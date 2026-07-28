@@ -6,6 +6,8 @@
 
 *One workspace. One interface. Every machine.*
 
+[![CI](https://github.com/2002Bishwajeet/yantra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/2002Bishwajeet/yantra/actions/workflows/ci.yml?query=branch%3Amain)
+
 </div>
 
 ---
