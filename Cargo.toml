@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/yantrad", "crates/yantra", "crates/yantra-agent"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+license = "BSD-3-Clause"
+repository = "https://github.com/2002Bishwajeet/yantra"
+
+# Dependencies are declared here and inherited by member crates with
+# `dep.workspace = true`, so every crate agrees on one version.
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# Panicking paths are the enemy of a daemon that must stay up for months.
+# These are `warn`, not `deny`, so they guide rather than block — `just lint`
+# runs with `-D warnings`, which is where they actually bite.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+# Correctness-adjacent lints worth having on from commit one.
+await_holding_lock = "warn"
+inefficient_to_string = "warn"
+
+[profile.release]
+opt-level = "s"    # the appliance is RAM- and storage-constrained, not CPU-bound
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
