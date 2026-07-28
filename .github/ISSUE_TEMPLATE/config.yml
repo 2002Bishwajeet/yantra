@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project state, roadmap and open questions
+    url: https://github.com/2002Bishwajeet/yantra/blob/main/tracker.md
+    about: tracker.md is the single source of truth. Check it before opening anything.
+  - name: Architecture decisions
+    url: https://github.com/2002Bishwajeet/yantra/tree/main/docs/adr
+    about: Accepted ADRs are settled. Disagree by proposing a superseding ADR.
+  - name: Security vulnerability
+    url: https://github.com/2002Bishwajeet/yantra/security/advisories/new
+    about: Report privately. Do not open a public issue.

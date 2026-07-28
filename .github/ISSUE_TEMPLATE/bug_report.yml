@@ -1,0 +1,42 @@
+name: Bug report
+description: Something behaves differently from what the docs, an ADR or an invariant says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: check `tracker.md` §1b (Invariants). Several non-obvious behaviours
+        are known and documented there, and the bug they cause usually looks like something else.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Expected vs actual. Paste exact commands and output.
+      placeholder: |
+        $ yantra up demo
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: The shortest sequence that shows it. Say if it is intermittent.
+    validations:
+      required: true
+
+  - type: input
+    id: invariant
+    attributes:
+      label: Related invariant or ADR
+      description: If this contradicts a documented invariant or decision, name it (e.g. I-3, ADR-0004).
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, `rustc --version`, `tmux -V`, `ssh -V`, `tailscale version`, and which machine of the fleet.
+    validations:
+      required: true

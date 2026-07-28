@@ -1,0 +1,58 @@
+name: ADR proposal
+description: Propose a decision worth writing down, or supersede an accepted one.
+labels: ["adr"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Per [ADR-0001](https://github.com/2002Bishwajeet/yantra/blob/main/docs/adr/0001-record-architecture-decisions.md): a decision earns an ADR
+        if reversing it would cost more than a day, or if a reasonable person would choose differently.
+
+        **Accepted ADRs are immutable and are not re-litigated.** If you think one is wrong, that is
+        not a bug — it is a superseding ADR. Say so below, in writing, rather than quietly building
+        something else.
+
+  - type: input
+    id: supersedes
+    attributes:
+      label: Supersedes
+      description: ADR number this would replace, if any. Leave blank for a new decision.
+      placeholder: ADR-0003
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: The forces at play. What changed, or what is unsettled? Cite research notes (with their access dates) where the evidence comes from one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Proposed decision
+      description: One clear statement in the active voice. What we will do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences
+      description: Including the bad ones. Costs paid knowingly are the point of the format.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives rejected
+      description: And why. A decision with no rejected alternative usually is not one.
+
+  - type: checkboxes
+    id: process
+    attributes:
+      label: Process
+      options:
+        - label: If this supersedes an ADR, the old file will be marked `superseded by ADR-NNNN` rather than edited in substance.
+        - label: The new ADR will be Nygard format (Context / Decision / Consequences) at `docs/adr/NNNN-kebab-title.md` and indexed in `tracker.md`.
