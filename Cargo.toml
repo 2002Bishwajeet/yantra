@@ -22,6 +22,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# NOTE: only fires for publicly-exported types, so it is dormant while every
+# crate is a binary. It starts working the day we add a lib crate.
 missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
