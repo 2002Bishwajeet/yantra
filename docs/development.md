@@ -46,15 +46,21 @@ tracker.md             single source of truth for project state
 
 ```bash
 just              # list every recipe
-just check        # the gate: fmt + clippy + tests. Run before every push.
+just check        # the gate: fmt + clippy + tests + deny. Run before every push.
+just ci           # everything CI runs: check + the arm64 cross-build
 just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
 just appliance    # cross-compile arm64 binaries for the Pi 5
 ```
 
-`just check` is exactly what CI runs. If they ever disagree, that's a bug — fix
-the divergence rather than working around it.
+`just ci` is exactly what CI runs — the workflow in `.github/workflows/ci.yml`
+invokes these same recipes rather than its own copy of the commands, one recipe
+per job, so the two cannot silently drift. If you add a check, add it to the
+`justfile` first and give it a job second.
+
+`check` is the fast subset to run before every push; `ci` additionally
+cross-compiles for the appliance, which CI does on a runner anyway.
 
 ## Testing
 
