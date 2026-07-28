@@ -1,0 +1,130 @@
+# Every job below runs a recipe from the justfile, so `just ci` locally and a
+# green PR mean the same thing. Add a new check to the justfile first, then
+# give it a job here — never the other way round.
+#
+# The Rust toolchain is pinned once, in rust-toolchain.toml (1.97.1). `rustup
+# show` installs exactly that, with the components and the aarch64 target it
+# declares. No version is repeated in this file.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Superseded pushes to a PR branch are cancelled; pushes to main are not, so
+# every commit that lands keeps its own result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+      - run: just fmt-check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # .cargo/config.toml links the host target with mold, so CI needs it too.
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+      - run: just lint
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just,cargo-nextest
+      - run: just test
+
+  deny:
+    name: deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just,cargo-deny
+      - run: just deny
+
+  cross:
+    # The Pi 5 appliance target. ADR-0004 chose Rust partly because this build
+    # is a one-liner, so it is a first-class gate rather than a release detail.
+    name: cross (aarch64-unknown-linux-musl)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+      - name: Install the pinned toolchain
+        run: rustup show
+      # cargo-zigbuild needs a zig; pinned to the version used locally.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just,cargo-zigbuild
+      - run: just appliance
+
+      # A cross-build that silently produces x86_64 binaries would pass every
+      # other check in this file. Assert the ELF header instead of trusting it.
+      - name: Assert the binaries are statically linked aarch64
+        run: |
+          set -euo pipefail
+          for bin in yantrad yantra yantra-agent; do
+            path="target/aarch64-unknown-linux-musl/release/$bin"
+            info=$(file -b "$path")
+            echo "$bin: $info"
+            case "$info" in
+              *"ARM aarch64"*"statically linked"*) ;;
+              *) echo "::error::$bin is not a statically linked aarch64 binary"; exit 1 ;;
+            esac
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yantra-aarch64-unknown-linux-musl
+          path: |
+            target/aarch64-unknown-linux-musl/release/yantrad
+            target/aarch64-unknown-linux-musl/release/yantra
+            target/aarch64-unknown-linux-musl/release/yantra-agent
+          if-no-files-found: error
+          retention-days: 14
