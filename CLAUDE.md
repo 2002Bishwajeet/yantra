@@ -116,8 +116,10 @@ Yantra meets an unreliable outside world, and they must be fakeable in tests.
 
 ## B3. Verification means reality
 
-Orchestration primitives get integration tests against a **real** sshd and a **real** tmux
-(`ssh localhost` is the starting fixture). Mocked SSH proves nothing — it tests your mock.
+Orchestration primitives get integration tests against a **real** sshd and a **real** tmux, running in
+a **disposable podman container** — not the host. Mocked SSH proves nothing; it tests your mock. The
+container is also a truer stand-in for a remote machine than `ssh localhost` (separate filesystem, user
+and network hop) and leaves nothing running on the developer's box.
 
 `cargo test` passing against fakes does not satisfy §A4 for anything in the transport or session layer.
 Note the split: the narrow traits from B2 exist so the *layers above* can be tested with fakes; the
@@ -134,8 +136,10 @@ traits' own implementations must be tested against the real thing.
 
 - **Read `tracker.md` §1b (Invariants) before writing orchestration code.** Twenty non-obvious rules
   that research proved the hard way; violating one produces a bug that looks like something else.
+- **Commits carry no co-author, "Generated with", or AI-attribution trailers of any kind.** The repo
+  owner set this rule explicitly. Plain, professional messages only.
 - Task IDs `Y-NNN` from `tracker.md`. Commits: `Y-030: add cargo workspace skeleton`.
-  Branches: `y-030-cargo-skeleton`.
+  Branches: `y-030-cargo-skeleton`. One branch per issue, one PR per branch.
 - ADRs: `docs/adr/NNNN-kebab-title.md`, Nygard format (Context / Decision / Consequences),
   immutable once accepted.
 - Research notes: `docs/research/NN-topic.md`, must end with `## Sources` including access dates.
