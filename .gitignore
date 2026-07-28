@@ -30,3 +30,7 @@ target
 # Web UI (M4)
 node_modules/
 dist/
+
+# Local agent skills - installed via `npx skills add`, not part of the project
+.claude/skills/
+.claude/settings.local.json

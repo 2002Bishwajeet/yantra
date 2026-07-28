@@ -84,7 +84,8 @@ clarification. In this project, "verify" means what §B3 says it means.
 2. **[`docs/adr/`](docs/adr/) holds settled decisions.** Do not re-litigate an accepted ADR. If you
    think one is wrong, say so and propose a superseding ADR (that is §A1 applied) — do not quietly
    build something else.
-3. **[`docs/research/`](docs/research/) holds dated evidence.** Notes reflect the world on their
+3. **[`docs/development.md`](docs/development.md) is the local setup + daily-command reference.**
+4. **[`docs/research/`](docs/research/) holds dated evidence.** Notes reflect the world on their
    access date. Re-verify anything version-sensitive before relying on it.
 
 ## B1. Runtime

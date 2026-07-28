@@ -54,6 +54,7 @@ being worked on, and what is still an open question.
 | [`tracker.md`](tracker.md) | **Project state** — milestones, task board, decisions, open questions |
 | [`docs/vision.md`](docs/vision.md) | The destination: full scope, first-class objects, 9-phase roadmap |
 | [`docs/brainstorm.md`](docs/brainstorm.md) | The founding intent document, archived unedited |
+| [`docs/development.md`](docs/development.md) | **Local dev setup** — prerequisites, daily commands, gotchas |
 | [`docs/adr/`](docs/adr/) | Architecture decision records |
 | [`docs/research/`](docs/research/) | Dated research notes — what exists, what to reuse, what to build |
 
