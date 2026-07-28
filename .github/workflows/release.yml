@@ -1,0 +1,326 @@
+name: release
+
+# Tag push cuts a real release. workflow_dispatch builds the whole matrix and
+# uploads the archives as workflow artifacts without publishing anything, which
+# is how you rehearse a release before committing to a tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Least privilege by default. Only the `release` job widens this to
+# `contents: write`, and only that job holds a token that can publish.
+permissions:
+  contents: read
+
+# Never let two runs for the same tag race to create the same release, and
+# never cancel a run that may already be uploading assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+
+jobs:
+  # One place decides the version string, so the archives, the checksum file and
+  # the release title cannot disagree.
+  meta:
+    name: resolve version
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - name: Resolve version from ref
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev.${GITHUB_SHA:0:7}"
+          fi
+          # A hyphen in a semver string marks a pre-release: v1.2.0-rc.1.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "version=$version prerelease=$prerelease" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      # One broken target should still tell us about the other four.
+      fail-fast: false
+      matrix:
+        include:
+          # The appliance. Static musl, no libc on the Pi 5 to depend on.
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04
+            packages: yantrad yantra yantra-agent
+            zigbuild: true
+            archive: tar.gz
+
+          # Linux dev boxes and the x86 mini-PC alternative to the Pi.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            packages: yantrad yantra yantra-agent
+            zigbuild: true
+            archive: tar.gz
+
+          # macOS and Windows exist only for the heartbeat agent; the daemon and
+          # CLI are not shipped there (see the PR description for the reasoning).
+          #
+          # Per R-19 in ADR-0004, Apple targets are never cross-compiled from
+          # Linux — that needs the Apple SDK via osxcross. They are built on a
+          # macOS runner with Apple's own toolchain, which carries both the
+          # arm64 and the x86_64 slice, so one runner covers both triples.
+          - target: aarch64-apple-darwin
+            os: macos-15
+            packages: yantra-agent
+            archive: tar.gz
+
+          - target: x86_64-apple-darwin
+            os: macos-15
+            packages: yantra-agent
+            archive: tar.gz
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-2025
+            packages: yantra-agent
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          target: ${{ matrix.target }}
+
+      # .cargo/config.toml asks for the mold linker on x86_64-unknown-linux-gnu,
+      # which is the host triple used for build scripts even when cross-compiling.
+      # Installing it keeps the runner's config identical to a developer box
+      # instead of relying on cargo to ignore a flag it might not ignore.
+      - name: Install mold
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
+
+      - name: Install zig
+        if: matrix.zigbuild
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Install cargo-zigbuild
+        if: matrix.zigbuild
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: cargo-zigbuild@0.23.0
+
+      # --locked so a release is built from the committed Cargo.lock and nothing
+      # else. Stripping is not a step here: [profile.release] already sets
+      # strip = true, so the linker never emits the symbols in the first place.
+      - name: Build
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PACKAGES: ${{ matrix.packages }}
+          ZIGBUILD: ${{ matrix.zigbuild }}
+        run: |
+          set -euo pipefail
+          pkg_args=()
+          for pkg in $PACKAGES; do
+            pkg_args+=(-p "$pkg")
+          done
+          if [ "$ZIGBUILD" = "true" ]; then
+            cargo zigbuild --release --locked --target "$TARGET" "${pkg_args[@]}"
+          else
+            cargo build --release --locked --target "$TARGET" "${pkg_args[@]}"
+          fi
+
+      # Cheap guard against the failure this whole workflow exists to prevent:
+      # shipping a dynamically-linked or wrong-architecture binary to the Pi.
+      - name: Verify Linux binaries are static and correct-arch
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PACKAGES: ${{ matrix.packages }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            aarch64-*) want_arch="ARM aarch64" ;;
+            x86_64-*)  want_arch="x86-64" ;;
+            *) echo "unhandled target $TARGET" >&2; exit 1 ;;
+          esac
+          for pkg in $PACKAGES; do
+            out=$(file -b "target/$TARGET/release/$pkg")
+            echo "$pkg: $out"
+            case "$out" in
+              *"$want_arch"*) ;;
+              *) echo "::error::$pkg is not $want_arch"; exit 1 ;;
+            esac
+            case "$out" in
+              *"statically linked"*) ;;
+              *) echo "::error::$pkg is not statically linked"; exit 1 ;;
+            esac
+          done
+
+      - name: Stage archive contents
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PACKAGES: ${{ matrix.packages }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="yantra-${VERSION}-${TARGET}"
+          ext=""
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            ext=".exe"
+          fi
+          mkdir -p "staging/$stage" artifacts
+          for pkg in $PACKAGES; do
+            cp "target/$TARGET/release/${pkg}${ext}" "staging/$stage/"
+          done
+          cp README.md LICENSE "staging/$stage/"
+          echo "STAGE=$stage" >> "$GITHUB_ENV"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C staging -czf "artifacts/${STAGE}.tar.gz" "$STAGE"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path "staging/$env:STAGE" -DestinationPath "artifacts/$env:STAGE.zip"
+
+      # Checksums are produced next to the archive on the machine that built it,
+      # so a corrupted upload is detectable rather than merely unlikely. Written
+      # from inside artifacts/ so the recorded path is a bare filename and
+      # `sha256sum -c` works anywhere.
+      - name: Checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          for f in *; do
+            case "$f" in *.sha256) continue ;; esac
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$f" > "$f.sha256"
+            else
+              shasum -a 256 "$f" > "$f.sha256"
+            fi
+            cat "$f.sha256"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: yantra-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: [meta, build]
+    # workflow_dispatch runs are rehearsals: they build and upload artifacts but
+    # never publish. Only a tag push gets this far.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: yantra-*
+          path: artifacts
+          merge-multiple: true
+
+      # Collapse the per-target .sha256 files into one SHA256SUMS asset and
+      # verify every archive against it before anything is published.
+      - name: Aggregate and verify checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cat *.sha256 | sort -k2 > SHA256SUMS
+          rm -f -- *.sha256
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Write release notes preamble
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Artifacts"
+            echo
+            echo "| Target | Contents |"
+            echo "| --- | --- |"
+            echo "| \`aarch64-unknown-linux-musl\` | appliance (Pi 5 / arm64) — \`yantrad\`, \`yantra\`, \`yantra-agent\` |"
+            echo "| \`x86_64-unknown-linux-musl\` | Linux x86_64 — \`yantrad\`, \`yantra\`, \`yantra-agent\` |"
+            echo "| \`aarch64-apple-darwin\` | macOS Apple silicon — \`yantra-agent\` |"
+            echo "| \`x86_64-apple-darwin\` | macOS Intel — \`yantra-agent\` |"
+            echo "| \`x86_64-pc-windows-msvc\` | Windows x86_64 — \`yantra-agent\` |"
+            echo
+            echo "Linux builds are statically linked against musl: no runtime dependencies."
+            echo "\`yantrad\` and \`yantra\` are Linux-only; macOS and Windows ship the"
+            echo "heartbeat agent only."
+            echo
+            echo "Verify a download with:"
+            echo
+            echo '```sh'
+            echo "sha256sum -c SHA256SUMS --ignore-missing"
+            echo '```'
+          } > notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=(
+            --verify-tag
+            --title "v${VERSION}"
+            --notes-file notes.md
+            --generate-notes
+          )
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" artifacts/*
