@@ -4,7 +4,10 @@ default:
     @just --list
 
 # The gate. Run before every commit.
-check: fmt-check lint test
+check: fmt-check lint test deny
+
+# Everything CI runs — the workflow calls these same recipes, so they cannot drift.
+ci: check appliance
 
 fmt:
     cargo fmt --all
