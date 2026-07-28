@@ -6,8 +6,12 @@ description: >-
 
 inputs:
   target:
-    description: Target triple to add, e.g. aarch64-unknown-linux-musl.
-    required: true
+    description: >-
+      Extra target triple to add, e.g. aarch64-unknown-linux-musl. Leave unset
+      for anything rust-toolchain.toml already declares — it is only needed for
+      the release matrix, which builds triples this repo does not pin.
+    required: false
+    default: ""
   cache-key:
     description: Extra discriminator appended to the cargo cache key.
     required: false
@@ -21,9 +25,10 @@ runs:
   using: composite
   steps:
     # rustup is preinstalled on all GitHub-hosted images. Calling
-    # `rustup toolchain install` with no argument installs exactly the channel
-    # and components named in rust-toolchain.toml, so CI and a developer laptop
-    # can never drift apart. It is a no-op when that toolchain is already there.
+    # `rustup toolchain install` with no argument installs exactly the channel,
+    # components and targets named in rust-toolchain.toml, so CI and a developer
+    # laptop can never drift apart. It is a no-op when that toolchain is already
+    # there.
     - name: Install pinned toolchain
       shell: bash
       env:
@@ -31,11 +36,13 @@ runs:
       run: |
         set -euo pipefail
         rustup toolchain install --no-self-update
-        rustup target add "$TARGET"
+        if [ -n "$TARGET" ]; then
+          rustup target add "$TARGET"
+        fi
         rustc --version --verbose
 
     - name: Restore cargo cache
-      uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
         key: ${{ inputs.target }}${{ inputs.cache-key }}
         save-if: ${{ inputs.save-cache == 'true' }}
