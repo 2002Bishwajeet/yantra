@@ -21,7 +21,7 @@ Read it first. Update it last. If it disagrees with your memory, the file wins.
 
 1. **Before starting work** — read §2 (milestones) and §3 (task board). Pick a task that is `todo` and whose dependencies are `done`.
 2. **When starting** — set the task to `doing` and put your name in Owner.
-3. **When finishing** — set to `done`, add the artifact path in Notes, and append a line to §7 (Session log).
+3. **When finishing** — set to `done`, add the artifact path in Notes, and append a line to §8 (Session log).
 4. **When you learn something that changes the plan** — do NOT silently change course. Add an entry to §5 (Decisions) or §6 (Open questions) and flag it.
 5. **Never delete a task.** Move it to `dropped` with a one-line reason. The graveyard is evidence.
 6. **One task = one reviewable change.** If a task cannot be finished in a single sitting, split it.
@@ -237,10 +237,13 @@ Append-only. Newest last. One line per working session.
 
 ---
 
-## 8. Conventions
+## 9. Conventions
 
 - **Task IDs** — `Y-NNN`, never reused. 000–039 = M0, 040–079 = M1, then +40 per milestone.
 - **ADRs** — `docs/adr/NNNN-kebab-title.md`, Nygard format (Context / Decision / Consequences). Never edit an accepted ADR; supersede it.
 - **Research notes** — `docs/research/NN-topic.md`. Must end with Sources + access dates. Research is dated evidence, not eternal truth.
-- **Commits** — imperative mood, reference the task ID: `Y-030: add cargo workspace skeleton`.
+- **Commits** — conventional prefix (`feat:`/`fix:`/`docs:`/`chore:`/`ci:`), imperative mood, and the
+  task ID in parentheses when one exists: `feat: add cargo workspace skeleton (Y-030)`. Not every commit
+  maps to a tracker task; those just take the prefix.
+- **No attribution trailers.** No `Co-Authored-By`, no "Generated with", no AI attribution. Owner's rule.
 - **Branches** — `y-030-cargo-skeleton`.
