@@ -1,0 +1,41 @@
+name: Setup Rust
+description: >-
+  Install the toolchain pinned by rust-toolchain.toml, add a target triple, and
+  restore the cargo registry + target cache. Shared by every job that compiles
+  Rust so the pin lives in exactly one place.
+
+inputs:
+  target:
+    description: Target triple to add, e.g. aarch64-unknown-linux-musl.
+    required: true
+  cache-key:
+    description: Extra discriminator appended to the cargo cache key.
+    required: false
+    default: ""
+  save-cache:
+    description: Whether this job is allowed to write the cache back.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # rustup is preinstalled on all GitHub-hosted images. Calling
+    # `rustup toolchain install` with no argument installs exactly the channel
+    # and components named in rust-toolchain.toml, so CI and a developer laptop
+    # can never drift apart. It is a no-op when that toolchain is already there.
+    - name: Install pinned toolchain
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        rustup toolchain install --no-self-update
+        rustup target add "$TARGET"
+        rustc --version --verbose
+
+    - name: Restore cargo cache
+      uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+      with:
+        key: ${{ inputs.target }}${{ inputs.cache-key }}
+        save-if: ${{ inputs.save-cache == 'true' }}
