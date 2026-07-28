@@ -1,0 +1,22 @@
+# Disposable sshd + tmux container for Yantra's integration tests (Y-031).
+#
+# This is a test fixture, never a deployment artefact. It exists so that
+# orchestration primitives can be exercised against a real sshd and a real tmux
+# rather than a mock -- "mocks lie about SSH" (tracker.md §1).
+#
+# The image holds no secret and grants no access on its own: the authorised key
+# is injected at run time from a keypair generated fresh for each test run.
+
+FROM docker.io/library/alpine:3.22
+
+RUN apk add --no-cache openssh-server tmux \
+ && ssh-keygen -A \
+ && adduser -D -s /bin/sh yantra \
+ && passwd -u yantra \
+ && install -d -o yantra -g yantra -m 700 /home/yantra/.ssh \
+ && printf 'PasswordAuthentication no\nPermitRootLogin no\n' >> /etc/ssh/sshd_config
+
+EXPOSE 22
+
+# $YANTRA_PUBKEY is the per-run public key, passed in by the Rust fixture.
+ENTRYPOINT ["/bin/sh", "-c", "printf '%s\\n' \"$YANTRA_PUBKEY\" > /home/yantra/.ssh/authorized_keys && chown yantra:yantra /home/yantra/.ssh/authorized_keys && chmod 600 /home/yantra/.ssh/authorized_keys && exec /usr/sbin/sshd -D -e"]
