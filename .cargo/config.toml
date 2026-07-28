@@ -1,0 +1,4 @@
+# mold cuts the link step, which is the slowest part of the edit-compile loop.
+# This is the concrete mitigation for R-20 (Rust punishes design churn).
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
