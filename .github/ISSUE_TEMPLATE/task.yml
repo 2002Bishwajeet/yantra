@@ -1,0 +1,65 @@
+name: Task or feature
+description: Propose work. Anything that gets built must exist in tracker.md first.
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `tracker.md` is the source of truth. This issue is the discussion; the task board is the record.
+        One task = one reviewable change. If it cannot be finished in a single sitting, split it.
+
+  - type: input
+    id: task-id
+    attributes:
+      label: Task ID
+      description: "`Y-NNN` from tracker.md, or leave blank if this issue is proposing a new one. Ranges: 000-039 = M0, 040-079 = M1, +40 per milestone."
+      placeholder: Y-0NN
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Milestone
+      options:
+        - M0 Foundations
+        - M1 Walking skeleton
+        - M2 Real machines
+        - M3 Agent orchestration
+        - M4 Web UI
+        - M5 Placement
+        - M6 Terminal in browser
+        - M7 Appliance
+        - M8 Hardware prototype
+        - M9 Enclosure & PCB
+        - unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+      description: The smallest thing that solves it. No speculative flexibility.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: A verifiable check, not "make it work". For orchestration primitives, that means a real sshd + tmux test in a podman container.
+    validations:
+      required: true
+
+  - type: input
+    id: depends
+    attributes:
+      label: Depends on
+      description: Task IDs that must be done first.
+
+  - type: checkboxes
+    id: guardrails
+    attributes:
+      label: Guardrails
+      options:
+        - label: This orchestrates existing tools; it does not reimplement SSH, a multiplexer or a container runtime.
+        - label: This is not provisioning (creating, imaging or destroying machines) — a permanent non-goal.
