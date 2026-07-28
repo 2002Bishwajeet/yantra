@@ -28,9 +28,10 @@ tracker's Decisions or Open questions section and flag it.
 ## Branches and commits
 
 - **Branches** — `y-030-cargo-skeleton`: the lower-cased task ID plus a short slug.
-- **Commits** — imperative mood, referencing the task ID: `Y-030: add cargo workspace skeleton`.
-  Repo-level work with no tracker task uses a conventional-commit prefix instead, as the existing
-  history does: `docs:`, `chore:`, `feat:`, `fix:`.
+- **Commits** — a conventional-commit prefix (`feat:` `fix:` `docs:` `chore:` `ci:`), imperative mood,
+  and the task ID in parentheses when one exists:
+  `feat: add cargo workspace skeleton (Y-030)`. Work with no tracker task just takes the prefix.
+  One format everywhere, so history stays greppable and machine-readable.
 - **No trailers.** Commits carry **no `Co-Authored-By`, no "Generated with …", no AI attribution of
   any kind.** Whoever pressed the button owns the change. This applies to PR titles and bodies too.
 - Small, logical commits. One giant squashed drop is not reviewable.
