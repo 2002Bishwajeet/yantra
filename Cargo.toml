@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/yantrad", "crates/yantra", "crates/yantra-agent"]
+members = ["crates/yantra-core", "crates/yantrad", "crates/yantra", "crates/yantra-agent"]
 
 [workspace.package]
 version = "0.0.0"
@@ -22,8 +22,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-# NOTE: only fires for publicly-exported types, so it is dormant while every
-# crate is a binary. It starts working the day we add a lib crate.
+# Only fires for publicly-exported types, so it does nothing for the binaries.
+# `yantra-core` is the lib crate that makes it bite (ADR-0005).
 missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
