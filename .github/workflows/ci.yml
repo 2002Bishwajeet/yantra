@@ -68,7 +68,11 @@ jobs:
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: just,cargo-nextest
-      - run: just test
+      # ubuntu-24.04 ships podman preinstalled; fail loudly here rather than
+      # let the Y-031 fixture quietly fall back to its SKIPPED path below.
+      - name: Verify podman is available
+        run: podman --version
+      - run: just test-ci
 
   deny:
     name: deny
