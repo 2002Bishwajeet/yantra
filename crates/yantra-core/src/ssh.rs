@@ -12,6 +12,9 @@
 //!   execution. A quote-free wire format removes the quoting problem entirely.
 //! - **`-E`.** Diverts `ssh`'s own diagnostics off stderr so stderr belongs to
 //!   the command.
+//!
+//! A stdin-EOF watchdog was tried and withdrawn — it killed every command that
+//! took longer than a few hundred milliseconds. See ADR-0008.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -173,15 +176,14 @@ impl Exec for Ssh {
         cmd.arg(m.destination());
         cmd.arg(payload(command, &nonce));
 
-        // stdin stays a held-open pipe: the remote watchdog kills the command on
-        // EOF, so `Stdio::null()` would kill it instantly.
-        cmd.stdin(Stdio::piped())
+        // ADR-0008: no stdin is forwarded. The watchdog that needed a held-open
+        // pipe is withdrawn, and a remote command reading stdin would hang.
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
         let mut child = cmd.spawn().map_err(Error::Spawn)?;
-        let stdin = child.stdin.take();
         let mut out = child.stdout.take();
         let mut err = child.stderr.take();
 
@@ -202,7 +204,6 @@ impl Exec for Ssh {
             }
         );
         let status = child.wait().await;
-        drop(stdin);
 
         let transport = |diagnosis: String| Error::Transport {
             host: m.host.clone(),
@@ -223,26 +224,20 @@ impl Exec for Ssh {
     }
 }
 
-/// Wraps `command` so the remote side reports its own exit status and dies with
-/// the connection. Encoded rather than quoted: `ssh` hands whatever it is given
-/// to the remote *login shell*, which may not even be POSIX.
+/// Wraps `command` so the remote side reports its own exit status. Encoded
+/// rather than quoted: `ssh` hands whatever it is given to the remote *login
+/// shell*, which may not even be POSIX.
+///
+/// The command runs in a *child* shell — `exit 3` in the wrapper's own shell
+/// would terminate it before the sentinel is printed.
 fn payload(command: &str, nonce: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
 
-    // `exec 9<&0` is load-bearing: the remote shell redirects a background
-    // job's stdin to /dev/null, so the watchdog needs its own copy.
-    // The command runs in a *child* shell — `exit 3` in the wrapper's own shell
-    // would terminate it before the sentinel is printed.
     let script = format!(
-        "exec 9<&0\n\
-         CMD=$(echo {inner} | base64 -d)\n\
-         /bin/sh -c \"$CMD\" &\n\
-         c=$!\n\
-         ( cat <&9 >/dev/null; kill -TERM $c 2>/dev/null ) &\n\
-         w=$!\n\
-         wait $c; r=$?\n\
-         kill $w 2>/dev/null\n\
+        "CMD=$(echo {inner} | base64 -d)\n\
+         /bin/sh -c \"$CMD\"\n\
+         r=$?\n\
          printf '\\n{nonce}:%d' \"$r\" >&2\n",
         inner = b64.encode(command),
     );

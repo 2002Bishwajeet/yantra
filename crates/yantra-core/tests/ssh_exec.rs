@@ -116,6 +116,30 @@ async fn a_command_containing_shell_metacharacters_is_not_expanded() -> Result<(
     Ok(())
 }
 
+/// Regression for the stdin-EOF watchdog withdrawn in ADR-0008. It killed
+/// every command slower than a few hundred milliseconds, and Y-041's original
+/// suite missed it entirely because every command in it was instantaneous.
+/// Anything reintroducing a watchdog must keep this passing.
+#[tokio::test]
+async fn a_slow_command_runs_to_completion() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    let dir = state_dir("slow")?;
+    let ssh = ssh_to(&fixture, &dir)?;
+
+    let out = ssh.exec("sleep 3; echo finished").await?;
+    assert_eq!(out.status, 0, "a three-second command is not a failure");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "finished",
+        "the command produced its output rather than being killed"
+    );
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
 /// An unreachable host must be a `Transport` error, never a command status —
 /// the distinction Y-042 relies on to avoid creating a duplicate session.
 #[tokio::test]
