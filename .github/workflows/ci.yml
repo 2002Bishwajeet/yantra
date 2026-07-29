@@ -70,8 +70,19 @@ jobs:
           tool: just,cargo-nextest
       # ubuntu-24.04 ships podman preinstalled; fail loudly here rather than
       # let the Y-031 fixture quietly fall back to its SKIPPED path below.
+      # Versions are printed because the runner image upgrades them underneath us
+      # — image 20260726.254 moved podman 4.9.3 → 5.8.4 and broke the build (Y-048).
       - name: Verify podman is available
-        run: podman --version
+        run: |
+          podman --version
+          crun --version | head -1 || true
+          runc --version | head -1 || true
+      # On that image podman 5.8.4 + crun 1.28 fail with "unknown version specified";
+      # runc 1.4.3 on the very same image works. Verified on both images (Y-048).
+      - name: Pin the OCI runtime to runc
+        run: |
+          mkdir -p ~/.config/containers
+          printf '[engine]\nruntime = "runc"\n' > ~/.config/containers/containers.conf
       - run: just test-ci
 
   deny:
