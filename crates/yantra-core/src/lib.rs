@@ -11,4 +11,5 @@
 //!    type; keep the rest private until something outside needs it.
 
 pub mod ssh;
+pub mod tmux;
 pub mod workspace;
