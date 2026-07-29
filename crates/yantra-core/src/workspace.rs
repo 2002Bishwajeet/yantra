@@ -42,7 +42,7 @@ struct OnDisk {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(
-        "`{name}` is not a usable workspace name: it must be non-empty, must not start with a dot, and must not contain `/`, `\\` or `..`"
+        "`{name}` is not a usable workspace name: only letters, digits, `_` and `-` are allowed"
     )]
     InvalidName { name: String },
 
@@ -107,15 +107,15 @@ fn load_from(dir: &Path, name: &str) -> Result<Workspace, Error> {
     parse(name, &path, &text)
 }
 
-/// Names arrive from the command line and become filenames, so
-/// `yantra up ../../etc/passwd` must fail here rather than read that file.
+/// Names arrive from the command line and become both a filename and a tmux
+/// session name, so this is the intersection of I-24 (nothing that can escape a
+/// directory) and I-2 (nothing tmux cannot address). One rule, checked once, so
+/// an unusable workspace fails at load rather than half-way through `up`.
 fn validate_name(name: &str) -> Result<(), Error> {
     let usable = !name.is_empty()
-        && !name.starts_with('.')
-        && !name.contains('/')
-        && !name.contains('\\')
-        && !name.contains("..")
-        && !name.contains('\0');
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
 
     if usable {
         Ok(())
@@ -259,6 +259,8 @@ mod tests {
             ".hidden",
             "",
             "nul\0byte",
+            // Rejected by I-2 as well: tmux cannot address a dotted name.
+            "has.dot",
         ] {
             assert!(
                 matches!(

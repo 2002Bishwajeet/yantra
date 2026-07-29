@@ -34,8 +34,11 @@ and Yantra restores the context — picking a machine, opening the session, and 
 
 ## Status
 
-🚧 **Day zero.** No code yet — this repository currently holds the vision, the architecture decisions,
-and the research that has to land before the first line is written.
+🚧 **Walking skeleton.** `yantra up <workspace>` opens a real tmux session, in a real repo, on a
+machine reached over SSH — idempotently. Run it twice and it attaches rather than duplicating.
+
+Everything else in the roadmap is still ahead: no daemon, no HTTP API, no scheduler, no agent
+integration, no UI, no hardware.
 
 **Start here → [`tracker.md`](tracker.md)** — the single source of truth for what is decided, what is
 being worked on, and what is still an open question.

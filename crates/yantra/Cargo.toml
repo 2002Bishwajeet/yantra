@@ -9,4 +9,5 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
+tokio.workspace = true
+yantra-core.workspace = true
