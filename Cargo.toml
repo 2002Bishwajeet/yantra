@@ -16,6 +16,11 @@ anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# TOML, not YAML: serde_yaml's newest release is `0.9.34+deprecated`. See ADR-0007.
+toml = "1"
+# etcetera over dirs: `dirs` pulls option-ext (MPL-2.0), and its macOS config dir
+# is ~/Library/Application Support, not the ~/.config we document.
+etcetera = "0.11"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
