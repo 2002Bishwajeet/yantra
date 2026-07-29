@@ -7,7 +7,7 @@ Read it first. Update it last. If it disagrees with your memory, the file wins.
 | --- | --- |
 | **Project** | Yantra (यन्त्र) — personal developer control plane |
 | **Current milestone** | `M1 — Walking skeleton` |
-| **Status** | 🔵 **M1 in progress** — Y-045, Y-040, Y-040b, Y-041 done; Y-042 in review. Repo live at [2002Bishwajeet/yantra](https://github.com/2002Bishwajeet/yantra), CI green (and now genuinely runs the container fixture). |
+| **Status** | 🔵 **M1 in progress** — Y-045, Y-040, Y-040b, Y-041, Y-042 done; Y-043 in review — the walking skeleton runs. Repo live at [2002Bishwajeet/yantra](https://github.com/2002Bishwajeet/yantra), CI green (and now genuinely runs the container fixture). |
 | **Runtime** | **Rust** (daemon, CLI, per-machine agent) + **TypeScript** (web UI) — see [ADR-0004](docs/adr/0004-rust-for-the-daemon.md), which supersedes ADR-0003 |
 | **Top risk** | **R-7** — Windows breaks tmux, `ControlMaster` *and* Tailscale SSH-server. Q4 deliberately deferred to M2; keep the transport seam honest until then. *R-0 retired with Bun; R-1 refuted by Y-023.* |
 | **Last updated** | 2026-07-29 |
@@ -159,7 +159,8 @@ end-to-end path. The original phases still map: M1 covers old Phases 1–3, M2 =
 | Y-041 | SSH exec primitive | 🟢 review | claude | Y-031, Y-045 | [ADR-0006](docs/adr/0006-ssh-exec-transport.md), [R7](docs/research/07-ssh-transport.md). `yantra_core::ssh` — sentinel trailer (I-25), base64 wire format (I-26), stdin-EOF watchdog (I-27), `-E` diversion, control-path validation (I-28). Explicit master process and per-host mutex **deliberately deferred** — `ControlMaster=auto` satisfies I-20 without lifecycle code, and the race it avoids does not exist at M1's concurrency. |
 | Y-042 | tmux session primitive (ensure/attach/kill) | 🟢 review | claude | Y-041 | `yantra_core::tmux` — `ensure` returns `Created`/`Attached`, so idempotency is a return value rather than a claim. I-1, I-2, I-4, I-21 all honoured; two new ones found the hard way (I-29 server-exit race, I-30 kill spellings). **Also fixes a Y-041 defect merged in PR #9**: the stdin watchdog killed every command slower than ~200 ms ([ADR-0008](docs/adr/0008-withdraw-the-stdin-watchdog.md)). |
 | Y-046 | Orphan prevention for long-running remote commands | ⬜ todo | — | Y-041 | Killing local `ssh` leaves the remote command on PID 1 (I-27). The watchdog remedy was withdrawn in ADR-0008. Harmless now — every command Yantra issues finishes in milliseconds — but it bites from M3, when agent sessions are long-running. Likely answer is `tmux kill-session` rather than anything at the ssh layer. |
-| Y-043 | `yantra up` wiring it together | ⬜ todo | — | Y-040..Y-042 | The M1 demo. |
+| Y-043 | `yantra up` wiring it together | 🟢 review | claude | Y-040..Y-042 | `yantra_core::up` + the CLI. `up()` resolves and `open()` is the testable seam. **M1's definition of done is a passing test**: two `up`s, one session. Workspace names tightened to the I-2 charset so an unusable name fails at load rather than half-way through `up`. |
+| Y-047 | Honour `branch` in the workspace schema | ⬜ todo | — | Y-043 | **`branch` is parsed and then ignored.** ADR-0007 describes it as "branch to check out" and nothing checks it out, so schema and behaviour disagree today. Deliberately not implemented in M1: switching branches under a dirty worktree is destructive, and the right semantics (refuse? stash? warn?) is a real decision, not a line of code. |
 | Y-044 | Session state store (`rusqlite`) | ⬜ todo | — | Y-043 | Only if state genuinely can't be derived from tmux. Prefer deriving. |
 
 ---
