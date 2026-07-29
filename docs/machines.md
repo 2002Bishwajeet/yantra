@@ -63,12 +63,38 @@ the dual boot — and the MacBook's contains spaces *and* U+2019, a Unicode righ
 mark. Interpolated into a tmux session name it violates I-2; interpolated into a remote command it is
 a quoting problem in a non-ASCII disguise. Recorded as **I-33**.
 
-## Not yet known
+## The MacBook cannot be reached yet
 
-Answering these is M2's first task, and needs a connection to each host rather than a guess:
+Probed from `cachyos-g14` on 2026-07-29. It is online and routable, and **nothing will accept a
+shell**:
+
+| Check | Result |
+| --- | --- |
+| `tailscale ping` | pong, 27 ms — **via DERP(ams), no direct path** |
+| `ssh -p 22` | `Connection refused` — no sshd listening |
+| Tailscale SSH | not enabled: peer advertises no SSH host keys and no SSH capability |
+| Key on this box | **none** — `~/.ssh` holds only an empty `authorized_keys` |
+
+Three things follow, and two of them need the owner.
+
+**Key authentication is mandatory, not preferred.** ADR-0006 spawns `ssh` with `BatchMode=yes`, so a
+machine offering only password auth is unreachable *by construction* — Yantra will never see the
+prompt, it will just fail. There is currently no keypair on the daemon's own host, so the first step
+of M2 is generating one and authorising it on each target.
+
+**Tailscale SSH is not the easy way out here.** Its server component runs only on Linux and the
+open-source macOS variant — *"the App Store version of macOS is not supported"* — and not on Windows
+at all. So the Windows node could never use it even if the Mac could. Native `sshd` plus a key is the
+path that works on every target and is what ADR-0006 already assumes.
+
+**The relay is worth noting for later.** Traffic to the MacBook goes through a DERP relay in
+Amsterdam rather than a direct connection. Harmless for M2, where commands are short, but M6 streams
+an interactive terminal — 27 ms through a relay in another country is a latency floor to measure
+before promising a responsive browser terminal.
+
+### Still unknown, pending a connection
 
 - Is `tmux` installed on the MacBook, and at what version? I-21 and I-29 were verified on 3.5a/3.7b.
-- Does `sshd` accept connections, and via Tailscale SSH or a normal daemon with keys?
 - Do `/bin/sh` and `base64` behave as ADR-0006 assumes? macOS ships BSD `base64`, whose flags differ
   from GNU's — the payload only uses `-d`, which both accept, but that is worth confirming rather
   than assuming.
