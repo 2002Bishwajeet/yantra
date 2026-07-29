@@ -24,20 +24,10 @@ lint:
 test:
     cargo nextest run --workspace --no-tests=pass
 
-# CI-only: fails if the sshd fixture (Y-031) printed its `SKIPPED:` line, which
-# means podman was missing and the real sshd+tmux test never ran. `just test`
-# stays skip-friendly for machines without podman (docs/development.md).
+# CI-only: the sshd fixture (Y-031) must run, not skip. `just test` stays
+# skip-friendly for machines without podman (docs/development.md).
 test-ci:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    output=$(cargo nextest run --workspace --no-tests=pass --success-output=immediate 2>&1)
-    status=$?
-    echo "$output"
-    if grep -q 'SKIPPED:' <<< "$output"; then
-        echo "::error::sshd fixture skipped - podman must be available in CI" >&2
-        exit 1
-    fi
-    exit "$status"
+    YANTRA_REQUIRE_PODMAN=1 cargo nextest run --workspace --no-tests=pass
 
 build:
     cargo build --workspace
