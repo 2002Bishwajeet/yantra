@@ -18,6 +18,9 @@
 //! * **Nothing is left behind.** Teardown is in `Drop`, so it also runs when a
 //!   test panics.
 
+// Included by more than one test binary; each uses a different subset.
+#![allow(dead_code)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -30,7 +33,7 @@ use anyhow::{Context, Result, bail};
 /// Bump the tag when `tests/fixture/Containerfile` changes; the image is built
 /// once and then reused from the local store.
 const IMAGE: &str = "localhost/yantra-fixture:1";
-const USER: &str = "yantra";
+pub const USER: &str = "yantra";
 const HOST: &str = "127.0.0.1";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 
