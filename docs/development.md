@@ -77,8 +77,8 @@ separate user, real network hop — and it leaves nothing running on your box.
 Unit-test pure logic (placement scoring, config parsing) freely. Anything that
 touches SSH, tmux, or an agent CLI gets an integration test against the real thing.
 
-The fixture is `crates/yantrad/tests/common/mod.rs`. Its image is built from
-`crates/yantrad/tests/fixture/Containerfile` (Alpine + `openssh-server` +
+The fixture is `crates/yantra-core/tests/common/mod.rs`. Its image is built from
+`crates/yantra-core/tests/fixture/Containerfile` (Alpine + `openssh-server` +
 `tmux`, ~12 MB) the first time a test needs it, then reused. Each run generates
 its own throwaway keypair and publishes sshd on an ephemeral loopback port —
 your `~/.ssh` is never read — and the container is removed in `Drop`, so it goes
@@ -90,7 +90,9 @@ podman ps -a --filter label=yantra-fixture  # must be empty afterwards
 ```
 
 Without `podman` the test prints `SKIPPED:` and passes, so a machine that cannot
-run containers is not blocked.
+run containers is not blocked. CI sets `YANTRA_REQUIRE_PODMAN=1` (via
+`just test-ci`), which turns that skip into a failure — a silent skip there
+would mean the test had stopped checking anything.
 
 ## Cross-compiling for the appliance
 
