@@ -10,4 +10,5 @@
 //! 2. **Keep the public surface small.** Export the operation and its error
 //!    type; keep the rest private until something outside needs it.
 
+pub mod ssh;
 pub mod workspace;
