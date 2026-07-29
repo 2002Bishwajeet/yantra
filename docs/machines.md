@@ -63,41 +63,63 @@ the dual boot — and the MacBook's contains spaces *and* U+2019, a Unicode righ
 mark. Interpolated into a tmux session name it violates I-2; interpolated into a remote command it is
 a quoting problem in a non-ASCII disguise. Recorded as **I-33**.
 
-## The MacBook cannot be reached yet
+## The MacBook, verified
 
-Probed from `cachyos-g14` on 2026-07-29. It is online and routable, and **nothing will accept a
-shell**:
+Reachable from `cachyos-g14` since **2026-07-30**, over its own `sshd` with a dedicated key. Every
+assumption ADR-0006 made about the far side has now been tested against real macOS instead of a
+container:
 
 | Check | Result |
 | --- | --- |
-| `tailscale ping` | pong, 27 ms — **via DERP(ams), no direct path** |
-| `ssh -p 22` | `Connection refused` — no sshd listening |
-| Tailscale SSH | not enabled: peer advertises no SSH host keys and no SSH capability |
-| Key on this box | **none** — `~/.ssh` holds only an empty `authorized_keys` |
+| `ssh -o BatchMode=yes` + key | ✅ exit 0 — macOS 26.5.1, Darwin 25.5.0, arm64 |
+| `/bin/sh` + `base64 -d` payload (I-26) | ✅ decodes and runs; `$0` is `/bin/sh` |
+| `base64` flavour | FreeBSD — accepts `-d` *and* `-D`; the payload only uses `-d` |
+| stderr sentinel trailer (I-25) | ✅ arrives intact |
+| `ControlMaster` multiplexing (I-20) | ✅ **20 ms against 150 ms cold** — `ControlPath` 27 bytes, inside I-28 |
+| Idempotency (§B4) | ✅ a second `has-session ‖ new-session` attached; `session_created` unchanged |
+| `#{pane_current_path}` targets | a *session* target returns empty on **both** OSes; a `%id` pane or `=name:` window target works — I-21 exactly as documented |
+| `tmux` | 3.7b — but at `/opt/homebrew/bin/tmux`, invisible to the non-interactive `PATH` (I-34) |
 
-Three things follow, and two of them need the owner.
+That multiplexing figure is the first measurement of I-20's value on this fleet: 7.5× on a genuine
+cross-OS hop, and *through* the DERP relay rather than a direct path.
 
-**Key authentication is mandatory, not preferred.** ADR-0006 spawns `ssh` with `BatchMode=yes`, so a
-machine offering only password auth is unreachable *by construction* — Yantra will never see the
-prompt, it will just fail. There is currently no keypair on the daemon's own host, so the first step
-of M2 is generating one and authorising it on each target.
+### Why a key was unavoidable
 
-**Tailscale SSH is not the easy way out here.** Its server component runs only on Linux and the
-open-source macOS variant — *"the App Store version of macOS is not supported"* — and not on Windows
-at all. So the Windows node could never use it even if the Mac could. Native `sshd` plus a key is the
-path that works on every target and is what ADR-0006 already assumes.
+`cachyos-g14` runs no `sshd` at all. A login's process ancestry is `tailscaled → login → fish`, and
+nothing is bound to port 22 — Tailscale SSH serves the box from userspace netstack. That is also why
+`ss` shows no listener, and why an empty `authorized_keys` never locked anyone out.
 
-**The relay is worth noting for later.** Traffic to the MacBook goes through a DERP relay in
-Amsterdam rather than a direct connection. Harmless for M2, where commands are short, but M6 streams
-an interactive terminal — 27 ms through a relay in another country is a latency floor to measure
-before promising a responsive browser terminal.
+It works because the *server* half of Tailscale SSH runs on Linux. It cannot run on the App Store
+build of macOS and cannot run on Windows at all, so `cachyos-g14` → MacBook was never going to use
+it, however well the reverse direction already worked. Native `sshd` plus a key is the only transport
+that covers the whole fleet — which is what ADR-0006 assumed, for reasons it did not yet have
+evidence for.
 
-### Still unknown, pending a connection
+### Three ways the environment lies
 
-- Is `tmux` installed on the MacBook, and at what version? I-21 and I-29 were verified on 3.5a/3.7b.
-- Do `/bin/sh` and `base64` behave as ADR-0006 assumes? macOS ships BSD `base64`, whose flags differ
-  from GNU's — the payload only uses `-d`, which both accept, but that is worth confirming rather
-  than assuming.
+Each of these presents as something other than what it is, which is why they became invariants.
+
+**Homebrew is not on the non-interactive `PATH` (I-34).** `ssh mac 'command -v tmux'` finds nothing
+while `tmux 3.7b` sits at `/opt/homebrew/bin/tmux`. Interactively it works, so the failure reads as a
+broken install.
+
+**zsh eats `=name` (I-35).** The MacBook's login shell is `/bin/zsh`, where `=word` is filename
+expansion. `tmux kill-session -t =yantra-probe` sent through it returns `zsh:1: yantra-probe not
+found` — the session survives and the caller believes it was killed. Through ADR-0006's base64 →
+`/bin/sh` envelope the identical argument succeeds. I-26 justified that envelope by argument-joining
+alone; this is the sharper reason, and the reason never to bypass it for a "quick" command.
+
+**An unknown `TERM` kills tmux (I-36).** `tmux attach` aborts with `missing or unsuitable terminal`
+when the outer `TERM` has no terminfo entry on the machine running tmux — true of both boxes here,
+since Ghostty's `xterm-ghostty` was in neither terminfo database. Non-interactive `ssh` never
+forwards `TERM`, so ADR-0006's command path is immune; `attach` and M6's browser terminal are not.
+
+### Still unknown
+
+- **I-30's three "already absent" spellings are unverified on macOS.** The `kill-session` that would
+  have exercised them was swallowed by zsh first (I-35), so only the `/bin/sh` path is proven.
+- **The DERP relay is still a latency floor.** 27 ms via Amsterdam is fine for M2's short commands;
+  M6 streams an interactive terminal and should measure it before promising responsiveness.
 
 ## Sources
 
