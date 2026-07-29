@@ -46,8 +46,17 @@ pub struct SshFixture {
 impl SshFixture {
     /// Starts the fixture, or returns `Ok(None)` when `podman` is not installed
     /// so that such a machine skips the test rather than failing it.
+    ///
+    /// Set `YANTRA_REQUIRE_PODMAN` to turn that skip into a failure. CI sets it,
+    /// because there a silent skip means this test stopped checking anything.
     pub fn start() -> Result<Option<Self>> {
         if !podman(&["--version"]).is_ok_and(|out| out.status.success()) {
+            if std::env::var_os("YANTRA_REQUIRE_PODMAN").is_some() {
+                anyhow::bail!(
+                    "YANTRA_REQUIRE_PODMAN is set but `podman` is not available, so the real \
+                     sshd + tmux fixture cannot run"
+                );
+            }
             eprintln!(
                 "SKIPPED: `podman` is not available, so the real sshd + tmux fixture \
                  cannot run. Install it (see docs/development.md) to exercise this test."
