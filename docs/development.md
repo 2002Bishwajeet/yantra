@@ -34,6 +34,7 @@ disposable container — see [Testing](#testing).
 ## Layout
 
 ```
+crates/yantra-core     the orchestration logic - everything Yantra actually does
 crates/yantrad         the control-plane daemon
 crates/yantra          the CLI  (the daemon's first client)
 crates/yantra-agent    per-machine heartbeat agent
@@ -41,6 +42,10 @@ docs/adr/              architecture decisions - immutable once accepted
 docs/research/         dated evidence behind those decisions
 tracker.md             single source of truth for project state
 ```
+
+`yantra-core` is a library; the other three are thin binaries around it. Two rules
+apply inside it and nowhere else: it **never prints and never exits**, and its
+`pub` surface stays small. See [ADR-0005](adr/0005-core-logic-in-a-library-crate.md).
 
 ## Daily commands
 
