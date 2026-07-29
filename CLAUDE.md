@@ -72,6 +72,19 @@ For multi-step tasks, state a brief plan:
 Strong criteria let you loop independently. Weak criteria ("make it work") force constant
 clarification. In this project, "verify" means what §B3 says it means.
 
+## 5. Comment sparingly
+
+**Comment only what the code cannot say. One or two lines, never more.**
+
+- Explain **why**, never **what**. If a comment restates the line below it, delete it.
+- No banner comments, no section dividers, no ceremony around obvious code.
+- Good reasons to comment: a non-obvious invariant, a workaround for someone else's bug, a
+  deliberate choice that looks wrong (`// I-21: pane targets must use %id, not =name`).
+- Doc comments on public items follow the same rule — say what a caller cannot infer from the
+  signature, then stop.
+
+If a block needs a paragraph to explain it, the block is wrong. Fix the code, not the comment.
+
 ---
 
 # Part B — Yantra
