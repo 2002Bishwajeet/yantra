@@ -45,6 +45,7 @@ mega-visions die in Phase 4 with a beautiful architecture and nothing that runs.
 - **No hardware until the software is boring.** Phases 7–9 are a reward, not a shortcut.
 - **Test hard.** Every orchestration primitive gets an integration test against a real sshd + real tmux. Mocks lie about SSH. **The fixture is a disposable podman container**, not the host — a separate filesystem, user and network hop make it a more honest stand-in for a remote machine than `ssh localhost`, and it changes nothing about the host's security posture.
 - **Rust for the daemon, TypeScript for the web UI** — [ADR-0004](docs/adr/0004-rust-for-the-daemon.md). Chosen for quality and appliance fit over iteration speed, with that trade made explicitly. Rust punishes design churn, so **think before writing**: this is the milestone where the shape is still unknown.
+- **Orchestration lives in `yantra-core`, a library crate** — [ADR-0005](docs/adr/0005-core-logic-in-a-library-crate.md). The binaries are thin. The library never prints and never exits, which forces a typed error from the first fallible call instead of an M2 cleanup; M2's daemon changes *where* the code is called from, not *what* it does.
 - **Keep SSH, tmux, telemetry and hardware behind narrow traits.** Not to enable a runtime swap any more — to keep the four seams that touch an unreliable outside world fakeable in tests.
 
 ---
@@ -118,7 +119,7 @@ end-to-end path. The original phases still map: M1 covers old Phases 1–3, M2 =
 | Y-013 | R4: Workspace prior art (incl. "why not Coder?") | ✅ done | agent | — | → [04-workspace-prior-art.md](docs/research/04-workspace-prior-art.md). Answers Q1 & Q4 |
 | Y-014 | R5: Scheduling & placement | ✅ done | agent | — | → [05-scheduling.md](docs/research/05-scheduling.md). **Settles the push-vs-poll half of Q3** |
 | Y-015 | R6: Bun-on-Pi5 / SSH / PTY / GPIO feasibility | ✅ done | agent | — | → [06](docs/research/06-runtime-feasibility.md) + sub-notes [06a](docs/research/06a-bun-sqlite.md) / [06b](docs/research/06b-node-fallback.md) / [06c](docs/research/06c-bun-native-modules.md). **Verdict: GO-WITH-CAVEATS** |
-| Y-020 | Synthesise research → architecture decisions | 🔵 doing | claude | Y-010..Y-015 | ADR-0004 (runtime) ✅ written. Remaining: ADR-0005 (transport), ADR-0006 (workspace schema), ADR-0007 (telemetry). ADR-0008 blocked on Y-023. |
+| Y-020 | Synthesise research → architecture decisions | 🔵 doing | claude | Y-010..Y-015 | ADR-0004 (runtime) ✅, ADR-0005 (core library crate) ✅. Remaining: ADR-0006 (transport), ADR-0007 (workspace schema), ADR-0008 (telemetry). ADR-0009 blocked on Y-023. |
 | Y-021 | Answer "why not just use Coder?" in writing | ⬜ todo | biswa | Y-013 | Kill criterion. If the answer is weak, we rescope. |
 | Y-022 | Inventory my actual machines | ⬜ todo | biswa | — | Real hostnames/OS/specs → `docs/machines.md`. Grounds M2 in reality. **R1 found a live 5-node tailnet with 2 HostName collisions** — resolve those names here. |
 | ~~Y-025~~ | ~~Spike: Tailscale LocalAPI from Bun~~ | ⬛ dropped | — | — | Superseded by [ADR-0004](docs/adr/0004-rust-for-the-daemon.md). Reading the unix socket from Rust (`hyper` + `hyperlocal`) is unremarkable; I-6's `Host:` header rule still applies. |
@@ -145,9 +146,10 @@ end-to-end path. The original phases still map: M1 covers old Phases 1–3, M2 =
 
 | ID | Task | Status | Owner | Depends | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Y-040 | Workspace schema v1 + loader | ⬜ todo | — | Y-020 | Smallest useful field set. |
-| Y-041 | SSH exec primitive | ⬜ todo | — | Y-030, Y-031 | **Decided (I-20):** wrap the system `ssh` binary with `ControlMaster` multiplexing via `tokio::process`. No SSH library. |
-| Y-042 | tmux session primitive (ensure/attach/kill) | ⬜ todo | — | Y-041 | Idempotent by construction. |
+| Y-045 | `yantra-core` library crate | 🔵 doing | claude | Y-030 | The crate boundary all M1 code lands behind — [ADR-0005](docs/adr/0005-core-logic-in-a-library-crate.md). Binaries stay thin; the library never prints and never exits. |
+| Y-040 | Workspace schema v1 + loader | ⬜ todo | — | Y-020, Y-045 | Smallest useful field set: `name`, `machine`, `repo path`, `branch`, `startup`. Config at `~/.config/yantra/workspaces/<name>.yaml` — central rather than in-repo, since the repo need not exist on the machine running the CLI. |
+| Y-041 | SSH exec primitive | ⬜ todo | — | Y-031, Y-045 | **Decided (I-20):** wrap the system `ssh` binary with `ControlMaster` multiplexing via `tokio::process`. No SSH library. |
+| Y-042 | tmux session primitive (ensure/attach/kill) | ⬜ todo | — | Y-041 | Idempotent by construction. Where I-1, I-2, I-4 and I-21 all live — read them before writing a line. |
 | Y-043 | `yantra up` wiring it together | ⬜ todo | — | Y-040..Y-042 | The M1 demo. |
 | Y-044 | Session state store (`rusqlite`) | ⬜ todo | — | Y-043 | Only if state genuinely can't be derived from tmux. Prefer deriving. |
 
