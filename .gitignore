@@ -38,3 +38,5 @@ dist/
 # Local agent skills - installed via `npx skills add`, not part of the project
 .claude/skills/
 .claude/settings.local.json
+.agents/
+skills-lock.json
