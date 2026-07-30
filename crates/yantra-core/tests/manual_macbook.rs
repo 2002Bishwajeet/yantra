@@ -16,6 +16,7 @@
 use std::path::PathBuf;
 
 use yantra_core::ssh::{Exec as _, Machine, Ssh};
+use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
 use yantra_core::{up, workspace};
 
@@ -65,7 +66,7 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
     std::fs::write(&file, format!("machine = \"{dest}\"\nrepo = \"/tmp\"\n"))?;
     let mut leaves = Leaves::of(file, E2E);
 
-    let first = up::up(E2E).await?;
+    let first = up::up(E2E, terminfo::FALLBACK).await?;
     // Registered before the assertions, so a failing one still tidies up.
     leaves.session = Some((dest, first.tmux.path().to_owned()));
     println!(
@@ -76,7 +77,7 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
     );
     assert!(first.opened.was_created(), "the first up opens the session");
 
-    let second = up::up(E2E).await?;
+    let second = up::up(E2E, terminfo::FALLBACK).await?;
     assert!(
         !second.opened.was_created(),
         "the second up attaches — §B4, over a real network this time"
@@ -85,6 +86,35 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
         first.opened.session().session_id,
         second.opened.session().session_id,
         "and it is the same session, not a second one with the same name"
+    );
+    Ok(())
+}
+
+/// Y-058 where the version skew is real: this machine runs ncurses 6.6 and the
+/// MacBook runs 6.0 from 2015. The container cannot reproduce a ten-year gap.
+///
+/// Read-only — it probes and reports. Installing writes to someone's `$HOME`,
+/// which is `yantra fix-terminfo`'s job precisely because it should be asked for.
+#[tokio::test]
+#[ignore = "needs the real MacBook; set YANTRA_MAC=user@host"]
+async fn the_terminal_probe_tells_real_macos_apart() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest,
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y58"),
+    })?;
+
+    for term in ["xterm-256color", "screen-256color", "xterm-ghostty", "foot"] {
+        println!("{term}: {:?}", terminfo::choose(&ssh, term).await?);
+    }
+
+    // The floor has to hold, or every fallback is an attach that aborts.
+    assert_eq!(
+        terminfo::choose(&ssh, terminfo::FALLBACK).await?,
+        Chosen::Known(terminfo::FALLBACK.to_owned())
     );
     Ok(())
 }

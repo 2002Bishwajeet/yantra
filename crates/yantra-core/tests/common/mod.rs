@@ -32,7 +32,7 @@ use anyhow::{Context, Result, bail};
 
 /// Bump the tag when `tests/fixture/Containerfile` changes; the image is built
 /// once and then reused from the local store.
-const IMAGE: &str = "localhost/yantra-fixture:1";
+const IMAGE: &str = "localhost/yantra-fixture:2";
 pub const USER: &str = "yantra";
 const HOST: &str = "127.0.0.1";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);

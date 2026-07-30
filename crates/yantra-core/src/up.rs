@@ -5,6 +5,7 @@
 //! return value the caller can assert on, not a promise.
 
 use crate::ssh::{self, Machine, Ssh};
+use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Opened, Tmux};
 use crate::workspace::{self, Workspace};
 
@@ -14,6 +15,9 @@ pub struct Report {
     pub opened: Opened,
     /// Carried so the attach hint can name a real path (I-34).
     pub tmux: Tmux,
+    /// Carried so the attach hint can name a terminal the far side has (I-36),
+    /// and so the caller can say when that is not the one asked for.
+    pub term: Chosen,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -27,21 +31,29 @@ pub enum Error {
     #[error(transparent)]
     Tmux(#[from] tmux::Error),
 
+    #[error(transparent)]
+    Terminfo(#[from] terminfo::Error),
+
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
 }
 
-/// Opens the workspace called `name`. Resolving tmux first means a machine
-/// without it says so, rather than failing partway through.
-pub async fn up(name: &str) -> Result<Report, Error> {
+/// Opens the workspace called `name`, for a caller sitting at `term`.
+///
+/// Resolving tmux first means a machine without it says so, rather than failing
+/// partway through. `term` is a request, not a promise: the far side may have no
+/// description of it, and [`Report::term`] reports what was actually used.
+pub async fn up(name: &str, term: &str) -> Result<Report, Error> {
     let workspace = workspace::load(name)?;
     let ssh = Ssh::new(machine_for(&workspace)?)?;
     let tmux = Tmux::resolve(&ssh).await?;
+    let term = terminfo::choose(&ssh, term).await?;
     let opened = open(&ssh, &tmux, &workspace).await?;
     Ok(Report {
         workspace,
         opened,
         tmux,
+        term,
     })
 }
 

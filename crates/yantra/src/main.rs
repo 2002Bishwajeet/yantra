@@ -9,6 +9,7 @@ use clap::{CommandFactory as _, Parser, Subcommand};
 use std::process::ExitCode;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::sessions::{self, MachineSessions};
+use yantra_core::terminfo::{self, Chosen};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,6 +35,11 @@ enum Command {
         #[command(subcommand)]
         target: LsTarget,
     },
+    /// Teach a machine about the terminal you are sitting at
+    FixTerminfo {
+        /// ssh destination, spelled the way a workspace's `machine` spells it
+        machine: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -54,6 +60,7 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Sessions,
         }) => ls_sessions().await,
+        Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -67,7 +74,7 @@ async fn main() -> ExitCode {
 }
 
 async fn up(name: &str) -> ExitCode {
-    match yantra_core::up::up(name).await {
+    match yantra_core::up::up(name, &local_term()).await {
         Ok(report) => {
             let session = report.opened.session();
             let verb = if report.opened.was_created() {
@@ -75,14 +82,56 @@ async fn up(name: &str) -> ExitCode {
             } else {
                 "attached to"
             };
-            println!(
-                "{verb} {} on {}",
-                report.workspace.name, report.workspace.machine
-            );
+            let machine = &report.workspace.machine;
+            println!("{verb} {} on {machine}", report.workspace.name);
             println!(
                 "  attach: {}",
-                attach_hint(&report.workspace.machine, report.tmux.path(), &session.name)
+                attach_hint(
+                    machine,
+                    report.tmux.path(),
+                    &session.name,
+                    report.term.term()
+                )
             );
+            if let Chosen::Substituted { wanted } = &report.term {
+                println!("{}", downgrade_notice(machine, wanted));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The terminal the user is sitting at. Unset under cron and in CI, which is
+/// not an error — it is the same case as a terminal the far side never heard of.
+fn local_term() -> String {
+    std::env::var("TERM").unwrap_or_else(|_| terminfo::FALLBACK.to_owned())
+}
+
+/// Names the loss and the one command that ends it. Printing a shell pipeline
+/// to paste would work too; this way the error handling is Yantra's.
+fn downgrade_notice(machine: &str, wanted: &str) -> String {
+    format!(
+        "  note: {machine} has no `{wanted}`, so the attach above uses `{}`.\n\
+         \x20       colour depth and styled underlines are what that costs.\n\
+         \x20       fix it once with: yantra fix-terminfo {machine}",
+        terminfo::FALLBACK
+    )
+}
+
+async fn fix_terminfo(machine: &str) -> ExitCode {
+    let term = local_term();
+    match terminfo::install_on(machine, &term).await {
+        Ok(installed) => {
+            println!("installed {} on {machine}", installed.term);
+            // `tic` accepts entries it is unhappy about, and the machines here
+            // are ten ncurses releases apart, so what it said is worth showing.
+            if !installed.warnings.is_empty() {
+                println!("  tic said: {}", installed.warnings);
+            }
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -104,10 +153,6 @@ async fn ls_machines() -> ExitCode {
         }
     }
 }
-
-/// I-36: `ssh -t` forwards the client's `TERM` and tmux aborts if the far side
-/// lacks that terminfo entry. Pin one every database carries.
-const ATTACH_TERM: &str = "xterm-256color";
 
 async fn ls_sessions() -> ExitCode {
     match sessions::list().await {
@@ -240,9 +285,10 @@ fn table(headings: &[&str], rows: &[Vec<String>]) -> String {
 
 /// Every part is load-bearing: the session is remote, the login shell cannot
 /// find tmux (I-34), `-t` forwards a `TERM` the far side may lack (I-36), and
-/// zsh eats an unquoted `=name` (I-35).
-fn attach_hint(machine: &str, tmux: &str, session: &str) -> String {
-    format!("ssh {machine} -t \"TERM={ATTACH_TERM} {tmux} attach -t '={session}'\"")
+/// zsh eats an unquoted `=name` (I-35). `term` is already known to be one the
+/// far side has, so setting it here is passing through rather than pinning.
+fn attach_hint(machine: &str, tmux: &str, session: &str, term: &str) -> String {
+    format!("ssh {machine} -t \"TERM={term} {tmux} attach -t '={session}'\"")
 }
 
 /// The library never prints (ADR-0005), so rendering the chain is the CLI's job.
@@ -346,7 +392,7 @@ mod tests {
     /// Verified against the MacBook; each missing part breaks it there.
     #[test]
     fn the_attach_hint_survives_a_remote_machine() {
-        let hint = attach_hint("mac", "/opt/homebrew/bin/tmux", "demo");
+        let hint = attach_hint("mac", "/opt/homebrew/bin/tmux", "demo", "xterm-256color");
         assert_eq!(
             hint,
             "ssh mac -t \"TERM=xterm-256color /opt/homebrew/bin/tmux attach -t '=demo'\""
@@ -356,7 +402,25 @@ mod tests {
     /// I-35: unquoted, zsh expands `=demo` and the attach silently misses.
     #[test]
     fn the_session_target_is_quoted_against_zsh() {
-        assert!(attach_hint("mac", "/usr/bin/tmux", "demo").contains("'=demo'"));
+        assert!(attach_hint("mac", "/usr/bin/tmux", "demo", "xterm-256color").contains("'=demo'"));
+    }
+
+    /// Y-058: a terminal the far side knows reaches the hint unchanged, rather
+    /// than everyone getting the floor.
+    #[test]
+    fn a_terminal_the_machine_knows_is_passed_through() {
+        let hint = attach_hint("g14", "/usr/bin/tmux", "demo", "xterm-ghostty");
+        assert!(hint.contains("TERM=xterm-ghostty"), "{hint}");
+    }
+
+    /// A downgrade has to say what was lost and how to end it, or it is the
+    /// silent degradation Y-058 exists to remove.
+    #[test]
+    fn the_downgrade_notice_names_the_cost_and_the_cure() {
+        let notice = downgrade_notice("mac", "xterm-ghostty");
+        assert!(notice.contains("no `xterm-ghostty`"), "{notice}");
+        assert!(notice.contains("xterm-256color"), "{notice}");
+        assert!(notice.contains("yantra fix-terminfo mac"), "{notice}");
     }
 
     fn summary(name: &str, windows: u32, attached: u32) -> Summary {
