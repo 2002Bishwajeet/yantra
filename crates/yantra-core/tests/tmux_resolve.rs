@@ -1,17 +1,9 @@
 //! Y-052 against a real machine, per §B3: finding tmux when `PATH` cannot.
 //!
-//! **What this container can and cannot prove.** Alpine puts tmux at
-//! `/usr/bin/tmux`, and sshd's compiled-in `PATH` includes `/usr/bin`, so the
-//! fixture is naturally the case where `PATH` already works — the *opposite* of
-//! I-34. These tests therefore move the binary first, which reproduces the
-//! *shape* of the macOS failure (installed, but nowhere `PATH` looks) on a
-//! machine CI can run.
-//!
-//! The macOS *specifics* stay out of reach here: zsh's `~/.zprofile`, macOS
-//! `path_helper`, and Homebrew's installer choices are what put tmux outside the
-//! non-interactive `PATH` in the first place. Those are verified by hand against
-//! `bishwajeets-macbook-pro` and recorded in the tracker. Per I-32, a green run
-//! of this file must not be read as covering them.
+//! The container is the *opposite* of I-34 by default — Alpine's tmux is on
+//! sshd's `PATH` — so these tests move the binary first to reproduce the shape.
+//! The macOS specifics (zsh, `path_helper`, Homebrew) are out of reach here and
+//! covered by `manual_macbook.rs`; per I-32, green here does not mean them.
 
 // `expect` in a test is a deliberate abort with a message.
 #![allow(clippy::expect_used)]
@@ -47,9 +39,8 @@ impl Lab {
         Ok(Some(Self { fixture, ssh, dir }))
     }
 
-    /// Moves tmux to `dest`, which must be off the non-interactive `PATH`.
-    /// Asserts the precondition, because without it the test passes by accident
-    /// — `PATH` would still answer and the candidate list would never run.
+    /// Moves tmux off `PATH`, asserting it really left — otherwise `PATH`
+    /// answers and the candidate list is never exercised.
     fn hide_tmux_at(&self, dest: &str) -> Result<()> {
         let dir = dest.rsplit_once('/').map(|(d, _)| d).unwrap_or("/");
         self.fixture
@@ -95,8 +86,7 @@ async fn tmux_is_found_where_path_cannot_see_it() -> Result<()> {
     Ok(())
 }
 
-/// A machine with no tmux anywhere must say so, rather than surfacing as a
-/// transport failure or as a confusing tmux error later on.
+/// No tmux anywhere must be a typed error, not a transport failure.
 #[tokio::test]
 async fn a_machine_without_tmux_reports_that_and_not_a_transport_error() -> Result<()> {
     let Some(lab) = Lab::start("absent")? else {
@@ -118,9 +108,7 @@ async fn a_machine_without_tmux_reports_that_and_not_a_transport_error() -> Resu
     Ok(())
 }
 
-/// `PATH` is consulted first, so a machine that is already configured keeps
-/// whichever tmux its owner put on `PATH` — the candidate list never overrides
-/// a working answer.
+/// The candidate list never overrides a `PATH` that already works.
 #[tokio::test]
 async fn path_wins_when_it_has_an_answer() -> Result<()> {
     let Some(lab) = Lab::start("pathwins")? else {
@@ -136,9 +124,7 @@ async fn path_wins_when_it_has_an_answer() -> Result<()> {
     Ok(())
 }
 
-/// A path that worked at resolve time and then stopped is a different problem
-/// from a machine with no tmux, and has to read as one. This is the case a
-/// long-lived daemon will hit when a package upgrade moves the binary.
+/// What a long-lived daemon hits when a package upgrade moves the binary.
 #[tokio::test]
 async fn a_binary_that_moves_after_resolution_is_not_reported_as_missing() -> Result<()> {
     let Some(lab) = Lab::start("moved")? else {
@@ -161,8 +147,7 @@ async fn a_binary_that_moves_after_resolution_is_not_reported_as_missing() -> Re
     Ok(())
 }
 
-/// The resolved path is absolute, which is the entire contract: a bare name
-/// would be re-resolved by whatever shell runs it, which is the bug I-34 names.
+/// A bare name would be re-resolved by whatever shell runs it — that is I-34.
 #[tokio::test]
 async fn the_resolved_path_is_absolute() -> Result<()> {
     let Some(lab) = Lab::start("absolute")? else {

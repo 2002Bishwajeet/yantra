@@ -14,14 +14,10 @@
 //! - **I-21** — `=name` is a valid target **only for sessions**. For window and
 //!   pane targets it fails outright, and `remain-on-exit` is a *window* option.
 //!   Ids captured at creation (`@N`, `%N`) are used instead.
-//! - **I-34** — the binary is never invoked bare. [`Tmux::resolve`] finds an
-//!   absolute path once per connection, because the non-interactive `PATH` does
-//!   not contain what an interactive login would find.
-//! - **I-40** — `default-terminal` is deliberately never set. It is a *server*
-//!   option, so `set-option -t '=name'` silently changes it for every session on
-//!   the machine, including ones Yantra did not create. Its built-in default is
-//!   already `tmux-256color`. The `TERM` that actually matters is the outer one
-//!   at attach time, which is the client's problem, not the session's.
+//! - **I-34** — never invoke the binary bare. [`Tmux::resolve`] finds an
+//!   absolute path once per connection.
+//! - **I-40** — never set `default-terminal`. It is a *server* option, so a
+//!   per-session `set-option -t` reconfigures every session on the machine.
 
 use crate::ssh::Exec;
 
@@ -65,8 +61,7 @@ pub enum Error {
     #[error("tmux was not found on PATH or in any of: {searched}")]
     NotFound { searched: String },
 
-    /// Distinct from [`Error::NotFound`]: the binary *was* found at this path
-    /// and has since stopped working, which is a different thing to explain.
+    /// Found at resolve time, gone now — not the same as never installed.
     #[error("tmux was found at {path} but no longer runs there")]
     Vanished { path: String },
 
@@ -86,17 +81,8 @@ pub enum Error {
 
 const IDS: &str = "#{session_id} #{window_id} #{pane_id}";
 
-/// Absolute directories to search when `PATH` does not have the answer, most
-/// specific first so a hand-installed tmux wins over the distro one.
-///
-/// System-scoped locations only. Anything under `$HOME` is deliberately absent:
-/// a user who installs to `~/.local/bin` has it on `PATH` by construction, and
-/// `PATH` is consulted first — that is the division of labour between the two
-/// halves of the probe.
-///
-/// Known gap: `/run/current-system/sw/bin` exists on NixOS and nix-darwin only.
-/// A plain Nix install puts tmux in `~/.nix-profile/bin`, which is `$HOME`-
-/// relative and so falls to the `PATH` half. No machine in this fleet runs Nix.
+/// Searched in order when `PATH` fails. System-scoped only — `$HOME` installs
+/// are on `PATH` by construction, which is why `PATH` is asked first.
 const CANDIDATES: [&str; 7] = [
     "/opt/homebrew/bin",              // Homebrew, Apple Silicon
     "/opt/local/bin",                 // MacPorts
@@ -107,32 +93,19 @@ const CANDIDATES: [&str; 7] = [
     "/bin",                           // pre-usrmerge, and a symlink to /usr/bin after
 ];
 
-/// A tmux binary located on a machine, and every operation that uses it.
-///
-/// Holding the resolved path is the whole cache: it lives exactly as long as
-/// the connection it was found through, so there is no key and nothing to
-/// invalidate. Note what it is *not* keyed on — the M2 plan proposed a map
-/// keyed on `Peer.ID`, which ADR-0009 rules out, because an ssh destination
-/// cannot be mapped to a tailnet node without the resolution that ADR declined.
+/// A located tmux binary and the operations that use it. Holding the path *is*
+/// the cache — it lives as long as the connection, so there is nothing to key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tmux {
     path: String,
 }
 
 impl Tmux {
-    /// Finds tmux on the far side (I-34).
-    ///
-    /// `PATH` is consulted first — when it works it reflects a choice the owner
-    /// of the machine made — and the candidate list is the fallback for when it
-    /// does not, which on macOS is the normal case rather than the exception.
-    ///
-    /// One round trip, through the ADR-0006 envelope rather than a login shell:
-    /// `sh -lc` costs more *and answers wrong*, returning nothing on the very
-    /// machine that raised I-34, because Homebrew's installer writes to
-    /// `~/.zprofile` and `/bin/sh` never reads it.
+    /// Finds tmux on the far side in one round trip (I-34). Not a login shell:
+    /// `sh -lc` answers `NONE` on the machine that raised I-34.
     pub async fn resolve<E: Exec>(exec: &E) -> Result<Self, Error> {
-        // `exit` is safe here: ADR-0006 runs this in a child shell, so it
-        // cannot suppress the sentinel the transport needs (ssh.rs `payload`).
+        // `exit` is safe: ADR-0006 runs this in a child shell, so it cannot
+        // suppress the sentinel.
         let probe = format!(
             "p=$(command -v tmux 2>/dev/null)\n\
              case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
@@ -153,8 +126,6 @@ impl Tmux {
         })
     }
 
-    /// The path tmux was found at, for diagnostics and for tests that need to
-    /// assert *where* it was found rather than merely that it was.
     pub fn path(&self) -> &str {
         &self.path
     }
@@ -200,8 +171,7 @@ impl Tmux {
 
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
         if !stderr.contains("duplicate session:") {
-            // The path was verified executable at resolve time, so this is a
-            // binary that has since moved — not a machine without tmux.
+            // Verified executable at resolve time, so it moved since.
             if stderr.contains("not found") || stderr.contains("No such file") {
                 return Err(Error::Vanished {
                     path: self.path.clone(),
