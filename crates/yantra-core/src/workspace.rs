@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! machine = "pi"
-//! repo    = "/home/biswa/code/demo"
+//! repo    = "/home/user/code/demo"
 //! branch  = "main"      # optional
 //! startup = "claude"    # optional
 //! ```
@@ -170,7 +170,7 @@ mod tests {
                 "demo.toml",
                 r#"
                 machine = "pi"
-                repo    = "/home/biswa/code/demo"
+                repo    = "/home/user/code/demo"
                 branch  = "main"
                 startup = "claude"
                 "#,
@@ -181,7 +181,7 @@ mod tests {
 
         assert_eq!(ws.name, "demo", "identity comes from the filename");
         assert_eq!(ws.machine, "pi");
-        assert_eq!(ws.repo, PathBuf::from("/home/biswa/code/demo"));
+        assert_eq!(ws.repo, PathBuf::from("/home/user/code/demo"));
         assert_eq!(ws.branch.as_deref(), Some("main"));
         assert_eq!(ws.startup.as_deref(), Some("claude"));
         Ok(())

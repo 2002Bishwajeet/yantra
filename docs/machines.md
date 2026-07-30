@@ -75,13 +75,23 @@ container:
 | `/bin/sh` + `base64 -d` payload (I-26) | ✅ decodes and runs; `$0` is `/bin/sh` |
 | `base64` flavour | FreeBSD — accepts `-d` *and* `-D`; the payload only uses `-d` |
 | stderr sentinel trailer (I-25) | ✅ arrives intact |
-| `ControlMaster` multiplexing (I-20) | ✅ **20 ms against 150 ms cold** — `ControlPath` 27 bytes, inside I-28 |
+| `ControlMaster` multiplexing (I-20) | ✅ **20 ms against 150 ms cold** — `ControlPath` 27 bytes, inside I-28. Over a **direct** path, not DERP — see the correction below |
 | Idempotency (§B4) | ✅ a second `has-session ‖ new-session` attached; `session_created` unchanged |
 | `#{pane_current_path}` targets | a *session* target returns empty on **both** OSes; a `%id` pane or `=name:` window target works — I-21 exactly as documented |
 | `tmux` | 3.7b — but at `/opt/homebrew/bin/tmux`, invisible to the non-interactive `PATH` (I-34) |
 
 That multiplexing figure is the first measurement of I-20's value on this fleet: 7.5× on a genuine
-cross-OS hop, and *through* the DERP relay rather than a direct path.
+cross-OS hop.
+
+**Corrected 2026-07-30.** This was first written as "through the DERP relay rather than a direct
+path", and that is wrong. `tailscale status` reports the MacBook as `active; direct
+192.168.x.x:41641` — a direct WireGuard path over the same LAN. The relay figure quoted alongside it
+("27 ms via Amsterdam") came from reading a `netcheck` DERP-latency table as if it described the path
+in use; it describes the DERP *map*, and the nearest region is Frankfurt at 7.1 ms, not Amsterdam.
+The 20 ms / 150 ms measurement itself stands — but it is a LAN measurement, so it is a **weaker**
+claim than it was written as, not a stronger one. I-20's value over a genuinely relayed link is still
+unmeasured, and would be expected to be larger, since it is the cold connection that a relay
+penalises.
 
 ### Why a key was unavoidable
 
@@ -118,8 +128,14 @@ forwards `TERM`, so ADR-0006's command path is immune; `attach` and M6's browser
 
 - **I-30's three "already absent" spellings are unverified on macOS.** The `kill-session` that would
   have exercised them was swallowed by zsh first (I-35), so only the `/bin/sh` path is proven.
-- **The DERP relay is still a latency floor.** 27 ms via Amsterdam is fine for M2's short commands;
-  M6 streams an interactive terminal and should measure it before promising responsiveness.
+- **The relayed case is unmeasured.** Every measurement so far is over a direct LAN path, because
+  that is what the tailnet chose. The nearest DERP region is Frankfurt at 7.1 ms and the connection
+  falls back to it whenever the two machines are not on the same network — which is the normal case
+  for the fleet, not the exception. M6 streams an interactive terminal and should measure the relayed
+  path before promising responsiveness.
+- **Two of six nodes have expired keys** (`ipad153`, `laptop-9ml3d644`). Neither is a Yantra target
+  today, but it means "offline" and "unusable" are different states in this fleet, and a machine
+  listing that shows only the first is misleading. `MachineInfo::expired` carries it (Y-050).
 
 ## Sources
 
