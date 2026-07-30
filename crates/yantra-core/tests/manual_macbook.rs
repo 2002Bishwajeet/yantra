@@ -66,7 +66,7 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
     std::fs::write(&file, format!("machine = \"{dest}\"\nrepo = \"/tmp\"\n"))?;
     let mut leaves = Leaves::of(file, E2E);
 
-    let first = up::up(E2E, terminfo::FALLBACK).await?;
+    let first = up::up(E2E, terminfo::FALLBACK, None).await?;
     // Registered before the assertions, so a failing one still tidies up.
     leaves.session = Some((dest, first.tmux.path().to_owned()));
     println!(
@@ -77,7 +77,7 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
     );
     assert!(first.opened.was_created(), "the first up opens the session");
 
-    let second = up::up(E2E, terminfo::FALLBACK).await?;
+    let second = up::up(E2E, terminfo::FALLBACK, None).await?;
     assert!(
         !second.opened.was_created(),
         "the second up attaches — §B4, over a real network this time"

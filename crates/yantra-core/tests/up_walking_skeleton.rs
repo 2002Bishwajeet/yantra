@@ -69,10 +69,10 @@ async fn up_twice_attaches_and_does_not_duplicate() -> Result<()> {
     };
     let ws = workspace("skeleton", None);
 
-    let first = up::open(&lab.ssh, &lab.tmux, &ws).await?;
+    let first = up::open(&lab.ssh, &lab.tmux, &ws, None).await?;
     assert!(first.was_created(), "the first up opens the session");
 
-    let second = up::open(&lab.ssh, &lab.tmux, &ws).await?;
+    let second = up::open(&lab.ssh, &lab.tmux, &ws, None).await?;
     assert!(
         !second.was_created(),
         "the second up attaches — this is the whole point of M1"
@@ -107,9 +107,9 @@ async fn startup_runs_once_and_is_not_repeated() -> Result<()> {
     lab.ssh.exec("rm -f /tmp/ran.log").await?;
     let ws = workspace("startup", Some("echo ran >> /tmp/ran.log; sleep 30"));
 
-    up::open(&lab.ssh, &lab.tmux, &ws).await?;
+    up::open(&lab.ssh, &lab.tmux, &ws, None).await?;
     lab.ssh.exec("sleep 1").await?;
-    let again = up::open(&lab.ssh, &lab.tmux, &ws).await?;
+    let again = up::open(&lab.ssh, &lab.tmux, &ws, None).await?;
     assert!(!again.was_created(), "the second open attaches");
     lab.ssh.exec("sleep 1").await?;
 
@@ -135,7 +135,7 @@ async fn the_session_opens_in_the_workspace_repo() -> Result<()> {
     let mut ws = workspace("repo", None);
     ws.repo = std::path::PathBuf::from("/tmp/somerepo");
 
-    let opened = up::open(&lab.ssh, &lab.tmux, &ws).await?;
+    let opened = up::open(&lab.ssh, &lab.tmux, &ws, None).await?;
     let out = lab
         .ssh
         .exec(&format!(

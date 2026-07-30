@@ -7,9 +7,11 @@
 
 use clap::{CommandFactory as _, Parser, Subcommand};
 use std::process::ExitCode;
+use yantra_core::agent;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::terminfo::{self, Chosen};
+use yantra_core::up;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -29,6 +31,9 @@ enum Command {
     Up {
         /// Workspace name, without the `.toml`
         workspace: String,
+        /// Start a coding agent in the session
+        #[arg(long, value_enum)]
+        agent: Option<AgentArg>,
     },
     /// List what Yantra can see
     Ls {
@@ -42,6 +47,13 @@ enum Command {
     },
 }
 
+/// Spelled out rather than a bare bool so that adding a second agent is a new
+/// variant, not a new flag — even though the guardrail says that day is far off.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum AgentArg {
+    Claude,
+}
+
 #[derive(Debug, Subcommand)]
 enum LsTarget {
     /// Machines in the tailnet
@@ -53,7 +65,7 @@ enum LsTarget {
 #[tokio::main]
 async fn main() -> ExitCode {
     match Cli::parse().command {
-        Some(Command::Up { workspace }) => up(&workspace).await,
+        Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -73,8 +85,9 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn up(name: &str) -> ExitCode {
-    match yantra_core::up::up(name, &local_term()).await {
+async fn up(name: &str, agent: Option<AgentArg>) -> ExitCode {
+    let agent = agent.map(|AgentArg::Claude| up::Agent::Claude);
+    match up::up(name, &local_term(), agent).await {
         Ok(report) => {
             let session = report.opened.session();
             let verb = if report.opened.was_created() {
@@ -84,6 +97,11 @@ async fn up(name: &str) -> ExitCode {
             };
             let machine = &report.workspace.machine;
             println!("{verb} {} on {machine}", report.workspace.name);
+            if let Some(launch) = &report.launched {
+                println!("  agent:  claude, session {}", launch.session_id);
+            } else if agent.is_some() {
+                println!("  agent:  already running in that session, left alone");
+            }
             println!(
                 "  attach: {}",
                 attach_hint(
@@ -100,10 +118,22 @@ async fn up(name: &str) -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
+            if matches!(err, up::Error::Agent(agent::Error::NotLoggedIn { .. })) {
+                eprintln!("{KEYCHAIN_NOTE}");
+            }
             ExitCode::FAILURE
         }
     }
 }
+
+/// I-44, in the one place someone meets it. Without this the message reads as
+/// nonsense on a Mac where `claude` works perfectly in a terminal — which is
+/// every Mac, because the keychain is reachable there and not over ssh.
+const KEYCHAIN_NOTE: &str = "\
+\x20 note: on macOS the agent's token lives in the login keychain, which a process
+        launched over ssh cannot read — so a machine that works when you sit at
+        it still answers `not logged in` here. check with:
+          ssh <machine> claude auth status";
 
 /// The terminal the user is sitting at. Unset under cron and in CI, which is
 /// not an error — it is the same case as a terminal the far side never heard of.
@@ -303,6 +333,9 @@ fn report_error(err: &dyn std::error::Error) {
 }
 
 #[cfg(test)]
+// `expect` in a test is a deliberate abort with a message; the workspace lint
+// targets code that ships, where the same call would take the process down.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use yantra_core::inventory::Os;
@@ -312,6 +345,33 @@ mod tests {
     #[test]
     fn the_command_tree_is_well_formed() {
         Cli::command().debug_assert();
+    }
+
+    /// `--agent` is a value enum rather than a flag, so the spelling users type
+    /// is part of the contract and `debug_assert` does not check it.
+    #[test]
+    fn the_agent_flag_takes_a_named_agent_and_is_optional() {
+        let with = Cli::try_parse_from(["yantra", "up", "demo", "--agent", "claude"])
+            .expect("`--agent claude` parses");
+        assert!(matches!(
+            with.command,
+            Some(Command::Up {
+                agent: Some(AgentArg::Claude),
+                ..
+            })
+        ));
+
+        let without =
+            Cli::try_parse_from(["yantra", "up", "demo"]).expect("no agent is the default");
+        assert!(matches!(
+            without.command,
+            Some(Command::Up { agent: None, .. })
+        ));
+
+        assert!(
+            Cli::try_parse_from(["yantra", "up", "demo", "--agent", "aider"]).is_err(),
+            "an agent Yantra does not ship must be refused by name, not started"
+        );
     }
 
     fn machine(name: &str, os: Os, online: bool, expired: bool, seen: Option<&str>) -> MachineInfo {

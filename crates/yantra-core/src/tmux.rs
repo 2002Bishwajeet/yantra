@@ -393,7 +393,7 @@ fn parse_ids(name: &str, stdout: &[u8]) -> Result<Session, Error> {
 
 /// POSIX single-quoting. Safe here because the exec payload runs the command
 /// under `/bin/sh` (ADR-0006), so the tcsh caveat in R7 does not apply.
-fn sq(s: &str) -> String {
+pub(crate) fn sq(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
