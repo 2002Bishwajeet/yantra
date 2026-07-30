@@ -70,6 +70,22 @@ impl Os {
     }
 }
 
+/// The inverse of `parse`: renders Tailscale's own spelling, so a round trip
+/// through `Os` loses nothing. Not a presentation choice — ADR-0005 keeps
+/// layout in the caller — but a property of the type.
+impl std::fmt::Display for Os {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Linux => "linux",
+            Self::MacOs => "macOS",
+            Self::Ios => "iOS",
+            Self::Windows => "windows",
+            Self::Android => "android",
+            Self::Other(raw) => raw,
+        })
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("could not spawn `tailscale` — is it installed and on PATH?")]
@@ -321,6 +337,13 @@ mod tests {
         assert_eq!(Os::parse("macOS"), Os::MacOs);
         // Not the lowercase spelling ACLs use.
         assert_eq!(Os::parse("macos"), Os::Other("macos".to_string()));
+    }
+
+    #[test]
+    fn every_os_renders_back_to_the_string_it_was_parsed_from() {
+        for raw in ["linux", "macOS", "iOS", "windows", "android", "freebsd"] {
+            assert_eq!(Os::parse(raw).to_string(), raw);
+        }
     }
 
     #[test]
