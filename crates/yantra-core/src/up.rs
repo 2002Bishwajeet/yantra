@@ -4,10 +4,18 @@
 //! Running it twice attaches rather than duplicating (§B4), and that is a
 //! return value the caller can assert on, not a promise.
 
+use crate::agent::{self, Launch};
 use crate::ssh::{self, Machine, Ssh};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Opened, Tmux};
 use crate::workspace::{self, Workspace};
+
+/// Which agent to launch. One variant, and it stays one until a second agent is
+/// genuinely wanted — the guardrail, and ADR-0011.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Agent {
+    Claude,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -18,6 +26,11 @@ pub struct Report {
     /// Carried so the attach hint can name a terminal the far side has (I-36),
     /// and so the caller can say when that is not the one asked for.
     pub term: Chosen,
+    /// `Some` only when this call actually started an agent. A second `up`
+    /// attaches to the session that is already running one, so there is nothing
+    /// launched to report — asking the machine what is running there is
+    /// [`crate::agent`]'s job, not this one's.
+    pub launched: Option<Launch>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -34,39 +47,85 @@ pub enum Error {
     #[error(transparent)]
     Terminfo(#[from] terminfo::Error),
 
+    #[error(transparent)]
+    Agent(#[from] agent::Error),
+
+    /// Refused rather than resolved. Picking a winner would mean silently
+    /// ignoring one of them, and ADR-0007's rule — that a quietly ignored
+    /// instruction is the worst kind of bug — does not stop applying because the
+    /// instruction arrived on the command line instead of in the file.
+    #[error(
+        "workspace `{workspace}` already runs `{startup}` at startup, so --agent has nothing to \
+         start it in: drop one of the two"
+    )]
+    StartupConflict { workspace: String, startup: String },
+
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
 }
 
-/// Opens the workspace called `name`, for a caller sitting at `term`.
+/// Opens the workspace called `name`, for a caller sitting at `term`, optionally
+/// starting an agent in it.
 ///
 /// Resolving tmux first means a machine without it says so, rather than failing
 /// partway through. `term` is a request, not a promise: the far side may have no
 /// description of it, and [`Report::term`] reports what was actually used.
-pub async fn up(name: &str, term: &str) -> Result<Report, Error> {
+///
+/// Everything an agent needs is settled *before* the session is touched — the
+/// binary located, the account checked — so a machine that cannot run one leaves
+/// nothing half-open behind.
+pub async fn up(name: &str, term: &str, agent: Option<Agent>) -> Result<Report, Error> {
     let workspace = workspace::load(name)?;
+    if let (Some(_), Some(startup)) = (agent, workspace.startup.as_deref()) {
+        return Err(Error::StartupConflict {
+            workspace: workspace.name.clone(),
+            startup: startup.to_owned(),
+        });
+    }
+
     let ssh = Ssh::new(machine_for(&workspace)?)?;
     let tmux = Tmux::resolve(&ssh).await?;
     let term = terminfo::choose(&ssh, term).await?;
-    let opened = open(&ssh, &tmux, &workspace).await?;
+
+    let launch = match agent {
+        Some(Agent::Claude) => Some(agent::prepare(&ssh, &workspace.repo.to_string_lossy()).await?),
+        None => None,
+    };
+
+    let opened = open(
+        &ssh,
+        &tmux,
+        &workspace,
+        launch.as_ref().map(|l| l.command.as_str()),
+    )
+    .await?;
+
+    // Nothing was started if the session was already there, and saying otherwise
+    // would have `logs` follow a transcript that will never exist.
+    let launched = opened.was_created().then_some(launch).flatten();
+
     Ok(Report {
         workspace,
         opened,
         tmux,
         term,
+        launched,
     })
 }
 
 /// The testable half: `up` once it can reach a machine and has found tmux.
+///
+/// `agent_command` replaces the workspace's own `startup` rather than joining
+/// it; [`up`] refuses the case where both are set, so only one can arrive here.
 pub async fn open<E: ssh::Exec>(
     exec: &E,
     tmux: &Tmux,
     workspace: &Workspace,
+    agent_command: Option<&str>,
 ) -> Result<Opened, Error> {
     let repo = workspace.repo.to_string_lossy();
-    let opened = tmux
-        .ensure(exec, &workspace.name, &repo, workspace.startup.as_deref())
-        .await?;
+    let startup = agent_command.or(workspace.startup.as_deref());
+    let opened = tmux.ensure(exec, &workspace.name, &repo, startup).await?;
     Ok(opened)
 }
 
