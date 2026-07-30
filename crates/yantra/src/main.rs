@@ -8,6 +8,7 @@
 use clap::{CommandFactory as _, Parser, Subcommand};
 use std::process::ExitCode;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
+use yantra_core::sessions::{self, MachineSessions};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -39,6 +40,8 @@ enum Command {
 enum LsTarget {
     /// Machines in the tailnet
     Machines,
+    /// tmux sessions on the machines your workspaces name
+    Sessions,
 }
 
 #[tokio::main]
@@ -48,6 +51,9 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
+        Some(Command::Ls {
+            target: LsTarget::Sessions,
+        }) => ls_sessions().await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -103,25 +109,79 @@ async fn ls_machines() -> ExitCode {
 /// lacks that terminfo entry. Pin one every database carries.
 const ATTACH_TERM: &str = "xterm-256color";
 
-const HEADINGS: [&str; 4] = ["MACHINE", "OS", "STATUS", "LAST SEEN"];
+async fn ls_sessions() -> ExitCode {
+    match sessions::list().await {
+        Ok(machines) => {
+            print!("{}", render_sessions(&machines));
+            // Non-zero on a partial answer: the table is still printed, but a
+            // caller must be able to tell it is incomplete.
+            let complete = machines.iter().all(|m| m.sessions.is_ok());
+            if complete {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_sessions(machines: &[MachineSessions]) -> String {
+    let rows: Vec<Vec<String>> = machines
+        .iter()
+        .filter_map(|machine| {
+            machine
+                .sessions
+                .as_ref()
+                .ok()
+                .map(|s| (&machine.machine, s))
+        })
+        .flat_map(|(name, sessions)| {
+            sessions.iter().map(move |session| {
+                vec![
+                    name.clone(),
+                    session.name.clone(),
+                    session.windows.to_string(),
+                    session.attached.to_string(),
+                    session.created.clone(),
+                ]
+            })
+        })
+        .collect();
+
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(
+            &["MACHINE", "SESSION", "WINDOWS", "ATTACHED", "CREATED"],
+            &rows,
+        )
+    };
+
+    let answered = machines.iter().filter(|m| m.sessions.is_ok()).count();
+    out.push_str(&format!(
+        "\n{} session{} on {answered} of {} machines\n",
+        rows.len(),
+        if rows.len() == 1 { "" } else { "s" },
+        machines.len()
+    ));
+
+    for machine in machines.iter().filter(|m| m.sessions.is_err()) {
+        if let Err(err) = &machine.sessions {
+            out.push_str(&format!("  {} unreachable: {err}\n", machine.machine));
+        }
+    }
+    out
+}
 
 /// The tailnet as a table. Advisory only — ADR-0009 keeps `~/.ssh/config`
 /// authoritative over what a name means, so this reports and never gates.
 fn render_machines(machines: &[MachineInfo]) -> String {
-    let rows: Vec<[String; 4]> = machines.iter().map(row).collect();
-
-    let mut widths = HEADINGS.map(str::len);
-    for cells in &rows {
-        for (width, cell) in widths.iter_mut().zip(cells) {
-            *width = (*width).max(cell.chars().count());
-        }
-    }
-
-    let mut out = String::new();
-    push_row(&mut out, &HEADINGS.map(String::from), &widths);
-    for cells in &rows {
-        push_row(&mut out, cells, &widths);
-    }
+    let rows: Vec<Vec<String>> = machines.iter().map(row).collect();
+    let mut out = table(&["MACHINE", "OS", "STATUS", "LAST SEEN"], &rows);
 
     // Counting *online* is what stops the dual boot reading as two, without
     // guessing which nodes share a box — `HostName` would pair the phones too.
@@ -130,8 +190,8 @@ fn render_machines(machines: &[MachineInfo]) -> String {
     out
 }
 
-fn row(machine: &MachineInfo) -> [String; 4] {
-    [
+fn row(machine: &MachineInfo) -> Vec<String> {
+    vec![
         machine.name.clone(),
         machine.os.to_string(),
         status(machine),
@@ -155,14 +215,27 @@ fn status(machine: &MachineInfo) -> String {
     }
 }
 
-fn push_row(out: &mut String, cells: &[String; 4], widths: &[usize; 4]) {
-    let padded: Vec<String> = cells
-        .iter()
-        .zip(widths)
-        .map(|(cell, width)| format!("{cell:<width$}", width = *width))
-        .collect();
-    out.push_str(padded.join("  ").trim_end());
-    out.push('\n');
+/// Column-aligned, no line ending in whitespace.
+fn table(headings: &[&str], rows: &[Vec<String>]) -> String {
+    let mut widths: Vec<usize> = headings.iter().map(|h| h.chars().count()).collect();
+    for row in rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(cell.chars().count());
+        }
+    }
+
+    let headings: Vec<String> = headings.iter().map(|h| (*h).to_owned()).collect();
+    let mut out = String::new();
+    for row in std::iter::once(&headings).chain(rows) {
+        let padded: Vec<String> = row
+            .iter()
+            .zip(&widths)
+            .map(|(cell, width)| format!("{cell:<width$}", width = *width))
+            .collect();
+        out.push_str(padded.join("  ").trim_end());
+        out.push('\n');
+    }
+    out
 }
 
 /// Every part is load-bearing: the session is remote, the login shell cannot
@@ -187,6 +260,7 @@ fn report_error(err: &dyn std::error::Error) {
 mod tests {
     use super::*;
     use yantra_core::inventory::Os;
+    use yantra_core::tmux::Summary;
 
     /// clap's own check: conflicting flags, duplicate names, bad defaults.
     #[test]
@@ -283,6 +357,57 @@ mod tests {
     #[test]
     fn the_session_target_is_quoted_against_zsh() {
         assert!(attach_hint("mac", "/usr/bin/tmux", "demo").contains("'=demo'"));
+    }
+
+    fn summary(name: &str, windows: u32, attached: u32) -> Summary {
+        Summary {
+            name: name.to_owned(),
+            windows,
+            attached,
+            created: "Thu Jul 30 13:02:31 2026".to_owned(),
+        }
+    }
+
+    /// One unreachable machine must not erase the machines that answered.
+    #[test]
+    fn an_unreachable_machine_is_reported_beside_the_ones_that_answered() {
+        let listed = vec![
+            MachineSessions {
+                machine: "cachyos-g14".to_owned(),
+                sessions: Ok(vec![summary("demo", 2, 1)]),
+            },
+            MachineSessions {
+                machine: "pi".to_owned(),
+                sessions: Err(sessions::Error::Interrupted {
+                    machine: "pi".to_owned(),
+                    reason: "timed out".to_owned(),
+                }),
+            },
+        ];
+
+        let rendered = render_sessions(&listed);
+        assert!(rendered.contains("cachyos-g14  demo"), "{rendered}");
+        assert!(
+            rendered.contains("1 session on 1 of 2 machines"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("pi unreachable"), "{rendered}");
+    }
+
+    /// A machine with a running tmux and no sessions is not an error, and must
+    /// not be confused with a machine that could not be reached.
+    #[test]
+    fn no_sessions_anywhere_still_says_which_machines_answered() {
+        let listed = vec![MachineSessions {
+            machine: "mac".to_owned(),
+            sessions: Ok(Vec::new()),
+        }];
+        let rendered = render_sessions(&listed);
+        assert!(
+            rendered.contains("0 sessions on 1 of 1 machines"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("unreachable"), "{rendered}");
     }
 
     #[test]

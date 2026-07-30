@@ -7,7 +7,6 @@
 use crate::ssh::{self, Machine, Ssh};
 use crate::tmux::{self, Opened, Tmux};
 use crate::workspace::{self, Workspace};
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -64,23 +63,5 @@ pub async fn open<E: ssh::Exec>(
 /// not maintain a second copy of that mapping. Settled in ADR-0009: the
 /// Tailscale inventory observes machines, it does not resolve them.
 fn machine_for(workspace: &Workspace) -> Result<Machine, Error> {
-    Ok(Machine {
-        host: workspace.machine.clone(),
-        user: None,
-        port: None,
-        identity: None,
-        state_dir: state_dir()?,
-    })
-}
-
-/// Control sockets are runtime state, and the runtime directory is also the
-/// shortest — which matters, because the path budget is 90 bytes (I-28).
-fn state_dir() -> Result<PathBuf, Error> {
-    use etcetera::BaseStrategy as _;
-    let base = etcetera::choose_base_strategy().map_err(|_| Error::NoStateDir)?;
-    let dir = base
-        .runtime_dir()
-        .unwrap_or_else(|| base.data_dir())
-        .join("yantra");
-    Ok(dir)
+    ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)
 }

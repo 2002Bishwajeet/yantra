@@ -31,6 +31,18 @@ pub struct Session {
     pub pane_id: String,
 }
 
+/// A session as `list-sessions` reports it. `attached` is a client *count*, not
+/// a flag — it has been that since tmux 2.3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub name: String,
+    pub windows: u32,
+    pub attached: u32,
+    /// Formatted by tmux on the machine that owns the session, so it is that
+    /// machine's clock and timezone.
+    pub created: String,
+}
+
 /// Which half of the idempotent open happened. The whole point of `up` is that
 /// running it twice produces `Attached`, not a second session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,11 +87,22 @@ pub enum Error {
     #[error("could not parse tmux ids from `{raw}`")]
     Ids { raw: String },
 
+    #[error("could not parse a session from `{raw}`")]
+    Listing { raw: String },
+
     #[error(transparent)]
     Ssh(#[from] crate::ssh::Error),
 }
 
 const IDS: &str = "#{session_id} #{window_id} #{pane_id}";
+
+/// Name last, because a session tmux did not create can contain spaces — and
+/// with `splitn` that also means a name may contain the delimiter.
+///
+/// I-42: not a tab. tmux 3.5a rewrites tabs in format output to `_` while 3.7b
+/// passes them through, and the fleet runs both.
+const LIST_FORMAT: &str =
+    "#{session_windows}|#{session_attached}|#{t:session_created}|#{session_name}";
 
 /// Searched in order when `PATH` fails. System-scoped only — `$HOME` installs
 /// are on `PATH` by construction, which is why `PATH` is asked first.
@@ -202,6 +225,39 @@ impl Tmux {
         Ok(Opened::Attached(parse_ids(name, &out.stdout)?))
     }
 
+    /// Sessions on this machine, name-sorted. No server means none.
+    pub async fn list<E: Exec>(&self, exec: &E) -> Result<Vec<Summary>, Error> {
+        let out = exec
+            .exec(&format!(
+                "{} list-sessions -F {}",
+                sq(&self.path),
+                sq(LIST_FORMAT)
+            ))
+            .await?;
+
+        if !out.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if no_server(&stderr) {
+                return Ok(Vec::new());
+            }
+            return Err(Error::Command {
+                command: "list-sessions".to_owned(),
+                status: out.status,
+                stderr: stderr.trim().to_owned(),
+            });
+        }
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let mut sessions = stdout
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(parse_summary)
+            .collect::<Result<Vec<_>, _>>()?;
+        // tmux documents no order; today's is an artefact of its internal tree.
+        sessions.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(sessions)
+    }
+
     /// Kills the session if it exists. Absence is success, not an error.
     pub async fn kill<E: Exec>(&self, exec: &E, name: &str) -> Result<(), Error> {
         validate_name(name)?;
@@ -283,6 +339,24 @@ impl Tmux {
 fn no_server(stderr: &str) -> bool {
     stderr.contains("no server running")
         || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
+}
+
+fn parse_summary(line: &str) -> Result<Summary, Error> {
+    let bad = || Error::Listing {
+        raw: line.to_owned(),
+    };
+    let mut fields = line.splitn(4, '|');
+    match (fields.next(), fields.next(), fields.next(), fields.next()) {
+        (Some(windows), Some(attached), Some(created), Some(name)) if !name.is_empty() => {
+            Ok(Summary {
+                windows: windows.parse().map_err(|_| bad())?,
+                attached: attached.parse().map_err(|_| bad())?,
+                created: created.to_owned(),
+                name: name.to_owned(),
+            })
+        }
+        _ => Err(bad()),
+    }
 }
 
 fn validate_name(name: &str) -> Result<(), Error> {
@@ -370,6 +444,28 @@ mod tests {
             "error connecting to /tmp/tmux-1000/y54perm (Permission denied)"
         ));
         assert!(!no_server("some future tmux phrasing"));
+    }
+
+    #[test]
+    fn a_session_row_parses_and_a_name_may_contain_spaces() {
+        let s = parse_summary("3|1|Thu Jul 30 13:02:31 2026|my session")
+            .expect("a well-formed row parses");
+        assert_eq!(s.windows, 3);
+        assert_eq!(s.attached, 1);
+        assert_eq!(s.created, "Thu Jul 30 13:02:31 2026");
+        assert_eq!(s.name, "my session", "the name is last, so spaces survive");
+    }
+
+    /// A dropped session reads as "not running", which is the same class of
+    /// wrong answer as I-30's absence-is-not-failure, in the other direction.
+    #[test]
+    fn a_malformed_row_is_an_error_rather_than_a_dropped_session() {
+        for bad in ["", "1|0", "x|0|when|name", "1|0|when|"] {
+            assert!(
+                matches!(parse_summary(bad), Err(Error::Listing { .. })),
+                "{bad:?} must not silently vanish"
+            );
+        }
     }
 
     #[test]
