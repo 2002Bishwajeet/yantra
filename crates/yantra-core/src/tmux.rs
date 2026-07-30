@@ -14,6 +14,9 @@
 //! - **I-21** — `=name` is a valid target **only for sessions**. For window and
 //!   pane targets it fails outright, and `remain-on-exit` is a *window* option.
 //!   Ids captured at creation (`@N`, `%N`) are used instead.
+//! - **I-34** — the binary is never invoked bare. [`Tmux::resolve`] finds an
+//!   absolute path once per connection, because the non-interactive `PATH` does
+//!   not contain what an interactive login would find.
 
 use crate::ssh::Exec;
 
@@ -54,8 +57,13 @@ pub enum Error {
     )]
     InvalidName { name: String },
 
-    #[error("tmux is not installed on {machine}")]
-    NotInstalled { machine: String },
+    #[error("tmux was not found on PATH or in any of: {searched}")]
+    NotFound { searched: String },
+
+    /// Distinct from [`Error::NotFound`]: the binary *was* found at this path
+    /// and has since stopped working, which is a different thing to explain.
+    #[error("tmux was found at {path} but no longer runs there")]
+    Vanished { path: String },
 
     #[error("tmux `{command}` failed with status {status}: {stderr}")]
     Command {
@@ -73,128 +81,222 @@ pub enum Error {
 
 const IDS: &str = "#{session_id} #{window_id} #{pane_id}";
 
-/// Opens `name` at `cwd`, running `startup` if the session had to be created.
+/// Absolute directories to search when `PATH` does not have the answer, most
+/// specific first so a hand-installed tmux wins over the distro one.
 ///
-/// An existing session is left exactly as it is — no re-running of `startup`,
-/// no reset of the working directory. That is what makes a second `up` safe.
-pub async fn ensure<E: Exec>(
-    exec: &E,
-    name: &str,
-    cwd: &str,
-    startup: Option<&str>,
-) -> Result<Opened, Error> {
-    validate_name(name)?;
+/// System-scoped locations only. Anything under `$HOME` is deliberately absent:
+/// a user who installs to `~/.local/bin` has it on `PATH` by construction, and
+/// `PATH` is consulted first — that is the division of labour between the two
+/// halves of the probe.
+///
+/// Known gap: `/run/current-system/sw/bin` exists on NixOS and nix-darwin only.
+/// A plain Nix install puts tmux in `~/.nix-profile/bin`, which is `$HOME`-
+/// relative and so falls to the `PATH` half. No machine in this fleet runs Nix.
+const CANDIDATES: [&str; 7] = [
+    "/opt/homebrew/bin",              // Homebrew, Apple Silicon
+    "/opt/local/bin",                 // MacPorts
+    "/home/linuxbrew/.linuxbrew/bin", // Homebrew on Linux
+    "/usr/local/bin",                 // Homebrew on Intel macOS; generic local builds
+    "/run/current-system/sw/bin",     // NixOS / nix-darwin system profile
+    "/usr/bin",                       // every distro package
+    "/bin",                           // pre-usrmerge, and a symlink to /usr/bin after
+];
 
-    // Created with the default shell, never with `startup` directly: a startup
-    // command that exits at once takes the window, the session and the whole
-    // tmux server with it before `remain-on-exit` can be set. A shell does not
-    // exit, so the option is in place before anything can die. Measured, not
-    // theorised — the obvious one-shot form fails this way.
-    let create = format!(
-        "tmux new-session -d -s {} -c {} -P -F {}",
-        sq(name),
-        sq(cwd),
-        sq(IDS)
-    );
+/// A tmux binary located on a machine, and every operation that uses it.
+///
+/// Holding the resolved path is the whole cache: it lives exactly as long as
+/// the connection it was found through, so there is no key and nothing to
+/// invalidate. Note what it is *not* keyed on — the M2 plan proposed a map
+/// keyed on `Peer.ID`, which ADR-0009 rules out, because an ssh destination
+/// cannot be mapped to a tailnet node without the resolution that ADR declined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tmux {
+    path: String,
+}
 
-    let out = exec.exec(&create).await?;
-    if out.success() {
-        let session = parse_ids(name, &out.stdout)?;
-        set_remain_on_exit(exec, &session).await?;
-        if let Some(startup) = startup {
-            respawn_with(exec, &session, startup).await?;
+impl Tmux {
+    /// Finds tmux on the far side (I-34).
+    ///
+    /// `PATH` is consulted first — when it works it reflects a choice the owner
+    /// of the machine made — and the candidate list is the fallback for when it
+    /// does not, which on macOS is the normal case rather than the exception.
+    ///
+    /// One round trip, through the ADR-0006 envelope rather than a login shell:
+    /// `sh -lc` costs more *and answers wrong*, returning nothing on the very
+    /// machine that raised I-34, because Homebrew's installer writes to
+    /// `~/.zprofile` and `/bin/sh` never reads it.
+    pub async fn resolve<E: Exec>(exec: &E) -> Result<Self, Error> {
+        // `exit` is safe here: ADR-0006 runs this in a child shell, so it
+        // cannot suppress the sentinel the transport needs (ssh.rs `payload`).
+        let probe = format!(
+            "p=$(command -v tmux 2>/dev/null)\n\
+             case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
+             for d in {dirs}; do\n\
+             \x20 [ -x \"$d/tmux\" ] && {{ printf '%s\\n' \"$d/tmux\"; exit 0; }}\n\
+             done\n\
+             exit 1\n",
+            dirs = CANDIDATES.join(" "),
+        );
+
+        let out = exec.exec(&probe).await?;
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if out.success() && path.starts_with('/') {
+            return Ok(Self { path });
         }
-        return Ok(Opened::Created(session));
+        Err(Error::NotFound {
+            searched: CANDIDATES.join(", "),
+        })
     }
 
-    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
-    if !stderr.contains("duplicate session:") {
-        if stderr.contains("not found") || stderr.contains("No such file") {
-            return Err(Error::NotInstalled {
-                machine: "the target".to_owned(),
+    /// The path tmux was found at, for diagnostics and for tests that need to
+    /// assert *where* it was found rather than merely that it was.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Opens `name` at `cwd`, running `startup` if the session had to be
+    /// created.
+    ///
+    /// An existing session is left exactly as it is — no re-running of
+    /// `startup`, no reset of the working directory. That is what makes a
+    /// second `up` safe.
+    pub async fn ensure<E: Exec>(
+        &self,
+        exec: &E,
+        name: &str,
+        cwd: &str,
+        startup: Option<&str>,
+    ) -> Result<Opened, Error> {
+        validate_name(name)?;
+
+        // Created with the default shell, never with `startup` directly: a
+        // startup command that exits at once takes the window, the session and
+        // the whole tmux server with it before `remain-on-exit` can be set. A
+        // shell does not exit, so the option is in place before anything can
+        // die. Measured, not theorised — the obvious one-shot form fails this
+        // way.
+        let create = format!(
+            "{} new-session -d -s {} -c {} -P -F {}",
+            sq(&self.path),
+            sq(name),
+            sq(cwd),
+            sq(IDS)
+        );
+
+        let out = exec.exec(&create).await?;
+        if out.success() {
+            let session = parse_ids(name, &out.stdout)?;
+            self.set_remain_on_exit(exec, &session).await?;
+            if let Some(startup) = startup {
+                self.respawn_with(exec, &session, startup).await?;
+            }
+            return Ok(Opened::Created(session));
+        }
+
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+        if !stderr.contains("duplicate session:") {
+            // The path was verified executable at resolve time, so this is a
+            // binary that has since moved — not a machine without tmux.
+            if stderr.contains("not found") || stderr.contains("No such file") {
+                return Err(Error::Vanished {
+                    path: self.path.clone(),
+                });
+            }
+            return Err(Error::Command {
+                command: "new-session".to_owned(),
+                status: out.status,
+                stderr,
             });
         }
-        return Err(Error::Command {
-            command: "new-session".to_owned(),
-            status: out.status,
-            stderr,
-        });
+
+        // I-1: the duplicate is the success case. The session was already there.
+        let query = format!(
+            "{} display-message -p -t {} -F {}",
+            sq(&self.path),
+            sq(&format!("={name}:")),
+            sq(IDS)
+        );
+        let out = exec.exec(&query).await?;
+        if !out.success() {
+            return Err(Error::Command {
+                command: "display-message".to_owned(),
+                status: out.status,
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            });
+        }
+        Ok(Opened::Attached(parse_ids(name, &out.stdout)?))
     }
 
-    // I-1: the duplicate is the success case. The session was already there.
-    let query = format!(
-        "tmux display-message -p -t {} -F {}",
-        sq(&format!("={name}:")),
-        sq(IDS)
-    );
-    let out = exec.exec(&query).await?;
-    if !out.success() {
-        return Err(Error::Command {
-            command: "display-message".to_owned(),
-            status: out.status,
-            stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-        });
-    }
-    Ok(Opened::Attached(parse_ids(name, &out.stdout)?))
-}
-
-/// Kills the session if it exists. Absence is success, not an error.
-pub async fn kill<E: Exec>(exec: &E, name: &str) -> Result<(), Error> {
-    validate_name(name)?;
-    let out = exec
-        .exec(&format!("tmux kill-session -t {}", sq(&format!("={name}"))))
-        .await?;
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // No server at all means no session either, which is the state asked for.
-    if out.success() || stderr.contains("can't find session") || no_server(&stderr) {
-        return Ok(());
-    }
-    Err(Error::Command {
-        command: "kill-session".to_owned(),
-        status: out.status,
-        stderr: stderr.trim().to_owned(),
-    })
-}
-
-/// I-4 via I-21: `remain-on-exit` is a *window* option, and a bare `=name` is
-/// not a valid window target — so this uses the `@id` captured at creation.
-async fn set_remain_on_exit<E: Exec>(exec: &E, session: &Session) -> Result<(), Error> {
-    let out = exec
-        .exec(&format!(
-            "tmux set-option -w -t {} remain-on-exit on",
-            sq(&session.window_id)
-        ))
-        .await?;
-    if out.success() {
-        Ok(())
-    } else {
+    /// Kills the session if it exists. Absence is success, not an error.
+    pub async fn kill<E: Exec>(&self, exec: &E, name: &str) -> Result<(), Error> {
+        validate_name(name)?;
+        let out = exec
+            .exec(&format!(
+                "{} kill-session -t {}",
+                sq(&self.path),
+                sq(&format!("={name}"))
+            ))
+            .await?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        // No server at all means no session either, which is the state asked for.
+        if out.success() || stderr.contains("can't find session") || no_server(&stderr) {
+            return Ok(());
+        }
         Err(Error::Command {
-            command: "set-option remain-on-exit".to_owned(),
+            command: "kill-session".to_owned(),
             status: out.status,
-            stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            stderr: stderr.trim().to_owned(),
         })
     }
-}
 
-/// Replaces the pane's shell with `startup`, so the pane's process *is* the
-/// command and I-4 can report how it ended. `remain-on-exit` is already set by
-/// the time this runs.
-async fn respawn_with<E: Exec>(exec: &E, session: &Session, startup: &str) -> Result<(), Error> {
-    let out = exec
-        .exec(&format!(
-            "tmux respawn-pane -k -t {} {}",
-            sq(&session.pane_id),
-            sq(startup)
-        ))
-        .await?;
-    if out.success() {
-        Ok(())
-    } else {
-        Err(Error::Command {
-            command: "respawn-pane".to_owned(),
-            status: out.status,
-            stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-        })
+    /// I-4 via I-21: `remain-on-exit` is a *window* option, and a bare `=name`
+    /// is not a valid window target — so this uses the `@id` captured at
+    /// creation.
+    async fn set_remain_on_exit<E: Exec>(&self, exec: &E, session: &Session) -> Result<(), Error> {
+        let out = exec
+            .exec(&format!(
+                "{} set-option -w -t {} remain-on-exit on",
+                sq(&self.path),
+                sq(&session.window_id)
+            ))
+            .await?;
+        if out.success() {
+            Ok(())
+        } else {
+            Err(Error::Command {
+                command: "set-option remain-on-exit".to_owned(),
+                status: out.status,
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            })
+        }
+    }
+
+    /// Replaces the pane's shell with `startup`, so the pane's process *is* the
+    /// command and I-4 can report how it ended. `remain-on-exit` is already set
+    /// by the time this runs.
+    async fn respawn_with<E: Exec>(
+        &self,
+        exec: &E,
+        session: &Session,
+        startup: &str,
+    ) -> Result<(), Error> {
+        let out = exec
+            .exec(&format!(
+                "{} respawn-pane -k -t {} {}",
+                sq(&self.path),
+                sq(&session.pane_id),
+                sq(startup)
+            ))
+            .await?;
+        if out.success() {
+            Ok(())
+        } else {
+            Err(Error::Command {
+                command: "respawn-pane".to_owned(),
+                status: out.status,
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            })
+        }
     }
 }
 
