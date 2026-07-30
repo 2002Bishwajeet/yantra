@@ -47,7 +47,8 @@ pub async fn open<E: ssh::Exec>(exec: &E, workspace: &Workspace) -> Result<Opene
 
 /// `machine` is used as an ssh destination verbatim, so `~/.ssh/config` decides
 /// what it means — the fidelity I-20 chose the system binary for. Yantra does
-/// not maintain a second copy of that mapping.
+/// not maintain a second copy of that mapping. Settled in ADR-0009: the
+/// Tailscale inventory observes machines, it does not resolve them.
 fn machine_for(workspace: &Workspace) -> Result<Machine, Error> {
     Ok(Machine {
         host: workspace.machine.clone(),

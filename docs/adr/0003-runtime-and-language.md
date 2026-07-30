@@ -1,7 +1,7 @@
 # ADR-0003 — TypeScript on Bun, with a pre-agreed Rust escape hatch
 
 - **Date:** 2026-07-28
-- **Status:** accepted
+- **Status:** **superseded by [ADR-0004](0004-rust-for-the-daemon.md)**
 
 ## Context
 

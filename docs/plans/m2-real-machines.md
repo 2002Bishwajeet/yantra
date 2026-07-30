@@ -348,7 +348,13 @@ chasing every package manager's prefix.
 
 ## 7. Forks that need the owner
 
-### 7.1 Does Yantra resolve machine names, or does `ssh`?
+### 7.1 Does Yantra resolve machine names, or does `ssh`? — **decided 2026-07-30: (a)**
+
+**Settled in [ADR-0009](../adr/0009-machine-names-are-ssh-destinations.md).** `machine` reaches `ssh`
+verbatim; the inventory observes and never resolves. The ADR adds one constraint this section did not
+anticipate: an unknown name is a **warning, never an error**, because a hard-failing validator makes
+the inventory authoritative over which names are legal, having just declined to make it authoritative
+over what they mean. The rest of this section is the reasoning that got there.
 
 The live contradiction from §4. Two coherent answers:
 
@@ -404,8 +410,8 @@ Issue #63545 — the one R-1 was named after — is a **macOS + tmux** report. Y
 That does not make Y-023 wrong. What it did observe was real: interactive `claude` 2.1.220 in a fully
 detached tmux session wrote 18,427 bytes within 5 s. That is genuine evidence, and it is also
 evidence against the open Linux issue #70632, which claims a live session's JSONL is only flushed at
-exit on 2.1.190. But it is Linux evidence, and R-1, Q7 and ADR-0009 were all retired or unblocked on
-the back of it.
+exit on 2.1.190. But it is Linux evidence, and R-1, Q7 and the Claude Code integration ADR were all
+retired or unblocked on the back of it.
 
 Independent support exists — open issue #79188 (macOS, 2.1.215) is a controlled comparison across
 multiplexers that found plain tmux *does* persist correctly. That is someone else's experiment on

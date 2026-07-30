@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 pub struct Workspace {
     /// From the filename, not the file's contents.
     pub name: String,
-    /// An alias; Y-041 resolves it to a host.
+    /// An ssh destination, verbatim — `~/.ssh/config` decides what it means
+    /// (ADR-0009). Yantra never resolves it.
     pub machine: String,
     /// Path to the repository **on `machine`**, not on the local box.
     pub repo: PathBuf,
