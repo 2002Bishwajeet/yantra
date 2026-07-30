@@ -6,9 +6,15 @@
 //! ```toml
 //! machine = "pi"
 //! repo    = "/home/user/code/demo"
-//! branch  = "main"      # optional
 //! startup = "claude"    # optional
 //! ```
+//!
+//! There is no `branch`. It was parsed and never acted on, so [ADR-0010]
+//! removed it rather than keep a key that only looked implemented; branch
+//! selection returns in M3 as worktrees, which is the model that lets two
+//! workspaces share one repo.
+//!
+//! [ADR-0010]: ../../../docs/adr/0010-drop-branch-from-the-workspace-schema.md
 
 use std::path::{Path, PathBuf};
 
@@ -21,8 +27,6 @@ pub struct Workspace {
     pub machine: String,
     /// Path to the repository **on `machine`**, not on the local box.
     pub repo: PathBuf,
-    /// `None` leaves the working tree alone.
-    pub branch: Option<String>,
     /// `None` means just a shell.
     pub startup: Option<String>,
 }
@@ -34,8 +38,6 @@ pub struct Workspace {
 struct OnDisk {
     machine: String,
     repo: PathBuf,
-    #[serde(default)]
-    branch: Option<String>,
     #[serde(default)]
     startup: Option<String>,
 }
@@ -181,7 +183,6 @@ fn parse(name: &str, path: &Path, text: &str) -> Result<Workspace, Error> {
         name: name.to_owned(),
         machine: on_disk.machine,
         repo: on_disk.repo,
-        branch: on_disk.branch,
         startup: on_disk.startup,
     })
 }
@@ -192,6 +193,7 @@ fn parse(name: &str, path: &Path, text: &str) -> Result<Workspace, Error> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
 
     fn dir_with(label: &str, files: &[(&str, &str)]) -> std::io::Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!("yantra-workspace-test-{label}"));
@@ -214,7 +216,6 @@ mod tests {
                 r#"
                 machine = "pi"
                 repo    = "/home/user/code/demo"
-                branch  = "main"
                 startup = "claude"
                 "#,
             )],
@@ -225,13 +226,40 @@ mod tests {
         assert_eq!(ws.name, "demo", "identity comes from the filename");
         assert_eq!(ws.machine, "pi");
         assert_eq!(ws.repo, PathBuf::from("/home/user/code/demo"));
-        assert_eq!(ws.branch.as_deref(), Some("main"));
         assert_eq!(ws.startup.as_deref(), Some("claude"));
         Ok(())
     }
 
+    /// ADR-0010: it is gone, and `deny_unknown_fields` means gone is loud. A
+    /// file that still carries it must not load and quietly do nothing —
+    /// which is precisely what the field did for the whole of M1 and M2.
     #[test]
-    fn branch_and_startup_are_optional() -> std::io::Result<()> {
+    fn a_workspace_still_carrying_branch_fails_to_load() -> std::io::Result<()> {
+        let dir = dir_with(
+            "stale-branch",
+            &[(
+                "stale.toml",
+                r#"
+                machine = "pi"
+                repo    = "/srv/stale"
+                branch  = "main"
+                "#,
+            )],
+        )?;
+
+        let err = load_from(&dir, "stale").expect_err("branch is no longer a key");
+        assert!(matches!(err, Error::Malformed { .. }));
+        // The message has to name the field, because deleting that line is the
+        // entire migration.
+        assert!(
+            err.source()
+                .is_some_and(|e| e.to_string().contains("branch"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn startup_is_optional() -> std::io::Result<()> {
         let dir = dir_with(
             "optional",
             &[(
@@ -245,7 +273,6 @@ mod tests {
 
         let ws = load_from(&dir, "minimal").expect("the minimum set is enough");
 
-        assert_eq!(ws.branch, None);
         assert_eq!(ws.startup, None);
         Ok(())
     }

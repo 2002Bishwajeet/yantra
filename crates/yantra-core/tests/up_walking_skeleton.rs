@@ -57,7 +57,6 @@ fn workspace(name: &str, startup: Option<&str>) -> Workspace {
         name: name.to_owned(),
         machine: "fixture".to_owned(),
         repo: std::path::PathBuf::from("/tmp"),
-        branch: None,
         startup: startup.map(str::to_owned),
     }
 }
