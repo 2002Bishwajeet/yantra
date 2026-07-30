@@ -384,11 +384,16 @@ platform-conditional code is the `ControlPath` limit constant. Two findings narr
 the Windows node is the second boot of a laptop that already runs Linux, so supporting it buys zero
 extra machines; and Tailscale SSH can never serve it. Still open, still deferred.
 
-### 7.4 clap, now?
+### 7.4 clap, now? — **decided 2026-07-30: yes, as Y-056**
 
 The CLI's own comment sets the threshold at three commands. M2 brings it to three. Nesting
 `ls machines` / `ls sessions` into a slice match is where hand-rolled parsing starts to hurt.
 Recommend a small separate task rather than smuggling it into Y-051.
+
+Done that way. Y-056 is a pure port — no new commands, so the diff is readable as a migration
+rather than as a feature — and Y-051 now depends on it. The one number worth carrying forward: clap
+costs **254 KB** of binary, +34% on a CLI that had none of it, which matters only against M7's
+appliance size target and is noted on the Y-056 row.
 
 ## 8. What M2 deliberately does not do
 

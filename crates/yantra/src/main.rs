@@ -4,42 +4,44 @@
 //! UI can do must be expressible here first. It calls `yantra-core` in-process
 //! today and becomes an HTTP client of `yantrad` in M2 (ADR-0005), which is a
 //! change of *where* the work is called from, not *what* it does.
-//!
-//! Argument parsing is hand-rolled because there is one command. When there are
-//! three, this becomes `clap`.
 
+use clap::{CommandFactory as _, Parser, Subcommand};
 use std::process::ExitCode;
 
-const USAGE: &str = "\
-yantra — a personal developer control plane
+#[derive(Debug, Parser)]
+#[command(
+    name = "yantra",
+    version,
+    about = "a personal developer control plane",
+    after_help = "Workspaces live in ~/.config/yantra/workspaces/<name>.toml"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
 
-USAGE:
-    yantra up <workspace>    open a workspace and its tmux session
-    yantra --help            show this message
-    yantra --version         show the version
-
-Workspaces live in ~/.config/yantra/workspaces/<name>.toml
-";
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Open a workspace and its tmux session
+    Up {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
+}
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let owned: Vec<String> = std::env::args().skip(1).collect();
-    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-
-    match args.as_slice() {
-        [] | ["--help" | "-h"] => {
-            print!("{USAGE}");
-            ExitCode::SUCCESS
-        }
-        ["--version" | "-V"] => {
-            println!("yantra {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::SUCCESS
-        }
-        ["up", name] => up(name).await,
-        _ => {
-            eprint!("{USAGE}");
-            ExitCode::FAILURE
-        }
+    match Cli::parse().command {
+        Some(Command::Up { workspace }) => up(&workspace).await,
+        // clap would make a bare `yantra` an error exiting 2. It printed help
+        // and exited 0 before this crate had a parser, and that is the contract.
+        None => match Cli::command().print_help() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("yantra: {err}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 
@@ -73,5 +75,18 @@ fn report_error(err: &dyn std::error::Error) {
     while let Some(cause) = source {
         eprintln!("  caused by: {cause}");
         source = cause.source();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// clap's own consistency check. It catches conflicting flags, duplicate
+    /// names and bad defaults at test time rather than on first run — the
+    /// failures a hand-rolled slice match could not have.
+    #[test]
+    fn the_command_tree_is_well_formed() {
+        Cli::command().debug_assert();
     }
 }

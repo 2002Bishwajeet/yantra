@@ -9,5 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+clap.workspace = true
 tokio.workspace = true
 yantra-core.workspace = true
