@@ -262,3 +262,34 @@ async fn kill_reports_failure_when_the_socket_is_unreachable() -> Result<()> {
         .arrange_as_root("chmod 600 /tmp/tmux-*/default")?;
     Ok(())
 }
+
+/// Y-054 against real tmux. Also the only place the tab-separated format is
+/// proven end to end, through ADR-0006's base64 envelope.
+#[tokio::test]
+async fn listing_reports_sessions_and_no_server_means_none() -> Result<()> {
+    let Some(lab) = Lab::start("listing").await? else {
+        return Ok(());
+    };
+
+    assert!(
+        lab.tmux.list(&lab.ssh).await?.is_empty(),
+        "no server started yet, which is zero sessions rather than an error"
+    );
+
+    lab.tmux.ensure(&lab.ssh, "beta", "/tmp", None).await?;
+    lab.tmux.ensure(&lab.ssh, "alpha", "/tmp", None).await?;
+
+    let listed = lab.tmux.list(&lab.ssh).await?;
+    let names: Vec<&str> = listed.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["alpha", "beta"], "sorted by us, not by tmux");
+    assert_eq!(listed[0].windows, 1);
+    assert_eq!(listed[0].attached, 0, "a detached session has no clients");
+    assert!(
+        !listed[0].created.is_empty(),
+        "tmux formats the time remotely"
+    );
+
+    lab.tmux.kill(&lab.ssh, "alpha").await?;
+    lab.tmux.kill(&lab.ssh, "beta").await?;
+    Ok(())
+}

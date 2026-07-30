@@ -40,6 +40,26 @@ pub struct Machine {
     pub state_dir: PathBuf,
 }
 
+/// A machine reached by ssh destination alone, letting `~/.ssh/config` supply
+/// user, port and identity (ADR-0009). `None` if no state directory exists.
+///
+/// Control sockets are runtime state, and the runtime directory is also the
+/// shortest — which matters against I-28's 90-byte path budget.
+pub fn machine_at(host: &str) -> Option<Machine> {
+    use etcetera::BaseStrategy as _;
+    let base = etcetera::choose_base_strategy().ok()?;
+    Some(Machine {
+        host: host.to_owned(),
+        user: None,
+        port: None,
+        identity: None,
+        state_dir: base
+            .runtime_dir()
+            .unwrap_or_else(|| base.data_dir())
+            .join("yantra"),
+    })
+}
+
 impl Machine {
     fn destination(&self) -> String {
         match &self.user {
