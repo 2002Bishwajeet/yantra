@@ -244,9 +244,19 @@ path is discovered once per machine and cached, not probed per command.
 Scoped smaller than it first looked. `Ssh::exec` already sets `RequestTTY=no`, so **no PTY is
 allocated anywhere in the current code** and I-36 cannot bite today. What M2 owes is:
 
-- set `default-terminal` when creating a session, so the *inner* terminal is sane regardless of who
-  attaches later;
+- ~~set `default-terminal` when creating a session, so the *inner* terminal is sane regardless of who
+  attaches later;~~ **Rejected by measurement — see below.**
 - make sure the attach hint `up` prints does not imply the user's `TERM` will work on the far side.
+
+> **`default-terminal` must not be set, and Y-053 does not set it (I-40).** It is a *server* option:
+> `set-option -t '=ours' default-terminal screen` changes the value for an unrelated session
+> `=theirs` on the same machine, and a new pane there comes up with `TERM=screen`. The `-t` target is
+> accepted and ignored. Measured on tmux 3.5a (Alpine) and 3.7b (Arch and macOS 26.5.1) — all three.
+>
+> So the recommendation above would have had Yantra silently reconfigure tmux for every session on a
+> machine, including the owner's own, to no benefit: the built-in default is **already**
+> `tmux-256color`, and that entry is present in the terminfo database on all three systems. The
+> `TERM` that actually matters is the *outer* one at attach time, which is what the hint fixes.
 
 The real fix — pinning `TERM` on a PTY we allocate ourselves — belongs to M6, where Yantra owns both
 ends. Recording it here so it is not rediscovered then.

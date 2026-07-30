@@ -70,8 +70,12 @@ async fn up(name: &str) -> ExitCode {
                 "attached to"
             };
             println!(
-                "{verb} {} on {} — tmux attach -t '={}'",
-                report.workspace.name, report.workspace.machine, session.name
+                "{verb} {} on {}",
+                report.workspace.name, report.workspace.machine
+            );
+            println!(
+                "  attach: {}",
+                attach_hint(&report.workspace.machine, report.tmux.path(), &session.name)
             );
             ExitCode::SUCCESS
         }
@@ -94,6 +98,12 @@ async fn ls_machines() -> ExitCode {
         }
     }
 }
+
+/// I-36: `ssh -t` forwards the client's `TERM`, and tmux aborts outright when
+/// the far side has no terminfo entry for it — measured against the MacBook,
+/// which has never heard of `xterm-ghostty`. The client's terminal is unbounded,
+/// so the hint pins one that every terminfo database carries instead.
+const ATTACH_TERM: &str = "xterm-256color";
 
 const HEADINGS: [&str; 4] = ["MACHINE", "OS", "STATUS", "LAST SEEN"];
 
@@ -159,6 +169,23 @@ fn push_row(out: &mut String, cells: &[String; 4], widths: &[usize; 4]) {
         .collect();
     out.push_str(padded.join("  ").trim_end());
     out.push('\n');
+}
+
+/// A command that actually attaches to the session `up` just opened.
+///
+/// Three things it cannot leave out, each of which breaks it on a real machine:
+///
+/// - **`ssh <machine>`** — the session is on `machine`, not here. A bare
+///   `tmux attach` would find a local session of the same name, or none.
+/// - **the absolute tmux path** (I-34) — `ssh host "tmux …"` runs through the
+///   login shell non-interactively, which on macOS never sees Homebrew.
+/// - **`TERM=`** (I-36) — `-t` forwards the client's `TERM` and tmux refuses to
+///   attach when the far side lacks that terminfo entry.
+///
+/// `=name` is quoted because I-35: the MacBook's login shell is zsh, where a
+/// bare `=word` is filename expansion.
+fn attach_hint(machine: &str, tmux: &str, session: &str) -> String {
+    format!("ssh {machine} -t \"TERM={ATTACH_TERM} {tmux} attach -t '={session}'\"")
 }
 
 /// The library never prints (ADR-0005), so rendering the chain is the CLI's job.
@@ -261,6 +288,26 @@ mod tests {
         }
         // A short name is still padded out to meet the next column.
         assert!(rendered.contains("laptop-9ml3d644    linux"), "{rendered}");
+    }
+
+    /// Every element here was verified against the real MacBook: without the
+    /// pinned `TERM` the identical command aborts with `missing or unsuitable
+    /// terminal: xterm-ghostty`, and without the absolute path the login shell
+    /// cannot find tmux at all.
+    #[test]
+    fn the_attach_hint_survives_a_remote_machine() {
+        let hint = attach_hint("mac", "/opt/homebrew/bin/tmux", "demo");
+        assert_eq!(
+            hint,
+            "ssh mac -t \"TERM=xterm-256color /opt/homebrew/bin/tmux attach -t '=demo'\""
+        );
+    }
+
+    /// I-35: unquoted, zsh treats `=demo` as filename expansion and the attach
+    /// fails with `zsh: demo not found` while the session sits there untouched.
+    #[test]
+    fn the_session_target_is_quoted_against_zsh() {
+        assert!(attach_hint("mac", "/usr/bin/tmux", "demo").contains("'=demo'"));
     }
 
     #[test]

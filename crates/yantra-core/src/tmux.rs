@@ -17,6 +17,11 @@
 //! - **I-34** — the binary is never invoked bare. [`Tmux::resolve`] finds an
 //!   absolute path once per connection, because the non-interactive `PATH` does
 //!   not contain what an interactive login would find.
+//! - **I-40** — `default-terminal` is deliberately never set. It is a *server*
+//!   option, so `set-option -t '=name'` silently changes it for every session on
+//!   the machine, including ones Yantra did not create. Its built-in default is
+//!   already `tmux-256color`. The `TERM` that actually matters is the outer one
+//!   at attach time, which is the client's problem, not the session's.
 
 use crate::ssh::Exec;
 
