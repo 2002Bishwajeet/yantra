@@ -13,6 +13,7 @@
 pub mod inventory;
 pub mod sessions;
 pub mod ssh;
+pub mod terminfo;
 pub mod tmux;
 pub mod up;
 pub mod workspace;
