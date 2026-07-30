@@ -13,6 +13,9 @@ use std::path::PathBuf;
 pub struct Report {
     pub workspace: Workspace,
     pub opened: Opened,
+    /// Carried so the caller can spell out a working `attach` command. A bare
+    /// `tmux` in that hint would fail on exactly the machines I-34 describes.
+    pub tmux: Tmux,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,21 +34,30 @@ pub enum Error {
 }
 
 /// Opens the workspace called `name`.
-pub async fn up(name: &str) -> Result<Report, Error> {
-    let workspace = workspace::load(name)?;
-    let ssh = Ssh::new(machine_for(&workspace)?)?;
-    let opened = open(&ssh, &workspace).await?;
-    Ok(Report { workspace, opened })
-}
-
-/// The testable half: everything `up` does once it has a way to reach a machine.
 ///
 /// Locating tmux costs one round trip and precedes everything else, because a
 /// machine that has no tmux should say so rather than fail partway through
 /// (I-34).
-pub async fn open<E: ssh::Exec>(exec: &E, workspace: &Workspace) -> Result<Opened, Error> {
+pub async fn up(name: &str) -> Result<Report, Error> {
+    let workspace = workspace::load(name)?;
+    let ssh = Ssh::new(machine_for(&workspace)?)?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    let opened = open(&ssh, &tmux, &workspace).await?;
+    Ok(Report {
+        workspace,
+        opened,
+        tmux,
+    })
+}
+
+/// The testable half: everything `up` does once it has a way to reach a machine
+/// and knows where tmux lives on it.
+pub async fn open<E: ssh::Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    workspace: &Workspace,
+) -> Result<Opened, Error> {
     let repo = workspace.repo.to_string_lossy();
-    let tmux = Tmux::resolve(exec).await?;
     let opened = tmux
         .ensure(exec, &workspace.name, &repo, workspace.startup.as_deref())
         .await?;
