@@ -99,10 +99,8 @@ async fn ls_machines() -> ExitCode {
     }
 }
 
-/// I-36: `ssh -t` forwards the client's `TERM`, and tmux aborts outright when
-/// the far side has no terminfo entry for it — measured against the MacBook,
-/// which has never heard of `xterm-ghostty`. The client's terminal is unbounded,
-/// so the hint pins one that every terminfo database carries instead.
+/// I-36: `ssh -t` forwards the client's `TERM` and tmux aborts if the far side
+/// lacks that terminfo entry. Pin one every database carries.
 const ATTACH_TERM: &str = "xterm-256color";
 
 const HEADINGS: [&str; 4] = ["MACHINE", "OS", "STATUS", "LAST SEEN"];
@@ -125,11 +123,8 @@ fn render_machines(machines: &[MachineInfo]) -> String {
         push_row(&mut out, cells, &widths);
     }
 
-    // Counting the *online* machines is what stops the dual-booted laptop
-    // reading as two: its nodes are one box, so only one can ever be up.
-    // Tailscale cannot say they are related, and the obvious guess is worse
-    // than none — grouping by `HostName` pairs them correctly and pairs the
-    // iPad with the iPhone (I-33).
+    // Counting *online* is what stops the dual boot reading as two, without
+    // guessing which nodes share a box — `HostName` would pair the phones too.
     let online = machines.iter().filter(|m| m.online).count();
     out.push_str(&format!("\n{} machines, {online} online\n", machines.len()));
     out
@@ -150,8 +145,7 @@ fn row(machine: &MachineInfo) -> [String; 4] {
     ]
 }
 
-/// I-39: an expired key is a third state, not a flavour of offline. Such a
-/// node cannot re-authenticate until someone signs in on the device itself.
+/// I-39: expired is a third state — the node cannot re-authenticate itself.
 fn status(machine: &MachineInfo) -> String {
     let reachable = if machine.online { "online" } else { "offline" };
     if machine.expired {
@@ -171,19 +165,9 @@ fn push_row(out: &mut String, cells: &[String; 4], widths: &[usize; 4]) {
     out.push('\n');
 }
 
-/// A command that actually attaches to the session `up` just opened.
-///
-/// Three things it cannot leave out, each of which breaks it on a real machine:
-///
-/// - **`ssh <machine>`** — the session is on `machine`, not here. A bare
-///   `tmux attach` would find a local session of the same name, or none.
-/// - **the absolute tmux path** (I-34) — `ssh host "tmux …"` runs through the
-///   login shell non-interactively, which on macOS never sees Homebrew.
-/// - **`TERM=`** (I-36) — `-t` forwards the client's `TERM` and tmux refuses to
-///   attach when the far side lacks that terminfo entry.
-///
-/// `=name` is quoted because I-35: the MacBook's login shell is zsh, where a
-/// bare `=word` is filename expansion.
+/// Every part is load-bearing: the session is remote, the login shell cannot
+/// find tmux (I-34), `-t` forwards a `TERM` the far side may lack (I-36), and
+/// zsh eats an unquoted `=name` (I-35).
 fn attach_hint(machine: &str, tmux: &str, session: &str) -> String {
     format!("ssh {machine} -t \"TERM={ATTACH_TERM} {tmux} attach -t '={session}'\"")
 }
@@ -204,9 +188,7 @@ mod tests {
     use super::*;
     use yantra_core::inventory::Os;
 
-    /// clap's own consistency check. It catches conflicting flags, duplicate
-    /// names and bad defaults at test time rather than on first run — the
-    /// failures a hand-rolled slice match could not have.
+    /// clap's own check: conflicting flags, duplicate names, bad defaults.
     #[test]
     fn the_command_tree_is_well_formed() {
         Cli::command().debug_assert();
@@ -224,8 +206,7 @@ mod tests {
         }
     }
 
-    /// The dual boot, exactly as this tailnet reports it: one physical laptop,
-    /// two node IDs, and the Linux side's key expired while it was down.
+    /// One laptop, two node IDs; the Linux side's key expired while down.
     fn dual_boot() -> Vec<MachineInfo> {
         vec![
             machine(
@@ -256,9 +237,7 @@ mod tests {
         assert!(render_machines(&fleet).ends_with("3 machines, 2 online\n"));
     }
 
-    /// I-39. `LastSeen` on an online peer is unrelated to reachability — the
-    /// live tailnet has an online peer holding a real timestamp and an online
-    /// `Self` holding the zero time — so the column stays empty there.
+    /// I-39: `LastSeen` on an online peer says nothing, so the column is blank.
     #[test]
     fn an_online_machine_reports_no_last_seen_however_tailscale_fills_it() {
         let noisy = machine(
@@ -290,10 +269,7 @@ mod tests {
         assert!(rendered.contains("laptop-9ml3d644    linux"), "{rendered}");
     }
 
-    /// Every element here was verified against the real MacBook: without the
-    /// pinned `TERM` the identical command aborts with `missing or unsuitable
-    /// terminal: xterm-ghostty`, and without the absolute path the login shell
-    /// cannot find tmux at all.
+    /// Verified against the MacBook; each missing part breaks it there.
     #[test]
     fn the_attach_hint_survives_a_remote_machine() {
         let hint = attach_hint("mac", "/opt/homebrew/bin/tmux", "demo");
@@ -303,8 +279,7 @@ mod tests {
         );
     }
 
-    /// I-35: unquoted, zsh treats `=demo` as filename expansion and the attach
-    /// fails with `zsh: demo not found` while the session sits there untouched.
+    /// I-35: unquoted, zsh expands `=demo` and the attach silently misses.
     #[test]
     fn the_session_target_is_quoted_against_zsh() {
         assert!(attach_hint("mac", "/usr/bin/tmux", "demo").contains("'=demo'"));

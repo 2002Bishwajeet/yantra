@@ -100,13 +100,8 @@ impl SshFixture {
         self.dir.join("id_ed25519")
     }
 
-    /// Runs `command` inside the container as root, bypassing SSH.
-    ///
-    /// The point of the fixture is that Yantra reaches the container the way it
-    /// reaches a real machine — over SSH, as an unprivileged user. This is the
-    /// deliberate exception: rearranging the *machine itself* (moving a binary
-    /// off `PATH` to reproduce I-34) is setup, not something Yantra ever does.
-    /// The container is disposable and per-test, so the change dies with it.
+    /// Root inside the container, bypassing SSH. Setup only — rearranging the
+    /// machine is not something Yantra does, so it does not go through `Exec`.
     pub fn arrange_as_root(&self, command: &str) -> Result<()> {
         let out = podman(&["exec", "-u", "root", &self.container, "sh", "-c", command])?;
         if !out.status.success() {

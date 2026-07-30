@@ -70,9 +70,7 @@ impl Os {
     }
 }
 
-/// The inverse of `parse`: renders Tailscale's own spelling, so a round trip
-/// through `Os` loses nothing. Not a presentation choice — ADR-0005 keeps
-/// layout in the caller — but a property of the type.
+/// Inverse of `parse`, so a round trip loses nothing. Not layout (ADR-0005).
 impl std::fmt::Display for Os {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -106,11 +104,8 @@ pub trait Inventory {
     -> impl std::future::Future<Output = Result<Vec<MachineInfo>, Error>> + Send;
 }
 
-/// Reads the local `tailscale` CLI (§B2). The LocalAPI at
-/// `/run/tailscale/tailscaled.sock` returns byte-identical data and can also
-/// push updates over `watch-ipn-bus`, which is the upgrade path when M4 wants
-/// live status; the CLI is portable to the macOS and Windows clients without
-/// token or named-pipe handling, and M2 only ever needs a snapshot.
+/// Reads the local `tailscale` CLI (§B2). The LocalAPI returns identical data
+/// and can stream — the upgrade path when M4 wants live status.
 #[derive(Debug, Clone, Default)]
 pub struct Tailscale;
 

@@ -13,8 +13,7 @@ use std::path::PathBuf;
 pub struct Report {
     pub workspace: Workspace,
     pub opened: Opened,
-    /// Carried so the caller can spell out a working `attach` command. A bare
-    /// `tmux` in that hint would fail on exactly the machines I-34 describes.
+    /// Carried so the attach hint can name a real path (I-34).
     pub tmux: Tmux,
 }
 
@@ -33,11 +32,8 @@ pub enum Error {
     NoStateDir,
 }
 
-/// Opens the workspace called `name`.
-///
-/// Locating tmux costs one round trip and precedes everything else, because a
-/// machine that has no tmux should say so rather than fail partway through
-/// (I-34).
+/// Opens the workspace called `name`. Resolving tmux first means a machine
+/// without it says so, rather than failing partway through.
 pub async fn up(name: &str) -> Result<Report, Error> {
     let workspace = workspace::load(name)?;
     let ssh = Ssh::new(machine_for(&workspace)?)?;
@@ -50,8 +46,7 @@ pub async fn up(name: &str) -> Result<Report, Error> {
     })
 }
 
-/// The testable half: everything `up` does once it has a way to reach a machine
-/// and knows where tmux lives on it.
+/// The testable half: `up` once it can reach a machine and has found tmux.
 pub async fn open<E: ssh::Exec>(
     exec: &E,
     tmux: &Tmux,
