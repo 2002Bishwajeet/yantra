@@ -275,8 +275,14 @@ impl Tmux {
     }
 }
 
+/// tmux prints two different things for "no server", picked by errno:
+/// `ECONNREFUSED` gives `no server running on …`, a socket that was never there
+/// gives `error connecting to … (No such file or directory)`. That second
+/// spelling is shared with real failures such as `(Permission denied)`, and
+/// both exit 1 — so the reason in brackets is the only signal (I-41).
 fn no_server(stderr: &str) -> bool {
-    stderr.contains("no server running") || stderr.contains("error connecting to")
+    stderr.contains("no server running")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
 }
 
 fn validate_name(name: &str) -> Result<(), Error> {
@@ -349,6 +355,21 @@ mod tests {
     fn unexpanded_output_is_not_mistaken_for_ids() {
         assert!(parse_ids("demo", b"#{session_id} #{window_id} #{pane_id}").is_err());
         assert!(parse_ids("demo", b"").is_err());
+    }
+
+    /// Exact strings from tmux 3.7b, reproduced against a live server whose
+    /// socket was made unreadable. Treating the third as "no server" made
+    /// `kill` report success on a failure.
+    #[test]
+    fn only_a_genuinely_absent_server_counts_as_no_server() {
+        assert!(no_server("no server running on /tmp/tmux-1000/default"));
+        assert!(no_server(
+            "error connecting to /tmp/tmux-1000/absent (No such file or directory)"
+        ));
+        assert!(!no_server(
+            "error connecting to /tmp/tmux-1000/y54perm (Permission denied)"
+        ));
+        assert!(!no_server("some future tmux phrasing"));
     }
 
     #[test]

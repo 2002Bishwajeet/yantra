@@ -15,8 +15,7 @@ use yantra_core::ssh::{Exec, Machine, Ssh};
 use yantra_core::tmux::{Error, Tmux};
 
 struct Lab {
-    /// Held only so the container outlives the test.
-    _fixture: SshFixture,
+    fixture: SshFixture,
     ssh: Ssh,
     tmux: Tmux,
     dir: std::path::PathBuf,
@@ -41,7 +40,7 @@ impl Lab {
         })?;
         let tmux = Tmux::resolve(&ssh).await?;
         Ok(Some(Self {
-            _fixture: fixture,
+            fixture,
             ssh,
             tmux,
             dir,
@@ -236,5 +235,30 @@ async fn killing_an_absent_session_is_not_an_error() -> Result<()> {
         return Ok(());
     };
     lab.tmux.kill(&lab.ssh, "never-existed").await?;
+    Ok(())
+}
+
+/// The regression behind the `no_server` fix: a live server behind an
+/// unreadable socket makes tmux print `error connecting to ... (Permission
+/// denied)` and exit 1 — the same exit and verb as a genuinely absent server.
+/// Swallowing it made `kill` report success on a failure.
+#[tokio::test]
+async fn kill_reports_failure_when_the_socket_is_unreachable() -> Result<()> {
+    let Some(lab) = Lab::start("sockperm").await? else {
+        return Ok(());
+    };
+    lab.tmux.ensure(&lab.ssh, "victim", "/tmp", None).await?;
+    lab.fixture
+        .arrange_as_root("chmod 000 /tmp/tmux-*/default")?;
+
+    let err = lab
+        .tmux
+        .kill(&lab.ssh, "victim")
+        .await
+        .expect_err("an unreachable socket is not a killed session");
+    assert!(matches!(err, Error::Command { .. }), "{err:?}");
+
+    lab.fixture
+        .arrange_as_root("chmod 600 /tmp/tmux-*/default")?;
     Ok(())
 }
