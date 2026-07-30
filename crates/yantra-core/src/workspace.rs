@@ -83,6 +83,49 @@ pub fn load(name: &str) -> Result<Workspace, Error> {
     load_from(&workspaces_dir()?, name)
 }
 
+/// Every workspace, name-sorted. A missing directory is an empty list — nobody
+/// has made one yet, which is not an error.
+///
+/// A malformed file stops the listing, deliberately: silently omitting a
+/// workspace would report "no sessions on that machine" for a machine that was
+/// never queried, and a wrong answer is worse than a refusal.
+pub fn list() -> Result<Vec<Workspace>, Error> {
+    list_in(&workspaces_dir()?)
+}
+
+fn list_in(dir: &Path) -> Result<Vec<Workspace>, Error> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(Error::Unreadable {
+                name: "*".to_owned(),
+                path: dir.to_owned(),
+                source,
+            });
+        }
+    };
+
+    let mut names: Vec<String> = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|source| Error::Unreadable {
+                name: "*".to_owned(),
+                path: dir.to_owned(),
+                source,
+            })?
+            .path();
+        if path.extension().is_some_and(|ext| ext == "toml")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            names.push(stem.to_owned());
+        }
+    }
+    names.sort();
+
+    names.iter().map(|name| load_from(dir, name)).collect()
+}
+
 /// Private so the public surface stays one function (ADR-0005).
 fn load_from(dir: &Path, name: &str) -> Result<Workspace, Error> {
     validate_name(name)?;
@@ -271,5 +314,48 @@ mod tests {
                 "`{hostile}` must be rejected as a name, before it becomes a path",
             );
         }
+    }
+
+    #[test]
+    fn listing_returns_every_workspace_sorted_and_ignores_other_files() -> std::io::Result<()> {
+        let dir = dir_with(
+            "listing",
+            &[
+                ("zeta.toml", "machine = \"a\"\nrepo = \"/tmp\"\n"),
+                ("alpha.toml", "machine = \"b\"\nrepo = \"/tmp\"\n"),
+                // Neither is a workspace, and neither may derail the listing.
+                ("notes.md", "not a workspace"),
+                ("alpha.toml.bak", "machine = \"c\"\nrepo = \"/tmp\"\n"),
+            ],
+        )?;
+
+        let found = list_in(&dir).expect("a directory of valid workspaces lists");
+        let names: Vec<&str> = found.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "zeta"]);
+        Ok(())
+    }
+
+    /// Absence is emptiness: a user who has never made a workspace is not in an
+    /// error state, and `ls` should say so rather than fail.
+    #[test]
+    fn listing_a_directory_that_does_not_exist_is_empty_not_an_error() {
+        let found = list_in(Path::new("/nonexistent/yantra/workspaces"));
+        assert!(matches!(found.as_deref(), Ok([])), "{found:?}");
+    }
+
+    /// The opposite call: a file that *is* a workspace but cannot be parsed
+    /// must stop the listing, because quietly dropping it would report "no
+    /// sessions" for a machine that was never asked.
+    #[test]
+    fn a_malformed_workspace_fails_the_listing_rather_than_being_skipped() -> std::io::Result<()> {
+        let dir = dir_with(
+            "listing-bad",
+            &[
+                ("good.toml", "machine = \"a\"\nrepo = \"/tmp\"\n"),
+                ("broken.toml", "machine = = ="),
+            ],
+        )?;
+        assert!(matches!(list_in(&dir), Err(Error::Malformed { .. })));
+        Ok(())
     }
 }
