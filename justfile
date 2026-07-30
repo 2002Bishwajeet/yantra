@@ -29,6 +29,11 @@ test:
 test-ci:
     YANTRA_REQUIRE_PODMAN=1 cargo nextest run --workspace --no-tests=pass
 
+# The checks no container can make (I-34, ADR-0009). Needs the machine to be
+# reachable and named in ~/.ssh/config; CI cannot run these and does not try.
+test-mac machine:
+    YANTRA_MAC={{machine}} cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture
+
 build:
     cargo build --workspace
 
