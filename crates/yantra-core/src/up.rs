@@ -5,7 +5,7 @@
 //! return value the caller can assert on, not a promise.
 
 use crate::ssh::{self, Machine, Ssh};
-use crate::tmux::{self, Opened};
+use crate::tmux::{self, Opened, Tmux};
 use crate::workspace::{self, Workspace};
 use std::path::PathBuf;
 
@@ -39,9 +39,16 @@ pub async fn up(name: &str) -> Result<Report, Error> {
 }
 
 /// The testable half: everything `up` does once it has a way to reach a machine.
+///
+/// Locating tmux costs one round trip and precedes everything else, because a
+/// machine that has no tmux should say so rather than fail partway through
+/// (I-34).
 pub async fn open<E: ssh::Exec>(exec: &E, workspace: &Workspace) -> Result<Opened, Error> {
     let repo = workspace.repo.to_string_lossy();
-    let opened = tmux::ensure(exec, &workspace.name, &repo, workspace.startup.as_deref()).await?;
+    let tmux = Tmux::resolve(exec).await?;
+    let opened = tmux
+        .ensure(exec, &workspace.name, &repo, workspace.startup.as_deref())
+        .await?;
     Ok(opened)
 }
 

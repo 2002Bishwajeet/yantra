@@ -10,18 +10,19 @@ mod common;
 use anyhow::Result;
 use common::{SshFixture, USER};
 use yantra_core::ssh::{Exec, Machine, Ssh};
-use yantra_core::tmux;
+use yantra_core::tmux::Tmux;
 use yantra_core::up;
 use yantra_core::workspace::Workspace;
 
 struct Lab {
     _fixture: SshFixture,
     ssh: Ssh,
+    tmux: Tmux,
     dir: std::path::PathBuf,
 }
 
 impl Lab {
-    fn start(label: &str) -> Result<Option<Self>> {
+    async fn start(label: &str) -> Result<Option<Self>> {
         let Some(fixture) = SshFixture::start()? else {
             return Ok(None);
         };
@@ -35,9 +36,11 @@ impl Lab {
             identity: Some(fixture.key_path()),
             state_dir: dir.clone(),
         })?;
+        let tmux = Tmux::resolve(&ssh).await?;
         Ok(Some(Self {
             _fixture: fixture,
             ssh,
+            tmux,
             dir,
         }))
     }
@@ -62,7 +65,7 @@ fn workspace(name: &str, startup: Option<&str>) -> Workspace {
 /// The milestone, in one test.
 #[tokio::test]
 async fn up_twice_attaches_and_does_not_duplicate() -> Result<()> {
-    let Some(lab) = Lab::start("skeleton")? else {
+    let Some(lab) = Lab::start("skeleton").await? else {
         return Ok(());
     };
     let ws = workspace("skeleton", None);
@@ -91,7 +94,7 @@ async fn up_twice_attaches_and_does_not_duplicate() -> Result<()> {
         "exactly one session exists on the machine"
     );
 
-    tmux::kill(&lab.ssh, "skeleton").await?;
+    lab.tmux.kill(&lab.ssh, "skeleton").await?;
     Ok(())
 }
 
@@ -99,7 +102,7 @@ async fn up_twice_attaches_and_does_not_duplicate() -> Result<()> {
 /// run again — re-running it would defeat the point of attaching.
 #[tokio::test]
 async fn startup_runs_once_and_is_not_repeated() -> Result<()> {
-    let Some(lab) = Lab::start("startup")? else {
+    let Some(lab) = Lab::start("startup").await? else {
         return Ok(());
     };
     lab.ssh.exec("rm -f /tmp/ran.log").await?;
@@ -118,7 +121,7 @@ async fn startup_runs_once_and_is_not_repeated() -> Result<()> {
         "the startup command ran exactly once across two ups"
     );
 
-    tmux::kill(&lab.ssh, "startup").await?;
+    lab.tmux.kill(&lab.ssh, "startup").await?;
     Ok(())
 }
 
@@ -126,7 +129,7 @@ async fn startup_runs_once_and_is_not_repeated() -> Result<()> {
 /// of this exists.
 #[tokio::test]
 async fn the_session_opens_in_the_workspace_repo() -> Result<()> {
-    let Some(lab) = Lab::start("repo")? else {
+    let Some(lab) = Lab::start("repo").await? else {
         return Ok(());
     };
     lab.ssh.exec("mkdir -p /tmp/somerepo").await?;
@@ -143,6 +146,6 @@ async fn the_session_opens_in_the_workspace_repo() -> Result<()> {
         .await?;
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/tmp/somerepo");
 
-    tmux::kill(&lab.ssh, "repo").await?;
+    lab.tmux.kill(&lab.ssh, "repo").await?;
     Ok(())
 }

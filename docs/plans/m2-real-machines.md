@@ -327,6 +327,20 @@ time-based:** if a cached path fails to exec, treat that as a miss, re-probe onc
 typed error. Install locations do not drift on a schedule, so periodic re-probing spends round trips
 for nothing.
 
+> **Superseded by what Y-052 shipped, on two points.** This paragraph was written while §7.1 was
+> still open.
+>
+> **The `Peer.ID` key is ruled out by [ADR-0009](../adr/0009-machine-names-are-ssh-destinations.md).**
+> `machine` is an ssh destination, and mapping one to a tailnet node is exactly the resolution that
+> ADR declined to do. There is no key at all in the shipped design: `Tmux` holds the path and lives
+> as long as the connection it was found through, so the cache cannot outlive its own validity.
+>
+> **The 18× login-shell penalty is a local measurement and does not survive the network.** Against
+> the MacBook over a warm `ControlMaster`, the candidate probe takes 10–20 ms and `sh -lc` takes
+> 30 ms — under 2×, because the wire dominates. The real argument against the login shell is the
+> other column: `sh -lc 'command -v tmux'` returns **`NONE`** on the very machine that raised I-34.
+> It is not slower-but-correct, it is wrong.
+
 A `tmux` override on the machine/workspace config is the escape hatch for nonstandard prefixes,
 following the existing optional-override pattern (`identity`, `port`). It must not be the *only*
 mechanism, or every new machine needs hand configuration for a problem the list solves.

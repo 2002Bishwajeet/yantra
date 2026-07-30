@@ -12,17 +12,18 @@ mod common;
 use anyhow::Result;
 use common::{SshFixture, USER};
 use yantra_core::ssh::{Exec, Machine, Ssh};
-use yantra_core::tmux::{self, Error};
+use yantra_core::tmux::{Error, Tmux};
 
 struct Lab {
     /// Held only so the container outlives the test.
     _fixture: SshFixture,
     ssh: Ssh,
+    tmux: Tmux,
     dir: std::path::PathBuf,
 }
 
 impl Lab {
-    fn start(label: &str) -> Result<Option<Self>> {
+    async fn start(label: &str) -> Result<Option<Self>> {
         let Some(fixture) = SshFixture::start()? else {
             return Ok(None);
         };
@@ -38,9 +39,11 @@ impl Lab {
             identity: Some(fixture.key_path()),
             state_dir: dir.clone(),
         })?;
+        let tmux = Tmux::resolve(&ssh).await?;
         Ok(Some(Self {
             _fixture: fixture,
             ssh,
+            tmux,
             dir,
         }))
     }
@@ -55,14 +58,14 @@ impl Drop for Lab {
 /// The M1 definition of done: run it twice, get one session.
 #[tokio::test]
 async fn a_second_ensure_attaches_rather_than_duplicating() -> Result<()> {
-    let Some(lab) = Lab::start("idem")? else {
+    let Some(lab) = Lab::start("idem").await? else {
         return Ok(());
     };
 
-    let first = tmux::ensure(&lab.ssh, "demo", "/tmp", None).await?;
+    let first = lab.tmux.ensure(&lab.ssh, "demo", "/tmp", None).await?;
     assert!(first.was_created(), "the first open creates the session");
 
-    let second = tmux::ensure(&lab.ssh, "demo", "/tmp", None).await?;
+    let second = lab.tmux.ensure(&lab.ssh, "demo", "/tmp", None).await?;
     assert!(
         !second.was_created(),
         "the second open must attach, not create (I-1, §B4)"
@@ -83,7 +86,7 @@ async fn a_second_ensure_attaches_rather_than_duplicating() -> Result<()> {
         .count();
     assert_eq!(matching, 1, "exactly one session called demo exists");
 
-    tmux::kill(&lab.ssh, "demo").await?;
+    lab.tmux.kill(&lab.ssh, "demo").await?;
     Ok(())
 }
 
@@ -91,11 +94,11 @@ async fn a_second_ensure_attaches_rather_than_duplicating() -> Result<()> {
 /// valid window target, so this fails if the code addresses by name.
 #[tokio::test]
 async fn remain_on_exit_is_actually_set_on_the_window() -> Result<()> {
-    let Some(lab) = Lab::start("remain")? else {
+    let Some(lab) = Lab::start("remain").await? else {
         return Ok(());
     };
 
-    let opened = tmux::ensure(&lab.ssh, "keepalive", "/tmp", None).await?;
+    let opened = lab.tmux.ensure(&lab.ssh, "keepalive", "/tmp", None).await?;
     let window = &opened.session().window_id;
 
     let out = lab
@@ -110,7 +113,7 @@ async fn remain_on_exit_is_actually_set_on_the_window() -> Result<()> {
         "a crashed pane would otherwise vanish and look like a clean finish"
     );
 
-    tmux::kill(&lab.ssh, "keepalive").await?;
+    lab.tmux.kill(&lab.ssh, "keepalive").await?;
     Ok(())
 }
 
@@ -119,11 +122,14 @@ async fn remain_on_exit_is_actually_set_on_the_window() -> Result<()> {
 /// the race against a fast exit.
 #[tokio::test]
 async fn a_startup_command_that_exits_at_once_leaves_a_dead_pane() -> Result<()> {
-    let Some(lab) = Lab::start("fastexit")? else {
+    let Some(lab) = Lab::start("fastexit").await? else {
         return Ok(());
     };
 
-    let opened = tmux::ensure(&lab.ssh, "quick", "/tmp", Some("exit 3")).await?;
+    let opened = lab
+        .tmux
+        .ensure(&lab.ssh, "quick", "/tmp", Some("exit 3"))
+        .await?;
     let pane = &opened.session().pane_id;
 
     let out = lab
@@ -142,18 +148,21 @@ async fn a_startup_command_that_exits_at_once_leaves_a_dead_pane() -> Result<()>
         "the exit status should be recoverable, got `{line}`"
     );
 
-    tmux::kill(&lab.ssh, "quick").await?;
+    lab.tmux.kill(&lab.ssh, "quick").await?;
     Ok(())
 }
 
 #[tokio::test]
 async fn the_session_starts_in_the_requested_directory() -> Result<()> {
-    let Some(lab) = Lab::start("cwd")? else {
+    let Some(lab) = Lab::start("cwd").await? else {
         return Ok(());
     };
     lab.ssh.exec("mkdir -p '/tmp/a dir'").await?;
 
-    let opened = tmux::ensure(&lab.ssh, "workdir", "/tmp/a dir", None).await?;
+    let opened = lab
+        .tmux
+        .ensure(&lab.ssh, "workdir", "/tmp/a dir", None)
+        .await?;
     let out = lab
         .ssh
         .exec(&format!(
@@ -167,7 +176,7 @@ async fn the_session_starts_in_the_requested_directory() -> Result<()> {
         "a path with a space must survive quoting"
     );
 
-    tmux::kill(&lab.ssh, "workdir").await?;
+    lab.tmux.kill(&lab.ssh, "workdir").await?;
     Ok(())
 }
 
@@ -175,11 +184,13 @@ async fn the_session_starts_in_the_requested_directory() -> Result<()> {
 /// after it has created a permanently unaddressable session.
 #[tokio::test]
 async fn an_unaddressable_name_is_refused_locally() -> Result<()> {
-    let Some(lab) = Lab::start("badname")? else {
+    let Some(lab) = Lab::start("badname").await? else {
         return Ok(());
     };
 
-    let err = tmux::ensure(&lab.ssh, "has.dot", "/tmp", None)
+    let err = lab
+        .tmux
+        .ensure(&lab.ssh, "has.dot", "/tmp", None)
         .await
         .expect_err("a dotted name is not addressable");
     assert!(matches!(err, Error::InvalidName { .. }));
@@ -196,34 +207,34 @@ async fn an_unaddressable_name_is_refused_locally() -> Result<()> {
 /// `demo2`, and the wrong session gets killed.
 #[tokio::test]
 async fn similar_names_are_distinct_sessions() -> Result<()> {
-    let Some(lab) = Lab::start("prefix")? else {
+    let Some(lab) = Lab::start("prefix").await? else {
         return Ok(());
     };
 
-    let a = tmux::ensure(&lab.ssh, "demo", "/tmp", None).await?;
-    let b = tmux::ensure(&lab.ssh, "demo2", "/tmp", None).await?;
+    let a = lab.tmux.ensure(&lab.ssh, "demo", "/tmp", None).await?;
+    let b = lab.tmux.ensure(&lab.ssh, "demo2", "/tmp", None).await?;
     assert_ne!(
         a.session().session_id,
         b.session().session_id,
         "demo2 is its own session, not a prefix match on demo"
     );
 
-    tmux::kill(&lab.ssh, "demo").await?;
-    let still = tmux::ensure(&lab.ssh, "demo2", "/tmp", None).await?;
+    lab.tmux.kill(&lab.ssh, "demo").await?;
+    let still = lab.tmux.ensure(&lab.ssh, "demo2", "/tmp", None).await?;
     assert!(
         !still.was_created(),
         "killing `demo` must not have taken `demo2` with it"
     );
 
-    tmux::kill(&lab.ssh, "demo2").await?;
+    lab.tmux.kill(&lab.ssh, "demo2").await?;
     Ok(())
 }
 
 #[tokio::test]
 async fn killing_an_absent_session_is_not_an_error() -> Result<()> {
-    let Some(lab) = Lab::start("killabsent")? else {
+    let Some(lab) = Lab::start("killabsent").await? else {
         return Ok(());
     };
-    tmux::kill(&lab.ssh, "never-existed").await?;
+    lab.tmux.kill(&lab.ssh, "never-existed").await?;
     Ok(())
 }
