@@ -91,6 +91,7 @@ Then:
 ```bash
 yantra up yantra                 # open the session (run again to attach)
 yantra up yantra --agent claude  # ...and start Claude Code in it
+yantra resume yantra             # start the agent again on the conversation it left off
 yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
 yantra down yantra               # stop it, giving the agent a chance to shut down

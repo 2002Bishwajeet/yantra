@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
+use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
@@ -36,6 +37,11 @@ enum Command {
         /// Start a coding agent in the session
         #[arg(long, value_enum)]
         agent: Option<AgentArg>,
+    },
+    /// Start the agent again on the conversation it left off
+    Resume {
+        /// Workspace name, without the `.toml`
+        workspace: String,
     },
     /// Show what the workspace's agent has been saying
     Logs {
@@ -86,6 +92,7 @@ enum LsTarget {
 async fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
+        Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
@@ -143,6 +150,54 @@ async fn up(name: &str, agent: Option<AgentArg>) -> ExitCode {
             report_error(&err);
             if matches!(err, up::Error::Agent(agent::Error::NotLoggedIn { .. })) {
                 eprintln!("{KEYCHAIN_NOTE}");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn resume(name: &str) -> ExitCode {
+    match resume::resume(name, &local_term()).await {
+        Ok(report) => {
+            let machine = &report.workspace.machine;
+            match &report.outcome {
+                resume::Outcome::Resumed(launch) => {
+                    println!("resumed {} on {machine}", report.workspace.name);
+                    println!(
+                        "  agent:  claude, session {}, continuing the last conversation in {}",
+                        launch.session_id,
+                        report.workspace.repo.display()
+                    );
+                }
+                // Not an error: an agent that is already working is the state
+                // the user was asking for, and starting a second is the bug.
+                resume::Outcome::AlreadyRunning => println!(
+                    "{} on {machine} already has an agent running, left alone",
+                    report.workspace.name
+                ),
+            }
+            println!(
+                "  attach: {}",
+                attach_hint(
+                    machine,
+                    report.tmux.path(),
+                    &report.workspace.name,
+                    report.term.term()
+                )
+            );
+            if let Chosen::Substituted { wanted } = &report.term {
+                println!("{}", downgrade_notice(machine, wanted));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            match err {
+                resume::Error::AwaitingTrust { .. } => eprintln!("{}", trust_note(name)),
+                resume::Error::Agent(agent::Error::NotLoggedIn { .. }) => {
+                    eprintln!("{KEYCHAIN_NOTE}");
+                }
+                _ => {}
             }
             ExitCode::FAILURE
         }
@@ -550,6 +605,25 @@ mod tests {
         assert!(
             Cli::try_parse_from(["yantra", "up", "demo", "--agent", "aider"]).is_err(),
             "an agent Yantra does not ship must be refused by name, not started"
+        );
+    }
+
+    /// `resume` takes a workspace and nothing else — which agent to continue is
+    /// the workspace's business, and *which conversation* is claude's.
+    #[test]
+    fn resume_takes_a_workspace_and_no_flags() {
+        let parsed = Cli::try_parse_from(["yantra", "resume", "demo"]).expect("`resume` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Resume { workspace }) if workspace == "demo"
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "resume"]).is_err(),
+            "a resume with no workspace must be an argument error, not a guess"
+        );
+        assert!(
+            Cli::try_parse_from(["yantra", "resume", "demo", "--agent", "claude"]).is_err(),
+            "there is no agent to choose when continuing one that already ran"
         );
     }
 

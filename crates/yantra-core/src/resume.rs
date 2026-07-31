@@ -1,0 +1,276 @@
+//! `resume` — picking a conversation up where it stopped.
+//!
+//! The fourth of the agent verbs [`brainstorm.md`] names, and the one Q9 killed
+//! Aider over: *"Yantra's core promise is 'continue where you left off'."*
+//!
+//! **Which conversation to resume is Claude Code's question, not Yantra's**
+//! (§B2). Yantra keeps no session id — [`crate::agent::prepare`] mints a fresh
+//! one per launch and nothing persists it, because Y-044's session store is
+//! deliberately unbuilt and ADR-0011 is why it recedes. So of what 2.1.220
+//! offers, only one flag is reachable from here:
+//!
+//! - `--resume <id>` needs an id Yantra never kept, and a bare `--resume` opens
+//!   an **interactive picker** — which resumes nothing until a human attaches
+//!   and answers it.
+//! - `--continue` resolves the most recent conversation **from the cwd**, and
+//!   the cwd is the workspace's `repo` because the launch command `cd`s there.
+//!
+//! `--continue` on its own reuses the *original* session id, which would cost
+//! the predictable transcript path ADR-0011 built `logs` on. `--fork-session`
+//! gives it back: measured on 2.1.220,
+//! `--continue --fork-session --session-id <uuid>` carries the earlier turns
+//! into a transcript Yantra named, while `--continue --session-id <uuid>`
+//! without the fork is **refused outright**.
+//!
+//! **What no flag can tell Yantra is that there was nothing to resume.**
+//! `--continue` in a directory with no earlier conversation starts a fresh one
+//! and exits 0 — measured, not assumed — so `resume` on a workspace whose agent
+//! has never run is `up --agent claude` under another name.
+//!
+//! What it will not do is guess. A live pane holding something that is not a
+//! registered agent is R-2's shape ([`crate::status`]), and respawning it would
+//! destroy whatever is in there; an agent waiting at the trust dialog has no
+//! conversation to continue and needs a human, never Yantra (ADR-0011). Both
+//! are refusals.
+//!
+//! [`brainstorm.md`]: ../../../docs/brainstorm.md
+
+use crate::agent::{self, Launch};
+use crate::ssh::{self, Exec, Ssh};
+use crate::status::{self, Verdict};
+use crate::terminfo::{self, Chosen};
+use crate::tmux::{self, Pane, Tmux};
+use crate::up;
+use crate::workspace::{self, Workspace};
+
+/// What happened. Never "a second agent was started".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    Resumed(Launch),
+    /// An agent is already working in that session, so there is nothing to
+    /// continue and the session is left exactly as it is.
+    AlreadyRunning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub workspace: Workspace,
+    /// Carried for the attach hint, as in [`crate::up::Report`].
+    pub tmux: Tmux,
+    pub term: Chosen,
+    pub outcome: Outcome,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    Workspace(#[from] workspace::Error),
+
+    #[error(transparent)]
+    Ssh(#[from] ssh::Error),
+
+    #[error(transparent)]
+    Tmux(#[from] tmux::Error),
+
+    #[error(transparent)]
+    Terminfo(#[from] terminfo::Error),
+
+    #[error(transparent)]
+    Agent(#[from] agent::Error),
+
+    #[error(transparent)]
+    Status(#[from] status::Error),
+
+    #[error(transparent)]
+    Up(#[from] up::Error),
+
+    /// I-49: the agent never got past the dialog, so it has said nothing there
+    /// is to continue — and ADR-0011 means Yantra cannot answer it either.
+    #[error(
+        "`{workspace}` is holding at claude's trust prompt, so it has no conversation to continue"
+    )]
+    AwaitingTrust { workspace: String },
+
+    /// Refused rather than resolved, for the same reason [`Verdict::Unclear`]
+    /// is reported rather than resolved: respawning would kill whatever is in
+    /// that pane to find out what it was.
+    #[error("refusing to resume `{workspace}` — {because}")]
+    Unclear {
+        workspace: String,
+        because: &'static str,
+    },
+
+    /// The same rule as [`up::Error::StartupConflict`], one verb along: a
+    /// workspace that runs something of its own at startup is not running an
+    /// agent, and silently replacing it is ADR-0007's worst kind of bug.
+    #[error(
+        "workspace `{workspace}` runs `{startup}` at startup rather than an agent, so there is \
+         nothing for resume to continue"
+    )]
+    Startup { workspace: String, startup: String },
+
+    #[error("could not determine a directory for ssh control sockets")]
+    NoStateDir,
+}
+
+/// Resumes the workspace called `name`, for a caller sitting at `term`.
+pub async fn resume(name: &str, term: &str) -> Result<Report, Error> {
+    let workspace = workspace::load(name)?;
+    if let Some(startup) = workspace.startup.as_deref() {
+        return Err(Error::Startup {
+            workspace: workspace.name.clone(),
+            startup: startup.to_owned(),
+        });
+    }
+
+    let ssh = Ssh::new(ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?)?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    let term = terminfo::choose(&ssh, term).await?;
+    let outcome = of(&ssh, &tmux, &workspace).await?;
+
+    Ok(Report {
+        workspace,
+        tmux,
+        term,
+        outcome,
+    })
+}
+
+/// The testable half.
+///
+/// The agent is prepared *after* the state is known, so a refusal costs no
+/// round trip to `claude auth status` and leaves nothing half-started.
+pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: &Workspace) -> Result<Outcome, Error> {
+    let status = status::of(exec, tmux, workspace.clone()).await?;
+    let repo = workspace.repo.to_string_lossy();
+    let named = || workspace.name.clone();
+
+    match plan(&status.verdict, status.pane.as_ref()) {
+        Plan::AlreadyRunning => Ok(Outcome::AlreadyRunning),
+        Plan::AwaitingTrust => Err(Error::AwaitingTrust { workspace: named() }),
+        Plan::Unclear(because) => Err(Error::Unclear {
+            workspace: named(),
+            because,
+        }),
+        Plan::Open => {
+            let launch = agent::resume(exec, &repo).await?;
+            up::open(exec, tmux, workspace, Some(&launch.command)).await?;
+            Ok(Outcome::Resumed(launch))
+        }
+        Plan::Respawn(pane_id) => {
+            let launch = agent::resume(exec, &repo).await?;
+            tmux.respawn(exec, pane_id, &launch.command).await?;
+            Ok(Outcome::Resumed(launch))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Plan<'a> {
+    Open,
+    /// Under `remain-on-exit` the pane outlives its process, so putting the
+    /// agent back means `respawn-pane` and never a second session (I-29).
+    Respawn(&'a str),
+    AlreadyRunning,
+    AwaitingTrust,
+    Unclear(&'static str),
+}
+
+/// Every verdict spelled out rather than a wildcard, so a state added later
+/// cannot default into respawning a pane that has something live in it.
+fn plan<'a>(verdict: &'a Verdict, pane: Option<&'a Pane>) -> Plan<'a> {
+    match verdict {
+        Verdict::NoSession => Plan::Open,
+        Verdict::Running => Plan::AlreadyRunning,
+        Verdict::AwaitingTrust => Plan::AwaitingTrust,
+        Verdict::Unclear { because } => Plan::Unclear(because),
+        Verdict::Finished | Verdict::Stopped | Verdict::Crashed { .. } | Verdict::Killed { .. } => {
+            match pane {
+                Some(pane) => Plan::Respawn(&pane.id),
+                None => Plan::Unclear("tmux said how the agent ended and then reported no pane"),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(dead: bool) -> Pane {
+        Pane {
+            id: "%7".to_owned(),
+            dead,
+            status: dead.then_some(0),
+            signal: None,
+            pid: (!dead).then_some(42),
+        }
+    }
+
+    #[test]
+    fn a_workspace_with_no_session_gets_one_opened() {
+        assert_eq!(plan(&Verdict::NoSession, None), Plan::Open);
+    }
+
+    /// The four ways an agent can be gone are one state to `resume`, and all of
+    /// them leave a dead pane that only `respawn-pane` can refill.
+    #[test]
+    fn every_ending_is_resumed_in_the_pane_it_ended_in() {
+        for verdict in [
+            Verdict::Finished,
+            Verdict::Stopped,
+            Verdict::Crashed { status: 1 },
+            Verdict::Killed {
+                signal: "KILL".to_owned(),
+            },
+        ] {
+            assert_eq!(
+                plan(&verdict, Some(&pane(true))),
+                Plan::Respawn("%7"),
+                "{verdict:?}"
+            );
+        }
+    }
+
+    /// §B4's idempotency, one verb along: resuming a running agent must not put
+    /// a second one in the pane the first is working in.
+    #[test]
+    fn a_running_agent_is_left_alone_rather_than_replaced() {
+        assert_eq!(
+            plan(&Verdict::Running, Some(&pane(false))),
+            Plan::AlreadyRunning
+        );
+    }
+
+    /// I-49. There is no conversation to continue, and ADR-0011 says the one
+    /// who answers the dialog is never Yantra.
+    #[test]
+    fn an_agent_at_the_trust_prompt_is_refused_rather_than_restarted() {
+        assert_eq!(
+            plan(&Verdict::AwaitingTrust, Some(&pane(false))),
+            Plan::AwaitingTrust
+        );
+    }
+
+    /// R-2's shape. Something is alive in that pane and it is not the agent —
+    /// respawning would destroy it to find out what it was.
+    #[test]
+    fn a_pane_the_registry_does_not_know_about_is_never_respawned() {
+        let because = "the pane is alive but claude knows of no agent in that directory";
+        assert_eq!(
+            plan(&Verdict::Unclear { because }, Some(&pane(false))),
+            Plan::Unclear(because),
+            "the reason has to survive, or the refusal tells nobody anything"
+        );
+    }
+
+    /// A dead verdict with no pane to respawn is a contradiction, and the
+    /// answer to a contradiction is the same here as in `status`: say so.
+    #[test]
+    fn an_ending_with_no_pane_refuses_instead_of_opening_a_fresh_session() {
+        assert!(
+            matches!(plan(&Verdict::Finished, None), Plan::Unclear(_)),
+            "silently opening a new session would lose the conversation being asked for"
+        );
+    }
+}

@@ -14,6 +14,7 @@ pub mod agent;
 pub mod down;
 pub mod inventory;
 pub mod logs;
+pub mod resume;
 pub mod sessions;
 pub mod snapshot;
 pub mod ssh;

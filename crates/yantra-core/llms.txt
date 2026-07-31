@@ -15,6 +15,7 @@ Each takes a workspace name, loads it from `~/.config/yantra/workspaces/<name>.t
 ssh connection. Each also exposes a generic half taking an `Exec`, which is what the tests drive.
 
 - [up.rs](src/up.rs): open a workspace's tmux session, optionally launching an agent in it. Idempotent — a second call attaches. Returns `Opened::{Created,Attached}`.
+- [resume.rs](src/resume.rs): put the agent back on the conversation it left off, via `claude --continue --fork-session`. Refuses rather than guesses when the pane holds something it did not start.
 - [logs.rs](src/logs.rs): read the agent's transcript JSONL, projected down to turns. Selection happens on the far side.
 - [status.rs](src/status.rs): is the agent running, finished, stopped, crashed or killed. Reads two sources and reports their disagreement rather than resolving it.
 - [down.rs](src/down.rs): stop the session, reporting how the agent ended — read *before* the pane that holds the exit status is destroyed.
