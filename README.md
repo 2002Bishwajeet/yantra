@@ -96,6 +96,7 @@ yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
 yantra down yantra               # stop it, giving the agent a chance to shut down
 yantra ls machines               # what Tailscale can see
+yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine
 yantra fix-terminfo <machine>    # teach a machine about your terminal
 ```
