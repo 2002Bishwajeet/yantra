@@ -15,6 +15,7 @@ use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::up;
+use yantra_core::workspace::{self, Workspace};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -86,6 +87,8 @@ enum LsTarget {
     Machines,
     /// tmux sessions on the machines your workspaces name
     Sessions,
+    /// Workspaces defined in ~/.config/yantra/workspaces
+    Workspaces,
 }
 
 #[tokio::main]
@@ -102,6 +105,9 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Sessions,
         }) => ls_sessions().await,
+        Some(Command::Ls {
+            target: LsTarget::Workspaces,
+        }) => ls_workspaces(),
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
@@ -436,6 +442,53 @@ async fn ls_sessions() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The same `workspace::list()` the daemon's `/api/workspaces` serves, called
+/// in-process — ADR-0012 keeps the CLI a caller of the library rather than a
+/// client of the daemon, so this works with no `yantrad` running.
+fn ls_workspaces() -> ExitCode {
+    match workspace::list() {
+        Ok(workspaces) => {
+            print!("{}", render_workspaces(&workspaces));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_workspaces(workspaces: &[Workspace]) -> String {
+    if workspaces.is_empty() {
+        return format!(
+            "no workspaces yet — make one at {}/<name>.toml\n",
+            workspace::workspaces_dir()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|_| "~/.config/yantra/workspaces".to_owned())
+        );
+    }
+
+    let rows: Vec<Vec<String>> = workspaces
+        .iter()
+        .map(|workspace| {
+            vec![
+                workspace.name.clone(),
+                workspace.machine.clone(),
+                workspace.repo.display().to_string(),
+                workspace.startup.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+
+    let mut out = table(&["WORKSPACE", "MACHINE", "REPO", "STARTUP"], &rows);
+    out.push_str(&format!(
+        "\n{} workspace{}\n",
+        workspaces.len(),
+        if workspaces.len() == 1 { "" } else { "s" }
+    ));
+    out
 }
 
 fn render_sessions(machines: &[MachineSessions]) -> String {
@@ -921,6 +974,43 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("unreachable"), "{rendered}");
+    }
+
+    fn workspace(name: &str, machine: &str, startup: Option<&str>) -> Workspace {
+        Workspace {
+            name: name.to_owned(),
+            machine: machine.to_owned(),
+            repo: std::path::PathBuf::from(format!("/srv/{name}")),
+            startup: startup.map(str::to_owned),
+        }
+    }
+
+    /// A workspace with no `startup` is just a shell, which is a real state and
+    /// not a missing one — so the cell is blank rather than saying `none`.
+    #[test]
+    fn a_workspace_with_no_startup_leaves_the_column_empty() {
+        let rendered = render_workspaces(&[
+            workspace("yantra", "cachyos-g14", Some("claude")),
+            workspace("scratch", "pi", None),
+        ]);
+        assert!(
+            rendered.contains("yantra     cachyos-g14  /srv/yantra   claude"),
+            "{rendered}"
+        );
+        for line in rendered.lines() {
+            assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
+        }
+        assert!(rendered.ends_with("2 workspaces\n"), "{rendered}");
+    }
+
+    /// Absence is emptiness (`workspace::list` returns `Ok(vec![])` for a
+    /// directory nobody has made), so this exits 0 — and a bare header row
+    /// would tell a first-time user nothing about where to put a file.
+    #[test]
+    fn no_workspaces_names_where_one_goes_rather_than_printing_a_header() {
+        let rendered = render_workspaces(&[]);
+        assert!(rendered.contains("no workspaces yet"), "{rendered}");
+        assert!(rendered.contains("<name>.toml"), "{rendered}");
     }
 
     #[test]

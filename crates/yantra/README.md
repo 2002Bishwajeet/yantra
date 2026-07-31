@@ -11,6 +11,7 @@ yantra status yantra             # running? finished? crashed?
 yantra down yantra               # stop it, cleanly
 
 yantra ls machines               # the tailnet
+yantra ls workspaces             # what you have defined
 yantra ls sessions               # what is running, everywhere
 yantra fix-terminfo <machine>    # teach a machine your terminal
 ```
