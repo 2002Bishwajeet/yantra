@@ -1,0 +1,21 @@
+# yantra-agent
+
+> The per-machine heartbeat agent. It exists because Tailscale exposes zero telemetry and SSH polling
+> cannot see a sleeping laptop, so the scheduler would otherwise be blind to the one question it most
+> needs answered. Pushes a heartbeat every 10s; the daemon marks a machine stale at 30s.
+> **Not implemented** — this is the M0 skeleton. Deliberately tiny: it reports, it does not decide.
+
+## Source
+
+- [src/main.rs](src/main.rs): a stub that prints its version and exits. Nineteen lines.
+
+## What decides its shape
+
+- [CLAUDE.md](CLAUDE.md): why it exists, and the one rule that keeps it from growing.
+- [research/01-tailscale-inventory.md](../../docs/research/01-tailscale-inventory.md): the negative finding that made an agent unavoidable — zero telemetry, verified three ways.
+- [research/05-scheduling.md](../../docs/research/05-scheduling.md): why polling over SSH was rejected, and what the scheduler needs from a heartbeat.
+- The telemetry ADR is **unwritten** (Y-020). Interval, transport and payload are all still open; do not treat the numbers above as settled.
+
+## Optional
+
+- [tracker.md](../../tracker.md): R-12 is the risk this crate is the likeliest to realise.

@@ -1,0 +1,21 @@
+# yantrad
+
+> The Yantra control-plane daemon. Every client talks to this and nothing else; no client ever talks
+> directly to a managed machine. **Not implemented** — this is the M0 skeleton, and it stays that way
+> until M4. When it starts it becomes an HTTP surface (axum) over `yantra-core`, not a second copy of
+> the logic.
+
+## Source
+
+- [src/main.rs](src/main.rs): a stub that prints its version and exits. Fifteen lines.
+
+## What decides its shape
+
+- [ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md): the logic lives in the library; this crate stays thin.
+- [ADR-0004](../../docs/adr/0004-rust-for-the-daemon.md): Rust, with axum and tokio. Supersedes the Bun decision — do not reintroduce Bun or Node here.
+- [CLAUDE.md](CLAUDE.md): what is already settled, and what to read before starting.
+
+## Optional
+
+- [tracker.md](../../tracker.md): M4 is the milestone that needs this. Open decisions that affect it are listed there.
+- [docs/vision.md](../../docs/vision.md): what the daemon is ultimately for.

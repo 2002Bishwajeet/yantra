@@ -1,0 +1,44 @@
+# yantra-core
+
+> The orchestration logic for Yantra, with no opinion about who calls it. Reaches machines over the
+> system `ssh` binary, opens tmux sessions on them, launches and observes Claude Code, and reads the
+> Tailscale inventory. A library: it never prints and never exits (ADR-0005). The CLI calls it
+> in-process today; `yantrad` will call the same functions from an HTTP handler.
+
+Every module below has a `//!` header explaining *why* it is shaped the way it is, usually naming the
+invariant that forced it. Those headers are the real documentation — the notes here say which file to
+open, not what it contains.
+
+## Entry points
+
+Each takes a workspace name, loads it from `~/.config/yantra/workspaces/<name>.toml`, and opens an
+ssh connection. Each also exposes a generic half taking an `Exec`, which is what the tests drive.
+
+- [up.rs](src/up.rs): open a workspace's tmux session, optionally launching an agent in it. Idempotent — a second call attaches. Returns `Opened::{Created,Attached}`.
+- [logs.rs](src/logs.rs): read the agent's transcript JSONL, projected down to turns. Selection happens on the far side.
+- [status.rs](src/status.rs): is the agent running, finished, stopped, crashed or killed. Reads two sources and reports their disagreement rather than resolving it.
+- [down.rs](src/down.rs): stop the session, reporting how the agent ended — read *before* the pane that holds the exit status is destroyed.
+- [sessions.rs](src/sessions.rs): every tmux session on every machine a workspace names, queried concurrently, partial answers reported rather than failed.
+
+## Primitives
+
+- [ssh.rs](src/ssh.rs): one command on one machine, over the system `ssh` with `ControlMaster`. Sentinel trailer, base64 payload, `-E` to divert ssh's own diagnostics. ADR-0006.
+- [tmux.rs](src/tmux.rs): resolve the binary absolutely, create sessions idempotently, list them, read a pane's ending, kill. The densest invariant surface in the crate.
+- [agent.rs](src/agent.rs): find `claude`, check the account, build the launch command, read the running-agent registry. Claude Code only, per the one-agent-first guardrail.
+- [terminfo.rs](src/terminfo.rs): pass the caller's `TERM` through when the far side knows it, fall back when it does not, install on request.
+- [inventory.rs](src/inventory.rs): `tailscale status --json` behind a trait. Read-only and advisory — it observes machines, it never resolves them (ADR-0009).
+- [workspace.rs](src/workspace.rs): the TOML schema. `deny_unknown_fields`, because a silently ignored key is the worst kind of bug (ADR-0007).
+
+## Decisions that constrain this crate
+
+- [ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md): core logic is a library; binaries stay thin. The source of the never-print rule.
+- [ADR-0006](../../docs/adr/0006-ssh-exec-transport.md): why the transport looks over-engineered and is not.
+- [ADR-0007](../../docs/adr/0007-workspace-schema-v1.md): the workspace schema, with provisioning as an explicit non-goal.
+- [ADR-0009](../../docs/adr/0009-machine-names-are-ssh-destinations.md): a `machine` is an ssh destination; `~/.ssh/config` decides what it means.
+- [ADR-0011](../../docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md): the agent is a TUI in tmux, the transcript is the log, and Yantra sends it no input.
+
+## Optional
+
+- [tracker.md §1b](../../tracker.md): the invariants — 46 live, numbered to I-49. Long, and the single most useful thing to read before changing anything here.
+- [CLAUDE.md](CLAUDE.md): the crate's own working rules.
+- [tests/common/mod.rs](tests/common/mod.rs): the disposable sshd + tmux container every integration test runs against.

@@ -97,8 +97,12 @@ If a block needs a paragraph to explain it, the block is wrong. Fix the code, no
 2. **[`docs/adr/`](docs/adr/) holds settled decisions.** Do not re-litigate an accepted ADR. If you
    think one is wrong, say so and propose a superseding ADR (that is §A1 applied) — do not quietly
    build something else.
-3. **[`docs/development.md`](docs/development.md) is the local setup + daily-command reference.**
-4. **[`docs/research/`](docs/research/) holds dated evidence.** Notes reflect the world on their
+3. **Each crate has its own [`CLAUDE.md`](crates/), `llms.txt` and `README.md`.** Read the one for
+   the crate you are changing — the root documents are the map, not the territory, and the crate
+   files hold the rules that actually bind the code in front of you. [`llms.txt`](llms.txt) at the
+   root indexes everything.
+4. **[`docs/development.md`](docs/development.md) is the local setup + daily-command reference.**
+5. **[`docs/research/`](docs/research/) holds dated evidence.** Notes reflect the world on their
    access date. Re-verify anything version-sensitive before relying on it.
 
 ## B1. Runtime
