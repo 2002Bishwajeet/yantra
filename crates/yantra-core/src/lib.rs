@@ -11,6 +11,7 @@
 //!    type; keep the rest private until something outside needs it.
 
 pub mod agent;
+pub mod down;
 pub mod inventory;
 pub mod logs;
 pub mod sessions;
