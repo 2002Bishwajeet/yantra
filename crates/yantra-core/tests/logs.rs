@@ -1,0 +1,234 @@
+//! Reading an agent's transcript off a real remote (§B3).
+//!
+//! No stub `claude` here, and that is the point: [`yantra_core::logs`] never
+//! runs the agent's binary, so what it needs from the far side is a filesystem
+//! and a shell. The records written below are real ones, copied byte for byte
+//! from a 14 MB transcript this machine produced.
+
+#![allow(clippy::expect_used)]
+
+mod common;
+
+use anyhow::Result;
+use common::{SshFixture, USER};
+use yantra_core::logs::{self, Who};
+use yantra_core::ssh::{Exec, Machine, Ssh};
+
+/// A directory that is not `$HOME`, so the slug is not the trivial case.
+const REPO: &str = "/tmp/logsrepo";
+
+/// What Claude Code turns `REPO` into. Spelled out rather than computed, so a
+/// change to the mapping fails here instead of being mirrored by the test.
+const PROJECT: &str = "-tmp-logsrepo";
+
+/// One assistant turn with a tool call, one typed prompt, and the bookkeeping
+/// that outnumbers both in a real file.
+const REAL_RECORDS: &[&str] = &[
+    r#"{"type":"mode","mode":"normal","sessionId":"s"}"#,
+    r#"{"type":"bridge-session","sessionId":"s","bridgeSessionId":"b","lastSequenceNum":0}"#,
+    r#"{"parentUuid":"a","isSidechain":false,"promptId":"p","type":"user","message":{"role":"user","content":"fix the failing test"},"timestamp":"2026-07-28T18:20:30.543Z","cwd":"/tmp/logsrepo"}"#,
+    r#"{"type":"ai-title","aiTitle":"Fix the failing test","sessionId":"s"}"#,
+    r#"{"type":"assistant","message":{"model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"Looking at the test first."},{"type":"tool_use","id":"t1","name":"Read","input":{}}]},"timestamp":"2026-07-28T18:20:34.000Z"}"#,
+    r#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"a very large file"}]},"toolUseResult":{"stdout":"a very large file"}}"#,
+    r#"{"type":"file-history-snapshot","messageId":"m","snapshot":{},"isSnapshotUpdate":false}"#,
+    r#"{"type":"pr-link","sessionId":"s","prNumber":1,"prUrl":"u","prRepository":"r"}"#,
+];
+
+struct Lab {
+    _fixture: SshFixture,
+    ssh: Ssh,
+    dir: std::path::PathBuf,
+}
+
+impl Lab {
+    async fn start(label: &str) -> Result<Option<Self>> {
+        let Some(fixture) = SshFixture::start()? else {
+            return Ok(None);
+        };
+        let dir = std::path::PathBuf::from("/tmp").join(format!("ya-{label}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let ssh = Ssh::new(Machine {
+            host: fixture.host().to_owned(),
+            user: Some(USER.to_owned()),
+            port: Some(fixture.port()),
+            identity: Some(fixture.key_path()),
+            state_dir: dir.clone(),
+        })?;
+        Ok(Some(Self {
+            _fixture: fixture,
+            ssh,
+            dir,
+        }))
+    }
+
+    /// Writes a transcript exactly where Claude Code would put it. Base64 so
+    /// the JSON's quotes never meet a shell (ADR-0006).
+    async fn write_transcript(
+        &self,
+        session_id: &str,
+        records: &[&str],
+        append: bool,
+    ) -> Result<()> {
+        use base64::Engine as _;
+        let body = format!("{}\n", records.join("\n"));
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&body);
+        let redirect = if append { ">>" } else { ">" };
+        self.ssh
+            .exec(&format!(
+                "mkdir -p ~/.claude/projects/{PROJECT} && printf %s '{b64}' | base64 -d \
+                 {redirect} ~/.claude/projects/{PROJECT}/{session_id}.jsonl"
+            ))
+            .await?;
+        Ok(())
+    }
+}
+
+impl Drop for Lab {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// A workspace whose agent has never run is an ordinary answer, not a failure —
+/// `logs` is the first thing someone tries when they are not sure it started.
+#[tokio::test]
+async fn a_repo_with_no_transcript_says_so_instead_of_failing() -> Result<()> {
+    let Some(lab) = Lab::start("logs-none").await? else {
+        return Ok(());
+    };
+
+    let err = logs::read(&lab.ssh, REPO, 20)
+        .await
+        .expect_err("there is no transcript there");
+    assert!(matches!(err, logs::Error::NoTranscript { .. }), "{err:?}");
+    Ok(())
+}
+
+/// The projection, end to end: eight records in, two turns out.
+#[tokio::test]
+async fn only_the_turns_survive_the_trip() -> Result<()> {
+    let Some(lab) = Lab::start("logs-read").await? else {
+        return Ok(());
+    };
+    lab.write_transcript("11111111-1111-4111-8111-111111111111", REAL_RECORDS, false)
+        .await?;
+
+    let transcript = logs::read(&lab.ssh, REPO, 20).await?;
+    assert!(
+        transcript.path.ends_with(&format!(
+            "/.claude/projects/{PROJECT}/11111111-1111-4111-8111-111111111111.jsonl"
+        )),
+        "{}",
+        transcript.path
+    );
+
+    assert_eq!(transcript.entries.len(), 2, "{:#?}", transcript.entries);
+    assert_eq!(transcript.entries[0].who, Who::User);
+    assert_eq!(transcript.entries[0].text, "fix the failing test");
+    assert_eq!(transcript.entries[1].who, Who::Assistant);
+    assert_eq!(transcript.entries[1].text, "Looking at the test first.");
+    assert_eq!(transcript.entries[1].tools, ["Read"]);
+    Ok(())
+}
+
+/// **Q12's standing requirement.** Issue #70632's failure mode is a transcript
+/// that exists and stops growing, which looks healthy to anything that only
+/// checks for the file — so what is asserted here is that the mtime *moved*.
+///
+/// Both timestamps come from the far side's own clock, so this measures the
+/// file rather than the gap between two machines' clocks.
+#[tokio::test]
+async fn a_transcript_that_is_still_being_written_reports_a_moving_mtime() -> Result<()> {
+    let Some(lab) = Lab::start("logs-mtime").await? else {
+        return Ok(());
+    };
+    let id = "22222222-2222-4222-8222-222222222222";
+    lab.write_transcript(id, REAL_RECORDS, false).await?;
+
+    let before = logs::read(&lab.ssh, REPO, 20).await?;
+    // A whole second, because the mtime this reads has one-second resolution.
+    lab.ssh.exec("sleep 2").await?;
+    lab.write_transcript(
+        id,
+        &[
+            r#"{"type":"assistant","message":{"model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"Fixed it."}]},"timestamp":"2026-07-28T18:21:00.000Z"}"#,
+        ],
+        true,
+    )
+    .await?;
+    let after = logs::read(&lab.ssh, REPO, 20).await?;
+
+    assert!(
+        after.modified > before.modified,
+        "the agent is working, so the transcript must be growing: {} then {}",
+        before.modified,
+        after.modified
+    );
+    assert!(
+        after.idle_for() < before.idle_for() + 2,
+        "a fresh write must read as fresher, not merely as different"
+    );
+    assert_eq!(after.entries.len(), 3);
+    assert_eq!(after.entries[2].text, "Fixed it.");
+    Ok(())
+}
+
+/// Two workspaces may name the same repo, and a repo outlives any one session,
+/// so the directory accumulates. The newest is the one anybody means.
+#[tokio::test]
+async fn the_newest_transcript_is_the_one_read() -> Result<()> {
+    let Some(lab) = Lab::start("logs-newest").await? else {
+        return Ok(());
+    };
+    lab.write_transcript(
+        "33333333-3333-4333-8333-333333333333",
+        &[
+            r#"{"type":"user","message":{"role":"user","content":"the older conversation"},"timestamp":"2026-07-27T10:00:00.000Z"}"#,
+        ],
+        false,
+    )
+    .await?;
+    lab.ssh.exec("sleep 2").await?;
+    lab.write_transcript(
+        "44444444-4444-4444-8444-444444444444",
+        &[
+            r#"{"type":"user","message":{"role":"user","content":"the newer conversation"},"timestamp":"2026-07-28T10:00:00.000Z"}"#,
+        ],
+        false,
+    )
+    .await?;
+
+    let transcript = logs::read(&lab.ssh, REPO, 20).await?;
+    assert!(transcript.path.contains("44444444"), "{}", transcript.path);
+    assert_eq!(transcript.entries[0].text, "the newer conversation");
+    Ok(())
+}
+
+/// `-n` counts turns, and it only can because the bookkeeping is dropped before
+/// it is counted. Without that, a window of 3 over this file shows nothing.
+#[tokio::test]
+async fn the_window_counts_turns_and_not_records() -> Result<()> {
+    let Some(lab) = Lab::start("logs-window").await? else {
+        return Ok(());
+    };
+    let mut records: Vec<&str> = vec![
+        r#"{"type":"queue-operation","operation":"enqueue","content":"x","sessionId":"s"}"#;
+        40
+    ];
+    records.extend_from_slice(REAL_RECORDS);
+    lab.write_transcript("55555555-5555-4555-8555-555555555555", &records, false)
+        .await?;
+
+    let transcript = logs::read(&lab.ssh, REPO, 3).await?;
+    assert!(
+        !transcript.entries.is_empty(),
+        "a small window over a file that is mostly bookkeeping must still show turns"
+    );
+    assert!(
+        transcript.entries.iter().all(|e| !e.text.is_empty()),
+        "{:#?}",
+        transcript.entries
+    );
+    Ok(())
+}

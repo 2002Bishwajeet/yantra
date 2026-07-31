@@ -12,6 +12,7 @@
 
 pub mod agent;
 pub mod inventory;
+pub mod logs;
 pub mod sessions;
 pub mod ssh;
 pub mod terminfo;
