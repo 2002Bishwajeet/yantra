@@ -50,6 +50,11 @@ enum Command {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Stop the workspace's session, giving the agent a chance to shut down
+    Down {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// List what Yantra can see
     Ls {
         #[command(subcommand)]
@@ -83,6 +88,7 @@ async fn main() -> ExitCode {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
+        Some(Command::Down { workspace }) => down(&workspace).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -232,6 +238,27 @@ async fn show_status(name: &str) -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn down(name: &str) -> ExitCode {
+    match yantra_core::down::down(name).await {
+        Ok(report) => {
+            let machine = &report.workspace.machine;
+            if report.stopped {
+                println!("stopped {} on {machine}", report.workspace.name);
+                // What it was doing when it was stopped, which is only knowable
+                // before the session is destroyed and is gone by now.
+                println!("  agent:  {}", describe(&report.ending));
+            } else {
+                println!("{} was not running on {machine}", report.workspace.name);
+            }
+            ExitCode::SUCCESS
         }
         Err(err) => {
             report_error(&err);
