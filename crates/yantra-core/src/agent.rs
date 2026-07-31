@@ -51,6 +51,24 @@ pub struct Launch {
     pub command: String,
 }
 
+/// One entry from `claude agents --json`.
+///
+/// Named narrowly for the same reason as [`Status`]: the command also reports
+/// `kind`, `startedAt` and a `name`, and what is not named here cannot end up
+/// in a Yantra error or log.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Running {
+    pub pid: u32,
+    /// The directory the agent was started in — the only field that ties an
+    /// entry back to a workspace, since Yantra's session name means nothing
+    /// to `claude`.
+    pub cwd: String,
+    #[serde(rename = "sessionId", default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub status: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Auth {
     pub logged_in: bool,
@@ -117,6 +135,23 @@ impl Claude {
 
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// What Claude Code believes is running, from its own registry.
+    ///
+    /// The second of Y-063's two sources, and needs **no TTY** — which is what
+    /// makes it usable over the ADR-0006 envelope at all. A machine whose
+    /// `claude` is too old to know the subcommand answers nothing rather than
+    /// failing: an unavailable second opinion is not the same as a contradiction,
+    /// and the caller has to be able to tell those apart.
+    pub async fn agents<E: Exec>(&self, exec: &E) -> Result<Vec<Running>, Error> {
+        let out = exec
+            .exec(&format!("{} agents --json", sq(&self.path)))
+            .await?;
+        if !out.success() {
+            return Ok(Vec::new());
+        }
+        Ok(serde_json::from_slice(&out.stdout).unwrap_or_default())
     }
 
     /// Asks the agent whether it can talk to Anthropic at all.
