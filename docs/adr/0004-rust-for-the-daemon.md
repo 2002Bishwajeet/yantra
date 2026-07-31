@@ -1,39 +1,35 @@
-# ADR-0004 — Rust for the daemon (supersedes ADR-0003)
+# ADR-0004 — Rust for the daemon, CLI and agent; TypeScript for the web UI
 
 - **Date:** 2026-07-28
 - **Status:** accepted
-- **Supersedes:** [ADR-0003](0003-runtime-and-language.md) — TypeScript on Bun
 
 ## Context
 
-ADR-0003 chose TypeScript on Bun and justified it primarily on **iteration speed while the design is
-unsettled**, with Rust held back as an escape hatch behind five measurable triggers (T1–T5).
+Yantra is a long-lived daemon that will eventually run unattended on a Raspberry Pi appliance, a CLI
+the owner types dozens of times a day, and a per-machine agent shipped to Linux, macOS and Windows.
+The language question had to be settled before M0, because it decides the build, the test story, the
+distribution format and what the appliance costs at idle.
 
-Two things changed on the same day.
+The stated priority is **quality over speed**: *"I don't have to ship fast. I need to ship quality and
+ship better products."* That rules out choosing a runtime for how quickly it lets an unsettled design
+churn, and rules in choosing one for what it is like to own in year three.
 
-**1. The decision criteria changed.** The stated priority moved from iteration speed to *"I don't have
-to ship fast. I need to ship quality and ship better products."* ADR-0003's central trade — accept a
-heavier, less proven runtime in exchange for moving faster through an unknown design — is a trade that
-is no longer wanted. The facts did not change; their weighting did.
+**Research had already removed most of the reasons to reach for something lighter.** Round R1–R7
+established that the daemon's real workload is narrower than it first looked:
 
-**2. Research removed most of the reasons Rust was being deferred.** Research round R1–R6 established:
+- **I-20:** the execution transport is the **system `ssh` binary** with `ControlMaster` — not a library
+  to write and maintain.
+- **The hardware layer needs no separate language.** Pi 5 device-tree overlays
+  (`dtoverlay=rotary-encoder`, `dtoverlay=ws2812-pio`) hand the encoder and the LED strip to userspace
+  as an evdev node and a char device. The kernel and RP1's PIO already provide the real-time layer.
+- **PTY and SSH are both solvable without native extension modules**, in any language.
 
-- **I-20:** the execution transport is the **system `ssh` binary** with `ControlMaster`, not a library.
-- **I-16:** the design uses **zero native addons**.
-- **T4 did not fire:** Pi 5 device-tree overlays (`dtoverlay=rotary-encoder`, `dtoverlay=ws2812-pio`)
-  drive the encoder and LEDs from userspace — no separate firmware language was needed after all.
-- **T5 was retired:** PTY and SSH both turned out to be solvable without native modules.
+So the daemon spawns processes, parses their output, serves HTTP and WebSocket, and writes SQLite.
+None of that needs the parts of Rust that are hard to learn.
 
-Taken together, the daemon's actual workload is: spawn processes, parse their output, serve HTTP and
-WebSocket, and write SQLite. None of that requires the parts of Rust that are hard to learn, and none
-of it benefits from the parts of TypeScript that are pleasant.
-
-Two further observations weakened the "one language" argument, which was ADR-0003's other pillar:
-
-- **The web UI is TypeScript regardless.** The real comparison was always Rust + TS versus Bun + TS,
-  not two languages versus one.
-- **Bun stable had shipped nothing in 76 days** (R-16) while a ~1M-line rewrite to Rust lands as
-  v1.4.0, with no ship date and no statement on native-addon compatibility.
+One argument had to be answered directly: *one language across the stack*. It does not survive
+contact with the plan — **the web UI is TypeScript regardless**, so the real comparison was always
+Rust + TypeScript against something-else + TypeScript, never two languages against one.
 
 ## Decision
 
@@ -49,45 +45,33 @@ Stack:
 | Datastore | `rusqlite` (bundled SQLite feature) |
 | PTY | `portable-pty` (the WezTerm crate) |
 | Serialization | `serde` / `serde_json` |
-| Config | `serde` + YAML |
+| Config | `serde` + YAML (later settled as TOML by [ADR-0007](0007-workspace-schema-v1.md)) |
 | Appliance target | `aarch64-unknown-linux-musl` via `cargo-zigbuild` or `cross` |
 
-**ADR-0003's trigger table (T1–T5) is void.** It existed to decide when to leave Bun; that question is
-now settled. The measurement discipline it introduced is kept — the appliance build still reports RSS,
-idle CPU, and CLI cold-start as part of M7's definition of done — but as quality targets, not as
-escape-hatch triggers.
+**SSH, tmux, telemetry and hardware each stay behind a narrow trait.** Those are the four seams where
+the system meets an unreliable outside world, and they are the seams that must be fakeable in tests —
+see §B2 and §B3 of [`CLAUDE.md`](../../CLAUDE.md).
 
-**The interface discipline from ADR-0003 is kept and strengthened.** SSH, tmux, telemetry, and hardware
-each stay behind a narrow trait. The original reason (making a runtime swap cheap) has expired; the
-better reason remains: those are the four seams where the system meets an unreliable outside world, and
-they are the seams that must be fakeable in tests.
+**The appliance still reports RSS, idle CPU and CLI cold-start** as part of M7's definition of done.
+They are quality targets, not gates on the language choice.
 
 ## Consequences
 
 **Gained:**
 
-- Eight Bun-specific risks are deleted outright: R-0 (Pi 5 16 KB page size — a JSC/Bun issue, not an
-  arm64 one), R-9, R-11, R-14 (synchronous SQLite blocking the event loop), R-15, R-16, R-17, R-18.
-  **The single appliance-blocking unknown in the entire research round disappears with the runtime.**
-- A ~5 MB static musl binary and ~15 MB idle RSS, against Bun's ~90 MB binary — for a device meant to
-  run continuously for years, on a Pi 5.
-- `rusqlite` has a real `busy_timeout` and, with `spawn_blocking`, no event-loop starvation.
-- No dependency on a runtime that is mid-rewrite with a stalled release pipeline.
+- A ~5 MB static musl binary and ~15 MB idle RSS, for a device meant to run continuously for years.
+- `rusqlite` has a real `busy_timeout` and, with `spawn_blocking`, no event-loop starvation — see
+  I-12 and I-13 in [`crates/yantrad/tracker.md`](../../crates/yantrad/tracker.md).
+- One toolchain for all three binaries, and a release matrix that produces every artefact from CI.
 
 **Paid:**
 
 - **Velocity in M0–M1 will be worse**, and Rust punishes design churn — which is exactly what the
   walking-skeleton milestone is. This is the cost that was knowingly accepted.
 - **Cross-compiling to macOS from Linux is genuinely hard in Rust** (it needs the Apple SDK via
-  osxcross), where `bun build --compile` did it trivially. This matters for the per-machine agent,
-  which must run on macOS and Windows. Mitigation: build on native runners in CI rather than
-  cross-compiling. Logged as R-19.
-- Nine research notes were written against a Bun target. Their *findings* about tmux, Tailscale, agent
-  CLIs, prior art, and scheduling are language-independent and remain valid; their *runtime* sections
-  (06, 06a, 06b, 06c) are now historical. They are kept unedited as dated evidence, with a header
-  noting the superseding decision.
-- Invariants I-15, I-16, I-17 and I-18 were Bun-specific and are retired. I-12, I-13 and I-14 survive
-  with revised reasoning.
+  osxcross). This matters for the per-machine agent, which must run on macOS and Windows. Mitigation:
+  build on native runners in CI rather than cross-compiling. Logged as R-19, and retired by Y-037 when
+  the release matrix went green — the workflow sidesteps the problem rather than solving it.
 
 **Explicitly not a reason for this decision:** performance. Yantra orchestrates five machines and
 serves one user. Throughput was never the constraint, and no benchmark motivated this.
