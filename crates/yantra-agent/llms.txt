@@ -18,4 +18,5 @@
 
 ## Optional
 
-- [tracker.md](../../tracker.md): R-12 is the risk this crate is the likeliest to realise.
+- [tracker.md](tracker.md): the two invariants that bind this crate. I-9 is a scoring bug in disguise — read it before writing the power-supply reader.
+- [../../tracker.md](../../tracker.md): R-12 is the risk this crate is the likeliest to realise.

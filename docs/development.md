@@ -41,6 +41,7 @@ crates/yantra-agent    per-machine heartbeat agent
 docs/adr/              architecture decisions - immutable once accepted
 docs/research/         dated evidence behind those decisions
 tracker.md             single source of truth for project state
+crates/*/tracker.md    the invariants binding each crate
 ```
 
 `yantra-core` is a library; the other three are thin binaries around it. Two rules
@@ -108,8 +109,9 @@ partly on the strength of it.
 
 ## Gotchas that will cost you an afternoon
 
-These are the short version. The full list with evidence is `tracker.md` §1b, and
-each one is there because it already caught somebody out.
+These are the short version. The full list with evidence is in the crate trackers —
+mostly [`crates/yantra-core/tracker.md`](../crates/yantra-core/tracker.md) — and each
+one is there because it already caught somebody out.
 
 - **tmux:** create sessions with plain `new-session -d` and treat
   `duplicate session:` as success. `new-session -A -d` is broken when called from
