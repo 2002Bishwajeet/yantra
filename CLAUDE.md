@@ -116,10 +116,8 @@ If a block needs a paragraph to explain it, the block is wrong. Fix the code, no
 Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`, `tmux`, `tailscale`) ·
 `rusqlite` · `portable-pty` · `serde`. Appliance target `aarch64-unknown-linux-musl` via `cargo-zigbuild`.
 
-**ADR-0003 (TypeScript on Bun) is superseded.** Do not reintroduce Bun, Node, `bun:sqlite`, or
-`Bun.Terminal` into the daemon. Research notes 06/06a/06b/06c were written against the Bun target and
-are retained as **historical evidence only** — their tmux, Tailscale, agent-CLI, prior-art and
-scheduling findings remain valid; their runtime recommendations do not.
+**Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
+the daemon, the CLI or the agent. TypeScript's only home is the browser.
 
 **Rust punishes design churn**, and M0–M1 is where the design is least settled. Prefer a working ugly
 path over an elegant abstraction. Resist generalising before the third use.

@@ -148,7 +148,7 @@ see Q6 in [`tracker.md`](tracker.md).
 tmux for persistence · Tailscale as the network · `rusqlite` for state ·
 appliance target `aarch64-unknown-linux-musl`.
 
-See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md), which supersedes ADR-0003 (TypeScript on Bun).
+See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md).
 
 ## Name
 

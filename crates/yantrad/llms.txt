@@ -13,7 +13,7 @@
 ## What decides its shape
 
 - [ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md): the logic lives in the library; this crate stays thin.
-- [ADR-0004](../../docs/adr/0004-rust-for-the-daemon.md): Rust, with axum and tokio. Supersedes the Bun decision — do not reintroduce Bun or Node here.
+- [ADR-0004](../../docs/adr/0004-rust-for-the-daemon.md): Rust, with axum and tokio. TypeScript belongs to the browser — do not introduce a second runtime here.
 - [CLAUDE.md](CLAUDE.md): what is already settled, and what to read before starting — including why there is no `--bind` flag.
 
 ## Optional
