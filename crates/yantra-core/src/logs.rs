@@ -68,7 +68,11 @@ pub enum Error {
     #[error(transparent)]
     Ssh(#[from] ssh::Error),
 
-    #[error("no agent transcript for `{repo}` on that machine — has an agent ever run there?")]
+    /// I-49: a launch does not write one. Saying "has an agent ever run there?"
+    /// pointed at the wrong thing for every agent that had only just started.
+    #[error(
+        "no agent transcript for `{repo}` on that machine — one appears on the agent's first message, not when it launches"
+    )]
     NoTranscript { repo: String },
 
     #[error("could not read the transcript directory: {stderr}")]
