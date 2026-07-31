@@ -14,8 +14,8 @@ Research note for YANTRA. **[V]** = executed here against `tmux 3.7b` (Linux 7.1
 - **Control mode (`tmux -CC`) beats polling on every axis, but is not the v1.** Push `%output %<pane>` with
   octal-escaped raw bytes, request/response via `%begin/%end` command numbers, N panes per connection, real flow
   control — at the cost of a decoder and a resize handshake.
-- **Bun ships a native PTY: `Bun.Terminal` + `Bun.spawn({terminal})`.** node-pty is unnecessary and its Bun story is
-  shaky (N-API port still an open PR; reported `bun build` breakage) **[D]**, so daemon-side PTY + xterm.js is the
+- **The PTY belongs on the daemon side, not in the web stack.** A PTY opened as part of spawning the child, with
+  no native addon in the browser-facing layer **[D]**, so daemon-side PTY + xterm.js is the
   least-work v1.
 - **Reboot survival is Yantra's job.** resurrect/continuum restore layout + cwd + a *whitelist of re-run commands* —
   never process state, on a 15-min lossy timer, via a status-line side channel **[D]**. Yantra's DB is the manifest.
@@ -54,9 +54,9 @@ shortest path to v1. Adopt in v2 when concurrent live panes per machine become t
 | Scaling | 1 PTY + 1 ssh per viewer | 1 process per viewer per box | **1 conn/machine, N panes** |
 
 **(a) is the v1**: spawn a PTY running `ssh -tt <host> tmux -u attach -t "=<name>"`, pipe bytes both ways over a
-WebSocket into xterm.js, forward resize. Bun has a native PTY — `new Bun.Terminal({cols, rows, data(term, buf){}})`
-passed as `Bun.spawn(cmd, {terminal})`, with `write()`, `resize()`, `setRawMode()`, `close()`, POSIX-only **[D]**. Do
-**not** plan on `node-pty` (native NAN/N-API addon, N-API port still an open PR, open `bun build` breakage reports)
+WebSocket into xterm.js, forward resize. The PTY needs `write()`, `resize()`, raw mode and `close()`, and must be
+created **with** the child rather than before it or `^C` will not work — see I-18 and [06](06-runtime-feasibility.md)
+**[D]**. Do **not** plan on `node-pty` (native NAN/N-API addon, N-API port still an open PR)
 **[D]**. **(b) is a trap here** — a daemon, port and auth boundary on every machine, and Yantra ends up proxying
 WebSockets it cannot inspect; emergency fallback only. **(c) scales best**: one connection per machine multiplexes
 every pane and yields structured events instead of scraping. **Honest caveat on (a):** one PTY per *viewer* means two
@@ -139,7 +139,7 @@ layer. Keep JSON-shaped return types that zellij would naturally produce, and ad
 
 tmux as the persistence primitive (already everywhere, no new per-machine daemon) · `new-session -d` atomicity as the
 concurrency control for "open workspace" · `remain-on-exit` + `pane_dead_status` for exit codes · `pipe-pane` for
-durable transcripts · `Bun.Terminal`/`Bun.spawn({terminal})` as the PTY layer (no native addon) · xterm.js · ssh over
+durable transcripts · a daemon-side PTY spawned with its child · xterm.js · ssh over
 Tailscale as transport · tmux control mode later as the v2 streaming transport.
 
 ## What Yantra must build itself
@@ -156,8 +156,8 @@ Tailscale as transport · tmux control mode later as the v2 streaming transport.
 
 ## Risks & unknowns
 
-- `Bun.Terminal` is **[D]**-only here (Bun not installed). Verify against the pinned Bun version before committing to
-  (a); fallback is `ssh -tt` + plain pipes (loses proper TTY signalling).
+- The PTY layer is **[D]**-only here — nothing was run. Verify the controlling-terminal behaviour (I-18) before
+  committing to (a); fallback is `ssh -tt` + plain pipes (loses proper TTY signalling).
 - tmux versions differ across machines — `refresh-client -B` and some format vars are recent. Probe `#{version}` and
   degrade rather than assume 3.7. Multi-viewer pane sizing (§3) is unresolved and immediately user-visible.
 - `wait-for` signals are not queued — one firing before the waiter attaches hangs it forever. `pipe-pane` volume from
@@ -241,8 +241,6 @@ All accessed 2026-07-28.
 - resurrect/continuum: https://github.com/tmux-plugins/tmux-resurrect ·
   https://github.com/tmux-plugins/tmux-resurrect/blob/master/docs/restoring_programs.md ·
   https://github.com/tmux-plugins/tmux-continuum
-- Bun: https://bun.com/reference/bun/Terminal · https://bun.com/docs/runtime/nodejs-compat ·
-  https://github.com/oven-sh/bun/issues/22468
 - node-pty: https://github.com/microsoft/node-pty/pull/644 · https://github.com/microsoft/node-pty/issues/748
 - zellij: https://zellij.dev/documentation/programmatic-control.html · https://zellij.dev/documentation/cli-actions ·
   https://zellij.dev/news/remote-sessions-windows-cli/

@@ -5,9 +5,9 @@ Research note for YANTRA. Verified 2026-07-28 against a live tailnet (`tailscale
 ## Summary
 
 - **Tailscale gives identity + reachability, never telemetry.** Zero CPU/RAM/GPU/battery/load in `status --json`, in the API v2 `Device` schema, or in `tailscale metrics`. Yantra **must** ship its own per-machine agent. Confirmed against three surfaces, not assumed.
-- **LocalAPI is the right inventory source and plain Node/Bun can speak it.** Verified 200 from `node:http` `socketPath` as uid 1000. Wrong or missing `Host` header → **403**.
+- **LocalAPI is the right inventory source, and any HTTP client that can reach a unix socket can speak it.** Verified 200 as uid 1000 — no root, no operator grant. Wrong or missing `Host` header → **403**.
 - **Reads unprivileged, writes not.** Same uid: `GET /prefs` 200, `PATCH /prefs` 403, `GET /metrics` 403.
-- **`tsnet` has no real JS binding.** `tailscale-js` is Bun-only FFI over experimental `libtailscale`; 6 commits, no releases. Be a normal host with `tailscaled` + `tailscale serve`.
+- **`tsnet` is Go-only in practice.** The one third-party binding is FFI over experimental `libtailscale`; 6 commits, no releases. Be a normal host with `tailscaled` + `tailscale serve`.
 - **Tailscale SSH ends key management but breaks SSH libraries and cannot serve Windows.**
 
 ## Findings
@@ -48,7 +48,6 @@ Gotchas, all verified locally:
 
 - **`Host: local-tailscaled.sock` is mandatory.** Anything else, or omitted → `403 invalid localapi request`. CSRF defence, not DNS.
 - Unix auth is **peer credentials**, no token. Socket is mode `0666`; the daemon derives `PermitRead`/`PermitWrite`/`PermitCert` from the connecting uid (root or `--operator` gets write). macOS-GUI and Windows instead need an **`Authorization` token**, so a cross-platform collector cannot assume "just open the socket".
-- Bun's `fetch(url, { unix })` works. **Node's global `fetch` does not support unix sockets** — use `node:http` `socketPath`.
 
 Endpoints under `/localapi/v0/` (from `ipn/localapi/localapi.go` @ v1.98.9 plus binary strings): `status`, `whois?addr=`, `prefs`, `check-prefs`, `ping` (**POST**, `?ip=&type=disco|TSMP|ICMP|peerapi`), `peer-by-id`, `derpmap`, `dns-config`, `cert-domains`, `cert/<domain>`, `metrics`, `watch-ipn-bus` (stream), `files/`, `file-put/`, `profiles/`, `profiles/current`, `login-interactive`, `logout`, `start`, `shutdown`, `set-expiry-sooner`, `reload-config`, `reset-auth`, `services`, `goroutines`, `upload-client-metrics`, `update/check`, `debug-packet-filter-rules`, `disconnect-control`, `clear-netmap-cache`, `notify-last-netmap`, `peer-relay-servers`. `watch-ipn-bus` streams `ipn.Notify` JSON — push netmap changes instead of polling.
 
@@ -74,7 +73,7 @@ The only writable per-device slot is **posture attributes** (`POST /api/v2/devic
 
 ### 5. `tsnet` in JS/TS
 
-Go-only; embeds a userspace node (gVisor netstack), no daemon, no root. **No official JS/TS binding.** Only candidate is [`mastermakrela/tailscale-js`](https://github.com/mastermakrela/tailscale-js): Bun-only FFI over `libtailscale` (C wrapper on `tsnet`). Reality — 6 commits, 4 stars, no releases, prebuilt binaries macOS/Linux only, no WebSocket support, broken Ctrl-C, FFI type drift across Bun versions; `libtailscale` upstream is itself experimental. **Not a day-1 dependency.**
+Go-only; embeds a userspace node (gVisor netstack), no daemon, no root. **No official binding outside Go.** Only candidate is [`mastermakrela/tailscale-js`](https://github.com/mastermakrela/tailscale-js): FFI over `libtailscale` (a C wrapper on `tsnet`). Reality — 6 commits, 4 stars, no releases, prebuilt binaries macOS/Linux only, no WebSocket support, broken Ctrl-C, type drift across host versions; `libtailscale` upstream is itself experimental. **Not a day-1 dependency.**
 
 Options for Yantra to be reachable, in order of sanity:
 
@@ -108,7 +107,7 @@ Can Yantra skip SSH key management? **Yes for interactive use, with real caveats
 
 - **Server side is Linux and macOS only. Windows cannot be a Tailscale SSH server** (nor Synology/QNAP), so the Windows laptop still needs OpenSSH — you cannot standardise on one mechanism. Server needs v1.24+; env-var forwarding v1.76+. Port hardcoded to 22. SFTP is implemented, so `scp`/`sftp`/`rsync` work with modern clients.
 - **Restarting `tailscaled` — including an auto-update — kills every live Tailscale SSH session.** For a daemon holding long-running agent sessions this matters: attach to **tmux on the remote** so a dropped SSH session never kills the work.
-- **Programmatic clients are the sharp edge.** OpenSSH CLI is fine (host keys are distributed by control, so no unknown-host prompt). But paramiko fails with `SSHException: No authentication methods available` (paramiko#2370, open since Mar 2024), and Node `ssh2` only attempts `none` if you pass `authHandler: ['none']`. On Bun, set that explicitly or shell out to the `ssh` binary.
+- **Programmatic clients are the sharp edge.** OpenSSH CLI is fine (host keys are distributed by control, so no unknown-host prompt). But paramiko fails with `SSHException: No authentication methods available` (paramiko#2370, open since Mar 2024), and `ssh2` only attempts `none` if you pass `authHandler: ['none']`. Either set that explicitly or shell out to the `ssh` binary — which is what I-20 settles on.
 - **Unverified:** OpenSSH-client → Tailscale-SSH could not be tested locally — `ssh <own-100.x>` from the same host gives `Connection refused` (interception only applies to traffic arriving from peers). Test from a second machine before committing.
 
 ## What Yantra reuses
@@ -170,18 +169,15 @@ Verified matrix on this host (uid 1000, not root, not operator):
 | `PATCH /localapi/v0/prefs` | **403** (needs root/operator) |
 | `GET /localapi/v0/metrics` | **403** `metric access denied` |
 
-Node/Bun client (verified: 200, 8718 bytes):
+The request shape (verified: 200, 8718 bytes, as uid 1000):
 
-```js
-import http from "node:http";
-http.request({
-  socketPath: "/var/run/tailscale/tailscaled.sock",
-  path: "/localapi/v0/status",
-  headers: { Host: "local-tailscaled.sock" },   // MANDATORY
-}, r => { /* r.statusCode === 200 */ }).end();
-// Bun: fetch("http://local-tailscaled.sock/localapi/v0/status", { unix: "/var/run/tailscale/tailscaled.sock" })
-// Node's global fetch() does NOT support unix sockets.
+```http
+GET /localapi/v0/status HTTP/1.1
+Host: local-tailscaled.sock
 ```
+
+over a unix-socket connection to `/var/run/tailscale/tailscaled.sock`. **The `Host` header is
+mandatory** — tailscaled rejects anything else with 403, which is I-6.
 
 Redacted live `status --json` excerpt (IPs / keys / IDs / emails / tailnet scrubbed):
 
@@ -248,7 +244,7 @@ All accessed 2026-07-28. Live system: `tailscale 1.98.9` (commit `4fb758c3…`, 
 - github.com/tailscale/tailscale @ `v1.98.9`: `ipn/localapi/localapi.go` (routes, `PermitRead`/`PermitWrite`), `paths/paths.go` (per-OS sockets), `safesocket/safesocket_darwin.go` (macOS `sameuserproof`)
 - https://api.tailscale.com/api/v2?outputOpenapiSchema=true — OpenAPI 3.1 spec, 235 KB, fetched raw
 - tailscale.com/docs/features/oauth-clients (scopes, 1 h token) · /kb/1223/funnel (ports 443/8443/10000, TLS-only, nodeAttr) · /kb/1193/tailscale-ssh (ACL `ssh` rules, platform limits, SFTP, port 22) · /kb/1244/tsnet
-- github.com/mastermakrela/tailscale-js — Bun FFI binding · github.com/mscdex/ssh2 — `authHandler` accepts `'none'`
+- github.com/mastermakrela/tailscale-js — third-party FFI binding · github.com/mscdex/ssh2 — `authHandler` accepts `'none'`
 - github.com/paramiko/paramiko/issues/2370 (`none`-auth failure vs Tailscale SSH, open) · tailscale/tailscale#14328 (rate limits undocumented) · #16911 (OAuth can't see shared devices)
 - https://tailscale.com/blog/wake-on-lan-tailscale-upsnap — Pi + UpSnap WoL pattern
 - headscale.net/stable/ref/api/ · /about/features/ · raw CHANGELOG.md on `main` — `/api/v1`, `headscale apikeys create`, feature matrix, 0.30.0 gRPC removal + OpenAPI 3.1 + v2/OAuth

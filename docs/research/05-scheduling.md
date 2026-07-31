@@ -120,7 +120,7 @@ Each signal normalized to `0.0..1.0` × a weight; weights sum to 100, so the sco
 | optional capability match | 5 | fraction of `prefer_labels` present |
 | **penalties** (flat, additive) | — | asleep/needs-WoL −15; in `avoid` −25; failed to start here in last 1h −20 (Nomad's reschedule penalty) |
 
-### Pseudocode (TypeScript, per ADR-0003)
+### Pseudocode
 
 ```ts
 const ALGO_VERSION = 1;
@@ -194,7 +194,7 @@ instances** on Windows desktops — absence means AC, not unknown.
 
 ## Placement decision record
 
-One append-only JSON row per attempt (success *and* failure) in `bun:sqlite`, keyed by ULID; surfaced by
+One append-only JSON row per attempt (success *and* failure) in SQLite, keyed by ULID; surfaced by
 `yantra explain <ws>` and `yantra plan <ws>` (dry run, à la `nomad plan`).
 
 ```json
