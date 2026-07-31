@@ -1,8 +1,8 @@
 # yantrad — working notes
 
-**It serves and it looks; it does not yet answer.** Y-069 made it an `axum` server with one route,
-Y-070 gave it a background read model. The API (Y-071) is not written. The most useful thing you can
-do here is still not write code before M4 needs it.
+**It serves, it looks, and it answers — read-only.** Y-069 made it an `axum` server, Y-070 gave it a
+background read model, Y-071 put that model on the wire at `/api`. Nothing here writes. The most
+useful thing you can do here is still not write code before M4 needs it.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
 
@@ -47,7 +47,15 @@ five minutes keeps every ssh master warm, so the poll makes the fleet *faster* �
 
 **Four states, not three**, and folding any two together is the bug this module exists to avoid:
 nobody has looked (`None`), a look succeeded, a look succeeded and a machine within it did not answer,
-and *the look itself failed*. I-47 is the same mistake one layer down.
+and *the look itself failed*. I-47 is the same mistake one layer down. All four reach `/api` by name
+(`looked` and `reached`), because a client that has to infer a state from a missing field will infer
+the wrong one.
+
+**A failed look replaces the previous good one, and that is Y-071's decision rather than an
+accident.** Every class-level error here is local and persistent — `tailscale` missing, a malformed
+workspace file — so retaining a stale reading would hide a fault the operator has to fix, and go on
+hiding it. The transient case is a *machine* that did not answer, and that already survives inside a
+successful reading.
 
 ## What is already decided
 
