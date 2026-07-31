@@ -34,14 +34,86 @@ and Yantra restores the context — picking a machine, opening the session, and 
 
 ## Status
 
-🚧 **Walking skeleton.** `yantra up <workspace>` opens a real tmux session, in a real repo, on a
-machine reached over SSH — idempotently. Run it twice and it attaches rather than duplicating.
+🚧 **Usable from the CLI, against real machines, with a real agent.** Four milestones are closed.
 
-Everything else in the roadmap is still ahead: no daemon, no HTTP API, no scheduler, no agent
-integration, no UI, no hardware.
+`yantra up <workspace>` opens a tmux session in a repo on a machine reached over SSH — idempotently,
+so running it twice attaches rather than duplicating. With `--agent claude` it launches Claude Code
+in that session, and `logs` / `status` / `down` watch it and stop it. All four were verified end to
+end against a live Claude Code on a real machine, not a stub.
+
+Still ahead: the daemon and HTTP API (M4, in progress), the web UI, the scheduler, the browser
+terminal, and the hardware.
 
 **Start here → [`tracker.md`](tracker.md)** — the single source of truth for what is decided, what is
 being worked on, and what is still an open question.
+
+## Install
+
+There is **no published release yet**, so build from source. You need
+[rustup](https://rustup.rs); the toolchain version is pinned by `rust-toolchain.toml`.
+
+```bash
+git clone https://github.com/2002Bishwajeet/yantra
+cd yantra
+cargo install --path crates/yantra
+```
+
+That installs the `yantra` CLI to `~/.cargo/bin`. Nothing else needs installing — the daemon does not
+exist yet, and Yantra runs no software on the machines it manages.
+
+**On the machines you want to reach**, you need what Yantra orchestrates rather than anything of
+Yantra's own:
+
+| On the target | Why |
+| --- | --- |
+| SSH access | The transport. Tailscale SSH counts; so does a normal `sshd`. |
+| `tmux` | Sessions live in it, and they outlive your connection. |
+| Tailscale | Only for `yantra ls machines`. Reaching a machine needs no Tailscale — see [ADR-0009](docs/adr/0009-machine-names-are-ssh-destinations.md). |
+| A coding agent | Optional. Claude Code today, and only Claude Code. |
+
+## Usage
+
+A **workspace** is a file at `~/.config/yantra/workspaces/<name>.toml`. The filename is the name, so
+the two can never disagree:
+
+```toml
+machine = "bishwajeets-macbook-pro"   # an ssh destination — ~/.ssh/config decides what it means
+repo    = "/Users/me/code/yantra"     # the path on `machine`, not on this box
+startup = "nvim"                      # optional; omit for just a shell
+```
+
+That is the whole schema. An unknown key is an error rather than a line that is silently ignored
+([ADR-0007](docs/adr/0007-workspace-schema-v1.md)).
+
+Then:
+
+```bash
+yantra up nexus                  # open the session (run again to attach)
+yantra up nexus --agent claude   # ...and start Claude Code in it
+yantra status nexus              # running, finished, stopped, crashed or killed
+yantra logs nexus -n 40          # what the agent has been saying
+yantra down nexus                # stop it, giving the agent a chance to shut down
+yantra ls machines               # what Tailscale can see
+yantra ls sessions               # what tmux is holding, across every machine
+yantra fix-terminfo <machine>    # teach a machine about your terminal
+```
+
+`yantra --help` is the current and complete reference — it is generated from the code, so unlike this
+README it cannot drift.
+
+**Exit codes are a contract**, documented in [`crates/yantra/CLAUDE.md`](crates/yantra/CLAUDE.md).
+The two worth knowing: `status` exits 1 when nothing is running, so `yantra status x && …` reads the
+way it looks; and `ls sessions` exits 1 if a machine was unreachable, so a caller can tell the table
+is partial.
+
+## API reference
+
+`cargo doc --open -p yantra-core`.
+
+Every module carries a `//!` header explaining *why* it is shaped the way it is, usually naming the
+bug that forced it. Those headers are the real documentation, and they cannot drift from the code.
+There is no separate docs site and there will not be one until Yantra is meant for other people —
+see Q6 in [`tracker.md`](tracker.md).
 
 ## Principles
 
@@ -60,8 +132,12 @@ being worked on, and what is still an open question.
 | [`docs/vision.md`](docs/vision.md) | The destination: full scope, first-class objects, 9-phase roadmap |
 | [`docs/brainstorm.md`](docs/brainstorm.md) | The founding intent document, archived unedited |
 | [`docs/development.md`](docs/development.md) | **Local dev setup** — prerequisites, daily commands, gotchas |
-| [`docs/adr/`](docs/adr/) | Architecture decision records |
+| [`crates/*/tracker.md`](crates/) | **The invariants** — rules research proved the hard way, filed with the crate each one binds |
+| [`crates/*/CLAUDE.md`](crates/) | Per-crate working rules; `llms.txt` and `README.md` sit beside them |
+| [`docs/adr/`](docs/adr/) | Architecture decision records — immutable once accepted |
+| [`docs/plans/`](docs/plans/) | Per-milestone implementation plans, written before the code |
 | [`docs/research/`](docs/research/) | Dated research notes — what exists, what to reuse, what to build |
+| [`docs/session-log.md`](docs/session-log.md) | One line per working session, append-only |
 
 ## Stack
 
