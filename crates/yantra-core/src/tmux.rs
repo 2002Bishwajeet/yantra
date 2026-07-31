@@ -43,6 +43,66 @@ pub struct Summary {
     pub created: String,
 }
 
+/// A pane, and how its process ended if it has.
+///
+/// **Exactly one of `status` and `signal` is set on a dead pane, and reading
+/// only `status` is the R-2 trap**: a signal-killed process leaves
+/// `pane_dead_status` *empty*, which parses to nothing and reads like a clean
+/// exit to anyone who defaults it to zero. Measured on 3.5a and 3.7b: SIGTERM
+/// gives `status=[] signal=[…]`, `exit 143` gives `status=[143] signal=[]`.
+///
+/// `signal` is a **name**, never a number, and that is not cosmetic (I-48):
+/// tmux prints `15` on Linux and `term` on macOS *at the same version*, and the
+/// numbering itself is not portable either — signal 10 is `USR1` on Linux and
+/// `BUS` on macOS. A name is the only spelling that means one thing everywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pane {
+    pub id: String,
+    pub dead: bool,
+    pub status: Option<i32>,
+    pub signal: Option<String>,
+    /// Absent once the pane is dead — there is no process left to name.
+    pub pid: Option<u32>,
+}
+
+/// The signal numbers POSIX fixes, so both spellings can be read as one thing.
+///
+/// Deliberately partial. 7, 10 and 12 are **left out because they genuinely
+/// differ** between Linux and macOS, and inventing an answer for them would be
+/// worse than `SIG10`.
+const SIGNAL_NAMES: [(i32, &str); 12] = [
+    (1, "HUP"),
+    (2, "INT"),
+    (3, "QUIT"),
+    (4, "ILL"),
+    (5, "TRAP"),
+    (6, "ABRT"),
+    (8, "FPE"),
+    (9, "KILL"),
+    (11, "SEGV"),
+    (13, "PIPE"),
+    (14, "ALRM"),
+    (15, "TERM"),
+];
+
+/// Reads either spelling tmux might use, and answers in names.
+fn signal_name(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(number) = raw.parse::<i32>() {
+        return Some(
+            SIGNAL_NAMES
+                .iter()
+                .find(|(n, _)| *n == number)
+                .map_or_else(|| format!("SIG{number}"), |(_, name)| (*name).to_owned()),
+        );
+    }
+    let name = raw.to_ascii_uppercase();
+    Some(name.strip_prefix("SIG").unwrap_or(&name).to_owned())
+}
+
 /// Which half of the idempotent open happened. The whole point of `up` is that
 /// running it twice produces `Attached`, not a second session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +163,11 @@ const IDS: &str = "#{session_id} #{window_id} #{pane_id}";
 /// passes them through, and the fleet runs both.
 const LIST_FORMAT: &str =
     "#{session_windows}|#{session_attached}|#{t:session_created}|#{session_name}";
+
+/// Same `|` and the same reason as [`LIST_FORMAT`] — and here the empty field
+/// is the point, so a delimiter that survives an empty value is mandatory.
+const PANE_FORMAT: &str =
+    "#{pane_id}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}";
 
 /// Searched in order when `PATH` fails. System-scoped only — `$HOME` installs
 /// are on `PATH` by construction, which is why `PATH` is asked first.
@@ -258,6 +323,42 @@ impl Tmux {
         Ok(sessions)
     }
 
+    /// The session's first pane, or `None` when there is no such session.
+    ///
+    /// This is only readable at all because `remain-on-exit` is set when the
+    /// session is created (I-4): without it a pane whose process ended is gone,
+    /// and a crash is indistinguishable from a clean finish.
+    pub async fn pane<E: Exec>(&self, exec: &E, name: &str) -> Result<Option<Pane>, Error> {
+        validate_name(name)?;
+        let out = exec
+            .exec(&format!(
+                "{} list-panes -s -t {} -F {}",
+                sq(&self.path),
+                sq(&format!("={name}")),
+                sq(PANE_FORMAT)
+            ))
+            .await?;
+
+        if !out.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if no_server(&stderr) || stderr.contains("can't find session") {
+                return Ok(None);
+            }
+            return Err(Error::Command {
+                command: "list-panes".to_owned(),
+                status: out.status,
+                stderr: stderr.trim().to_owned(),
+            });
+        }
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        stdout
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .map(parse_pane)
+            .transpose()
+    }
+
     /// Kills the session if it exists. Absence is success, not an error.
     pub async fn kill<E: Exec>(&self, exec: &E, name: &str) -> Result<(), Error> {
         validate_name(name)?;
@@ -341,6 +442,31 @@ fn no_server(stderr: &str) -> bool {
         || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
 }
 
+fn parse_pane(line: &str) -> Result<Pane, Error> {
+    let bad = || Error::Listing {
+        raw: line.to_owned(),
+    };
+    let mut fields = line.trim_end().splitn(5, '|');
+    match (
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+    ) {
+        (Some(id), Some(dead), Some(status), Some(signal), Some(pid)) if !id.is_empty() => {
+            Ok(Pane {
+                id: id.to_owned(),
+                dead: dead == "1",
+                status: status.parse().ok(),
+                signal: signal_name(signal),
+                pid: pid.parse().ok(),
+            })
+        }
+        _ => Err(bad()),
+    }
+}
+
 fn parse_summary(line: &str) -> Result<Summary, Error> {
     let bad = || Error::Listing {
         raw: line.to_owned(),
@@ -395,6 +521,38 @@ fn parse_ids(name: &str, stdout: &[u8]) -> Result<Session, Error> {
 /// under `/bin/sh` (ADR-0006), so the tcsh caveat in R7 does not apply.
 pub(crate) fn sq(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// I-48, the reason [`signal_name`] exists at all.
+#[cfg(test)]
+mod signal_tests {
+    use super::signal_name;
+
+    /// The two spellings tmux actually produced, on machines running the *same*
+    /// version: `15` on Arch and Alpine, `term` on macOS.
+    #[test]
+    fn both_spellings_tmux_uses_mean_the_same_signal() {
+        assert_eq!(signal_name("15").as_deref(), Some("TERM"));
+        assert_eq!(signal_name("term").as_deref(), Some("TERM"));
+        assert_eq!(signal_name("SIGTERM").as_deref(), Some("TERM"));
+        assert_eq!(signal_name("9").as_deref(), Some("KILL"));
+        assert_eq!(signal_name("kill").as_deref(), Some("KILL"));
+    }
+
+    /// An empty field is a pane that did not die of a signal, and must stay
+    /// distinguishable from one that did — that is the whole I-47 trap.
+    #[test]
+    fn an_empty_field_is_not_a_signal() {
+        assert_eq!(signal_name(""), None);
+        assert_eq!(signal_name("  "), None);
+    }
+
+    /// 10 is `USR1` on Linux and `BUS` on macOS, so naming it would be a guess.
+    #[test]
+    fn a_number_that_is_not_portable_is_left_as_a_number() {
+        assert_eq!(signal_name("10").as_deref(), Some("SIG10"));
+        assert_eq!(signal_name("64").as_deref(), Some("SIG64"));
+    }
 }
 
 #[cfg(test)]

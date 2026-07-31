@@ -11,6 +11,7 @@ use yantra_core::agent;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::sessions::{self, MachineSessions};
+use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::up;
 
@@ -44,6 +45,11 @@ enum Command {
         #[arg(short = 'n', long, default_value_t = 20)]
         lines: usize,
     },
+    /// Say whether the workspace's agent is running, finished or crashed
+    Status {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// List what Yantra can see
     Ls {
         #[command(subcommand)]
@@ -76,6 +82,7 @@ async fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
+        Some(Command::Status { workspace }) => show_status(&workspace).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -204,6 +211,46 @@ fn ago(seconds: i64) -> String {
         s if s < 3600 => format!("{}m ago", s / 60),
         s if s < 86_400 => format!("{}h ago", s / 3600),
         s => format!("{}d ago", s / 86_400),
+    }
+}
+
+async fn show_status(name: &str) -> ExitCode {
+    match yantra_core::status::status(name).await {
+        Ok(report) => {
+            println!("{} on {}", report.workspace.name, report.workspace.machine);
+            println!("  state:  {}", describe(&report.verdict));
+            if let Some(agent) = &report.agent {
+                println!(
+                    "  agent:  claude, session {}, pid {}",
+                    agent.session_id, agent.pid
+                );
+            }
+            // Non-zero when nothing is running, so `yantra status x && …` means
+            // what it looks like it means in a shell.
+            if report.verdict.is_running() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn describe(verdict: &Verdict) -> String {
+    match verdict {
+        Verdict::NoSession => "no session on that machine".to_owned(),
+        Verdict::Running => "running".to_owned(),
+        Verdict::Finished => "finished (exit 0)".to_owned(),
+        Verdict::Stopped => "stopped cleanly (exit 143)".to_owned(),
+        Verdict::Crashed { status } => format!("crashed (exit {status})"),
+        Verdict::Killed { signal } => {
+            format!("killed by SIG{signal}, so it ran no shutdown of its own")
+        }
+        Verdict::Unclear { because } => format!("unclear — {because}"),
     }
 }
 
@@ -511,6 +558,33 @@ mod tests {
             entries: Vec::new(),
         });
         assert!(rendered.contains("nothing has been said"), "{rendered}");
+    }
+
+    /// Every verdict must read as a sentence a person can act on — and the two
+    /// that are not plain exits must say *why*, since those are the ones nobody
+    /// can guess from a number.
+    #[test]
+    fn every_verdict_says_what_happened() {
+        assert_eq!(describe(&Verdict::Finished), "finished (exit 0)");
+        assert_eq!(
+            describe(&Verdict::Crashed { status: 1 }),
+            "crashed (exit 1)"
+        );
+        let killed = Verdict::Killed {
+            signal: "KILL".to_owned(),
+        };
+        assert!(describe(&killed).contains("SIGKILL"));
+        assert!(
+            describe(&killed).contains("no shutdown"),
+            "a signal kill means the agent ran none of its own shutdown"
+        );
+        assert!(
+            describe(&Verdict::Unclear {
+                because: "the sources disagree"
+            })
+            .contains("the sources disagree"),
+            "an unclear verdict is useless without its reason"
+        );
     }
 
     fn machine(name: &str, os: Os, online: bool, expired: bool, seen: Option<&str>) -> MachineInfo {
