@@ -79,9 +79,9 @@ sequenceDiagram
     participant ssh as system ssh
     participant mach as the machine
 
-    you->>cli: yantra up nexus --agent claude
-    cli->>core: up::up("nexus", TERM, Agent::Claude)
-    core->>core: read ~/.config/yantra/workspaces/nexus.toml
+    you->>cli: yantra up yantra --agent claude
+    cli->>core: up::up("yantra", TERM, Agent::Claude)
+    core->>core: read ~/.config/yantra/workspaces/yantra.toml
     Note over core: machine, repo, startup.<br/>An unknown key is an error, not a shrug.
 
     core->>ssh: locate claude, check the account

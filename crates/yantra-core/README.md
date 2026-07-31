@@ -12,10 +12,10 @@ in-process today; the daemon will call the same functions over HTTP.
 ```rust
 use yantra_core::{up, logs, status, down};
 
-let report = up::up("nexus", "xterm-256color", Some(up::Agent::Claude)).await?;
-let recent = logs::logs("nexus", 20).await?;
-let state  = status::status("nexus").await?;
-let ending = down::down("nexus").await?;
+let report = up::up("yantra", "xterm-256color", Some(up::Agent::Claude)).await?;
+let recent = logs::logs("yantra", 20).await?;
+let state  = status::status("yantra").await?;
+let ending = down::down("yantra").await?;
 ```
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one

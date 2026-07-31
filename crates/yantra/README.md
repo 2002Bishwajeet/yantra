@@ -4,10 +4,10 @@ The command-line client. Ask for a workspace and it restores the context — pic
 the tmux session, resumes the agent.
 
 ```sh
-yantra up nexus --agent claude   # open it, and start Claude Code in it
-yantra logs nexus                # what the agent has been saying
-yantra status nexus              # running? finished? crashed?
-yantra down nexus                # stop it, cleanly
+yantra up yantra --agent claude  # open it, and start Claude Code in it
+yantra logs yantra               # what the agent has been saying
+yantra status yantra             # running? finished? crashed?
+yantra down yantra               # stop it, cleanly
 
 yantra ls machines               # the tailnet
 yantra ls sessions               # what is running, everywhere
@@ -18,7 +18,7 @@ Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:
 
 ```toml
 machine = "bishwajeets-macbook-pro"   # an ssh destination — ~/.ssh/config decides what it means
-repo    = "/Users/you/code/nexus"     # the path on *that* machine
+repo    = "/Users/you/code/yantra"    # the path on *that* machine
 startup = "just dev"                  # optional; conflicts with --agent
 ```
 
