@@ -18,6 +18,7 @@
 //! [ADR-0009]: ../../../docs/adr/0009-machine-names-are-ssh-destinations.md
 
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::process::Stdio;
 
 /// Go's zero time, which `LastSeen` carries instead of being omitted. It does
@@ -102,6 +103,14 @@ pub enum Error {
 pub trait Inventory {
     fn machines(&self)
     -> impl std::future::Future<Output = Result<Vec<MachineInfo>, Error>> + Send;
+
+    /// The addresses **this** machine holds on the tailnet, for a server that
+    /// must not listen anywhere else.
+    ///
+    /// Self only, and that is the whole boundary: a peer's address would be
+    /// name resolution, which ADR-0009 declined. This asks what this machine
+    /// owns, not where another one is.
+    fn addresses(&self) -> impl std::future::Future<Output = Result<Vec<IpAddr>, Error>> + Send;
 }
 
 /// Reads the local `tailscale` CLI (§B2). The LocalAPI returns identical data
@@ -111,6 +120,16 @@ pub struct Tailscale;
 
 impl Inventory for Tailscale {
     async fn machines(&self) -> Result<Vec<MachineInfo>, Error> {
+        parse(&self.status().await?)
+    }
+
+    async fn addresses(&self) -> Result<Vec<IpAddr>, Error> {
+        parse_addresses(&self.status().await?)
+    }
+}
+
+impl Tailscale {
+    async fn status(&self) -> Result<Vec<u8>, Error> {
         let out = tokio::process::Command::new("tailscale")
             .args(["status", "--json"])
             .stdin(Stdio::null())
@@ -123,8 +142,18 @@ impl Inventory for Tailscale {
                 stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
             });
         }
-        parse(&out.stdout)
+        Ok(out.stdout)
     }
+}
+
+/// `Self.TailscaleIPs`, in the order Tailscale reports them — v4 first in
+/// every document seen so far, but nothing depends on that.
+fn parse_addresses(json: &[u8]) -> Result<Vec<IpAddr>, Error> {
+    let status: Status = serde_json::from_slice(json).map_err(Error::Parse)?;
+    Ok(status
+        .self_node
+        .map(|node| node.tailscale_ips)
+        .unwrap_or_default())
 }
 
 /// Machines from one `status --json` document, sorted by name so callers and
@@ -166,6 +195,10 @@ struct Node {
     /// Peers carry this; `Self` has no such key at all.
     #[serde(rename = "Expired", default)]
     expired: bool,
+    /// Read only from `Self` — see [`Inventory::addresses`]. Defaulted rather
+    /// than required because a node with no address is a valid document.
+    #[serde(rename = "TailscaleIPs", default)]
+    tailscale_ips: Vec<IpAddr>,
 }
 
 impl From<Node> for MachineInfo {
@@ -200,11 +233,16 @@ impl From<Node> for MachineInfo {
 #[derive(Debug, Clone, Default)]
 pub struct Fake {
     pub machines: Vec<MachineInfo>,
+    pub addresses: Vec<IpAddr>,
 }
 
 impl Inventory for Fake {
     async fn machines(&self) -> Result<Vec<MachineInfo>, Error> {
         Ok(self.machines.clone())
+    }
+
+    async fn addresses(&self) -> Result<Vec<IpAddr>, Error> {
+        Ok(self.addresses.clone())
     }
 }
 
@@ -344,5 +382,45 @@ mod tests {
     #[test]
     fn nonsense_is_a_parse_error_not_a_panic() {
         assert!(matches!(parse(b"not json"), Err(Error::Parse(_))));
+    }
+
+    #[test]
+    fn this_machines_addresses_come_from_self_and_carry_both_families() {
+        let addresses = parse_addresses(STATUS.as_bytes()).expect("fixture parses");
+        assert_eq!(
+            addresses
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["100.64.0.1", "fd7a:115c:a1e0::1"]
+        );
+    }
+
+    /// A peer's address is not this machine's, and a server that bound one
+    /// would be listening on somebody else's behalf.
+    #[test]
+    fn no_peer_address_is_ever_returned() {
+        let addresses = parse_addresses(STATUS.as_bytes()).expect("fixture parses");
+        assert!(!addresses.iter().any(|a| a.to_string() == "100.64.0.2"));
+    }
+
+    /// A tailnet that is down still parses; it simply owns nothing, which is
+    /// what makes "refuse to start" a decision the caller can take.
+    #[test]
+    fn a_document_without_self_yields_no_addresses_rather_than_an_error() {
+        assert!(
+            parse_addresses(b"{}")
+                .expect("an empty document is valid")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_self_node_with_no_addresses_is_not_an_error() {
+        let json = br#"{"Self": {
+            "ID": "n1", "DNSName": "solo.example.ts.net.", "OS": "linux",
+            "Online": true, "LastSeen": "0001-01-01T00:00:00Z"
+        }}"#;
+        assert!(parse_addresses(json).expect("parses").is_empty());
     }
 }
