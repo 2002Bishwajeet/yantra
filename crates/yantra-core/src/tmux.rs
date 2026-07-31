@@ -252,7 +252,7 @@ impl Tmux {
             let session = parse_ids(name, &out.stdout)?;
             self.set_remain_on_exit(exec, &session).await?;
             if let Some(startup) = startup {
-                self.respawn_with(exec, &session, startup).await?;
+                self.respawn(exec, &session.pane_id, startup).await?;
             }
             return Ok(Opened::Created(session));
         }
@@ -428,21 +428,24 @@ impl Tmux {
         }
     }
 
-    /// Replaces the pane's shell with `startup`, so the pane's process *is* the
-    /// command and I-4 can report how it ended. `remain-on-exit` is already set
-    /// by the time this runs.
-    async fn respawn_with<E: Exec>(
+    /// Replaces the pane's process with `command`, so the pane's process *is*
+    /// the command and I-4 can report how it ended.
+    ///
+    /// Also the only way to put a process back into a pane that has already
+    /// died, which under `remain-on-exit` is every pane whose agent has exited.
+    pub async fn respawn<E: Exec>(
         &self,
         exec: &E,
-        session: &Session,
-        startup: &str,
+        pane_id: &str,
+        command: &str,
     ) -> Result<(), Error> {
+        // I-21: `%id`, because a pane target is never `=name`.
         let out = exec
             .exec(&format!(
                 "{} respawn-pane -k -t {} {}",
                 sq(&self.path),
-                sq(&session.pane_id),
-                sq(startup)
+                sq(pane_id),
+                sq(command)
             ))
             .await?;
         if out.success() {

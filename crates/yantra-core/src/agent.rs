@@ -184,6 +184,14 @@ impl Claude {
     }
 }
 
+/// Whether the agent opens a new conversation or picks up the last one in
+/// `repo`. See [`crate::resume`] for why resuming is spelled `--continue`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    New,
+    Resume,
+}
+
 /// Resolve, check, and produce the command the session will run.
 ///
 /// The auth check is a gate rather than a diagnostic, and it earns that by
@@ -193,6 +201,16 @@ impl Claude {
 /// `loggedIn: false`. Refusing turns a silent useless session into a refusal
 /// that names its reason.
 pub async fn prepare<E: Exec>(exec: &E, repo: &str) -> Result<Launch, Error> {
+    ready(exec, repo, Mode::New).await
+}
+
+/// [`prepare`], for an agent that continues the last conversation in `repo`
+/// rather than starting one. The id is still Yantra's, and still fresh.
+pub async fn resume<E: Exec>(exec: &E, repo: &str) -> Result<Launch, Error> {
+    ready(exec, repo, Mode::Resume).await
+}
+
+async fn ready<E: Exec>(exec: &E, repo: &str, mode: Mode) -> Result<Launch, Error> {
     let claude = Claude::resolve(exec).await?;
     let auth = claude.auth(exec).await?;
     if !auth.logged_in {
@@ -202,7 +220,7 @@ pub async fn prepare<E: Exec>(exec: &E, repo: &str) -> Result<Launch, Error> {
     }
     let session_id = new_session_id()?;
     Ok(Launch {
-        command: launch_command(claude.path(), repo, &session_id),
+        command: launch_command(claude.path(), repo, &session_id, mode),
         session_id,
     })
 }
@@ -213,9 +231,18 @@ pub async fn prepare<E: Exec>(exec: &E, repo: &str) -> Result<Launch, Error> {
 /// The `cd` is not redundant with tmux's `-c`: `respawn-pane` without `-c` reuses
 /// the pane's start directory, and the fleet runs two tmux versions (I-42), so
 /// this does not rest on that behaviour being identical in both.
-fn launch_command(claude: &str, repo: &str, session_id: &str) -> String {
+///
+/// It is also what makes [`Mode::Resume`] work at all: `--continue` resolves the
+/// conversation from the **cwd**, so the `cd` is the argument.
+fn launch_command(claude: &str, repo: &str, session_id: &str, mode: Mode) -> String {
+    // Measured on 2.1.220: `--session-id` beside `--continue` is refused outright
+    // unless `--fork-session` is there too.
+    let resuming = match mode {
+        Mode::New => "",
+        Mode::Resume => " --continue --fork-session",
+    };
     format!(
-        "cd {} && exec {} --session-id {}",
+        "cd {} && exec {}{resuming} --session-id {}",
         sq(repo),
         sq(claude),
         sq(session_id)
@@ -275,16 +302,57 @@ mod tests {
         // quotes, so a substring search cannot tell safe from unsafe. Whether a
         // shell agrees is proved on a real one in `tests/agent.rs`.
         assert_eq!(
-            launch_command("/usr/bin/claude", "/tmp/x'; rm -rf ~; '", "an-id"),
+            launch_command(
+                "/usr/bin/claude",
+                "/tmp/x'; rm -rf ~; '",
+                "an-id",
+                Mode::New
+            ),
             r"cd '/tmp/x'\''; rm -rf ~; '\''' && exec '/usr/bin/claude' --session-id 'an-id'"
+        );
+        assert_eq!(
+            launch_command(
+                "/usr/bin/claude",
+                "/tmp/x'; rm -rf ~; '",
+                "an-id",
+                Mode::Resume
+            ),
+            r"cd '/tmp/x'\''; rm -rf ~; '\''' && exec '/usr/bin/claude' --continue --fork-session --session-id 'an-id'"
         );
     }
 
     #[test]
     fn the_launch_command_cds_and_execs() {
-        let cmd = launch_command("/home/u/.local/bin/claude", "/srv/repo", "abc");
+        let cmd = launch_command("/home/u/.local/bin/claude", "/srv/repo", "abc", Mode::New);
         assert!(cmd.starts_with("cd '/srv/repo' && exec "), "{cmd}");
         assert!(cmd.contains("--session-id 'abc'"), "{cmd}");
+    }
+
+    /// The three flags are one decision, and each is load-bearing: `--continue`
+    /// because Yantra kept no id to pass `--resume`, `--fork-session` because
+    /// 2.1.220 refuses `--session-id` beside `--continue` without it, and
+    /// `--session-id` because that is what keeps the transcript path predictable.
+    #[test]
+    fn resuming_continues_the_last_conversation_under_an_id_yantra_chose() {
+        assert_eq!(
+            launch_command(
+                "/home/u/.local/bin/claude",
+                "/srv/repo",
+                "abc",
+                Mode::Resume
+            ),
+            "cd '/srv/repo' && exec '/home/u/.local/bin/claude' --continue --fork-session \
+             --session-id 'abc'"
+        );
+    }
+
+    /// A launch that quietly carried the last conversation into a *new* session
+    /// would be the same bug in the other direction.
+    #[test]
+    fn a_new_launch_carries_none_of_the_resume_flags() {
+        let cmd = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New);
+        assert!(!cmd.contains("--continue"), "{cmd}");
+        assert!(!cmd.contains("--fork-session"), "{cmd}");
     }
 
     /// The fields Yantra does not name must not arrive with the ones it does.

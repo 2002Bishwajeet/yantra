@@ -5,6 +5,7 @@ the tmux session, resumes the agent.
 
 ```sh
 yantra up yantra --agent claude  # open it, and start Claude Code in it
+yantra resume yantra             # start it again where the last conversation stopped
 yantra logs yantra               # what the agent has been saying
 yantra status yantra             # running? finished? crashed?
 yantra down yantra               # stop it, cleanly

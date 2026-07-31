@@ -8,6 +8,7 @@
 ## Commands
 
 - `yantra up <workspace> [--agent claude]`: open the workspace's tmux session, optionally launching Claude Code in it. Running it twice attaches rather than duplicating.
+- `yantra resume <workspace>`: put the agent back on the conversation it left off, in the pane it died in. Refuses when the pane holds something it did not start.
 - `yantra logs <workspace> [-n N]`: the last N turns of the agent's transcript, plus how long since anything was written.
 - `yantra status <workspace>`: running, finished, stopped, crashed, killed — or unclear, with the reason.
 - `yantra down <workspace>`: stop the session, reporting how the agent ended.

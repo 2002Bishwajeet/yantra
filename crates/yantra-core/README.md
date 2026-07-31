@@ -10,9 +10,10 @@ in-process today; the daemon will call the same functions over HTTP.
 ## What it does
 
 ```rust
-use yantra_core::{up, logs, status, down};
+use yantra_core::{up, resume, logs, status, down};
 
 let report = up::up("yantra", "xterm-256color", Some(up::Agent::Claude)).await?;
+let again  = resume::resume("yantra", "xterm-256color").await?;
 let recent = logs::logs("yantra", 20).await?;
 let state  = status::status("yantra").await?;
 let ending = down::down("yantra").await?;
