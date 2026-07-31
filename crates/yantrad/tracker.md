@@ -4,9 +4,10 @@ The slice of [`tracker.md`](../../tracker.md) that belongs to this crate: **the 
 code in `crates/yantrad`**, and nothing else. The main tracker still owns milestones, tasks,
 decisions, open questions and risks, and it still wins when anything disagrees with it.
 
-**The crate is an M0 skeleton — no daemon exists yet.** These invariants were earned during
-research, before there was anywhere to put them, and they are here so that whoever writes the daemon
-finds them before repeating the measurement. Nothing below has been exercised by shipped code.
+**The daemon exists now but is small**: it binds, serves `/healthz`, and refreshes a snapshot in the
+background (Y-069, Y-070). The invariants below were earned during research, before there was
+anywhere to put them, and **none has been exercised by shipped code yet** — the daemon holds no
+state on disk and makes no placement decisions.
 
 ## Invariants
 

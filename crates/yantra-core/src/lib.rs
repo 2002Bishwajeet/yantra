@@ -15,6 +15,7 @@ pub mod down;
 pub mod inventory;
 pub mod logs;
 pub mod sessions;
+pub mod snapshot;
 pub mod ssh;
 pub mod status;
 pub mod terminfo;

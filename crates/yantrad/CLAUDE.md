@@ -1,8 +1,8 @@
 # yantrad — working notes
 
-**It serves, and that is all it does.** Y-069 made it a real `axum` server with one route; the read
-model (Y-070) and the API (Y-071) are not written yet. The most useful thing you can do here is still
-not write code before M4 needs it.
+**It serves and it looks; it does not yet answer.** Y-069 made it an `axum` server with one route,
+Y-070 gave it a background read model. The API (Y-071) is not written. The most useful thing you can
+do here is still not write code before M4 needs it.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
 
@@ -33,6 +33,21 @@ declined.
 
 **Test the refusal, not the bind.** A test asserting the daemon binds passes just as well when the
 fallback is `0.0.0.0`. That is R-22's stated retire condition and the shape to keep.
+
+## Nothing expensive happens on the request path
+
+`ssh.rs` sets `ConnectTimeout=10`, so one asleep machine costs ten seconds. A browser polls whether
+or not anyone is looking, so a handler that calls `sessions::list` per request turns one open tab
+into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
+reads memory. **Never `await` ssh inside a handler.**
+
+The interval is a constant for the same reason the port is. `ControlPersist=300` means anything under
+five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the
+`ControlPath` is per-user, a running daemon speeds the CLI up too.
+
+**Four states, not three**, and folding any two together is the bug this module exists to avoid:
+nobody has looked (`None`), a look succeeded, a look succeeded and a machine within it did not answer,
+and *the look itself failed*. I-47 is the same mistake one layer down.
 
 ## What is already decided
 

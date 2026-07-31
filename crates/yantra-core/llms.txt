@@ -28,6 +28,7 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 - [terminfo.rs](src/terminfo.rs): pass the caller's `TERM` through when the far side knows it, fall back when it does not, install on request.
 - [inventory.rs](src/inventory.rs): `tailscale status --json` behind a trait. Read-only and advisory — it observes machines, it never resolves them (ADR-0009).
 - [workspace.rs](src/workspace.rs): the TOML schema. `deny_unknown_fields`, because a silently ignored key is the worst kind of bug (ADR-0007).
+- [snapshot.rs](src/snapshot.rs): what a caller last learned about the fleet and when. Each class carries its own age; "nobody has looked yet" is `None`. No clock and no loop — those are the daemon's.
 
 ## Decisions that constrain this crate
 
