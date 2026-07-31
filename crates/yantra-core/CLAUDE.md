@@ -15,8 +15,9 @@ yourself formatting a column here, it belongs there.
 
 ## Read before touching anything
 
-**[`tracker.md` §1b](../../tracker.md)** — 46 live invariants, numbered to I-49, most of them earned
-by a bug that looked like something else. They are not style notes. Which ones bind where:
+**[`tracker.md`](tracker.md)** — this crate's own, holding the 34 invariants that bind code here,
+most of them earned by a bug that looked like something else. They are not style notes. Which ones
+bind where:
 
 | Module | Invariants you will trip over |
 | --- | --- |

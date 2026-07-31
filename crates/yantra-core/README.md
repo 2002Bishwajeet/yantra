@@ -42,4 +42,5 @@ just test-mac <machine>   # the handful that need a real remote machine
 
 - [llms.txt](llms.txt) — a map of the crate
 - [CLAUDE.md](CLAUDE.md) — the rules that bind changes here
-- [tracker.md](../../tracker.md) — project state, and §1b's invariants
+- [tracker.md](tracker.md) — the invariants that bind this crate
+- [../../tracker.md](../../tracker.md) — project state, milestones and open tasks

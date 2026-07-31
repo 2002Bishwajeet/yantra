@@ -17,5 +17,6 @@
 
 ## Optional
 
-- [tracker.md](../../tracker.md): M4 is the milestone that needs this. Open decisions that affect it are listed there.
+- [tracker.md](tracker.md): seven invariants waiting here for the daemon that does not exist yet — SQLite, scheduling, PTY. None of them exercised by shipped code.
+- [../../tracker.md](../../tracker.md): M4 is the milestone that needs this. Open decisions that affect it are listed there.
 - [docs/vision.md](../../docs/vision.md): what the daemon is ultimately for.

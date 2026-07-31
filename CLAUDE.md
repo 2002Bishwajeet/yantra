@@ -93,14 +93,17 @@ If a block needs a paragraph to explain it, the block is wrong. Fix the code, no
 
 1. **[`tracker.md`](tracker.md) is the source of truth for project state.** Read it before doing
    anything; update it when you finish. Never start work that isn't represented there — add the task
-   first if it's missing.
+   first if it's missing. It holds milestones, open tasks, decisions, questions and risks; closed
+   tasks are in [`docs/archive/`](docs/archive/) and the session log is
+   [`docs/session-log.md`](docs/session-log.md).
 2. **[`docs/adr/`](docs/adr/) holds settled decisions.** Do not re-litigate an accepted ADR. If you
    think one is wrong, say so and propose a superseding ADR (that is §A1 applied) — do not quietly
    build something else.
-3. **Each crate has its own [`CLAUDE.md`](crates/), `llms.txt` and `README.md`.** Read the one for
-   the crate you are changing — the root documents are the map, not the territory, and the crate
-   files hold the rules that actually bind the code in front of you. [`llms.txt`](llms.txt) at the
-   root indexes everything.
+3. **Each crate has its own [`CLAUDE.md`](crates/), `tracker.md`, `llms.txt` and `README.md`.** Read
+   the ones for the crate you are changing — the root documents are the map, not the territory, and
+   the crate files hold the rules that actually bind the code in front of you. **The invariants live
+   in the crate trackers**, not in the root one. [`llms.txt`](llms.txt) at the root indexes
+   everything.
 4. **[`docs/development.md`](docs/development.md) is the local setup + daily-command reference.**
 5. **[`docs/research/`](docs/research/) holds dated evidence.** Notes reflect the world on their
    access date. Re-verify anything version-sensitive before relying on it.
@@ -151,8 +154,10 @@ traits' own implementations must be tested against the real thing.
 
 ## B5. Conventions
 
-- **Read `tracker.md` §1b (Invariants) before writing orchestration code.** Twenty non-obvious rules
-  that research proved the hard way; violating one produces a bug that looks like something else.
+- **Read the invariants for the crate you are changing before writing orchestration code** —
+  [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds 34 of the 46, and
+  `tracker.md §1b` says where the rest are. They are rules research proved the hard way; violating
+  one produces a bug that looks like something else.
 - **Commits carry no co-author, "Generated with", or AI-attribution trailers of any kind.** The repo
   owner set this rule explicitly. Plain, professional messages only.
 - Task IDs `Y-NNN` from `tracker.md`. Commits: `Y-030: add cargo workspace skeleton`.

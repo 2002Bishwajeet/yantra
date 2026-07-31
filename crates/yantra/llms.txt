@@ -22,6 +22,7 @@
 ## Conventions that are contracts
 
 - [CLAUDE.md](CLAUDE.md): exit codes, what belongs here versus in the library, and how errors are worded.
+- [tracker.md](tracker.md): why this crate has no invariants of its own, and the one that reaches it from yantra-core.
 - [ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md): why this crate is thin.
 
 ## Optional

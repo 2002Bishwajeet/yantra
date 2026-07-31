@@ -7,15 +7,16 @@
 > never be destroyed, which is the case Coder and DevPod cannot represent.
 
 **Read `tracker.md` first.** It is the single source of truth for project state, and it wins over
-anything else — including this file — when they disagree. §1b's invariants are the highest-value
-part: 46 non-obvious rules, numbered to I-49, most earned by a bug that presented as something else.
+anything else — including this file — when they disagree.
 
-Each crate carries its own `CLAUDE.md`, `llms.txt` and `README.md`. Start at the crate you are
-changing rather than reading the root documents end to end.
+Each crate carries its own `CLAUDE.md`, `tracker.md`, `llms.txt` and `README.md`. Start at the crate
+you are changing rather than reading the root documents end to end. **The invariants live in the
+crate trackers** — 46 non-obvious rules, numbered to I-49, most earned by a bug that presented as
+something else, and 34 of them in `yantra-core`. They are the highest-value thing in the repo.
 
 ## Start here
 
-- [tracker.md](tracker.md): project state, milestones, tasks, open questions, risks, and §1b's invariants. Long; skim §1b and the task board for the current milestone.
+- [tracker.md](tracker.md): project state — milestones, open tasks, decisions, open questions, risks, and an index of where the invariants live.
 - [CLAUDE.md](CLAUDE.md): how to work in this repo — think before coding, surgical changes, and what "verification" means here (a real sshd and a real tmux, never a mock).
 - [README.md](README.md): what Yantra is, for a human.
 
@@ -39,4 +40,6 @@ something else.
 - [docs/development.md](docs/development.md): local setup and daily commands.
 - [docs/machines.md](docs/machines.md): the actual fleet this is developed against.
 - [docs/vision.md](docs/vision.md): the long-range shape, including the hardware panel.
-- [docs/archive/m0-m1.md](docs/archive/m0-m1.md): closed milestones. History, not current state.
+- [docs/session-log.md](docs/session-log.md): one line per working session, append-only. Newest last.
+- [docs/archive/m0-m1.md](docs/archive/m0-m1.md): closed milestones M0 and M1. History, not current state.
+- [docs/archive/m2-m3.md](docs/archive/m2-m3.md): closed milestones M2 and M3, with the evidence behind each task.

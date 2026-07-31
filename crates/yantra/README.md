@@ -26,4 +26,5 @@ The CLI does no orchestration of its own — it renders results and picks exit c
 else lives in [`yantra-core`](../yantra-core/README.md). Exit codes are documented in
 [CLAUDE.md](CLAUDE.md) and are worth reading before scripting against them.
 
-See [docs/development.md](../../docs/development.md) for local setup.
+See [docs/development.md](../../docs/development.md) for local setup, [tracker.md](tracker.md) for
+what binds this crate, and [../../tracker.md](../../tracker.md) for project state.

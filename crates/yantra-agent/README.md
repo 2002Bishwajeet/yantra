@@ -8,4 +8,5 @@ tell a sleeping laptop from an unreachable one. It reports; it does not decide, 
 way is deliberate.
 
 **Not implemented yet.** It prints its version and exits. The heartbeat's interval, transport and
-payload are still undecided — see [tracker.md](../../tracker.md).
+payload are still undecided — see [../../tracker.md](../../tracker.md). What research *did* settle is
+in [tracker.md](tracker.md).
