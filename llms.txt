@@ -18,7 +18,8 @@ something else, and 34 of them in `yantra-core`. They are the highest-value thin
 
 - [tracker.md](tracker.md): project state — milestones, open tasks, decisions, open questions, risks, and an index of where the invariants live.
 - [CLAUDE.md](CLAUDE.md): how to work in this repo — think before coding, surgical changes, and what "verification" means here (a real sshd and a real tmux, never a mock).
-- [README.md](README.md): what Yantra is, for a human.
+- [README.md](README.md): what Yantra is, for a human — install, usage, the workspace schema.
+- [docs/architecture.md](docs/architecture.md): the structure, the `up` sequence, the trust boundaries and where the live risks sit, as rendered diagrams. The fastest way to orient.
 
 ## Crates
 

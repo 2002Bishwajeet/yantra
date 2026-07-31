@@ -132,6 +132,7 @@ see Q6 in [`tracker.md`](tracker.md).
 | [`tracker.md`](tracker.md) | **Project state** — milestones, task board, decisions, open questions |
 | [`docs/vision.md`](docs/vision.md) | The destination: full scope, first-class objects, 9-phase roadmap |
 | [`docs/brainstorm.md`](docs/brainstorm.md) | The founding intent document, archived unedited |
+| [`docs/architecture.md`](docs/architecture.md) | **How it fits together** — diagrams of the structure, the request path, the trust boundaries and the roadmap |
 | [`docs/development.md`](docs/development.md) | **Local dev setup** — prerequisites, daily commands, gotchas |
 | [`crates/*/tracker.md`](crates/) | **The invariants** — rules research proved the hard way, filed with the crate each one binds |
 | [`crates/*/CLAUDE.md`](crates/) | Per-crate working rules; `llms.txt` and `README.md` sit beside them |
