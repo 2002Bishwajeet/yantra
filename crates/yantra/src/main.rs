@@ -9,6 +9,7 @@ use clap::{CommandFactory as _, Parser, Subcommand};
 use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
+use yantra_core::logs;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::up;
@@ -34,6 +35,14 @@ enum Command {
         /// Start a coding agent in the session
         #[arg(long, value_enum)]
         agent: Option<AgentArg>,
+    },
+    /// Show what the workspace's agent has been saying
+    Logs {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// How many turns to show
+        #[arg(short = 'n', long, default_value_t = 20)]
+        lines: usize,
     },
     /// List what Yantra can see
     Ls {
@@ -66,6 +75,7 @@ enum LsTarget {
 async fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
+        Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -134,6 +144,68 @@ const KEYCHAIN_NOTE: &str = "\
         launched over ssh cannot read — so a machine that works when you sit at
         it still answers `not logged in` here. check with:
           ssh <machine> claude auth status";
+
+async fn show_logs(name: &str, lines: usize) -> ExitCode {
+    match logs::logs(name, lines).await {
+        Ok(transcript) => {
+            print!("{}", render_logs(&transcript));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_logs(transcript: &logs::Transcript) -> String {
+    let mut out = format!(
+        "transcript: {}\nlast write: {}\n\n",
+        transcript.path,
+        ago(transcript.idle_for())
+    );
+    if transcript.entries.is_empty() {
+        out.push_str("nothing has been said in this session yet\n");
+        return out;
+    }
+
+    for entry in &transcript.entries {
+        let who = match entry.who {
+            logs::Who::User => "you",
+            logs::Who::Assistant => "claude",
+        };
+        out.push_str(&format!(
+            "{:<8}  {who:<6}  ",
+            time_of_day(entry.at.as_deref())
+        ));
+        // Continuations line up under the first line rather than under the
+        // clock, so a wrapped paragraph still reads as one turn.
+        out.push_str(&entry.text.replace('\n', "\n                  "));
+        out.push('\n');
+        if !entry.tools.is_empty() {
+            out.push_str(&format!(
+                "                  tools: {}\n",
+                entry.tools.join(", ")
+            ));
+        }
+    }
+    out
+}
+
+/// The clock part of an ISO-8601 instant. `get` rather than a slice because the
+/// field is someone else's and a short string must not take the process down.
+fn time_of_day(at: Option<&str>) -> &str {
+    at.and_then(|at| at.get(11..19)).unwrap_or("")
+}
+
+fn ago(seconds: i64) -> String {
+    match seconds {
+        s if s < 60 => format!("{s}s ago"),
+        s if s < 3600 => format!("{}m ago", s / 60),
+        s if s < 86_400 => format!("{}h ago", s / 3600),
+        s => format!("{}d ago", s / 86_400),
+    }
+}
 
 /// The terminal the user is sitting at. Unset under cron and in CI, which is
 /// not an error — it is the same case as a terminal the far side never heard of.
@@ -372,6 +444,73 @@ mod tests {
             Cli::try_parse_from(["yantra", "up", "demo", "--agent", "aider"]).is_err(),
             "an agent Yantra does not ship must be refused by name, not started"
         );
+    }
+
+    #[test]
+    fn logs_defaults_to_a_window_rather_than_the_whole_transcript() {
+        let default = Cli::try_parse_from(["yantra", "logs", "demo"]).expect("a bare logs parses");
+        assert!(matches!(
+            default.command,
+            Some(Command::Logs { lines: 20, .. })
+        ));
+        let asked = Cli::try_parse_from(["yantra", "logs", "demo", "-n", "5"]).expect("-n parses");
+        assert!(matches!(
+            asked.command,
+            Some(Command::Logs { lines: 5, .. })
+        ));
+    }
+
+    /// A turn with no tool call must not print an empty `tools:` line, and a
+    /// multi-line answer must stay one turn.
+    #[test]
+    fn a_turn_renders_as_one_block_whether_or_not_it_used_tools() {
+        let rendered = render_logs(&logs::Transcript {
+            path: "/h/.claude/projects/-srv-repo/an-id.jsonl".to_owned(),
+            modified: 1_000,
+            now: 1_004,
+            entries: vec![
+                logs::Entry {
+                    who: logs::Who::User,
+                    at: Some("2026-07-28T18:20:30.543Z".to_owned()),
+                    text: "fix the test".to_owned(),
+                    tools: Vec::new(),
+                },
+                logs::Entry {
+                    who: logs::Who::Assistant,
+                    at: Some("2026-07-28T18:20:34.000Z".to_owned()),
+                    text: "Looking at it.\nTwo lines.".to_owned(),
+                    tools: vec!["Read".to_owned(), "Bash".to_owned()],
+                },
+            ],
+        });
+        assert!(rendered.contains("last write: 4s ago"), "{rendered}");
+        assert!(
+            rendered.contains("18:20:30  you     fix the test"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("tools: Read, Bash"), "{rendered}");
+        assert_eq!(
+            rendered.matches("tools:").count(),
+            1,
+            "a turn with no tools gets no tools line: {rendered}"
+        );
+        assert!(
+            rendered.contains("\n                  Two lines."),
+            "a wrapped answer stays one turn: {rendered}"
+        );
+    }
+
+    /// The transcript exists and has nothing in it — the state right after
+    /// `up --agent claude`, and not an error.
+    #[test]
+    fn an_empty_transcript_says_so_rather_than_printing_a_bare_header() {
+        let rendered = render_logs(&logs::Transcript {
+            path: "/h/x.jsonl".to_owned(),
+            modified: 1_000,
+            now: 1_000,
+            entries: Vec::new(),
+        });
+        assert!(rendered.contains("nothing has been said"), "{rendered}");
     }
 
     fn machine(name: &str, os: Os, online: bool, expired: bool, seen: Option<&str>) -> MachineInfo {
