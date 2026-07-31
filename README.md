@@ -41,8 +41,9 @@ so running it twice attaches rather than duplicating. With `--agent claude` it l
 in that session, and `logs` / `status` / `down` watch it and stop it. All four were verified end to
 end against a live Claude Code on a real machine, not a stub.
 
-Still ahead: the daemon and HTTP API (M4, in progress), the web UI, the scheduler, the browser
-terminal, and the hardware.
+`yantrad` now serves too, though only a health check so far — it listens on this machine's Tailscale
+addresses and refuses to start anywhere else. Still ahead: the HTTP API, the web UI, the scheduler,
+the browser terminal, and the hardware.
 
 **Start here → [`tracker.md`](tracker.md)** — the single source of truth for what is decided, what is
 being worked on, and what is still an open question.
