@@ -38,7 +38,7 @@
 | **mise** | A directory's tools + env + tasks | Your shell | none | `mise.toml` in-repo | mise backends | Yes | No |
 | **direnv** | A directory's exported env vars | Your shell | none | `.envrc` in-repo | direnv stdlib | Yes | No |
 | **devenv / nix / devbox** | A reproducible shell closure + processes | Local or any Nix host | none | Nix store | Nix modules | Linux + macOS | No |
-| **Yantra (proposed)** | **Continuation context**: repo + branch + machine + tmux session + agent | Machines you already own and never destroy | **SSH over Tailscale** (borrowed, not built) | tmux on the host + `bun:sqlite` on the daemon | copy DevPod's `provider.yaml` shape (ADR-0006) | **Yes — the entire point** | **First-class** |
+| **Yantra (proposed)** | **Continuation context**: repo + branch + machine + tmux session + agent | Machines you already own and never destroy | **SSH over Tailscale** (borrowed, not built) | tmux on the host + SQLite on the daemon | copy DevPod's `provider.yaml` shape (ADR-0006) | **Yes — the entire point** | **First-class** |
 
 ## Per-system findings
 
@@ -201,7 +201,7 @@ export interface WorkspaceStatus {
   JSON because a human authors it and comments matter.
 - **Not in the project repo.** Machine preference is a personal fact, not a property of the code. A repo-level
   `.yantra/workspace.yaml` overlay can be merged later; it is not v1.
-- **Status never goes in YAML.** It lives in `bun:sqlite` at `~/.local/state/yantra/yantra.db` alongside machine
+- **Status never goes in YAML.** It lives in SQLite at `~/.local/state/yantra/yantra.db` alongside machine
   inventory and session history. Writing observed state into a user's config file makes it un-diffable and races with
   their editor.
 - Validate on load against a schema derived from the TS types; fail loudly with file path and line, and **warn on
