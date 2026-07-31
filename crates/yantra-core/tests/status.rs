@@ -22,6 +22,15 @@ use yantra_core::workspace::Workspace;
 
 const REPO: &str = "/tmp/statusrepo";
 
+/// The dialog as `claude` 2.1.220 draws it in an 80-column pane, copied from a
+/// real one and then held on screen — which is what the agent does, since it is
+/// waiting for a keystroke that Yantra will never send (ADR-0011).
+const TRUST_DIALOG: &str = "printf '%s\\n' \
+     ' Quick safety check: Is this a project you created or one you trust? (Like your' \
+     ' \u{276f} 1. Yes, I trust this folder' \
+     '   2. No, exit'; \
+     sleep 300";
+
 struct Lab {
     _fixture: SshFixture,
     ssh: Ssh,
@@ -159,7 +168,87 @@ async fn a_live_pane_the_registry_does_not_know_about_is_never_called_running() 
     let verdict = lab.verdict("statusghost").await?;
     assert!(matches!(verdict, Verdict::Unclear { .. }), "{verdict:?}");
     assert!(!verdict.is_running());
+    // I-49 shares this evidence exactly, and only the pane's screen separates
+    // them — so a pane with nothing on it must stay the unclear answer.
+    assert_ne!(verdict, Verdict::AwaitingTrust);
     lab.tmux.kill(&lab.ssh, "statusghost").await?;
+    Ok(())
+}
+
+/// **I-49, produced.** A pane holding the trust dialog and a registry that knows
+/// of no agent is the same pair of readings as the test above — the difference
+/// is on the screen, and `capture-pane` can reach it even though the session has
+/// never been attached and the dialog is on the alternate screen (I-3).
+#[tokio::test]
+async fn an_agent_holding_at_the_trust_dialog_is_named_rather_than_left_unclear() -> Result<()> {
+    let Some(lab) = Lab::start("status-trust").await? else {
+        return Ok(());
+    };
+    lab.registry(None).await?;
+    lab.open("statustrust", TRUST_DIALOG).await?;
+
+    let verdict = lab.verdict("statustrust").await?;
+    assert_eq!(verdict, Verdict::AwaitingTrust, "{verdict:?}");
+    assert!(
+        !verdict.is_running(),
+        "nothing runs until a human answers the dialog"
+    );
+
+    let pane = lab
+        .tmux
+        .pane(&lab.ssh, "statustrust")
+        .await?
+        .expect("the session is open");
+    assert!(
+        !lab.tmux
+            .pane_shows(&lab.ssh, &pane.id, "some later wording")
+            .await?,
+        "a reworded dialog must miss rather than match, which is what makes the \
+         fallback to Unclear the safe direction"
+    );
+
+    lab.tmux.kill(&lab.ssh, "statustrust").await?;
+    Ok(())
+}
+
+/// **The two states kept apart at their hardest point.** `remain-on-exit` leaves
+/// the dialog on the screen of a pane whose process has been killed, so the
+/// evidence for I-49 is still there after exactly the death R-2 describes. The
+/// pane, not the screen, is what settles it.
+#[tokio::test]
+async fn an_agent_killed_at_the_trust_dialog_is_a_death_and_not_a_wait() -> Result<()> {
+    let Some(lab) = Lab::start("status-trustkill").await? else {
+        return Ok(());
+    };
+    lab.registry(None).await?;
+    lab.open("statustrustkill", TRUST_DIALOG).await?;
+
+    let pane = lab
+        .tmux
+        .pane(&lab.ssh, "statustrustkill")
+        .await?
+        .expect("the session is open");
+    let pid = pane.pid.expect("a live pane has a process");
+    lab.ssh.exec(&format!("kill -9 {pid}")).await?;
+    lab.ssh.exec("sleep 1").await?;
+
+    // The dialog is still drawn, which is the whole trap.
+    assert!(
+        lab.tmux
+            .pane_shows(&lab.ssh, &pane.id, "trust this folder")
+            .await?,
+        "the precondition is that the killed pane still shows the dialog"
+    );
+    let verdict = lab.verdict("statustrustkill").await?;
+    assert_eq!(
+        verdict,
+        Verdict::Killed {
+            signal: "KILL".to_owned()
+        },
+        "{verdict:?}"
+    );
+
+    lab.tmux.kill(&lab.ssh, "statustrustkill").await?;
     Ok(())
 }
 

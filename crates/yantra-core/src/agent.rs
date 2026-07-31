@@ -6,6 +6,10 @@
 //! *automated* keystrokes, and there are none. Whoever attaches answers it. The
 //! hazard returns the day Yantra drives the agent, and not before.
 //!
+//! Not handling it is still not the same as not *naming* it: an agent holding at
+//! that dialog is inert and looks like a failed launch (I-49), which is what
+//! [`TRUST_PROMPT`] is for. Reading the screen is not answering it.
+//!
 //! Claude Code only, per the one-agent-first guardrail. The interface to extract
 //! comes from a second working implementation, never from guessing ahead of one.
 //!
@@ -31,6 +35,16 @@ const CANDIDATES: [&str; 6] = [
     "/opt/local/bin",      // MacPorts
     "/usr/bin",            // distro package
 ];
+
+/// A fragment of the trust dialog, and the only evidence that separates I-49's
+/// inert agent from a pane that merely outlived its agent.
+///
+/// Measured on 2.1.220 in a detached 80-column pane, which draws
+/// `❯ 1. Yes, I trust this folder`; the sentence above that line is wrapped by
+/// tmux and this one is not. When a later version rewords it the match stops
+/// hitting and the caller keeps the verdict it already had — a name that is
+/// missed, never one that is wrong.
+pub const TRUST_PROMPT: &str = "trust this folder";
 
 /// A located `claude` binary and the operations that use it. Holding the path
 /// *is* the cache, exactly as in [`crate::tmux::Tmux`] and for the same reason:

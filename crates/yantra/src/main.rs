@@ -166,9 +166,23 @@ async fn show_logs(name: &str, lines: usize) -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
+            if matches!(err, logs::Error::NoTranscript { .. }) {
+                eprintln!("{}", transcript_note(name));
+            }
             ExitCode::FAILURE
         }
     }
+}
+
+/// I-49: an agent that was launched and never spoken to has no transcript, and
+/// one still at the trust prompt never got that far — two states this error
+/// cannot tell apart, and `status` can.
+fn transcript_note(workspace: &str) -> String {
+    format!(
+        "\x20 note: a fresh agent has none yet, and one waiting at claude's trust prompt\n\
+         \x20       never gets that far. which of those it is:\n\
+         \x20         yantra status {workspace}"
+    )
 }
 
 fn render_logs(transcript: &logs::Transcript) -> String {
@@ -231,6 +245,9 @@ async fn show_status(name: &str) -> ExitCode {
                     agent.session_id, agent.pid
                 );
             }
+            if report.verdict == Verdict::AwaitingTrust {
+                println!("{}", trust_note(&report.workspace.name));
+            }
             // Non-zero when nothing is running, so `yantra status x && …` means
             // what it looks like it means in a shell.
             if report.verdict.is_running() {
@@ -277,8 +294,24 @@ fn describe(verdict: &Verdict) -> String {
         Verdict::Killed { signal } => {
             format!("killed by SIG{signal}, so it ran no shutdown of its own")
         }
+        Verdict::AwaitingTrust => {
+            "waiting at claude's trust prompt, so it has done nothing yet".to_owned()
+        }
         Verdict::Unclear { because } => format!("unclear — {because}"),
     }
+}
+
+/// I-49 at the one place someone meets it. The state is only legible if it says
+/// who has to act, and ADR-0011 means that is never Yantra: it sends the agent no
+/// input, so the dialog is answered by a person or not at all.
+fn trust_note(workspace: &str) -> String {
+    format!(
+        "\x20 note: the first run in a directory asks whether you trust it, and the agent\n\
+         \x20       does nothing at all until a human answers — yantra never answers it\n\
+         \x20       for you. this prints the command that attaches:\n\
+         \x20         yantra up {workspace}\n\
+         \x20       then choose `Yes, I trust this folder`."
+    )
 }
 
 /// The terminal the user is sitting at. Unset under cron and in CI, which is
@@ -612,6 +645,48 @@ mod tests {
             .contains("the sources disagree"),
             "an unclear verdict is useless without its reason"
         );
+        let waiting = describe(&Verdict::AwaitingTrust);
+        assert!(waiting.contains("trust prompt"), "{waiting}");
+        assert!(
+            waiting.contains("done nothing"),
+            "the point of the state is that no work has happened: {waiting}"
+        );
+    }
+
+    /// I-49: naming the state is half of it — the other half is who answers the
+    /// dialog, which ADR-0011 says is never Yantra.
+    #[test]
+    fn the_trust_note_names_the_answer_and_who_has_to_give_it() {
+        let note = trust_note("demo");
+        // The answer quoted verbatim as 2.1.220 draws it, so it is the thing a
+        // person is looking at rather than a paraphrase of it.
+        assert!(note.contains("Yes, I trust this folder"), "{note}");
+        assert!(note.contains("yantra up demo"), "{note}");
+        assert!(
+            note.contains("yantra never"),
+            "a user must not be left expecting Yantra to answer it: {note}"
+        );
+    }
+
+    /// An absent transcript is two states — never launched, and launched but
+    /// still at the dialog — so the note has to send the reader somewhere that
+    /// can tell them apart rather than guess for them.
+    #[test]
+    fn the_missing_transcript_note_points_at_the_command_that_can_tell_which() {
+        let note = transcript_note("demo");
+        assert!(note.contains("trust prompt"), "{note}");
+        assert!(note.contains("yantra status demo"), "{note}");
+    }
+
+    /// `\` eats the leading whitespace of a continued line, so an indented one
+    /// needs `\x20`. That was shipped wrong once already.
+    #[test]
+    fn the_notes_keep_their_indentation() {
+        for note in [trust_note("demo"), transcript_note("demo")] {
+            for line in note.lines() {
+                assert!(line.starts_with(' '), "unindented note line: {line:?}");
+            }
+        }
     }
 
     fn machine(name: &str, os: Os, online: bool, expired: bool, seen: Option<&str>) -> MachineInfo {

@@ -359,6 +359,31 @@ impl Tmux {
             .transpose()
     }
 
+    /// Whether the pane's *visible* screen holds `text` — which for an agent TUI
+    /// is the alternate screen, the one thing `capture-pane` can reach (I-3).
+    ///
+    /// The match runs on the far side, so a pane's contents never cross the wire
+    /// and what comes back is one bit. A pane that has gone away answers `false`
+    /// rather than failing: a caller asking "is it showing this?" can act on a
+    /// no, and there is nothing else it could do with an error.
+    pub async fn pane_shows<E: Exec>(
+        &self,
+        exec: &E,
+        pane_id: &str,
+        text: &str,
+    ) -> Result<bool, Error> {
+        // I-21: `%id`, because a pane target is never `=name`.
+        let out = exec
+            .exec(&format!(
+                "{} capture-pane -p -t {} | grep -qF -- {}",
+                sq(&self.path),
+                sq(pane_id),
+                sq(text)
+            ))
+            .await?;
+        Ok(out.success())
+    }
+
     /// Kills the session if it exists. Absence is success, not an error.
     pub async fn kill<E: Exec>(&self, exec: &E, name: &str) -> Result<(), Error> {
         validate_name(name)?;

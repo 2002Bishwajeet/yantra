@@ -11,6 +11,16 @@
 //! So two sources are read — the pane, and `claude agents --json` — and where
 //! they contradict each other that contradiction is the answer, not something
 //! to resolve by preferring one.
+//!
+//! **One other state hides inside that contradiction**, and it is not a death at
+//! all: a fresh agent in an unseen directory holds at Claude Code's trust dialog,
+//! in no registry entry and writing no transcript (I-49). The two sources say
+//! exactly what they say for a silent death, so the sources cannot tell them
+//! apart — the dialog still on the pane's screen can, and that is asked for only
+//! once the contradiction has already happened. It fails to a fallback: a
+//! reworded dialog, a pane too narrow to hold the line, or an ssh that does not
+//! answer all read as [`Verdict::Unclear`], which is the verdict there was
+//! before. Yantra reads that screen and never answers it (ADR-0011).
 
 use crate::agent::{self, Claude, Running};
 use crate::ssh::{self, Exec, Ssh};
@@ -40,6 +50,10 @@ pub enum Verdict {
     Killed {
         signal: String,
     },
+    /// Launched, and holding at Claude Code's trust dialog until a human answers
+    /// it — no registry entry, no transcript, and no work done in between
+    /// (I-49). Not running, and not a failure either.
+    AwaitingTrust,
     /// The two sources contradict each other. **Reported rather than resolved**
     /// — a pane that is alive while `claude` knows of no agent in that
     /// directory is exactly R-2's silent death, and guessing which source to
@@ -108,7 +122,18 @@ pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: Workspace) -> Result<
         Err(_) => None,
     };
 
-    let verdict = verdict(pane.as_ref(), agent.is_some());
+    // Asked only where the two sources already disagree, so the extra round trip
+    // buys the one verdict that has no action in it. An ssh that fails here
+    // leaves that verdict exactly as it was.
+    let at_trust_prompt = match &pane {
+        Some(pane) if !pane.dead && agent.is_none() => tmux
+            .pane_shows(exec, &pane.id, agent::TRUST_PROMPT)
+            .await
+            .unwrap_or(false),
+        _ => false,
+    };
+
+    let verdict = verdict(pane.as_ref(), agent.is_some(), at_trust_prompt);
     Ok(Report {
         workspace,
         pane,
@@ -117,17 +142,17 @@ pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: Workspace) -> Result<
     })
 }
 
-fn verdict(pane: Option<&Pane>, registered: bool) -> Verdict {
+fn verdict(pane: Option<&Pane>, registered: bool, at_trust_prompt: bool) -> Verdict {
     let Some(pane) = pane else {
         return Verdict::NoSession;
     };
     if !pane.dead {
-        return if registered {
-            Verdict::Running
-        } else {
-            Verdict::Unclear {
+        return match (registered, at_trust_prompt) {
+            (true, _) => Verdict::Running,
+            (false, true) => Verdict::AwaitingTrust,
+            (false, false) => Verdict::Unclear {
                 because: "the pane is alive but claude knows of no agent in that directory",
-            }
+            },
         };
     }
     match (pane.status, pane.signal.as_deref()) {
@@ -161,13 +186,13 @@ mod tests {
 
     #[test]
     fn an_absent_session_is_not_a_crash() {
-        assert_eq!(verdict(None, false), Verdict::NoSession);
+        assert_eq!(verdict(None, false, false), Verdict::NoSession);
     }
 
     #[test]
     fn a_live_pane_with_a_registered_agent_is_running() {
         assert_eq!(
-            verdict(Some(&pane(false, None, None)), true),
+            verdict(Some(&pane(false, None, None)), true, false),
             Verdict::Running
         );
         assert!(Verdict::Running.is_running());
@@ -177,7 +202,7 @@ mod tests {
     /// pane and it is not the agent.
     #[test]
     fn a_live_pane_with_no_registered_agent_is_not_called_healthy() {
-        let verdict = verdict(Some(&pane(false, None, None)), false);
+        let verdict = verdict(Some(&pane(false, None, None)), false, false);
         assert!(matches!(verdict, Verdict::Unclear { .. }), "{verdict:?}");
         assert!(
             !verdict.is_running(),
@@ -185,18 +210,43 @@ mod tests {
         );
     }
 
+    /// I-49. The two sources say the same thing here as they do one test up —
+    /// only the dialog on the screen separates the two, and naming the state
+    /// must not promote it to a running agent.
+    #[test]
+    fn a_live_pane_still_showing_the_trust_dialog_is_named_rather_than_unclear() {
+        assert_eq!(
+            verdict(Some(&pane(false, None, None)), false, true),
+            Verdict::AwaitingTrust
+        );
+        assert!(
+            !Verdict::AwaitingTrust.is_running(),
+            "an agent that has not been let out of the dialog is doing nothing"
+        );
+    }
+
+    /// The registry outranks the screen: an agent that answered the dialog
+    /// leaves it drawn until something redraws over it.
+    #[test]
+    fn a_registered_agent_is_running_whatever_is_left_on_its_screen() {
+        assert_eq!(
+            verdict(Some(&pane(false, None, None)), true, true),
+            Verdict::Running
+        );
+    }
+
     #[test]
     fn the_three_ways_a_pane_can_end_are_told_apart() {
         assert_eq!(
-            verdict(Some(&pane(true, Some(0), None)), false),
+            verdict(Some(&pane(true, Some(0), None)), false, false),
             Verdict::Finished
         );
         assert_eq!(
-            verdict(Some(&pane(true, Some(SIGTERM_EXIT), None)), false),
+            verdict(Some(&pane(true, Some(SIGTERM_EXIT), None)), false, false),
             Verdict::Stopped
         );
         assert_eq!(
-            verdict(Some(&pane(true, Some(1), None)), false),
+            verdict(Some(&pane(true, Some(1), None)), false, false),
             Verdict::Crashed { status: 1 }
         );
     }
@@ -207,18 +257,18 @@ mod tests {
     #[test]
     fn a_signal_killed_pane_is_never_mistaken_for_a_clean_exit() {
         assert_eq!(
-            verdict(Some(&pane(true, None, Some("KILL"))), false),
+            verdict(Some(&pane(true, None, Some("KILL"))), false, false),
             Verdict::Killed {
                 signal: "KILL".to_owned()
             }
         );
         assert_ne!(
-            verdict(Some(&pane(true, None, Some("TERM"))), false),
+            verdict(Some(&pane(true, None, Some("TERM"))), false, false),
             Verdict::Finished,
             "an unhandled SIGTERM is not the same as exiting 0"
         );
         assert_ne!(
-            verdict(Some(&pane(true, None, Some("TERM"))), false),
+            verdict(Some(&pane(true, None, Some("TERM"))), false, false),
             Verdict::Stopped,
             "nor the same as handling one and exiting 143"
         );
