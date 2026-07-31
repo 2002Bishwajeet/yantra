@@ -1,0 +1,55 @@
+# yantra (CLI) — working notes
+
+Scoped to this crate. The root [`CLAUDE.md`](../../CLAUDE.md) still binds.
+
+## What belongs here, and what does not
+
+This crate is where Yantra is allowed to **print** and to **choose an exit code**. That is the whole
+reason it is separate from [`yantra-core`](../yantra-core/CLAUDE.md), which may do neither
+([ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md)).
+
+So: layout, wording, tables, exit codes and clap wiring live here. Anything that decides *what is
+true* — how to reach a machine, what a verdict means, whether a session exists — lives in the
+library, even when it would be three lines shorter inline. The test is whether the web UI would need
+the same logic: if yes, it is not CLI code.
+
+## Exit codes are a contract
+
+Someone will put these in a shell script, so they are behaviour, not cosmetics.
+
+| Case | Code | Why |
+| --- | --- | --- |
+| bare `yantra` | **0** | it prints help; this predates clap and is preserved deliberately, because clap's default is 2 |
+| unknown command / bad args | 2 | clap's own |
+| `status`, and nothing is running | 1 | so `yantra status x && …` reads the way it looks |
+| `ls sessions` with a machine unreachable | 1 | the table still prints — a caller must be able to tell the answer is **partial** |
+| `down` on something not running | **0** | absence is the state asked for (I-30, root §B4) |
+
+Changing one of these is a breaking change even though nothing declares it.
+
+## Saying things
+
+- **Name the fix, not just the fault.** `downgrade_notice` ends with the exact command that ends the
+  problem; `KEYCHAIN_NOTE` explains why a Mac that works in a terminal says *not logged in* over ssh
+  (I-44). An error a user cannot act on is half an error.
+- **Print the reason with the verdict.** `describe(Verdict::Unclear { because })` carries its own
+  explanation, because "unclear" alone tells no one anything.
+- `report_error` walks the `source()` chain — the useful detail is usually a level or two down, so
+  never flatten an error to its top line.
+- Multi-line string constants: Rust's `\` line-continuation eats leading whitespace, so an indented
+  first line needs `\x20`. Print it and look at it; this was shipped wrong once.
+
+## clap
+
+- Value enums are spelled out, not bools — `--agent claude` rather than `--agent`, so a second agent
+  is a new variant rather than a new flag.
+- `Cli::command().debug_assert()` is a test. It catches conflicting flags and duplicate names, which
+  is the class of mistake the old hand-rolled parser could not make.
+- Anything a user types is part of the contract: add a parse test for it. `debug_assert` does not
+  check spellings.
+
+## Tests
+
+Rendering functions take data and return a `String` for exactly this reason — they are testable
+without a machine, a terminal, or a subprocess. Keep them that way: no `println!` inside a
+`render_*`, only in the `async fn` that calls it.

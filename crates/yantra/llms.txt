@@ -1,0 +1,30 @@
+# yantra (CLI)
+
+> The command-line client, and the daemon's first client. It renders and chooses exit codes; every
+> decision about what is true belongs to `yantra-core` (ADR-0005). It calls that crate in-process
+> today and becomes an HTTP client of `yantrad` later — a change of *where* the work is called from,
+> not *what* it does. One file, `src/main.rs`.
+
+## Commands
+
+- `yantra up <workspace> [--agent claude]`: open the workspace's tmux session, optionally launching Claude Code in it. Running it twice attaches rather than duplicating.
+- `yantra logs <workspace> [-n N]`: the last N turns of the agent's transcript, plus how long since anything was written.
+- `yantra status <workspace>`: running, finished, stopped, crashed, killed — or unclear, with the reason.
+- `yantra down <workspace>`: stop the session, reporting how the agent ended.
+- `yantra ls machines`: the tailnet, advisory only.
+- `yantra ls sessions`: tmux sessions on every machine a workspace names.
+- `yantra fix-terminfo <machine>`: teach a machine the terminal you are sitting at.
+
+## Source
+
+- [src/main.rs](src/main.rs): the whole crate. Clap definitions at the top, one `async fn` per command, then the `render_*` and `describe` helpers, then tests.
+
+## Conventions that are contracts
+
+- [CLAUDE.md](CLAUDE.md): exit codes, what belongs here versus in the library, and how errors are worded.
+- [ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md): why this crate is thin.
+
+## Optional
+
+- [yantra-core](../yantra-core/llms.txt): everything this crate calls.
+- [docs/development.md](../../docs/development.md): local setup and daily commands.
