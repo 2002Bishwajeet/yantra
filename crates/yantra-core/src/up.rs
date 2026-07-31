@@ -60,6 +60,16 @@ pub enum Error {
     )]
     StartupConflict { workspace: String, startup: String },
 
+    /// Names all three of workspace, path and machine, because any one of them
+    /// can be the thing that is wrong and the reader cannot tell which from the
+    /// other two.
+    #[error("workspace `{workspace}` opens at `{repo}`, and `{machine}` has no such directory")]
+    NoRepo {
+        workspace: String,
+        repo: String,
+        machine: String,
+    },
+
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
 }
@@ -124,9 +134,40 @@ pub async fn open<E: ssh::Exec>(
     agent_command: Option<&str>,
 ) -> Result<Opened, Error> {
     let repo = workspace.repo.to_string_lossy();
+    ensure_repo(exec, workspace, &repo).await?;
     let startup = agent_command.or(workspace.startup.as_deref());
     let opened = tmux.ensure(exec, &workspace.name, &repo, startup).await?;
     Ok(opened)
+}
+
+/// Refuses a `repo` the machine does not have, before anything is opened.
+///
+/// A missing directory is otherwise invisible: `new-session -c` falls back to
+/// `$HOME` rather than failing, so the session comes up healthy in the wrong
+/// tree and an agent launched into it works on nothing. Costs one round trip,
+/// and it is on the far side because `repo` is a path on *that* machine
+/// (ADR-0009).
+///
+/// Refused even when the session is already there. Skipping the check for an
+/// existing session would mean asking tmux first, which is I-1's
+/// `has-session || create` race in a new place.
+async fn ensure_repo<E: ssh::Exec>(
+    exec: &E,
+    workspace: &Workspace,
+    repo: &str,
+) -> Result<(), Error> {
+    if exec.exec(&exists_command(repo)).await?.success() {
+        return Ok(());
+    }
+    Err(Error::NoRepo {
+        workspace: workspace.name.clone(),
+        repo: repo.to_owned(),
+        machine: workspace.machine.clone(),
+    })
+}
+
+fn exists_command(repo: &str) -> String {
+    format!("test -d {}", tmux::sq(repo))
 }
 
 /// `machine` is used as an ssh destination verbatim, so `~/.ssh/config` decides
@@ -135,4 +176,24 @@ pub async fn open<E: ssh::Exec>(
 /// Tailscale inventory observes machines, it does not resolve them.
 fn machine_for(workspace: &Workspace) -> Result<Machine, Error> {
     ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The existence check puts `repo` in front of a remote shell, and a
+    /// workspace file is where it comes from — the boundary I-26 drew.
+    ///
+    /// Asserted as an exact string, as in [`crate::agent`]: the correctly
+    /// escaped form still *contains* `; rm -rf ~; `, inside quotes, so a
+    /// substring search cannot tell safe from unsafe. A real `/bin/sh` settles
+    /// it in `tests/up_walking_skeleton.rs`.
+    #[test]
+    fn a_hostile_repo_path_cannot_break_out_of_the_check() {
+        assert_eq!(
+            exists_command("/tmp/x'; rm -rf ~; '"),
+            r"test -d '/tmp/x'\''; rm -rf ~; '\'''"
+        );
+    }
 }
