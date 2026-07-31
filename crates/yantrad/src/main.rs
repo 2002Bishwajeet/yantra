@@ -19,6 +19,8 @@ use axum::Router;
 use axum::routing::get;
 use yantra_core::inventory::{Inventory, Tailscale};
 
+mod refresh;
+
 const PORT: u16 = 7717;
 
 #[derive(Debug, thiserror::Error)]
@@ -73,8 +75,10 @@ fn report(error: &Error) {
     }
 }
 
-async fn serve<I: Inventory>(inventory: &I) -> Result<(), Error> {
+async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
+    let model = refresh::Model::default();
+    refresh::spawn(&model, inventory.clone());
     let app = Router::new().route("/healthz", get(|| async { "ok" }));
 
     let mut servers = tokio::task::JoinSet::new();
