@@ -31,7 +31,9 @@
 //! registered agent is R-2's shape ([`crate::status`]), and respawning it would
 //! destroy whatever is in there; an agent waiting at the trust dialog has no
 //! conversation to continue and needs a human, never Yantra (ADR-0011). Both
-//! are refusals.
+//! are refusals, and so is a `repo` the machine no longer has — Y-081's check
+//! binds a respawn exactly as it binds an open, or `resume` would report success
+//! for an agent whose `cd` failed.
 //!
 //! [`brainstorm.md`]: ../../../docs/brainstorm.md
 
@@ -158,6 +160,9 @@ pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: &Workspace) -> Result
             Ok(Outcome::Resumed(launch))
         }
         Plan::Respawn(pane_id) => {
+            // Y-081 binds both paths or neither: `Plan::Open` inherits the check
+            // from `up::open`, and a respawn goes straight to tmux instead.
+            up::ensure_repo(exec, workspace, &repo).await?;
             let launch = agent::resume(exec, &repo).await?;
             tmux.respawn(exec, pane_id, &launch.command).await?;
             Ok(Outcome::Resumed(launch))

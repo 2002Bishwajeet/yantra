@@ -151,7 +151,7 @@ pub async fn open<E: ssh::Exec>(
 /// Refused even when the session is already there. Skipping the check for an
 /// existing session would mean asking tmux first, which is I-1's
 /// `has-session || create` race in a new place.
-async fn ensure_repo<E: ssh::Exec>(
+pub(crate) async fn ensure_repo<E: ssh::Exec>(
     exec: &E,
     workspace: &Workspace,
     repo: &str,

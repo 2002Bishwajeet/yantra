@@ -312,6 +312,69 @@ async fn an_agent_waiting_at_the_trust_prompt_is_refused_and_left_alone() -> Res
     Ok(())
 }
 
+/// **Y-081's refusal, on the path that does not go through `up::open`.** A
+/// respawn reaches tmux directly, so without the same check `resume` would put
+/// `cd '<gone>' && exec claude …` into the pane, watch the `cd` fail, and report
+/// success for an agent that never started.
+///
+/// The assertion that matters is the one about what did *not* happen: the pane
+/// is still dead afterwards. An implementation that refused *after* respawning
+/// would pass on the error type alone.
+#[tokio::test]
+async fn a_repo_that_is_gone_is_refused_before_the_pane_is_respawned() -> Result<()> {
+    let Some(lab) = Lab::start("resume-norepo").await? else {
+        return Ok(());
+    };
+    let ws = workspace("resumenorepo");
+
+    let first = agent::prepare(&lab.ssh, REPO).await?;
+    up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command)).await?;
+    lab.settle().await?;
+
+    let before = lab.pane_of(&ws.name).await?;
+    let pid = before.pid.expect("a live pane has a process");
+    lab.ssh.exec(&format!("kill -9 {pid}")).await?;
+    lab.ssh.exec(&format!("rm -rf {REPO}")).await?;
+    lab.settle().await?;
+
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+        .await
+        .expect_err("a repo the machine no longer has cannot be resumed into");
+    assert!(
+        matches!(err, resume::Error::Up(up::Error::NoRepo { .. })),
+        "{err:?}"
+    );
+
+    let after = lab.pane_of(&ws.name).await?;
+    assert_eq!(after.id, before.id, "the same pane");
+    assert!(
+        after.dead,
+        "the refusal happened before the respawn — a pane with a process in it \
+         means the agent was started into a directory that is not there"
+    );
+    assert_eq!(
+        lab.argv().await?.len(),
+        1,
+        "only the original launch ever ran"
+    );
+
+    // The same refusal on the other path: with no session at all, `resume` goes
+    // through `up::open`, and the two verbs have to agree.
+    lab.tmux.kill(&lab.ssh, &ws.name).await?;
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+        .await
+        .expect_err("opening into a missing repo is refused too");
+    assert!(
+        matches!(err, resume::Error::Up(up::Error::NoRepo { .. })),
+        "{err:?}"
+    );
+    assert!(
+        lab.tmux.list(&lab.ssh).await?.is_empty(),
+        "and it left no session behind"
+    );
+    Ok(())
+}
+
 /// R-2's shape: something is alive in that pane and `claude` knows of no agent
 /// in that directory. Respawning would destroy it to find out what it was.
 #[tokio::test]
