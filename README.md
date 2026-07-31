@@ -21,7 +21,7 @@ and Yantra restores the context — picking a machine, opening the session, and 
 
            which machine was I on?
                      ↓
-                    ssh                                  yantra up nexus
+                    ssh                                  yantra up yantra
                      ↓                          ────────────────────────────────
                 find the repo                    machine chosen · ssh · tmux
                      ↓                           restored · repo open · agent
@@ -89,11 +89,11 @@ That is the whole schema. An unknown key is an error rather than a line that is 
 Then:
 
 ```bash
-yantra up nexus                  # open the session (run again to attach)
-yantra up nexus --agent claude   # ...and start Claude Code in it
-yantra status nexus              # running, finished, stopped, crashed or killed
-yantra logs nexus -n 40          # what the agent has been saying
-yantra down nexus                # stop it, giving the agent a chance to shut down
+yantra up yantra                 # open the session (run again to attach)
+yantra up yantra --agent claude  # ...and start Claude Code in it
+yantra status yantra             # running, finished, stopped, crashed or killed
+yantra logs yantra -n 40         # what the agent has been saying
+yantra down yantra               # stop it, giving the agent a chance to shut down
 yantra ls machines               # what Tailscale can see
 yantra ls sessions               # what tmux is holding, across every machine
 yantra fix-terminfo <machine>    # teach a machine about your terminal

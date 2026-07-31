@@ -65,7 +65,7 @@ Client-only — no server, no database; state is JSON under `~/.devpod`. Its `pr
 
 Fields worth knowing: `image`/`build`/`dockerComposeFile`, `features`, `customizations`, `containerEnv` (baked in) vs `remoteEnv` (per-process), `forwardPorts`, `mounts`, `workspaceFolder`, `remoteUser`, `hostRequirements` (cpus/memory/storage/gpu). Lifecycle hooks, in order: `initializeCommand` (on the **host**, before the container exists) → `onCreateCommand` (once) → `updateContentCommand` (once; the prebuild boundary) → `postCreateCommand` (once) → `postStartCommand` (**every** start) → `postAttachCommand` (**every** attach), with `waitFor` selecting the blocking hook.
 
-**Should Yantra adopt it? No — not as the root schema.** Three fatal gaps: no *identity* (it is a file in a repo, not an addressable object, so it cannot express "my nexus workspace on the Mac"); no *machine* concept beyond `hostRequirements`; and its lifecycle bottoms out at the container, whereas Yantra's unit is a **session on a host** that may involve no container at all. **Steal two things**: the once-vs-every-start distinction, and a reserved `devcontainer` field so a workspace can delegate later without a schema break.
+**Should Yantra adopt it? No — not as the root schema.** Three fatal gaps: no *identity* (it is a file in a repo, not an addressable object, so it cannot express "my yantra workspace on the Mac"); no *machine* concept beyond `hostRequirements`; and its lifecycle bottoms out at the container, whereas Yantra's unit is a **session on a host** that may involve no container at all. **Steal two things**: the once-vs-every-start distinction, and a reserved `devcontainer` field so a workspace can delegate later without a schema break.
 
 ### 4. GitHub Codespaces
 
