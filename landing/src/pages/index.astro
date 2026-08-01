@@ -1,54 +1,93 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import Frame from '../components/Frame.astro';
+import Header from '../components/Header.astro';
+import Shrine from '../components/Shrine.astro';
+import Footer from '../components/Footer.astro';
 ---
 
 <Layout
   title="Yantra — coming soon"
   description="One control plane for every machine you already own."
 >
-  <main class="shell">
-    <p class="deva">यन्त्र</p>
-    <p class="latin">Yantra</p>
-    <p class="soon">Coming soon</p>
-  </main>
+  <Frame />
+
+  <div class="shell">
+    <Header />
+
+    <main class="sheet">
+      <div class="stage">
+        <Shrine />
+        <p class="say">
+          One control plane for every machine you already own. Ask for a workspace &mdash; it
+          picks the machine, opens the session, <b>resumes the agent.</b>
+        </p>
+        <p class="soon"><span class="dot"></span>Coming soon</p>
+      </div>
+    </main>
+
+    <Footer />
+  </div>
 </Layout>
 
 <style>
-  /* Y-084 ships the ground and the faces only. The frame, the shrine and the shader
-     arrive in Y-085..Y-087; this page exists so the token pipeline is reviewable on its own. */
+  /* The frame is fixed to the viewport, so the sheet is inset by its width rather than
+     laid out after it. */
   .shell {
     position: relative;
     z-index: 10;
     min-height: 100dvh;
+    padding: var(--border-band) calc(var(--border-band) + clamp(.2rem, 2vw, 2rem));
     display: flex;
     flex-direction: column;
+  }
+  .sheet {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    padding: clamp(.6rem, 1.6vh, 1.4rem) 0;
+    min-height: 0;
+  }
+  .stage { display: flex; flex-direction: column; align-items: center; }
+
+  .say {
+    max-width: 40ch;
+    margin: clamp(1rem, 3vh, 1.9rem) auto 0;
+    text-align: center;
+    font-size: var(--step-1);
+    line-height: 1.4;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  .say b {
+    font-weight: 400;
+    font-family: var(--font-display);
+    font-size: 1.08em;
+    color: var(--accent);
+  }
+
+  .soon {
+    display: flex;
     align-items: center;
     justify-content: center;
-    gap: .4rem;
-    text-align: center;
-  }
-  .deva {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: var(--step-3);
-    line-height: .92;
-    color: var(--ink);
-  }
-  .latin {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: var(--step--1);
-    text-transform: uppercase;
-    letter-spacing: var(--track-wide);
-    text-indent: var(--track-wide);
-    color: var(--ink);
-  }
-  .soon {
-    margin: 1.4rem 0 0;
+    gap: .8rem;
+    margin: clamp(1rem, 2.6vh, 1.6rem) 0 0;
     font-family: var(--font-mono);
     font-size: var(--step--1);
     text-transform: uppercase;
     letter-spacing: .28em;
     color: var(--ink-soft);
+  }
+  .dot {
+    width: .5rem;
+    height: .5rem;
+    background: var(--accent);
+    border: var(--line-pen) solid var(--ink);
+    border-radius: 50%;
+    animation: breathe 3.4s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(.62); opacity: .55; }
   }
 </style>

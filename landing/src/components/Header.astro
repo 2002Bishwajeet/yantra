@@ -1,0 +1,66 @@
+---
+import Sigil from './motifs/Sigil.astro';
+
+const repo = 'https://github.com/2002Bishwajeet/yantra';
+---
+
+<header class="masthead">
+  <a class="mark" href={repo}>
+    <Sigil class="sigil" />
+    <span class="name">यन्त्र</span>
+  </a>
+  <div class="meta">
+    <span class="chip">Alpha</span>
+    <a class="lnk" href={repo}>GitHub</a>
+  </div>
+</header>
+<div class="rule2"></div>
+
+<style>
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: clamp(.7rem, 1.6vw, 1.4rem) 0 clamp(.6rem, 1.2vw, 1rem);
+  }
+  .mark {
+    display: flex;
+    align-items: center;
+    gap: .62rem;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .mark :global(.sigil) { width: 1.85rem; height: 1.85rem; flex: none; }
+  .name {
+    font-family: var(--font-display);
+    font-size: var(--step-1);
+    line-height: 1;
+    padding-bottom: .12em;
+  }
+  .meta { display: flex; align-items: center; gap: clamp(.5rem, 1.4vw, 1.1rem); }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    text-transform: uppercase;
+    letter-spacing: var(--track-label);
+    border: var(--line-pen) solid var(--ink);
+    padding: .28em .7em .22em;
+    background: var(--hingula);
+    color: var(--shankha);
+    white-space: nowrap;
+  }
+  .lnk {
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    text-transform: uppercase;
+    letter-spacing: var(--track-label);
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: var(--line-pen) solid var(--rule);
+    padding-bottom: .15em;
+    transition: border-color .2s, color .2s;
+  }
+  .lnk:hover,
+  .lnk:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+</style>

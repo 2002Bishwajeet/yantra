@@ -1,0 +1,36 @@
+---
+import Vine from './motifs/Vine.astro';
+
+const year = 2026;
+---
+
+<div class="rule2"></div>
+<footer class="foot">
+  <p class="stack">Rust <s>·</s> Tailscale <s>·</s> tmux</p>
+  <div class="vine" aria-hidden="true"><Vine length={900} height={26} /></div>
+  <p class="stack">MIT <s>·</s> {year}</p>
+</footer>
+
+<style>
+  .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: clamp(.7rem, 1.4vw, 1.1rem) 0 clamp(.3rem, 1vw, .7rem);
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    text-transform: uppercase;
+    letter-spacing: .13em;
+    color: var(--ink-soft);
+  }
+  .stack { margin: 0; white-space: nowrap; }
+  .stack s { text-decoration: none; color: var(--accent); }
+  .vine { flex: 1; min-width: 60px; height: 14px; opacity: .85; }
+  .vine :global(svg) { display: block; width: 100%; height: 100%; }
+
+  @media (max-width: 640px) {
+    .vine { display: none; }
+  }
+</style>
