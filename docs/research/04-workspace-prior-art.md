@@ -1,6 +1,6 @@
 # R4 — Workspace prior art, and "why not just use Coder?"
 
-- **Date:** 2026-07-28 · **Task:** Y-013 · answers **Q1** · feeds **ADR-0005 (workspace schema v1)**
+- **Date:** 2026-07-28 · **Task:** Y-013 · answers **Q1** · feeds **[ADR-0007](../adr/0007-workspace-schema-v1.md)**
 - **Status:** complete
 
 ## Summary
@@ -38,7 +38,7 @@
 | **mise** | A directory's tools + env + tasks | Your shell | none | `mise.toml` in-repo | mise backends | Yes | No |
 | **direnv** | A directory's exported env vars | Your shell | none | `.envrc` in-repo | direnv stdlib | Yes | No |
 | **devenv / nix / devbox** | A reproducible shell closure + processes | Local or any Nix host | none | Nix store | Nix modules | Linux + macOS | No |
-| **Yantra (proposed)** | **Continuation context**: repo + branch + machine + tmux session + agent | Machines you already own and never destroy | **SSH over Tailscale** (borrowed, not built) | tmux on the host + SQLite on the daemon | copy DevPod's `provider.yaml` shape (ADR-0006) | **Yes — the entire point** | **First-class** |
+| **Yantra (proposed)** | **Continuation context**: repo + branch + machine + tmux session + agent | Machines you already own and never destroy | **SSH over Tailscale** (borrowed, not built) | tmux on the host + SQLite on the daemon | copy DevPod's `provider.yaml` shape ([ADR-0007](../adr/0007-workspace-schema-v1.md)) | **Yes — the entire point** | **First-class** |
 
 ## Per-system findings
 
@@ -134,8 +134,8 @@ is: use Coder and stop writing Yantra.** That is a real possible outcome and sho
 
 **Verdict.** Coder is the right answer to a question Yantra is not asking. Yantra is only justified if its centre of
 gravity stays on **continuation across pre-existing heterogeneous machines** and it refuses to grow a provisioning
-layer. The moment Yantra starts creating VMs it becomes a worse Coder and should be deleted. Write that into ADR-0005
-as an explicit non-goal.
+layer. The moment Yantra starts creating VMs it becomes a worse Coder and should be deleted. Write that into the
+workspace-schema ADR as an explicit non-goal.
 
 ## Proposed Yantra workspace schema (v1)
 
@@ -223,7 +223,7 @@ durable unit, and a machine as a replaceable place to put it.
 ## Risks & unknowns
 
 - **The "worse Coder" failure mode is the main project risk.** Every feature request will pull toward provisioning.
-  ADR-0005 should name non-provisioning as an explicit non-goal.
+  The workspace-schema ADR should name non-provisioning as an explicit non-goal.
 - **`when: 'once'` needs somewhere to record that it ran** — a status write per workspace per machine. Confirm it
   belongs in SQLite, and decide what happens when the machine is reimaged.
 - **Agent resume may simply not exist** for some CLIs. `AgentSpec.resume` assumes R3 says yes; if it says no, the
@@ -253,4 +253,4 @@ All accessed **2026-07-28**. Versions noted inline where the docs stated them.
 - **Remote bootstrap** — [VS Code Remote-SSH](https://code.visualstudio.com/docs/remote/ssh), [remote Linux requirements](https://code.visualstudio.com/docs/remote/linux), [Remote FAQ](https://code.visualstudio.com/docs/remote/faq), [Remote-SSH troubleshooting wiki](https://github.com/microsoft/vscode-remote-release/wiki/Remote-SSH-troubleshooting), [JetBrains remote dev](https://www.jetbrains.com/help/idea/remote-development-overview.html), [JetBrains prerequisites](https://www.jetbrains.com/help/idea/prerequisites.html)
 - **Env tools** — [mise configuration](https://mise.jdx.dev/configuration.html), [direnv](https://direnv.net/), [devenv](https://devenv.sh/), [Nix flakes](https://wiki.nixos.org/wiki/Flakes)
 
-**Source-quality caveat.** The `~/.vscode-server` layout and the piped-bootstrap / port-token handshake are **not** documented by Microsoft — reconstructed from the troubleshooting wiki, `nixos-vscode-server`, and `vscode-remote-oss`; treat as observed behaviour, not contract. Coder's Tasks deprecation dates carry real weight in the AI-agent argument above and should be re-verified before ADR-0005 lands.
+**Source-quality caveat.** The `~/.vscode-server` layout and the piped-bootstrap / port-token handshake are **not** documented by Microsoft — reconstructed from the troubleshooting wiki, `nixos-vscode-server`, and `vscode-remote-oss`; treat as observed behaviour, not contract. Coder's Tasks deprecation dates carry real weight in the AI-agent argument above and should be re-verified before the workspace-schema ADR lands.

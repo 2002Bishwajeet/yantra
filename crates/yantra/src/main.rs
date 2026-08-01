@@ -6,8 +6,10 @@
 //! change of *where* the work is called from, not *what* it does.
 
 use clap::{CommandFactory as _, Parser, Subcommand};
+use std::io::IsTerminal as _;
 use std::process::ExitCode;
 use yantra_core::agent;
+use yantra_core::attach;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::resume;
@@ -38,6 +40,11 @@ enum Command {
         /// Start a coding agent in the session
         #[arg(long, value_enum)]
         agent: Option<AgentArg>,
+    },
+    /// Attach this terminal to a workspace's session
+    Attach {
+        /// Workspace name, without the `.toml`
+        workspace: String,
     },
     /// Start the agent again on the conversation it left off
     Resume {
@@ -95,6 +102,7 @@ enum LsTarget {
 async fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
+        Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
@@ -624,8 +632,73 @@ fn table(headings: &[&str], rows: &[Vec<String>]) -> String {
 /// find tmux (I-34), `-t` forwards a `TERM` the far side may lack (I-36), and
 /// zsh eats an unquoted `=name` (I-35). `term` is already known to be one the
 /// far side has, so setting it here is passing through rather than pinning.
+///
+/// The remote half comes from the library so that what a user copies and what
+/// `yantra attach` runs cannot drift apart.
 fn attach_hint(machine: &str, tmux: &str, session: &str, term: &str) -> String {
-    format!("ssh {machine} -t \"TERM={term} {tmux} attach -t '={session}'\"")
+    format!(
+        "ssh {machine} -t \"{}\"",
+        attach::remote_command(tmux, session, term)
+    )
+}
+
+/// **This command does not return.** `exec` replaces the process with `ssh`, so
+/// from here on the exit code, the signals and the terminal are `ssh`'s and
+/// tmux's — which is the whole point, and the reason `attach` is the one verb
+/// outside the exit-code contract in this crate's notes.
+///
+/// `exec` rather than spawn-and-wait deliberately: a supervising parent would
+/// have to forward `SIGWINCH`, relay signals and reap a child, all to add
+/// nothing. Replacing the image means there is no parent to get any of it wrong.
+#[cfg(unix)]
+fn hand_over(machine: &str, remote: &str) -> ExitCode {
+    use std::os::unix::process::CommandExt as _;
+
+    // `exec` only returns when it failed, so anything after it is the error path.
+    let err = std::process::Command::new("ssh")
+        .arg(machine)
+        .arg("-t")
+        .arg(remote)
+        .exec();
+    eprintln!("yantra: could not run ssh: {err}");
+    ExitCode::FAILURE
+}
+
+/// Windows has no `exec`, and Q4 is deliberately open — but it also has no tmux
+/// to attach to (R-7), so refusing here forecloses nothing that works today.
+#[cfg(not(unix))]
+fn hand_over(machine: &str, remote: &str) -> ExitCode {
+    eprintln!(
+        "yantra: attach needs a unix host; run it yourself:\n  ssh {machine} -t \"{remote}\""
+    );
+    ExitCode::FAILURE
+}
+
+async fn attach(name: &str) -> ExitCode {
+    let plan = match attach::plan(name, &local_term()).await {
+        Ok(plan) => plan,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Asked before handing over, because `ssh -t` without one degrades into a
+    // non-interactive session that attaches to nothing and says why in a way
+    // nobody reads.
+    if !std::io::stdin().is_terminal() {
+        eprintln!("yantra: attach needs a terminal — nothing is reading this session");
+        return ExitCode::FAILURE;
+    }
+
+    let machine = &plan.workspace.machine;
+    if let Chosen::Substituted { wanted } = &plan.term {
+        println!("{}", downgrade_notice(machine, wanted));
+    }
+    hand_over(
+        machine,
+        &attach::remote_command(plan.tmux.path(), &plan.workspace.name, plan.term.term()),
+    )
 }
 
 /// The library never prints (ADR-0005), so rendering the chain is the CLI's job.
