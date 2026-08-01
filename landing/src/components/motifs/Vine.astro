@@ -1,0 +1,76 @@
+---
+interface Props {
+  length?: number;
+  height?: number;
+  vertical?: boolean;
+  class?: string;
+}
+
+const { length = 1400, height = 40, vertical = false, class: className } = Astro.props;
+
+// A partial trailing unit reads as a gap, so the nominal height*2.1 pitch is fitted to divide
+// the band exactly.
+const units = Math.max(1, Math.round(length / (height * 2.1)));
+const unit = length / units;
+const amp = height * 0.3;
+const mid = height / 2;
+const r = height * 0.3;
+
+let stem = `M0 ${mid}`;
+for (let i = 0; i < units; i++) {
+  const x = i * unit;
+  const up = i % 2 ? 1 : -1;
+  stem += ` C ${x + unit * 0.25} ${mid + amp * up}, ${x + unit * 0.75} ${mid + amp * up}, ${x + unit} ${mid}`;
+}
+
+const nodes = Array.from({ length: units }, (_, i) => {
+  const x = unit / 2 + i * unit;
+  const up = i % 2 ? 1 : -1;
+  return { x, up, cy: mid + amp * up * 0.82 };
+});
+---
+
+<svg
+  class={className}
+  viewBox={vertical ? `0 0 ${height} ${length}` : `0 0 ${length} ${height}`}
+  preserveAspectRatio="none"
+  aria-hidden="true"
+>
+  <g transform={vertical ? `rotate(90) translate(0 -${height})` : undefined}>
+    <path d={stem} fill="none" stroke="var(--kalam)" stroke-width="1.5" />
+
+    {nodes.map(({ x, up, cy }) => (
+      <g>
+        <path
+          d={`M${x} ${cy} c ${r * 0.1} ${-r * up} ${r * 0.95} ${-r * 1.15 * up} ${r * 1.05} ${-r * 0.2 * up} c ${r * 0.1} ${r * 0.55 * up} ${-r * 0.55} ${r * 0.8 * up} ${-r * 0.75} ${r * 0.25 * up}`}
+          fill="none"
+          stroke="var(--kalam)"
+          stroke-width="1.3"
+          stroke-linecap="round"
+        />
+        <path
+          d={`M${x - r * 0.9} ${cy + r * 0.2 * up} q ${r * 0.5} ${-r * 0.78 * up} ${r * 0.95} 0 q ${-r * 0.48} ${r * 0.5 * up} ${-r * 0.95} 0 z`}
+          fill="var(--hingula)"
+          stroke="var(--kalam)"
+          stroke-width=".7"
+        />
+        <circle
+          cx={x + r * 1.05}
+          cy={cy - r * 0.28 * up}
+          r={height * 0.075}
+          fill="var(--haritala-lit)"
+          stroke="var(--kalam)"
+          stroke-width=".6"
+        />
+        {[-1, 1].map((s) => (
+          <path
+            d={`M${x + s * r * 1.5} ${mid} q ${s * r * 0.45} ${r * 0.5 * up} ${s * r * 0.95} ${r * 0.18 * up} q ${-s * r * 0.38} ${-r * 0.12 * up} ${-s * r * 0.95} ${-r * 0.18 * up} z`}
+            fill="var(--sabaja)"
+            stroke="var(--kalam)"
+            stroke-width=".55"
+          />
+        ))}
+      </g>
+    ))}
+  </g>
+</svg>
