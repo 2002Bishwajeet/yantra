@@ -1,0 +1,54 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout
+  title="Yantra — coming soon"
+  description="One control plane for every machine you already own."
+>
+  <main class="shell">
+    <p class="deva">यन्त्र</p>
+    <p class="latin">Yantra</p>
+    <p class="soon">Coming soon</p>
+  </main>
+</Layout>
+
+<style>
+  /* Y-084 ships the ground and the faces only. The frame, the shrine and the shader
+     arrive in Y-085..Y-087; this page exists so the token pipeline is reviewable on its own. */
+  .shell {
+    position: relative;
+    z-index: 10;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .4rem;
+    text-align: center;
+  }
+  .deva {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--step-3);
+    line-height: .92;
+    color: var(--ink);
+  }
+  .latin {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    text-transform: uppercase;
+    letter-spacing: var(--track-wide);
+    text-indent: var(--track-wide);
+    color: var(--ink);
+  }
+  .soon {
+    margin: 1.4rem 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    text-transform: uppercase;
+    letter-spacing: .28em;
+    color: var(--ink-soft);
+  }
+</style>
