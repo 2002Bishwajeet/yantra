@@ -1,0 +1,19 @@
+// Static assets on Workers, not Pages. Pages is not deprecated, but Cloudflare has
+// stopped recommending it for new projects -- wrangler itself now prints "Workers are
+// the recommended way to deploy all new projects", and Astro's deploy guide no longer
+// documents Pages at all.
+//
+// Hand-written because `astro add cloudflare` is what would normally generate this, and
+// the adapter is explicitly not needed for output: 'static'.
+//
+// No `main` field: there is no Worker script, only assets.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yantra-landing",
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

@@ -27,6 +27,7 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1"
+    "@playwright/test": "^1.62.1",
+    "wrangler": "^4.118.0"
   }
 }

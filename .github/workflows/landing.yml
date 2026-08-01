@@ -1,0 +1,147 @@
+# The landing site only. Deliberately a separate workflow from ci.yml rather than a
+# job inside it — R-24's retire condition is that `cargo build` stays green on a
+# machine with no Node installed, and the cheapest way to keep that true is for the
+# Rust gate and the Node gate to share no file.
+#
+# The path filter includes design/ as well as landing/, because the site imports
+# design/tokens.css from the repo root, one level above the Astro project.
+#
+# One job, not build+deploy: passing dist/ between jobs buys nothing here except an
+# artifact-version compatibility question, and step order already guarantees that
+# nothing deploys unless the visual regression passed.
+name: landing
+
+on:
+  pull_request:
+    paths:
+      - 'landing/**'
+      - 'design/**'
+      - '.github/workflows/landing.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'landing/**'
+      - 'design/**'
+      - '.github/workflows/landing.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  landing:
+    name: build, verify, deploy preview
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    # A PR from a fork gets no secrets on `pull_request`, by design. This repo has one
+    # owner so that case does not arise today; if it ever does, the deploy steps skip
+    # rather than fail. The fix would be a reviewed deploy — never `pull_request_target`,
+    # which would run this with secrets against unreviewed code.
+    env:
+      HAS_CLOUDFLARE: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+
+      - run: npm ci
+        working-directory: landing
+
+      - run: npm run build
+        working-directory: landing
+
+      # --only-shell fetches chromium-headless-shell rather than full headed Chromium;
+      # it is what headless actually runs, and about half the download.
+      - name: Install Chromium
+        run: npx playwright install --only-shell chromium
+        working-directory: landing
+
+      - name: Visual regression
+        run: npm run test:visual
+        working-directory: landing
+
+      # Baselines are rendered on Linux and the snapshot path template carries no
+      # platform segment, so this report is where a font or layout regression is
+      # actually legible.
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: landing/playwright-report/
+          retention-days: 7
+
+      - name: Report missing credentials
+        if: env.HAS_CLOUDFLARE != 'true'
+        run: |
+          echo "::notice::Cloudflare secrets are not set, so no preview was deployed." \
+               "Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to enable them."
+
+      # `versions upload` publishes a preview version without touching production.
+      # The alias must start with a lowercase letter, and alias + worker name share a
+      # DNS label, so they must stay under 63 characters — `pr-42-yantra-landing` is 20.
+      - name: Deploy preview
+        id: preview
+        if: env.HAS_CLOUDFLARE == 'true' && github.event_name == 'pull_request'
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: landing
+          command: versions upload --preview-alias pr-${{ github.event.number }}
+
+      - name: Deploy production
+        if: env.HAS_CLOUDFLARE == 'true' && github.event_name != 'pull_request'
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: landing
+          command: deploy
+
+      # wrangler-action's `deployment-url` is the hash-versioned URL, never the stable
+      # alias: its output schema parses only `preview_url` and silently drops the
+      # `preview_alias_url` that wrangler writes. The alias is still logged, so recover
+      # it from stdout and fall back to the versioned URL if the format ever changes.
+      - name: Resolve the preview URL
+        id: url
+        if: steps.preview.outcome == 'success'
+        env:
+          OUT: ${{ steps.preview.outputs.command-output }}
+          FALLBACK: ${{ steps.preview.outputs.deployment-url }}
+        run: |
+          alias=$(printf '%s' "$OUT" \
+            | sed -n 's/.*Version Preview Alias URL: \(https:[^ ]*\).*/\1/p' | head -1)
+          echo "url=${alias:-$FALLBACK}" >> "$GITHUB_OUTPUT"
+
+      # One comment, edited in place, rather than a new one per push. Written with gh
+      # rather than a third-party action so the deploy path stays auditable.
+      - name: Comment the preview URL
+        if: steps.url.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          URL: ${{ steps.url.outputs.url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          marker='<!-- landing-preview -->'
+          body=$(printf '%s\n**Landing preview** — `%s`\n\n%s\n\nThe page follows your system theme; switch your OS appearance to see the night patta.' "$marker" "$SHA" "$URL")
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                 --jq "map(select(.body | contains(\"$marker\"))) | .[0].id // empty")
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+          echo "Preview: $URL" >> "$GITHUB_STEP_SUMMARY"
