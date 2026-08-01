@@ -11,7 +11,7 @@
     "build": "tsc -b && vite build && npm run compiled",
     "compiled": "grep -c react.memo_cache_sentinel dist/assets/*.js",
     "lint": "oxlint",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
