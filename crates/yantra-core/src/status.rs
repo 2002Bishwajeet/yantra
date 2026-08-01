@@ -50,6 +50,11 @@ pub enum Verdict {
     Killed {
         signal: String,
     },
+    /// The session is open and no agent was ever launched in it — a plain `up`,
+    /// or a workspace whose `startup` is not an agent. **Not a failure**, and
+    /// distinct from [`Verdict::Unclear`]: the pane was never asked to run one,
+    /// which tmux knows because it holds the command it was given.
+    NoAgent,
     /// Launched, and holding at Claude Code's trust dialog until a human answers
     /// it — no registry entry, no transcript, and no work done in between
     /// (I-49). Not running, and not a failure either.
@@ -147,10 +152,17 @@ fn verdict(pane: Option<&Pane>, registered: bool, at_trust_prompt: bool) -> Verd
         return Verdict::NoSession;
     };
     if !pane.dead {
-        return match (registered, at_trust_prompt) {
-            (true, _) => Verdict::Running,
-            (false, true) => Verdict::AwaitingTrust,
-            (false, false) => Verdict::Unclear {
+        // Asked only once the registry has already come back empty, so a running
+        // agent is never described by what it was launched with.
+        let launched_an_agent = pane
+            .start_command
+            .as_deref()
+            .is_some_and(|started| agent::session_id_in(started).is_some());
+        return match (registered, at_trust_prompt, launched_an_agent) {
+            (true, _, _) => Verdict::Running,
+            (false, true, _) => Verdict::AwaitingTrust,
+            (false, false, false) => Verdict::NoAgent,
+            (false, false, true) => Verdict::Unclear {
                 because: "the pane is alive but claude knows of no agent in that directory",
             },
         };
@@ -174,6 +186,10 @@ fn verdict(pane: Option<&Pane>, registered: bool, at_trust_prompt: bool) -> Verd
 mod tests {
     use super::*;
 
+    /// The shape `agent::launch_command` builds, so a pane in these tests is one
+    /// an agent was actually launched into.
+    const AGENT_COMMAND: &str = "cd '/srv/repo' && exec '/usr/bin/claude' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'";
+
     fn pane(dead: bool, status: Option<i32>, signal: Option<&str>) -> Pane {
         Pane {
             id: "%0".to_owned(),
@@ -181,6 +197,7 @@ mod tests {
             status,
             signal: signal.map(str::to_owned),
             pid: if dead { None } else { Some(42) },
+            start_command: Some(AGENT_COMMAND.to_owned()),
         }
     }
 

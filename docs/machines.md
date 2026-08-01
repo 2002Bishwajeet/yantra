@@ -137,7 +137,37 @@ forwards `TERM`, so ADR-0006's command path is immune; `attach` and M6's browser
   today, but it means "offline" and "unusable" are different states in this fleet, and a machine
   listing that shows only the first is misleading. `MachineInfo::expired` carries it (Y-050).
 
+## A machine cannot reach itself
+
+Measured 2026-08-02: `ssh cachyos-g14` **from** `cachyos-g14` is refused on port 22, even though
+`tailscale debug prefs` reports `"RunSSH": true` and the node answers that name from anywhere else on
+the tailnet.
+
+This is not a misconfiguration. Tailscale SSH is peer-to-peer, and nothing intercepts a machine
+dialling its own tailnet address; behind it there is no `sshd` to fall through to, for the reason
+above. So the fleet's most convenient target — the box you are sitting at — is the one target a
+workspace cannot name directly.
+
+**Go out and come back.** [ADR-0009](adr/0009-machine-names-are-ssh-destinations.md) makes a
+workspace's `machine` an ssh destination that `~/.ssh/config` resolves, which is exactly the hook
+this needs:
+
+```sshconfig
+Host g14-via-mac
+    HostName cachyos-g14
+    ProxyJump bishwajeets-macbook-pro
+```
+
+`machine = "g14-via-mac"` then works like any other target — verified end to end, including a full
+agent lifecycle. Yantra needs no code for this and should not grow any: a local-machine special case
+would be a second transport for one host, and the config file already answers it.
+
+The cost is that the local box is reachable only while the MacBook is, so a workspace on your own
+machine depends on a machine that is not yours to keep online. That is a real fragility and it is the
+price of not owning an `sshd`; running one on `cachyos-g14` would remove the hop entirely.
+
 ## Sources
 
+- `tailscale status`, `tailscale debug prefs` and `ss -ltn` on `cachyos-g14`, accessed 2026-08-02.
 - `tailscale status` and `tailscale status --json` on `cachyos-g14`, accessed 2026-07-29.
 - [R1 — Tailscale inventory](research/01-tailscale-inventory.md) for the LocalAPI shape and I-5.

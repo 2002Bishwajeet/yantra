@@ -86,6 +86,12 @@ startup = "nvim"                      # optional; omit for just a shell
 That is the whole schema. An unknown key is an error rather than a line that is silently ignored
 ([ADR-0007](docs/adr/0007-workspace-schema-v1.md)).
 
+**The box you are sitting at is the awkward case.** If it is served by Tailscale SSH rather than its
+own `sshd`, it cannot ssh to *itself* — Tailscale SSH is peer-to-peer, and there is no listener behind
+it — so a workspace naming it directly fails with `Connection refused`. Route back in through another
+machine and name that instead; `~/.ssh/config` is where this is answered, not Yantra
+([docs/machines.md](docs/machines.md#a-machine-cannot-reach-itself)).
+
 Then:
 
 ```bash

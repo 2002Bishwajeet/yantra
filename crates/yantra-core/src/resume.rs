@@ -93,6 +93,13 @@ pub enum Error {
     )]
     AwaitingTrust { workspace: String },
 
+    /// The session is open as a shell and no agent was ever launched in it, so
+    /// there is no conversation to continue. Respawning would put an agent in a
+    /// pane the user is sitting in, which is a launch wearing `resume`'s name —
+    /// and `up --agent` is the verb that already means that.
+    #[error("`{workspace}` has no agent — it was opened as a shell")]
+    NoAgent { workspace: String },
+
     /// Refused rather than resolved, for the same reason [`Verdict::Unclear`]
     /// is reported rather than resolved: respawning would kill whatever is in
     /// that pane to find out what it was.
@@ -150,6 +157,7 @@ pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: &Workspace) -> Result
     match plan(&status.verdict, status.pane.as_ref()) {
         Plan::AlreadyRunning => Ok(Outcome::AlreadyRunning),
         Plan::AwaitingTrust => Err(Error::AwaitingTrust { workspace: named() }),
+        Plan::NoAgent => Err(Error::NoAgent { workspace: named() }),
         Plan::Unclear(because) => Err(Error::Unclear {
             workspace: named(),
             because,
@@ -178,6 +186,7 @@ enum Plan<'a> {
     Respawn(&'a str),
     AlreadyRunning,
     AwaitingTrust,
+    NoAgent,
     Unclear(&'static str),
 }
 
@@ -188,6 +197,7 @@ fn plan<'a>(verdict: &'a Verdict, pane: Option<&'a Pane>) -> Plan<'a> {
         Verdict::NoSession => Plan::Open,
         Verdict::Running => Plan::AlreadyRunning,
         Verdict::AwaitingTrust => Plan::AwaitingTrust,
+        Verdict::NoAgent => Plan::NoAgent,
         Verdict::Unclear { because } => Plan::Unclear(because),
         Verdict::Finished | Verdict::Stopped | Verdict::Crashed { .. } | Verdict::Killed { .. } => {
             match pane {
@@ -202,6 +212,10 @@ fn plan<'a>(verdict: &'a Verdict, pane: Option<&'a Pane>) -> Plan<'a> {
 mod tests {
     use super::*;
 
+    /// The shape `agent::launch_command` builds, so a pane in these tests is one
+    /// an agent was actually launched into.
+    const AGENT_COMMAND: &str = "cd '/srv/repo' && exec '/usr/bin/claude' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'";
+
     fn pane(dead: bool) -> Pane {
         Pane {
             id: "%7".to_owned(),
@@ -209,6 +223,7 @@ mod tests {
             status: dead.then_some(0),
             signal: None,
             pid: (!dead).then_some(42),
+            start_command: Some(AGENT_COMMAND.to_owned()),
         }
     }
 

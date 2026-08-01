@@ -375,8 +375,15 @@ async fn a_repo_that_is_gone_is_refused_before_the_pane_is_respawned() -> Result
     Ok(())
 }
 
-/// R-2's shape: something is alive in that pane and `claude` knows of no agent
-/// in that directory. Respawning would destroy it to find out what it was.
+/// R-2's shape: an agent **was** launched into that pane, something is still
+/// alive in it, and `claude` knows of no agent in that directory. Respawning
+/// would destroy it to find out what it was.
+///
+/// The startup carries `--session-id` because that is what makes this R-2 and
+/// not merely a shell — Y-091 reads the launch back out of the pane, so a test
+/// that starts a bare `sleep` is testing [`Verdict::NoAgent`] instead. The
+/// arguments after `sh -c`'s script land in `$0`/`$1` and are ignored, which is
+/// how the pane both stays alive and carries an agent's command line.
 #[tokio::test]
 async fn a_live_pane_the_registry_does_not_know_about_is_never_respawned() -> Result<()> {
     let Some(lab) = Lab::start("resume-ghost").await? else {
@@ -385,7 +392,12 @@ async fn a_live_pane_the_registry_does_not_know_about_is_never_respawned() -> Re
     let ws = workspace("resumeghost");
     lab.registry(None).await?;
     lab.tmux
-        .ensure(&lab.ssh, &ws.name, REPO, Some("sleep 300"))
+        .ensure(
+            &lab.ssh,
+            &ws.name,
+            REPO,
+            Some("sh -c 'exec sleep 300' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'"),
+        )
         .await?;
     lab.settle().await?;
     let before = lab.pane_of(&ws.name).await?;
@@ -403,6 +415,40 @@ async fn a_live_pane_the_registry_does_not_know_about_is_never_respawned() -> Re
         lab.pane_of(&ws.name).await?.pid,
         before.pid,
         "whatever was in that pane is still in it"
+    );
+
+    lab.tmux.kill(&lab.ssh, &ws.name).await?;
+    Ok(())
+}
+
+/// Y-091: a session opened as a plain shell is not R-2 and is not a failure —
+/// nobody ever asked for an agent in it. It is still refused, because starting a
+/// first agent is `up --agent`, and it is refused **without** touching the pane
+/// the user may be working in.
+#[tokio::test]
+async fn a_session_that_never_had_an_agent_is_refused_as_such() -> Result<()> {
+    let Some(lab) = Lab::start("resume-shell").await? else {
+        return Ok(());
+    };
+    let ws = workspace("resumeshell");
+    lab.registry(None).await?;
+    lab.tmux.ensure(&lab.ssh, &ws.name, REPO, None).await?;
+    lab.settle().await?;
+    let before = lab.pane_of(&ws.name).await?;
+
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+        .await
+        .expect_err("there is no conversation to continue");
+    assert!(matches!(err, resume::Error::NoAgent { .. }), "{err:?}");
+    assert!(
+        !err.to_string().contains("knows of no agent"),
+        "and it must not be dressed up as R-2's contradiction: {err}"
+    );
+
+    assert_eq!(
+        lab.pane_of(&ws.name).await?.pid,
+        before.pid,
+        "the shell someone may be sitting in is untouched"
     );
 
     lab.tmux.kill(&lab.ssh, &ws.name).await?;
