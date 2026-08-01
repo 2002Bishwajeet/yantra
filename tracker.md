@@ -188,6 +188,8 @@ defines `--accent` as a muted hover surface and this file defines it as cinnabar
 with no error either way — `docs/design-system.md` §7 carries the bridge.
 
 Lives in `landing/`, leaving `web/` free for Y-072. Astro 7 + React 19 islands + Tailwind 4.
+
+**Shipped as [GitHub stack #72](https://github.com/2002Bishwajeet/yantra/pull/67)**, five layers, using the native feature rather than five PRs that merely point at each other — which is what Y-064 widened the CI trigger for. The difference is not cosmetic: a registered stack retargets and rebases the layers above one that merges, and can be merged atomically, where hand-chained `base` branches leave every upper layer to be fixed by hand. `gh stack link` was used rather than `submit`, because the PRs already existed and `link` adopts them instead of recreating them.
 The guardrail *"no UI until the CLI is good"* is not in play: this renders nothing about a machine,
 reads no API, and has no way to reach `yantra-core`.
 
