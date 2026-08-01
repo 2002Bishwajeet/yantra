@@ -24,8 +24,15 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `status`, and nothing is running | 1 | so `yantra status x && …` reads the way it looks |
 | `ls sessions` with a machine unreachable | 1 | the table still prints — a caller must be able to tell the answer is **partial** |
 | `down` on something not running | **0** | absence is the state asked for (I-30, root §B4) |
+| `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.
+
+**`attach` is the one verb outside this table**, because it does not return: it `exec`s `ssh`, so the
+process becomes `ssh` and the exit code is `ssh`'s and then tmux's. Everything it can decide it
+decides *before* handing over — the workspace exists, a session exists, `TERM` resolves, stdin is a
+terminal — and each of those is a normal exit 1. `exec` rather than spawn-and-wait is deliberate:
+a supervising parent would have to forward `SIGWINCH`, relay signals and reap a child to add nothing.
 
 ## Saying things
 

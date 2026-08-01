@@ -87,6 +87,21 @@ concurrent first-connections racing, only pay for themselves under concurrency M
 20 concurrent cold starts all *succeed*, they just run unmultiplexed and log noise. Revisit when
 `yantrad` serves more than one workspace at a time.
 
+> **What that deferral is also avoiding, recorded 2026-08-02 (Y-079).** R7's recommendation is not
+> only an explicit master — it is an explicit master *plus* `ControlMaster=no` on the clients, and
+> **`no` is the one setting that cannot recover a stale socket.** If the master is `SIGKILL`ed the
+> socket file is left on disk; a `no` client then connects fine but prints
+> `Control socket connect(…): Connection refused` on **every subsequent exec, forever**, because the
+> unlink in OpenSSH is guarded by `options.control_master != SSHCTL_MASTER_NO`.
+>
+> `auto` has no such hole, and that was measured here rather than read: a master was `kill -9`ed,
+> the stale socket confirmed on disk and confirmed refusing `-O check`, and the next Yantra command
+> against it exited **0 with zero bytes on stderr** while a new master took over the same path.
+>
+> So the deferral is not merely cheaper, it is **safer**, and adopting R7's recommendation later is
+> not a drop-in: whoever does it must bring `-O check`-then-unlink with it, or ship a transport that
+> complains on every command for the rest of the socket's life.
+
 **`StrictHostKeyChecking=accept-new`, not `yes`.** There is no enrolment flow yet. Tightening this is
 part of adding one, and is tracked rather than silently left permissive.
 
