@@ -1,6 +1,6 @@
 # Yantra design system — Pattachitra
 
-**Status:** in use by the landing site (`landing/`). **Not** a decision about the M4 dashboard.
+**Status:** in use by the landing site (`landing/`). Adoptable by the M4 dashboard — see §7.
 
 The tokens are [`design/tokens.css`](../design/tokens.css) and that file is the source of truth.
 This document explains the reasoning; where the two disagree, the CSS wins.
@@ -13,9 +13,13 @@ It settles **what Yantra looks like**: pigments, type, line weight, motif vocabu
 two grounds. It is deliberately plain CSS custom properties — no Tailwind, React, Astro or build
 step — so it costs nothing to adopt.
 
-It settles **nothing about what the M4 dashboard is built with**. [Q14](../tracker.md) is still
-open. That is the point of shipping tokens rather than components: whatever Q14 picks can import
-the same file. See §7.
+It settles **nothing about how the dashboard is built.**
+[ADR-0014](adr/0014-react-with-the-compiler-for-the-web-ui.md) answered that separately, and the
+two decisions meet cleanly: it picks **plain CSS + CSS custom properties** as the styling layer,
+and it left *"what the incoming design system is delivered as"* deliberately open between CSS
+variables, a Tailwind preset, and React components. **This is the first of those three** — which is
+also the one that keeps ADR-0014's promise that the diff when the design system lands is
+`index.css` and nothing else.
 
 ---
 
@@ -151,13 +155,49 @@ the toggle takes effect live, and pauses via `IntersectionObserver` when scrolle
 
 ---
 
-## 7. Extending this for Q14 / M4
+## 7. Extending this for M4
 
 The dashboard is a different job: scanned and operated, not read. Inherit the identity, add what a
 UI needs, and do not bend the pigments into roles they cannot hold.
 
-**Import as-is** — `design/tokens.css` is plain CSS. It has no framework dependency, so this is
-one line whatever Q14 picks.
+**Import as-is** — `design/tokens.css` is plain CSS with no framework dependency, so this is one
+line from the dashboard's `index.css`.
+
+### The one known collision: `--accent`
+
+[ADR-0014](adr/0014-react-with-the-compiler-for-the-web-ui.md) chose **shadcn/ui in
+`cssVariables: true` mode**. shadcn defines its own `:root` token set, and exactly one name
+overlaps with this one — but it is the worst possible one to get wrong silently:
+
+| Token | Here | shadcn |
+| --- | --- | --- |
+| `--accent` | cinnabar, the one hot note | a **muted hover surface**, paired with `--accent-foreground` |
+
+Both are `:root`, so whichever stylesheet loads second wins, and there is no error either way.
+Import this file second and every hover surface in the dashboard turns cinnabar; import it first
+and `--accent` here quietly becomes a near-neutral. **Bridge it, do not let the cascade decide:**
+
+```css
+/* index.css — the whole integration, per ADR-0014 */
+@import "../../design/tokens.css";
+
+:root {
+  --background: var(--patta);      --foreground: var(--kalam);
+  --card:       var(--patta-lit);  --card-foreground: var(--kalam);
+  --primary:    var(--hingula);    --primary-foreground: var(--shankha);
+  --border:     var(--rule);       --ring: var(--hingula);
+  --accent:     var(--patta-lit);  /* shadcn's meaning wins for shadcn's name */
+  --accent-foreground: var(--kalam);
+}
+```
+
+Then reach for `--hingula` directly where the *pigment* is wanted. The rest of this file's names
+(`--patta`, `--kalam`, `--hingula`, …) are Odia pigment words and collide with nothing.
+
+The other four role tokens here — `--ink`, `--ground`, `--panel`, `--rule` — do not appear in
+shadcn's set. They are left unprefixed deliberately: namespacing all of them to guard against a
+consumer that does not exist yet is the speculative work §A2 of `CLAUDE.md` forbids, and the real
+collision is one line, now written down.
 
 **Adopt directly:** the two grounds and their contract (§3); the three faces and the scale; the
 three line weights; the double rule as a register separator; the cloth and fleck surfaces.

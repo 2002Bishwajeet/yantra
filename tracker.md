@@ -173,12 +173,19 @@ on an argument it made two milestones before there was a second caller. `yantrad
 
 ### Landing site — out of milestone
 
-Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4 and does not answer Q14.** The
-dashboard is a read-only tool served over Tailscale to one person; this is a public single-page
-holding note. They share an identity and nothing else — which is why what they share ships as
+Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
+tool served over Tailscale to one person; this is a public single-page holding note. They share an
+identity and nothing else — which is why what they share ships as
 [`design/tokens.css`](design/tokens.css), plain CSS custom properties with no framework
-dependency, and the reasoning as [`docs/design-system.md`](docs/design-system.md). **Q14 stays
-open**; whatever it settles on can import the same file.
+dependency, and the reasoning as [`docs/design-system.md`](docs/design-system.md).
+
+**It meets [ADR-0014](docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) cleanly.** That ADR
+picked plain CSS + custom properties as the styling layer and left *what the incoming design system
+is delivered as* open between CSS variables, a Tailwind preset and React components; this is the
+first, which is the one that keeps its promise that the integration diff is `index.css` and nothing
+else. **One collision is recorded rather than designed around**: shadcn's `cssVariables` mode
+defines `--accent` as a muted hover surface and this file defines it as cinnabar, both on `:root`,
+with no error either way — `docs/design-system.md` §7 carries the bridge.
 
 Lives in `landing/`, leaving `web/` free for Y-072. Astro 7 + React 19 islands + Tailwind 4.
 The guardrail *"no UI until the CLI is good"* is not in play: this renders nothing about a machine,
