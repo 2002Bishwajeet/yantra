@@ -40,3 +40,6 @@ dist/
 .claude/settings.local.json
 .agents/
 skills-lock.json
+
+# Astro build cache (landing site)
+.astro/

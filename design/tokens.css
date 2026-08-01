@@ -1,0 +1,95 @@
+/* Yantra design tokens — Pattachitra.
+ *
+ * Plain CSS custom properties on purpose. Nothing here depends on Tailwind, React, Astro or
+ * any build step, so the M4 dashboard can adopt it whatever Q14 settles on. See
+ * docs/design-system.md for the reasoning behind each value.
+ *
+ * Two grounds, both painted rather than inverted: the day patta is tamarind-treated cloth with
+ * lamp-soot line; the night patta is the same cloth blacked, with conch-white line. Only the
+ * tokens change between them — never the components. */
+
+:root {
+  /* ---- pigments. Named for the material, not the role, because that is what a chitrakar
+         would call them and it keeps the palette honest about where it came from. ---- */
+  --patta:        #D0A87F;  /* tamarind-treated cloth, the ground of everything */
+  --patta-lit:    #DFC1A0;  /* cloth catching light: raised panels, border bands */
+  --patta-deep:   #B98E63;  /* cloth in shadow */
+  --kalam:        #101010;  /* kala, lamp soot. every structural line in the system */
+  --hingula:      #BB1F15;  /* cinnabar. accents, buds, the one hot note */
+  --haritala:     #D8A611;  /* orpiment gold. jewellery, ornament points */
+  --haritala-lit: #F4E02C;  /* brighter orpiment. bud centres, small highlights */
+  --sabaja:       #227845;  /* boiled-leaf green. foliage only, never UI */
+  --neela:        #345C9F;  /* khandaneela indigo. the deity's skin; held in reserve */
+  --halo:         #FF8000;  /* the arch fills with this, and only the arch */
+  --shankha:      #FAF0E6;  /* conch white. eye-whites, tiny ornament points */
+
+  /* ---- roles. Components reference these, never the pigments above, so a re-ground
+         is a token edit rather than a component edit. ---- */
+  --ink:          var(--kalam);
+  --ink-soft:     #101010cc;
+  --ground:       var(--patta);
+  --panel:        var(--patta-lit);
+  --accent:       var(--hingula);
+  --rule:         #10101033;
+
+  /* Painted surfaces carry weight; these are the two the system actually uses. */
+  --grain-opacity: .55;
+  --halo-alpha:    .92;
+  --shader-mix:    normal;
+
+  /* ---- line. Pattachitra linework is uniform-weight and never tapers. Three weights,
+         no more: hairline detail, the standard pen, and the structural contour. ---- */
+  --line-hair:      1px;
+  --line-pen:     1.5px;
+  --line-contour: 3.5px;
+
+  /* ---- type. Rozha One is a Devanagari didone: its thick/thin contrast is the closest
+         type gets to a brush-loaded kalam, and it carries Latin so यन्त्र and "Yantra" sit
+         in one lockup. Anek is the quiet floor that stays legible at 14px in both scripts.
+         IBM Plex Mono is the modern/technical note the folk frame is set against. ---- */
+  --font-display: 'Rozha One', 'Noto Serif Devanagari', serif;
+  --font-body:    'Anek Devanagari Variable', 'Anek Devanagari', ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* Fluid scale. Steps are deliberately sparse — a coming-soon page that needs eight sizes
+     is a page with too much on it. */
+  --step--1: clamp(.72rem, .68rem + .18vw, .8rem);
+  --step-0:  clamp(.95rem, .9rem + .24vw, 1.06rem);
+  --step-1:  clamp(1.15rem, 1.05rem + .5vw, 1.4rem);
+  --step-2:  clamp(1.5rem, 1.2rem + 1.4vw, 2.2rem);
+  --step-3:  clamp(2.6rem, 1.6rem + 4.6vw, 5rem);
+
+  /* Uppercase mono labels only read as labels with the tracking on. */
+  --track-label: .14em;
+  --track-wide:  .52em;
+
+  /* ---- geometry ---- */
+  --border-band: clamp(22px, 3.4vw, 46px);  /* the painted frame's width */
+  --niche-w: 430;                            /* the shrine's viewBox, unitless on purpose */
+  --niche-h: 408;
+}
+
+/* The night patta. Redefined tokens only — no component ever appears inside a theme block. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --patta: #191108; --patta-lit: #241809; --patta-deep: #0E0904;
+    --kalam: #F0E2C8; --ink-soft: #F0E2C8cc; --rule: #F0E2C833;
+    --hingula: #E5432F; --haritala: #E9BC2A; --halo: #FF8C1A;
+    --grain-opacity: .3; --halo-alpha: .34; --shader-mix: screen;
+  }
+}
+
+/* The viewer's own toggle stamps data-theme on the root and must win over the media query
+   in both directions, so both are spelled out rather than relying on the cascade. */
+:root[data-theme="dark"] {
+  --patta: #191108; --patta-lit: #241809; --patta-deep: #0E0904;
+  --kalam: #F0E2C8; --ink-soft: #F0E2C8cc; --rule: #F0E2C833;
+  --hingula: #E5432F; --haritala: #E9BC2A; --halo: #FF8C1A;
+  --grain-opacity: .3; --halo-alpha: .34; --shader-mix: screen;
+}
+:root[data-theme="light"] {
+  --patta: #D0A87F; --patta-lit: #DFC1A0; --patta-deep: #B98E63;
+  --kalam: #101010; --ink-soft: #101010cc; --rule: #10101033;
+  --hingula: #BB1F15; --haritala: #D8A611; --halo: #FF8000;
+  --grain-opacity: .55; --halo-alpha: .92; --shader-mix: normal;
+}

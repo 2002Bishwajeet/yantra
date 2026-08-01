@@ -171,6 +171,27 @@ on an argument it made two milestones before there was a second caller. `yantrad
 | Y-073 | Asset serving: directory in dev, embedded at release | ⬜ todo | — | Y-072 | Vite with hot reload in development; assets embedded in the binary for release, so the M7 appliance stays one file to copy. **Embedding goes behind a cargo feature that is off by default** — the moment a Rust build needs a JavaScript toolchain, every `fmt`/`clippy`/`test` job and the musl cross-build grow a dependency on npm (R-24). Built assets are never committed. |
 | Y-074 | README: install, usage, and a Status that is not two milestones stale | ✅ done | claude | — | Owner's ask, 2026-07-31: *"I know how to use it, but what after 1 month?"* **The answer was not an API docs site** — `cargo doc` already renders every `//!` header, and those headers are the best documentation in the repo, so a site would be a second copy with a build step for an audience [Q6](#) says does not exist yet. The real gaps were smaller and all in the README: its Status still described **M1** (*"no agent integration"* — that shipped in M3), it had never shown a single command, and the workspace schema was reachable only by reading [ADR-0007](docs/adr/0007-workspace-schema-v1.md) and then applying [ADR-0010](docs/adr/0010-drop-branch-from-the-workspace-schema.md)'s amendment yourself — a decision record standing in for a reference. Now: install from source (**verified** by installing to a throwaway `--root`, not asserted), what each target machine needs and why, the workspace file as a copy-pasteable block, all eight commands, the exit-code contract, and `cargo doc --open` named as the API reference. Layout table gained the per-crate files, `docs/plans/` and the session log. **No install instructions for a release** — Y-037 has never run, so there are no binaries to point at, and instructions for an unbuilt release are instructions that do not work. |
 
+### Landing site — out of milestone
+
+Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4 and does not answer Q14.** The
+dashboard is a read-only tool served over Tailscale to one person; this is a public single-page
+holding note. They share an identity and nothing else — which is why what they share ships as
+[`design/tokens.css`](design/tokens.css), plain CSS custom properties with no framework
+dependency, and the reasoning as [`docs/design-system.md`](docs/design-system.md). **Q14 stays
+open**; whatever it settles on can import the same file.
+
+Lives in `landing/`, leaving `web/` free for Y-072. Astro 7 + React 19 islands + Tailwind 4.
+The guardrail *"no UI until the CLI is good"* is not in play: this renders nothing about a machine,
+reads no API, and has no way to reach `yantra-core`.
+
+| ID | Task | Status | Owner | Depends | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Y-084 | Landing scaffold + the design system | 🔵 review | claude | — | Astro 7.1.6 / React 19.2.8 / Tailwind 4.3.3, static output. Tokens and spec as above. **Three findings worth the research cost:** (1) **`astro dev` daemonizes itself under an AI-agent environment** — Astro 7 bundles `am-i-vibing`, so `npm run dev` forks and the foreground process exits 0, which kills Playwright's `webServer` with *"exited early"*; the fix is counter-intuitively `ASTRO_DEV_BACKGROUND=1`, which means *"I am already the background child"*. (2) **`@astrojs/tailwind` is deprecated** — Tailwind 4 is a Vite plugin with no `tailwind.config.js`, and tokens go in CSS via `@theme`; `@theme inline` is required when a token references a var defined elsewhere, or Tailwind emits the literal string. (3) **`create astro` has no `--typescript` flag** any more; strict is unconditional. Also `--no-ai`, to suppress generated agent files this repo already has conventions for. |
+| Y-085 | Pattachitra motifs as generated SVG | ⬜ todo | claude | Y-084 | Vine, rosette, cusped arch, hanging lamp, pearl band, sigil — **parameterised, never hand-authored path data**. Two rules earned by getting them wrong: the arch's lobe count must be **even** (`\|sin(N·θ)\|` then vanishes at `θ = 0, π/2, π`, cusping both springings and the apex; odd scoops the apex into a dome), and **only the inner rim is cusped** — cusping the silhouette turns a shrine into a sunburst. |
+| Y-086 | The yantra shader | ⬜ todo | claude | Y-084 | Nine interlocking triangles, a spoked chakra band, a bindu, in a WebGL2 fragment shader. Raw WebGL2, **no dependency** — a full-screen triangle from `gl_VertexID` needs no buffers, no VAO, no attributes. `client:only="react"` is mandatory: every other directive still server-renders, and `canvas` does not exist during SSR. Honours `prefers-reduced-motion` by drawing **one static frame** rather than nothing. Structure adapted from `canvas-ui` (**MIT + Commons Clause** — adaptable, *not* redistributable as a component library). |
+| Y-087 | Header, footer, and the one sheet | ⬜ todo | claude | Y-085, Y-086 | The whole page: painted frame, masthead, the shrine, one line of copy, coming-soon, footer. One screen, no scroll, no router. |
+| Y-088 | Visual regression tests | ⬜ todo | claude | Y-087 | Playwright `toHaveScreenshot`, light + dark × desktop + mobile. **Snapshots are OS-specific and Playwright's default path template no longer includes the platform**, so Linux and macOS collide at one path while rendering fonts differently — pin to one OS. |
+
 ---
 
 ## 4. Research index
