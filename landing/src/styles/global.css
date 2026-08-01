@@ -1,0 +1,103 @@
+@import "tailwindcss";
+@import "../../../design/tokens.css";
+
+/* Expose the design tokens as Tailwind utilities. `inline` because the values are
+   var() references defined outside this block — without it Tailwind emits the literal
+   string rather than resolving through the theme. */
+@theme inline {
+  --color-patta:      var(--patta);
+  --color-patta-lit:  var(--patta-lit);
+  --color-patta-deep: var(--patta-deep);
+  --color-kalam:      var(--kalam);
+  --color-hingula:    var(--hingula);
+  --color-haritala:   var(--haritala);
+  --color-sabaja:     var(--sabaja);
+  --color-neela:      var(--neela);
+  --color-halo:       var(--halo);
+  --color-shankha:    var(--shankha);
+
+  --font-display: var(--font-display);
+  --font-body:    var(--font-body);
+  --font-mono:    var(--font-mono);
+}
+
+/* The woven cloth. Two crossed streak layers read as warp and weft; a fleck field of three
+   co-prime tiles reads as the slubs in the silk. Deliberately not an SVG filter — Chromium
+   tiles feTurbulence's filter region and leaves a visible rectangle on large viewports. */
+.cloth,
+.speckle {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.cloth {
+  opacity: var(--grain-opacity);
+  background-image:
+    repeating-linear-gradient(94deg, #0000 0 2px, #7a5a3a1f 2px 3px),
+    repeating-linear-gradient(3deg, #0000 0 3px, #3d2a1a14 3px 4px);
+  mix-blend-mode: multiply;
+}
+.speckle {
+  opacity: .5;
+  mix-blend-mode: multiply;
+  background-image:
+    radial-gradient(circle at 21% 31%, #00000026 0 1px, #0000 1.6px),
+    radial-gradient(circle at 68% 64%, #0000001f 0 1px, #0000 1.6px),
+    radial-gradient(circle at 44% 87%, #00000022 0 1px, #0000 1.6px);
+  background-size: 37px 37px, 53px 53px, 71px 71px;
+}
+/* On the night patta the cloth lifts the ground instead of darkening it. */
+@media (prefers-color-scheme: dark) {
+  .cloth { mix-blend-mode: screen; }
+  .speckle { opacity: .22; mix-blend-mode: screen; }
+}
+:root[data-theme="dark"] .cloth { mix-blend-mode: screen; }
+:root[data-theme="dark"] .speckle { opacity: .22; mix-blend-mode: screen; }
+:root[data-theme="light"] .cloth { mix-blend-mode: multiply; }
+:root[data-theme="light"] .speckle { opacity: .5; mix-blend-mode: multiply; }
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+:where(a, button):focus-visible {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The double rule — thick over hair — is the patta convention for separating registers. */
+.rule2 {
+  height: 0;
+  border-top: 2.5px solid var(--ink);
+  position: relative;
+}
+.rule2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  border-top: var(--line-hair) solid var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
