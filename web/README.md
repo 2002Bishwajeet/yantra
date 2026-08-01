@@ -19,6 +19,11 @@ cd web && npm ci && npm run dev
 
 Then open <http://localhost:5173>.
 
+**Node `^22.18` or `>=24.11`**, as `package.json` declares. Babel 8 sets that floor, and
+it is worth checking rather than assuming: this repo's own development machine
+was on **24.0.0**, which is below it, so `npm ci` warns `EBADENGINE` there. CI runs
+24.18.1. The build works either way; the warning is real and is not noise.
+
 **The dev server must proxy.** `yantrad` runs axum with no `tower-http`, so there
 are no CORS headers and a cross-origin `fetch` cannot work. `vite.config.ts`
 proxies `/api` to the daemon.
