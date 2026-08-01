@@ -200,6 +200,7 @@ async fn resume(name: &str) -> ExitCode {
             report_error(&err);
             match err {
                 resume::Error::AwaitingTrust { .. } => eprintln!("{}", trust_note(name)),
+                resume::Error::NoAgent { .. } => eprintln!("{}", no_agent_note(name)),
                 resume::Error::Agent(agent::Error::NotLoggedIn { .. }) => {
                     eprintln!("{KEYCHAIN_NOTE}");
                 }
@@ -263,16 +264,16 @@ fn render_logs(transcript: &logs::Transcript) -> String {
             logs::Who::Assistant => "claude",
         };
         out.push_str(&format!(
-            "{:<8}  {who:<6}  ",
+            "{:<9}  {who:<6}  ",
             time_of_day(entry.at.as_deref())
         ));
         // Continuations line up under the first line rather than under the
         // clock, so a wrapped paragraph still reads as one turn.
-        out.push_str(&entry.text.replace('\n', "\n                  "));
+        out.push_str(&entry.text.replace('\n', "\n                   "));
         out.push('\n');
         if !entry.tools.is_empty() {
             out.push_str(&format!(
-                "                  tools: {}\n",
+                "                   tools: {}\n",
                 entry.tools.join(", ")
             ));
         }
@@ -280,10 +281,18 @@ fn render_logs(transcript: &logs::Transcript) -> String {
     out
 }
 
-/// The clock part of an ISO-8601 instant. `get` rather than a slice because the
-/// field is someone else's and a short string must not take the process down.
-fn time_of_day(at: Option<&str>) -> &str {
-    at.and_then(|at| at.get(11..19)).unwrap_or("")
+/// The clock part of an ISO-8601 instant, labelled `Z`: the transcript is
+/// written in UTC on the agent's machine, and an unlabelled `21:52:48` reads as
+/// the reader's own clock while being hours from it.
+///
+/// The label is appended rather than sliced, because the zone designator sits
+/// after a fractional-second field that is present or absent at the writer's
+/// discretion. `get` rather than a slice because the field is someone else's
+/// and a short string must not take the process down.
+fn time_of_day(at: Option<&str>) -> String {
+    at.and_then(|at| at.get(11..19))
+        .map(|clock| format!("{clock}Z"))
+        .unwrap_or_default()
 }
 
 fn ago(seconds: i64) -> String {
@@ -358,8 +367,19 @@ fn describe(verdict: &Verdict) -> String {
         Verdict::AwaitingTrust => {
             "waiting at claude's trust prompt, so it has done nothing yet".to_owned()
         }
+        Verdict::NoAgent => "no agent — the session was opened as a shell".to_owned(),
         Verdict::Unclear { because } => format!("unclear — {because}"),
     }
+}
+
+/// `resume` will not start a first agent, because that is `up --agent` and the
+/// session already holds a shell someone may be working in.
+fn no_agent_note(workspace: &str) -> String {
+    format!(
+        "\x20 note: resume continues a conversation, and this session never had one.\n\
+         \x20       to start an agent in it:\n\
+         \x20         yantra up {workspace} --agent claude"
+    )
 }
 
 /// I-49 at the one place someone meets it. The state is only legible if it says
@@ -718,8 +738,10 @@ mod tests {
             ],
         });
         assert!(rendered.contains("last write: 4s ago"), "{rendered}");
+        // The zone is part of the contract: the instant is the agent machine's
+        // UTC, not the reader's local time.
         assert!(
-            rendered.contains("18:20:30  you     fix the test"),
+            rendered.contains("18:20:30Z  you     fix the test"),
             "{rendered}"
         );
         assert!(rendered.contains("tools: Read, Bash"), "{rendered}");
@@ -729,7 +751,7 @@ mod tests {
             "a turn with no tools gets no tools line: {rendered}"
         );
         assert!(
-            rendered.contains("\n                  Two lines."),
+            rendered.contains("\n                   Two lines."),
             "a wrapped answer stays one turn: {rendered}"
         );
     }

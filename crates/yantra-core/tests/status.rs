@@ -154,6 +154,12 @@ async fn a_live_pane_backed_by_the_registry_is_running() -> Result<()> {
     Ok(())
 }
 
+/// A live pane carrying the command shape [`agent`] launches with. The arguments
+/// after `sh -c`'s script land in `$0`/`$1` and are ignored, so the pane stays
+/// alive while its start command reads as an agent's — which is what separates
+/// R-2 below from a plain shell.
+const LAUNCHED: &str = "sh -c 'exec sleep 300' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'";
+
 /// **R-2's shape, and the reason two sources are read.** The pane is alive, so
 /// anything watching only tmux calls this healthy — while `claude` knows of no
 /// agent in that directory at all.
@@ -163,7 +169,7 @@ async fn a_live_pane_the_registry_does_not_know_about_is_never_called_running() 
         return Ok(());
     };
     lab.registry(None).await?;
-    lab.open("statusghost", "sleep 300").await?;
+    lab.open("statusghost", LAUNCHED).await?;
 
     let verdict = lab.verdict("statusghost").await?;
     assert!(matches!(verdict, Verdict::Unclear { .. }), "{verdict:?}");
@@ -172,6 +178,26 @@ async fn a_live_pane_the_registry_does_not_know_about_is_never_called_running() 
     // them — so a pane with nothing on it must stay the unclear answer.
     assert_ne!(verdict, Verdict::AwaitingTrust);
     lab.tmux.kill(&lab.ssh, "statusghost").await?;
+    Ok(())
+}
+
+/// Y-091: the same two readings as R-2 above — pane alive, registry empty — and
+/// **not** the same state, because no agent was ever launched here. Told apart
+/// by what tmux was asked to run, which for a plain `up` is nothing at all.
+#[tokio::test]
+async fn a_session_opened_as_a_shell_is_not_r2() -> Result<()> {
+    let Some(lab) = Lab::start("status-shell").await? else {
+        return Ok(());
+    };
+    lab.registry(None).await?;
+    lab.tmux.ensure(&lab.ssh, "statusshell", REPO, None).await?;
+    lab.ssh.exec("sleep 1").await?;
+
+    let verdict = lab.verdict("statusshell").await?;
+    assert_eq!(verdict, Verdict::NoAgent, "{verdict:?}");
+    // Still not running: `yantra status x && …` must not fire for a shell.
+    assert!(!verdict.is_running());
+    lab.tmux.kill(&lab.ssh, "statusshell").await?;
     Ok(())
 }
 

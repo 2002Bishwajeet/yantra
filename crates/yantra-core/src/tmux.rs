@@ -63,6 +63,12 @@ pub struct Pane {
     pub signal: Option<String>,
     /// Absent once the pane is dead — there is no process left to name.
     pub pid: Option<u32>,
+    /// What this pane was asked to run, which is what Yantra asked for: sessions
+    /// are created with the default shell and *then* respawned with the startup
+    /// or agent command, so `None` means nobody asked for anything and the pane
+    /// is a plain shell. tmux updates it on every respawn, so it survives
+    /// `resume`. Measured on 3.5a and 3.7b.
+    pub start_command: Option<String>,
 }
 
 /// The signal numbers POSIX fixes, so both spellings can be read as one thing.
@@ -166,8 +172,9 @@ const LIST_FORMAT: &str =
 
 /// Same `|` and the same reason as [`LIST_FORMAT`] — and here the empty field
 /// is the point, so a delimiter that survives an empty value is mandatory.
-const PANE_FORMAT: &str =
-    "#{pane_id}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}";
+/// `pane_start_command` is **last** because it is the one field that can contain
+/// a `|` of its own — a `startup` is whatever the workspace wrote.
+const PANE_FORMAT: &str = "#{pane_id}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}|#{pane_start_command}";
 
 /// Searched in order when `PATH` fails. System-scoped only — `$HOME` installs
 /// are on `PATH` by construction, which is why `PATH` is asked first.
@@ -474,21 +481,25 @@ fn parse_pane(line: &str) -> Result<Pane, Error> {
     let bad = || Error::Listing {
         raw: line.to_owned(),
     };
-    let mut fields = line.trim_end().splitn(5, '|');
+    let mut fields = line.trim_end().splitn(6, '|');
     match (
         fields.next(),
         fields.next(),
         fields.next(),
         fields.next(),
         fields.next(),
+        fields.next(),
     ) {
-        (Some(id), Some(dead), Some(status), Some(signal), Some(pid)) if !id.is_empty() => {
+        (Some(id), Some(dead), Some(status), Some(signal), Some(pid), Some(started))
+            if !id.is_empty() =>
+        {
             Ok(Pane {
                 id: id.to_owned(),
                 dead: dead == "1",
                 status: status.parse().ok(),
                 signal: signal_name(signal),
                 pid: pid.parse().ok(),
+                start_command: (!started.is_empty()).then(|| started.to_owned()),
             })
         }
         _ => Err(bad()),

@@ -46,6 +46,22 @@ const CANDIDATES: [&str; 6] = [
 /// missed, never one that is wrong.
 pub const TRUST_PROMPT: &str = "trust this folder";
 
+/// The session id Yantra gave the agent in a pane, read back out of the command
+/// tmux was asked to run — `None` when that command launched no agent.
+///
+/// This is the session store Y-044 was going to build: every launch carries
+/// `--session-id <uuid>` and [`crate::tmux::Pane::start_command`] keeps it
+/// current across a respawn, so tmux already holds the one fact that mattered.
+/// Reading it back beats remembering it, because the pane and the record cannot
+/// then disagree.
+pub fn session_id_in(start_command: &str) -> Option<&str> {
+    start_command
+        .split_once("--session-id ")
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+        .map(|id| id.trim_matches('\''))
+        .filter(|id| !id.is_empty())
+}
+
 /// A located `claude` binary and the operations that use it. Holding the path
 /// *is* the cache, exactly as in [`crate::tmux::Tmux`] and for the same reason:
 /// it lives as long as the connection it was found through.
