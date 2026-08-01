@@ -16,6 +16,8 @@ correct it in place with a note about what changed and when.
 | R5 | Scheduling & placement | M5 | [05-scheduling.md](05-scheduling.md) |
 | R6 | Pi 5 feasibility: SSH, PTY, SQLite, hardware I/O | I-12, I-14, I-18, I-19, I-20, M8 hardware | [06-runtime-feasibility.md](06-runtime-feasibility.md) |
 | R7 | SSH exec over the system binary | ADR-0006 | [07-ssh-transport.md](07-ssh-transport.md) |
+| R8 | React + React Compiler + Vite — what "latest" means today | ADR-0014, Y-072 | [08-react-and-the-compiler.md](08-react-and-the-compiler.md) |
+| R9 | Component libraries, judged on whether the look is swappable | ADR-0014, Y-072 | [09-component-libraries.md](09-component-libraries.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that
