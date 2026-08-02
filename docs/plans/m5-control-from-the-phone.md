@@ -78,6 +78,28 @@ exists — [Y-105](../../tracker.md) put each peer's tailnet addresses on `Machi
 daemon resolves the caller to a peer and refuses anyone it cannot name. This wants an ADR (§B5),
 because it is a decision and not an implementation detail.
 
+### 4.4 There is nothing to open yet
+
+Checked against [`docs/brainstorm.md`](../brainstorm.md) rather than assumed, and it is the one place
+this plan was out of sync with the vision. UI Philosophy:
+
+> *"Everything should be configurable from the interface. No YAML editing. No configuration files.
+> Configuration files are implementation details. The interface should generate them automatically."*
+
+**The fleet has zero workspaces.** `yantra ls workspaces` answers *"no workspaces yet — make one at
+`~/.config/yantra/workspaces/<name>.toml`"*, so the acceptance test in §1 cannot begin: creating the
+`personal-website` workspace means finding a terminal, which is the thing this milestone exists to
+stop.
+
+The TOML file **stays** the source of truth — Y-044 established it is one of three stores Yantra did
+not invent and should not replace. The UI generates it; it does not supersede it.
+
+**The rest of `brainstorm.md` is in sync, and the re-scope moved toward it, not away.** Its
+Scheduling Philosophy names three modes with **Manual first** (*"scheduling should assist, not
+dictate"*), its MVP list puts **Scheduling at Phase 6** — after the web UI and AI orchestration,
+which is *later* than the tracker's old M5 — and **Wake-on-LAN sits under Future Possibilities**, never
+core.
+
 ## 5. The tasks
 
 | # | Task | Why it is where it is |
@@ -87,6 +109,7 @@ because it is a decision and not an implementation detail.
 | Y-113 | The dashboard acts: a machine picker and real buttons | Replaces the copy-a-command affordance where a write now exists. `Command` stays for `attach`, which is still a paste. |
 | Y-114 | PWA shell — installable on iOS | Needs Y-111. Manifest, icons, `apple-touch-icon`, `display: standalone`, an offline shell that never caches a reading (R-23: a cached dashboard tells confident lies). |
 | Y-115 | Unreachable machines read honestly, and offer no wake | Closes the loop on 4.2 rather than leaving a gap the UI has to invent. |
+| Y-116 | Create and edit a workspace from the dashboard | 4.4 — without it the acceptance test has nothing to open. |
 
 Y-109 (beat age on the dashboard) is not part of this milestone but is its natural companion: the
 picker in Y-113 is far more useful when each machine shows its own free RAM and power state.
