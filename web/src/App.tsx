@@ -1,4 +1,4 @@
-import type { Machine, MachineSessions, Workspace } from '@/api'
+import type { Looked, Machine, MachineSessions, Workspace } from '@/api'
 import { machineColumns, sessionColumns, workspaceColumns } from '@/columns'
 import { DataTable } from '@/components/DataTable'
 import { Section } from '@/components/Section'
@@ -27,10 +27,12 @@ export default function App() {
         )}
       </Section>
 
+      {/* Each section's command reads the *other* class, so a look that failed
+          costs the command its precision and never its honesty. */}
       <Section title="Workspaces" query={workspaces}>
         {(rows) => (
           <DataTable
-            columns={workspaceColumns}
+            columns={workspaceColumns(sessions)}
             rows={rows}
             rowKey={(workspace) => workspace.name}
             empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -39,7 +41,7 @@ export default function App() {
       </Section>
 
       <Section title="Sessions" query={sessions}>
-        {(answers) => <Sessions answers={answers} />}
+        {(answers) => <Sessions answers={answers} workspaces={workspaces} />}
       </Section>
     </main>
   )
@@ -47,7 +49,13 @@ export default function App() {
 
 /** The machines that did not answer are named, and the count says how many did
  *  — without which an unreachable machine reads as a machine with no sessions. */
-function Sessions({ answers }: { answers: MachineSessions[] }) {
+function Sessions({
+  answers,
+  workspaces,
+}: {
+  answers: MachineSessions[]
+  workspaces: Looked<Workspace[]>
+}) {
   const rows = answers.flatMap((answer) =>
     answer.reached === 'yes'
       ? answer.sessions.map((session) => ({ machine: answer.machine, session }))
@@ -59,7 +67,7 @@ function Sessions({ answers }: { answers: MachineSessions[] }) {
   return (
     <div className="flex flex-col gap-2">
       <DataTable
-        columns={sessionColumns}
+        columns={sessionColumns(workspaces)}
         rows={rows}
         rowKey={(row) => `${row.machine} ${row.session.name}`}
         empty="no tmux sessions on the machines that answered"
