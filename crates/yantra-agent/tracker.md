@@ -4,8 +4,9 @@ The slice of [`tracker.md`](../../tracker.md) that belongs to this crate: **the 
 code in `crates/yantra-agent`**, and nothing else. The main tracker still owns milestones, tasks,
 decisions, open questions and risks, and it still wins when anything disagrees with it.
 
-**The crate is an M0 skeleton — no agent exists yet.** Both invariants below came out of the
-telemetry research (R1, R5, R6) and neither has been exercised by shipped code.
+**The loop and the transport ship (Y-107); the probes do not (Y-106).** Both invariants below came
+out of the telemetry research (R1, R5, R6) and neither has been exercised by shipped code — I-9
+belongs to the power reader, which is Y-106's, and I-19 to hardware this crate does not touch yet.
 
 ## Invariants
 
@@ -23,5 +24,9 @@ power* and scored down for it.
 
 ## Open work
 
-Task rows live in [`tracker.md` §3](../../tracker.md). **Y-020**, the telemetry ADR, decides what
-this crate reports and how often; Q3 already fixed the shape (push heartbeat, 10 s, stale at 30 s).
+Task rows live in [`tracker.md` §3](../../tracker.md). What this crate reports and how often is
+settled by [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md), and
+how each of the seven fields is read on Linux and macOS is measured in
+[the M5 plan](../../docs/plans/m5-the-heartbeat-agent.md) §3. **Y-106** fills `measure()`; until it
+does, the agent sends a machine that fails every hard filter. **I-50** — dial the address, never the
+MagicDNS name — binds `YANTRA_DAEMON` and lives in the root tracker.
