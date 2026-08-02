@@ -1,19 +1,27 @@
 # landing
 
-The public *coming soon* page for Yantra. Astro 7 + Tailwind 4, static output, one page and no
-client framework — everything on it is drawn by the pure SVG functions in
-[`src/patta/`](src/patta/README.md).
+The public *coming soon* page for Yantra. Astro 7 + Tailwind 4, static output, one page, no client
+framework, and no JavaScript shipped to the browser at all.
+
+**It is a placeholder, deliberately.** Two designs have been rejected and the owner is redrawing the
+direction from their own prototype (`Y-208`), so the page is three lines of system type on a neutral
+ground and commits to nothing. What is worth keeping is underneath it: the build, the visual
+regression and the Cloudflare deploy below all stay exercised, so the redraw arrives at a working
+pipeline rather than rebuilding one.
+
+Nothing was lost in the strip. Commit `827d300` on `main` holds the whole previous build — the
+Pattachitra palette measured off a reference photograph, the cusped torana, and a Jai Prakash bowl
+reading the real sun over Jaipur — and `tracker.md` rows Y-206/Y-207 record what drawing them taught,
+including the geometry that would otherwise have to be rediscovered.
 
 **This is not the M4 dashboard.** That is `Y-072`, it lives in `web/`, and it is built per
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md).
 
-**The two no longer share a palette.** They did: both read [`design/tokens.css`](../design/tokens.css),
-documented in [`docs/design-system.md`](../docs/design-system.md). The first landing design was then
-rejected outright and rebuilt against a measured reference photograph, and the palette that came out
-of that is [`src/patta/tokens.css`](src/patta/tokens.css) — lighter cloth, duller red, and a
-black-and-cream weighting the first one did not have. `design/tokens.css` is untouched and still
-describes the dashboard's identity; if the two are ever to agree again, the patta values are the
-measured ones and the design-system doc is the thing that needs rewriting.
+**The landing does not read [`design/tokens.css`](../design/tokens.css)**, which
+[`docs/design-system.md`](../docs/design-system.md) documents and which still describes the
+dashboard's identity. It did once. The placeholder takes no palette at all — three neutrals defined
+in `src/styles/global.css` — precisely so there is nothing here to argue with when the direction is
+settled.
 
 ```sh
 npm install

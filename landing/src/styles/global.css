@@ -1,47 +1,72 @@
 @import "tailwindcss";
-@import "../patta/tokens.css";
-@import "../patta/ground.css";
+
+/* A placeholder, deliberately. Two landing designs were rejected and the visual direction is
+   being redrawn from the owner's own prototype (Y-208), so this page commits to nothing: system
+   type, neutral ground, three sizes. The build, the visual regression and the Cloudflare deploy
+   are the point of it being here at all. */
 
 :root {
-  /* Eczar for both scripts: it is a Devanagari-first face with a Latin that holds the same
-     weight, so यन्त्र and "yantra" sit in one lockup without a second family. Plex Mono is the
-     only other voice on the page — the technical note the painted frame is set against. */
-  --font-display: 'Eczar', 'Noto Serif Devanagari', serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
-
-  /* --band-base is the frame's band width at 100% density; the page derives --band-w from it
-     and the chosen density. vmin, so a short landscape window never gets a band taller than
-     the field it is meant to surround. */
-  --band-base: clamp(22px, 3.7vmin, 50px);
-  --band-w: var(--band-base);
+  /* Warm-biased neutrals rather than pure greys — enough to not read as an unstyled default,
+     not enough to be an identity the redraw would have to argue with. */
+  --ground: #faf9f7;
+  --ink: #1c1917;
+  --muted: #6b6560;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #17150f;
+    --ink: #f5f2ec;
+    --muted: #9a938a;
+  }
+}
 
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; }
 
 body {
-  background: var(--band);
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: var(--ground);
   color: var(--ink);
-  font-family: var(--font-display);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  /* The frame is the viewport. There is nothing below the fold to scroll to, and a scrollbar
-     would cut the right-hand band off its own corner florets. */
-  overflow: hidden;
 }
 
-:where(a, button):focus-visible {
-  outline: 2.5px solid var(--accent);
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-width: 34rem;
+}
+
+h1 {
+  font-size: clamp(2.75rem, 9vw, 4.5rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.say {
+  font-size: clamp(1.0625rem, 2.6vw, 1.25rem);
+  text-wrap: balance;
+}
+
+.soon {
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.25em;
+}
+
+a:hover { color: var(--ink); }
+
+:where(a):focus-visible {
+  outline: 2px solid currentColor;
   outline-offset: 3px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: .001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
 }
