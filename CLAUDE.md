@@ -114,7 +114,9 @@ If a block needs a paragraph to explain it, the block is wrong. Fix the code, no
 **TypeScript** for the web UI only. See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md).
 
 Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`, `tmux`, `tailscale`) ·
-`rusqlite` · `portable-pty` · `serde`. Appliance target `aarch64-unknown-linux-musl` via `cargo-zigbuild`.
+`portable-pty` · `serde`. Appliance target `aarch64-unknown-linux-musl` via `cargo-zigbuild`.
+**The daemon persists nothing.** The `rusqlite` row in that ADR's stack table was never built (Y-044);
+see its 2026-08-02 amendment.
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
 the daemon, the CLI or the agent. TypeScript's only home is the browser.
