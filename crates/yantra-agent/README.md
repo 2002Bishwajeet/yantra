@@ -21,8 +21,13 @@ YANTRA_DAEMON=100.x.x.x:7717
 An **address**, never a name — a MagicDNS short name resolves to `127.0.1.1`, where the daemon does
 not listen.
 
-**The probes are not written yet**, so the payload it sends today reports a machine with nothing free
-— pessimistic on purpose, since the alternative is placing work on a machine that cannot take it.
+It measures the seven fields itself, on Linux and macOS: architecture and capability labels once at
+start, free RAM, free disk, CPU load and power state every beat. Every reader that cannot answer
+reports the value that loses a placement rather than a guess, because the alternative is placing work
+on a machine that cannot take it.
+
+**It is not yet installable.** Nothing starts it at boot; that is M7's. Run it from a terminal.
+
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
 seven fields are and why; [the M5 plan](../../docs/plans/m5-the-heartbeat-agent.md) measures how each
 is read on Linux and macOS. What earlier research settled is in [tracker.md](tracker.md).

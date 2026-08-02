@@ -25,7 +25,7 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 
 - [ssh.rs](src/ssh.rs): one command on one machine, over the system `ssh` with `ControlMaster`. Sentinel trailer, base64 payload, `-E` to divert ssh's own diagnostics. ADR-0006.
 - [tmux.rs](src/tmux.rs): resolve the binary absolutely, create sessions idempotently, list them, read a pane's ending, kill. The densest invariant surface in the crate.
-- [agent.rs](src/agent.rs): find `claude`, check the account, build the launch command, read the running-agent registry. Claude Code only, per the one-agent-first guardrail.
+- [agent.rs](src/agent.rs): find `claude`, check the account, build the launch command, read the running-agent registry. Claude Code only, per the one-agent-first guardrail. Its `CANDIDATES` is public because `yantra-agent`'s label probe searches the same directories for the same reason (I-34).
 - [terminfo.rs](src/terminfo.rs): pass the caller's `TERM` through when the far side knows it, fall back when it does not, install on request.
 - [inventory.rs](src/inventory.rs): `tailscale status --json` behind a trait. Read-only and advisory — it observes machines, it never resolves them (ADR-0009).
 - [workspace.rs](src/workspace.rs): the TOML schema. `deny_unknown_fields`, because a silently ignored key is the worst kind of bug (ADR-0007).
