@@ -1,4 +1,11 @@
-import type { Looked, Machine, MachineSessions, Session, Workspace } from '@/api'
+import type {
+  Looked,
+  Machine,
+  MachineSessions,
+  Session,
+  Workspace,
+  WorkspaceStatus,
+} from '@/api'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -101,3 +108,104 @@ export function sessionColumns(
     },
   ]
 }
+
+/** A `null` status is Y-084's 404, or a workspace the last agent look predates
+ *  — the two readings are taken on their own clocks and can disagree. */
+export type AgentRow = { workspace: Workspace; status: WorkspaceStatus | null }
+
+export function awaitingTrust(row: AgentRow): boolean {
+  return (
+    row.status?.reached === 'yes' &&
+    row.status.status.state === 'awaiting_trust'
+  )
+}
+
+/** Y-091 is what lets this section be honest: a shell session is `no_agent` and
+ *  ordinary, so only `unclear`'s contradiction and a dead agent read as wrong. */
+export function agentState(status: WorkspaceStatus | null): {
+  tone: Tone
+  label: string
+} {
+  if (!status) return { tone: 'unknown', label: 'no report yet' }
+  if (status.reached === 'no') {
+    return { tone: 'unknown', label: 'machine did not answer' }
+  }
+
+  const agent = status.status
+  switch (agent.state) {
+    case 'no_session':
+      return { tone: 'ok', label: 'no session' }
+    case 'running':
+      return { tone: 'ok', label: 'running' }
+    case 'finished':
+      return { tone: 'ok', label: 'finished' }
+    case 'stopped':
+      return { tone: 'ok', label: 'stopped' }
+    case 'no_agent':
+      return { tone: 'ok', label: 'no agent — opened as a shell' }
+    case 'awaiting_trust':
+      return { tone: 'warn', label: "waiting for you at claude's trust prompt" }
+    case 'crashed':
+      return { tone: 'bad', label: `crashed — exit ${agent.exit_status}` }
+    case 'killed':
+      return { tone: 'bad', label: `killed — ${agent.signal}` }
+    case 'unclear':
+      return { tone: 'bad', label: 'unclear' }
+  }
+}
+
+/** What told this state apart from the one next to it. */
+function agentDetail(status: WorkspaceStatus | null): string {
+  if (!status) {
+    return 'the workspace list names it and the last agent look does not'
+  }
+  if (status.reached === 'no') return status.error
+  if (status.status.state === 'unclear') return status.status.because
+  return status.session ? `claude lists pid ${status.session.pid}` : ''
+}
+
+/** Y-097's third verb, derivable at last: `resume` respawns exactly the four
+ *  endings, and refuses on sight a workspace whose `startup` is not an agent. */
+export function agentCommand(row: AgentRow): string | null {
+  const { name, startup } = row.workspace
+  if (!USABLE_NAME.test(name)) return null
+  if (!row.status || row.status.reached === 'no') return null
+
+  switch (row.status.status.state) {
+    case 'no_session':
+      return `yantra up ${name}`
+    case 'finished':
+    case 'stopped':
+    case 'crashed':
+    case 'killed':
+      return startup === null ? `yantra resume ${name}` : null
+    // Attach is the whole answer to the trust prompt: ADR-0011 says the one who
+    // answers that dialog is a person, never Yantra.
+    case 'running':
+    case 'awaiting_trust':
+    case 'no_agent':
+    case 'unclear':
+      return `yantra attach ${name}`
+  }
+}
+
+export const agentColumns: Column<AgentRow>[] = [
+  { header: 'WORKSPACE', cell: (row) => row.workspace.name },
+  { header: 'MACHINE', cell: (row) => row.workspace.machine },
+  { header: 'AGENT', cell: (row) => <Status {...agentState(row.status)} /> },
+  {
+    header: 'DETAIL',
+    cell: (row) => (
+      <span className="font-mono text-xs whitespace-pre-wrap">
+        {agentDetail(row.status)}
+      </span>
+    ),
+  },
+  {
+    header: 'COMMAND',
+    cell: (row) => {
+      const command = agentCommand(row)
+      return command && <Command command={command} />
+    },
+  },
+]

@@ -7,8 +7,20 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
-import type { Looked, Machine, MachineSessions, Session, Workspace } from './api'
+import type {
+  AgentState,
+  Looked,
+  Machine,
+  MachineSessions,
+  Session,
+  Workspace,
+  WorkspaceStatus,
+} from './api'
 import {
+  type AgentRow,
+  agentColumns,
+  agentCommand,
+  agentState,
   machineColumns,
   sessionColumns,
   sessionCommand,
@@ -39,12 +51,21 @@ function machine(overrides: Partial<Machine> = {}): Machine {
   }
 }
 
-function stubFetch(answers: Record<string, Looked<unknown>>) {
+// A number stands for a status code the daemon answers instead of a body, which
+// only `/api/workspaces/:name/status` does.
+function stubFetch(answers: Record<string, Looked<unknown> | number>) {
   vi.stubGlobal(
     'fetch',
-    vi.fn((path: string) =>
-      Promise.resolve({ ok: true, json: () => Promise.resolve(answers[path]) }),
-    ),
+    vi.fn((path: string) => {
+      const answer = answers[path]
+      return typeof answer === 'number'
+        ? Promise.resolve({ ok: false, status: answer })
+        : Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(answer),
+          })
+    }),
   )
 }
 
@@ -414,5 +435,208 @@ describe('copying a command', () => {
 
     expect(await screen.findByText('copied')).toBeTruthy()
     expect(writeText).toHaveBeenCalledWith('yantra attach yantra')
+  })
+})
+
+describe('the agents section', () => {
+  const yantra: Workspace = {
+    name: 'yantra',
+    machine: 'cachyos-g14',
+    repo: '/home/<user>/Github/homelab/yantra',
+    startup: null,
+  }
+
+  function reported(state: AgentState, workspace = yantra): AgentRow {
+    return {
+      workspace,
+      status: {
+        workspace: workspace.name,
+        machine: workspace.machine,
+        reached: 'yes',
+        status: state,
+        session: null,
+      },
+    }
+  }
+
+  const unreachable: AgentRow = {
+    workspace: yantra,
+    status: {
+      workspace: 'yantra',
+      machine: 'cachyos-g14',
+      reached: 'no',
+      error: 'ssh: connect to host cachyos-g14 port 22: Connection refused',
+    },
+  }
+
+  it('reads a shell session as ordinary and a contradiction as wrong', () => {
+    const shell = agentState(reported({ state: 'no_agent' }).status)
+    expect(shell.tone).not.toBe('bad')
+    expect(shell.label).toContain('shell')
+
+    const ghost = agentState(
+      reported({ state: 'unclear', because: 'the pane is alive' }).status,
+    )
+    expect(ghost.tone).toBe('bad')
+  })
+
+  it('renders what told an ending apart rather than flattening it to a label', () => {
+    const rows: AgentRow[] = [
+      reported({ state: 'crashed', exit_status: 3 }),
+      reported(
+        { state: 'killed', signal: 'term' },
+        { ...yantra, name: 'shot' },
+      ),
+      reported(
+        {
+          state: 'unclear',
+          because: 'the pane is alive but claude knows of no agent',
+        },
+        { ...yantra, name: 'ghost' },
+      ),
+    ]
+    render(
+      <DataTable
+        columns={agentColumns}
+        rows={rows}
+        rowKey={(row) => row.workspace.name}
+        empty="no workspaces yet"
+      />,
+    )
+
+    expect(screen.getByText('crashed — exit 3')).toBeTruthy()
+    // I-48: the same tmux prints a signal as `15` on Linux and `term` on macOS,
+    // so it is passed through rather than named.
+    expect(screen.getByText('killed — term')).toBeTruthy()
+    expect(
+      screen.getByText('the pane is alive but claude knows of no agent'),
+    ).toBeTruthy()
+  })
+
+  it('names the machine that did not answer instead of reporting no agent', () => {
+    render(
+      <DataTable
+        columns={agentColumns}
+        rows={[unreachable]}
+        rowKey={(row) => row.workspace.name}
+        empty="no workspaces yet"
+      />,
+    )
+
+    expect(screen.getByText('machine did not answer')).toBeTruthy()
+    expect(screen.getByText(/Connection refused/)).toBeTruthy()
+    expect(screen.queryByText(/yantra (resume|attach|up)/)).toBeNull()
+  })
+
+  it('offers resume where resume is what the state is for', () => {
+    for (const state of ['finished', 'stopped'] as const) {
+      expect(agentCommand(reported({ state }))).toBe('yantra resume yantra')
+    }
+    expect(agentCommand(reported({ state: 'crashed', exit_status: 1 }))).toBe(
+      'yantra resume yantra',
+    )
+    expect(agentCommand(reported({ state: 'killed', signal: 'KILL' }))).toBe(
+      'yantra resume yantra',
+    )
+  })
+
+  it('offers attach where resume would refuse, and up where nothing is open', () => {
+    for (const state of [
+      'running',
+      'awaiting_trust',
+      'no_agent',
+      'unclear',
+    ] as const) {
+      const row = reported(
+        state === 'unclear' ? { state, because: 'why' } : { state },
+      )
+      expect(agentCommand(row)).toBe('yantra attach yantra')
+    }
+    expect(agentCommand(reported({ state: 'no_session' }))).toBe(
+      'yantra up yantra',
+    )
+  })
+
+  it('does not offer resume to a workspace resume refuses on sight', () => {
+    const editor = { ...yantra, startup: 'nvim' }
+    expect(
+      agentCommand(reported({ state: 'crashed', exit_status: 1 }, editor)),
+    ).toBeNull()
+    expect(agentCommand(unreachable)).toBeNull()
+
+    const hostile = { ...yantra, name: 'yantra; rm -rf ~' }
+    expect(agentCommand(reported({ state: 'finished' }, hostile))).toBeNull()
+  })
+
+  it('says the trust prompt twice and hands over a command, never a dialog', async () => {
+    const waiting: WorkspaceStatus = {
+      workspace: 'yantra',
+      machine: 'cachyos-g14',
+      reached: 'yes',
+      status: { state: 'awaiting_trust' },
+      session: null,
+    }
+    stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [yantra] },
+      '/api/sessions': { looked: 'never' },
+      '/api/workspaces/yantra/status': {
+        looked: 'ok',
+        age_seconds: 4,
+        data: waiting,
+      },
+    })
+    render(<App />)
+
+    expect(
+      await screen.findByText("waiting for you at claude's trust prompt"),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/is holding at claude's trust prompt on cachyos-g14/),
+    ).toBeTruthy()
+    expect(screen.getAllByText('yantra attach yantra').length).toBe(2)
+  })
+
+  // The two readings are taken on their own clocks, so a workspace added since
+  // the last agent look is 404 while its neighbours answer.
+  it('reads a 404 as a row the agent look has not seen, not as a failed class', async () => {
+    const fresh = { ...yantra, name: 'fresh' }
+    stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [yantra, fresh],
+      },
+      '/api/sessions': { looked: 'never' },
+      '/api/workspaces/yantra/status': {
+        looked: 'ok',
+        age_seconds: 4,
+        data: reported({ state: 'running' }).status,
+      },
+      '/api/workspaces/fresh/status': 404,
+    })
+    render(<App />)
+
+    expect(await screen.findByText('no report yet')).toBeTruthy()
+    expect(screen.getByText('running')).toBeTruthy()
+    expect(screen.queryByText('The look failed.')).toBeNull()
+  })
+
+  it('inherits the failure of the look that says which workspaces exist', async () => {
+    stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': {
+        looked: 'failed',
+        age_seconds: 1,
+        error: 'invalid workspace file',
+      },
+      '/api/sessions': { looked: 'never' },
+    })
+    render(<App />)
+
+    expect(
+      (await screen.findAllByText('invalid workspace file')).length,
+    ).toBe(2)
   })
 })
