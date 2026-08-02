@@ -37,6 +37,6 @@ telemetry ADR, still `proposed`). M4 builds this crate; its tasks are not broken
 
 **Y-044 is closed** — dropped 2026-08-02 without being built. Session state is derived from tmux
 (`pane_start_command`, Y-091) and declared in the workspace TOML, and the audit found no consumer for
-a store: the snapshot is deliberately in memory, the heartbeat is deliberately not kept, and no verb
-asks a question about the past. The tracker row records what would bring one back, and it is a
-placement or notification record rather than session state.
+a store: the snapshot is deliberately in memory, the heartbeat is deliberately not kept, and nothing
+asks the daemon to remember. The tracker row records what would bring one back, and it is a placement
+or notification record rather than session state.
