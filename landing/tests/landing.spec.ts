@@ -12,7 +12,25 @@ async function settle(page: Page) {
   await page.goto('/');
   await page.waitForFunction(() => document.fonts.status === 'loaded');
   await expect(page.locator('canvas')).toBeVisible();
-  await page.waitForTimeout(250);
+
+  /* Wait for the canvas BACKING STORE to stop changing, not for a fixed delay. Fonts landing
+     changes layout, which changes the canvas size, which moves every line in the diagram --
+     so a capture taken between the final resize and its redraw differs from the baseline by
+     a sub-pixel shift across the whole figure. A 250ms sleep lost that race about one run in
+     ten and read as "the shader is non-deterministic", which it is not. */
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector('canvas');
+      if (!c || !c.width || !c.height) return false;
+      const w = window as unknown as { __size?: string; __stable?: number };
+      const key = `${c.width}x${c.height}`;
+      if (w.__size === key) w.__stable = (w.__stable ?? 0) + 1;
+      else { w.__size = key; w.__stable = 0; }
+      return (w.__stable ?? 0) >= 3;
+    },
+    null,
+    { polling: 80 },
+  );
 }
 
 for (const [view, size] of Object.entries(VIEWS)) {
