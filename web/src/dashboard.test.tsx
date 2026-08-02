@@ -640,3 +640,134 @@ describe('the agents section', () => {
     ).toBe(2)
   })
 })
+
+describe('creating a workspace', () => {
+  const mac = machine({
+    name: 'bishwajeets-macbook-pro',
+    os: 'macOS',
+    online: false,
+    last_seen: '2h ago',
+  })
+  const made: Workspace = {
+    name: 'site',
+    machine: 'cachyos-g14',
+    repo: '/code/site',
+    startup: null,
+  }
+
+  // The create answers a status and a *plain-text* body rather than a `Looked`
+  // envelope, so the POST is stubbed apart from the polls. It returns what the
+  // form actually sent.
+  function stubCreate(status: number, body: unknown) {
+    const posted = vi.fn()
+    const looks: Record<string, Looked<unknown>> = {
+      '/api/machines': { looked: 'ok', age_seconds: 2, data: [machine(), mac] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [] },
+      '/api/sessions': { looked: 'never' },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          posted(JSON.parse(String(init.body)))
+          return Promise.resolve({
+            status,
+            json: () => Promise.resolve(body),
+            text: () => Promise.resolve(String(body)),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(looks[path]),
+        })
+      }),
+    )
+    return posted
+  }
+
+  async function fill(fields: Record<string, string>) {
+    for (const [label, value] of Object.entries(fields)) {
+      fireEvent.change(await screen.findByLabelText(label), {
+        target: { value },
+      })
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
+  }
+
+  it('renders the workspace the 201 carried, not the list it is not in yet', async () => {
+    const posted = stubCreate(201, made)
+    render(<App />)
+    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+
+    expect(await screen.findByText('Created site on cachyos-g14.')).toBeTruthy()
+    expect(screen.getByText('/code/site')).toBeTruthy()
+    // The read model is 30 s behind a create, so the list still says there is
+    // nothing — which is exactly what confirming by re-reading would draw.
+    expect(screen.getByText(/^no workspaces yet/)).toBeTruthy()
+    // Three keys and no fourth: §B4 holds because there is nowhere to put one.
+    expect(posted).toHaveBeenCalledWith({
+      name: 'site',
+      machine: 'cachyos-g14',
+      repo: '/code/site',
+    })
+  })
+
+  it('says the name is taken rather than that the create failed', async () => {
+    const said =
+      'a workspace named site already exists at /home/<user>/.config/yantra/workspaces/site.toml'
+    stubCreate(409, said)
+    render(<App />)
+    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+
+    expect(await screen.findByText('That name is already a workspace.')).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(screen.queryByText('The daemon did not create it.')).toBeNull()
+    expect(screen.queryByText(/^Created /)).toBeNull()
+  })
+
+  it("does not read a tailscale that could not answer as the caller's fault", async () => {
+    const said =
+      'could not establish who is calling: whois failed: failed to connect to local tailscaled'
+    stubCreate(503, said)
+    render(<App />)
+    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+
+    expect(
+      await screen.findByText(/could not ask Tailscale who is calling/),
+    ).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(
+      screen.queryByText(/unusable|already a workspace|not on a node/),
+    ).toBeNull()
+  })
+
+  // ADR-0009: Yantra never resolves a machine, so a sleeping Mac is a target
+  // like any other and the picker must not withhold it.
+  it('offers a machine that is asleep and lets it be chosen', async () => {
+    const posted = stubCreate(201, { ...made, machine: mac.name })
+    render(<App />)
+
+    const asleep = await screen.findByRole('option', {
+      name: 'bishwajeets-macbook-pro — offline',
+    })
+    expect((asleep as HTMLOptionElement).disabled).toBe(false)
+
+    await fill({ Name: 'site', Machine: mac.name, Repo: '/code/site' })
+    expect(await screen.findByText(`Created site on ${mac.name}.`)).toBeTruthy()
+    expect(posted).toHaveBeenCalledWith(
+      expect.objectContaining({ machine: mac.name }),
+    )
+  })
+
+  it('has nowhere to type a secret, and says startup carries a reference', async () => {
+    stubCreate(201, made)
+    render(<App />)
+    await screen.findByLabelText('Startup')
+
+    expect(screen.queryByLabelText(/secret/i)).toBeNull()
+    expect(
+      screen.getByText(/a secret stays a reference the shell resolves/),
+    ).toBeTruthy()
+  })
+})
