@@ -74,6 +74,27 @@ One thing the tests record because it is not obvious: a path that climbs out of 
 the path as one the app routes, so a traversal attempt and a deep link are indistinguishable by
 status. Assert on the body.
 
+## The routes that act
+
+`POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and nothing more.** The daemon
+may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
+reach. A new verb here starts in the CLI.
+
+Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
+the source address is resolved **live** through `whois`, and anything that is not this owner's own
+untagged node is refused. Three rules that are easy to get subtly wrong:
+
+- **A `tailscale` that cannot answer is `503`, never `403`.** Nothing was decided about the caller,
+  and blaming them is a lie about which thing broke.
+- **Tags are checked even when the owner matches.** A tagged node *is* owned by the tailnet, so the
+  user check alone would let a CI runner through.
+- **Identity never comes from the body**, for ADR-0013 §5's reason: a body that names its sender can
+  name someone else.
+
+**These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
+reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
+generalise the exception — a *read* that awaits ssh is still the bug that rule exists to prevent.
+
 ## Nothing expensive happens on the request path
 
 `ssh.rs` sets `ConnectTimeout=10`, so one asleep machine costs ten seconds. A browser polls whether

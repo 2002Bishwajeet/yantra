@@ -23,6 +23,7 @@ mod api;
 mod heartbeat;
 mod refresh;
 mod web;
+mod write;
 
 const PORT: u16 = 7717;
 
@@ -101,7 +102,12 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     refresh::spawn(&fleet.model, inventory.clone());
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
-        .nest("/api", api::router().with_state(fleet.model.clone()))
+        .nest(
+            "/api",
+            api::router()
+                .with_state(fleet.model.clone())
+                .merge(write::router(inventory.clone())),
+        )
         .merge(heartbeat::router())
         .with_state(fleet)
         .fallback_service(dashboard()?);
