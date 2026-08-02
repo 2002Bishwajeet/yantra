@@ -46,6 +46,15 @@ appliance:
     cargo zigbuild --release --target aarch64-unknown-linux-musl \
         -p yantrad -p yantra -p yantra-agent
 
+# The landing site. Deliberately absent from `ci` and `check` — R-24's retire
+# condition is that the Rust gate stays green on a machine with no Node
+# installed, so nothing here may become a dependency of either.
+landing-build:
+    cd landing && npm ci && npm run build
+
+landing-visual:
+    cd landing && npm ci && npx playwright install --only-shell chromium && npm run test:visual
+
 # Size and startup are quality targets carried over from ADR-0003's
 # measurement discipline; the appliance milestone (M7) reports both.
 appliance-size: appliance

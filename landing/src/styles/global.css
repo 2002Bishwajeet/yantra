@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@import "../patta/tokens.css";
+@import "../patta/ground.css";
+
+:root {
+  /* Eczar for both scripts: it is a Devanagari-first face with a Latin that holds the same
+     weight, so यन्त्र and "yantra" sit in one lockup without a second family. Plex Mono is the
+     only other voice on the page — the technical note the painted frame is set against. */
+  --font-display: 'Eczar', 'Noto Serif Devanagari', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* --band-base is the frame's band width at 100% density; the page derives --band-w from it
+     and the chosen density. vmin, so a short landscape window never gets a band taller than
+     the field it is meant to surround. */
+  --band-base: clamp(22px, 3.7vmin, 50px);
+  --band-w: var(--band-base);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--band);
+  color: var(--ink);
+  font-family: var(--font-display);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* The frame is the viewport. There is nothing below the fold to scroll to, and a scrollbar
+     would cut the right-hand band off its own corner florets. */
+  overflow: hidden;
+}
+
+:where(a, button):focus-visible {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

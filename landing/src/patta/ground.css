@@ -1,0 +1,116 @@
+/* patta/ground.css — the surface the page sits on. Requires tokens.css.
+   Every colour here is derived from a token; there are no literals.
+
+   The reference cloth is *quiet*. Measured on the Nabagunjara patta's open field:
+   high-pass std ~3/255, i.e. ~1.2% luminance, over a slow cloudy drift. Anything
+   you notice without going looking for it is too strong.
+
+   Two rules learned the hard way:
+   1. No feTurbulence. Chromium tiles the filter region and leaves a rectangular
+      seam across a full-page ground.
+   2. Co-prime periods stop the *stack* from repeating, but they do not hide any
+      single layer's own lattice. One soft blob per 89px cell reads as a grid no
+      matter what its neighbours do. So the periods here are pushed out past
+      viewport scale (421-787px) or pulled down into weave scale (3-4px), with
+      nothing left in the 60-250px band where the eye counts repeats. */
+
+.patta-cloth,
+.patta-band {
+  /* Grain is a symmetric pair straddling the ground: --patta-deep darkens,
+     --shankha lightens, and both keep that relationship in dark mode, so one
+     modulation works on either ground. Note what does NOT work: --ink as the
+     dark half. On the dark ground --ink is the *light* token, so the pair stops
+     straddling and the weave collapses into one-directional scanlines. Nor any
+     blend mode — `overlay`/`multiply` that reads right on cream goes muddy on
+     near-black; plain alpha compositing of a straddling pair does not. */
+  --_g: var(--patta-grain, 1);
+  --_shade: color-mix(in srgb, var(--patta-deep) calc(15% * var(--_g)), transparent);
+  --_sheen: color-mix(in srgb, var(--shankha) calc(12% * var(--_g)), transparent);
+  --_shade-lo: color-mix(in srgb, var(--patta-deep) calc(9% * var(--_g)), transparent);
+  --_sheen-lo: color-mix(in srgb, var(--shankha) calc(7% * var(--_g)), transparent);
+
+  --_weave:
+    /* Plain weave: weft every 3px, warp every 4px, plus a slacker pair at 7px and
+       11px. All four pitches are pairwise co-prime, so the beat between them runs
+       3x4x7x11 = 924px — that beat is the mid-scale slub, and it costs two
+       gradients instead of a lattice of blobs. */
+    repeating-linear-gradient(to bottom, var(--_shade) 0 0.5px, transparent 1.5px 3px),
+    repeating-linear-gradient(to right, var(--_sheen) 0 0.5px, transparent 1.5px 4px),
+    repeating-linear-gradient(to bottom, transparent 0, var(--_sheen-lo) 3.5px, transparent 7px),
+    repeating-linear-gradient(to right, transparent 0, var(--_shade-lo) 5.5px, transparent 11px);
+  --_cloud:
+    /* The slow mottle. 887 941 1013 1063 1103 1201 1279 1447 are prime, hence
+       pairwise co-prime: the combined period is ~2e24 px. Each is also longer
+       than a viewport axis, so no single lattice repeats often enough to be
+       counted — at 421-787px they were visibly rhythmic down a tall page. */
+    radial-gradient(ellipse 66% 52% at 30% 36%, var(--_shade-lo) 0%, transparent 68%),
+    radial-gradient(ellipse 58% 66% at 72% 22%, var(--_sheen-lo) 0%, transparent 70%),
+    radial-gradient(ellipse 74% 58% at 44% 76%, var(--_sheen-lo) 0%, transparent 66%),
+    radial-gradient(ellipse 52% 72% at 64% 58%, var(--_shade-lo) 0%, transparent 72%);
+  --_sizes:
+    100% 3px, 4px 100%, 100% 7px, 11px 100%,
+    887px 1103px, 1013px 1279px, 1201px 941px, 1063px 1447px;
+  /* prime offsets keep the four cloud lattices from phase-locking to each other */
+  --_pos:
+    0 0, 0 0, 0 0, 0 0,
+    0 0, 149px 233px, 311px 47px, 89px 397px;
+
+  background-image: var(--_weave), var(--_cloud);
+  background-size: var(--_sizes);
+  background-position: var(--_pos);
+  background-repeat: repeat;
+}
+
+/* The interior field: tamarind-primed cloth, and the darker of the two grounds.
+   The reference field drifts from ~#DFCBA6 near the top to ~#C9AB8D at the
+   margins, so the base is --patta with --patta-deep drawn in around the edges.
+   The weave dithers this ramp; without it the gradient bands on 8-bit displays. */
+.patta-cloth {
+  background-color: var(--patta);
+  background-image: var(--_weave), var(--_cloud),
+    radial-gradient(ellipse 128% 96% at 50% 34%, transparent 40%,
+                    color-mix(in srgb, var(--patta-deep) 38%, transparent) 100%);
+  background-size: var(--_sizes), 100% 100%;
+  background-position: var(--_pos), 0 0;
+  background-repeat:
+    repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, no-repeat;
+}
+
+/* The lighter cream ground the border tiles sit on. Chalk-primed and burnished.
+   0.3, not 0.5: --patta-deep is 53 levels below the cream band but only 22 below
+   the cloth, so the same multiplier grains the band harder than the field. */
+.patta-band {
+  --patta-grain: 0.3;
+  background-color: var(--band);
+}
+
+/* The double rule that parts band from field. Sampled off the reference at y=350:
+   ~2px ink, ~2px cream, ~3px ink, the heavier line facing the field. */
+.patta-rule {
+  --_gap: 2px;
+  --_thick: calc(var(--line-pen) + var(--_gap) + var(--line-rule));
+  flex: none;
+  block-size: var(--_thick);
+  inline-size: 100%;
+  background-image: linear-gradient(
+    to bottom,
+    var(--ink) 0 var(--line-pen),
+    var(--band) var(--line-pen) calc(var(--line-pen) + var(--_gap)),
+    var(--ink) calc(var(--line-pen) + var(--_gap)) 100%
+  );
+}
+
+/* Vertical variant. `block-size: 100%` would be wrong here: against a parent of
+   indefinite height Chromium resolves it to 0 *and* it opts the item out of flex
+   stretch, so the rule vanishes. auto + stretch fills a flex or grid parent. */
+.patta-rule--v {
+  block-size: auto;
+  align-self: stretch;
+  inline-size: var(--_thick);
+  background-image: linear-gradient(
+    to right,
+    var(--ink) 0 var(--line-pen),
+    var(--band) var(--line-pen) calc(var(--line-pen) + var(--_gap)),
+    var(--ink) calc(var(--line-pen) + var(--_gap)) 100%
+  );
+}
