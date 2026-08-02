@@ -1,0 +1,60 @@
+/* Palette sampled directly from the Nabagunjara patta (OPC-01-TOL-NABAGUNJARA-1-2-1.jpg),
+   not eyeballed: each value is the top-decile-saturation mean of its hue family across the
+   whole image, so these are the pigments as they actually sit on the cloth.
+
+   The headline finding: this painting is black-and-cream dominant with colour used sparingly.
+   Ground coverage is ~58k sampled px of #DFCBA6; every chromatic accent together is under 25k. */
+
+:root {
+  /* ---- grounds ---- */
+  --patta:      #DFCBA6;  /* the cloth. lighter and cooler than the first attempt's #D0A87F */
+  --patta-deep: #C9AB8D;  /* cloth in shadow, and the interior field behind the figure */
+  --shankha:    #FEFBEF;  /* conch white. the border tiles sit on this, and it is everywhere */
+  --kalam:      #0B0A0A;  /* lamp soot. the dominant colour by visual weight, not by area */
+
+  /* ---- pigments. Muted on purpose — the reference is not a saturated painting. ---- */
+  --lac:        #671018;  /* deep lac red. the border diamonds and the figure's cloth */
+  --lac-lit:    #70261D;  /* the same red where the light catches it */
+  --lac-rose:   #6B2822;  /* muted brick rose: the lac inside the border petals, measured there
+                             (mean of the drop cores in the top/bottom bands, #5B261F–#70261D).
+                             Duller than --lac; the florets never read as vivid crimson. */
+  --sindura:    #F29B71;  /* salmon. flesh, and the petal centres in the border florets */
+  --haritala:   #FEF282;  /* orpiment. small and bright — jewellery, the wheel, bud centres */
+  --neela:      #000E4E;  /* indigo, nearly black. the peacock body */
+  --neela-lit:  #07205A;  /* indigo catching light */
+  --dhusara:    #4F488B;  /* violet. the scattered flower dots — absent from the old palette */
+  --gold-dim:   #B4A16E;  /* muted gold, for hairlines that should not read as orpiment */
+
+  /* ---- roles. Components reference these; a re-ground is a token edit. ---- */
+  --ink:        var(--kalam);
+  --ink-dim:    #0B0A0Aa8;
+  --ground:     var(--patta);
+  --band:       var(--shankha);   /* the border band's ground */
+  --accent:     var(--lac);
+
+  /* ---- line. The reference's linework is uniform-weight and unhesitating. ---- */
+  --line-hair:  0.9px;
+  --line-pen:   1.6px;
+  --line-rule:  2.6px;   /* the double rule that separates border from field */
+
+  /* ---- the frame's geometry ---- */
+  --tile:       46px;    /* one border floret cell, edge to edge */
+  --band-w:     clamp(26px, 4.2vw, 52px);
+}
+
+/* No `prefers-color-scheme` block on purpose. A patta is a painted cloth and the cloth is
+   light — the dark ground below is an invention with no basis in the reference, so it does
+   not get to be what a dark-mode visitor sees by default. It applies only when the viewer
+   asks for it by stamping data-theme="dark". */
+:root[data-theme="dark"] {
+  --patta: #1A1509; --patta-deep: #120E06; --shankha: #26200F; --kalam: #EDE3CB;
+  --ink-dim: #EDE3CBa8;
+  --lac: #C0392B; --lac-lit: #D9553F; --lac-rose: #A85347; --sindura: #E08A5F;
+  --haritala: #F0DE6A; --neela: #4A63B8; --neela-lit: #5C77CC; --dhusara: #8F86C4;
+}
+:root[data-theme="light"] {
+  --patta: #DFCBA6; --patta-deep: #C9AB8D; --shankha: #FEFBEF; --kalam: #0B0A0A;
+  --ink-dim: #0B0A0Aa8;
+  --lac: #671018; --lac-lit: #70261D; --lac-rose: #6B2822; --sindura: #F29B71;
+  --haritala: #FEF282; --neela: #000E4E; --neela-lit: #07205A; --dhusara: #4F488B;
+}
