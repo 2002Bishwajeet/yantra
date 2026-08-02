@@ -29,6 +29,7 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 - [terminfo.rs](src/terminfo.rs): pass the caller's `TERM` through when the far side knows it, fall back when it does not, install on request.
 - [inventory.rs](src/inventory.rs): `tailscale status --json` behind a trait. Read-only and advisory — it observes machines, it never resolves them (ADR-0009).
 - [workspace.rs](src/workspace.rs): the TOML schema. `deny_unknown_fields`, because a silently ignored key is the worst kind of bug (ADR-0007).
+- [heartbeat.rs](src/heartbeat.rs): the seven-field wire type `yantra-agent` sends and `yantrad` reads. `deny_unknown_fields` for the same reason as `workspace`, and a two-variant `Power` so unknown power cannot be expressed (ADR-0013).
 - [snapshot.rs](src/snapshot.rs): what a caller last learned about the fleet and when. Each class carries its own age; "nobody has looked yet" is `None`. No clock and no loop — those are the daemon's.
 
 ## Decisions that constrain this crate
@@ -38,6 +39,7 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 - [ADR-0007](../../docs/adr/0007-workspace-schema-v1.md): the workspace schema, with provisioning as an explicit non-goal.
 - [ADR-0009](../../docs/adr/0009-machine-names-are-ssh-destinations.md): a `machine` is an ssh destination; `~/.ssh/config` decides what it means.
 - [ADR-0011](../../docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md): the agent is a TUI in tmux, the transcript is the log, and Yantra sends it no input.
+- [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md): what a heartbeat carries, why each field earns its place, and why absent power data means AC.
 
 ## Optional
 
