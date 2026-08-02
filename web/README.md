@@ -1,7 +1,8 @@
 # yantra web — the dashboard
 
-One page, four sections — machines, workspaces, sessions, agents — polling the
-read-only API `yantrad` serves at `/api`. No router, no state library, no navigation.
+One page, five sections — machines, workspaces, a form that makes one, sessions,
+agents — over the API `yantrad` serves at `/api`. The four readings poll; the form
+is the only thing that writes. No router, no state library, no navigation.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -59,6 +60,30 @@ and neither is optional:
 Three files under `src/components/ui/` bail out today and the build says so.
 They are shadcn's generated source; see below.
 
+## The one write
+
+`NewWorkspace.tsx` posts `{name, machine, repo, startup?}` to `/api/workspaces`
+(Y-116). Three things about it are not free choices:
+
+- **It renders the `201`'s own body and never re-reads the list to confirm.**
+  `refresh.rs` looks every 30 s and a create does not poke it — measured at 15 s
+  during which `GET /api/workspaces` still answered without the new workspace. A
+  form that confirmed by re-reading would draw an empty list after a success.
+- **The machine is a picker over the machines reading, and an offline machine can
+  be chosen.** [ADR-0009](../docs/adr/0009-machine-names-are-ssh-destinations.md):
+  Yantra never resolves a machine, and a sleeping Mac is a legitimate target.
+- **Each status the route answers keeps its own sentence** — `409` a name already
+  taken, `400` an unusable name or an empty field, `422` a field the daemon does
+  not know, `403` a node that is not the owner's, `503` a `tailscale` that could
+  not answer, which is not the caller's fault. The body is plain text, not JSON,
+  and is shown whole.
+
+There is **nowhere to type a secret**, and that is what keeps root §B4 here: the
+schema has three keys and none of them is one. `startup` is a shell command, so a
+secret in it stays a reference (`op://…`, `pass show …`) the shell resolves. No
+check is made over that string — a heuristic over an arbitrary command either
+misses the real case or refuses a legitimate one.
+
 ## The seam
 
 A design system is arriving from elsewhere. Two rules keep it a one-file change:
@@ -80,14 +105,15 @@ was rewired to the media query rather than left with nothing to toggle it.
 ```
 src/
   api.ts             the wire shapes; every state is a tag, never a missing key
-  useLooked.ts       the poll — the only place a fetch happens, class or agent
+  useLooked.ts       the poll — every read, class or agent
   columns.tsx        four Column<T>[] arrays: the four tables, as data
   components/
     Section.tsx      the looked switch; children run only in the ok branch
+    NewWorkspace.tsx the create form — the only fetch that is not a read
     DataTable.tsx    the table; owns "we looked and there is nothing"
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
   index.css          the token vocabulary — the whole integration surface
-  App.tsx            four <Section>s
+  App.tsx            five <Section>s
 ```
