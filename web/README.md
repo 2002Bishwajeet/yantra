@@ -1,7 +1,7 @@
 # yantra web — the dashboard
 
-One page, three sections — machines, workspaces, sessions — polling the read-only
-API `yantrad` serves at `/api`. No router, no state library, no navigation.
+One page, four sections — machines, workspaces, sessions, agents — polling the
+read-only API `yantrad` serves at `/api`. No router, no state library, no navigation.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -80,8 +80,8 @@ was rewired to the media query rather than left with nothing to toggle it.
 ```
 src/
   api.ts             the wire shapes; every state is a tag, never a missing key
-  useLooked.ts       the poll — the only place a fetch happens
-  columns.tsx        three Column<T>[] arrays: the three tables, as data
+  useLooked.ts       the poll — the only place a fetch happens, class or agent
+  columns.tsx        four Column<T>[] arrays: the four tables, as data
   components/
     Section.tsx      the looked switch; children run only in the ok branch
     DataTable.tsx    the table; owns "we looked and there is nothing"
@@ -89,5 +89,5 @@ src/
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
   index.css          the token vocabulary — the whole integration surface
-  App.tsx            three <Section>s
+  App.tsx            four <Section>s
 ```
