@@ -14,7 +14,9 @@
 //!
 //! [ADR-0011]: ../../../docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md
 
+use crate::agent;
 use crate::ssh::{self, Exec, Ssh};
+use crate::tmux::{Tmux, sq};
 use crate::workspace;
 
 /// Exit status the probe uses for "there is no transcript here". Distinct from
@@ -75,6 +77,14 @@ pub enum Error {
     )]
     NoTranscript { repo: String },
 
+    /// The pane names a session and that session has written nothing yet.
+    /// Reading the newest file instead would show a *different* conversation
+    /// under this session's name, which is the guess this module stopped making.
+    #[error(
+        "the agent in `{repo}` has written no turn yet — its transcript appears on its first message, not when it launches (session {session})"
+    )]
+    NoTurnYet { repo: String, session: String },
+
     #[error("could not read the transcript directory: {stderr}")]
     Probe { stderr: String },
 
@@ -90,21 +100,55 @@ pub async fn logs(name: &str, lines: usize) -> Result<Transcript, Error> {
     let workspace = workspace::load(name)?;
     let machine = ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?;
     let ssh = Ssh::new(machine)?;
-    read(&ssh, &workspace.repo.to_string_lossy(), lines).await
+    let session = session_of(&ssh, &workspace.name).await;
+    read(
+        &ssh,
+        &workspace.repo.to_string_lossy(),
+        session.as_deref(),
+        lines,
+    )
+    .await
+}
+
+/// The session id the workspace's pane was launched with, from the command tmux
+/// holds (Y-091) — `None` for a shell session, an absent session, or a tmux
+/// that could not be asked.
+///
+/// Two round trips, and neither failure is one `logs` reports: reading the
+/// newest transcript worked before this existed and still answers without it.
+pub async fn session_of<E: Exec>(exec: &E, name: &str) -> Option<String> {
+    let tmux = Tmux::resolve(exec).await.ok()?;
+    let started = tmux.pane(exec, name).await.ok()??.start_command?;
+    agent::session_id_in(&started).map(str::to_owned)
 }
 
 /// The testable half, once a machine can be reached.
 ///
-/// The newest transcript in the project directory is the one read, rather than
-/// the id [`crate::agent`] chose at launch. That is deliberate: an agent that
-/// has exited is gone from `claude agents --json`, and "show me the last thing
-/// that happened here" is the question `logs` is asked after a crash as much as
-/// during a run.
-pub async fn read<E: Exec>(exec: &E, repo: &str, lines: usize) -> Result<Transcript, Error> {
-    let out = exec.exec(&probe(repo, lines)).await?;
+/// Naming `session` is what separates the conversation now running from
+/// whichever one touched this repo last. Without one the newest transcript is
+/// still the answer: an agent that has exited is gone from `claude agents
+/// --json`, and "show me the last thing that happened here" is the question
+/// `logs` is asked after a crash as much as during a run.
+///
+/// A named session with no file yet is [`Error::NoTurnYet`] and never a fall
+/// back to the newest file — a launch writes no transcript (I-49), and the
+/// state that produces this is an agent that has only just started.
+pub async fn read<E: Exec>(
+    exec: &E,
+    repo: &str,
+    session: Option<&str>,
+    lines: usize,
+) -> Result<Transcript, Error> {
+    let out = exec.exec(&probe(repo, session, lines)).await?;
     if out.status == NO_TRANSCRIPT {
-        return Err(Error::NoTranscript {
-            repo: repo.to_owned(),
+        return Err(match session {
+            Some(session) => Error::NoTurnYet {
+                repo: repo.to_owned(),
+                session: session.to_owned(),
+            },
+            None => Error::NoTranscript {
+                repo: repo.to_owned(),
+            },
         });
     }
     if !out.success() {
@@ -139,11 +183,26 @@ pub async fn read<E: Exec>(exec: &E, repo: &str, lines: usize) -> Result<Transcr
 /// and a byte-level filter over a 14 MB file costs nothing next to shipping it.
 /// It over-matches slightly — `"type":"user"` also occurs inside message text —
 /// and that is safe, because the parse on this side is what decides.
-fn probe(repo: &str, lines: usize) -> String {
+///
+/// The file is `<session id>.jsonl`, measured on both fleet machines and across
+/// a `resume` fork, which is what makes naming one possible at all.
+fn probe(repo: &str, session: Option<&str>, lines: usize) -> String {
+    // Quoted, unlike the slug: a workspace's own `startup` decides what follows
+    // `--session-id`, and that file is a code-execution boundary.
+    let find = match session {
+        Some(id) => format!(
+            "f=$d/{id}.jsonl\n\
+             [ -f \"$f\" ] || exit {NO_TRANSCRIPT}\n",
+            id = sq(id)
+        ),
+        None => format!(
+            "f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -n 1)\n\
+             [ -n \"$f\" ] || exit {NO_TRANSCRIPT}\n"
+        ),
+    };
     format!(
         "d=$HOME/.claude/projects/{slug}\n\
-         f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -n 1)\n\
-         [ -n \"$f\" ] || exit {NO_TRANSCRIPT}\n\
+         {find}\
          printf '%s\\n' \"$f\"\n\
          stat -c %Y \"$f\" 2>/dev/null || stat -f %m \"$f\"\n\
          date +%s\n\
@@ -254,9 +313,38 @@ mod tests {
     /// tries to leave it is the test that matters.
     #[test]
     fn a_hostile_repo_path_cannot_reach_the_remote_shell() {
-        let probe = probe("/tmp/x'; touch /tmp/pwned; '", 5);
+        let probe = probe("/tmp/x'; touch /tmp/pwned; '", None, 5);
         assert!(probe.contains("-tmp-x---touch--tmp-pwned---"), "{probe}");
         assert!(!probe.contains("touch /tmp/pwned"), "{probe}");
+    }
+
+    /// Y-094: a named session is opened by name, and `ls -t` — the guess that
+    /// picks whichever conversation touched this repo last — is gone from the
+    /// script entirely.
+    #[test]
+    fn a_named_session_is_asked_for_by_name_rather_than_by_age() {
+        let probe = probe("/srv/repo", Some("34d9a1ab-0000-4000-8000-000000000000"), 5);
+        assert!(
+            probe.contains("f=$d/'34d9a1ab-0000-4000-8000-000000000000'.jsonl"),
+            "{probe}"
+        );
+        assert!(!probe.contains("ls -t"), "{probe}");
+    }
+
+    /// The id comes from a start command a workspace's `startup` can write, so
+    /// it is the second string in this module that must not reach a shell.
+    /// Asserted as an exact string for `agent.rs`'s reason: the escaped form
+    /// still *contains* the payload, so searching for it proves nothing.
+    #[test]
+    fn a_hostile_session_id_cannot_reach_the_remote_shell() {
+        let probe = probe("/srv/repo", Some("x'; touch /tmp/pwned; '"), 5);
+        assert!(
+            probe.contains(&format!(
+                "f=$d/{}.jsonl\n",
+                r"'x'\''; touch /tmp/pwned; '\'''"
+            )),
+            "{probe}"
+        );
     }
 
     /// Real records, byte for byte, from a 14 MB transcript on this machine.

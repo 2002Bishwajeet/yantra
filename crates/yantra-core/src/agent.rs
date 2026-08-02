@@ -54,11 +54,15 @@ pub const TRUST_PROMPT: &str = "trust this folder";
 /// current across a respawn, so tmux already holds the one fact that mattered.
 /// Reading it back beats remembering it, because the pane and the record cannot
 /// then disagree.
+///
+/// Both quote characters are trimmed: tmux stores a multi-word start command
+/// re-quoted with `"`, so the id arrives as `'…'"` and the launch's own `'` is
+/// not the last character (measured on 3.5a and 3.7b).
 pub fn session_id_in(start_command: &str) -> Option<&str> {
     start_command
         .split_once("--session-id ")
         .and_then(|(_, rest)| rest.split_whitespace().next())
-        .map(|id| id.trim_matches('\''))
+        .map(|id| id.trim_matches(['\'', '"']))
         .filter(|id| !id.is_empty())
 }
 
@@ -369,6 +373,21 @@ mod tests {
         let cmd = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New);
         assert!(!cmd.contains("--continue"), "{cmd}");
         assert!(!cmd.contains("--fork-session"), "{cmd}");
+    }
+
+    /// Exactly what tmux 3.7b returned for a pane respawned with
+    /// [`launch_command`]'s output — the wrapping `"` is tmux's own, and every
+    /// real launch has one, since it re-quotes anything with a space in it.
+    /// `status` never saw this: it asks whether there is an id, not what it is.
+    #[test]
+    fn the_id_survives_the_quotes_tmux_puts_around_a_start_command() {
+        let started = "\"cd '/srv/repo' && exec '/usr/bin/claude' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'\"";
+        assert_eq!(
+            session_id_in(started),
+            Some("d4c3b2a1-0000-4000-8000-000000000000"),
+            "a trailing quote here becomes a transcript filename that cannot exist"
+        );
+        assert_eq!(session_id_in("sleep 300"), None);
     }
 
     /// The fields Yantra does not name must not arrive with the ones it does.
