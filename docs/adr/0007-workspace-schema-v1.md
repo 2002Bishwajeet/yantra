@@ -37,7 +37,7 @@ Schema v1 is five fields, four of them on disk:
 
 ```toml
 machine = "pi"                        # required — an alias, resolved by Y-041
-repo    = "/home/biswa/code/demo"     # required — a path ON `machine`
+repo    = "/home/<user>/code/demo"     # required — a path ON `machine`
 branch  = "main"                      # optional — omitted leaves the tree alone
 startup = "claude"                    # optional — omitted means just a shell
 ```

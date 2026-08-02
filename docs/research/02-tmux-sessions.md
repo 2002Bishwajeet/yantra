@@ -181,10 +181,10 @@ $T new-session -d -s "$N" -c "$DIR" -x 200 -y 50 -P -F '#{session_id}'
 # DO NOT USE: new-session -A -d  -> "open terminal failed: not a terminal" when it exists
 $T list-sessions -F '#{session_name}|#{session_id}|#{session_created}|#{session_attached}|#{session_windows}|#{session_path}|#{session_activity}' \
    -f '#{m:yantra-*,#{session_name}}'
-# ws-abc123|$0|1785263204|0|1|/home/biswa|1785263204
+# ws-abc123|$0|1785263204|0|1|/home/<user>|1785263204
 # (no -F:)  ws-abc123: 1 windows (created Tue Jul 28 20:26:44 2026)
 $T list-panes -a -F '#{session_name}|#{window_index}|#{pane_index}|#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}|#{pane_dead}|#{pane_dead_status}|#{pane_width}x#{pane_height}|#{pane_pipe}'
-# ws-abc123|0|0|%0|86679|bash|/home/biswa|0||80x24|0
+# ws-abc123|0|0|%0|86679|bash|/home/<user>|0||80x24|0
 $T display-message -p -t "=$N" '#{session_name} #{session_created} #{pane_pid} #{history_size} #{history_limit} #{alternate_on}'
 # ws-abc123 1785263204 86679 68 2000 0
 $T display-message -p '#{version} #{pid} #{socket_path}'      # 3.7b 86832 /tmp/ytr.sock
