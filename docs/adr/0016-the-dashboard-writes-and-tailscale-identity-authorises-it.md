@@ -111,3 +111,31 @@ here is that granting them later has to be deliberate.
 - **Tailscale ACLs.** They would enforce this a layer lower and are worth having, but they are
   configuration the daemon cannot read, and a daemon that assumes an ACL it cannot see fails open the
   moment someone edits it. Complementary, never a substitute.
+
+> **Amendment, 2026-08-03 (Y-111): a reverse proxy sits in front of this, and the source address no
+> longer names the caller.**
+>
+> Decision 4 rests on a premise this ADR never wrote down, because at the time it was free: that the
+> TCP peer *is* the caller. Y-111 put `yantrad` behind `tailscale serve` so the dashboard has TLS —
+> which the PWA needs and `axum` should not own (§B2) — and a proxy terminates that connection and
+> opens its own.
+>
+> Measured on the real tailnet: a request issued on `bishwajeets-macbook-pro` reached the backend
+> from **this** node's address, with the caller's own address only in `X-Forwarded-For` and its
+> identity in `Tailscale-User-Login`. So **every write through the HTTPS port is attributed to the
+> machine running the proxy**, and `allowed()` cannot reject anything reaching it.
+>
+> Nothing in the decisions above is wrong, and none is retracted — the daemon's plain-HTTP port is
+> unchanged and a caller reaching it directly is still resolved as written. What changed is upstream:
+> the browser now arrives by a second path that launders the address.
+>
+> **The consequence lands exactly where this ADR said its value was.** "It rejects nothing today, and
+> that is the point" — the value was the day a tagged node or a shared-in node appears. Behind the
+> proxy that day arrives already authorised, so the mitigation is gone precisely in the case it was
+> bought for. R-22's outer boundary is untouched: `tailscale serve` is tailnet-only, so this is not
+> reachable from the internet.
+>
+> The fix is not obvious enough to make silently — trusting `X-Forwarded-For` means trusting a header,
+> which is decision 4's own reasoning turned around, and it is only sound because the connection came
+> from `tailscaled` on this machine. That is a decision, so it gets its own task (**Y-118**) and, if
+> it changes what may be trusted, its own ADR.

@@ -49,6 +49,13 @@ Run it with `yantrad`. It listens on **port 7717**, on the addresses Tailscale s
 holds, and refuses to start if it cannot learn them. There is no flag to change either — with no
 authentication (Q6, personal-first), where it listens is the whole security model.
 
+It speaks **plain HTTP and always will**. TLS belongs to `tailscale serve`, which already holds and
+renews a certificate for the machine's `*.ts.net` name — `just https` puts the dashboard on
+`https://<machine>.<tailnet>.ts.net:8443/`, which is what a phone needs and what the PWA's secure
+context requires. One caveat, measured: a proxied write arrives from the *proxy's* address, so
+ADR-0016's identity check sees the machine running the proxy rather than the caller. See its
+amendment and [`docs/development.md`](../../docs/development.md).
+
 [tracker.md](tracker.md) collects what research already settled about it — SQLite handling, scheduling
 determinism, PTYs — none of it exercised by code yet. See [../../tracker.md](../../tracker.md) for
 where this sits in the roadmap.

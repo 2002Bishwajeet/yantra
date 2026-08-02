@@ -95,6 +95,67 @@ Assets are not embedded in the binary. That is R-24: embedding makes every `fmt`
 and cross-build job depend on npm, and the only thing that wants one file to copy is the M7
 appliance.
 
+## The dashboard over HTTPS
+
+`yantrad` speaks plain HTTP and will keep doing so. TLS is `tailscale serve`'s job: it already holds
+a publicly-trusted certificate for this machine's `*.ts.net` name and renews it, so terminating TLS
+in `axum` would mean owning cert renewal to gain nothing (§B2).
+
+A browser needs this for more than the padlock. Service workers do not register outside a secure
+context, so the PWA (Y-114) cannot exist over HTTP, and `navigator.clipboard` already fails for the
+same reason.
+
+Run the daemon as above, then, **once**:
+
+```bash
+just https        # tailscale serve --bg --https=8443 "http://$(tailscale ip -4):7717"
+```
+
+Open **`https://<machine>.<tailnet>.ts.net:8443/`** from anything on the tailnet — a phone included.
+`--bg` makes it a stored `tailscaled` setting, so it survives reboots and outlives the shell; you set
+it once per machine, not once per session. To undo it:
+
+```bash
+just https-off    # tailscale serve --https=8443 off
+tailscale serve status
+```
+
+Four things about that command are deliberate, and three of them were measured rather than assumed.
+
+**It proxies to the tailnet address, never `127.0.0.1`.** Y-069 has the daemon bind only the
+addresses Tailscale says this machine holds, and loopback is deliberately not among them, so
+`http://127.0.0.1:7717` is refused by design. `$(tailscale ip -4)` is the target that works.
+
+**Port 8443, not `/`.** `/` on this machine's HTTPS is code-server's and stays that way. A subpath
+would have cost the PWA its service-worker scope — a worker's scope is its path — and made every
+asset path relative for the rest of the project's life, so Yantra takes its own port instead. 8443 is
+the conventional alternate-HTTPS port and is the one Tailscale's own `serve` and `funnel` help pages
+use as their example.
+
+**Not 7717.** `tailscale serve --https=7717` is accepted without complaint even though `yantrad`
+already holds that address and port; `ss -lntp` then still shows the socket belonging to `yantrad`,
+so `tailscaled` never got it and the HTTPS endpoint quietly does not exist. Keeping one meaning per
+port avoids that: 7717 is the daemon's plain-HTTP listener that `yantra-agent` posts heartbeats to,
+8443 is the browser's door.
+
+**The target address is stored, not resolved per request.** `tailscale serve status` shows the
+literal `100.x.x.x` the shell expanded. If this machine's tailnet address ever changes, re-run
+`just https`.
+
+### What the proxy does to caller identity
+
+**Behind `tailscale serve`, `yantrad` cannot see who is calling**, and
+[ADR-0016](adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md) authorises writes
+by source address. Measured on 2026-08-03 with a listener standing in for the daemon: a request made
+from `bishwajeets-macbook-pro` arrived from peer address `100.x.x.x` — *this* node — with the real
+caller only in `X-Forwarded-For`, alongside `Tailscale-User-Login`. So every write through the HTTPS
+port is attributed to whichever machine runs the proxy.
+
+Nothing breaks today: that address is the owner's own untagged node, so writes from the phone are
+authorised, which is what M5 needs. What is lost is the *failure mode* ADR-0016 exists for — a tagged
+CI runner or a node shared in from another tailnet would be authorised too. **Y-118** carries the
+fix; ADR-0016 has a dated amendment recording it.
+
 ## Testing
 
 **Mocks lie about SSH.** Orchestration primitives are tested against a real
