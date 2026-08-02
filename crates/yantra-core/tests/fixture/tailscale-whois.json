@@ -1,0 +1,28 @@
+{
+  "Node": {
+    "ID": 1499133739371723,
+    "StableID": "nMAC000000011CNTRL",
+    "Name": "a-machine.<tailnet>.ts.net.",
+    "User": 1,
+    "Key": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+    "KeyExpiry": "2027-01-27T11:02:20Z",
+    "DiscoKey": "discokey:0000000000000000000000000000000000000000000000000000000000000000",
+    "Addresses": ["100.64.0.2/32", "fd7a:115c:a1e0::2/128"],
+    "AllowedIPs": ["100.64.0.2/32", "fd7a:115c:a1e0::2/128"],
+    "Endpoints": ["192.0.2.10:41641"],
+    "HomeDERP": 6,
+    "Hostinfo": {},
+    "Created": "2026-07-29T10:59:26Z",
+    "LastSeen": "2026-08-02T15:52:07Z",
+    "Online": true,
+    "ComputedName": "a-machine",
+    "ComputedNameWithHost": "a-machine"
+  },
+  "UserProfile": {
+    "ID": 1,
+    "LoginName": "someone@example.com",
+    "DisplayName": "Someone",
+    "ProfilePicURL": ""
+  },
+  "CapMap": {}
+}
