@@ -75,3 +75,20 @@ They are quality targets, not gates on the language choice.
 
 **Explicitly not a reason for this decision:** performance. Yantra orchestrates five machines and
 serves one user. Throughput was never the constraint, and no benchmark motivated this.
+
+> **The daemon writes no SQLite, recorded 2026-08-02 (Y-044).** The session state store was dropped
+> without being built: five candidate consumers were audited and none needed one, because what the
+> store would have held is already held by the workspace TOML, by tmux's `pane_start_command`, and by
+> the agent's own transcript. `rusqlite` is in no `Cargo.toml` and no `Cargo.lock`. So three lines
+> above describe a part that was never built — *"and writes SQLite"* in the Context, the `Datastore`
+> row of the stack table, and the `busy_timeout` bullet under **Gained**. The Y-044 row in
+> [`tracker.md`](../../tracker.md) carries the audit and names what would bring a store back. I-12,
+> I-13 and I-14 stay parked in [`crates/yantrad/tracker.md`](../../crates/yantrad/tracker.md),
+> unexercised rather than withdrawn.
+>
+> **That bullet's argument was true when it was made, and it is not what changed.** `rusqlite`'s
+> `busy_timeout` and `spawn_blocking` were a real advantage over the bindings R6 measured, and
+> nothing since has contradicted it. What changed sits upstream of it: the daemon turned out to need
+> no datastore at all, so a comparison between datastore bindings no longer decides anything here.
+> The decision stands on the rest of the record — the static musl binary, one toolchain for three
+> binaries, `tokio::process` around `ssh`, `tmux` and `tailscale`, and `axum` for HTTP and WebSocket.

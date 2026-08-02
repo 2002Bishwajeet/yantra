@@ -154,10 +154,10 @@ see Q6 in [`tracker.md`](tracker.md).
 
 **Rust** for the daemon, CLI and per-machine agent · **TypeScript** for the web UI ·
 `tokio` + `axum` · the system `ssh` binary as transport (with `ControlMaster` multiplexing) ·
-tmux for persistence · Tailscale as the network · `rusqlite` for state ·
-appliance target `aarch64-unknown-linux-musl`.
+tmux for persistence · Tailscale as the network · nothing persisted — state is declared, derived, or
+held in memory · appliance target `aarch64-unknown-linux-musl`.
 
-See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md).
+See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md) and its 2026-08-02 amendment on the datastore.
 
 ## Name
 
