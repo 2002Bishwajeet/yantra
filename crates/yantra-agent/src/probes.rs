@@ -54,8 +54,13 @@ impl Fixed {
 
 /// One beat's worth of the machine.
 pub fn beat(fixed: &Fixed) -> Heartbeat {
+    let now = OffsetDateTime::now_utc();
     Heartbeat {
-        sent_at: OffsetDateTime::now_utc(),
+        // Whole seconds, which is ADR-0013 §1's example and Y-104's test vector.
+        // Nine digits of precision would be consumed by nothing: the beat is
+        // 10 s, the staleness threshold 30 s, and the field's job is to spot a
+        // clock that is wrong by minutes, not a delivery late by milliseconds.
+        sent_at: now.replace_nanosecond(0).unwrap_or(now),
         arch: fixed.arch.to_owned(),
         labels: fixed.labels.clone(),
         free_ram_mb: free_ram_mb(),
@@ -573,5 +578,6 @@ mod tests {
             beat.cpu_busy_pct > 0,
             "a machine running its own tests is not idle"
         );
+        assert_eq!(beat.sent_at.nanosecond(), 0, "`sent_at` is whole seconds");
     }
 }
