@@ -243,14 +243,9 @@ export function spandrelRosette(o: RosetteOpts = {}): string {
 
 /* --------------------------------------------------------------- torana */
 
-/**
- * The whole arch: pearl band on foiled jambs that close in pendant feet, a creeper running the
- * whole outside from foot to foot, a rosette anchored on it in each spandrel, and lamps hanging
- * off every inner cusp. Returns a fragment — the caller supplies <svg viewBox="0 0 w h">.
- */
-export function torana(o: ToranaOpts): string {
+/** Every measurement `torana` works from. Shared with `toranaOpening` so the two cannot drift. */
+function geom(o: ToranaOpts) {
   const { w, h } = o;
-  const dp = o.dp ?? 1;
   /* The reference band is 0.026 of the field's width AND 0.05 of its height — the same 10px,
      because that field is 0.53 as tall as it is wide. Spanning a viewport at h≈0.30w the two
      disagree by 1.7x, and the width reading bloats the band, the pearls and everything keyed to
@@ -275,7 +270,6 @@ export function torana(o: ToranaOpts): string {
   const ts = angles(lobes, 400);
   const outer = sweep(cx, baseY, rxOut, ryOut, lobes, AMP, ts);
   const inner = sweep(cx, baseY, rxIn, ryIn, lobes, AMP, ts);
-  const last = ts.length - 1;
 
   /* Lamp scale is capped against the arch rise: at full-viewport width the band is twice as thick
      relative to the rise as it is in the reference, and a band-only scale hangs lamps halfway
@@ -286,7 +280,52 @@ export function torana(o: ToranaOpts): string {
   /* The jambs do not reach the bottom edge: in the reference they close in a rounded pendant foot
      with the pearl course running into it, and a tassel hangs below. */
   const footY = Math.max(baseY + bandW * 1.2, h - lampH - bandW * 0.15);
-  const fr = bandW * 0.45;             // foot corner radius
+
+  return { w, h, bandW, lobes, padX, padY, baseY, cx, rxOut, ryOut, rxIn, ryIn, ts, outer, inner,
+    lampU, footY, fr: bandW * 0.45 };
+}
+
+export interface ToranaOpening {
+  cx: number;
+  /** the springing line — below it the opening is a plain rectangle from x0 to x1 */
+  baseY: number;
+  /** inside faces of the two jambs */
+  x0: number;
+  x1: number;
+  /** the highest point of the opening, under the apex */
+  headTop: number;
+  /** where the jambs close in their pendant feet */
+  footY: number;
+  /** The head's inner boundary, springing to springing. Given rather than summarised because
+   *  the opening is cusped: its clearance is nowhere near its half-width, and the two upper
+   *  cusps bind long before the widest point does. */
+  edge: Array<[number, number]>;
+}
+
+/**
+ * Where the arch's opening is, so a caller can put something inside it. Must be given the *same*
+ * options as the `torana` call it describes — the two share their geometry rather than agreeing
+ * on it, which is the only way a caller can place anything without restating the profile
+ * constants.
+ */
+export function toranaOpening(o: ToranaOpts): ToranaOpening {
+  const g = geom(o);
+  let headTop = Infinity;
+  for (const p of g.inner) if (p[1] < headTop) headTop = p[1];
+  return { cx: g.cx, baseY: g.baseY, x0: g.padX + g.bandW, x1: o.w - g.padX - g.bandW, headTop,
+    footY: g.footY, edge: g.inner };
+}
+
+/**
+ * The whole arch: pearl band on foiled jambs that close in pendant feet, a creeper running the
+ * whole outside from foot to foot, a rosette anchored on it in each spandrel, and lamps hanging
+ * off every inner cusp. Returns a fragment — the caller supplies <svg viewBox="0 0 w h">.
+ */
+export function torana(o: ToranaOpts): string {
+  const dp = o.dp ?? 1;
+  const { w, h, bandW, lobes, padX, padY, baseY, cx, rxOut, ryOut, rxIn, ryIn, ts, outer, inner,
+    lampU, footY, fr } = geom(o);
+  const last = ts.length - 1;
 
   const band =
     'M' + n(padX, dp) + ' ' + n(footY - fr, dp) + pts(outer, dp) +

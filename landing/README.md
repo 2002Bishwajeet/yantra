@@ -1,14 +1,19 @@
 # landing
 
-The public *coming soon* page for Yantra. Astro 7 + React 19 islands + Tailwind 4, static output.
+The public *coming soon* page for Yantra. Astro 7 + Tailwind 4, static output, one page and no
+client framework — everything on it is drawn by the pure SVG functions in
+[`src/patta/`](src/patta/README.md).
 
-**This is not the M4 dashboard.** That is `Y-072` and it will live in `web/`, built per
-[ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md). The two share an identity
-and nothing else — the shared part is [`design/tokens.css`](../design/tokens.css), plain CSS custom
-properties with no framework dependency, which is one of the three delivery shapes ADR-0014 left
-open and the one that keeps its integration diff down to `index.css`. The reasoning is in
-[`docs/design-system.md`](../docs/design-system.md); read that before changing a colour, and read
-§7 before wiring it into the dashboard — `--accent` collides with shadcn's.
+**This is not the M4 dashboard.** That is `Y-072`, it lives in `web/`, and it is built per
+[ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md).
+
+**The two no longer share a palette.** They did: both read [`design/tokens.css`](../design/tokens.css),
+documented in [`docs/design-system.md`](../docs/design-system.md). The first landing design was then
+rejected outright and rebuilt against a measured reference photograph, and the palette that came out
+of that is [`src/patta/tokens.css`](src/patta/tokens.css) — lighter cloth, duller red, and a
+black-and-cream weighting the first one did not have. `design/tokens.css` is untouched and still
+describes the dashboard's identity; if the two are ever to agree again, the patta values are the
+measured ones and the design-system doc is the thing that needs rewriting.
 
 ```sh
 npm install

@@ -7,16 +7,15 @@ so a re-ground is a token edit.
 | file | exports | what it draws |
 | --- | --- | --- |
 | `border.ts` | `floretTile` · `cornerPanel` · `borderFrame` | the floret tile band and the full four-edge frame |
-| `torana.ts` | `torana` · `lamp` · `spandrelRosette` | the cusped gate, its jambs, lamps and rosettes |
-| `instrument.js` | `jaiPrakash` · `sunPosition` | the hemispherical bowl, read against the viewer's real sky |
+| `torana.ts` | `torana` · `toranaOpening` · `lamp` · `spandrelRosette` | the cusped gate, its jambs, lamps and rosettes |
+| `instrument.js` | `jaiPrakash` · `sunPosition` | the hemispherical bowl, read against a real sky |
 | `tokens.css` | — | the palette, sampled from the reference photograph |
 | `ground.css` | `.patta-cloth` · `.patta-band` · `.patta-rule` | the cloth and cream surfaces (see `ground.md`) |
 
-## Status
-
-**These are not wired into the site yet.** `src/pages/index.astro` still renders the previous
-design. Both exist deliberately: replacing the page also means rewriting the Playwright
-baselines, and what goes inside the frame is still an open decision.
+`toranaOpening` hands back the arch's opening, including its inner boundary as points. Placing
+anything inside a cusped arch needs the boundary itself: the clearance is nowhere near the
+half-width, and the two upper cusps bind first — sizing the bowl off the half-width drew it
+straight over the band.
 
 ## Where the values come from
 
@@ -42,6 +41,14 @@ Palette values are the top-decile-saturation mean of each hue family across the 
   near-horizontal.
 - **Both rims of the torana band are cusped equally**, and the apex needs a *local* tent
   (half-width ~0.15 rad) — an even lobe count alone still reads as a dome.
+
+- **The arch takes its own shape, not the field's.** A near-square panel puts the head's two
+  radii within a few percent of each other, which is the round torana of the reference.
+  Spanning a 1.7:1 desktop field flattens it into a tent; spanning a phone field draws a 3:1
+  lancet. The page sizes the panel and leaves the slack as open cloth.
+- **The instrument goes down before the arch.** The lamps hang from the inner cusps, inside the
+  opening the bowl is fitted to, so they cross it at any radius. In front of the bowl they are
+  lamps hanging before it; behind it they are clipped stubs.
 
 `cornerPanel` is exported but unused: the reference has no corner panels, all four corners are
 ordinary florets. It is kept only because removing an export is a breaking change.

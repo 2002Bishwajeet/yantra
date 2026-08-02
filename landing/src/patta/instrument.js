@@ -44,8 +44,9 @@ export function jaiPrakash(o) {
   const { alt, az, up } = sunPosition(o.now, o.lat, o.lon);
   const p = [];
 
-  // The bowl. Filled so the shadow bead has something to fall on.
-  p.push(`<circle cx="0" cy="0" r="${r2(R)}" fill="var(--patta)" stroke="var(--ink)" stroke-width="var(--line-rule)"/>`);
+  // The bowl. Filled with the cream, not the cloth: a bowl the same colour as the field it is
+  // sunk in has no edge except its outline, and the bead needs a lighter ground to fall on.
+  p.push(`<circle cx="0" cy="0" r="${r2(R)}" fill="var(--band)" stroke="var(--ink)" stroke-width="var(--line-rule)"/>`);
 
   // Declination circles: concentric, unevenly spaced because they are a projection of
   // equal angular steps onto a hemisphere — even spacing would be the giveaway that this
@@ -87,7 +88,9 @@ export function jaiPrakash(o) {
     const th = (az - 90) * Math.PI / 180;
     const x = r2(Math.cos(th) * rr), y = r2(Math.sin(th) * rr);
     p.push(`<circle cx="${x}" cy="${y}" r="${r2(R * 0.055)}" fill="var(--kalam)" opacity=".9"/>`);
-    p.push(`<circle cx="${x}" cy="${y}" r="${r2(R * 0.105)}" fill="none" stroke="var(--haritala)" stroke-width="var(--line-pen)"/>`);
+    // Ringed in lac, not orpiment: yellow on the cream bowl is barely a mark, and the one
+    // thing on the instrument that changes is the one thing that should carry the hot colour.
+    p.push(`<circle cx="${x}" cy="${y}" r="${r2(R * 0.105)}" fill="none" stroke="var(--accent)" stroke-width="var(--line-pen)"/>`);
   } else {
     // Night. The instrument does not invent a reading it cannot take — the bowl simply
     // sits empty, which is what it does, and the bead is drawn unlit.

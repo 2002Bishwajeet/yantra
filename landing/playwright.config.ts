@@ -34,15 +34,7 @@ export default defineConfig({
   },
 
   projects: [
-    {
-      name: 'chromium',
-      use: {
-        ...devices['Desktop Chrome'],
-        // SwiftShader, or the yantra island renders nothing headless and every
-        // snapshot silently records an empty niche.
-        launchOptions: { args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] },
-      },
-    },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
 
   webServer: {
