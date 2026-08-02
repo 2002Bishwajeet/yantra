@@ -16,10 +16,12 @@ import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 export function Section<T>({
   title,
   query,
+  waiting,
   children,
 }: {
   title: string
   query: Looked<T>
+  waiting?: string[]
   children: (data: T) => ReactNode
 }) {
   return (
@@ -28,7 +30,7 @@ export function Section<T>({
         <CardTitle>{title}</CardTitle>
         {query.looked !== 'never' && (
           <CardDescription>
-            <Age seconds={query.age_seconds} />
+            <Age seconds={query.age_seconds} waiting={waiting} />
           </CardDescription>
         )}
       </CardHeader>
