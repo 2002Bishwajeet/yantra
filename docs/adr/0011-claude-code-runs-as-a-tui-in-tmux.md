@@ -47,6 +47,12 @@ Concretely:
   mandatory; `--session-id` chooses the UUID up front, which is what makes the transcript path
   predictable rather than discovered. The command reaches the pane via `respawn-pane -k`, never
   `new-session` (**I-29**), and `hasTrustDialogAccepted` is pre-seeded first (**I-23**).
+
+  > **This is one of two commands, recorded 2026-08-02 (Y-077).** `yantra resume` puts
+  > `cd <repo> && exec claude --continue --fork-session --session-id <uuid>` in the pane instead.
+  > Nothing above changes — the extra flags and the reasons for them are
+  > [ADR-0015](0015-resume-forks-the-conversation.md).
+
 - **Output comes from the transcript JSONL**, at
   `~/.claude/projects/<repo path, non-alphanumerics → ->/<uuid>.jsonl`, written append-per-message.
   Never from `pipe-pane`, which on a TUI captures the raw redraw stream — a liveness channel, not a
