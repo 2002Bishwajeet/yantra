@@ -27,6 +27,6 @@ power* and scored down for it.
 Task rows live in [`tracker.md` §3](../../tracker.md). What this crate reports and how often is
 settled by [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md), and
 how each of the seven fields is read on Linux and macOS is measured in
-[the M5 plan](../../docs/plans/m5-the-heartbeat-agent.md) §3. **Y-106** fills `measure()`; until it
+[the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) §3. **Y-106** fills `measure()`; until it
 does, the agent sends a machine that fails every hard filter. **I-50** — dial the address, never the
 MagicDNS name — binds `YANTRA_DAEMON` and lives in the root tracker.

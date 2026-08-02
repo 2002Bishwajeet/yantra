@@ -40,7 +40,7 @@ the other side).
 `hyper` + `tokio` +87 %, `tokio` alone +28 % for one timer, and `reqwest` **cannot cross-build to
 musl at all** — default features resolve `native-tls` → `openssl-sys` and the build script exits 101,
 which would take Y-037's five-target release pipeline down while looking like a CI problem
-([the M5 plan §2](../../docs/plans/m5-the-heartbeat-agent.md)). §B2's *orchestrate, don't reinvent*
+([the heartbeat-agent plan §2](../../docs/plans/the-heartbeat-agent.md)). §B2's *orchestrate, don't reinvent*
 is about SSH clients and terminal multiplexers; this is a fixed-shape POST to a known port with no
 redirects, no keep-alive, no chunked encoding and no TLS. **If it ever needs one of those, this
 decision is wrong and the answer is `ureq`** — so if the request starts growing content negotiation,
@@ -68,7 +68,7 @@ startup with that reason; a value that is an address but wrong fails per beat, o
 keeps running.
 
 The local agent is **not** a special case: a host dialling its own tailnet address reaches the
-listener and is attributed by that same address (the M5 plan §5), so there is no "is this me" branch
+listener and is attributed by that same address (the heartbeat-agent plan §5), so there is no "is this me" branch
 here or in the daemon.
 
 ## Tests
@@ -81,12 +81,12 @@ test the mock (root §B3).
 The probes' parsers are exercised against output recorded from both fleet machines, which is not a
 substitute for §B3 but the only way to reach two states this fleet cannot produce: a desktop with no
 battery, and a machine that is unplugged. **A fixture is not evidence about a platform** — run the
-binary on both machines ([the M5 plan §9](../../docs/plans/m5-the-heartbeat-agent.md), I-32).
+binary on both machines ([the heartbeat-agent plan §9](../../docs/plans/the-heartbeat-agent.md), I-32).
 
 ## What binds the probes
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles the
-payload and [the M5 plan](../../docs/plans/m5-the-heartbeat-agent.md) §3 measures every probe on both
+payload and [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) §3 measures every probe on both
 fleet machines, verbatim. It is the probes' specification; read it before touching `probes.rs`.
 
 Four rules, each earned by a measurement that would otherwise ship as a bug:

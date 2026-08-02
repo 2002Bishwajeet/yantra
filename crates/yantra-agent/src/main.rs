@@ -12,7 +12,7 @@
 //! than an HTTP crate, and there is no async runtime: measured against this
 //! shape, `ureq` costs +57 % of the binary, `hyper` + `tokio` +87 %, `tokio`
 //! alone +28 % for one timer, and `reqwest` cannot cross-build to musl at all.
-//! See the M5 plan §2. If this ever needs redirects, retries, keep-alive,
+//! See the heartbeat-agent plan §2. If this ever needs redirects, retries, keep-alive,
 //! compression or TLS, the decision is wrong and the answer is `ureq` —
 //! ADR-0013 §4 and §7 rule out every one of those by name.
 
@@ -53,7 +53,7 @@ fn main() -> ExitCode {
     let fixed = probes::Fixed::measure();
     // The fixed facts are said once because an empty label set is a permanent,
     // silent hard-filter-4 rejection, and this is the only place to see it
-    // before the read model renders it (M5 plan §9).
+    // before the read model renders it (heartbeat-agent plan §9).
     eprintln!(
         "yantra-agent: reporting to {daemon} every {}s — {fixed:?}",
         INTERVAL.as_secs()

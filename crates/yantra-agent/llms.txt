@@ -15,7 +15,7 @@
 
 - [CLAUDE.md](CLAUDE.md): what it may call, what the loop must keep doing, and its one configuration value.
 - [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md): the seven fields, the transport, and §7 — drop the beat, never exit, log once.
-- [plans/m5-the-heartbeat-agent.md](../../docs/plans/m5-the-heartbeat-agent.md): §1 and §2 measure why there is no HTTP crate and no async runtime; §3 runs every probe on both fleet machines and is the probes' specification; §5 measures the local agent; §8 lists where reality differed from the ADR.
+- [plans/the-heartbeat-agent.md](../../docs/plans/the-heartbeat-agent.md): §1 and §2 measure why there is no HTTP crate and no async runtime; §3 runs every probe on both fleet machines and is the probes' specification; §5 measures the local agent; §8 lists where reality differed from the ADR.
 - [yantra-core/src/heartbeat.rs](../yantra-core/src/heartbeat.rs): the wire type, and the only module of the library this binary calls.
 - [research/01-tailscale-inventory.md](../../docs/research/01-tailscale-inventory.md): the negative finding that made an agent unavoidable — zero telemetry, verified three ways.
 - [research/05-scheduling.md](../../docs/research/05-scheduling.md): why polling over SSH was rejected, and what the scheduler needs from a heartbeat.
