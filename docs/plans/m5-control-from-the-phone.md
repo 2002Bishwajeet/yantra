@@ -100,10 +100,38 @@ dictate"*), its MVP list puts **Scheduling at Phase 6** — after the web UI and
 which is *later* than the tracker's old M5 — and **Wake-on-LAN sits under Future Possibilities**, never
 core.
 
+### 4.5 Nothing serves the dashboard
+
+`yantrad` mounts `/api` and `/healthz` and **nothing else**. The web UI is served by Vite's dev
+server, which proxies `/api` across to the daemon:
+
+```
+"dev": "YANTRA_API=http://$(tailscale ip -4):7717 vite"
+```
+
+So looking at the dashboard today means running a development server on a laptop, which is not a
+thing to do from a phone. **Y-073 is therefore a prerequisite of this milestone rather than an M4
+leftover** — without it, TLS has nothing to put behind it.
+
+It also settles the origin question in the PWA's favour: one process serving both the app and the
+API means same-origin, no CORS, and a service-worker scope of `/`.
+
+### 4.6 The tailnet root is taken
+
+`tailscale serve` on `cachyos-g14` already proxies `/` to `http://127.0.0.1:8080`, which is
+**code-server**. That is deliberate and stays. Yantra takes its own HTTPS port rather than a subpath:
+a port is uglier in a URL, and a subpath costs the service worker its `/` scope and makes every asset
+path relative for the rest of the project's life.
+
+`tailscale serve` must also proxy to the **tailnet address**, not `127.0.0.1` — Y-069 has `yantrad`
+bind only the addresses Tailscale says this machine holds, and loopback is deliberately not among
+them.
+
 ## 5. The tasks
 
 | # | Task | Why it is where it is |
 | --- | --- | --- |
+| Y-073 | `yantrad` serves the built dashboard | 4.5 — first, because TLS needs something behind it. Embedding stays behind a cargo feature that is off by default (R-24: no Rust build should need npm). |
 | Y-111 | `yantrad` behind `tailscale serve`, so the UI is HTTPS | Unblocks 4.1. §B2 says orchestrate rather than reinvent: `tailscale serve https / proxy 7717` is a config line against terminating TLS in `axum` and renewing certs ourselves. |
 | Y-112 | ADR-0016 + write routes authorised by peer identity | The decision recorded, then `POST /api/workspaces/{name}/{up,down,resume}`. Reuses Y-108's source-address lookup. |
 | Y-113 | The dashboard acts: a machine picker and real buttons | Replaces the copy-a-command affordance where a write now exists. `Command` stays for `attach`, which is still a paste. |
