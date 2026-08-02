@@ -348,8 +348,11 @@ async fn down(name: &str) -> ExitCode {
             if report.stopped {
                 println!("stopped {} on {machine}", report.workspace.name);
                 // What it was doing when it was stopped, which is only knowable
-                // before the session is destroyed and is gone by now.
-                println!("  agent:  {}", describe(&report.ending));
+                // before the session is destroyed and is gone by now. Absent for
+                // a session that held no agent, which has no ending to report.
+                if let Some(ending) = &report.ending {
+                    println!("  agent:  {}", describe(ending));
+                }
             } else {
                 println!("{} was not running on {machine}", report.workspace.name);
             }
