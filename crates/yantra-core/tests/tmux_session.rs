@@ -293,3 +293,32 @@ async fn listing_reports_sessions_and_no_server_means_none() -> Result<()> {
     lab.tmux.kill(&lab.ssh, "beta").await?;
     Ok(())
 }
+
+/// **Y-084 found this on the fleet, and no existing test could.** `pane` reads
+/// "no such session" out of tmux's stderr, and every test that asked had no
+/// server running at all — so it only ever saw `no server running`. With a
+/// server up, tmux resolves `=name` as a *window* target and answers `can't
+/// find window`, which was reaching the caller as a hard error. A read model
+/// that asks about every workspace hits this on the first one that is not open.
+#[tokio::test]
+async fn a_missing_session_is_none_even_when_the_server_is_running() -> Result<()> {
+    let Some(lab) = Lab::start("panegone").await? else {
+        return Ok(());
+    };
+
+    assert!(
+        lab.tmux.pane(&lab.ssh, "neverwas").await?.is_none(),
+        "no server at all is the case every earlier test covered"
+    );
+
+    lab.tmux.ensure(&lab.ssh, "elsewhere", "/tmp", None).await?;
+    assert!(
+        lab.tmux.pane(&lab.ssh, "neverwas").await?.is_none(),
+        "a server running someone else's session must not turn an absent \
+         session into an error"
+    );
+    assert!(lab.tmux.pane(&lab.ssh, "elsewhere").await?.is_some());
+
+    lab.tmux.kill(&lab.ssh, "elsewhere").await?;
+    Ok(())
+}

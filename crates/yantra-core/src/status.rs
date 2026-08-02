@@ -22,6 +22,8 @@
 //! answer all read as [`Verdict::Unclear`], which is the verdict there was
 //! before. Yantra reads that screen and never answers it (ADR-0011).
 
+use std::collections::BTreeMap;
+
 use crate::agent::{self, Claude, Running};
 use crate::ssh::{self, Exec, Ssh};
 use crate::tmux::{self, Pane, Tmux};
@@ -85,6 +87,18 @@ pub struct Report {
     pub verdict: Verdict,
 }
 
+/// One machine's answer for every workspace that names it.
+#[derive(Debug)]
+pub struct MachineStatus {
+    pub machine: String,
+    /// Listed whether or not the machine answered, because a workspace whose
+    /// machine is asleep still has to be findable by name.
+    pub workspaces: Vec<Workspace>,
+    /// One [`Report`] per entry of [`Self::workspaces`], in that order — or why
+    /// the machine could not be asked at all.
+    pub reports: Result<Vec<Report>, Error>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -98,6 +112,9 @@ pub enum Error {
 
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
+
+    #[error("querying {machine} did not finish: {reason}")]
+    Interrupted { machine: String, reason: String },
 }
 
 pub async fn status(name: &str) -> Result<Report, Error> {
@@ -107,25 +124,113 @@ pub async fn status(name: &str) -> Result<Report, Error> {
     of(&ssh, &tmux, workspace).await
 }
 
+/// Every workspace, grouped by the machine it names so a machine is reached once
+/// rather than once per workspace. Machines are queried concurrently, as in
+/// [`crate::sessions::list`] and for the same reason.
+///
+/// **The machine is the unit because that is what the round trips are** (Y-084).
+/// Three of the four `of` makes are machine-scoped and only the pane query is
+/// per workspace; measured warm on this fleet, the machine-scoped three cost
+/// ~480 ms of which `claude agents --json` alone is ~400 ms, against ~50 ms for
+/// the pane query — and that registry covers the whole machine, so asking it per
+/// workspace would pay the machine's price once per workspace. The sharper form
+/// is the unreachable case: `ConnectTimeout=10` is spent per *ssh invocation*
+/// and `ControlMaster` caches no failure, so per-workspace would make a sleeping
+/// machine cost ten seconds for each workspace that names it. Here it costs ten
+/// seconds once, whatever N is.
+pub async fn fleet() -> Result<Vec<MachineStatus>, Error> {
+    let mut by_machine: BTreeMap<String, Vec<Workspace>> = BTreeMap::new();
+    for workspace in workspace::list()? {
+        by_machine
+            .entry(workspace.machine.clone())
+            .or_default()
+            .push(workspace);
+    }
+
+    let queries: Vec<_> = by_machine
+        .into_iter()
+        .map(|(machine, workspaces)| {
+            let name = machine.clone();
+            let asked = workspaces.clone();
+            (
+                name,
+                asked,
+                tokio::spawn(async move { on(machine, workspaces).await }),
+            )
+        })
+        .collect();
+
+    let mut answers = Vec::with_capacity(queries.len());
+    for (machine, workspaces, query) in queries {
+        let reports = query.await.unwrap_or_else(|joined| {
+            Err(Error::Interrupted {
+                machine: machine.clone(),
+                reason: joined.to_string(),
+            })
+        });
+        answers.push(MachineStatus {
+            machine,
+            workspaces,
+            reports,
+        });
+    }
+    Ok(answers)
+}
+
+/// A pane query that fails after tmux has already answered is the connection
+/// rather than the workspace, so it fails the machine rather than one entry.
+async fn on(machine: String, workspaces: Vec<Workspace>) -> Result<Vec<Report>, Error> {
+    let ssh = Ssh::new(ssh::machine_at(&machine).ok_or(Error::NoStateDir)?)?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    on_machine(&ssh, &tmux, workspaces).await
+}
+
 /// The testable half.
 ///
 /// A machine with no usable `claude` is not an error here — [`Verdict`] still
 /// has the pane to go on, and `status` refusing to answer because the *second*
 /// opinion is missing would be worse than answering from the first.
 pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: Workspace) -> Result<Report, Error> {
+    let registry = registry(exec).await;
+    against(exec, tmux, workspace, &registry).await
+}
+
+/// Every workspace on one machine, over one connection and one registry read.
+///
+/// The testable half of the grouping [`fleet`] does; see there for why the
+/// machine is the unit.
+pub async fn on_machine<E: Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    workspaces: Vec<Workspace>,
+) -> Result<Vec<Report>, Error> {
+    let registry = registry(exec).await;
+    let mut reports = Vec::with_capacity(workspaces.len());
+    for workspace in workspaces {
+        reports.push(against(exec, tmux, workspace, &registry).await?);
+    }
+    Ok(reports)
+}
+
+/// What `claude` believes is running on this machine, or nothing when it cannot
+/// be asked — a missing second opinion is not a contradiction, so the caller
+/// still has the pane to go on.
+async fn registry<E: Exec>(exec: &E) -> Vec<Running> {
+    match Claude::resolve(exec).await {
+        Ok(claude) => claude.agents(exec).await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn against<E: Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    workspace: Workspace,
+    registry: &[Running],
+) -> Result<Report, Error> {
     let pane = tmux.pane(exec, &workspace.name).await?;
     let repo = workspace.repo.to_string_lossy().into_owned();
-
-    let agent = match Claude::resolve(exec).await {
-        Ok(claude) => claude
-            .agents(exec)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .find(|running| running.cwd == repo),
-        Err(agent::Error::NotFound { .. }) => None,
-        Err(_) => None,
-    };
+    let agent = registry.iter().find(|running| running.cwd == repo).cloned();
 
     // Asked only where the two sources already disagree, so the extra round trip
     // buys the one verdict that has no action in it. An ssh that fails here

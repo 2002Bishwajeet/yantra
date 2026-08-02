@@ -13,9 +13,11 @@
 
 mod common;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use anyhow::Result;
 use common::{SshFixture, USER};
-use yantra_core::ssh::{Exec, Machine, Ssh};
+use yantra_core::ssh::{self, Exec, Machine, Ssh};
 use yantra_core::status::{self, Verdict};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::Workspace;
@@ -130,12 +132,89 @@ fn workspace(name: &str) -> Workspace {
     }
 }
 
+/// Counts the machine-scoped round trip, so a refactor back to one registry
+/// read per workspace fails here rather than on the fleet.
+struct Counting<'a> {
+    inner: &'a Ssh,
+    registry_reads: AtomicUsize,
+}
+
+impl Exec for Counting<'_> {
+    async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+        if command.contains("agents --json") {
+            self.registry_reads.fetch_add(1, Ordering::Relaxed);
+        }
+        self.inner.exec(command).await
+    }
+}
+
+/// **Y-084's decision, produced rather than asserted.** `claude agents --json`
+/// answers for the whole machine and costs ~400 ms warm against ~50 ms for a
+/// tmux query, so grouping by machine is only worth anything if N workspaces
+/// really do share one read of it — and the two verdicts here are read out of
+/// that single registry.
+#[tokio::test]
+async fn two_workspaces_on_one_machine_share_one_registry_read() -> Result<()> {
+    let Some(lab) = Lab::start("status-fleet").await? else {
+        return Ok(());
+    };
+    let elsewhere = "/tmp/statusrepo-elsewhere";
+    lab.ssh.exec(&format!("mkdir -p {elsewhere}")).await?;
+    lab.registry(Some(REPO)).await?;
+    lab.open("fleetagent", LAUNCHED).await?;
+    lab.tmux
+        .ensure(&lab.ssh, "fleetshell", elsewhere, None)
+        .await?;
+    lab.ssh.exec("sleep 1").await?;
+
+    let counting = Counting {
+        inner: &lab.ssh,
+        registry_reads: AtomicUsize::new(0),
+    };
+    let reports = status::on_machine(
+        &counting,
+        &lab.tmux,
+        vec![
+            workspace("fleetagent"),
+            Workspace {
+                repo: std::path::PathBuf::from(elsewhere),
+                ..workspace("fleetshell")
+            },
+        ],
+    )
+    .await?;
+
+    assert_eq!(
+        reports
+            .iter()
+            .map(|report| report.verdict.clone())
+            .collect::<Vec<_>>(),
+        vec![Verdict::Running, Verdict::NoAgent],
+        "one registry has to answer both, and answer them differently"
+    );
+    assert_eq!(
+        counting.registry_reads.load(Ordering::Relaxed),
+        1,
+        "the registry is a machine fact, so it is read once per machine"
+    );
+
+    lab.tmux.kill(&lab.ssh, "fleetagent").await?;
+    lab.tmux.kill(&lab.ssh, "fleetshell").await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn a_workspace_with_no_session_is_not_a_crash() -> Result<()> {
     let Some(lab) = Lab::start("status-none").await? else {
         return Ok(());
     };
     assert_eq!(lab.verdict("statusnone").await?, Verdict::NoSession);
+
+    // The case the read model actually asks: a machine holding other sessions,
+    // and a workspace nobody has opened yet.
+    lab.tmux.ensure(&lab.ssh, "statuselse", REPO, None).await?;
+    assert_eq!(lab.verdict("statusnone").await?, Verdict::NoSession);
+    lab.tmux.kill(&lab.ssh, "statuselse").await?;
     Ok(())
 }
 
