@@ -32,6 +32,11 @@ against the real crate before relying on them.
 
 ## Open work
 
-Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-044**
-(session store — only if state genuinely cannot be derived from tmux) and **Y-020** (the telemetry
-ADR). M4 builds this crate; its tasks are not broken down yet.
+Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-020** (the
+telemetry ADR, still `proposed`). M4 builds this crate; its tasks are not broken down yet.
+
+**Y-044 is closed** — dropped 2026-08-02 without being built. Session state is derived from tmux
+(`pane_start_command`, Y-091) and declared in the workspace TOML, and the audit found no consumer for
+a store: the snapshot is deliberately in memory, the heartbeat is deliberately not kept, and no verb
+asks a question about the past. The tracker row records what would bring one back, and it is a
+placement or notification record rather than session state.
