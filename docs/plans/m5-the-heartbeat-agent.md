@@ -138,9 +138,10 @@ a status code the agent barely reads. The numbers:
     X86_64_UNKNOWN_LINUX_MUSL_OPENSSL_LIB_DIR unset
   ```
 
-  Y-037 built five targets green on the first attempt; this one line would end that. `rustls` would
-  avoid the C dependency and still costs 131 crates and 1873 KB of TLS for a link ADR-0013 §4 says is
-  already encrypted by WireGuard.
+  Y-037 built five targets green on the first attempt; this one line would end that. As measured —
+  `blocking` + `json`, default TLS — it is **131 crates and 1873 KB**. Switching it to `rustls` would
+  remove the C dependency and was not measured, because it does not change the argument: it is still
+  a TLS stack for a link ADR-0013 §4 says WireGuard already encrypts.
 
 **No async runtime.** `tokio` alone — with a hand-written POST, no HTTP crate at all — is
 **+133 KB (28 %)** over A, to give one thread one timer. The agent has no concurrency: it measures,
@@ -550,6 +551,18 @@ Five things follow, each of which an implementer would otherwise have to discove
    attribution must therefore match a peer on **either** family, because `Peer.TailscaleIPs` holds
    both and a v6-connecting agent is not a stranger.
 
+**Where the beat lands, because the obvious answer is slightly wrong.** `snapshot::Snapshot` is
+tempting and its `Reading<T>` already stamps `Instant::now()` and hands out an `age()`, which is
+exactly the freshness ADR-0013 §7 wants. But `Snapshot`'s three rules are about **looks the daemon
+takes** — *"a look that failed is a third answer"*, *"nobody has looked yet is `None`"* — and a
+heartbeat is not a look. It arrives, it belongs to one machine, and there is no `Result` for it to
+carry. **Recommended: a separate `Arc<RwLock<BTreeMap<String, Reading<Heartbeat>>>>` keyed on
+`Peer.ID`** (I-5), beside the `Model` rather than inside it — so the 10 s write path does not take
+the same lock four 30 s refresh tasks hold, and so `Reading` is reused for its age without
+`Snapshot` acquiring a member that means something different from the other four. The counter-argument
+is one lock and one clone per request; it is worth having, and it is a task decision rather than a
+plan one.
+
 **What ADR-0013 §5 needs from `yantra-core`, precisely.** `MachineInfo` carries no addresses today,
 but `inventory::Node` **already parses `TailscaleIPs` for every node** — `parse_addresses` reads it
 from `Self` and `From<Node> for MachineInfo` simply drops it. So this is one field on the struct, one
@@ -571,8 +584,8 @@ MagicDNS name. Re-measured for the heartbeat specifically, on `cachyos-g14`:
 
 The second row is I-50. The first row is **new and is the part that mattered**: it was not obvious
 that a host dialling its own tailnet address would present that address as the *source*. It does — so
-the local agent is attributed by §5's mechanism with no special case at all, and `yantrad` needs no
-"is this me" branch. ADR-0013's claim that the local case *"is a configuration detail rather than a
+the local agent is attributed by ADR-0013 §5's mechanism with no special case at all, and `yantrad`
+needs no "is this me" branch. ADR-0013's claim that the local case *"is a configuration detail rather than a
 second code path"* is now verified on both halves rather than one.
 
 **Where the value comes from: the service unit, and it is an address.** A name works for four of the
@@ -586,8 +599,8 @@ does **not** resolve names at all. Two consequences to record:
   agent anyway. It is also the exact shape ADR-0013 §5 rejected on the identity side.
 - **A Tailscale address is stable per node but not immortal.** Re-authenticating or recreating the
   daemon's node changes it, and every unit on every machine then points at nothing. The failure is
-  loud — §7 has the agent log the first failure and stay quiet — so the risk is that it is loud
-  *once*, five machines away. Worth a line in whatever install story M7 writes.
+  loud — ADR-0013 §7 has the agent log the first failure and then stay quiet — so the risk is that it
+  is loud *once*, five machines away. Worth a line in whatever install story M7 writes.
 
 ---
 
@@ -685,7 +698,7 @@ Format matches `tracker.md` §3. Numbered from Y-103; Y-102 is the highest in us
 | --- | --- | --- |
 | Y-103 | Accept ADR-0013, or say what would change it — **owner only** | — |
 | Y-104 | The wire type: `heartbeat.rs` in `yantra-core`, `deny_unknown_fields`, `Power` as ADR-0013 §2 | Y-103 |
-| Y-105 | `MachineInfo` carries each peer's tailnet addresses — one field, 8 construction sites | — |
+| Y-105 | `MachineInfo` carries each peer's tailnet addresses — one field, three test construction sites | — |
 | Y-106 | The probes on Linux and macOS: seven fields, absolute-path label discovery, pessimistic on failure | Y-104 |
 | Y-107 | The loop and the transport: hand-written POST, 10 s, no runtime, drop-don't-queue, log once | Y-104 |
 | Y-108 | `POST /heartbeat` on `yantrad`: 4 KB limit, 204, `ConnectInfo`, source-address attribution | Y-104, Y-105 |
