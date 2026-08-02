@@ -12,6 +12,7 @@
 //! is looking; a write happens when a person taps a button, once.
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 
 use axum::Json;
 use axum::Router;
@@ -31,6 +32,7 @@ where
     S: Clone + Send + Sync + 'static,
 {
     Router::new()
+        .route("/workspaces", post(make::<I>))
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
@@ -85,6 +87,62 @@ impl From<Agent> for up::Agent {
         match agent {
             Agent::Claude => Self::Claude,
         }
+    }
+}
+
+/// The dashboard's half of `yantra new`. `startup` is a command and not a place
+/// for values: the schema has no secrets field at all (ADR-0007), so §B4 is kept
+/// by there being nowhere to put one rather than by a check here.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Create {
+    name: String,
+    machine: String,
+    repo: PathBuf,
+    #[serde(default)]
+    startup: Option<String>,
+}
+
+async fn make<I: Inventory + Clone + Send + Sync + 'static>(
+    State(inventory): State<I>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Json(create): Json<Create>,
+) -> Result<(StatusCode, Json<Made>), Refused> {
+    let caller = allowed(&inventory, from.ip()).await?;
+    tracing::info!("new {} for {}", create.name, caller.node);
+
+    let workspace = workspace::create(
+        &create.name,
+        &create.machine,
+        &create.repo,
+        create.startup.as_deref(),
+    )
+    .map_err(|error| Refused::Verb {
+        status: from_create(&error),
+        said: chain(&error),
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(Made {
+            name: workspace.name,
+            machine: workspace.machine,
+            repo: workspace.repo.display().to_string(),
+            startup: workspace.startup,
+        }),
+    ))
+}
+
+/// Distinct from [`from_workspace`] because the errors that matter here are the
+/// ones `load` cannot raise: a name already taken is a **409**, since the caller
+/// asked for something reasonable that the world already answers.
+fn from_create(error: &workspace::Error) -> StatusCode {
+    match error {
+        workspace::Error::Exists { .. } => StatusCode::CONFLICT,
+        workspace::Error::InvalidName { .. } | workspace::Error::Empty { .. } => {
+            StatusCode::BAD_REQUEST
+        }
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -208,6 +266,14 @@ fn chosen(term: &terminfo::Chosen) -> String {
         terminfo::Chosen::Known(name) => name.clone(),
         terminfo::Chosen::Substituted { .. } => terminfo::FALLBACK.to_string(),
     }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Made {
+    name: String,
+    machine: String,
+    repo: String,
+    startup: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -401,6 +467,100 @@ mod tests {
             from_workspace(None),
             StatusCode::INTERNAL_SERVER_ERROR,
             "an ssh failure is not the caller's mistake"
+        );
+    }
+
+    /// A name already taken is the one create error that is neither the
+    /// caller's typo nor the daemon's fault, and 409 is the only code that says
+    /// *try another name* rather than *fix your request* or *something broke*.
+    #[test]
+    fn a_name_already_taken_is_a_conflict_and_not_a_bad_request() {
+        assert_eq!(
+            from_create(&workspace::Error::Exists {
+                name: "personal-website".to_string(),
+                path: "/nowhere".into(),
+            }),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            from_create(&workspace::Error::InvalidName {
+                name: "../etc/passwd".to_string(),
+            }),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            from_create(&workspace::Error::Empty { field: "machine" }),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            from_create(&workspace::Error::NoConfigDir),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "a user with no config directory did not make a bad request"
+        );
+    }
+
+    #[test]
+    fn the_create_body_needs_a_name_a_machine_and_a_repo() {
+        let full: Create = serde_json::from_str(
+            r#"{"name":"site","machine":"mac","repo":"/code/site","startup":"npm run dev"}"#,
+        )
+        .expect("every field");
+        assert_eq!(full.repo, std::path::Path::new("/code/site"));
+        assert_eq!(full.startup.as_deref(), Some("npm run dev"));
+
+        let shell: Create =
+            serde_json::from_str(r#"{"name":"site","machine":"mac","repo":"/code/site"}"#)
+                .expect("startup is optional");
+        assert!(shell.startup.is_none());
+
+        serde_json::from_str::<Create>(r#"{"machine":"mac","repo":"/code/site"}"#)
+            .expect_err("a workspace with no name has nowhere to be written");
+        serde_json::from_str::<Create>(
+            r#"{"name":"site","machine":"mac","repo":"/code/site","secrets":{"k":"v"}}"#,
+        )
+        .expect_err("the schema has no secrets field, and silently dropping one would be worse");
+    }
+
+    /// `GET /workspaces` is `api.rs`'s and `POST /workspaces` is this module's,
+    /// on one path in two routers. Recorded because merging them *reads* like a
+    /// conflict: axum merges the method routers, and only two handlers for the
+    /// same method would panic.
+    #[tokio::test]
+    async fn reading_and_creating_share_one_path_and_neither_shadows_the_other() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let app = crate::api::router()
+            .with_state(crate::refresh::Model::default())
+            .merge(router(tailnet(vec![])));
+
+        let read = app
+            .clone()
+            .oneshot(
+                Request::get("/workspaces")
+                    .body(Body::empty())
+                    .expect("a GET"),
+            )
+            .await
+            .expect("the router is infallible");
+        assert_eq!(read.status(), StatusCode::OK);
+
+        let mut write = Request::post("/workspaces")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"name":"site","machine":"mac","repo":"/code/site"}"#,
+            ))
+            .expect("a POST with a JSON body");
+        write
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+
+        let made = app.oneshot(write).await.expect("the router is infallible");
+        assert_eq!(
+            made.status(),
+            StatusCode::FORBIDDEN,
+            "the POST reached authorisation rather than a 405, and this tailnet holds nobody"
         );
     }
 
