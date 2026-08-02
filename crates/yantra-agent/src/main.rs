@@ -24,8 +24,9 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use time::OffsetDateTime;
-use yantra_core::heartbeat::{Heartbeat, Power};
+use yantra_core::heartbeat::Heartbeat;
+
+mod probes;
 
 /// ADR-0013 §7: it never changes. 10 s is slow enough that backoff is ceremony,
 /// and three of them is the daemon's staleness threshold.
@@ -47,11 +48,17 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // ADR-0013 §1: the fixed facts are measured here and only their transmission
+    // repeats. `nvidia-smi` costs 1.25 s, which no 10 s loop can afford.
+    let fixed = probes::Fixed::measure();
+    // The fixed facts are said once because an empty label set is a permanent,
+    // silent hard-filter-4 rejection, and this is the only place to see it
+    // before the read model renders it (M5 plan §9).
     eprintln!(
-        "yantra-agent: reporting to {daemon} every {}s",
+        "yantra-agent: reporting to {daemon} every {}s — {fixed:?}",
         INTERVAL.as_secs()
     );
-    run(daemon, measure)
+    run(daemon, move || probes::beat(&fixed))
 }
 
 fn unset() -> String {
@@ -72,7 +79,9 @@ fn parse_daemon(value: String) -> Result<SocketAddr, String> {
 
 /// The loop, and the only stateful thing in the process.
 ///
-/// `measure` is the seam Y-106 fills: one `Heartbeat`, taken now. A failed POST
+/// `measure` is [`probes::beat`] over the fixed facts taken at start: one
+/// `Heartbeat`, measured now, and infallible because a probe that cannot read
+/// something returns the pessimistic value rather than an error. A failed POST
 /// drops that beat rather than queueing it — a heartbeat delivered 40 s late is
 /// a false statement with a timestamp attached — and never exits, because a
 /// restarted daemon must not require reinstalling five agents (ADR-0013 §7).
@@ -164,21 +173,6 @@ impl fmt::Display for Dropped {
     }
 }
 
-/// The seam Y-106 fills. Until the probes land, the agent reports a machine that
-/// fails every hard filter: a wrong reading toward "plenty free" places work on
-/// a machine that cannot take it, and toward zero it merely places none.
-fn measure() -> Heartbeat {
-    Heartbeat {
-        sent_at: OffsetDateTime::now_utc(),
-        arch: env::consts::ARCH.to_string(),
-        labels: Vec::new(),
-        free_ram_mb: 0,
-        free_disk_mb: 0,
-        cpu_busy_pct: 100,
-        power: Power::Ac,
-    }
-}
-
 #[cfg(test)]
 // `expect` in a test is a deliberate abort with a message; the workspace lint
 // targets code that has to stay up for months.
@@ -187,6 +181,8 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::thread::JoinHandle;
+    use time::OffsetDateTime;
+    use yantra_core::heartbeat::Power;
 
     /// ADR-0013 §1's payload, which is also `yantra-core`'s own test vector.
     const BODY: &str = r#"{"sent_at":"2026-07-31T18:30:00Z","arch":"x86_64","labels":["gpu","cuda","docker"],"free_ram_mb":19942,"free_disk_mb":214003,"cpu_busy_pct":15,"power":"ac"}"#;

@@ -9,8 +9,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-# `heartbeat` is the one module of the library this binary may call: the
-# dependency edge costs 11 KB, and one call into ssh/tmux costs 319 KB.
+# `heartbeat`'s type and `agent::CANDIDATES` are the whole of what this binary
+# takes from the library — neither links any code. The dependency edge costs
+# 11 KB, and one call into ssh/tmux costs 319 KB.
 yantra-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

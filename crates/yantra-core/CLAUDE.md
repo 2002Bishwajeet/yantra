@@ -32,10 +32,15 @@ bind where:
 
 ## What `yantra-agent` may call
 
-`heartbeat.rs` is the one thing `yantra-agent` takes this crate for, and that agent must stay tiny
-(R-12). The *dependency edge* is nearly free — 11 KB, measured — and the **call graph** is not: one
-further call into ssh/tmux costs +319 KB, a 65 % jump, because `lto = "thin"` only strips what
-nothing reaches. So the thing to guard is the next `use`, not the `Cargo.toml` line.
+`heartbeat.rs` and `agent::CANDIDATES` — a type and a `const`, neither of which links any code.
+That agent must stay tiny (R-12). The *dependency edge* is nearly free — 11 KB, measured — and the
+**call graph** is not: one further call into ssh/tmux costs +319 KB, a 65 % jump, because
+`lto = "thin"` only strips what nothing reaches. So the thing to guard is the next `use`, not the
+`Cargo.toml` line.
+
+`CANDIDATES` is shared rather than copied because the agent's label probe hits I-34's wall for
+`docker` and `tmux` exactly as `claude` does. Two lists that drifted would produce a fleet where one
+binary is found and the other is not, which is the bug I-34 exists to name.
 
 ## Anything that reaches a remote shell
 
