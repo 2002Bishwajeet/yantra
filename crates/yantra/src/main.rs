@@ -926,6 +926,7 @@ mod tests {
             online,
             last_seen: seen.map(str::to_string),
             expired,
+            addresses: Vec::new(),
         }
     }
 
