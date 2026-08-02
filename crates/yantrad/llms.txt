@@ -2,7 +2,7 @@
 
 > The Yantra control-plane daemon. Every client talks to this and nothing else; no client ever talks
 > directly to a managed machine. **Barely implemented** — an axum server with a read-only JSON API
-> over a background snapshot, one write (`POST /heartbeat`), and the dashboard itself. It is an HTTP surface over
+> over a background snapshot, four writes (`POST /heartbeat`, and `up`/`down`/`resume` per workspace), and the dashboard itself. It is an HTTP surface over
 > `yantra-core`, not a second copy of the logic.
 
 ## Source
@@ -11,6 +11,7 @@
 - [src/refresh.rs](src/refresh.rs): one background task per data class, writing `yantra_core::snapshot::Snapshot`. The interval is a constant, low enough to keep the ssh masters warm. No request path touches ssh.
 - [src/api.rs](src/api.rs): `GET /api/{machines,workspaces,sessions}`, read-only. Every answer says whether the look succeeded, failed or has not happened, and how old it is. DTOs live here rather than as `Serialize` on core's types (ADR-0005).
 - [src/web.rs](src/web.rs): serves the built dashboard from `YANTRA_WEB`, with a fallback to `index.html` so deep links reach the app. Refuses at startup if that directory holds no `index.html`, and answers a 404 that says how to set it when nothing is configured. Assets are a directory rather than embedded (R-24).
+- [src/write.rs](src/write.rs): `POST /api/workspaces/{name}/{up,down,resume}` — the CLI's own verbs and nothing more. Authorised per ADR-0016: the caller's source address is resolved **live** via `whois`, and a node that is not this owner's, or carries tags, is refused 403. A `tailscale` that cannot answer is **503**, never 403 — nothing was decided about the caller. These handlers await ssh, which the read path may not.
 - [src/heartbeat.rs](src/heartbeat.rs): `POST /heartbeat`, the daemon's only write. 204 with an empty body, a 4 KB limit, strict parsing, and identity taken from the source address rather than the payload. Holds `Beats`, one in-memory row per machine keyed on the node id, overwritten every beat.
 
 ## What decides its shape
