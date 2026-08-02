@@ -213,3 +213,41 @@ describe('useLooked', () => {
     expect(result.current).toEqual({ looked: 'never' })
   })
 })
+
+describe('the age reading', () => {
+  const aged = (age_seconds: number) =>
+    render(
+      <Section title="Machines" query={{ looked: 'ok', age_seconds, data: [] }}>
+        {() => <p>a table</p>}
+      </Section>,
+    )
+
+  it('says how old a fresh reading is and claims nothing else', () => {
+    aged(6)
+    expect(screen.getByText('looked 6s ago')).toBeTruthy()
+    expect(screen.queryByText('refresh stuck')).toBeNull()
+  })
+
+  // 30 s of sleep plus the one ConnectTimeout a concurrent sweep can pay.
+  it('reads a sweep that waited out an unreachable machine as normal', () => {
+    aged(40)
+    expect(screen.getByText('looked 40s ago')).toBeTruthy()
+    expect(screen.queryByText('refresh stuck')).toBeNull()
+  })
+
+  it('says the refresh did not finish rather than that the data is old', () => {
+    aged(73)
+    expect(screen.getByText('looked 73s ago')).toBeTruthy()
+    expect(screen.getByText('refresh stuck')).toBeTruthy()
+  })
+
+  it('does not call a daemon that has never looked stale', () => {
+    render(
+      <Section title="Machines" query={{ looked: 'never' }}>
+        {() => <p>a table</p>}
+      </Section>,
+    )
+    expect(screen.queryByText(/looked \d+s ago/)).toBeNull()
+    expect(screen.queryByText('refresh stuck')).toBeNull()
+  })
+})
