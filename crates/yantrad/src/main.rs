@@ -221,6 +221,16 @@ mod tests {
                     stderr: "failed to connect to local tailscaled".into(),
                 })
             }
+            async fn whois(
+                &self,
+                _address: IpAddr,
+            ) -> Result<Option<yantra_core::inventory::Caller>, yantra_core::inventory::Error>
+            {
+                unreachable!("no write is authorised here")
+            }
+            async fn owner(&self) -> Result<u64, yantra_core::inventory::Error> {
+                unreachable!("no write is authorised here")
+            }
         }
         assert!(matches!(listen_on(&Down).await, Err(Error::Tailnet(_))));
     }

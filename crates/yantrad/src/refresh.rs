@@ -146,6 +146,16 @@ mod tests {
             async fn addresses(&self) -> Result<Vec<IpAddr>, yantra_core::inventory::Error> {
                 unreachable!("the refresher only asks for machines")
             }
+            async fn whois(
+                &self,
+                _address: IpAddr,
+            ) -> Result<Option<yantra_core::inventory::Caller>, yantra_core::inventory::Error>
+            {
+                unreachable!("no write is authorised here")
+            }
+            async fn owner(&self) -> Result<u64, yantra_core::inventory::Error> {
+                unreachable!("no write is authorised here")
+            }
         }
 
         let model = Model::default();
