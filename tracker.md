@@ -114,13 +114,14 @@ goal rather than a sign of a slow week.
 name: `yantrad` must serve `yantra-core` over HTTP before a web UI has anything to read.
 
 **Task numbers: `Y-0xx`/`Y-1xx` here, `Y-2xx` for the landing page.** The landing-page effort keeps
-its own tracker on its own branch and has now taken a number this file had already used **twice** —
-Y-084, which it renumbered itself out of, and Y-091, which is open as PR #80 while a different Y-091
-is merged here. Two collisions from one source is a pattern rather than an accident, and the cost is
-not a merge conflict: it is two rows in two files claiming the same identifier, so a commit message
-or a PR title stops saying which piece of work it belongs to. **Y-200 upward is reserved for the
-landing page**, and nothing in that range is ever allocated from this file. Renumbering PR #80 is
-what adopting this costs.
+its own tracker on its own branch and took a number this file had already used **three times** —
+Y-084, which it renumbered itself out of; Y-091, while a different Y-091 was merged here; and then
+Y-100 and Y-101, taken while this file was allocating those same two numbers on the same day. Three
+collisions from one source is a pattern rather than an accident, and the cost is not a merge
+conflict: it is two rows in two files claiming the same identifier, so a commit message or a PR title
+stops saying which piece of work it belongs to. **Y-200 upward is reserved for the landing page**,
+and nothing in that range is ever allocated from this file. **Adopted 2026-08-02**: the landing rows
+became Y-200..Y-207 and PR #80 merged renumbered.
 
 ### Carried forward from M0–M3
 
