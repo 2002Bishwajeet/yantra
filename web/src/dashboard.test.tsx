@@ -176,6 +176,18 @@ describe('the sessions section', () => {
     expect(screen.queryByText('pi')).toBeNull()
   })
 
+  it('reads its own age against the machine it is waiting for', async () => {
+    stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': { looked: 'never' },
+      '/api/sessions': { looked: 'ok', age_seconds: 44, data: answers },
+    })
+    render(<App />)
+
+    expect(await screen.findByText('waiting on pi')).toBeTruthy()
+    expect(screen.queryByText('refresh stuck')).toBeNull()
+  })
+
   it('renders attached as the client count rather than a yes or no', () => {
     const { container } = render(
       <DataTable
@@ -231,9 +243,13 @@ describe('useLooked', () => {
 })
 
 describe('the age reading', () => {
-  const aged = (age_seconds: number) =>
+  const aged = (age_seconds: number, waiting?: string[]) =>
     render(
-      <Section title="Machines" query={{ looked: 'ok', age_seconds, data: [] }}>
+      <Section
+        title="Machines"
+        query={{ looked: 'ok', age_seconds, data: [] }}
+        waiting={waiting}
+      >
         {() => <p>a table</p>}
       </Section>,
     )
@@ -254,6 +270,25 @@ describe('the age reading', () => {
   it('says the refresh did not finish rather than that the data is old', () => {
     aged(73)
     expect(screen.getByText('looked 73s ago')).toBeTruthy()
+    expect(screen.getByText('refresh stuck')).toBeTruthy()
+  })
+
+  it('names the machine the sweep is waiting for rather than blaming the refresh', () => {
+    aged(41, ['cachyos-g14'])
+    expect(screen.getByText('waiting on cachyos-g14')).toBeTruthy()
+    expect(screen.queryByText('refresh stuck')).toBeNull()
+  })
+
+  it('has nothing left to blame when every machine answered', () => {
+    aged(41)
+    expect(screen.getByText('refresh stuck')).toBeTruthy()
+    expect(screen.queryByText(/waiting on/)).toBeNull()
+  })
+
+  // 30 + ServerAliveInterval=15 × ServerAliveCountMax=3, which is the longest
+  // ssh itself will wait before giving up on a host that froze after connecting.
+  it('stops excusing an age no ssh timeout is long enough to explain', () => {
+    aged(76, ['cachyos-g14'])
     expect(screen.getByText('refresh stuck')).toBeTruthy()
   })
 
