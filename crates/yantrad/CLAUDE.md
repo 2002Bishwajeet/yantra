@@ -68,9 +68,10 @@ successful reading.
   ([ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md)).
 - **The CLI is the honesty check.** Anything the web UI can do must be expressible in `yantra`
   first. That is what stops the daemon growing a second, richer API that the CLI cannot reach.
-- Stack: `axum` and `tokio`, both in use since Y-069. `rusqlite` *only if* state genuinely cannot be
-  derived from tmux — prefer deriving (Y-044, which has now receded three times; a read-only
-  dashboard is the strongest case yet for deriving).
+- Stack: `axum` and `tokio`, both in use since Y-069. **Nothing is persisted, and `rusqlite` is in no
+  `Cargo.toml`** — Y-044 was dropped on 2026-08-02 after an audit of five candidate consumers found
+  none: state is declared in the workspace TOML, derived from tmux, or held in memory and re-read
+  every 30 s. A store returns only for a question about the *past*; the tracker row names which ones.
 - **Never store secrets.** Workspaces hold references; the daemon resolves them at launch and never
   writes a value to SQLite, a log, the API, or a terminal stream (root §B4).
 
