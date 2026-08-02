@@ -20,6 +20,7 @@ use axum::routing::get;
 use yantra_core::inventory::{Inventory, Tailscale};
 
 mod api;
+mod heartbeat;
 mod refresh;
 
 const PORT: u16 = 7717;
@@ -78,12 +79,13 @@ fn report(error: &Error) {
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
-    let model = refresh::Model::default();
-    refresh::spawn(&model, inventory.clone());
+    let fleet = heartbeat::Fleet::default();
+    refresh::spawn(&fleet.model, inventory.clone());
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
-        .nest("/api", api::router())
-        .with_state(model);
+        .nest("/api", api::router().with_state(fleet.model.clone()))
+        .merge(heartbeat::router())
+        .with_state(fleet);
 
     let mut servers = tokio::task::JoinSet::new();
     for address in addresses {
@@ -91,7 +93,11 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             .await
             .map_err(|source| Error::Bind { address, source })?;
         tracing::info!("listening on http://{address}");
-        let app = app.clone();
+        // Per listener, because v4 and v6 bind separately and ADR-0013 §5 has
+        // nothing but the source address to attribute a heartbeat with.
+        let app = app
+            .clone()
+            .into_make_service_with_connect_info::<SocketAddr>();
         servers.spawn(async move {
             axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown())

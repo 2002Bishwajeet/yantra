@@ -2,18 +2,20 @@
 
 > The Yantra control-plane daemon. Every client talks to this and nothing else; no client ever talks
 > directly to a managed machine. **Barely implemented** — an axum server with a read-only JSON API
-> over a background snapshot. It is an HTTP surface over `yantra-core`, not a second copy of the
-> logic.
+> over a background snapshot, plus one write: `POST /heartbeat`. It is an HTTP surface over
+> `yantra-core`, not a second copy of the logic.
 
 ## Source
 
 - [src/main.rs](src/main.rs): resolves its bind addresses from Tailscale, fails closed, serves `/healthz`, shuts down on SIGTERM.
 - [src/refresh.rs](src/refresh.rs): one background task per data class, writing `yantra_core::snapshot::Snapshot`. The interval is a constant, low enough to keep the ssh masters warm. No request path touches ssh.
 - [src/api.rs](src/api.rs): `GET /api/{machines,workspaces,sessions}`, read-only. Every answer says whether the look succeeded, failed or has not happened, and how old it is. DTOs live here rather than as `Serialize` on core's types (ADR-0005).
+- [src/heartbeat.rs](src/heartbeat.rs): `POST /heartbeat`, the daemon's only write. 204 with an empty body, a 4 KB limit, strict parsing, and identity taken from the source address rather than the payload. Holds `Beats`, one in-memory row per machine keyed on the node id, overwritten every beat.
 
 ## What decides its shape
 
 - [ADR-0005](../../docs/adr/0005-core-logic-in-a-library-crate.md): the logic lives in the library; this crate stays thin.
+- [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md): what `POST /heartbeat` accepts, why it answers nothing, and why the source address is the identity.
 - [ADR-0004](../../docs/adr/0004-rust-for-the-daemon.md): Rust, with axum and tokio. TypeScript belongs to the browser — do not introduce a second runtime here.
 - [CLAUDE.md](CLAUDE.md): what is already settled, and what to read before starting — including why there is no `--bind` flag.
 
