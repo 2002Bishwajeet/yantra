@@ -98,6 +98,7 @@ mod tests {
             online: true,
             last_seen: None,
             expired: false,
+            addresses: Vec::new(),
         }
     }
 

@@ -44,6 +44,11 @@ pub struct MachineInfo {
     /// The node key has expired. Such a machine can be powered on, listed, and
     /// still unreachable until someone re-authenticates it.
     pub expired: bool,
+    /// `TailscaleIPs`, parsed rather than kept as strings: ADR-0013 §5
+    /// attributes a heartbeat by matching these against the address it arrived
+    /// from, and one v6 address has more than one spelling. Empty is a peer
+    /// nothing can be attributed to, never a peer whose addresses are unknown.
+    pub addresses: Vec<IpAddr>,
 }
 
 /// Go's `GOOS` with darwin split in two, in Tailscale's own casing — which is
@@ -152,7 +157,7 @@ fn parse_addresses(json: &[u8]) -> Result<Vec<IpAddr>, Error> {
     let status: Status = serde_json::from_slice(json).map_err(Error::Parse)?;
     Ok(status
         .self_node
-        .map(|node| node.tailscale_ips)
+        .and_then(|node| node.tailscale_ips)
         .unwrap_or_default())
 }
 
@@ -195,10 +200,11 @@ struct Node {
     /// Peers carry this; `Self` has no such key at all.
     #[serde(rename = "Expired", default)]
     expired: bool,
-    /// Read only from `Self` — see [`Inventory::addresses`]. Defaulted rather
-    /// than required because a node with no address is a valid document.
+    /// `Option` because absent and `null` are both live possibilities in this
+    /// format — the sibling `Addrs` is literally `null` on every peer here —
+    /// and a `Vec` field would make the second one a whole-document error.
     #[serde(rename = "TailscaleIPs", default)]
-    tailscale_ips: Vec<IpAddr>,
+    tailscale_ips: Option<Vec<IpAddr>>,
 }
 
 impl From<Node> for MachineInfo {
@@ -223,6 +229,7 @@ impl From<Node> for MachineInfo {
             last_seen: node.last_seen.filter(|t| t != ZERO_TIME),
             expired: node.expired,
             dns_name: node.dns_name,
+            addresses: node.tailscale_ips.unwrap_or_default(),
         }
     }
 }
@@ -382,6 +389,69 @@ mod tests {
     #[test]
     fn nonsense_is_a_parse_error_not_a_panic() {
         assert!(matches!(parse(b"not json"), Err(Error::Parse(_))));
+    }
+
+    /// Attribution (ADR-0013 §5) is fleet-wide, so unlike
+    /// [`Inventory::addresses`] this has to arrive on peers too.
+    #[test]
+    fn every_node_carries_its_addresses_including_the_peers() {
+        for machine in machines() {
+            assert_eq!(
+                machine.addresses.len(),
+                2,
+                "{} carries {:?}",
+                machine.name,
+                machine.addresses
+            );
+        }
+        assert_eq!(
+            named("bishwajeets-macbook-pro")
+                .addresses
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["100.64.0.2", "fd7a:115c:a1e0::2"]
+        );
+    }
+
+    /// Why the field is `IpAddr` and not `String`: the fixture spells this
+    /// address `fd7a:115c:a1e0::2` and the connection arrives spelling it in
+    /// full. Same address, different text.
+    #[test]
+    fn a_peer_matches_whichever_spelling_its_address_arrives_in() {
+        const ARRIVED: &str = "[fd7a:115c:a1e0:0:0:0:0:2]:52001";
+        let mac = named("bishwajeets-macbook-pro");
+        let ip = ARRIVED
+            .parse::<std::net::SocketAddr>()
+            .expect("a v6 socket address")
+            .ip();
+        assert!(mac.addresses.contains(&ip));
+        assert!(
+            !ARRIVED.contains("fd7a:115c:a1e0::2"),
+            "the arriving text is not the fixture's text, which is all a String could compare"
+        );
+    }
+
+    /// Y-071's rule — no state inferable only from a missing field. Absent and
+    /// `null` are one state, empty, and neither is an error: the sibling
+    /// `Addrs` is `null` on every live peer, so nulling a key is how this
+    /// format moves.
+    #[test]
+    fn an_absent_or_null_address_list_is_empty_rather_than_an_error() {
+        let json = br#"{
+            "Self": {
+                "ID": "n1", "DNSName": "solo.example.ts.net.", "OS": "linux",
+                "Online": true, "LastSeen": "0001-01-01T00:00:00Z"
+            },
+            "Peer": {"nodekey:00": {
+                "ID": "n2", "DNSName": "nulled.example.ts.net.", "OS": "linux",
+                "Online": true, "LastSeen": "0001-01-01T00:00:00Z",
+                "TailscaleIPs": null
+            }}
+        }"#;
+        let machines = parse(json).expect("a nulled address list is not a parse error");
+        assert_eq!(machines.len(), 2);
+        assert!(machines.iter().all(|m| m.addresses.is_empty()));
     }
 
     #[test]

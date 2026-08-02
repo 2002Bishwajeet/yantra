@@ -532,6 +532,7 @@ mod tests {
                 online: false,
                 last_seen: Some("2026-07-07T09:00:00Z".into()),
                 expired: true,
+                addresses: vec!["100.64.0.4".parse().expect("a v4 address")],
             }])))),
             ..Snapshot::default()
         });
@@ -544,6 +545,12 @@ mod tests {
         assert!(
             machine.get("id").is_none(),
             "the node id is not something a read-only page needs: {machine}"
+        );
+        // Same reason, and ADR-0009's: the address is the daemon's key for
+        // attributing a heartbeat, while a reader reaches a machine by name.
+        assert!(
+            machine.get("addresses").is_none(),
+            "a tailnet address is a key, not a column: {machine}"
         );
     }
 
