@@ -72,6 +72,20 @@ pub enum Error {
 
     #[error("could not determine a config directory for the current user")]
     NoConfigDir,
+
+    #[error("workspace `{name}` already exists at {}", path.display())]
+    Exists { name: String, path: PathBuf },
+
+    #[error("could not write workspace `{name}` to {}", path.display())]
+    Unwritable {
+        name: String,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("a workspace's {field} cannot be empty")]
+    Empty { field: &'static str },
 }
 
 /// `~/.config/yantra/workspaces`, or the platform equivalent.
@@ -79,6 +93,114 @@ pub fn workspaces_dir() -> Result<PathBuf, Error> {
     use etcetera::BaseStrategy;
     let base = etcetera::choose_base_strategy().map_err(|_| Error::NoConfigDir)?;
     Ok(base.config_dir().join("yantra").join("workspaces"))
+}
+
+/// Writes a workspace file, which is the one thing that used to require a text
+/// editor. `brainstorm.md`'s UI Philosophy asks for exactly this — *the
+/// interface should generate them automatically* — and Y-116 needs a verb here
+/// before the dashboard may grow a form.
+///
+/// **It refuses to overwrite.** Editing an existing workspace is a different
+/// verb with a different confirmation, and a `new` that silently replaced one
+/// would lose the operator's own file to a typo in a name.
+///
+/// `machine` and `repo` are **not** validated against reality. ADR-0009 has
+/// Yantra never resolving a machine name, and `repo` is a path on the *far*
+/// side — `up` already refuses a repo that is not there, on that machine,
+/// before a session exists (Y-081). Checking here would check the wrong box.
+pub fn create(
+    name: &str,
+    machine: &str,
+    repo: &Path,
+    startup: Option<&str>,
+) -> Result<Workspace, Error> {
+    create_in(&workspaces_dir()?, name, machine, repo, startup)
+}
+
+fn create_in(
+    dir: &Path,
+    name: &str,
+    machine: &str,
+    repo: &Path,
+    startup: Option<&str>,
+) -> Result<Workspace, Error> {
+    validate_name(name)?;
+    if machine.trim().is_empty() {
+        return Err(Error::Empty { field: "machine" });
+    }
+    if repo.as_os_str().is_empty() {
+        return Err(Error::Empty { field: "repo" });
+    }
+
+    let path = dir.join(format!("{name}.toml"));
+    if path.exists() {
+        return Err(Error::Exists {
+            name: name.to_owned(),
+            path,
+        });
+    }
+
+    std::fs::create_dir_all(dir).map_err(|source| Error::Unwritable {
+        name: name.to_owned(),
+        path: dir.to_owned(),
+        source,
+    })?;
+    // `create_new` rather than `write`: `path.exists()` above is a courtesy
+    // that says *which* workspace, and this is the check that actually holds
+    // when two callers race.
+    let mut file = std::fs::File::options()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|source| Error::Unwritable {
+            name: name.to_owned(),
+            path: path.clone(),
+            source,
+        })?;
+    use std::io::Write;
+    file.write_all(render(machine, repo, startup).as_bytes())
+        .map_err(|source| Error::Unwritable {
+            name: name.to_owned(),
+            path: path.clone(),
+            source,
+        })?;
+
+    load_from(dir, name)
+}
+
+/// Written by hand rather than serialised. The file is three keys and it is
+/// the operator's to edit afterwards, so it is worth it being the same shape
+/// the README shows — and adding `Serialize` to [`Workspace`] would put a wire
+/// format on a type ADR-0005 keeps free of one.
+fn render(machine: &str, repo: &Path, startup: Option<&str>) -> String {
+    let mut toml = format!(
+        "machine = {}\nrepo = {}\n",
+        quote(machine),
+        quote(&repo.display().to_string())
+    );
+    if let Some(startup) = startup {
+        toml.push_str(&format!("startup = {}\n", quote(startup)));
+    }
+    toml
+}
+
+/// A TOML basic string. `repo` is a path and `startup` is a shell command, so
+/// both can carry a quote or a backslash, and neither is ours to trust.
+fn quote(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            '\t' => quoted.push_str("\\t"),
+            '\r' => quoted.push_str("\\r"),
+            _ => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 pub fn load(name: &str) -> Result<Workspace, Error> {
@@ -384,5 +506,98 @@ mod tests {
         )?;
         assert!(matches!(list_in(&dir), Err(Error::Malformed { .. })));
         Ok(())
+    }
+    /// The round trip is the assertion: a file this wrote must be one `load`
+    /// reads back identically, or the two halves have drifted.
+    #[test]
+    fn a_created_workspace_loads_back_as_written() {
+        let dir = dir_with("created", &[]).expect("a temp dir");
+
+        let made = create_in(
+            &dir,
+            "personal-website",
+            "bishwajeets-macbook-pro",
+            Path::new("/Users/<user>/code/site"),
+            Some("npm run dev"),
+        )
+        .expect("a usable workspace");
+
+        assert_eq!(made, load_from(&dir, "personal-website").expect("loads"));
+        assert_eq!(made.machine, "bishwajeets-macbook-pro");
+        assert_eq!(made.startup.as_deref(), Some("npm run dev"));
+    }
+
+    #[test]
+    fn without_a_startup_the_key_is_absent_rather_than_empty() {
+        let dir = dir_with("shell", &[]).expect("a temp dir");
+
+        create_in(&dir, "shell", "a-machine", Path::new("/srv/repo"), None).expect("created");
+
+        let text = std::fs::read_to_string(dir.join("shell.toml")).expect("readable");
+        assert!(!text.contains("startup"), "{text}");
+        assert!(
+            load_from(&dir, "shell").expect("loads").startup.is_none(),
+            "an absent startup is just a shell"
+        );
+    }
+
+    /// A `new` that overwrote would lose the operator's own file to a typo.
+    #[test]
+    fn it_refuses_to_overwrite_an_existing_workspace() {
+        let dir = dir_with("twice", &[]).expect("a temp dir");
+        create_in(&dir, "once", "a-machine", Path::new("/srv/repo"), None).expect("first");
+
+        let refused = create_in(&dir, "once", "other", Path::new("/elsewhere"), None)
+            .expect_err("the second must not clobber the first");
+
+        assert!(matches!(refused, Error::Exists { .. }), "{refused}");
+        assert_eq!(
+            load_from(&dir, "once").expect("loads").machine,
+            "a-machine",
+            "the original survived"
+        );
+    }
+
+    /// `repo` is a path and `startup` a shell command, so both reach TOML with
+    /// characters TOML gives meaning to. Written and read back, not eyeballed.
+    #[test]
+    fn a_quote_or_a_backslash_survives_the_round_trip() {
+        let dir = dir_with("quoting", &[]).expect("a temp dir");
+        let repo = Path::new(r#"/srv/a "quoted" \ path"#);
+
+        create_in(
+            &dir,
+            "awkward",
+            "a-machine",
+            repo,
+            Some(r#"echo "hi" \ there"#),
+        )
+        .expect("created");
+
+        let read = load_from(&dir, "awkward").expect("loads");
+        assert_eq!(read.repo, repo);
+        assert_eq!(read.startup.as_deref(), Some(r#"echo "hi" \ there"#));
+    }
+
+    #[test]
+    fn an_unusable_name_or_an_empty_field_is_refused_before_anything_is_written() {
+        let dir = dir_with("refusals", &[]).expect("a temp dir");
+
+        assert!(matches!(
+            create_in(&dir, "not a name", "m", Path::new("/r"), None),
+            Err(Error::InvalidName { .. })
+        ));
+        assert!(matches!(
+            create_in(&dir, "fine", "  ", Path::new("/r"), None),
+            Err(Error::Empty { field: "machine" })
+        ));
+        assert!(matches!(
+            create_in(&dir, "fine", "m", Path::new(""), None),
+            Err(Error::Empty { field: "repo" })
+        ));
+        assert!(
+            list_in(&dir).expect("listable").is_empty(),
+            "a refusal must leave no file behind"
+        );
     }
 }
