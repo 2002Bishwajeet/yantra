@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use yantra_core::inventory::Inventory;
 use yantra_core::snapshot::{Reading, Snapshot};
-use yantra_core::{sessions, workspace};
+use yantra_core::{sessions, status, workspace};
 
 /// `ssh.rs` sets `ControlPersist=300`, so anything under five minutes keeps
 /// every ssh master warm — the poll is what makes the fleet fast rather than a
@@ -21,6 +21,10 @@ pub type Model = Arc<RwLock<Snapshot>>;
 /// One task per class. A fleet-wide session query costs a full `ConnectTimeout`
 /// for every machine that is asleep, and the two cheap classes must not queue
 /// behind it.
+///
+/// The agent class is the expensive one and the only one that is not fleet-wide
+/// by construction, so [`yantra_core::status::fleet`] groups it by machine —
+/// which is what keeps `EVERY` affordable as workspaces are added.
 pub fn spawn<I: Inventory + Send + Sync + 'static>(model: &Model, inventory: I) {
     let machines = model.clone();
     tokio::spawn(async move {
@@ -45,6 +49,14 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(model: &Model, inventory: I) 
             tokio::time::sleep(EVERY).await;
         }
     });
+
+    let agents = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_agents(&agents).await;
+            tokio::time::sleep(EVERY).await;
+        }
+    });
 }
 
 async fn look_at_machines<I: Inventory>(model: &Model, inventory: &I) {
@@ -60,6 +72,11 @@ async fn look_at_workspaces(model: &Model) {
 async fn look_at_sessions(model: &Model) {
     let reading = Reading::new(sessions::list().await);
     model.write().await.sessions = Some(Arc::new(reading));
+}
+
+async fn look_at_agents(model: &Model) {
+    let reading = Reading::new(status::fleet().await);
+    model.write().await.agents = Some(Arc::new(reading));
 }
 
 #[cfg(test)]

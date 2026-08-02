@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 use crate::inventory::{self, MachineInfo};
 use crate::sessions::{self, MachineSessions};
+use crate::status::{self, MachineStatus};
 use crate::workspace::{self, Workspace};
 
 /// One look, and the moment it finished.
@@ -63,6 +64,9 @@ pub type Machines = Reading<Result<Vec<MachineInfo>, inventory::Error>>;
 pub type Workspaces = Reading<Result<Vec<Workspace>, workspace::Error>>;
 /// One entry per machine, each carrying its own answer or its own failure.
 pub type Sessions = Reading<Result<Vec<MachineSessions>, sessions::Error>>;
+/// Also one entry per machine rather than per workspace — see
+/// [`crate::status::fleet`] for what that costs and why.
+pub type Agents = Reading<Result<Vec<MachineStatus>, status::Error>>;
 
 /// Each class costs something different to look at, so each is looked at on its
 /// own and carries its own age. Behind an [`Arc`] so a handler can take the
@@ -72,6 +76,7 @@ pub struct Snapshot {
     pub machines: Option<Arc<Machines>>,
     pub workspaces: Option<Arc<Workspaces>>,
     pub sessions: Option<Arc<Sessions>>,
+    pub agents: Option<Arc<Agents>>,
 }
 
 #[cfg(test)]
@@ -95,6 +100,7 @@ mod tests {
         assert!(snapshot.machines.is_none());
         assert!(snapshot.workspaces.is_none());
         assert!(snapshot.sessions.is_none());
+        assert!(snapshot.agents.is_none());
     }
 
     /// The clone a handler serves is the same reading, not a re-taken one.

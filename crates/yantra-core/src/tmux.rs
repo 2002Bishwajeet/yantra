@@ -348,7 +348,7 @@ impl Tmux {
 
         if !out.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            if no_server(&stderr) || stderr.contains("can't find session") {
+            if no_server(&stderr) || no_such_session(&stderr) {
                 return Ok(None);
             }
             return Err(Error::Command {
@@ -465,6 +465,14 @@ impl Tmux {
             })
         }
     }
+}
+
+/// **`can't find window` is the spelling that actually happens** (Y-084): with a
+/// server up, tmux resolves `list-panes -s -t '=name'` as a window target and
+/// names *that* in the refusal, on 3.7b and 3.5a alike. Both are matched because
+/// either one means the session is not there.
+fn no_such_session(stderr: &str) -> bool {
+    stderr.contains("can't find session") || stderr.contains("can't find window")
 }
 
 /// tmux prints two different things for "no server", picked by errno:
