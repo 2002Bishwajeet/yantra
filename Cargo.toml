@@ -31,6 +31,9 @@ getrandom = "0.4"
 time = { version = "0.3", features = ["serde-well-known"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 tower = { version = "0.5", features = ["util"] }
+# `fs` only: `ServeDir` resolves paths against the root and refuses to escape it,
+# which is the part of static serving that is worth not writing by hand.
+tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

@@ -68,6 +68,33 @@ per job, so the two cannot silently drift. If you add a check, add it to the
 `check` is the fast subset to run before every push; `ci` additionally
 cross-compiles for the appliance, which CI does on a runner anyway.
 
+## Running the dashboard
+
+Two ways, and they are for different jobs.
+
+**Developing the UI** — Vite, with hot reload, proxying the API across to the daemon:
+
+```bash
+cargo run --bin yantrad          # one terminal
+npm --prefix web run dev         # another; open the URL it prints
+```
+
+**Looking at the dashboard from anywhere else**, which is what a phone needs — `yantrad` serves the
+built assets itself, from one origin, so there is no CORS and no second process:
+
+```bash
+npm --prefix web run build
+YANTRA_WEB=$PWD/web/dist cargo run --bin yantrad
+```
+
+`YANTRA_WEB` is a directory of **built** assets. Unset it and the daemon serves the API alone and
+says so on `/`; point it somewhere with no `index.html` and it refuses to start rather than answering
+404 to every request, which reads as a broken dashboard instead of a wrong path.
+
+Assets are not embedded in the binary. That is R-24: embedding makes every `fmt`, `clippy`, `test`
+and cross-build job depend on npm, and the only thing that wants one file to copy is the M7
+appliance.
+
 ## Testing
 
 **Mocks lie about SSH.** Orchestration primitives are tested against a real

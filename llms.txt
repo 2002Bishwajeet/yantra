@@ -25,7 +25,7 @@ something else, and 35 of them in `yantra-core`. They are the highest-value thin
 
 - [yantra-core](crates/yantra-core/llms.txt): all the orchestration — ssh, tmux, agents, inventory, workspaces. Never prints, never exits. This is where nearly all the code is.
 - [yantra](crates/yantra/llms.txt): the CLI. Renders and chooses exit codes; decides nothing.
-- [yantrad](crates/yantrad/llms.txt): the daemon. An axum server binding only this machine's Tailscale addresses, a read-only JSON API over a background snapshot, and one write — `POST /heartbeat`.
+- [yantrad](crates/yantrad/llms.txt): the daemon. An axum server binding only this machine's Tailscale addresses: a read-only JSON API over a background snapshot, one write (`POST /heartbeat`), and the dashboard itself.
 - [yantra-agent](crates/yantra-agent/llms.txt): the per-machine heartbeat — seven probes, a 10 s loop and a hand-written POST. Install is M7's.
 
 ## Decisions
