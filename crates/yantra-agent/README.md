@@ -29,5 +29,5 @@ on a machine that cannot take it.
 **It is not yet installable.** Nothing starts it at boot; that is M7's. Run it from a terminal.
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
-seven fields are and why; [the M5 plan](../../docs/plans/m5-the-heartbeat-agent.md) measures how each
+seven fields are and why; [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) measures how each
 is read on Linux and macOS. What earlier research settled is in [tracker.md](tracker.md).
