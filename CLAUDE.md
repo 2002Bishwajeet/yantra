@@ -155,17 +155,36 @@ traits' own implementations must be tested against the real thing.
 ## B5. Conventions
 
 - **Read the invariants for the crate you are changing before writing orchestration code** —
-  [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds 34 of the 47, and
+  [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds 35 of the 48, and
   `tracker.md §1b` says where the rest are. They are rules research proved the hard way; violating
   one produces a bug that looks like something else.
 - **Commits carry no co-author, "Generated with", or AI-attribution trailers of any kind.** The repo
   owner set this rule explicitly. Plain, professional messages only.
 - Task IDs `Y-NNN` from `tracker.md`. Commits: `Y-030: add cargo workspace skeleton`.
-  Branches: `y-030-cargo-skeleton`. One branch per issue, one PR per branch.
+  Branches: `y-030-cargo-skeleton`. One branch per issue, one PR per branch. **`Y-2xx` is reserved
+  for the landing page**, which keeps its own tracker on its own branch — it has taken a number this
+  repo had already used three times, and the cost is two rows in two files claiming one identifier,
+  so a commit message stops saying which work it belongs to.
 - ADRs: `docs/adr/NNNN-kebab-title.md`, Nygard format (Context / Decision / Consequences),
-  immutable once accepted.
+  immutable once accepted. **Immutable does not mean untouchable**: when a premise behind an accepted
+  ADR stops holding, append a **dated blockquote** naming the date and the task, and leave the
+  original text in place — see the amendments in [ADR-0006](docs/adr/0006-ssh-exec-transport.md) and
+  [ADR-0004](docs/adr/0004-rust-for-the-daemon.md). Say what changed *upstream* of the reasoning
+  rather than implying the reasoning was wrong. Supersede only when the decision itself is wrong.
 - Research notes: `docs/research/NN-topic.md`, must end with `## Sources` including access dates.
 - Paths: config at `~/.config/yantra/`, CLI `yantra`, daemon `yantrad`.
+- **A summary is updated by the change it summarises, in the same PR.** This file,
+  [`llms.txt`](llms.txt), `README.md` and every crate's `CLAUDE.md`/`llms.txt`/`README.md` restate
+  things owned elsewhere, so they go stale with nobody editing them and nothing failing. Y-080 spent
+  a session on a research index that had drifted twice; on 2026-08-02 `llms.txt` was found counting
+  eleven ADRs against fourteen and 47 invariants against 48. **Prefer a link over a restatement** —
+  a link that stops resolving is a broken build, a copied fact is a reader's problem — and when a
+  count or a name must be restated, treat changing it as part of the work, not as tidying up
+  afterwards.
+- **A new instruction from the owner lands in the file that binds it, not only in the reply.** If it
+  is how work is done it belongs here or in the crate's `CLAUDE.md`; if it is what to build it is a
+  `tracker.md` row; if it is a decision it is an ADR. An instruction that lives only in a
+  conversation is one the next session does not have.
 
 ## B6. If you are a research subagent
 
