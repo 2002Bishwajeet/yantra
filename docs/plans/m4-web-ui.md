@@ -101,7 +101,9 @@ Each one closes off a design that would otherwise look reasonable.
 | **Q6** personal-first (2026-07-31) | A settings screen, a theme switcher, multi-user, and an auth model. One owner, one fleet. |
 | **I-39** online ≠ usable | A green dot per machine. Online, offline and *expired key* are three states, and the third is the one a person can act on. |
 | **Y-054's partial answer** | An endpoint that fails because one machine did. A machine that did not answer is data, not an error. |
-| **Y-044 still deferred** | Reaching for `rusqlite`. A read-only dashboard derives everything; nothing needs to survive a restart. |
+| **Y-044 dropped** | Reaching for `rusqlite`. A read-only dashboard derives everything; nothing needs to survive a restart. |
+
+> **Y-044 is dropped, not deferred, recorded 2026-08-02.** The row above said *still deferred* when it was written, and the guidance under it is what the audit went on to confirm — the dashboard derives everything and nothing needs to survive a restart. What changed is that this stopped being a deferral: five candidate consumers were audited and none needed a store, so `rusqlite` is not waiting for a better moment. See the Y-044 row in [`tracker.md`](../../tracker.md) and the 2026-08-02 amendment to [ADR-0004](../adr/0004-rust-for-the-daemon.md).
 
 ## 5. The work
 
