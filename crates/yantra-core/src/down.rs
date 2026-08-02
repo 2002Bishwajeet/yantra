@@ -24,7 +24,13 @@ const GRACE: &str = "50"; // × 0.1s
 pub struct Report {
     pub workspace: Workspace,
     /// How the agent ended, read while there was still a pane to read it from.
-    pub ending: Verdict,
+    ///
+    /// `None` when there was no agent to have an ending — a session opened as a
+    /// shell (Y-091), or no session at all. The distinction cannot be recovered
+    /// afterwards: a shell that takes the `SIGTERM` below reports exactly the
+    /// `Killed` an agent that ignored its own shutdown would, and calling that
+    /// *"it ran no shutdown of its own"* says something untrue about a shell.
+    pub ending: Option<Verdict>,
     /// `false` when there was nothing to stop. Absence is success (I-30, §B4),
     /// but the caller should not claim to have stopped something.
     pub stopped: bool,
@@ -61,10 +67,14 @@ pub async fn stop<E: Exec>(exec: &E, tmux: &Tmux, workspace: Workspace) -> Resul
     if before.verdict == Verdict::NoSession {
         return Ok(Report {
             workspace: before.workspace,
-            ending: Verdict::NoSession,
+            ending: None,
             stopped: false,
         });
     }
+
+    // Asked before the SIGTERM, because afterwards a shell and an agent that
+    // ignored its shutdown are the same dead pane.
+    let had_agent = before.verdict != Verdict::NoAgent;
 
     // Ask before telling. A pane that is already dead has nothing to ask.
     if let Some(pid) = before.pane.as_ref().and_then(|pane| pane.pid) {
@@ -79,7 +89,7 @@ pub async fn stop<E: Exec>(exec: &E, tmux: &Tmux, workspace: Workspace) -> Resul
 
     Ok(Report {
         workspace: after.workspace,
-        ending: after.verdict,
+        ending: had_agent.then_some(after.verdict),
         stopped: true,
     })
 }

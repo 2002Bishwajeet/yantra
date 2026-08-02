@@ -108,6 +108,44 @@ fn workspace(name: &str) -> Workspace {
     }
 }
 
+/// Y-099: a session opened as a plain shell is stopped just the same, and
+/// **reports no ending**, because there was no agent to have one.
+///
+/// The pane still dies of the `SIGTERM` `down` sends, which is indistinguishable
+/// afterwards from an agent that ignored its own shutdown — so the question has
+/// to be asked before the signal, and this test is what proves it is.
+///
+/// A second repo is what makes the pane read as `NoAgent`: the stub registry
+/// claims an agent in `REPO` and nowhere else, so a session opened elsewhere has
+/// a live pane, no registry entry, and no agent in its start command.
+#[tokio::test]
+async fn a_session_that_held_no_agent_reports_no_ending() -> Result<()> {
+    let Some(lab) = Lab::start("down-shell").await? else {
+        return Ok(());
+    };
+    const SHELL_REPO: &str = "/tmp/downshellrepo";
+    lab.ssh.exec(&format!("mkdir -p {SHELL_REPO}")).await?;
+    lab.tmux
+        .ensure(&lab.ssh, "downshell", SHELL_REPO, None)
+        .await?;
+    lab.ssh.exec("sleep 1").await?;
+
+    let mut ws = workspace("downshell");
+    ws.repo = std::path::PathBuf::from(SHELL_REPO);
+
+    let report = down::stop(&lab.ssh, &lab.tmux, ws).await?;
+    assert!(report.stopped, "a shell session is still stopped");
+    assert_eq!(
+        report.ending, None,
+        "and there is no agent whose ending could be reported"
+    );
+    assert!(
+        !lab.sessions().await?.contains(&"downshell".to_owned()),
+        "the session must be gone"
+    );
+    Ok(())
+}
+
 /// §B4 from the other end: stopping something that is not running is the state
 /// asked for, so it succeeds — but it must not *claim* to have stopped anything.
 #[tokio::test]
@@ -118,7 +156,7 @@ async fn stopping_what_is_not_running_succeeds_and_says_so() -> Result<()> {
 
     let report = down::stop(&lab.ssh, &lab.tmux, workspace("downabsent")).await?;
     assert!(!report.stopped, "there was nothing to stop");
-    assert_eq!(report.ending, Verdict::NoSession);
+    assert_eq!(report.ending, None, "and no agent ending to report");
     Ok(())
 }
 
@@ -180,7 +218,7 @@ async fn a_clean_shutdown_is_reported_before_the_evidence_is_destroyed() -> Resu
     assert!(report.stopped);
     assert_eq!(
         report.ending,
-        Verdict::Stopped,
+        Some(Verdict::Stopped),
         "a handled SIGTERM is a clean stop, not a crash"
     );
     assert!(!lab.sessions().await?.contains(&"downclean".to_owned()));
@@ -201,7 +239,7 @@ async fn an_agent_that_ignores_sigterm_is_still_stopped() -> Result<()> {
     assert!(report.stopped);
     assert_ne!(
         report.ending,
-        Verdict::Stopped,
+        Some(Verdict::Stopped),
         "it never handled the signal, so nothing of its own ran"
     );
     assert!(
@@ -222,7 +260,7 @@ async fn a_session_whose_agent_already_crashed_reports_the_crash() -> Result<()>
 
     let report = down::stop(&lab.ssh, &lab.tmux, workspace("downcrashed")).await?;
     assert!(report.stopped, "the session was still there to clean up");
-    assert_eq!(report.ending, Verdict::Crashed { status: 7 });
+    assert_eq!(report.ending, Some(Verdict::Crashed { status: 7 }));
     assert!(!lab.sessions().await?.contains(&"downcrashed".to_owned()));
     Ok(())
 }
