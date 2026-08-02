@@ -22,6 +22,7 @@ use yantra_core::inventory::{Inventory, Tailscale};
 mod api;
 mod heartbeat;
 mod refresh;
+mod web;
 
 const PORT: u16 = 7717;
 
@@ -42,6 +43,9 @@ enum Error {
 
     #[error("the server stopped unexpectedly")]
     Serve(#[source] std::io::Error),
+
+    #[error("could not serve the dashboard")]
+    Dashboard(#[source] web::NoIndex),
 }
 
 #[tokio::main]
@@ -77,6 +81,20 @@ fn report(error: &Error) {
     }
 }
 
+fn dashboard() -> Result<Router, Error> {
+    match web::from_env() {
+        Some(dir) => {
+            let router = web::router(&dir).map_err(Error::Dashboard)?;
+            tracing::info!("serving the dashboard from {}", dir.display());
+            Ok(router)
+        }
+        None => {
+            tracing::info!("no dashboard — {}", web::advice());
+            Ok(web::placeholder())
+        }
+    }
+}
+
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
     let fleet = heartbeat::Fleet::default();
@@ -85,7 +103,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         .route("/healthz", get(|| async { "ok" }))
         .nest("/api", api::router().with_state(fleet.model.clone()))
         .merge(heartbeat::router())
-        .with_state(fleet);
+        .with_state(fleet)
+        .fallback_service(dashboard()?);
 
     let mut servers = tokio::task::JoinSet::new();
     for address in addresses {

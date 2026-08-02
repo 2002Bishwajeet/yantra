@@ -53,6 +53,27 @@ R-22 is unchanged as a boundary and larger as a blast radius — anything that r
 now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
 is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.
 
+## It serves the dashboard, from a directory
+
+`YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,
+so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
+`index.html` rather than a 404, which is what makes a deep link work.
+
+**Assets are a directory, not an embed.** R-24 is the reason: embedding makes every `fmt`, `clippy`,
+`test` and musl cross-build job depend on npm, and the only thing that needs one file to copy is the
+M7 appliance. Y-073's row describes a cargo feature for that; it arrives with the appliance that
+wants it, not before.
+
+Two failure shapes, deliberately different. **Unset** is a normal deployment — the API serves alone
+and `/` says so *and says how*. **Set but wrong** refuses at startup, because a `ServeDir` over a
+missing directory answers 404 to everything, and that reads as a broken dashboard rather than a typo
+in one environment variable.
+
+One thing the tests record because it is not obvious: a path that climbs out of the root answers
+**200 with the app**, not 403 or 404. `ServeDir` refuses the climb and the SPA fallback then treats
+the path as one the app routes, so a traversal attempt and a deep link are indistinguishable by
+status. Assert on the body.
+
 ## Nothing expensive happens on the request path
 
 `ssh.rs` sets `ConnectTimeout=10`, so one asleep machine costs ten seconds. A browser polls whether
