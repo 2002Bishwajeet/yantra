@@ -18,10 +18,13 @@
 //! body is rendering, and ADR-0005 put rendering in the caller.
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, response::IntoResponse};
 use yantra_core::snapshot::Reading;
+use yantra_core::status::{MachineStatus, Verdict};
 
 use crate::refresh::Model;
 
@@ -33,6 +36,7 @@ pub fn router() -> Router<Model> {
         .route("/machines", get(machines))
         .route("/workspaces", get(workspaces))
         .route("/sessions", get(sessions))
+        .route("/workspaces/{name}/status", get(workspace_status))
 }
 
 async fn machines(State(model): State<Model>) -> impl IntoResponse {
@@ -54,6 +58,40 @@ async fn sessions(State(model): State<Model>) -> impl IntoResponse {
     Json(Answer::of(snapshot.sessions.as_deref(), |answers| {
         answers.iter().map(MachineSessions::of).collect::<Vec<_>>()
     }))
+}
+
+/// The one route naming a resource rather than a class, so it has a fourth
+/// answer the others cannot need: **404 for a workspace that does not exist**.
+/// A 200 carrying no data would make absence inferable only from a missing
+/// field, which is the inference this module exists to prevent. It is not
+/// reachable before the first look — a daemon that has not looked cannot know
+/// whether the name is real, and says `never` instead.
+async fn workspace_status(State(model): State<Model>, Path(name): Path<String>) -> Response {
+    let snapshot = model.read().await.clone();
+    let Some(reading) = snapshot.agents.as_deref() else {
+        return Json(Answer::<WorkspaceStatus>::Never).into_response();
+    };
+    let age_seconds = reading.age().as_secs();
+    let fleet = match reading.value() {
+        Ok(fleet) => fleet,
+        Err(error) => {
+            return Json(Answer::<WorkspaceStatus>::Failed {
+                age_seconds,
+                error: because(error),
+            })
+            .into_response();
+        }
+    };
+    match WorkspaceStatus::find(fleet, &name) {
+        Some(data) => Json(Answer::Ok { age_seconds, data }).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(Missing {
+                error: format!("no workspace named `{name}`"),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 /// I-47 one layer up: `never` is not an empty list, and neither is `failed`.
@@ -197,6 +235,127 @@ impl Session {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+struct Missing {
+    error: String,
+}
+
+/// `yantra status <name>` on the wire — the CLI expressed it first, so this
+/// route adds no verb the terminal cannot reach (ADR-0012).
+#[derive(Debug, serde::Serialize)]
+struct WorkspaceStatus {
+    workspace: String,
+    machine: String,
+    #[serde(flatten)]
+    reached: Reached,
+}
+
+/// The same distinction `/sessions` draws, at workspace granularity: a machine
+/// that did not answer leaves the workspace in the answer carrying why, rather
+/// than reading as a workspace with nothing running.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "reached", rename_all = "lowercase")]
+enum Reached {
+    Yes {
+        status: AgentState,
+        /// What `claude`'s own registry holds for this repo. Present without
+        /// `running` when the pane died under a live agent process.
+        session: Option<AgentSession>,
+    },
+    No {
+        error: String,
+    },
+}
+
+impl WorkspaceStatus {
+    fn find(fleet: &[MachineStatus], name: &str) -> Option<Self> {
+        fleet.iter().find_map(|machine| {
+            let of = |reached| Self {
+                workspace: name.to_owned(),
+                machine: machine.machine.clone(),
+                reached,
+            };
+            match &machine.reports {
+                Ok(reports) => reports
+                    .iter()
+                    .find(|report| report.workspace.name == name)
+                    .map(|report| {
+                        of(Reached::Yes {
+                            status: AgentState::of(&report.verdict),
+                            session: report.agent.as_ref().map(AgentSession::of),
+                        })
+                    }),
+                Err(error) => machine
+                    .workspaces
+                    .iter()
+                    .any(|workspace| workspace.name == name)
+                    .then(|| {
+                        of(Reached::No {
+                            error: because(error),
+                        })
+                    }),
+            }
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct AgentSession {
+    id: String,
+    pid: u32,
+}
+
+impl AgentSession {
+    fn of(running: &yantra_core::agent::Running) -> Self {
+        Self {
+            id: running.session_id.clone(),
+            pid: running.pid,
+        }
+    }
+}
+
+/// Every [`Verdict`] by name, so a renderer never infers one state from the
+/// absence of another. Two of them carry the weight: `no_agent` is a session
+/// opened as a plain shell and is **ordinary** rather than a failure (Y-091),
+/// while `unclear` beside it is R-2's genuine contradiction; `awaiting_trust`
+/// is the one state in the system where the machine has stopped and is waiting
+/// for a person (I-49).
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum AgentState {
+    NoSession,
+    Running,
+    Finished,
+    Stopped,
+    Crashed { exit_status: i32 },
+    Killed { signal: String },
+    NoAgent,
+    AwaitingTrust,
+    Unclear { because: String },
+}
+
+impl AgentState {
+    fn of(verdict: &Verdict) -> Self {
+        match verdict {
+            Verdict::NoSession => Self::NoSession,
+            Verdict::Running => Self::Running,
+            Verdict::Finished => Self::Finished,
+            Verdict::Stopped => Self::Stopped,
+            Verdict::Crashed { status } => Self::Crashed {
+                exit_status: *status,
+            },
+            Verdict::Killed { signal } => Self::Killed {
+                signal: signal.clone(),
+            },
+            Verdict::NoAgent => Self::NoAgent,
+            Verdict::AwaitingTrust => Self::AwaitingTrust,
+            Verdict::Unclear { because } => Self::Unclear {
+                because: (*because).to_owned(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 // `expect` in a test is a deliberate abort with a message; the workspace lint
 // targets the daemon, where the same call would take it down.
@@ -212,9 +371,10 @@ mod tests {
     use yantra_core::inventory::{MachineInfo, Os};
     use yantra_core::sessions::{self, MachineSessions};
     use yantra_core::snapshot::Snapshot;
+    use yantra_core::status::{self, Report};
     use yantra_core::tmux::Summary;
 
-    async fn get_json(model: Model, path: &str) -> Value {
+    async fn get(model: Model, path: &str) -> (StatusCode, Value) {
         let response = router()
             .with_state(model)
             .oneshot(
@@ -224,11 +384,20 @@ mod tests {
             )
             .await
             .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
         let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
             .await
             .expect("the body is in memory");
-        serde_json::from_slice(&body).expect("every answer is JSON")
+        (
+            status,
+            serde_json::from_slice(&body).expect("every answer is JSON"),
+        )
+    }
+
+    async fn get_json(model: Model, path: &str) -> Value {
+        let (status, body) = get(model, path).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
     }
 
     fn holding(snapshot: Snapshot) -> Model {
@@ -378,27 +547,229 @@ mod tests {
         );
     }
 
+    fn on_machine(machine: &str, reports: Result<Vec<Report>, status::Error>) -> MachineStatus {
+        MachineStatus {
+            machine: machine.into(),
+            workspaces: match &reports {
+                Ok(reports) => reports.iter().map(|r| r.workspace.clone()).collect(),
+                Err(_) => vec![workspace("api", machine)],
+            },
+            reports,
+        }
+    }
+
+    fn workspace(name: &str, machine: &str) -> yantra_core::workspace::Workspace {
+        yantra_core::workspace::Workspace {
+            name: name.into(),
+            machine: machine.into(),
+            repo: "/srv/repo".into(),
+            startup: None,
+        }
+    }
+
+    fn report(name: &str, verdict: Verdict) -> Report {
+        Report {
+            workspace: workspace(name, "bishwajeets-macbook-pro"),
+            pane: None,
+            agent: None,
+            verdict,
+        }
+    }
+
+    fn looking_at(fleet: Vec<MachineStatus>) -> Model {
+        holding(Snapshot {
+            agents: Some(Arc::new(Reading::new(Ok(fleet)))),
+            ..Snapshot::default()
+        })
+    }
+
+    /// Before the first look the daemon cannot know whether the name is real,
+    /// so this is the one place a 404 would be a lie rather than an answer.
+    #[tokio::test]
+    async fn a_workspace_nobody_has_looked_at_says_never_rather_than_not_found() {
+        let (status, body) = get(holding(Snapshot::default()), "/workspaces/api/status").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body, json!({"looked": "never"}));
+    }
+
+    /// `status::Error::Workspace` is `#[transparent]`, so the headline alone is
+    /// the empty string — the chain is the whole message.
+    #[tokio::test]
+    async fn a_failed_look_carries_the_cause_and_never_reads_as_no_such_workspace() {
+        let model = holding(Snapshot {
+            agents: Some(Arc::new(Reading::new(Err(status::Error::Workspace(
+                yantra_core::workspace::Error::InvalidName {
+                    name: "has.dot".into(),
+                },
+            ))))),
+            ..Snapshot::default()
+        });
+
+        let (code, body) = get(model, "/workspaces/api/status").await;
+        assert_eq!(code, StatusCode::OK, "{body}");
+        assert_eq!(body["looked"], "failed", "{body}");
+        assert!(body.get("data").is_none(), "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("has.dot")),
+            "{body}"
+        );
+    }
+
+    /// Serving a minute-old verdict as though it were live is the lie R-23
+    /// names, and it is worse here than anywhere: this is the page's only
+    /// actionable state.
+    #[tokio::test]
+    async fn an_ageing_verdict_is_served_with_its_age_rather_than_as_live() {
+        let model = looking_at(vec![on_machine(
+            "bishwajeets-macbook-pro",
+            Ok(vec![report("api", Verdict::Running)]),
+        )]);
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+        let body = get_json(model, "/workspaces/api/status").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert!(
+            body["age_seconds"].as_u64().is_some_and(|age| age >= 1),
+            "{body}"
+        );
+    }
+
+    /// Y-054's rule at workspace granularity. A workspace on a sleeping machine
+    /// must not read as a workspace with nothing running — that is the answer
+    /// that would send someone to look for a crash that never happened.
+    #[tokio::test]
+    async fn a_workspace_whose_machine_did_not_answer_says_so_and_stays_findable() {
+        let model = looking_at(vec![on_machine(
+            "bishwajeets-macbook-pro",
+            Err(status::Error::Ssh(yantra_core::ssh::Error::Transport {
+                host: "bishwajeets-macbook-pro".into(),
+                diagnosis: "connect to host bishwajeets-macbook-pro port 22: Connection refused"
+                    .into(),
+            })),
+        )]);
+
+        let body = get_json(model, "/workspaces/api/status").await;
+        let data = &body["data"];
+        assert_eq!(data["reached"], "no", "{body}");
+        assert_eq!(data["machine"], "bishwajeets-macbook-pro");
+        assert!(data.get("status").is_none(), "{body}");
+        assert!(
+            data["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("Connection refused")),
+            "{body}"
+        );
+    }
+
+    /// **Y-091 on the wire.** A session opened as a plain shell is the most
+    /// common thing on this page and is not a failure, so it has to be its own
+    /// name rather than R-2's contradiction — and `awaiting_trust` beside it is
+    /// the one state where a person is being waited for (I-49).
+    #[tokio::test]
+    async fn a_shell_session_the_trust_prompt_and_a_contradiction_are_three_names() {
+        let model = looking_at(vec![on_machine(
+            "bishwajeets-macbook-pro",
+            Ok(vec![
+                report("shell", Verdict::NoAgent),
+                report("waiting", Verdict::AwaitingTrust),
+                report(
+                    "ghost",
+                    Verdict::Unclear {
+                        because: "the pane is alive but claude knows of no agent in that directory",
+                    },
+                ),
+            ]),
+        )]);
+
+        let mut seen = Vec::new();
+        for name in ["shell", "waiting", "ghost"] {
+            let body = get_json(model.clone(), &format!("/workspaces/{name}/status")).await;
+            assert_eq!(body["data"]["reached"], "yes", "{body}");
+            seen.push(
+                body["data"]["status"]["state"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
+            );
+        }
+        assert_eq!(seen, ["no_agent", "awaiting_trust", "unclear"]);
+    }
+
+    /// Y-096 renders every one of these, so a verdict that arrives as a bare
+    /// word when it carries a number would be a rewrite rather than a case.
+    #[tokio::test]
+    async fn every_ending_reaches_the_json_carrying_whatever_told_it_apart() {
+        let model = looking_at(vec![on_machine(
+            "bishwajeets-macbook-pro",
+            Ok(vec![
+                report("gone", Verdict::NoSession),
+                report("broke", Verdict::Crashed { status: 1 }),
+                report(
+                    "shot",
+                    Verdict::Killed {
+                        signal: "KILL".into(),
+                    },
+                ),
+            ]),
+        )]);
+
+        let gone = get_json(model.clone(), "/workspaces/gone/status").await;
+        assert_eq!(gone["data"]["status"], json!({"state": "no_session"}));
+        let broke = get_json(model.clone(), "/workspaces/broke/status").await;
+        assert_eq!(
+            broke["data"]["status"],
+            json!({"state": "crashed", "exit_status": 1})
+        );
+        let shot = get_json(model, "/workspaces/shot/status").await;
+        assert_eq!(
+            shot["data"]["status"],
+            json!({"state": "killed", "signal": "KILL"})
+        );
+    }
+
+    /// The one route naming a resource. A 200 with an absent `data` would make
+    /// a client infer non-existence from a missing field, which is the
+    /// inference this whole shape exists to prevent.
+    #[tokio::test]
+    async fn a_workspace_that_does_not_exist_is_not_found_rather_than_an_empty_answer() {
+        let model = looking_at(vec![on_machine(
+            "bishwajeets-macbook-pro",
+            Ok(vec![report("api", Verdict::Running)]),
+        )]);
+
+        let (code, body) = get(model, "/workspaces/nosuch/status").await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "{body}");
+        assert!(
+            body["error"].as_str().is_some_and(|e| e.contains("nosuch")),
+            "{body}"
+        );
+    }
+
     /// M4 reads and nothing else. A write route is where Q6's absent auth stops
     /// being free (R-22), so the refusal is the thing worth asserting.
     #[tokio::test]
     async fn nothing_here_accepts_a_write() {
-        for method in ["POST", "PUT", "DELETE", "PATCH"] {
-            let response = router()
-                .with_state(holding(Snapshot::default()))
-                .oneshot(
-                    Request::builder()
-                        .method(method)
-                        .uri("/machines")
-                        .body(Body::empty())
-                        .expect("a request with no body is valid"),
-                )
-                .await
-                .expect("the router is infallible");
-            assert_eq!(
-                response.status(),
-                StatusCode::METHOD_NOT_ALLOWED,
-                "{method} reached a handler"
-            );
+        for path in ["/machines", "/workspaces/api/status"] {
+            for method in ["POST", "PUT", "DELETE", "PATCH"] {
+                let response = router()
+                    .with_state(holding(Snapshot::default()))
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .body(Body::empty())
+                            .expect("a request with no body is valid"),
+                    )
+                    .await
+                    .expect("the router is infallible");
+                assert_eq!(
+                    response.status(),
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    "{method} {path} reached a handler"
+                );
+            }
         }
     }
 }
