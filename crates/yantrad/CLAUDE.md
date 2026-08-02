@@ -106,6 +106,22 @@ list to find what it just made will draw an empty one.
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
 generalise the exception — a *read* that awaits ssh is still the bug that rule exists to prevent.
 
+## TLS is not this crate's job, and the proxy costs it something
+
+Y-111 put the daemon behind `tailscale serve` on port 8443 (`just https`,
+[`docs/development.md`](../../docs/development.md)). §B2: Tailscale already holds and renews a
+publicly-trusted certificate for the machine's `*.ts.net` name, so **do not terminate TLS here, and do
+not add a cert crate** — the daemon speaks plain HTTP on 7717 and that is the whole design. It also
+proxies to the **tailnet address**, because loopback is refused above.
+
+**The proxy launders the source address, and that defeats the identity check.** Measured 2026-08-03:
+a request from another machine arrives at the backend from *this* node's address, with the caller in
+`X-Forwarded-For` and `Tailscale-User-Login`. Writes through 8443 are therefore all attributed to
+whichever machine runs the proxy — which is this owner's own untagged node, so they succeed, and
+ADR-0016's check rejects nothing it would otherwise have rejected. Its dated amendment records this;
+**Y-118** decides what to do. Until then, do not read `allowed()` as protection against a tagged or
+shared-in node — it is only that on the direct port.
+
 ## Nothing expensive happens on the request path
 
 `ssh.rs` sets `ConnectTimeout=10`, so one asleep machine costs ten seconds. A browser polls whether

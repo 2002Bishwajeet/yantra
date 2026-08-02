@@ -51,6 +51,11 @@ context, so **the PWA is blocked on TLS** — and this is already costing us: `C
 reports a non-empty `CertDomains`, and `tailscale cert` exists in 1.98.9. So a real, publicly-trusted
 cert for `cachyos-g14.<tailnet>.ts.net` is available today with no admin-console change.
 
+**Closed by Y-111 on 2026-08-03**, and it held: `tailscale serve` issued a Let's Encrypt certificate
+(`issuer: C=US; O=Let's Encrypt; CN=YE1`) with no admin-console change, and the dashboard, the app
+bundle, the SPA fallback and `/api/machines` all answer over HTTP/2 TLS. `just https` is the whole of
+it; no TLS code entered `axum`.
+
 ### 4.2 Waking a sleeping machine is not possible from the phone, and will not be this milestone
 
 [Research note 01 §6](../research/01-tailscale-inventory.md): Tailscale is L3, magic packets are L2
@@ -127,12 +132,28 @@ path relative for the rest of the project's life.
 bind only the addresses Tailscale says this machine holds, and loopback is deliberately not among
 them.
 
+**Y-111 chose 8443** — the conventional alternate-HTTPS port, and the one Tailscale's own `serve` and
+`funnel` help pages use as their example. Two things this section did not know, both measured on
+2026-08-03. `tailscale serve` accepts **any** HTTPS port, not only 443/8443/10000 — 9443 configured
+without complaint — so the choice was free rather than forced. And it accepts a port another process
+already holds, reporting success while `ss -lntp` still shows the socket belonging to that process:
+`--https=7717` looked fine and gave nothing, which is the argument for one meaning per port rather
+than any conflict the CLI would have caught.
+
+**And §4.3's mechanism does not survive this section.** A proxy terminates the caller's connection
+and opens its own, so `yantrad` sees the proxy's address; measured from `bishwajeets-macbook-pro`,
+the backend saw *this* node with the real caller only in `X-Forwarded-For`. Writes from the phone
+still work — the proxy runs on the owner's own untagged node — but ADR-0016's check no longer
+distinguishes callers behind 8443, which is the one thing it was bought for. Recorded as a dated
+amendment on ADR-0016 and carried by **Y-118**; it does not block Y-113 or Y-114.
+
 ## 5. The tasks
 
 | # | Task | Why it is where it is |
 | --- | --- | --- |
 | Y-073 | `yantrad` serves the built dashboard | 4.5 — first, because TLS needs something behind it. Embedding stays behind a cargo feature that is off by default (R-24: no Rust build should need npm). |
-| Y-111 | `yantrad` behind `tailscale serve`, so the UI is HTTPS | Unblocks 4.1. §B2 says orchestrate rather than reinvent: `tailscale serve https / proxy 7717` is a config line against terminating TLS in `axum` and renewing certs ourselves. |
+| Y-111 | `yantrad` behind `tailscale serve`, so the UI is HTTPS | Unblocks 4.1. §B2 says orchestrate rather than reinvent: `tailscale serve https / proxy 7717` is a config line against terminating TLS in `axum` and renewing certs ourselves. **Done 2026-08-03**, and it cost ADR-0016 its failure mode — see 4.6. |
+| Y-118 | The proxy hides the caller, so identity must come from the forwarded address | Falls out of Y-111 and belongs to 4.3 rather than 4.1. Not a blocker for anything in this milestone. |
 | Y-112 | ADR-0016 + write routes authorised by peer identity | The decision recorded, then `POST /api/workspaces/{name}/{up,down,resume}`. Reuses Y-108's source-address lookup. |
 | Y-113 | The dashboard acts: a machine picker and real buttons | Replaces the copy-a-command affordance where a write now exists. `Command` stays for `attach`, which is still a paste. |
 | Y-114 | PWA shell — installable on iOS | Needs Y-111. Manifest, icons, `apple-touch-icon`, `display: standalone`, an offline shell that never caches a reading (R-23: a cached dashboard tells confident lies). |
