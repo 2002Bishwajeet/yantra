@@ -24,7 +24,7 @@ bind where:
 | `ssh.rs` | I-20 (system binary), I-25 (silent failure), I-26 (payload is base64, never quoted), I-27 (orphans), I-28 (`ControlPath` ≤ 90 bytes) |
 | `tmux.rs` | I-1 (`duplicate session:` is success), I-2 (name charset), I-4 (`remain-on-exit`), I-21 (`=name` is **session-only**), I-40 (never set `default-terminal`), I-41 (match the bracketed reason), I-42 (no tabs in `-F`), I-47/I-48 (dead-pane status *and* signal, both spellings) |
 | `terminfo.rs` | I-36, I-43 (two terminfo databases on one machine) |
-| `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain), I-49 (an agent at the trust prompt is inert) |
+| `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain), I-49 (an agent at the trust prompt is inert), I-51 (tmux's own quotes around a start command) |
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
 | `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010 |
