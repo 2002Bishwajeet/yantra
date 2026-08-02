@@ -1,9 +1,9 @@
 # yantrad — working notes
 
-**It serves, it looks, it answers, and it now takes exactly one write.** Y-069 made it an `axum`
-server, Y-070 gave it a background read model, Y-071 put that model on the wire at `/api`, and Y-108
-added `POST /heartbeat` — the only route in the daemon that accepts a body. The most useful thing you
-can do here is still not write code before a milestone needs it.
+**It serves, it looks, it answers, and it acts.** Y-069 made it an `axum` server, Y-070 gave it a
+background read model, Y-071 put that model on the wire at `/api`, Y-108 added `POST /heartbeat`, and
+Y-112 and Y-116 gave it the four writes a dashboard needs. The most useful thing you can do here is
+still not write code before a milestone needs it.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
 
@@ -76,7 +76,8 @@ status. Assert on the body.
 
 ## The routes that act
 
-`POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and nothing more.** The daemon
+`POST /api/workspaces` and `POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
+nothing more**, being `yantra new`, `up`, `down` and `resume`. The daemon
 may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
 reach. A new verb here starts in the CLI.
 
@@ -90,6 +91,16 @@ untagged node is refused. Three rules that are easy to get subtly wrong:
   user check alone would let a CI runner through.
 - **Identity never comes from the body**, for ADR-0013 §5's reason: a body that names its sender can
   name someone else.
+
+`POST /api/workspaces` is the odd one: it touches no machine, and its interesting failure is a name
+already taken, which is **`409`** rather than `400`. The caller asked for something reasonable that
+the world already answers, and telling them to fix their request would send them looking for a
+mistake they did not make.
+
+**A workspace created this way is not in the read model yet.** `refresh.rs` looks every 30 s, so
+`GET /api/workspaces` keeps answering without it for up to that long — measured at 15 s on the first
+try. The `201` carries the whole workspace back for exactly this reason: a client that re-reads the
+list to find what it just made will draw an empty one.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not

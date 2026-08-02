@@ -3,20 +3,35 @@
 The Yantra control-plane daemon: machine inventory, workspaces, session state, placement. Every
 client — CLI, web UI, hardware panel — talks to this and nothing else.
 
-**Barely implemented.** It serves `/healthz`, a read-only JSON API, and one write. A background
-task keeps machines, workspaces and sessions in memory with the age of each reading, so no request
-ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README.md) in-process and keeps
-working with no daemon running — that is a decision, not a gap
+It serves `/healthz`, a read-only JSON API, the writes that act, and the dashboard itself. A
+background task keeps machines, workspaces and sessions in memory with the age of each reading, so
+no *read* ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README.md) in-process and
+keeps working with no daemon running — that is a decision, not a gap
 ([ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)).
+
+Every route below has a CLI equivalent, and that is the rule rather than a coincidence: anything the
+web UI can do must be expressible in `yantra` first, which is what stops the daemon growing a richer
+API the CLI cannot reach.
 
 | Route | CLI equivalent |
 | --- | --- |
 | `GET /api/machines` | `yantra ls machines` |
 | `GET /api/workspaces` | `yantra ls workspaces` |
 | `GET /api/sessions` | `yantra ls sessions` |
+| `GET /api/workspaces/{name}/status` | `yantra status <name>` |
+| `POST /api/workspaces` | `yantra new` |
+| `POST /api/workspaces/{name}/up` | `yantra up` |
+| `POST /api/workspaces/{name}/down` | `yantra down` |
+| `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 
-`POST /heartbeat` is the only route that takes a body. It answers **`204` with nothing in it** and
+The four `POST /api/…` routes are authorised by Tailscale identity
+([ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)): the
+source address is resolved live, and anything that is not this owner's own untagged node is refused
+`403`. A `tailscale` that cannot answer is **`503`** — nothing was decided about the caller, so
+blaming them would be a lie about which thing broke.
+
+`POST /heartbeat` answers **`204` with nothing in it** and
 always will — a reply the agent could act on would make the agent something other than a reporter
 ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md)). The body names
 no machine: the beat is attributed to whichever peer holds the address it arrived from, and one from
