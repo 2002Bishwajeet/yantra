@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 /* A placeholder, deliberately. Two landing designs were rejected and the visual direction is
-   being redrawn from the owner's own prototype (Y-208), so this page commits to nothing: system
-   type, neutral ground, three sizes. The build, the visual regression and the Cloudflare deploy
-   are the point of it being here at all. */
+   being redrawn from the owner's own prototype (Y-208), so this page commits to nothing: one
+   neutral face, neutral ground, three sizes. The build, the visual regression and the Cloudflare
+   deploy are the point of it being here at all. */
 
 :root {
   /* Warm-biased neutrals rather than pure greys — enough to not read as an unstyled default,
@@ -29,7 +29,7 @@ body {
   padding: 2rem;
   background: var(--ground);
   color: var(--ink);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }

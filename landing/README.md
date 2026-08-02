@@ -4,8 +4,10 @@ The public *coming soon* page for Yantra. Astro 7 + Tailwind 4, static output, o
 framework, and no JavaScript shipped to the browser at all.
 
 **It is a placeholder, deliberately.** Two designs have been rejected and the owner is redrawing the
-direction from their own prototype (`Y-208`), so the page is three lines of system type on a neutral
-ground and commits to nothing. What is worth keeping is underneath it: the build, the visual
+direction from their own prototype (`Y-208`), so the page is three lines of type on a neutral ground
+and commits to nothing. The one face it does load is self-hosted because a `system-ui` stack renders
+differently on the CI runner than on a developer's box and breaks the baselines — reproducibility,
+not identity. What is worth keeping is underneath it: the build, the visual
 regression and the Cloudflare deploy below all stay exercised, so the redraw arrives at a working
 pipeline rather than rebuilding one.
 
