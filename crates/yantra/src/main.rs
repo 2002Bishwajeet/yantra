@@ -236,7 +236,10 @@ async fn show_logs(name: &str, lines: usize) -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
-            if matches!(err, logs::Error::NoTranscript { .. }) {
+            if matches!(
+                err,
+                logs::Error::NoTranscript { .. } | logs::Error::NoTurnYet { .. }
+            ) {
                 eprintln!("{}", transcript_note(name));
             }
             ExitCode::FAILURE
