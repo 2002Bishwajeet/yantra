@@ -74,8 +74,18 @@ Yantra's own:
 
 ## Usage
 
-A **workspace** is a file at `~/.config/yantra/workspaces/<name>.toml`. The filename is the name, so
-the two can never disagree:
+A **workspace** is a file at `~/.config/yantra/workspaces/<name>.toml`. Write it yourself, or have
+Yantra write it:
+
+```bash
+yantra new site --machine bishwajeets-macbook-pro --repo /Users/me/code/site
+```
+
+It refuses to overwrite an existing one, and it checks nothing about `machine` or `repo` — `repo` is
+a path on the *far* side, and `up` is what discovers it is not there, on that machine, before a
+session exists.
+
+The filename is the name, so the two can never disagree:
 
 ```toml
 machine = "bishwajeets-macbook-pro"   # an ssh destination — ~/.ssh/config decides what it means
@@ -95,6 +105,7 @@ machine and name that instead; `~/.ssh/config` is where this is answered, not Ya
 Then:
 
 ```bash
+yantra new site --machine mac --repo /Users/me/code/site   # write a workspace
 yantra up yantra                 # open the session (run again to attach)
 yantra up yantra --agent claude  # ...and start Claude Code in it
 yantra attach yantra             # hand this terminal to the session
