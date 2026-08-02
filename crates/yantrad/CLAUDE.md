@@ -1,8 +1,9 @@
 # yantrad — working notes
 
-**It serves, it looks, and it answers — read-only.** Y-069 made it an `axum` server, Y-070 gave it a
-background read model, Y-071 put that model on the wire at `/api`. Nothing here writes. The most
-useful thing you can do here is still not write code before M4 needs it.
+**It serves, it looks, it answers, and it now takes exactly one write.** Y-069 made it an `axum`
+server, Y-070 gave it a background read model, Y-071 put that model on the wire at `/api`, and Y-108
+added `POST /heartbeat` — the only route in the daemon that accepts a body. The most useful thing you
+can do here is still not write code before a milestone needs it.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
 
@@ -33,6 +34,24 @@ declined.
 
 **Test the refusal, not the bind.** A test asserting the daemon binds passes just as well when the
 fallback is `0.0.0.0`. That is R-22's stated retire condition and the shape to keep.
+
+## The one write, and what it may not grow into
+
+`POST /heartbeat` ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md)
+§4–§6) is the whole of it. Three rules bind anything that touches `heartbeat.rs`:
+
+- **The response is `204` with an empty body, permanently.** A reply the agent acts on is a control
+  channel, and a control channel is how `yantra-agent` stops being a reporter (R-12).
+- **Identity is the source address, never a field in the body**, matched against the
+  background-refreshed inventory. Do not call the LocalAPI per request, and do not add a machine name
+  to the payload — a body that names its sender can name someone else's.
+- **It writes to memory.** One row per machine, overwritten every beat, so a flood costs CPU and
+  cannot fill a disk. `Beats` sits beside `Model` rather than inside `Snapshot`: a beat is not a look
+  the daemon took and has no `Result` to carry.
+
+R-22 is unchanged as a boundary and larger as a blast radius — anything that reaches the tailnet can
+now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
+is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.
 
 ## Nothing expensive happens on the request path
 
