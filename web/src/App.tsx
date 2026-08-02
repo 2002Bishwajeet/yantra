@@ -40,11 +40,21 @@ export default function App() {
         )}
       </Section>
 
-      <Section title="Sessions" query={sessions}>
+      <Section title="Sessions" query={sessions} waiting={unanswered(sessions)}>
         {(answers) => <Sessions answers={answers} workspaces={workspaces} />}
       </Section>
     </main>
   )
+}
+
+/** The machines the next sweep will pay an ssh timeout for — Y-100's evidence
+ *  that an age near the threshold is ordinary rather than a refresh that died. */
+function unanswered(sessions: Looked<MachineSessions[]>): string[] {
+  return sessions.looked === 'ok'
+    ? sessions.data.flatMap((answer) =>
+        answer.reached === 'no' ? [answer.machine] : [],
+      )
+    : []
 }
 
 /** The machines that did not answer are named, and the count says how many did
