@@ -28,6 +28,14 @@ bind where:
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
 | `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010 |
+| `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
+
+## What `yantra-agent` may call
+
+`heartbeat.rs` is the one thing `yantra-agent` takes this crate for, and that agent must stay tiny
+(R-12). The *dependency edge* is nearly free — 11 KB, measured — and the **call graph** is not: one
+further call into ssh/tmux costs +319 KB, a 65 % jump, because `lto = "thin"` only strips what
+nothing reaches. So the thing to guard is the next `use`, not the `Cargo.toml` line.
 
 ## Anything that reaches a remote shell
 
