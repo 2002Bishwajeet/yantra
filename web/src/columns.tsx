@@ -7,6 +7,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
+import { Act } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -94,8 +95,9 @@ export const machineColumns: Column<Machine>[] = [
   },
 ]
 
-/** Only a look that succeeded can say a session is there. Not knowing is not
- *  the same as knowing there is none, and `up` is right either way (§B4). */
+/** Y-113 left one paste here and took the other: `up` is a button now, and
+ *  `attach` is not, because ADR-0011's TUI wants a terminal this page has none
+ *  of. Only a look that succeeded can say a session is there to attach to. */
 export function workspaceCommand(
   workspace: Workspace,
   sessions: Looked<MachineSessions[]>,
@@ -110,15 +112,44 @@ export function workspaceCommand(
     answer?.reached === 'yes' &&
     answer.sessions.some((session) => session.name === workspace.name)
 
-  return `yantra ${running ? 'attach' : 'up'} ${workspace.name}`
+  return running ? `yantra attach ${workspace.name}` : null
+}
+
+/** What the button is about to touch, said before it is tapped: the machine the
+ *  workspace names, and Y-109's reading of it where the fleet holds one. A
+ *  machine the tailnet does not list gets no state, because none was looked up. */
+function target(
+  workspace: Workspace,
+  machines: Looked<Machine[]>,
+): Machine | undefined {
+  return machines.looked === 'ok'
+    ? machines.data.find((one) => one.name === workspace.machine)
+    : undefined
 }
 
 export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
+  machines: Looked<Machine[]>,
 ): Column<Workspace>[] {
   return [
     { header: 'WORKSPACE', cell: (workspace) => workspace.name },
-    { header: 'MACHINE', cell: (workspace) => workspace.machine },
+    {
+      header: 'MACHINE',
+      cell: (workspace) => {
+        const machine = target(workspace, machines)
+        // Stacked, not inline: the cells do not wrap, and a badge beside a
+        // MagicDNS name costs 120 px of the 295 a phone has.
+        return (
+          <span className="inline-flex flex-col items-start gap-1">
+            {workspace.machine}
+            {machine && <Status {...reporting(machine)} />}
+          </span>
+        )
+      },
+    },
+    // Third, not last: the table scrolls sideways on a phone, and the whole
+    // point of this page is that the buttons are the thing within reach.
+    { header: 'ACT', cell: (workspace) => <Act workspace={workspace} /> },
     { header: 'REPO', cell: (workspace) => workspace.repo },
     { header: 'STARTUP', cell: (workspace) => workspace.startup ?? '' },
     {

@@ -14,6 +14,21 @@ Concretely: pick up a phone, open Yantra, tap the workspace, choose `bishwajeets
 start, and Claude Code is running in a tmux session on the Mac in the right repo. No terminal, no
 laptop, no SSH.
 
+> **2026-08-03, Y-113.** The buttons ship and the mechanism is proven against the real fleet from a
+> real browser over the real HTTPS URL: a workspace created, started, attached to on a second tap,
+> resumed, stopped, and stopped again reading *there was nothing to stop*. Claude Code really ran, in
+> the named repo, in a tmux session, with `--session-id` on the pane's own start command. A session
+> was created and killed on **`bishwajeets-macbook-pro`** itself.
+>
+> **The sentence does not yet work end to end on the Mac, and the reason is not code.** Claude Code
+> **2.1.220 is installed** at `~/.local/bin/claude` there and is **not logged in** —
+> `claude auth status` answers `{"loggedIn": false, "authMethod": "none"}` — so `up --agent claude`
+> is refused before a pane exists, exactly as Y-063 intended. Yantra reports it in the row, whole:
+> *claude on that machine is not logged in (auth method: `none`)*. Somebody has to run `claude` once
+> on the Mac and log in; nothing in this repo can do it, and Q10's *defer* on waking is untouched by
+> it. There is also no `personal-website` checkout on the Mac — the acceptance sentence names a repo
+> that has never been there.
+
 ## 2. Why the scope changed
 
 M5 was `Placement` — scoring, `preferred`/`automatic` modes, and `yantra why`. The owner deferred it
@@ -38,6 +53,10 @@ The dashboard is **read-only by construction**, not by omission. The API is five
 Y-097 chose that deliberately — a row hands over a command to paste into a terminal. **From an iPad
 that is worth nothing.** The gap between here and the acceptance test is write routes and buttons,
 and it appears in no milestone: M4 was scoped read-only on purpose and M6 is the browser terminal.
+
+**Closed by Y-112, Y-116 and Y-113.** The routes landed first, then the form that makes a workspace,
+then the buttons. `Command.tsx`'s comment is now true of `attach` alone, and the workspace row offers
+that paste only where a session really was seen — everything with a write behind it is a button.
 
 ## 4. Three constraints found before planning around them
 
