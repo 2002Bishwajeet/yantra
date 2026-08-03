@@ -43,7 +43,7 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 
 ## Optional
 
-- [tracker.md](tracker.md): this crate's invariants — 34 of the project's 46. The single most useful thing to read before changing anything here.
+- [tracker.md](tracker.md): this crate's invariants — the largest share in the project. The single most useful thing to read before changing anything here.
 - [CLAUDE.md](CLAUDE.md): the crate's own working rules, including which invariant binds which module.
 - [../../tracker.md](../../tracker.md): project state — milestones, open tasks, decisions, risks.
 - [tests/common/mod.rs](tests/common/mod.rs): the disposable sshd + tmux container every integration test runs against.

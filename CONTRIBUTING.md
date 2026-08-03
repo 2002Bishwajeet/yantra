@@ -8,8 +8,9 @@ work — mine, yours, or an agent's — stays reconstructable six months later. 
 1. **[`tracker.md`](tracker.md) is the single source of truth** for project state. Read it before
    doing anything; update it when you finish. Never start work that is not represented there — add
    the task first if it is missing.
-2. **[`tracker.md` §1b (Invariants)](tracker.md)** before writing any orchestration code. Twenty
-   non-obvious rules that research proved the hard way. Violating one produces a bug that looks like
+2. **The invariants** before writing any orchestration code. They live with the crate they bind —
+   [`crates/*/tracker.md`](crates/) — and [`tracker.md` §1b](tracker.md) says which holds what.
+   Non-obvious rules that research proved the hard way; violating one produces a bug that looks like
    something else entirely.
 3. **[`docs/adr/`](docs/adr/)** holds settled decisions. **[`CLAUDE.md`](CLAUDE.md)** is the working
    agreement for AI agents and applies to humans too.
