@@ -11,7 +11,7 @@ anything else — including this file — when they disagree.
 
 Each crate carries its own `CLAUDE.md`, `tracker.md`, `llms.txt` and `README.md`. Start at the crate
 you are changing rather than reading the root documents end to end. **The invariants live in the
-crate trackers** — 48 non-obvious rules, numbered to I-51, most earned by a bug that presented as
+crate trackers** — 49 non-obvious rules, numbered to I-52, most earned by a bug that presented as
 something else, and 35 of them in `yantra-core`. They are the highest-value thing in the repo.
 
 ## Start here
@@ -25,15 +25,15 @@ something else, and 35 of them in `yantra-core`. They are the highest-value thin
 
 - [yantra-core](crates/yantra-core/llms.txt): all the orchestration — ssh, tmux, agents, inventory, workspaces. Never prints, never exits. This is where nearly all the code is.
 - [yantra](crates/yantra/llms.txt): the CLI. Renders and chooses exit codes; decides nothing.
-- [yantrad](crates/yantrad/llms.txt): the daemon. Not implemented — M0 skeleton, arrives in M4.
-- [yantra-agent](crates/yantra-agent/llms.txt): the per-machine heartbeat. Not implemented — M0 skeleton.
+- [yantrad](crates/yantrad/llms.txt): the daemon. An axum server binding only this machine's Tailscale addresses: a read-only JSON API over a background snapshot, five writes (`POST /heartbeat`, and `new`/`up`/`down`/`resume` per workspace, authorised by Tailscale identity), and the dashboard itself.
+- [yantra-agent](crates/yantra-agent/llms.txt): the per-machine heartbeat — seven probes, a 10 s loop and a hand-written POST. Install is M7's.
 
 ## Decisions
 
 Accepted ADRs are immutable. If one is wrong, propose a superseding ADR — do not quietly build
 something else.
 
-- [docs/adr/](docs/adr/): fourteen of them. The ones that constrain most code are [0005](docs/adr/0005-core-logic-in-a-library-crate.md) (library crate), [0006](docs/adr/0006-ssh-exec-transport.md) (ssh transport), [0009](docs/adr/0009-machine-names-are-ssh-destinations.md) (machine names) and [0011](docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md) (the agent is a TUI).
+- [docs/adr/](docs/adr/): fifteen of them. The ones that constrain most code are [0005](docs/adr/0005-core-logic-in-a-library-crate.md) (library crate), [0006](docs/adr/0006-ssh-exec-transport.md) (ssh transport), [0009](docs/adr/0009-machine-names-are-ssh-destinations.md) (machine names) and [0011](docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md) (the agent is a TUI).
 - [docs/research/](docs/research/): ten dated research notes across seven topics. Evidence as of their access date, not eternal truth — re-verify anything version-sensitive.
 
 ## Optional

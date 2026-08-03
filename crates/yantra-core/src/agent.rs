@@ -27,7 +27,12 @@ use crate::tmux::sq;
 /// non-interactive ssh session never reads (**I-34**). Measured on both machines
 /// in this fleet: the binary is at `~/.local/bin/claude` on each, and
 /// `ssh <mac> 'command -v claude'` answers nothing at all.
-const CANDIDATES: [&str; 6] = [
+///
+/// Public because `yantra-agent`'s label probe hits the same wall for `docker`
+/// and `tmux` — a LaunchAgent's `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` — and
+/// a second list that drifted from this one is the bug I-34 names. A `const` is
+/// inlined at its use site, so sharing it links none of this module.
+pub const CANDIDATES: [&str; 6] = [
     "$HOME/.local/bin",    // the official install script
     "$HOME/.claude/local", // `claude migrate-installer` leaves it here
     "/opt/homebrew/bin",   // npm global under Homebrew node, Apple Silicon

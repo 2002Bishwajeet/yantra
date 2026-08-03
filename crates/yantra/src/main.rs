@@ -7,6 +7,7 @@
 
 use clap::{CommandFactory as _, Parser, Subcommand};
 use std::io::IsTerminal as _;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
@@ -40,6 +41,20 @@ enum Command {
         /// Start a coding agent in the session
         #[arg(long, value_enum)]
         agent: Option<AgentArg>,
+    },
+    /// Write a new workspace file
+    New {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// ssh destination to run it on, as `~/.ssh/config` spells it
+        #[arg(long)]
+        machine: String,
+        /// Path to the repository **on that machine**, not on this one
+        #[arg(long)]
+        repo: PathBuf,
+        /// Command to run when the session opens, instead of an agent
+        #[arg(long)]
+        startup: Option<String>,
     },
     /// Attach this terminal to a workspace's session
     Attach {
@@ -102,6 +117,12 @@ enum LsTarget {
 async fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
+        Some(Command::New {
+            workspace,
+            machine,
+            repo,
+            startup,
+        }) => new(&workspace, &machine, &repo, startup.as_deref()),
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
@@ -336,6 +357,28 @@ async fn show_status(name: &str) -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Not `async`: writing one small file is the whole of it, and there is no
+/// machine to ask. `up` is what discovers whether `machine` and `repo` were
+/// right, on the far side and before a session exists (Y-081) — checking here
+/// would check this machine's filesystem for a path on another one.
+fn new(name: &str, machine: &str, repo: &Path, startup: Option<&str>) -> ExitCode {
+    match yantra_core::workspace::create(name, machine, repo, startup) {
+        Ok(workspace) => {
+            println!("created {} on {}", workspace.name, workspace.machine);
+            println!("  repo:   {}", workspace.repo.display());
+            if let Some(startup) = &workspace.startup {
+                println!("  startup: {startup}");
+            }
+            println!("  next:   yantra up {} --agent claude", workspace.name);
+            ExitCode::SUCCESS
         }
         Err(err) => {
             report_error(&err);

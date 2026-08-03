@@ -23,15 +23,18 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, response::IntoResponse};
+use std::collections::BTreeMap;
+use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::snapshot::Reading;
 use yantra_core::status::{MachineStatus, Verdict};
 
+use crate::heartbeat::{Beats, Fleet};
 use crate::refresh::Model;
 
 /// `get` only, and no route takes a body. M4 is a dashboard that reads; a
 /// button that opens a session is the point at which Q6's missing auth
 /// stops being free (R-22).
-pub fn router() -> Router<Model> {
+pub fn router() -> Router<Fleet> {
     Router::new()
         .route("/machines", get(machines))
         .route("/workspaces", get(workspaces))
@@ -39,10 +42,17 @@ pub fn router() -> Router<Model> {
         .route("/workspaces/{name}/status", get(workspace_status))
 }
 
-async fn machines(State(model): State<Model>) -> impl IntoResponse {
+/// The one route that joins two memories: the look Tailscale answered and what
+/// each machine last said about itself. Both are already in memory, so the join
+/// is still a read (ADR-0013 §7).
+async fn machines(State(model): State<Model>, State(beats): State<Beats>) -> impl IntoResponse {
     let snapshot = model.read().await.clone();
+    let beats = beats.read().await;
     Json(Answer::of(snapshot.machines.as_deref(), |machines| {
-        machines.iter().map(Machine::of).collect::<Vec<_>>()
+        machines
+            .iter()
+            .map(|machine| Machine::of(machine, &beats))
+            .collect::<Vec<_>>()
     }))
 }
 
@@ -148,10 +158,19 @@ struct Machine {
     /// listed, and still unreachable — which a green dot would erase.
     expired: bool,
     last_seen: Option<String>,
+    /// **`null` is *never heard from*** — I-47 again, and the state a zeroed
+    /// row would erase. `online` beside it is what tells the two explanations
+    /// of a missing beat apart, and it never decides whether one arrived (R-8).
+    heartbeat: Option<Beat>,
 }
 
 impl Machine {
-    fn of(machine: &yantra_core::inventory::MachineInfo) -> Self {
+    /// Keyed on the node id (I-5), which is the only stable key and is the one
+    /// thing here a reader never sees.
+    fn of(
+        machine: &yantra_core::inventory::MachineInfo,
+        beats: &BTreeMap<String, Reading<Heartbeat>>,
+    ) -> Self {
         Self {
             name: machine.name.clone(),
             dns_name: machine.dns_name.clone(),
@@ -159,6 +178,39 @@ impl Machine {
             online: machine.online,
             expired: machine.expired,
             last_seen: machine.last_seen.clone(),
+            heartbeat: beats.get(&machine.id).map(Beat::of),
+        }
+    }
+}
+
+/// What a machine last said about itself, with the age of the *arrival* — the
+/// beat's own `sent_at` is diagnostic and never the freshness source
+/// (ADR-0013 §1), so it is not what a display state reads.
+///
+/// `Power` is core's own type because ADR-0013 §2 fixes one wire shape for both
+/// directions; a second spelling here would be a second thing to disagree with.
+#[derive(Debug, serde::Serialize)]
+struct Beat {
+    age_seconds: u64,
+    arch: String,
+    labels: Vec<String>,
+    free_ram_mb: u64,
+    free_disk_mb: u64,
+    cpu_busy_pct: u8,
+    power: Power,
+}
+
+impl Beat {
+    fn of(reading: &Reading<Heartbeat>) -> Self {
+        let beat = reading.value();
+        Self {
+            age_seconds: reading.age().as_secs(),
+            arch: beat.arch.clone(),
+            labels: beat.labels.clone(),
+            free_ram_mb: beat.free_ram_mb,
+            free_disk_mb: beat.free_disk_mb,
+            cpu_busy_pct: beat.cpu_busy_pct,
+            power: beat.power,
         }
     }
 }
@@ -374,9 +426,9 @@ mod tests {
     use yantra_core::status::{self, Report};
     use yantra_core::tmux::Summary;
 
-    async fn get(model: Model, path: &str) -> (StatusCode, Value) {
+    async fn get(fleet: Fleet, path: &str) -> (StatusCode, Value) {
         let response = router()
-            .with_state(model)
+            .with_state(fleet)
             .oneshot(
                 Request::get(path)
                     .body(Body::empty())
@@ -394,14 +446,58 @@ mod tests {
         )
     }
 
-    async fn get_json(model: Model, path: &str) -> Value {
-        let (status, body) = get(model, path).await;
+    async fn get_json(fleet: Fleet, path: &str) -> Value {
+        let (status, body) = get(fleet, path).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         body
     }
 
-    fn holding(snapshot: Snapshot) -> Model {
-        Arc::new(tokio::sync::RwLock::new(snapshot))
+    fn holding(snapshot: Snapshot) -> Fleet {
+        Fleet {
+            model: Arc::new(tokio::sync::RwLock::new(snapshot)),
+            beats: Beats::default(),
+        }
+    }
+
+    fn machine(id: &str, name: &str, online: bool) -> MachineInfo {
+        MachineInfo {
+            id: id.into(),
+            name: name.into(),
+            dns_name: format!("{name}.example.ts.net."),
+            os: Os::Linux,
+            online,
+            last_seen: None,
+            expired: false,
+            addresses: Vec::new(),
+        }
+    }
+
+    fn beat(power: Power) -> Heartbeat {
+        Heartbeat {
+            sent_at: time::OffsetDateTime::from_unix_timestamp(1_785_522_600)
+                .expect("a fixed, valid timestamp"),
+            arch: "x86_64".into(),
+            labels: vec!["gpu".into()],
+            free_ram_mb: 19942,
+            free_disk_mb: 214003,
+            cpu_busy_pct: 15,
+            power,
+        }
+    }
+
+    /// The fleet as the daemon holds it: what Tailscale said, and what some of
+    /// those machines have said about themselves.
+    async fn beating(machines: Vec<MachineInfo>, beats: &[(&str, Heartbeat)]) -> Fleet {
+        let fleet = holding(Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(machines)))),
+            ..Snapshot::default()
+        });
+        let mut held = fleet.beats.write().await;
+        for (id, beat) in beats {
+            held.insert((*id).to_owned(), Reading::new(beat.clone()));
+        }
+        drop(held);
+        fleet
     }
 
     /// A browser that arrives in the first 30 seconds must be told nobody has
@@ -554,6 +650,79 @@ mod tests {
         );
     }
 
+    /// **Never heard from is `null`, and a beat that says zero is not it.** A
+    /// machine with no row must not borrow the shape of one that reported an
+    /// empty tank, because those two send a person to different places.
+    #[tokio::test]
+    async fn a_machine_that_has_never_beaten_carries_null_and_not_a_zeroed_row() {
+        let fleet = beating(
+            vec![
+                machine("n-1", "cachyos-g14", true),
+                machine("n-2", "bishwajeets-macbook-pro", true),
+            ],
+            &[("n-1", beat(Power::Ac))],
+        )
+        .await;
+
+        let body = get_json(fleet, "/machines").await;
+        let heard = &body["data"][0];
+        assert_eq!(heard["heartbeat"]["free_ram_mb"], 19942, "{body}");
+        assert_eq!(heard["heartbeat"]["power"], "ac", "{body}");
+        assert_eq!(heard["heartbeat"]["labels"][0], "gpu", "{body}");
+
+        let silent = &body["data"][1];
+        assert!(silent["heartbeat"].is_null(), "{silent}");
+        assert_eq!(
+            silent["online"], true,
+            "Tailscale's view survives beside an absent beat, because it is what
+             tells `up, but not reporting` from `asleep or off`: {silent}"
+        );
+    }
+
+    /// I-5: the key is the node id. A name is a display label that collides
+    /// twice on this tailnet, and joining on one would attribute a machine's
+    /// facts to its namesake.
+    #[tokio::test]
+    async fn a_beat_is_joined_on_the_node_id_and_never_on_the_name() {
+        let fleet = beating(
+            vec![machine("n-1", "cachyos-g14", true)],
+            &[("cachyos-g14", beat(Power::Ac))],
+        )
+        .await;
+
+        let body = get_json(fleet, "/machines").await;
+        assert!(
+            body["data"][0]["heartbeat"].is_null(),
+            "a row keyed on the display name was served as this machine's: {body}"
+        );
+    }
+
+    /// The beat ages on its own clock, not the look's: one is written every
+    /// 10 s by the agent and the other every 30 s by the refresher, so a page
+    /// that read the envelope's age would call a dead agent fresh.
+    #[tokio::test]
+    async fn a_beat_carries_its_own_age_beside_the_age_of_the_look() {
+        let fleet = beating(
+            vec![machine("n-1", "cachyos-g14", true)],
+            &[("n-1", beat(Power::Battery { percent: 42 }))],
+        )
+        .await;
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+        let body = get_json(fleet, "/machines").await;
+        assert!(
+            body["data"][0]["heartbeat"]["age_seconds"]
+                .as_u64()
+                .is_some_and(|age| age >= 1),
+            "{body}"
+        );
+        assert_eq!(
+            body["data"][0]["heartbeat"]["power"],
+            json!({"battery": {"percent": 42}}),
+            "{body}"
+        );
+    }
+
     fn on_machine(machine: &str, reports: Result<Vec<Report>, status::Error>) -> MachineStatus {
         MachineStatus {
             machine: machine.into(),
@@ -583,7 +752,7 @@ mod tests {
         }
     }
 
-    fn looking_at(fleet: Vec<MachineStatus>) -> Model {
+    fn looking_at(fleet: Vec<MachineStatus>) -> Fleet {
         holding(Snapshot {
             agents: Some(Arc::new(Reading::new(Ok(fleet)))),
             ..Snapshot::default()

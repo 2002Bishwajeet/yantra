@@ -23,6 +23,10 @@ use std::process::Stdio;
 
 /// Go's zero time, which `LastSeen` carries instead of being omitted. It does
 /// **not** mean "never seen" — see [`MachineInfo::last_seen`].
+/// What `tailscale whois` says on stderr for an address it cannot place,
+/// measured on 1.98.9 for both an unused tailnet address and `8.8.8.8`.
+const NOT_A_PEER: &str = "peer not found";
+
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,11 +104,34 @@ pub enum Error {
 
     #[error("could not parse `tailscale status --json`")]
     Parse(#[source] serde_json::Error),
+
+    #[error("`tailscale whois` failed: {stderr}")]
+    Whois { stderr: String },
+
+    #[error("could not parse `tailscale whois --json`")]
+    ParseWhois(#[source] serde_json::Error),
 }
 
 /// The seam the layers above are tested against (§B2). A tailnet cannot be put
 /// in a container, so unlike [`crate::ssh::Exec`] this one is genuinely tested
 /// through a fake rather than through the podman fixture.
+/// Who holds a tailnet address, asked **live** rather than read from the
+/// snapshot — [ADR-0016](../../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)
+/// §3, because an authorisation decision on a 30 s reading lets a node removed
+/// twenty seconds ago still act.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Caller {
+    /// `Node.ID`, the stable identifier and the only safe key (I-5).
+    pub node: String,
+    /// `Node.User`, the numeric owner — compared against [`Inventory::owner`].
+    /// The login name is deliberately not carried: nothing authorises on it,
+    /// and it is the one field here that identifies a person.
+    pub user: u64,
+    /// `Node.Tags`. A tagged node is one no person is accountable for, which
+    /// is why ADR-0016 refuses it even when the owner matches.
+    pub tags: Vec<String>,
+}
+
 pub trait Inventory {
     fn machines(&self)
     -> impl std::future::Future<Output = Result<Vec<MachineInfo>, Error>> + Send;
@@ -116,6 +143,18 @@ pub trait Inventory {
     /// name resolution, which ADR-0009 declined. This asks what this machine
     /// owns, not where another one is.
     fn addresses(&self) -> impl std::future::Future<Output = Result<Vec<IpAddr>, Error>> + Send;
+
+    /// `None` when the address belongs to no peer. That is a different answer
+    /// from *could not ask*, which is an error — ADR-0016 refuses both, and
+    /// the operator needs to know which one happened.
+    fn whois(
+        &self,
+        address: IpAddr,
+    ) -> impl std::future::Future<Output = Result<Option<Caller>, Error>> + Send;
+
+    /// The numeric user owning **this** node, which is the only thing a
+    /// caller's `user` is ever compared against.
+    fn owner(&self) -> impl std::future::Future<Output = Result<u64, Error>> + Send;
 }
 
 /// Reads the local `tailscale` CLI (§B2). The LocalAPI returns identical data
@@ -130,6 +169,31 @@ impl Inventory for Tailscale {
 
     async fn addresses(&self) -> Result<Vec<IpAddr>, Error> {
         parse_addresses(&self.status().await?)
+    }
+
+    async fn whois(&self, address: IpAddr) -> Result<Option<Caller>, Error> {
+        let out = tokio::process::Command::new("tailscale")
+            .args(["whois", "--json", &address.to_string()])
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .map_err(Error::Spawn)?;
+
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if !out.status.success() {
+            // Measured on 1.98.9: an address belonging to nobody, and one that
+            // is not on the tailnet at all, both exit 1 saying exactly this.
+            return if stderr == NOT_A_PEER {
+                Ok(None)
+            } else {
+                Err(Error::Whois { stderr })
+            };
+        }
+        parse_whois(&out.stdout).map(Some)
+    }
+
+    async fn owner(&self) -> Result<u64, Error> {
+        parse_owner(&self.status().await?)
     }
 }
 
@@ -163,6 +227,25 @@ fn parse_addresses(json: &[u8]) -> Result<Vec<IpAddr>, Error> {
 
 /// Machines from one `status --json` document, sorted by name so callers and
 /// tests see a stable order.
+fn parse_owner(json: &[u8]) -> Result<u64, Error> {
+    let status: Status = serde_json::from_slice(json).map_err(Error::Parse)?;
+    status
+        .self_node
+        .and_then(|node| node.user)
+        .ok_or_else(|| Error::Whois {
+            stderr: "`tailscale status --json` named no owner for this node".to_string(),
+        })
+}
+
+fn parse_whois(json: &[u8]) -> Result<Caller, Error> {
+    let whois: WhoisReply = serde_json::from_slice(json).map_err(Error::ParseWhois)?;
+    Ok(Caller {
+        node: whois.node.stable_id,
+        user: whois.node.user,
+        tags: whois.node.tags.unwrap_or_default(),
+    })
+}
+
 fn parse(json: &[u8]) -> Result<Vec<MachineInfo>, Error> {
     let status: Status = serde_json::from_slice(json).map_err(Error::Parse)?;
     let mut machines: Vec<MachineInfo> = status
@@ -205,6 +288,36 @@ struct Node {
     /// and a `Vec` field would make the second one a whole-document error.
     #[serde(rename = "TailscaleIPs", default)]
     tailscale_ips: Option<Vec<IpAddr>>,
+    /// **`UserID` here and `User` in `whois`** — the same number under two
+    /// names, in two documents from the same binary.
+    #[serde(rename = "UserID", default)]
+    user: Option<u64>,
+}
+
+/// `tailscale whois --json` — `UserProfile` and `CapMap` are deliberately not
+/// read: nothing here authorises on a login name, and reading it would put a
+/// person's identity into the daemon's memory for no decision (the same
+/// boundary `agent::Status` draws).
+#[derive(Debug, serde::Deserialize)]
+struct WhoisReply {
+    #[serde(rename = "Node")]
+    node: WhoisNode,
+}
+
+/// **Not [`Node`]**, though both are a node from the same binary. `whois` omits
+/// `DNSName`, `OS` and `Tags` entirely, and — the trap — carries **two**
+/// identifiers: `StableID` is what `status` calls `ID` and what I-5 requires,
+/// while `ID` is a numeric internal key that would deserialise happily into the
+/// wrong field and never once error.
+#[derive(Debug, serde::Deserialize)]
+struct WhoisNode {
+    #[serde(rename = "StableID")]
+    stable_id: String,
+    #[serde(rename = "User")]
+    user: u64,
+    /// Absent on an untagged node rather than empty.
+    #[serde(rename = "Tags", default)]
+    tags: Option<Vec<String>>,
 }
 
 impl From<Node> for MachineInfo {
@@ -241,6 +354,8 @@ impl From<Node> for MachineInfo {
 pub struct Fake {
     pub machines: Vec<MachineInfo>,
     pub addresses: Vec<IpAddr>,
+    pub callers: BTreeMap<IpAddr, Caller>,
+    pub owner: u64,
 }
 
 impl Inventory for Fake {
@@ -250,6 +365,14 @@ impl Inventory for Fake {
 
     async fn addresses(&self) -> Result<Vec<IpAddr>, Error> {
         Ok(self.addresses.clone())
+    }
+
+    async fn whois(&self, address: IpAddr) -> Result<Option<Caller>, Error> {
+        Ok(self.callers.get(&address).cloned())
+    }
+
+    async fn owner(&self) -> Result<u64, Error> {
+        Ok(self.owner)
     }
 }
 
@@ -264,6 +387,97 @@ mod tests {
     /// collisions, the same dual boot, the same U+2019. Identifiers, keys,
     /// addresses and the tailnet name are replaced.
     const STATUS: &str = include_str!("../tests/fixture/tailscale-status.json");
+
+    /// A real `tailscale whois --json` on 1.98.9, with keys, addresses,
+    /// endpoints and the login name replaced.
+    const WHOIS: &str = include_str!("../tests/fixture/tailscale-whois.json");
+
+    /// The two identifiers are the point: `StableID` is what `status` calls
+    /// `ID` and what I-5 requires, and the numeric `ID` beside it would
+    /// deserialise into the same field without ever erroring.
+    #[test]
+    fn whois_reads_the_stable_id_and_not_the_numeric_one() {
+        let caller = parse_whois(WHOIS.as_bytes()).expect("the fixture parses");
+
+        assert_eq!(caller.node, "nMAC000000011CNTRL");
+        assert_eq!(
+            caller.node,
+            named("bishwajeets-macbook-pro").id,
+            "I-5's key"
+        );
+        assert_eq!(caller.user, 1);
+        assert!(caller.tags.is_empty(), "{:?}", caller.tags);
+    }
+
+    /// `UserID` in `status`, `User` in `whois` — one number, two names, two
+    /// documents from the same binary. Reading the wrong one yields `None`,
+    /// and an owner of `None` compared against a caller would refuse
+    /// everything or, worse, default to zero and match a tagged node.
+    #[test]
+    fn the_owner_comes_from_status_under_its_other_name() {
+        let owner = parse_owner(STATUS.as_bytes()).expect("the fixture names an owner");
+
+        assert_eq!(owner, 1);
+        assert_eq!(
+            owner,
+            parse_whois(WHOIS.as_bytes()).expect("parses").user,
+            "the same node, read through both documents"
+        );
+    }
+
+    #[test]
+    fn a_tagged_node_is_read_as_tagged() {
+        let tagged = WHOIS.replace(r#""User": 1,"#, r#""User": 1, "Tags": ["tag:ci"],"#);
+
+        let caller = parse_whois(tagged.as_bytes()).expect("parses");
+
+        assert_eq!(caller.tags, ["tag:ci"], "ADR-0016 refuses this node");
+    }
+
+    /// Needs the tailnet, so it is ignored rather than skipped (root §B3).
+    /// `just test-mac`-style: `cargo test -p yantra-core -- --ignored whois`.
+    #[tokio::test]
+    #[ignore = "needs a live tailnet"]
+    async fn the_real_tailscale_places_this_machine_and_refuses_a_stranger() {
+        let tailscale = Tailscale;
+        let mine = tailscale
+            .addresses()
+            .await
+            .expect("this machine holds addresses")
+            .into_iter()
+            .next()
+            .expect("at least one");
+
+        let me = tailscale
+            .whois(mine)
+            .await
+            .expect("tailscale answers")
+            .expect("this machine is a peer of itself");
+        assert_eq!(
+            me.user,
+            tailscale.owner().await.expect("an owner"),
+            "the daemon must authorise its own host"
+        );
+        assert!(me.tags.is_empty(), "{:?}", me.tags);
+
+        // 8.8.8.8 is not on any tailnet, and `whois` says so by exiting 1
+        // rather than by answering — the `None` this asserts is the difference
+        // between *not a peer* and *could not ask*.
+        let stranger = tailscale
+            .whois("8.8.8.8".parse().expect("a literal address"))
+            .await
+            .expect("a failure to place is not a failure to ask");
+        assert!(stranger.is_none(), "{stranger:?}");
+    }
+
+    #[test]
+    fn a_status_without_an_owner_is_an_error_rather_than_zero() {
+        let anonymous = STATUS.replace(r#""UserID": 1"#, r#""NotUserID": 1"#);
+
+        let refused = parse_owner(anonymous.as_bytes()).expect_err("no owner to compare against");
+
+        assert!(refused.to_string().contains("owner"), "{refused}");
+    }
 
     fn machines() -> Vec<MachineInfo> {
         parse(STATUS.as_bytes()).expect("fixture parses")

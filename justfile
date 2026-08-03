@@ -37,6 +37,15 @@ test-mac machine:
 build:
     cargo build --workspace
 
+# TLS for the dashboard, so a phone can open it (docs/development.md). 8443
+# because `/` on 443 is code-server's, and the tailnet address because Y-069
+# has the daemon refuse loopback. Set once per machine; `--bg` persists it.
+https:
+    tailscale serve --bg --https=8443 "http://$(tailscale ip -4):7717"
+
+https-off:
+    tailscale serve --https=8443 off
+
 # Licence + security-advisory audit. Cheap hygiene for a 24/7 daemon.
 deny:
     cargo deny check

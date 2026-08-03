@@ -10,6 +10,7 @@ import {
 } from '@/columns'
 import { Command } from '@/components/Command'
 import { DataTable } from '@/components/DataTable'
+import { NewWorkspace } from '@/components/NewWorkspace'
 import { Section } from '@/components/Section'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useAgents, useLooked } from '@/useLooked'
@@ -38,16 +39,23 @@ export default function App() {
       </Section>
 
       {/* Each section's command reads the *other* class, so a look that failed
-          costs the command its precision and never its honesty. */}
+          costs the command its precision and never its honesty. The machines
+          reading is read the same way, to say what a button is about to touch. */}
       <Section title="Workspaces" query={workspaces}>
         {(rows) => (
           <DataTable
-            columns={workspaceColumns(sessions)}
+            columns={workspaceColumns(sessions, machines)}
             rows={rows}
             rowKey={(workspace) => workspace.name}
-            empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
+            empty="no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml"
           />
         )}
+      </Section>
+
+      {/* The machines reading is the picker, so the form draws only where there
+          is really something to choose from. */}
+      <Section title="New workspace" query={machines}>
+        {(rows) => <NewWorkspace machines={rows} />}
       </Section>
 
       <Section

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cleanup,
   fireEvent,
@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import type {
   AgentState,
+  Beat,
   Looked,
   Machine,
   MachineSessions,
@@ -39,6 +40,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** jsdom implements no `matchMedia` at all, so a width has to be supplied — and
+ *  this one answers the query the component really asks rather than a fixed
+ *  boolean, so the breakpoint stays the component's to choose. */
+function viewport(width: number) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: width < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+}
+
+beforeEach(() => viewport(1280))
+
 function machine(overrides: Partial<Machine> = {}): Machine {
   return {
     name: 'cachyos-g14',
@@ -47,6 +61,20 @@ function machine(overrides: Partial<Machine> = {}): Machine {
     online: true,
     expired: false,
     last_seen: '2026-07-07T09:00:00Z',
+    heartbeat: beat(),
+    ...overrides,
+  }
+}
+
+function beat(overrides: Partial<Beat> = {}): Beat {
+  return {
+    age_seconds: 3,
+    arch: 'x86_64',
+    labels: ['gpu', 'cuda', 'docker'],
+    free_ram_mb: 19942,
+    free_disk_mb: 214003,
+    cpu_busy_pct: 15,
+    power: 'ac',
     ...overrides,
   }
 }
@@ -117,7 +145,7 @@ describe('the machines table', () => {
       />,
     )
     const cells = [...container.querySelectorAll('td')].map((cell) => cell.textContent)
-    expect(cells).toEqual(['cachyos-g14', 'linux', 'online', ''])
+    expect(cells).toEqual(['cachyos-g14', 'linux', 'online', 'readybeat 3s ago', ''])
   })
 
   it('composes the status sentence and does not fold an expired key into offline', () => {
@@ -134,6 +162,58 @@ describe('the machines table', () => {
   })
 })
 
+/** ADR-0013 §7. The two tests that matter are the dishonest readings: a machine
+ *  nothing has ever been heard from must not read as *asleep*, and one Tailscale
+ *  still sees must not read as *ready* on the strength of that alone (R-23). */
+describe('the four heartbeat states', () => {
+  function draw(one: Machine) {
+    return render(
+      <DataTable
+        columns={machineColumns}
+        rows={[one]}
+        rowKey={(row) => row.name}
+        empty="no machines on this tailnet"
+      />,
+    )
+  }
+
+  it('says never heard from, and never asleep, for a machine that has not beaten', () => {
+    draw(machine({ online: false, heartbeat: null }))
+
+    expect(screen.getByText('never heard from')).toBeTruthy()
+    expect(screen.queryByText('asleep or off')).toBeNull()
+    // Not a zeroed reading either: there is no age to show, so none is shown.
+    expect(screen.queryByText(/beat .* ago/)).toBeNull()
+  })
+
+  it('says up, but not reporting — and never ready — when only Tailscale sees it', () => {
+    draw(machine({ online: true, heartbeat: beat({ age_seconds: 92 }) }))
+
+    expect(screen.getByText('up, but not reporting')).toBeTruthy()
+    expect(screen.queryByText('ready')).toBeNull()
+    expect(screen.getByText('beat 92s ago')).toBeTruthy()
+  })
+
+  it('says asleep or off when the beats stopped and Tailscale lost it too', () => {
+    draw(machine({ online: false, heartbeat: beat({ age_seconds: 92 }) }))
+
+    expect(screen.getByText('asleep or off')).toBeTruthy()
+    expect(screen.queryByText('never heard from')).toBeNull()
+  })
+
+  it('is ready inside the threshold and reports what the beat carried', () => {
+    const { container } = draw(
+      machine({
+        heartbeat: beat({ age_seconds: 30, power: { battery: { percent: 42 } } }),
+      }),
+    )
+
+    expect(screen.getByText('ready')).toBeTruthy()
+    expect(screen.getByText('beat 30s ago')).toBeTruthy()
+    expect(container.querySelector('[title*="battery, 42%"]')).toBeTruthy()
+  })
+})
+
 describe('the workspaces table', () => {
   it('renders a null startup as a blank cell, not the word none', () => {
     const workspace: Workspace = {
@@ -144,20 +224,20 @@ describe('the workspaces table', () => {
     }
     const { container } = render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
         rows={[workspace]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
       />,
     )
     const cells = [...container.querySelectorAll('td')].map((cell) => cell.textContent)
-    expect(cells[3]).toBe('')
+    expect(cells[4]).toBe('')
   })
 
   it('names the path a file goes in when the look succeeded and found nothing', () => {
     render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
         rows={[]}
         rowKey={(row) => row.name}
         empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -168,6 +248,65 @@ describe('the workspaces table', () => {
         'no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml',
       ),
     ).toBeTruthy()
+  })
+})
+
+/** Y-121. The buttons were 15 px past the right edge of a 390 px phone, in a
+ *  749 px table inside 295 px of card. Below the breakpoint there is no table,
+ *  so there is nothing to swipe sideways and nothing to fall off the end of. */
+describe('a workspace row on a phone', () => {
+  const site: Workspace = {
+    name: 'personal-website',
+    machine: 'bishwajeets-macbook-pro',
+    repo: '/Users/<user>/Github/personal-website',
+    startup: null,
+  }
+
+  function draw() {
+    return render(
+      <DataTable
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        rows={[site]}
+        rowKey={(row) => row.name}
+        empty="no workspaces yet"
+      />,
+    )
+  }
+
+  it('puts the three verbs on the page instead of inside a table that scrolls', () => {
+    viewport(390)
+    const { container } = draw()
+
+    for (const name of ['Start claude', 'Stop', 'Resume']) {
+      expect(screen.getByRole('button', { name })).toBeTruthy()
+    }
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.querySelector('[data-slot="table-container"]')).toBeNull()
+  })
+
+  it('drops no column — every fact the row carried is still labelled', () => {
+    viewport(390)
+    const { container } = draw()
+
+    const labels = [...container.querySelectorAll('dt')].map(
+      (one) => one.textContent,
+    )
+    expect(labels).toEqual([
+      'WORKSPACE',
+      'MACHINE',
+      'ACT',
+      'REPO',
+      'STARTUP',
+      'COMMAND',
+    ])
+    expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
+  })
+
+  it('keeps the table where there is room for one', () => {
+    viewport(1024)
+    const { container } = draw()
+
+    expect(container.querySelector('table')).toBeTruthy()
   })
 })
 
@@ -352,24 +491,26 @@ describe('the command a row carries', () => {
     const idle = ok<MachineSessions[]>([
       { machine: 'cachyos-g14', reached: 'yes', sessions: [] },
     ])
-    expect(workspaceCommand(yantra, idle)).toBe('yantra up yantra')
+    expect(workspaceCommand(yantra, idle)).toBeNull()
   })
 
-  it('offers up when the sessions are unknown, since not knowing is not knowing', () => {
+  // Y-113: `up` is a button, so the row no longer hands over a command for it.
+  // Attach is the one verb with no write behind it (Y-078).
+  it('hands over no command where a button acts, and none where nothing is open', () => {
     const failed: Looked<MachineSessions[]> = {
       looked: 'failed',
       age_seconds: 1,
       error: 'tailscaled is down',
     }
-    expect(workspaceCommand(yantra, failed)).toBe('yantra up yantra')
-    expect(workspaceCommand(yantra, { looked: 'never' })).toBe('yantra up yantra')
+    expect(workspaceCommand(yantra, failed)).toBeNull()
+    expect(workspaceCommand(yantra, { looked: 'never' })).toBeNull()
   })
 
-  it('does not read an unreachable machine as a machine with no session', () => {
+  it('does not read an unreachable machine as a machine with a session', () => {
     const unreachable = ok<MachineSessions[]>([
       { machine: 'cachyos-g14', reached: 'no', error: 'connection timed out' },
     ])
-    expect(workspaceCommand(yantra, unreachable)).toBe('yantra up yantra')
+    expect(workspaceCommand(yantra, unreachable)).toBeNull()
   })
 
   it('refuses a name the daemon would not have allowed rather than quoting it', () => {
@@ -397,7 +538,7 @@ describe('the command a row carries', () => {
   it('puts the command in the row, and leaves the machines table without one', () => {
     render(
       <DataTable
-        columns={workspaceColumns(running)}
+        columns={workspaceColumns(running, { looked: 'never' })}
         rows={[yantra]}
         rowKey={(one) => one.name}
         empty="no workspaces yet"
@@ -638,5 +779,347 @@ describe('the agents section', () => {
     expect(
       (await screen.findAllByText('invalid workspace file')).length,
     ).toBe(2)
+  })
+})
+
+describe('creating a workspace', () => {
+  const mac = machine({
+    name: 'bishwajeets-macbook-pro',
+    os: 'macOS',
+    online: false,
+    last_seen: '2h ago',
+  })
+  const made: Workspace = {
+    name: 'site',
+    machine: 'cachyos-g14',
+    repo: '/code/site',
+    startup: null,
+  }
+
+  // The create answers a status and a *plain-text* body rather than a `Looked`
+  // envelope, so the POST is stubbed apart from the polls. It returns what the
+  // form actually sent.
+  function stubCreate(status: number, body: unknown) {
+    const posted = vi.fn()
+    const looks: Record<string, Looked<unknown>> = {
+      '/api/machines': { looked: 'ok', age_seconds: 2, data: [machine(), mac] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [] },
+      '/api/sessions': { looked: 'never' },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          posted(JSON.parse(String(init.body)))
+          return Promise.resolve({
+            status,
+            json: () => Promise.resolve(body),
+            text: () => Promise.resolve(String(body)),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(looks[path]),
+        })
+      }),
+    )
+    return posted
+  }
+
+  async function fill(fields: Record<string, string>) {
+    for (const [label, value] of Object.entries(fields)) {
+      fireEvent.change(await screen.findByLabelText(label), {
+        target: { value },
+      })
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
+  }
+
+  it('renders the workspace the 201 carried, not the list it is not in yet', async () => {
+    const posted = stubCreate(201, made)
+    render(<App />)
+    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+
+    expect(await screen.findByText('Created site on cachyos-g14.')).toBeTruthy()
+    expect(screen.getByText('/code/site')).toBeTruthy()
+    // The read model is 30 s behind a create, so the list still says there is
+    // nothing — which is exactly what confirming by re-reading would draw.
+    expect(screen.getByText(/^no workspaces yet/)).toBeTruthy()
+    // Three keys and no fourth: §B4 holds because there is nowhere to put one.
+    expect(posted).toHaveBeenCalledWith({
+      name: 'site',
+      machine: 'cachyos-g14',
+      repo: '/code/site',
+    })
+  })
+
+  it('says the name is taken rather than that the create failed', async () => {
+    const said =
+      'a workspace named site already exists at /home/<user>/.config/yantra/workspaces/site.toml'
+    stubCreate(409, said)
+    render(<App />)
+    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+
+    expect(await screen.findByText('That name is already a workspace.')).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(screen.queryByText('The daemon did not create it.')).toBeNull()
+    expect(screen.queryByText(/^Created /)).toBeNull()
+  })
+
+  it("does not read a tailscale that could not answer as the caller's fault", async () => {
+    const said =
+      'could not establish who is calling: whois failed: failed to connect to local tailscaled'
+    stubCreate(503, said)
+    render(<App />)
+    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+
+    expect(
+      await screen.findByText(/could not ask Tailscale who is calling/),
+    ).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(
+      screen.queryByText(/unusable|already a workspace|not on a node/),
+    ).toBeNull()
+  })
+
+  // ADR-0009: Yantra never resolves a machine, so a sleeping Mac is a target
+  // like any other and the picker must not withhold it.
+  it('offers a machine that is asleep and lets it be chosen', async () => {
+    const posted = stubCreate(201, { ...made, machine: mac.name })
+    render(<App />)
+
+    const asleep = await screen.findByRole('option', {
+      name: 'bishwajeets-macbook-pro — offline',
+    })
+    expect((asleep as HTMLOptionElement).disabled).toBe(false)
+
+    await fill({ Name: 'site', Machine: mac.name, Repo: '/code/site' })
+    expect(await screen.findByText(`Created site on ${mac.name}.`)).toBeTruthy()
+    expect(posted).toHaveBeenCalledWith(
+      expect.objectContaining({ machine: mac.name }),
+    )
+  })
+
+  it('has nowhere to type a secret, and says startup carries a reference', async () => {
+    stubCreate(201, made)
+    render(<App />)
+    await screen.findByLabelText('Startup')
+
+    expect(screen.queryByLabelText(/secret/i)).toBeNull()
+    expect(
+      screen.getByText(/a secret stays a reference the shell resolves/),
+    ).toBeTruthy()
+  })
+})
+
+/** Y-113. The tests that matter are the dishonest readings: an idempotent `up`
+ *  must not read as a failure, a `tailscale` that could not answer must not read
+ *  as the caller's fault, and a request still awaiting ssh must not read as
+ *  done. The machine is never sent — it is the workspace's own (Y-117). */
+describe('acting on a workspace', () => {
+  const site: Workspace = {
+    name: 'personal-website',
+    machine: 'bishwajeets-macbook-pro',
+    repo: '/Users/<user>/Github/personal-website',
+    startup: null,
+  }
+  const mac = machine({
+    name: 'bishwajeets-macbook-pro',
+    os: 'macOS',
+    online: false,
+    heartbeat: beat({ age_seconds: 92 }),
+  })
+
+  type Answer = { status: number; body: unknown } | 'never'
+
+  function stubAct(answer: Answer, workspace = site) {
+    const posted = vi.fn()
+    const looks: Record<string, Looked<unknown>> = {
+      '/api/machines': { looked: 'ok', age_seconds: 2, data: [mac] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [workspace] },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          posted(
+            path,
+            init.body === undefined ? undefined : JSON.parse(String(init.body)),
+          )
+          if (answer === 'never') return new Promise(() => {})
+          return Promise.resolve({
+            ok: answer.status < 400,
+            status: answer.status,
+            json: () => Promise.resolve(answer.body),
+            text: () => Promise.resolve(String(answer.body)),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(looks[path] ?? { looked: 'never' }),
+        })
+      }),
+    )
+    return posted
+  }
+
+  const tap = async (name: string) =>
+    fireEvent.click(await screen.findByRole('button', { name }))
+
+  it('reads a second up as attached rather than as a failure', async () => {
+    stubAct({
+      status: 200,
+      body: {
+        machine: 'bishwajeets-macbook-pro',
+        session: 'attached',
+        launched: false,
+        term: 'xterm-256color',
+      },
+    })
+    render(<App />)
+    await tap('Start claude')
+
+    expect(
+      await screen.findByText(/already open on bishwajeets-macbook-pro/),
+    ).toBeTruthy()
+    // §B4 and I-30: nothing launched beside an attached session is the
+    // idempotent success, so it may not be drawn as a refusal.
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/The verb ran and failed/)).toBeNull()
+  })
+
+  it("does not read a tailscale that could not answer as the caller's fault", async () => {
+    const said =
+      'could not establish who is calling: whois failed: failed to connect to local tailscaled'
+    stubAct({ status: 503, body: said })
+    render(<App />)
+    await tap('Start claude')
+
+    expect(
+      await screen.findByText(/could not ask Tailscale who is calling/),
+    ).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(
+      screen.queryByText(
+        /knows no workspace|not one the daemon accepts|not on a node/,
+      ),
+    ).toBeNull()
+  })
+
+  it('keeps a missing workspace apart from a verb that ran and failed', async () => {
+    stubAct({
+      status: 404,
+      body: 'no workspace named personal-website at /home/<user>/.config/yantra/workspaces/personal-website.toml',
+    })
+    render(<App />)
+    await tap('Start claude')
+
+    expect(
+      await screen.findByText('The daemon knows no workspace by that name.'),
+    ).toBeTruthy()
+    expect(screen.queryByText(/The verb ran and failed/)).toBeNull()
+  })
+
+  it('does not read a request still awaiting ssh as done, and sends one', async () => {
+    const posted = stubAct('never')
+    render(<App />)
+    await tap('Start claude')
+
+    const flight = await screen.findByRole('button', { name: 'starting…' })
+    expect(flight.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText(/waiting on bishwajeets-macbook-pro/)).toBeTruthy()
+    // Nothing has been answered, so nothing may be reported.
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    fireEvent.click(flight)
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(posted).toHaveBeenCalledTimes(1)
+  })
+
+  // ADR-0009 and R-23: the daemon decides whether a sleeping Mac can be
+  // reached, and the page neither refuses for it nor hides what it knows.
+  it('says the machine is asleep and still lets the button be tapped', async () => {
+    const posted = stubAct({
+      status: 200,
+      body: {
+        machine: 'bishwajeets-macbook-pro',
+        session: 'created',
+        launched: true,
+        term: 'xterm-256color',
+      },
+    })
+    render(<App />)
+
+    // Once in the machines table, once beside the workspace it will act on.
+    expect((await screen.findAllByText('asleep or off')).length).toBe(2)
+    const start = await screen.findByRole('button', { name: 'Start claude' })
+    expect(start.hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(start)
+    expect(
+      await screen.findByText('Started on bishwajeets-macbook-pro.'),
+    ).toBeTruthy()
+    // The machine is not in the body: the target is the workspace's own.
+    expect(posted).toHaveBeenCalledWith('/api/workspaces/personal-website/up', {
+      agent: 'claude',
+    })
+  })
+
+  it('reads nothing to stop, and an agent already working, as successes', async () => {
+    stubAct({
+      status: 200,
+      body: { machine: 'bishwajeets-macbook-pro', stopped: false, ending: null },
+    })
+    render(<App />)
+    await tap('Stop')
+
+    expect(await screen.findByText(/nothing to stop/)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+
+    cleanup()
+    stubAct({
+      status: 200,
+      body: {
+        machine: 'bishwajeets-macbook-pro',
+        resumed: false,
+        term: 'xterm-256color',
+      },
+    })
+    render(<App />)
+    await tap('Resume')
+
+    expect(await screen.findByText(/left exactly as it is/)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+  })
+
+  it('offers no resume, and no agent, to a workspace that starts its own thing', async () => {
+    const editor = { ...site, startup: 'npm run dev' }
+    const posted = stubAct(
+      {
+        status: 200,
+        body: {
+          machine: 'bishwajeets-macbook-pro',
+          session: 'created',
+          // `launched` reports an agent, and a workspace's own startup is not
+          // one — measured live against a session that really was running it.
+          launched: false,
+          term: 'xterm-256color',
+        },
+      },
+      editor,
+    )
+    render(<App />)
+    await tap('Start')
+
+    // ADR-0015 refuses it on sight, and ADR-0007 refuses the agent beside it.
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull()
+    expect(posted).toHaveBeenCalledWith(
+      '/api/workspaces/personal-website/up',
+      {},
+    )
+    expect(await screen.findByText(/running the workspace's own startup/)).toBeTruthy()
+    expect(screen.queryByText(/holding a plain shell/)).toBeNull()
   })
 })

@@ -20,7 +20,10 @@ use axum::routing::get;
 use yantra_core::inventory::{Inventory, Tailscale};
 
 mod api;
+mod heartbeat;
 mod refresh;
+mod web;
+mod write;
 
 const PORT: u16 = 7717;
 
@@ -41,6 +44,9 @@ enum Error {
 
     #[error("the server stopped unexpectedly")]
     Serve(#[source] std::io::Error),
+
+    #[error("could not serve the dashboard")]
+    Dashboard(#[source] web::NoIndex),
 }
 
 #[tokio::main]
@@ -76,14 +82,35 @@ fn report(error: &Error) {
     }
 }
 
+fn dashboard() -> Result<Router, Error> {
+    match web::from_env() {
+        Some(dir) => {
+            let router = web::router(&dir).map_err(Error::Dashboard)?;
+            tracing::info!("serving the dashboard from {}", dir.display());
+            Ok(router)
+        }
+        None => {
+            tracing::info!("no dashboard — {}", web::advice());
+            Ok(web::placeholder())
+        }
+    }
+}
+
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
-    let model = refresh::Model::default();
-    refresh::spawn(&model, inventory.clone());
+    let fleet = heartbeat::Fleet::default();
+    refresh::spawn(&fleet.model, inventory.clone());
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
-        .nest("/api", api::router())
-        .with_state(model);
+        .nest(
+            "/api",
+            api::router()
+                .with_state(fleet.clone())
+                .merge(write::router(inventory.clone())),
+        )
+        .merge(heartbeat::router())
+        .with_state(fleet)
+        .fallback_service(dashboard()?);
 
     let mut servers = tokio::task::JoinSet::new();
     for address in addresses {
@@ -91,7 +118,11 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             .await
             .map_err(|source| Error::Bind { address, source })?;
         tracing::info!("listening on http://{address}");
-        let app = app.clone();
+        // Per listener, because v4 and v6 bind separately and ADR-0013 §5 has
+        // nothing but the source address to attribute a heartbeat with.
+        let app = app
+            .clone()
+            .into_make_service_with_connect_info::<SocketAddr>();
         servers.spawn(async move {
             axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown())
@@ -195,6 +226,16 @@ mod tests {
                 Err(yantra_core::inventory::Error::Command {
                     stderr: "failed to connect to local tailscaled".into(),
                 })
+            }
+            async fn whois(
+                &self,
+                _address: IpAddr,
+            ) -> Result<Option<yantra_core::inventory::Caller>, yantra_core::inventory::Error>
+            {
+                unreachable!("no write is authorised here")
+            }
+            async fn owner(&self) -> Result<u64, yantra_core::inventory::Error> {
+                unreachable!("no write is authorised here")
             }
         }
         assert!(matches!(listen_on(&Down).await, Err(Error::Tailnet(_))));

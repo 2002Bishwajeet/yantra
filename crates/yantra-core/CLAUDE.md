@@ -15,7 +15,7 @@ yourself formatting a column here, it belongs there.
 
 ## Read before touching anything
 
-**[`tracker.md`](tracker.md)** — this crate's own, holding the 34 invariants that bind code here,
+**[`tracker.md`](tracker.md)** — this crate's own, holding the 36 invariants that bind code here,
 most of them earned by a bug that looked like something else. They are not style notes. Which ones
 bind where:
 
@@ -28,14 +28,20 @@ bind where:
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
 | `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010 |
+| `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
 
 ## What `yantra-agent` may call
 
-`heartbeat.rs` is the one thing `yantra-agent` takes this crate for, and that agent must stay tiny
-(R-12). The *dependency edge* is nearly free — 11 KB, measured — and the **call graph** is not: one
-further call into ssh/tmux costs +319 KB, a 65 % jump, because `lto = "thin"` only strips what
-nothing reaches. So the thing to guard is the next `use`, not the `Cargo.toml` line.
+`heartbeat.rs` and `agent::CANDIDATES` — a type and a `const`, neither of which links any code.
+That agent must stay tiny (R-12). The *dependency edge* is nearly free — 11 KB, measured — and the
+**call graph** is not: one further call into ssh/tmux costs +319 KB, a 65 % jump, because
+`lto = "thin"` only strips what nothing reaches. So the thing to guard is the next `use`, not the
+`Cargo.toml` line.
+
+`CANDIDATES` is shared rather than copied because the agent's label probe hits I-34's wall for
+`docker` and `tmux` exactly as `claude` does. Two lists that drifted would produce a fleet where one
+binary is found and the other is not, which is the bug I-34 exists to name.
 
 ## Anything that reaches a remote shell
 

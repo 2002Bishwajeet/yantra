@@ -27,8 +27,9 @@ async function copyText(text: string, node: Node): Promise<boolean> {
   return typeof document.execCommand === 'function' && document.execCommand('copy')
 }
 
-/** The API answers 405 to every write, so the row hands over the command
- *  instead — the shape `up`'s attach hint already chose for this problem. */
+/** What is left where no write exists: `attach` puts a TUI in *this* terminal
+ *  (ADR-0011), and a browser has none. Everything with a route behind it is a
+ *  button now (Y-113). */
 export function Command({ command }: { command: string }) {
   const text = useRef<HTMLElement>(null)
   const [outcome, setOutcome] = useState<keyof typeof labels>('ready')

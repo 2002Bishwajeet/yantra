@@ -2,10 +2,12 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Power,
   Session,
   Workspace,
   WorkspaceStatus,
 } from '@/api'
+import { Act } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -24,10 +26,68 @@ function reachability(machine: Machine): { tone: Tone; label: string } {
   return { tone: machine.online ? 'ok' : 'unknown', label: reachable }
 }
 
+// ADR-0013 §7: three of the agent's 10 s intervals, so a single lost POST never
+// reads as a machine that stopped reporting.
+const FRESH_SECONDS = 30
+
+/** ADR-0013 §7's four states, and there are four rather than two because a page
+ *  that says *asleep* when it means *we have not heard from it* is the confident
+ *  lie M4 exists not to tell (R-23). `online` chooses between two explanations
+ *  of a missing beat and never decides whether one arrived (R-8, I-10). */
+export function reporting(machine: Machine): {
+  tone: Tone
+  label: string
+  detail: string
+} {
+  const beat = machine.heartbeat
+  if (!beat) {
+    return {
+      tone: 'unknown',
+      label: 'never heard from',
+      detail: `no heartbeat has ever arrived from ${machine.name}, which is not the same as one that stopped — yantra-agent is probably not installed there`,
+    }
+  }
+  if (beat.age_seconds <= FRESH_SECONDS) {
+    return {
+      tone: 'ok',
+      label: 'ready',
+      detail: `${beat.free_ram_mb} MB free, ${beat.cpu_busy_pct}% busy, on ${power(beat.power)}`,
+    }
+  }
+  return machine.online
+    ? {
+        tone: 'warn',
+        label: 'up, but not reporting',
+        detail: `Tailscale still sees ${machine.name}, so this is its agent rather than the machine — a different thing to go and fix`,
+      }
+    : {
+        tone: 'unknown',
+        label: 'asleep or off',
+        detail: `nothing has arrived for ${beat.age_seconds}s and Tailscale has lost it too, which is the closest thing to a sleep signal that exists`,
+      }
+}
+
+function power(state: Power): string {
+  return state === 'ac' ? 'AC' : `battery, ${state.battery.percent}%`
+}
+
 export const machineColumns: Column<Machine>[] = [
   { header: 'MACHINE', cell: (machine) => machine.name },
   { header: 'OS', cell: (machine) => machine.os },
   { header: 'STATUS', cell: (machine) => <Status {...reachability(machine)} /> },
+  {
+    header: 'HEARTBEAT',
+    cell: (machine) => (
+      <span className="inline-flex items-center gap-2">
+        <Status {...reporting(machine)} />
+        {machine.heartbeat && (
+          <time dateTime={`PT${machine.heartbeat.age_seconds}S`}>
+            beat {machine.heartbeat.age_seconds}s ago
+          </time>
+        )}
+      </span>
+    ),
+  },
   {
     header: 'LAST SEEN',
     // I-39: on an online peer this is noise, and the API does not blank it.
@@ -35,8 +95,9 @@ export const machineColumns: Column<Machine>[] = [
   },
 ]
 
-/** Only a look that succeeded can say a session is there. Not knowing is not
- *  the same as knowing there is none, and `up` is right either way (§B4). */
+/** Y-113 left one paste here and took the other: `up` is a button now, and
+ *  `attach` is not, because ADR-0011's TUI wants a terminal this page has none
+ *  of. Only a look that succeeded can say a session is there to attach to. */
 export function workspaceCommand(
   workspace: Workspace,
   sessions: Looked<MachineSessions[]>,
@@ -51,15 +112,44 @@ export function workspaceCommand(
     answer?.reached === 'yes' &&
     answer.sessions.some((session) => session.name === workspace.name)
 
-  return `yantra ${running ? 'attach' : 'up'} ${workspace.name}`
+  return running ? `yantra attach ${workspace.name}` : null
+}
+
+/** What the button is about to touch, said before it is tapped: the machine the
+ *  workspace names, and Y-109's reading of it where the fleet holds one. A
+ *  machine the tailnet does not list gets no state, because none was looked up. */
+function target(
+  workspace: Workspace,
+  machines: Looked<Machine[]>,
+): Machine | undefined {
+  return machines.looked === 'ok'
+    ? machines.data.find((one) => one.name === workspace.machine)
+    : undefined
 }
 
 export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
+  machines: Looked<Machine[]>,
 ): Column<Workspace>[] {
   return [
     { header: 'WORKSPACE', cell: (workspace) => workspace.name },
-    { header: 'MACHINE', cell: (workspace) => workspace.machine },
+    {
+      header: 'MACHINE',
+      cell: (workspace) => {
+        const machine = target(workspace, machines)
+        // Stacked, not inline: the cells do not wrap, and a badge beside a
+        // MagicDNS name costs 120 px of the 295 a phone has.
+        return (
+          <span className="inline-flex flex-col items-start gap-1">
+            {workspace.machine}
+            {machine && <Status {...reporting(machine)} />}
+          </span>
+        )
+      },
+    },
+    // Third, not last: the buttons are the whole point of this page, so they
+    // come before the fields you only read — in a row and in a block alike.
+    { header: 'ACT', cell: (workspace) => <Act workspace={workspace} /> },
     { header: 'REPO', cell: (workspace) => workspace.repo },
     { header: 'STARTUP', cell: (workspace) => workspace.startup ?? '' },
     {
