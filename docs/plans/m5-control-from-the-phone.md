@@ -156,7 +156,7 @@ amendment on ADR-0016 and carried by **Y-118**; it does not block Y-113 or Y-114
 | Y-118 | The proxy hides the caller, so identity must come from the forwarded address | Falls out of Y-111 and belongs to 4.3 rather than 4.1. Not a blocker for anything in this milestone. |
 | Y-112 | ADR-0016 + write routes authorised by peer identity | The decision recorded, then `POST /api/workspaces/{name}/{up,down,resume}`. Reuses Y-108's source-address lookup. |
 | Y-113 | The dashboard acts: a machine picker and real buttons | Replaces the copy-a-command affordance where a write now exists. `Command` stays for `attach`, which is still a paste. |
-| Y-114 | PWA shell — installable on iOS | Needs Y-111. Manifest, icons, `apple-touch-icon`, `display: standalone`, an offline shell that never caches a reading (R-23: a cached dashboard tells confident lies). |
+| Y-114 | PWA shell — installable on iOS | Needs Y-111. Manifest, icons, `apple-touch-icon`, `display: standalone`, an offline shell that never caches a reading (R-23: a cached dashboard tells confident lies). **Done 2026-08-03**, hand-written rather than `vite-plugin-pwa`, and the readings are never intercepted at all rather than cached carefully. The install to a home screen is the one part no test here reached — it wants a device. |
 | Y-115 | Unreachable machines read honestly, and offer no wake | Closes the loop on 4.2 rather than leaving a gap the UI has to invent. |
 | Y-116 | Create and edit a workspace from the dashboard | 4.4 — without it the acceptance test has nothing to open. |
 
