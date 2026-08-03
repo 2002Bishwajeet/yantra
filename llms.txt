@@ -12,7 +12,7 @@ anything else — including this file — when they disagree.
 Each crate carries its own `CLAUDE.md`, `tracker.md`, `llms.txt` and `README.md`. Start at the crate
 you are changing rather than reading the root documents end to end. **The invariants live in the
 crate trackers** — 50 non-obvious rules, numbered to I-53, most earned by a bug that presented as
-something else, and 35 of them in `yantra-core`. They are the highest-value thing in the repo.
+something else, and 37 of them in `yantra-core`. They are the highest-value thing in the repo.
 
 ## Start here
 
@@ -44,3 +44,4 @@ something else.
 - [docs/session-log.md](docs/session-log.md): one line per working session, append-only. Newest last.
 - [docs/archive/m0-m1.md](docs/archive/m0-m1.md): closed milestones M0 and M1. History, not current state.
 - [docs/archive/m2-m3.md](docs/archive/m2-m3.md): closed milestones M2 and M3, with the evidence behind each task.
+- [docs/archive/m4-m5.md](docs/archive/m4-m5.md): closed milestones M4 and M5 — the dashboard, the heartbeat agent and control from the phone — plus the rolling status narrative `tracker.md §0` carried until 2026-08-03.
