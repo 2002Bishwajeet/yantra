@@ -212,13 +212,14 @@ one under `/tmp`. Every token below is deliberately **bogus**.
 
 Two things fall out of that table, and the second is the important one.
 
-1. **The env paths do work on macOS** — they are read in the `Background` launchd domain and the
-   keychain is never consulted. So the mechanism is not blocked by the thing that blocks I-44.
+1. **The env paths do work on macOS** — they are read in the `Background` launchd domain and reach a
+   `loggedIn: true` without a keychain read succeeding. So the mechanism is not blocked by the thing
+   that blocks I-44.
 2. **`auth status` does not validate anything.** A string that could not possibly authenticate
-   produces `loggedIn: true`. Two new field names appear that Yantra's `Status` does not model —
-   `apiKeySource`, and `authMethod` values `oauth_token`, `api_key` and `api_key_helper` beyond the
-   `claude.ai` / `none` pair seen so far — but `serde` drops unknown fields, so nothing breaks; the
-   gate simply *passes*.
+   produces `loggedIn: true`. The shape grows too: one field Yantra's `Status` does not model
+   (`apiKeySource`) and three `authMethod` values beyond the `claude.ai` / `none` pair seen so far
+   (`oauth_token`, `api_key`, `api_key_helper`). `serde` drops what is not named and `authMethod` is
+   already a `String`, so nothing breaks — the gate simply *passes*.
 
 Point 2 is what makes every env-var answer worse than no answer. ADR-0011 made `auth status` a
 pre-launch gate specifically so I-44 could not produce a running, healthy-looking, useless session.
