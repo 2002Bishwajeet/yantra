@@ -71,8 +71,9 @@ the four bill against the Anthropic API rather than the owner's subscription.
   *"Anthropic auth is strictly `ANTHROPIC_API_KEY` or `apiKeyHelper`"*. The one supported no-keychain
   mode costs the subscription by design (§4).
 - **Upstream, this is a known problem that has never been triaged.** Four issues describe this exact
-  combination — #5515, #5957, #10158, #29816 — spanning 2025-08 to 2026-04. **Every one is closed
-  `NOT_PLANNED` by the inactivity bot and then locked. Not one has a maintainer reply.** The only
+  combination — #5515, #5957, #10158, #29816 — spanning 2025-08 to 2026-04. **Three are closed
+  `NOT_PLANNED` by the inactivity bot, the fourth `DUPLICATE` by the duplicate bot, and all four are
+  now locked. Not one has a maintainer reply.** The only
   remedy the official troubleshooting page offers is `security unlock-keychain`, which wants a
   password and is therefore already refused by §B4 and by I-44 (§8).
 - **Undocumented internals exist and are not an answer.** Binary strings turn up
@@ -368,9 +369,10 @@ Searched `anthropics/claude-code` on 2026-08-03. The exact macOS-keychain-over-s
 | [#10158](https://github.com/anthropics/claude-code/issues/10158) *"[BUG] SSH sessions can't authenticate on macOS"* | 2025-10-23 | 2025-10-26 | `DUPLICATE` | **no** |
 | [#29816](https://github.com/anthropics/claude-code/issues/29816) *"SSH sessions require re-login despite valid `~/.claude/.credentials.json` (macOS Keychain unavailable)"* | 2026-03-01 | 2026-04-10 | `NOT_PLANNED` | **no** |
 
-Every closure was written by `github-actions`. #5957's was *"automatically closed due to 60 days of
-inactivity"*; #29816's was *"Closing for now — inactive for too long."* All are now locked. **A year
-of reports, and no human at Anthropic has answered any of them.** That is itself the finding: this
+The closing comments read by hand were both written by `github-actions` — #5957's *"automatically
+closed due to 60 days of inactivity"*, #29816's *"Closing for now — inactive for too long."* All
+four are now locked. **A year of reports, and no human at Anthropic has answered any of them.** That
+is itself the finding: this
 is not an oversight waiting on a doc fix, it is a case Anthropic has not engaged with, so nothing
 should be planned on the assumption it changes.
 
