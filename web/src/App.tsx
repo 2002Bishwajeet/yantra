@@ -39,11 +39,12 @@ export default function App() {
       </Section>
 
       {/* Each section's command reads the *other* class, so a look that failed
-          costs the command its precision and never its honesty. */}
+          costs the command its precision and never its honesty. The machines
+          reading is read the same way, to say what a button is about to touch. */}
       <Section title="Workspaces" query={workspaces}>
         {(rows) => (
           <DataTable
-            columns={workspaceColumns(sessions)}
+            columns={workspaceColumns(sessions, machines)}
             rows={rows}
             rowKey={(workspace) => workspace.name}
             empty="no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml"

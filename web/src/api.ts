@@ -42,6 +42,31 @@ export type Workspace = {
   startup: string | null
 }
 
+/** `POST /api/workspaces/{name}/up`. `attached` beside `launched: false` is the
+ *  idempotent success §B4 requires, and never a failure to report (I-30). */
+export type Opened = {
+  machine: string
+  session: 'created' | 'attached'
+  launched: boolean
+  term: string
+}
+
+/** `POST /api/workspaces/{name}/down`. `stopped: false` is "there was nothing
+ *  running", and `ending` is null for a session that held no agent (Y-099). */
+export type Stopped = {
+  machine: string
+  stopped: boolean
+  ending: string | null
+}
+
+/** `POST /api/workspaces/{name}/resume`. `resumed: false` is an agent already
+ *  working in that session, which ADR-0015 leaves exactly as it is. */
+export type Resumed = {
+  machine: string
+  resumed: boolean
+  term: string
+}
+
 export type Session = {
   name: string
   windows: number

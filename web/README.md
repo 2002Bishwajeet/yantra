@@ -2,7 +2,7 @@
 
 One page, five sections — machines, workspaces, a form that makes one, sessions,
 agents — over the API `yantrad` serves at `/api`. The four readings poll; the form
-is the only thing that writes. No router, no state library, no navigation.
+and every workspace row write. No router, no state library, no navigation.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -73,7 +73,47 @@ The daemon names none of this: `reporting()` in `columns.tsx` owns the threshold
 owns the staleness one. Most of this tailnet is a phone, a tablet and two dead laptops, so *never
 heard from* is the permanent and correct state on most rows.
 
-## The one write
+## The buttons that act (Y-113)
+
+`Act.tsx` is one cell of every workspace row: **start, stop and resume**, posting
+to `/api/workspaces/{name}/{up,down,resume}`. It is what M5 exists for — a phone
+has no terminal to paste into.
+
+- **There is no machine argument, and adding one would be a bug.** The target is
+  `workspace.machine`, chosen when the workspace was written. A transient
+  override would place a session where `down`, `resume`, `status` and `logs` all
+  look elsewhere and report the absence as success — [Y-117](../tracker.md).
+  What the picker is, is the machine and Y-109's reading of it in the cell
+  beside the buttons, said before the button is tapped. A machine the tailnet
+  does not list — an `~/.ssh/config` alias, which ADR-0009 allows — gets **no**
+  state, because none was looked up.
+- **An asleep machine is not refused here.** The daemon decides; the page shows
+  *asleep or off* and leaves the button live (R-23, ADR-0009). There is no wake
+  button, because waking is not possible from here (Q10, Y-115).
+- **`launched: false` is a success, not a failure.** `up` twice attaches (§B4,
+  I-30). It also reports an *agent*, and a workspace's own `startup` is not one,
+  so a created session with `launched: false` says "running the workspace's own
+  startup" where there is one and "a plain shell" where there is not — measured
+  against a `startup` that really was running.
+- **Every status keeps its own sentence** — `404` no such workspace, `400` an
+  unusable name, `403` a node that is not the owner's, `422` a field the daemon
+  does not know, `503` a `tailscale` that could not answer, `500` the verb
+  itself. The plain-text body is the whole `source()` chain and is shown whole.
+- **Nothing may read as done while it is in flight.** These handlers `await`
+  ssh and `ConnectTimeout` is 10 s, so the tapped button names what it is doing,
+  the row says which machine it is waiting on, and all three are disabled — a
+  second tap cannot fire a second request.
+- **`up` sends `{"agent":"claude"}` only where `startup` is null**, because
+  ADR-0007 refuses an agent beside a workspace's own startup; the button says
+  which it is. **Resume is not offered** to such a workspace at all, for
+  ADR-0015's reason, which is the shape Y-097 already chose.
+
+`Command` stays exactly where no write exists: a row offers `yantra attach` when
+a session really was seen, and nothing otherwise. The agents section still hands
+over `up` and `resume` as pastes — [Y-097](../tracker.md)'s derivation, untouched
+here.
+
+## The write that makes a workspace
 
 `NewWorkspace.tsx` posts `{name, machine, repo, startup?}` to `/api/workspaces`
 (Y-116). Three things about it are not free choices:
@@ -168,12 +208,13 @@ public/
   manifest.webmanifest
   favicon.svg  icon-192.png  icon-512.png  apple-touch-icon.png
 src/
-  api.ts             the wire shapes; every state is a tag, never a missing key
+  api.ts             the wire shapes, read and written; every state is a tag
   useLooked.ts       the poll — every read, class or agent
   columns.tsx        four Column<T>[] arrays: the four tables, as data
   components/
     Section.tsx      the looked switch; children run only in the ok branch
-    NewWorkspace.tsx the create form — the only fetch that is not a read
+    NewWorkspace.tsx the create form
+    Act.tsx          start / stop / resume, per workspace row
     DataTable.tsx    the table; owns "we looked and there is nothing"
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
