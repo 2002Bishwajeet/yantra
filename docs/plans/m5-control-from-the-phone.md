@@ -184,7 +184,7 @@ amendment on ADR-0016 and carried by **Y-118**; it does not block Y-113 or Y-114
 | Y-112 | ADR-0016 + write routes authorised by peer identity | The decision recorded, then `POST /api/workspaces/{name}/{up,down,resume}`. Reuses Y-108's source-address lookup. |
 | Y-113 | The dashboard acts: a machine picker and real buttons | Replaces the copy-a-command affordance where a write now exists. `Command` stays for `attach`, which is still a paste. |
 | Y-114 | PWA shell — installable on iOS | Needs Y-111. Manifest, icons, `apple-touch-icon`, `display: standalone`, an offline shell that never caches a reading (R-23: a cached dashboard tells confident lies). **Done 2026-08-03**, hand-written rather than `vite-plugin-pwa`, and the readings are never intercepted at all rather than cached carefully. The install to a home screen is the one part no test here reached — it wants a device. |
-| Y-115 | Unreachable machines read honestly, and offer no wake | Closes the loop on 4.2 rather than leaving a gap the UI has to invent. |
+| Y-115 | Unreachable machines read honestly, and offer no wake | Closes the loop on 4.2 rather than leaving a gap the UI has to invent. **Closed 2026-08-03 with no code**: Y-109's four states, Y-113's live button and the daemon's own words, and a sessions section older than both had already left no gap to fill. |
 | Y-116 | Create and edit a workspace from the dashboard | 4.4 — without it the acceptance test has nothing to open. |
 | Y-121 | The buttons fall off the right edge of a phone | Not planned for: found by measuring what Y-113 shipped, and it is §1's last inch. A table cannot be made to fit — the first two cells alone are wider than the screen — so below 48rem a row is a block. **Done 2026-08-03.** |
 
