@@ -49,6 +49,13 @@ fallback is `0.0.0.0`. That is R-22's stated retire condition and the shape to k
   cannot fill a disk. `Beats` sits beside `Model` rather than inside `Snapshot`: a beat is not a look
   the daemon took and has no `Result` to carry.
 
+**The read side of it is `GET /api/machines`**, which joins the beats onto what Tailscale said,
+keyed on the node id — the one field that route still does not serve. `null` there is **never heard
+from**, and it is a different state from a beat that reports zero (I-47). The daemon names none of
+ADR-0013 §7's four display states: it serves the beat's age and `online`, and the page decides, because
+a state named in two places is a disagreement waiting to happen (§3's argument against shipping `os`).
+`sent_at` is the one field of the seven not exposed — it feeds nothing, and no consumer has asked.
+
 R-22 is unchanged as a boundary and larger as a blast radius — anything that reaches the tailnet can
 now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
 is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.

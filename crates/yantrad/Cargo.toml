@@ -22,4 +22,6 @@ yantra-core.workspace = true
 # directly and assert what it refuses.
 [dev-dependencies]
 serde_json.workspace = true
+# A fixture beat cannot be built without it: `sent_at` is an `OffsetDateTime`.
+time.workspace = true
 tower.workspace = true

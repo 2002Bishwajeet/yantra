@@ -2,6 +2,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Power,
   Session,
   Workspace,
   WorkspaceStatus,
@@ -24,10 +25,68 @@ function reachability(machine: Machine): { tone: Tone; label: string } {
   return { tone: machine.online ? 'ok' : 'unknown', label: reachable }
 }
 
+// ADR-0013 §7: three of the agent's 10 s intervals, so a single lost POST never
+// reads as a machine that stopped reporting.
+const FRESH_SECONDS = 30
+
+/** ADR-0013 §7's four states, and there are four rather than two because a page
+ *  that says *asleep* when it means *we have not heard from it* is the confident
+ *  lie M4 exists not to tell (R-23). `online` chooses between two explanations
+ *  of a missing beat and never decides whether one arrived (R-8, I-10). */
+export function reporting(machine: Machine): {
+  tone: Tone
+  label: string
+  detail: string
+} {
+  const beat = machine.heartbeat
+  if (!beat) {
+    return {
+      tone: 'unknown',
+      label: 'never heard from',
+      detail: `no heartbeat has ever arrived from ${machine.name}, which is not the same as one that stopped — yantra-agent is probably not installed there`,
+    }
+  }
+  if (beat.age_seconds <= FRESH_SECONDS) {
+    return {
+      tone: 'ok',
+      label: 'ready',
+      detail: `${beat.free_ram_mb} MB free, ${beat.cpu_busy_pct}% busy, on ${power(beat.power)}`,
+    }
+  }
+  return machine.online
+    ? {
+        tone: 'warn',
+        label: 'up, but not reporting',
+        detail: `Tailscale still sees ${machine.name}, so this is its agent rather than the machine — a different thing to go and fix`,
+      }
+    : {
+        tone: 'unknown',
+        label: 'asleep or off',
+        detail: `nothing has arrived for ${beat.age_seconds}s and Tailscale has lost it too, which is the closest thing to a sleep signal that exists`,
+      }
+}
+
+function power(state: Power): string {
+  return state === 'ac' ? 'AC' : `battery, ${state.battery.percent}%`
+}
+
 export const machineColumns: Column<Machine>[] = [
   { header: 'MACHINE', cell: (machine) => machine.name },
   { header: 'OS', cell: (machine) => machine.os },
   { header: 'STATUS', cell: (machine) => <Status {...reachability(machine)} /> },
+  {
+    header: 'HEARTBEAT',
+    cell: (machine) => (
+      <span className="inline-flex items-center gap-2">
+        <Status {...reporting(machine)} />
+        {machine.heartbeat && (
+          <time dateTime={`PT${machine.heartbeat.age_seconds}S`}>
+            beat {machine.heartbeat.age_seconds}s ago
+          </time>
+        )}
+      </span>
+    ),
+  },
   {
     header: 'LAST SEEN',
     // I-39: on an online peer this is noise, and the API does not blank it.
