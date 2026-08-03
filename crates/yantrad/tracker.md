@@ -35,7 +35,10 @@ against the real crate before relying on them.
 Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-118** —
 `tailscale serve` launders the caller's address, so ADR-0016's authoriser sees the proxy; the ADR was
 accepted 2026-08-03 (Y-103) and is therefore immutable, so the fix is an amending or superseding ADR
-rather than an edit. **Y-020** is closed and its telemetry ADR ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md))
+rather than an edit. **Proposed 2026-08-03 as
+[ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)** — the
+forwarded address is the caller when the TCP peer is one of this daemon's own bind addresses — and it
+awaits the owner, so nothing here changes yet. **Y-020** is closed and its telemetry ADR ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md))
 was accepted on the same day.
 
 **Y-044 is closed** — dropped 2026-08-02 without being built. Session state is derived from tmux
