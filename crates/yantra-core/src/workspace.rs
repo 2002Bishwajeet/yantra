@@ -131,6 +131,11 @@ fn create_in(
     if repo.as_os_str().is_empty() {
         return Err(Error::Empty { field: "repo" });
     }
+    // Refused rather than read as `None`: absent already means "just a shell",
+    // and coercing here would have two callers disagree about what they wrote.
+    if startup.is_some_and(|startup| startup.trim().is_empty()) {
+        return Err(Error::Empty { field: "startup" });
+    }
 
     let path = dir.join(format!("{name}.toml"));
     if path.exists() {
@@ -538,6 +543,32 @@ mod tests {
         assert!(
             load_from(&dir, "shell").expect("loads").startup.is_none(),
             "an absent startup is just a shell"
+        );
+    }
+
+    /// `None` is a shell and `Some("")` is a command that cannot run, so the
+    /// two must not collapse into one another on the way to disk.
+    #[test]
+    fn an_empty_startup_is_refused_rather_than_read_as_no_startup() {
+        let dir = dir_with("blank-startup", &[]).expect("a temp dir");
+
+        for blank in ["", "   "] {
+            let refused = create_in(
+                &dir,
+                "blank",
+                "a-machine",
+                Path::new("/srv/repo"),
+                Some(blank),
+            )
+            .expect_err("an empty startup is not a startup");
+            assert!(
+                matches!(refused, Error::Empty { field: "startup" }),
+                "`{blank}`: {refused}",
+            );
+        }
+        assert!(
+            list_in(&dir).expect("listable").is_empty(),
+            "a refusal must leave no file behind"
         );
     }
 

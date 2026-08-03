@@ -83,7 +83,8 @@ yantra new site --machine bishwajeets-macbook-pro --repo /Users/me/code/site
 
 It refuses to overwrite an existing one, and it checks nothing about `machine` or `repo` — `repo` is
 a path on the *far* side, and `up` is what discovers it is not there, on that machine, before a
-session exists.
+session exists. It does refuse an empty `--startup`: leaving the flag off is what means *just a
+shell*, and a blank one would be a command that cannot run.
 
 The filename is the name, so the two can never disagree:
 
