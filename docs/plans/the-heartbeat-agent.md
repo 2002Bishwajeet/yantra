@@ -28,7 +28,7 @@ the macOS half. Windows does not move, and §7 says why that is deliberate rathe
 | The seven fields can be read on macOS | [D] | **[V]** | §3, `bishwajeets-macbook-pro`, macOS 26.5.1, arm64 |
 | A heartbeat crosses the tailnet and is attributed by source address | [D] | **[V]** | §3.8 — a real POST from the MacBook, 204, source `100.x.x.x` |
 | `Power::Ac` on a machine that is plugged in | [V] (R5, Linux) | **[V] both** | §3.6 |
-| `Power::Battery` on a machine that is unplugged | [D] | **[D]** | §3.6 — both fleet machines were on AC throughout; nothing was unplugged |
+| `Power::Battery` on a machine that is unplugged | [D] | **[V] macOS, [D] Linux** | §3.6 — Y-110, 2026-08-03: the MacBook was unplugged and beat `{"battery":{"percent":100}}`; `cachyos-g14` stayed on mains |
 | A machine with **no** battery at all | [V] per I-9 | **[D] on this fleet** | §3.6 — **the fleet has no desktop.** See §8.1 |
 | axum rejects unknown keys, over-limit bodies and other verbs | [D] | **[V]** | §4, against axum 0.8.9 |
 | The agent stays small | asserted | **[V]** | §1, §2 |
@@ -451,6 +451,12 @@ percentage, from whatever the platform's mains and battery sources are**, and ev
   power reader must produce it — a fake sysfs tree on Linux, and on macOS a recorded `pmset` string
   (`Now drawing from 'Battery Power'`) parsed by the same function, since a real one needs a hand on
   a cable.
+
+  > **2026-08-03, Y-110.** The hand was put on the cable: the MacBook was unplugged and beat
+  > `"power":{"battery":{"percent":100}}` to a live `yantrad`, so this is no longer true of macOS.
+  > It stays true of Linux — `cachyos-g14` was on mains throughout. The recorded string was also
+  > **wrong where it guessed**: a real unplugged Mac reads 100 % while `discharging`, and macOS
+  > prints `(no estimate)` before it prints a time.
 
 ### 3.7 `sent_at` — its stated purpose is currently unexercised
 

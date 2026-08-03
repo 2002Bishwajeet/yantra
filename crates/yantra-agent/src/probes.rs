@@ -13,10 +13,12 @@
 //! The parsers take `&str` and the power reader takes a directory, so the
 //! platform half of every probe is one line and the half that can be wrong is
 //! exercised against recorded fixtures from both fleet machines. That is not a
-//! substitute for §B3 — it is the only way to reach two states this fleet
-//! cannot produce: a desktop with no battery, and a machine that is unplugged.
-//! Both platforms' parsers compile everywhere, which is what the `dead_code`
-//! exemptions buy: Linux CI runs the macOS ones, and Linux CI is all there is.
+//! substitute for §B3 — it is the only way to reach the two states this fleet
+//! has not produced: a desktop with no battery, and an unplugged *Linux*
+//! machine. The macOS half of that second state is a recording rather than a
+//! guess since Y-110. Both platforms' parsers compile everywhere, which is what
+//! the `dead_code` exemptions buy: Linux CI runs the macOS ones, and Linux CI is
+//! all there is.
 //!
 //! [ADR-0013]: ../../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md
 
@@ -333,10 +335,7 @@ fn pmset_power(batt: &str) -> Power {
 mod tests {
     use super::*;
 
-    // Verbatim from both fleet machines on 2026-08-02, sanitised. The battery
-    // fixture is the one output neither machine can produce: both were on mains
-    // throughout, so its percentage and `discharging` are hand-written around a
-    // real line's shape.
+    // Verbatim from both fleet machines on 2026-08-02, sanitised.
     const LINUX_LOADAVG: &str = "1.27 1.49 0.95 3/1407 1992325\n";
     const MACOS_LOADAVG: &str = "{ 2.13 2.42 2.73 }\n";
     const LINUX_MEMINFO: &str = "MemTotal:       15709160 kB\nMemFree:         1043912 kB\nMemAvailable:    7640584 kB\nBuffers:          228696 kB\n";
@@ -345,7 +344,11 @@ mod tests {
     const MACOS_DF_ROOT: &str = "Filesystem     1024-blocks      Used Available Capacity  Mounted on\n/dev/disk3s1s1   482797652  12276800  40211536    24%    /\n";
     const MACOS_DF_DATA: &str = "Filesystem   1024-blocks      Used Available Capacity  Mounted on\n/dev/disk3s5   482797652 411806576  40211536    92%    /System/Volumes/Data\n";
     const PMSET_AC: &str = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=<id>)\t100%; charged; 0:00 remaining present: true\n";
-    const PMSET_BATTERY: &str = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=<id>)\t76%; discharging; 2:41 remaining present: true\n";
+    // Y-110, `bishwajeets-macbook-pro` unplugged on 2026-08-03. macOS prints no
+    // estimate for the first minutes off mains and a time once it has one, so
+    // both are the same machine in the same state.
+    const PMSET_BATTERY: &str = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=<id>)\t100%; discharging; 2:51 remaining present: true\n";
+    const PMSET_BATTERY_NO_ESTIMATE: &str = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=<id>)\t100%; discharging; (no estimate) present: true\n";
 
     /// A directory that looks like `/sys/class/power_supply`, because the two
     /// states this fleet cannot produce — a desktop with no battery, and a
@@ -530,9 +533,17 @@ mod tests {
         assert_eq!(pmset_power(""), Power::Ac);
     }
 
+    /// A real unplugged Mac reads **100 % while discharging**, which is the same
+    /// percentage `PMSET_AC` carries: the mains line is the only thing that
+    /// separates these two states, and a reader that consulted the status word or
+    /// the percentage would call this machine plugged in.
     #[test]
     fn pmset_off_mains_is_a_battery_at_its_percentage() {
-        assert_eq!(pmset_power(PMSET_BATTERY), Power::Battery { percent: 76 });
+        assert_eq!(pmset_power(PMSET_BATTERY), Power::Battery { percent: 100 });
+        assert_eq!(
+            pmset_power(PMSET_BATTERY_NO_ESTIMATE),
+            Power::Battery { percent: 100 }
+        );
     }
 
     /// Y-104 left the two-reading rule to the probe and nothing downstream can
