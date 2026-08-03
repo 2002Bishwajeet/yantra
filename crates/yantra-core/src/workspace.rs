@@ -31,6 +31,40 @@ pub struct Workspace {
     pub startup: Option<String>,
 }
 
+/// What an edit asks to change. A `None` leaves the field as it is, which is
+/// what makes editing one field not a rewrite of the other two.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Changes {
+    pub machine: Option<String>,
+    pub repo: Option<PathBuf>,
+    /// `Some(None)` puts the workspace back to just a shell.
+    pub startup: Option<Option<String>>,
+}
+
+impl Changes {
+    /// Whether this sends the workspace to a *different* machine. Naming the
+    /// machine it already has moves nothing, so it is not the move
+    /// [`crate::edit`] has to refuse under a live session (§B4).
+    pub fn moves(&self, from: &Workspace) -> bool {
+        self.machine.as_deref().is_some_and(|to| to != from.machine)
+    }
+
+    fn applied_to(&self, before: &Workspace) -> Workspace {
+        Workspace {
+            name: before.name.clone(),
+            machine: self
+                .machine
+                .clone()
+                .unwrap_or_else(|| before.machine.clone()),
+            repo: self.repo.clone().unwrap_or_else(|| before.repo.clone()),
+            startup: self
+                .startup
+                .clone()
+                .unwrap_or_else(|| before.startup.clone()),
+        }
+    }
+}
+
 /// `deny_unknown_fields` turns a mistyped key into an error instead of a
 /// silently ignored line.
 #[derive(Debug, serde::Deserialize)]
@@ -125,17 +159,7 @@ fn create_in(
     startup: Option<&str>,
 ) -> Result<Workspace, Error> {
     validate_name(name)?;
-    if machine.trim().is_empty() {
-        return Err(Error::Empty { field: "machine" });
-    }
-    if repo.as_os_str().is_empty() {
-        return Err(Error::Empty { field: "repo" });
-    }
-    // Refused rather than read as `None`: absent already means "just a shell",
-    // and coercing here would have two callers disagree about what they wrote.
-    if startup.is_some_and(|startup| startup.trim().is_empty()) {
-        return Err(Error::Empty { field: "startup" });
-    }
+    non_empty(machine, repo, startup)?;
 
     let path = dir.join(format!("{name}.toml"));
     if path.exists() {
@@ -169,6 +193,57 @@ fn create_in(
             path: path.clone(),
             source,
         })?;
+
+    load_from(dir, name)
+}
+
+fn non_empty(machine: &str, repo: &Path, startup: Option<&str>) -> Result<(), Error> {
+    if machine.trim().is_empty() {
+        return Err(Error::Empty { field: "machine" });
+    }
+    if repo.as_os_str().is_empty() {
+        return Err(Error::Empty { field: "repo" });
+    }
+    // Refused rather than read as `None`: absent already means "just a shell",
+    // and coercing here would have two callers disagree about what they wrote.
+    if startup.is_some_and(|startup| startup.trim().is_empty()) {
+        return Err(Error::Empty { field: "startup" });
+    }
+    Ok(())
+}
+
+/// Rewrites an existing workspace, leaving every field the caller did not name.
+/// The counterpart to [`create`]: that one refuses to touch a file that exists,
+/// and this one refuses to make a file that does not.
+///
+/// **It does not ask what is running.** `machine` is where the tmux session
+/// lives, so changing it under a live session strands that session — refusing
+/// that is [`crate::edit`]'s job, and this half only knows about the file.
+pub fn update(name: &str, changes: &Changes) -> Result<Workspace, Error> {
+    update_in(&workspaces_dir()?, name, changes)
+}
+
+fn update_in(dir: &Path, name: &str, changes: &Changes) -> Result<Workspace, Error> {
+    let after = changes.applied_to(&load_from(dir, name)?);
+    non_empty(&after.machine, &after.repo, after.startup.as_deref())?;
+
+    let path = dir.join(format!("{name}.toml"));
+    // Renamed over the original rather than written in place: `list` fails the
+    // whole listing on one malformed file, so a half-written one costs every
+    // workspace and not just this one. `.tmp` is not `.toml`, so a leftover is
+    // invisible to that listing.
+    let temp = dir.join(format!("{name}.toml.tmp"));
+    let unwritable = |source| Error::Unwritable {
+        name: name.to_owned(),
+        path: path.clone(),
+        source,
+    };
+    std::fs::write(
+        &temp,
+        render(&after.machine, &after.repo, after.startup.as_deref()),
+    )
+    .map_err(unwritable)?;
+    std::fs::rename(&temp, &path).map_err(unwritable)?;
 
     load_from(dir, name)
 }
@@ -608,6 +683,149 @@ mod tests {
         let read = load_from(&dir, "awkward").expect("loads");
         assert_eq!(read.repo, repo);
         assert_eq!(read.startup.as_deref(), Some(r#"echo "hi" \ there"#));
+    }
+
+    /// The whole point of naming one field: the other two are not touched, and
+    /// a `startup` that is not mentioned is not the same as one cleared.
+    #[test]
+    fn an_edit_rewrites_only_the_fields_it_names() {
+        let dir = dir_with("edit-one", &[]).expect("a temp dir");
+        create_in(
+            &dir,
+            "site",
+            "a-machine",
+            Path::new("/srv/old"),
+            Some("npm run dev"),
+        )
+        .expect("created");
+
+        let after = update_in(
+            &dir,
+            "site",
+            &Changes {
+                repo: Some(PathBuf::from("/srv/new")),
+                ..Changes::default()
+            },
+        )
+        .expect("edited");
+
+        assert_eq!(after.repo, PathBuf::from("/srv/new"));
+        assert_eq!(after.machine, "a-machine");
+        assert_eq!(after.startup.as_deref(), Some("npm run dev"));
+        assert_eq!(after, load_from(&dir, "site").expect("loads back"));
+    }
+
+    /// `Some(None)` is the only way back to *just a shell*, and without it a
+    /// startup set by mistake could only be removed by hand-editing the file —
+    /// which is the thing this verb exists to stop.
+    #[test]
+    fn an_edit_can_clear_a_startup_back_to_a_shell() {
+        let dir = dir_with("edit-clear", &[]).expect("a temp dir");
+        create_in(&dir, "site", "a-machine", Path::new("/srv/x"), Some("nvim")).expect("created");
+
+        let after = update_in(
+            &dir,
+            "site",
+            &Changes {
+                startup: Some(None),
+                ..Changes::default()
+            },
+        )
+        .expect("edited");
+
+        assert_eq!(after.startup, None);
+        let text = std::fs::read_to_string(dir.join("site.toml")).expect("readable");
+        assert!(!text.contains("startup"), "{text}");
+    }
+
+    /// §B4: an edit that asks for what is already there is not a failure and not
+    /// a move, so the caller can repeat one safely.
+    #[test]
+    fn naming_the_machine_a_workspace_already_has_is_not_a_move() {
+        let before = Workspace {
+            name: "site".to_owned(),
+            machine: "a-machine".to_owned(),
+            repo: PathBuf::from("/srv/x"),
+            startup: None,
+        };
+
+        assert!(!Changes::default().moves(&before));
+        assert!(
+            !Changes {
+                machine: Some("a-machine".to_owned()),
+                ..Changes::default()
+            }
+            .moves(&before)
+        );
+        assert!(
+            Changes {
+                machine: Some("elsewhere".to_owned()),
+                ..Changes::default()
+            }
+            .moves(&before)
+        );
+    }
+
+    /// The same refusals `create` makes, from the other side — and the file has
+    /// to survive them, because an edit that half-applied would be worse than
+    /// one that did nothing.
+    #[test]
+    fn an_edit_to_an_empty_field_is_refused_and_leaves_the_file_as_it_was() {
+        let dir = dir_with("edit-empty", &[]).expect("a temp dir");
+        create_in(&dir, "site", "a-machine", Path::new("/srv/x"), None).expect("created");
+        let before = load_from(&dir, "site").expect("loads");
+
+        for (changes, field) in [
+            (
+                Changes {
+                    machine: Some("  ".to_owned()),
+                    ..Changes::default()
+                },
+                "machine",
+            ),
+            (
+                Changes {
+                    repo: Some(PathBuf::new()),
+                    ..Changes::default()
+                },
+                "repo",
+            ),
+            (
+                Changes {
+                    startup: Some(Some(String::new())),
+                    ..Changes::default()
+                },
+                "startup",
+            ),
+        ] {
+            let refused = update_in(&dir, "site", &changes).expect_err("an empty field");
+            assert!(
+                matches!(refused, Error::Empty { field: f } if f == field),
+                "{refused}"
+            );
+        }
+        assert_eq!(before, load_from(&dir, "site").expect("still loads"));
+    }
+
+    #[test]
+    fn editing_a_workspace_that_is_not_there_is_not_found() {
+        let dir = dir_with("edit-absent", &[]).expect("a temp dir");
+
+        let refused = update_in(
+            &dir,
+            "absent",
+            &Changes {
+                machine: Some("m".to_owned()),
+                ..Changes::default()
+            },
+        )
+        .expect_err("there is nothing to edit");
+
+        assert!(matches!(refused, Error::NotFound { .. }), "{refused}");
+        assert!(
+            list_in(&dir).expect("listable").is_empty(),
+            "an edit must never create a workspace"
+        );
     }
 
     #[test]

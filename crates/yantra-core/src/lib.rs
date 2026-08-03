@@ -13,6 +13,7 @@
 pub mod agent;
 pub mod attach;
 pub mod down;
+pub mod edit;
 pub mod heartbeat;
 pub mod inventory;
 pub mod logs;

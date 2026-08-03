@@ -10,13 +10,17 @@ in-process today; the daemon will call the same functions over HTTP.
 ## What it does
 
 ```rust
-use yantra_core::{up, resume, logs, status, down};
+use yantra_core::{up, resume, logs, status, down, edit, workspace};
 
 let report = up::up("yantra", "xterm-256color", Some(up::Agent::Claude)).await?;
 let again  = resume::resume("yantra", "xterm-256color").await?;
 let recent = logs::logs("yantra", 20).await?;
 let state  = status::status("yantra").await?;
 let ending = down::down("yantra").await?;
+let moved  = edit::edit("yantra", &workspace::Changes {
+    machine: Some("bishwajeets-macbook-pro".into()),
+    ..Default::default()
+}).await?;   // refused while a session is open on the machine it would leave
 ```
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one

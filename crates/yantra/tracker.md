@@ -17,6 +17,11 @@ has three spellings for "already absent" — is what makes `yantra down` on a se
 running exit **0**: absence is the state that was asked for. The rule is core's; the visible
 behaviour is this crate's.
 
+The same invariant reaches here a second time, inverted. `yantra edit --machine` exits **1** rather
+than moving a workspace off a machine that still holds its session, because afterwards every verb
+would look at the new machine, find nothing, and report that absence as success — I-30's rule
+applied where absence is *not* the state anyone asked for.
+
 ## Open work
 
 Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-066** (name

@@ -28,6 +28,7 @@ bind where:
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
 | `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010 |
+| `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
 | `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
 

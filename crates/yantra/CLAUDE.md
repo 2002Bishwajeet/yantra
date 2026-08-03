@@ -24,6 +24,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `status`, and nothing is running | 1 | so `yantra status x && …` reads the way it looks |
 | `ls sessions` with a machine unreachable | 1 | the table still prints — a caller must be able to tell the answer is **partial** |
 | `down` on something not running | **0** | absence is the state asked for (I-30, root §B4) |
+| `edit --machine` when that machine cannot be reached | 1 | it cannot be *known* that no session is being stranded, and a check that cannot know must refuse rather than allow (R-23) |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.

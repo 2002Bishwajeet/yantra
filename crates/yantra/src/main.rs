@@ -56,6 +56,25 @@ enum Command {
         #[arg(long)]
         startup: Option<String>,
     },
+    /// Change an existing workspace's fields
+    #[command(group(clap::ArgGroup::new("fields").required(true).multiple(true)
+        .args(["machine", "repo", "startup", "no_startup"])))]
+    Edit {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// ssh destination to run it on, as `~/.ssh/config` spells it
+        #[arg(long)]
+        machine: Option<String>,
+        /// Path to the repository **on that machine**, not on this one
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Command to run when the session opens, instead of an agent
+        #[arg(long, conflicts_with = "no_startup")]
+        startup: Option<String>,
+        /// Drop the startup command, so the session opens a plain shell
+        #[arg(long)]
+        no_startup: bool,
+    },
     /// Attach this terminal to a workspace's session
     Attach {
         /// Workspace name, without the `.toml`
@@ -123,6 +142,23 @@ async fn main() -> ExitCode {
             repo,
             startup,
         }) => new(&workspace, &machine, &repo, startup.as_deref()),
+        Some(Command::Edit {
+            workspace,
+            machine,
+            repo,
+            startup,
+            no_startup,
+        }) => {
+            edit(
+                &workspace,
+                &workspace::Changes {
+                    machine,
+                    repo,
+                    startup: startup.map(Some).or(no_startup.then_some(None)),
+                },
+            )
+            .await
+        }
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
@@ -378,6 +414,32 @@ fn new(name: &str, machine: &str, repo: &Path, startup: Option<&str>) -> ExitCod
                 println!("  startup: {startup}");
             }
             println!("  next:   yantra up {} --agent claude", workspace.name);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn edit(name: &str, changes: &workspace::Changes) -> ExitCode {
+    match yantra_core::edit::edit(name, changes).await {
+        Ok(edited) => {
+            let workspace = &edited.workspace;
+            if edited.changed {
+                println!("edited {} on {}", workspace.name, workspace.machine);
+            } else {
+                println!(
+                    "{} on {} already reads that way",
+                    workspace.name, workspace.machine
+                );
+            }
+            println!("  repo:   {}", workspace.repo.display());
+            match &workspace.startup {
+                Some(startup) => println!("  startup: {startup}"),
+                None => println!("  startup: none, so the session opens a shell"),
+            }
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -800,6 +862,69 @@ mod tests {
         assert!(
             Cli::try_parse_from(["yantra", "up", "demo", "--agent", "aider"]).is_err(),
             "an agent Yantra does not ship must be refused by name, not started"
+        );
+    }
+
+    /// Every field is optional on its own and at least one is mandatory
+    /// together, because `yantra edit demo` asks for nothing and a verb that
+    /// silently did nothing would read as one that worked.
+    #[test]
+    fn edit_takes_any_field_but_needs_at_least_one() {
+        let one = Cli::try_parse_from(["yantra", "edit", "demo", "--repo", "/srv/x"])
+            .expect("one field is enough");
+        assert!(matches!(
+            one.command,
+            Some(Command::Edit {
+                machine: None,
+                startup: None,
+                no_startup: false,
+                ..
+            })
+        ));
+
+        Cli::try_parse_from([
+            "yantra",
+            "edit",
+            "demo",
+            "--machine",
+            "mac",
+            "--startup",
+            "nvim",
+        ])
+        .expect("several fields at once");
+        assert!(
+            Cli::try_parse_from(["yantra", "edit", "demo"]).is_err(),
+            "an edit that names no field has nothing to do"
+        );
+    }
+
+    /// The two ways to spell a `startup` are mutually exclusive: `--startup ''`
+    /// is refused by the library, so clearing one needs its own flag rather than
+    /// an empty value, and asking for both at once is a contradiction.
+    #[test]
+    fn a_startup_can_be_set_or_dropped_but_not_both() {
+        let dropped = Cli::try_parse_from(["yantra", "edit", "demo", "--no-startup"])
+            .expect("`--no-startup` parses");
+        assert!(matches!(
+            dropped.command,
+            Some(Command::Edit {
+                no_startup: true,
+                startup: None,
+                ..
+            })
+        ));
+
+        assert!(
+            Cli::try_parse_from([
+                "yantra",
+                "edit",
+                "demo",
+                "--startup",
+                "nvim",
+                "--no-startup"
+            ])
+            .is_err(),
+            "setting and dropping the same field is not an instruction"
         );
     }
 
