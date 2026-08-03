@@ -57,8 +57,14 @@ just ci           # everything CI runs: check + the arm64 cross-build
 just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
+just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
 just appliance    # cross-compile arm64 binaries for the Pi 5
 ```
+
+`just fixtures` is the one recipe you run *because* a test told you to: `just
+test` compares `web/src/contract.gen.ts` against what `/api` now answers, and a
+DTO that moved without it fails there. See
+[`crates/yantrad/CLAUDE.md`](../crates/yantrad/CLAUDE.md).
 
 `just ci` is exactly what CI runs — the workflow in `.github/workflows/ci.yml`
 invokes these same recipes rather than its own copy of the commands, one recipe

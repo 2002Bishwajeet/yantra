@@ -20,6 +20,10 @@ use axum::routing::get;
 use yantra_core::inventory::{Inventory, Tailscale};
 
 mod api;
+// Y-124: it only compares the routes against the dashboard's committed fixture.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod contract;
 mod heartbeat;
 mod refresh;
 mod web;
