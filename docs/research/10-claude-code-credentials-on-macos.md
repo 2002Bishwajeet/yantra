@@ -21,10 +21,11 @@ release once already (§8); re-measure before relying on any of this.
 
 No setting, environment variable, or flag in Claude Code 2.1.220 moves the *stored* subscription
 credential off the macOS login keychain. The storage location is documented per operating system and
-is not configurable on macOS. What exists instead are five ways to **supply a credential from
-outside** — and each one is a secret *value* that Yantra would have to hold, set, or pass, which
-[§B4](../../CLAUDE.md) disqualifies outright, and three of the five bill against the Anthropic API
-rather than the owner's subscription.
+is not configurable on macOS. What exists instead are ways to **supply a credential from outside**:
+five precedence levels sit above the keychain, and setting aside the cloud providers — this fleet
+has no Bedrock, Vertex or Foundry — four remain. **Each of the four is a secret *value* that Yantra
+would have to hold, set, or pass, which [§B4](../../CLAUDE.md) disqualifies outright**, and three of
+the four bill against the Anthropic API rather than the owner's subscription.
 
 ---
 
@@ -236,6 +237,7 @@ the blocker.**
 | `ANTHROPIC_API_KEY` | **API billing** | **disqualified** — secret value | yes, and defeats the gate |
 | `ANTHROPIC_AUTH_TOKEN` | **API billing** (gateway/proxy bearer) | **disqualified** — secret value | yes, and defeats the gate |
 | `apiKeyHelper` | **API billing**, as far as the docs commit (§5) | *shape* is fine — a reference, not a value | no — the helper runs in the same `Background` domain |
+| Bedrock / Vertex / Foundry | **cloud provider billing** | n/a | listed for completeness; this fleet uses none |
 | `security unlock-keychain` | Subscription | **disqualified** — needs a password | in principle; already refused by I-44 |
 
 The subscription-vs-API split is the line the owner has to see, so to state it without hedging:
