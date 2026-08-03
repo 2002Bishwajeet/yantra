@@ -113,6 +113,35 @@ a session really was seen, and nothing otherwise. The agents section still hands
 over `up` and `resume` as pastes — [Y-097](../tracker.md)'s derivation, untouched
 here.
 
+## The shape a phone gets (Y-121)
+
+Below **48rem** `DataTable` draws one labelled block per row instead of one table
+row, and above it the table is unchanged. All four tables share the component, so
+all four get it. The width is read with `matchMedia` through
+`useSyncExternalStore`, which is why narrowing a window swaps the shape without a
+reload.
+
+- **A table could not be made to fit, and no column order could save it.** Y-113
+  had already moved `ACT` third and stacked the heartbeat badge under the machine
+  name. Measured at 390 px over the real URL: the table is **924 px** inside a
+  **310 px** box and the start button lands at **x 358–443**, its centre past the
+  edge of the screen. In blocks it is at **x 140–225** at 390 px and at 320 px
+  alike, and `document.elementFromPoint` at its centre returns the button.
+- **No column is dropped, and that is not politeness.** The first two cells alone
+  measure **127 + 184 px** — wider than the 310 px a phone shows — so a table cut
+  to `WORKSPACE`, `MACHINE` and `ACT` would still hide the buttons. Hiding a fact
+  buys nothing here, so every header becomes a `<dt>` and every cell a `<dd>`,
+  including the empty ones: a blank `STARTUP` is what the table showed too.
+- **The cost is vertical.** The workspaces card grows from 322 px to 527 px at
+  390 px. That is the scroll a page already has; a sideways one is not.
+- **`48rem` is measured.** 768 px is the narrowest viewport where the table's own
+  `ACT` cell is on screen without a swipe, so it is where the table is allowed
+  back.
+
+**jsdom implements no `matchMedia` at all** — not a stub returning false, nothing
+— so `dashboard.test.tsx` supplies a width to every test and its stub evaluates
+the query `DataTable` really asks. The breakpoint stays the component's to choose.
+
 ## The write that makes a workspace
 
 `NewWorkspace.tsx` posts `{name, machine, repo, startup?}` to `/api/workspaces`
@@ -215,7 +244,8 @@ src/
     Section.tsx      the looked switch; children run only in the ok branch
     NewWorkspace.tsx the create form
     Act.tsx          start / stop / resume, per workspace row
-    DataTable.tsx    the table; owns "we looked and there is nothing"
+    DataTable.tsx    a table, or a block per row on a phone; owns "we looked
+                     and there is nothing"
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
