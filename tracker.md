@@ -143,12 +143,18 @@ became Y-200..Y-207 and PR #80 merged renumbered.
 
 ### Open
 
-Four rows open. Three are the owner's — Y-118 and Y-122 wait on an ADR being accepted, Y-117 waits on
-M10 — and one is what is left of the 2026-08-03 audit of the spec against the code (Y-126), which is
-the first time this file has held a row it found by looking rather than by building. Y-126 is
-part-built: the owner settled its open question, and the core verb and the CLI shipped ahead of the
-route and the form. Y-120 closed on 2026-08-03, as did Y-124 and Y-125, the audit's other two
-findings; all three sit here until the next archive trim.
+Three of the open rows are the owner's — Y-118 and Y-122 wait on an ADR being accepted, Y-117 waits
+on M10. The rest is what is left of the 2026-08-03 audit of the spec against the code (Y-126), the
+first time this file has held a row it found by looking rather than by building; Y-126 is part-built,
+the owner having settled its open question, with the core verb and the CLI shipped ahead of the route
+and the form. Y-120 closed on 2026-08-03, as did Y-124 and Y-125, the audit's other two findings;
+all three sit here until the next archive trim.
+
+**This paragraph does not say how many rows are open**, and that is [Y-120](#3-task-board)'s rule
+applied to the file that wrote it. The count was here for a day and went stale three times in it —
+once per merge — because three branches were closing rows at once and each had to guess what the
+others would leave behind. A number restated above a table that already carries it is the drift
+Y-120 deleted everywhere else; the table is the count.
 
 | ID | Task | Status | Owner | Depends | Notes |
 | --- | --- | --- | --- | --- | --- |
