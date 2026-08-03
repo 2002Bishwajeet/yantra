@@ -158,8 +158,12 @@ traits' own implementations must be tested against the real thing.
   [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds most of them, and
   `tracker.md §1b` says where the rest are. They are rules research proved the hard way; violating
   one produces a bug that looks like something else.
-- **Commits carry no co-author, "Generated with", or AI-attribution trailers of any kind.** The repo
-  owner set this rule explicitly. Plain, professional messages only.
+- **Commits carry no AI attribution — no `Co-Authored-By` naming an assistant, no "Generated with",
+  no session trailer.** The repo owner set this rule explicitly. Plain, professional messages only.
+  **A bot trailer is not AI attribution** (owner, 2026-08-03): GitHub's squash merge lifts
+  `Co-authored-by: dependabot[bot]` out of the PR body, and it stays. The rule is about what is
+  claimed to have written the code, not about the trailer as a form — so an audit greps for the
+  assistant, not for `Co-Authored-By`.
 - Task IDs `Y-NNN` from `tracker.md`. Commits: `Y-030: add cargo workspace skeleton`.
   Branches: `y-030-cargo-skeleton`. One branch per issue, one PR per branch. **`Y-2xx` is reserved
   for the landing page**, which keeps its own tracker on its own branch — it has taken a number this
