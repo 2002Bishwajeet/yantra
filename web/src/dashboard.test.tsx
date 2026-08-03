@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cleanup,
   fireEvent,
@@ -39,6 +39,19 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
 })
+
+/** jsdom implements no `matchMedia` at all, so a width has to be supplied — and
+ *  this one answers the query the component really asks rather than a fixed
+ *  boolean, so the breakpoint stays the component's to choose. */
+function viewport(width: number) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: width < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+}
+
+beforeEach(() => viewport(1280))
 
 function machine(overrides: Partial<Machine> = {}): Machine {
   return {
@@ -235,6 +248,65 @@ describe('the workspaces table', () => {
         'no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml',
       ),
     ).toBeTruthy()
+  })
+})
+
+/** Y-121. The buttons were 15 px past the right edge of a 390 px phone, in a
+ *  749 px table inside 295 px of card. Below the breakpoint there is no table,
+ *  so there is nothing to swipe sideways and nothing to fall off the end of. */
+describe('a workspace row on a phone', () => {
+  const site: Workspace = {
+    name: 'personal-website',
+    machine: 'bishwajeets-macbook-pro',
+    repo: '/Users/<user>/Github/personal-website',
+    startup: null,
+  }
+
+  function draw() {
+    return render(
+      <DataTable
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        rows={[site]}
+        rowKey={(row) => row.name}
+        empty="no workspaces yet"
+      />,
+    )
+  }
+
+  it('puts the three verbs on the page instead of inside a table that scrolls', () => {
+    viewport(390)
+    const { container } = draw()
+
+    for (const name of ['Start claude', 'Stop', 'Resume']) {
+      expect(screen.getByRole('button', { name })).toBeTruthy()
+    }
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.querySelector('[data-slot="table-container"]')).toBeNull()
+  })
+
+  it('drops no column — every fact the row carried is still labelled', () => {
+    viewport(390)
+    const { container } = draw()
+
+    const labels = [...container.querySelectorAll('dt')].map(
+      (one) => one.textContent,
+    )
+    expect(labels).toEqual([
+      'WORKSPACE',
+      'MACHINE',
+      'ACT',
+      'REPO',
+      'STARTUP',
+      'COMMAND',
+    ])
+    expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
+  })
+
+  it('keeps the table where there is room for one', () => {
+    viewport(1024)
+    const { container } = draw()
+
+    expect(container.querySelector('table')).toBeTruthy()
   })
 })
 

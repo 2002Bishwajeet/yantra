@@ -29,6 +29,14 @@ laptop, no SSH.
 > it. There is also no `personal-website` checkout on the Mac — the acceptance sentence names a repo
 > that has never been there.
 
+> **2026-08-03, Y-121.** *From my phone* now holds on the phone's side. The start button was landing
+> at x 358–443 on a 390 px screen and is now at **x 140–225** at 390 px and 320 px alike, with no
+> table to swipe sideways: below 48rem a workspace is a labelled block, not a table row. Measured
+> before and after in headless Chromium over the same HTTPS URL, and no column was dropped to do it.
+>
+> **Everything still in the way of the sentence is on the Mac, not in this repo** — `claude` is not
+> logged in there, and `personal-website` is not checked out there.
+
 ## 2. Why the scope changed
 
 M5 was `Placement` — scoring, `preferred`/`automatic` modes, and `yantra why`. The owner deferred it
@@ -178,6 +186,7 @@ amendment on ADR-0016 and carried by **Y-118**; it does not block Y-113 or Y-114
 | Y-114 | PWA shell — installable on iOS | Needs Y-111. Manifest, icons, `apple-touch-icon`, `display: standalone`, an offline shell that never caches a reading (R-23: a cached dashboard tells confident lies). **Done 2026-08-03**, hand-written rather than `vite-plugin-pwa`, and the readings are never intercepted at all rather than cached carefully. The install to a home screen is the one part no test here reached — it wants a device. |
 | Y-115 | Unreachable machines read honestly, and offer no wake | Closes the loop on 4.2 rather than leaving a gap the UI has to invent. |
 | Y-116 | Create and edit a workspace from the dashboard | 4.4 — without it the acceptance test has nothing to open. |
+| Y-121 | The buttons fall off the right edge of a phone | Not planned for: found by measuring what Y-113 shipped, and it is §1's last inch. A table cannot be made to fit — the first two cells alone are wider than the screen — so below 48rem a row is a block. **Done 2026-08-03.** |
 
 Y-109 (beat age on the dashboard) is not part of this milestone but is its natural companion: the
 picker in Y-113 is far more useful when each machine shows its own free RAM and power state.

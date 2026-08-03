@@ -147,8 +147,8 @@ export function workspaceColumns(
         )
       },
     },
-    // Third, not last: the table scrolls sideways on a phone, and the whole
-    // point of this page is that the buttons are the thing within reach.
+    // Third, not last: the buttons are the whole point of this page, so they
+    // come before the fields you only read — in a row and in a block alike.
     { header: 'ACT', cell: (workspace) => <Act workspace={workspace} /> },
     { header: 'REPO', cell: (workspace) => workspace.repo },
     { header: 'STARTUP', cell: (workspace) => workspace.startup ?? '' },
