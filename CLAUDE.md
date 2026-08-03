@@ -126,9 +126,9 @@ path over an elegant abstraction. Resist generalising before the third use.
 
 ## B2. Orchestrate, don't reinvent
 
-Yantra coordinates `ssh`, `tmux`, `tailscale`, `docker`, and agent CLIs. If your design starts
-implementing a terminal multiplexer, an SSH client, or a container runtime, **stop** — that is the
-signal you have misread the project.
+Yantra coordinates `ssh`, `tmux`, `tailscale`, `docker`, and agent CLIs — `docker` names intended
+scope, not a shipped capability (Y-125). If your design starts implementing a terminal multiplexer,
+an SSH client, or a container runtime, **stop** — that is the signal you have misread the project.
 
 Concretely: transport is the **system `ssh` binary** with `ControlMaster` multiplexing (I-20), not
 `russh`. Keep SSH, tmux, telemetry and hardware behind narrow traits — these are the four seams where

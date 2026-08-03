@@ -64,6 +64,11 @@ sharing one number today. `Age.tsx` already owns the threshold, so this is one f
 
 ### 1.4 Three tables is the API's shape, not the operator's
 
+> **Not built (2026-08-03, Y-125): M4 closed with the four-table shape unchanged.** This section is
+> left as written — it is what the plan knew on 2026-08-02. §3's waiting table and §6's risk both go
+> on citing this as pending; neither has happened and neither is scheduled. A workspace-centric
+> layout is a new task if it returns, not a resumption of this one.
+
 The read model has three classes because they refresh on three clocks — a *daemon* fact. The mental
 model is **workspaces**; a machine and a session are things a workspace has.
 

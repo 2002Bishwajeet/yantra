@@ -78,10 +78,11 @@ Re-verify anything version-sensitive before relying on it. Mark claims you execu
 
 ## Scope
 
-Yantra orchestrates `ssh`, `tmux`, `tailscale`, `docker` and agent CLIs. If a change starts
-implementing a terminal multiplexer, an SSH client or a container runtime, stop — that is the signal
-the project has been misread. **Provisioning is a permanent non-goal**: Yantra adopts machines that
-already exist; it never creates, images or destroys them.
+Yantra orchestrates `ssh`, `tmux`, `tailscale`, `docker` and agent CLIs — `docker` names intended
+scope, not a shipped capability (Y-125). If a change starts implementing a terminal multiplexer, an
+SSH client or a container runtime, stop — that is the signal the project has been misread.
+**Provisioning is a permanent non-goal**: Yantra adopts machines that already exist; it never
+creates, images or destroys them.
 
 ## Pull requests
 
