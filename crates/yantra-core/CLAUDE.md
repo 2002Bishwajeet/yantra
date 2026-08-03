@@ -15,7 +15,7 @@ yourself formatting a column here, it belongs there.
 
 ## Read before touching anything
 
-**[`tracker.md`](tracker.md)** — this crate's own, holding the 37 invariants that bind code here,
+**[`tracker.md`](tracker.md)** — this crate's own, holding the invariants that bind code here,
 most of them earned by a bug that looked like something else. They are not style notes. Which ones
 bind where:
 
