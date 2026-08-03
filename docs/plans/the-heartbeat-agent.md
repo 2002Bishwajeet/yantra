@@ -452,6 +452,12 @@ percentage, from whatever the platform's mains and battery sources are**, and ev
   (`Now drawing from 'Battery Power'`) parsed by the same function, since a real one needs a hand on
   a cable.
 
+  > **2026-08-03, Y-110.** The hand was put on the cable: the MacBook was unplugged and beat
+  > `"power":{"battery":{"percent":100}}` to a live `yantrad`, so this is no longer true of macOS.
+  > It stays true of Linux — `cachyos-g14` was on mains throughout. The recorded string was also
+  > **wrong where it guessed**: a real unplugged Mac reads 100 % while `discharging`, and macOS
+  > prints `(no estimate)` before it prints a time.
+
 ### 3.7 `sent_at` — its stated purpose is currently unexercised
 
 ADR-0013 gives `sent_at` one job: telling *"measured 9 s ago, delivered slowly"* from *"this machine's
