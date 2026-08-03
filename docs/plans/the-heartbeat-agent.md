@@ -2,8 +2,8 @@
 
 - **Date:** 2026-08-02
 - **Status:** proposal, awaiting review
-- **Implements:** [ADR-0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md), which is
-  still `proposed` — see §6
+- **Implements:** [ADR-0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md), which was
+  still `proposed` when this was written — see §6
 - **Follows:** [m4-dashboard-next.md](m4-dashboard-next.md), whose §4 named `yantra-agent` *"still a
   19-line stub that prints its version — the largest functional gap in the project"*
 
@@ -611,6 +611,12 @@ does **not** resolve names at all. Two consequences to record:
 ---
 
 ## 6. ADR-0013 is `proposed`, and accepting it is the owner's
+
+> **Settled 2026-08-03 (Y-103): the owner accepted ADR-0013, and ADR-0016 with it.** This section is
+> left as written — it is what the plan knew on 2026-08-02. One thing it predicted is worth keeping
+> visible: *"the status must be flipped before the code lands"* did **not** happen. Y-104 through
+> Y-108 shipped first and the flip came a day after, which is the order this section was written to
+> prevent.
 
 `tracker.md` §5 lists ADR-0013 as the one **proposed** decision among thirteen accepted ones, and §B5
 makes accepting an ADR the owner's call rather than Claude's. Building to a proposed ADR is what was
