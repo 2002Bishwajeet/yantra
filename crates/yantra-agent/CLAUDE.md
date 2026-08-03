@@ -79,9 +79,14 @@ closed, a status that is not 204, log-once-then-quiet) driven for real. A mocked
 test the mock (root §B3).
 
 The probes' parsers are exercised against output recorded from both fleet machines, which is not a
-substitute for §B3 but the only way to reach two states this fleet cannot produce: a desktop with no
-battery, and a machine that is unplugged. **A fixture is not evidence about a platform** — run the
+substitute for §B3 but the only way to reach the states this fleet has not produced: a desktop with
+no battery, and an unplugged Linux machine. **A fixture is not evidence about a platform** — run the
 binary on both machines ([the heartbeat-agent plan §9](../../docs/plans/the-heartbeat-agent.md), I-32).
+
+`PMSET_BATTERY` was hand-written until Y-110 unplugged the Mac, and the guess was wrong twice: the
+real line reads **100 % while discharging** — the same percentage the AC fixture carries — and macOS
+prints `(no estimate)` for the first minutes off mains before it prints a time. Both real forms are
+fixtures now.
 
 ## What binds the probes
 
