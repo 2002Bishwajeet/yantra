@@ -14,6 +14,24 @@ export type Machine = {
   expired: boolean
   // Present as null, and meaningless when `online` — I-39.
   last_seen: string | null
+  // null is "never heard from" and is not a beat that reports zero (I-47).
+  heartbeat: Beat | null
+}
+
+// ADR-0013 §2: two variants, so unknown power cannot be spelled. A string and
+// an object, so neither can be misread as the other.
+export type Power = 'ac' | { battery: { percent: number } }
+
+/** What a machine last said about itself, aged from when it *arrived* — the
+ *  beat's own `sent_at` is diagnostic and never the freshness source. */
+export type Beat = {
+  age_seconds: number
+  arch: string
+  labels: string[]
+  free_ram_mb: number
+  free_disk_mb: number
+  cpu_busy_pct: number
+  power: Power
 }
 
 export type Workspace = {

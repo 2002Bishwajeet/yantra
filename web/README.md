@@ -60,6 +60,19 @@ and neither is optional:
 Three files under `src/components/ui/` bail out today and the build says so.
 They are shadcn's generated source; see below.
 
+## The four heartbeat states
+
+The machines table draws ADR-0013 §7, and it has four states rather than two because a page that
+says *asleep* when it means *we have not heard from it* is the lie the read model exists not to tell
+(R-23). A beat inside 30 s is **ready**; past that, Tailscale's `online` chooses between **up, but
+not reporting** — an agent problem, a different thing to go and fix — and **asleep or off**; and a
+machine with no beat at all is **never heard from**, which is `heartbeat: null` and never a row of
+zeros. `online` picks the explanation and never decides whether a beat arrived (R-8).
+
+The daemon names none of this: `reporting()` in `columns.tsx` owns the threshold, the way `Age.tsx`
+owns the staleness one. Most of this tailnet is a phone, a tablet and two dead laptops, so *never
+heard from* is the permanent and correct state on most rows.
+
 ## The one write
 
 `NewWorkspace.tsx` posts `{name, machine, repo, startup?}` to `/api/workspaces`

@@ -56,6 +56,20 @@ pub struct Fleet {
     pub beats: Beats,
 }
 
+/// So a handler asks for the half it reads: `/api/machines` joins the two, and
+/// every other route still names the snapshot alone.
+impl axum::extract::FromRef<Fleet> for Model {
+    fn from_ref(fleet: &Fleet) -> Self {
+        fleet.model.clone()
+    }
+}
+
+impl axum::extract::FromRef<Fleet> for Beats {
+    fn from_ref(fleet: &Fleet) -> Self {
+        fleet.beats.clone()
+    }
+}
+
 pub fn router() -> Router<Fleet> {
     Router::new()
         .route("/heartbeat", post(receive))

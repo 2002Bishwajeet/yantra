@@ -532,7 +532,7 @@ mod tests {
         use tower::ServiceExt as _;
 
         let app = crate::api::router()
-            .with_state(crate::refresh::Model::default())
+            .with_state(crate::heartbeat::Fleet::default())
             .merge(router(tailnet(vec![])));
 
         let read = app
