@@ -33,8 +33,10 @@ tracker's Decisions or Open questions section and flag it.
   and the task ID in parentheses when one exists:
   `feat: add cargo workspace skeleton (Y-030)`. Work with no tracker task just takes the prefix.
   One format everywhere, so history stays greppable and machine-readable.
-- **No trailers.** Commits carry **no `Co-Authored-By`, no "Generated with …", no AI attribution of
-  any kind.** Whoever pressed the button owns the change. This applies to PR titles and bodies too.
+- **No AI attribution.** Commits carry **no `Co-Authored-By` naming an assistant, no "Generated
+  with …", no session trailer.** Whoever pressed the button owns the change. This applies to PR
+  titles and bodies too. A bot trailer is a different thing and is fine — a dependabot squash
+  carries `Co-authored-by: dependabot[bot]`, and that stays.
 - Small, logical commits. One giant squashed drop is not reviewable.
 
 ## Before you push
