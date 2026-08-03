@@ -84,6 +84,53 @@ secret in it stays a reference (`op://…`, `pass show …`) the shell resolves.
 check is made over that string — a heuristic over an arbitrary command either
 misses the real case or refuses a legitimate one.
 
+## Installable on a phone (Y-114)
+
+`public/manifest.webmanifest` plus `public/sw.js`, registered from `main.tsx` on
+production builds only. It needs HTTPS — a service worker will not register
+outside a secure context — which is `just https` in the repo root.
+
+**The one rule: the worker never caches a reading.** `/api`, `/healthz` and
+`/heartbeat` are not intercepted at all, so the browser makes those requests
+itself and a daemon that cannot be reached becomes `useLooked`'s `failed`
+envelope, exactly as it does with no worker installed. Offline reads as offline.
+A cached reading would be R-23's confident lie with a longer memory, and
+`src/sw.test.ts` runs the shipped `sw.js` against a fake `caches` to prove it —
+including that a reading planted in the cache by hand is still not served.
+
+The shell is **network first**, one path for navigations and assets alike, so a
+cached response only ever means the network was not there. Navigations share the
+key `/`, because `yantrad`'s SPA fallback answers every one of them with
+`index.html`; that is what makes a deep link work offline. `install` fetches `/`
+and the root-relative `src`/`href` it names, so the first launch from a home
+screen can be the first launch offline. Fonts are reached from CSS rather than
+from the HTML, so they arrive on first use and their absence costs a typeface,
+not a reading.
+
+**No `vite-plugin-pwa`.** The only thing it adds over 45 lines is a build-time
+precache manifest of Vite's hashed filenames, which `install` reads out of
+`index.html` for four lines — and against that it brings a Workbox runtime, a
+config to audit, and defaults that cache far more than the shell.
+
+**No colour in the manifest.** `theme_color` and `background_color` take a
+literal, and `index.css` is the swap point a design system replaces; neither is
+required for installability, so neither is here.
+
+Icons are the existing `favicon.svg` rasterised onto white — opaque because iOS
+composites a transparent home-screen icon onto black — with `librsvg` and
+ImageMagick:
+
+```sh
+rsvg-convert -h 348 -o /tmp/glyph.png public/favicon.svg
+magick /tmp/glyph.png -background white -gravity center -extent 512x512 \
+  -alpha remove -alpha off public/icon-512.png
+magick public/icon-512.png -resize 192x192 public/icon-192.png
+magick public/icon-512.png -resize 180x180 public/apple-touch-icon.png
+```
+
+`apple-touch-icon.png` is a separate file because Safari takes the home-screen
+icon from the `<link>` and not from the manifest.
+
 ## The seam
 
 A design system is arriving from elsewhere. Two rules keep it a one-file change:
@@ -103,6 +150,10 @@ was rewired to the media query rather than left with nothing to toggle it.
 ## Layout
 
 ```
+public/
+  sw.js              the service worker; caches the shell and never a reading
+  manifest.webmanifest
+  favicon.svg  icon-192.png  icon-512.png  apple-touch-icon.png
 src/
   api.ts             the wire shapes; every state is a tag, never a missing key
   useLooked.ts       the poll — every read, class or agent
