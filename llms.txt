@@ -11,7 +11,7 @@ anything else — including this file — when they disagree.
 
 Each crate carries its own `CLAUDE.md`, `tracker.md`, `llms.txt` and `README.md`. Start at the crate
 you are changing rather than reading the root documents end to end. **The invariants live in the
-crate trackers** — 49 non-obvious rules, numbered to I-52, most earned by a bug that presented as
+crate trackers** — 50 non-obvious rules, numbered to I-53, most earned by a bug that presented as
 something else, and 35 of them in `yantra-core`. They are the highest-value thing in the repo.
 
 ## Start here
