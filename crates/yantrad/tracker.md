@@ -32,8 +32,11 @@ against the real crate before relying on them.
 
 ## Open work
 
-Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-020** (the
-telemetry ADR, still `proposed`). M4 builds this crate; its tasks are not broken down yet.
+Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-118** —
+`tailscale serve` launders the caller's address, so ADR-0016's authoriser sees the proxy; the ADR was
+accepted 2026-08-03 (Y-103) and is therefore immutable, so the fix is an amending or superseding ADR
+rather than an edit. **Y-020** is closed and its telemetry ADR ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md))
+was accepted on the same day.
 
 **Y-044 is closed** — dropped 2026-08-02 without being built. Session state is derived from tmux
 (`pane_start_command`, Y-091) and declared in the workspace TOML, and the audit found no consumer for

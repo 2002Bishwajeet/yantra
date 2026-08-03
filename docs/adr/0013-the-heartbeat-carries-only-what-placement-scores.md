@@ -1,7 +1,7 @@
 # ADR-0013 — The heartbeat carries only what placement scores, and absent power data means AC
 
 - **Date:** 2026-07-31
-- **Status:** proposed
+- **Status:** accepted (2026-08-03, by the owner — Y-103)
 - **Closes:** Y-020
 - **Builds on:** Q3, which settled the *shape* — push heartbeat, 10 s, stale at 30 s — and nothing else.
 

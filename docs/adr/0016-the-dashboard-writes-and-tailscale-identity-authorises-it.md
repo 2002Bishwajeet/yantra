@@ -1,7 +1,7 @@
 # ADR-0016 — The dashboard writes, and Tailscale identity authorises it
 
 - **Date:** 2026-08-02
-- **Status:** proposed
+- **Status:** accepted (2026-08-03, by the owner — Y-103)
 - **Closes:** the write half of Y-112
 - **Builds on:** Q6, which settled that Yantra is personal-first and has no authentication, and
   [ADR-0013](0013-the-heartbeat-carries-only-what-placement-scores.md) §5, which established that a
