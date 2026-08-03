@@ -37,6 +37,18 @@ always will — a reply the agent could act on would make the agent something ot
 no machine: the beat is attributed to whichever peer holds the address it arrived from, and one from
 an address no peer holds is refused with `403`.
 
+`GET /api/machines` is where those beats are read back. Each machine carries the latest one and how
+long ago it arrived, and a machine nothing has ever been heard from carries **`null`** rather than a
+row of zeros — the two send a person to different places. The daemon names no display state: it
+serves the age and Tailscale's `online`, and the dashboard turns those into ADR-0013 §7's four. The
+beat is the one thing on this route that `yantra ls machines` cannot yet show.
+
+```json
+{"name": "cachyos-g14", "online": true, …,
+ "heartbeat": {"age_seconds": 1, "arch": "x86_64", "labels": ["gpu", "podman", "tmux"],
+               "free_ram_mb": 7866, "free_disk_mb": 361282, "cpu_busy_pct": 8, "power": "ac"}}
+```
+
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:
 
 ```json

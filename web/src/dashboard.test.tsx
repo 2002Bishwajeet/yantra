@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import type {
   AgentState,
+  Beat,
   Looked,
   Machine,
   MachineSessions,
@@ -47,6 +48,20 @@ function machine(overrides: Partial<Machine> = {}): Machine {
     online: true,
     expired: false,
     last_seen: '2026-07-07T09:00:00Z',
+    heartbeat: beat(),
+    ...overrides,
+  }
+}
+
+function beat(overrides: Partial<Beat> = {}): Beat {
+  return {
+    age_seconds: 3,
+    arch: 'x86_64',
+    labels: ['gpu', 'cuda', 'docker'],
+    free_ram_mb: 19942,
+    free_disk_mb: 214003,
+    cpu_busy_pct: 15,
+    power: 'ac',
     ...overrides,
   }
 }
@@ -117,7 +132,7 @@ describe('the machines table', () => {
       />,
     )
     const cells = [...container.querySelectorAll('td')].map((cell) => cell.textContent)
-    expect(cells).toEqual(['cachyos-g14', 'linux', 'online', ''])
+    expect(cells).toEqual(['cachyos-g14', 'linux', 'online', 'readybeat 3s ago', ''])
   })
 
   it('composes the status sentence and does not fold an expired key into offline', () => {
@@ -131,6 +146,58 @@ describe('the machines table', () => {
     )
     expect(screen.getByText('offline, key expired')).toBeTruthy()
     expect(screen.getByText('4d ago')).toBeTruthy()
+  })
+})
+
+/** ADR-0013 §7. The two tests that matter are the dishonest readings: a machine
+ *  nothing has ever been heard from must not read as *asleep*, and one Tailscale
+ *  still sees must not read as *ready* on the strength of that alone (R-23). */
+describe('the four heartbeat states', () => {
+  function draw(one: Machine) {
+    return render(
+      <DataTable
+        columns={machineColumns}
+        rows={[one]}
+        rowKey={(row) => row.name}
+        empty="no machines on this tailnet"
+      />,
+    )
+  }
+
+  it('says never heard from, and never asleep, for a machine that has not beaten', () => {
+    draw(machine({ online: false, heartbeat: null }))
+
+    expect(screen.getByText('never heard from')).toBeTruthy()
+    expect(screen.queryByText('asleep or off')).toBeNull()
+    // Not a zeroed reading either: there is no age to show, so none is shown.
+    expect(screen.queryByText(/beat .* ago/)).toBeNull()
+  })
+
+  it('says up, but not reporting — and never ready — when only Tailscale sees it', () => {
+    draw(machine({ online: true, heartbeat: beat({ age_seconds: 92 }) }))
+
+    expect(screen.getByText('up, but not reporting')).toBeTruthy()
+    expect(screen.queryByText('ready')).toBeNull()
+    expect(screen.getByText('beat 92s ago')).toBeTruthy()
+  })
+
+  it('says asleep or off when the beats stopped and Tailscale lost it too', () => {
+    draw(machine({ online: false, heartbeat: beat({ age_seconds: 92 }) }))
+
+    expect(screen.getByText('asleep or off')).toBeTruthy()
+    expect(screen.queryByText('never heard from')).toBeNull()
+  })
+
+  it('is ready inside the threshold and reports what the beat carried', () => {
+    const { container } = draw(
+      machine({
+        heartbeat: beat({ age_seconds: 30, power: { battery: { percent: 42 } } }),
+      }),
+    )
+
+    expect(screen.getByText('ready')).toBeTruthy()
+    expect(screen.getByText('beat 30s ago')).toBeTruthy()
+    expect(container.querySelector('[title*="battery, 42%"]')).toBeTruthy()
   })
 })
 

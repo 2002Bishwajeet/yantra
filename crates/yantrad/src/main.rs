@@ -105,7 +105,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         .nest(
             "/api",
             api::router()
-                .with_state(fleet.model.clone())
+                .with_state(fleet.clone())
                 .merge(write::router(inventory.clone())),
         )
         .merge(heartbeat::router())
