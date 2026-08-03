@@ -155,7 +155,7 @@ traits' own implementations must be tested against the real thing.
 ## B5. Conventions
 
 - **Read the invariants for the crate you are changing before writing orchestration code** —
-  [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds 36 of the 49, and
+  [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds 37 of the 50, and
   `tracker.md §1b` says where the rest are. They are rules research proved the hard way; violating
   one produces a bug that looks like something else.
 - **Commits carry no co-author, "Generated with", or AI-attribution trailers of any kind.** The repo
