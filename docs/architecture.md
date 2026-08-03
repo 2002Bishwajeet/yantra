@@ -205,7 +205,10 @@ what compiles for Windows is `yantra-agent`, still a stub. Windows' actual probl
 
 **R-21 (macOS agents cannot authenticate over ssh)** is real and unfixed. It costs a target rather
 than the project, because reaching a Linux machine *through* the Mac sidesteps it entirely — one
-`ProxyJump` line in `~/.ssh/config`, and no Yantra code at all.
+`ProxyJump` line in `~/.ssh/config`, and no Yantra code at all. A proposal for the Mac itself exists
+and is the owner's to accept:
+[ADR-0018](adr/0018-the-tmux-server-carries-the-macos-login-session.md), which keeps ssh as the only
+transport and gives `yantra-agent` no new job.
 
 ---
 
