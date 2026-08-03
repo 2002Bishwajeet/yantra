@@ -113,6 +113,20 @@ list to find what it just made will draw an empty one.
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
 generalise the exception — a *read* that awaits ssh is still the bug that rule exists to prevent.
 
+## The dashboard's types are checked against these routes, not trusted to match
+
+`contract.rs` (Y-124) drives the real `api::router()` over a fake snapshot and commits every answer
+to [`web/src/contract.gen.ts`](../../web/src/contract.gen.ts) as TypeScript that `satisfies` the
+types in `web/src/api.ts`. **Move a DTO here and `just test` goes red**, saying `just fixtures`;
+regenerate without moving `api.ts` and `tsc` goes red instead. Before this the two sides were kept in
+step by convention, and a renamed field left every test green and the dashboard blank.
+
+TypeScript rather than JSON because an imported JSON module has its string literals widened to
+`string`, which none of `api.ts`'s discriminated unions accepts — the assertion has to sit where the
+literal is written. The write answers are serialised from their DTOs rather than fetched, since those
+handlers authorise a live tailnet caller and then await ssh; what that leaves unchecked is status
+codes, headers and every refusal body, none of which is JSON.
+
 ## TLS is not this crate's job, and the proxy costs it something
 
 Y-111 put the daemon behind `tailscale serve` on port 8443 (`just https`,

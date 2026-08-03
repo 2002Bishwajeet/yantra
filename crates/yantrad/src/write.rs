@@ -305,6 +305,57 @@ struct Resumed {
     term: String,
 }
 
+/// What these four routes put on the wire, for the seam check in
+/// [`crate::contract`] — built rather than fetched, because every handler here
+/// authorises a real tailnet caller and then awaits ssh.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
+    fn of<T: serde::Serialize>(value: &T) -> serde_json::Value {
+        serde_json::to_value(value).expect("a DTO of owned strings and numbers")
+    }
+    vec![
+        (
+            "made",
+            "Workspace",
+            of(&Made {
+                name: "site".to_owned(),
+                machine: "cachyos-g14".to_owned(),
+                repo: "/home/<user>/Github/site".to_owned(),
+                startup: Some("npm run dev".to_owned()),
+            }),
+        ),
+        (
+            "opened",
+            "Opened",
+            of(&Opened {
+                machine: "cachyos-g14".to_owned(),
+                session: Session::Created,
+                launched: true,
+                term: terminfo::FALLBACK.to_owned(),
+            }),
+        ),
+        (
+            "stopped",
+            "Stopped",
+            of(&Stopped {
+                machine: "cachyos-g14".to_owned(),
+                stopped: true,
+                ending: Some("Finished".to_owned()),
+            }),
+        ),
+        (
+            "resumed",
+            "Resumed",
+            of(&Resumed {
+                machine: "cachyos-g14".to_owned(),
+                resumed: false,
+                term: terminfo::FALLBACK.to_owned(),
+            }),
+        ),
+    ]
+}
+
 #[derive(Debug)]
 enum Refused {
     NotAPeer(IpAddr),

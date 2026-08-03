@@ -37,6 +37,11 @@ test-mac machine:
 build:
     cargo build --workspace
 
+# Rewrite web/src/contract.gen.ts from the routes themselves (Y-124). `just test`
+# compares the two, so a DTO that moved without this is a red build.
+fixtures:
+    YANTRA_FIXTURES=1 cargo test -p yantrad contract
+
 # TLS for the dashboard, so a phone can open it (docs/development.md). 8443
 # because `/` on 443 is code-server's, and the tailnet address because Y-069
 # has the daemon refuse loopback. Set once per machine; `--bg` persists it.

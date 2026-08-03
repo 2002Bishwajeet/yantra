@@ -213,6 +213,23 @@ magick public/icon-512.png -resize 180x180 public/apple-touch-icon.png
 `apple-touch-icon.png` is a separate file because Safari takes the home-screen
 icon from the `<link>` and not from the manifest.
 
+## Where `api.ts` is checked against the daemon (Y-124)
+
+Every test in `dashboard.test.tsx` stubs `fetch` and returns a literal typed to
+match `api.ts`, so the two sides of the wire were kept in step by convention:
+renaming a field in `crates/yantrad/src/api.rs` left both suites green and this
+page blank. `src/contract.gen.ts` is the answer — the daemon's own routes
+rendered into TypeScript that `satisfies` the types above, written by a Rust test
+and regenerated with `just fixtures` in the repo root.
+
+**Never edit it, and do not import it.** `tsc` type-checks every file under
+`src/`, which is the whole of how it runs; `npm run build` and the CI type-check
+step are where a mismatch surfaces. A DTO that moved without the file being
+regenerated fails on the Rust side first, saying so.
+
+It does not cover status codes, headers or the refusal bodies — those are plain
+text, and `Act.tsx` and `NewWorkspace.tsx` still map them by hand.
+
 ## The seam
 
 A design system is arriving from elsewhere. Two rules keep it a one-file change:
@@ -238,6 +255,7 @@ public/
   favicon.svg  icon-192.png  icon-512.png  apple-touch-icon.png
 src/
   api.ts             the wire shapes, read and written; every state is a tag
+  contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
   useLooked.ts       the poll — every read, class or agent
   columns.tsx        four Column<T>[] arrays: the four tables, as data
   components/
