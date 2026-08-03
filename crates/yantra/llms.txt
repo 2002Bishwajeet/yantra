@@ -7,6 +7,8 @@
 
 ## Commands
 
+- `yantra new <workspace> --machine M --repo P [--startup CMD]`: write a workspace file. Refuses to overwrite one that exists.
+- `yantra edit <workspace> [--machine M] [--repo P] [--startup CMD | --no-startup]`: change one that already does. **Refuses to change `machine` while a session is open on the one it would leave** — that session would stay where nothing looks for it (I-30). Needs at least one field.
 - `yantra up <workspace> [--agent claude]`: open the workspace's tmux session, optionally launching Claude Code in it. Running it twice attaches rather than duplicating.
 - `yantra resume <workspace>`: put the agent back on the conversation it left off, in the pane it died in. Refuses when the pane holds something it did not start.
 - `yantra logs <workspace> [-n N]`: the last N turns of the agent's transcript, plus how long since anything was written.

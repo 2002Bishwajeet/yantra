@@ -4,6 +4,9 @@ The command-line client. Ask for a workspace and it restores the context — pic
 the tmux session, resumes the agent.
 
 ```sh
+yantra new site --machine mac --repo /Users/you/code/site   # write a workspace
+yantra edit site --repo /Users/you/code/website             # change one that exists
+
 yantra up yantra --agent claude  # open it, and start Claude Code in it
 yantra resume yantra             # start it again where the last conversation stopped
 yantra logs yantra               # what the agent has been saying
