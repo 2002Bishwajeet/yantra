@@ -22,7 +22,7 @@ bind where:
 | Module | Invariants you will trip over |
 | --- | --- |
 | `ssh.rs` | I-20 (system binary), I-25 (silent failure), I-26 (payload is base64, never quoted), I-27 (orphans), I-28 (`ControlPath` ≤ 90 bytes) |
-| `pty.rs` | I-18 (a controlling terminal, or no resize), I-13 (never block a tokio worker), I-27 (a remote *terminal* is hung up where a remote command is orphaned), and `ssh.rs`'s whole list through `Ssh::tty_argv` — **except I-26**: the envelope's `/bin/sh` reads from a pipe, which is the one stdin tmux refuses |
+| `pty.rs` | I-18 (a controlling terminal, or no resize), I-13 (never block a tokio worker), I-27 (a remote *terminal* is hung up where a remote command is orphaned), and `ssh.rs`'s whole list through `Ssh::tty_argv` — **except I-26**: the envelope's `/bin/sh` reads from a pipe, which is the one stdin tmux refuses — and **I-54**, which is why a second viewer needs no tmux option |
 | `tmux.rs` | I-1 (`duplicate session:` is success), I-2 (name charset), I-4 (`remain-on-exit`), I-21 (`=name` is **session-only**), I-40 (never set `default-terminal`), I-41 (match the bracketed reason), I-42 (no tabs in `-F`), I-47/I-48 (dead-pane status *and* signal, both spellings) |
 | `terminfo.rs` | I-36, I-43 (two terminfo databases on one machine) |
 | `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain), I-49 (an agent at the trust prompt is inert), **I-53** (`auth status` reports the credential it found, never that it works), I-51 (tmux's own quotes around a start command) |

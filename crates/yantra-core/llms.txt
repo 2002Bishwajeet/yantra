@@ -50,3 +50,4 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 - [../../tracker.md](../../tracker.md): project state — milestones, open tasks, decisions, risks.
 - [tests/common/mod.rs](tests/common/mod.rs): the disposable sshd + tmux container every integration test runs against.
 - [tests/pty.rs](tests/pty.rs): Y-127's spike — ssh connections differing only in how the local end is given a terminal, answering whether `^C` reaches a process in a remote pane — followed by Y-128's tests of [pty.rs](src/pty.rs) itself, in the same container. It is where I-18 was finally measured; its header says what each arm found.
+- [tests/two_clients.rs](tests/two_clients.rs): Y-131 — two live clients on one tmux window, which is what a second browser tab is. Pins I-54 and falsifies R2's *"the smaller clamps pane size"*; `window-size manual` is measured beside it as the rejected alternative.
