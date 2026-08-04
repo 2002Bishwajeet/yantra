@@ -135,9 +135,13 @@ for the xterm.js it runs, and `terminfo::choose` probes it against the far side 
 message does both jobs, so it arrives again on every resize and is not read there — a caller cannot
 become a different terminal without opening another socket.
 
-**Do not log the stream.** Q5 closed *reference-only, always* and names a terminal stream in the
-sentence that closed it, so a resolved secret can be on this one. Log the lifecycle; never the
-payload, not truncated and not at debug.
+**Do not log the stream, and do not buffer it.** Q5 closed *reference-only, always* and names a
+terminal stream in the sentence that closed it, so a resolved secret can be on this one. Log the
+lifecycle; never the payload, not truncated and not at debug. **Reconnect needs no buffer here**
+(Y-132): a browser whose socket dropped opens another, this route opens another pty, and the tmux on
+the far side draws the pane's current contents for whichever client attaches — measured, alternate
+screen included, in [`tests/pty.rs`](../yantra-core/tests/pty.rs). A window of the last N bytes would
+be a second copy of what tmux already has, and it is the copy Q5 is about.
 
 This route is correctly authorised on 7717 and **reachable-but-unauthorised through 8443** until
 Y-118 lands, for the reason the proxy section below gives. That is not new to this route, and it

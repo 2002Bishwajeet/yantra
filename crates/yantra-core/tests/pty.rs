@@ -15,9 +15,11 @@
 //! the remote command comes from [`attach::remote_command`] rather than being
 //! written out here (I-34, I-35, I-36/I-43).
 //!
-//! **Y-128 turned the first arm into [`yantra_core::pty`]**, and the two tests
-//! that come first below ask the module the same questions in the same
-//! container — the spike's four are kept behind them as the comparison.
+//! **Y-128 turned the first arm into [`yantra_core::pty`]**, and the tests that
+//! come first below ask the module the same questions in the same container —
+//! the spike's four are kept behind them as the comparison. **Y-132 added the
+//! two about dropping a terminal and opening another**, which is what a phone
+//! locking its screen does.
 
 #![allow(clippy::expect_used)]
 
@@ -41,6 +43,13 @@ const SESSION: &str = "ptyspike";
 /// Long enough that only a signal can end it inside the test's lifetime, and
 /// distinctive enough to find by name.
 const VICTIM: &str = "sleep 300";
+/// Printed while a terminal is attached, and while none is.
+const BEFORE: &str = "before-the-drop";
+const AFTER: &str = "while-nobody-looked";
+const ON_THE_ALTERNATE_SCREEN: &str = "an-agents-tui";
+/// smcup for `xterm-256color`: the client's alternate screen, taken by the
+/// attaching tmux before it draws anything.
+const SMCUP: &str = "\u{1b}[?1049h";
 const ETX: u8 = 0x03;
 /// How long any awaited state gets. Polled, never slept through: the interesting
 /// failure is "never", not "not yet".
@@ -204,6 +213,24 @@ impl Lab {
         {
             bail!("`{VICTIM}` never started in the pane");
         }
+        Ok(())
+    }
+
+    async fn echo(&self, text: &str) -> Result<()> {
+        self.ask(&format!("send-keys -t '{}' 'echo {text}' Enter", self.pane))
+            .await?;
+        Ok(())
+    }
+
+    /// A stand-in for an agent's TUI: take the alternate screen, draw on it, and
+    /// stay there. R2 §7 measured that this is where `capture-pane` stops being
+    /// able to see the scrollback at all.
+    async fn draw_a_full_screen_application(&self) -> Result<()> {
+        self.ask(&format!(
+            r#"send-keys -t '{}' 'printf "\033[?1049h\033[H{ON_THE_ALTERNATE_SCREEN}"; {VICTIM}' Enter"#,
+            self.pane
+        ))
+        .await?;
         Ok(())
     }
 
@@ -459,6 +486,73 @@ async fn dropping_the_terminal_detaches_and_leaves_the_session_alone() -> Result
         SESSION,
         "and the session itself outlives the terminal"
     );
+    Ok(())
+}
+
+/// **Y-132: the screen comes back because tmux redraws it for whoever attaches
+/// next, so reconnecting is the whole of replay and nothing in Yantra holds a
+/// byte of the stream ([Q5](../../../tracker.md#6-open-questions)).**
+///
+/// The second terminal is a second `ssh` and a second tmux client. It is sent
+/// what was on the pane before the first one was dropped *and* what arrived
+/// while nothing was attached — the far side having been the durable one all
+/// along.
+#[tokio::test]
+async fn a_second_terminal_is_drawn_the_screen_the_first_one_left() -> Result<()> {
+    let Some(lab) = Lab::start("replay").await? else {
+        return Ok(());
+    };
+    let mut first = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
+    screen_showing(&mut first, SESSION).await?;
+    lab.echo(BEFORE).await?;
+    screen_showing(&mut first, BEFORE).await?;
+
+    drop(first);
+    assert!(
+        lab.wait_for(|lab| Box::pin(async move { Ok(!lab.a_client_is_attached().await?) }))
+            .await?,
+        "the first terminal has to be gone before the second one proves anything"
+    );
+    lab.echo(AFTER).await?;
+
+    let mut second = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
+    let drawn = screen_showing(&mut second, AFTER).await?;
+    assert!(
+        drawn.contains(BEFORE),
+        "what was on the screen before the drop must be drawn again: {drawn:?}"
+    );
+    assert!(
+        drawn.starts_with(SMCUP),
+        "and it starts by taking the client's alternate screen, so the old screen \
+         is not something this end has to clear: {drawn:?}"
+    );
+    Ok(())
+}
+
+/// **The case the acceptance test is actually about, and the one a byte window
+/// would have been worst at.** While a full-screen application holds the
+/// alternate screen, R2 §7 measured `capture-pane -S -` returning only that
+/// screen with the scrollback unreachable — a replay built on it would have had
+/// to know which of the two it was looking at. The attach redraw does not have
+/// the distinction to get wrong: it draws whatever is current.
+#[tokio::test]
+async fn a_full_screen_application_is_drawn_again_too() -> Result<()> {
+    let Some(lab) = Lab::start("altscreen").await? else {
+        return Ok(());
+    };
+    let mut first = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
+    screen_showing(&mut first, SESSION).await?;
+    lab.draw_a_full_screen_application().await?;
+    screen_showing(&mut first, ON_THE_ALTERNATE_SCREEN).await?;
+    assert_eq!(
+        lab.display("#{alternate_on}").await?,
+        "1",
+        "the pane must really be on the alternate screen, or this proves nothing"
+    );
+
+    drop(first);
+    let mut second = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
+    screen_showing(&mut second, ON_THE_ALTERNATE_SCREEN).await?;
     Ok(())
 }
 
