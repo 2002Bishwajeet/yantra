@@ -20,16 +20,31 @@ API the CLI cannot reach.
 | `GET /api/sessions` | `yantra ls sessions` |
 | `GET /api/workspaces/{name}/status` | `yantra status <name>` |
 | `POST /api/workspaces` | `yantra new` |
+| `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
 | `POST /api/workspaces/{name}/down` | `yantra down` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 
-The four `POST /api/…` routes are authorised by Tailscale identity
+The `/api/…` routes that write are authorised by Tailscale identity
 ([ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)): the
 source address is resolved live, and anything that is not this owner's own untagged node is refused
 `403`. A `tailscale` that cannot answer is **`503`** — nothing was decided about the caller, so
 blaming them would be a lie about which thing broke.
+
+`PATCH /api/workspaces/{name}` rewrites only the fields the body names, and answers the workspace as
+it now reads — the same shape `POST /api/workspaces` answers with. `"startup": null` clears the
+startup command and an absent `startup` leaves it alone; a body naming no field at all is a `400`.
+It is also the one route that **refuses** on purpose: changing `machine` while a tmux session is open
+on the machine being left is a **`409`**, because the session would stay behind where `down`,
+`resume`, `status` and `logs` no longer look and each would report it as absent. A machine that could
+not be asked is a **`503`** rather than a move — an unreachable machine can be holding that session
+just as well as a reachable one, so a typo in `machine` is unfixable while its machine is asleep, and
+there is no override.
+
+```json
+PATCH /api/workspaces/site   {"repo": "/home/<user>/code/site", "startup": null}
+```
 
 `POST /heartbeat` answers **`204` with nothing in it** and
 always will — a reply the agent could act on would make the agent something other than a reporter

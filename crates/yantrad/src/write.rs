@@ -3,7 +3,7 @@
 //!
 //! Until Y-112 the API answered 405 to every write and the dashboard handed
 //! over a command to paste into a terminal, which from a phone is worth
-//! nothing. These three are the CLI's own verbs and nothing more: the daemon
+//! nothing. These routes are the CLI's own verbs and nothing more: the daemon
 //! may do what `yantra` can already do, and the library decides how
 //! ([ADR-0005](../../../docs/adr/0005-core-logic-in-a-library-crate.md)).
 //!
@@ -19,9 +19,9 @@ use axum::Router;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
-use yantra_core::{down, resume, terminfo, tmux, up, workspace};
+use yantra_core::{down, edit, resume, terminfo, tmux, up, workspace};
 
 /// Generic in `S` so it merges into a router whose own state is something
 /// else: `with_state` decides the *resulting* state type, and a concrete
@@ -33,6 +33,7 @@ where
 {
     Router::new()
         .route("/workspaces", post(make::<I>))
+        .route("/workspaces/{name}", patch(change::<I>))
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
@@ -124,15 +125,7 @@ async fn make<I: Inventory + Clone + Send + Sync + 'static>(
         said: chain(&error),
     })?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(Made {
-            name: workspace.name,
-            machine: workspace.machine,
-            repo: workspace.repo.display().to_string(),
-            startup: workspace.startup,
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(Made::from(workspace))))
 }
 
 /// Distinct from [`from_workspace`] because the errors that matter here are the
@@ -145,6 +138,88 @@ fn from_create(error: &workspace::Error) -> StatusCode {
             StatusCode::BAD_REQUEST
         }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// The dashboard's half of `yantra edit`. Only the fields named are rewritten,
+/// so absent and `null` may not mean the same thing: `"startup": null` is
+/// `--no-startup`, and no `startup` key at all leaves the command alone.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Change {
+    #[serde(default)]
+    machine: Option<String>,
+    #[serde(default)]
+    repo: Option<PathBuf>,
+    #[serde(default, deserialize_with = "sent")]
+    startup: Option<Option<String>>,
+}
+
+/// Serde reads an absent key and a `null` value alike, which for a PATCH is how
+/// a field nobody mentioned gets blanked. Wrapping what the key held keeps the
+/// outer `Option` meaning *the caller named this field*.
+fn sent<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    serde::Deserialize::deserialize(deserializer).map(Some)
+}
+
+impl Change {
+    /// `yantra edit` needs at least one field (clap's own group), for the reason
+    /// that binds here too: a request that asks for nothing would answer as one
+    /// that did something.
+    fn names_a_field(&self) -> bool {
+        self.machine.is_some() || self.repo.is_some() || self.startup.is_some()
+    }
+}
+
+impl From<Change> for workspace::Changes {
+    fn from(change: Change) -> Self {
+        Self {
+            machine: change.machine,
+            repo: change.repo,
+            startup: change.startup,
+        }
+    }
+}
+
+async fn change<I: Inventory + Clone + Send + Sync + 'static>(
+    State(inventory): State<I>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Path(name): Path<String>,
+    Json(change): Json<Change>,
+) -> Result<Json<Made>, Refused> {
+    let caller = allowed(&inventory, from.ip()).await?;
+    if !change.names_a_field() {
+        return Err(Refused::Verb {
+            status: StatusCode::BAD_REQUEST,
+            said: "an edit that names no field has nothing to do".to_owned(),
+        });
+    }
+    tracing::info!("edit {name} for {}", caller.node);
+
+    let edited = edit::edit(&name, &change.into())
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_edit(&error),
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Made::from(edited.workspace)))
+}
+
+/// The refusal Y-126 is about has to reach the client as something it can act
+/// on. A session still open on the machine being left is **409**: the request is
+/// reasonable and the world already answers, and `yantra down` is what changes
+/// that. A machine that could not be asked is **503** for [`Refused::CannotAsk`]'s
+/// reason — nothing was decided, so blaming the request names the wrong thing.
+fn from_edit(error: &edit::Error) -> StatusCode {
+    match error {
+        edit::Error::SessionOpen { .. } => StatusCode::CONFLICT,
+        edit::Error::CannotTell { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        edit::Error::Workspace(workspace::Error::Empty { .. }) => StatusCode::BAD_REQUEST,
+        edit::Error::Workspace(error) => from_workspace(Some(error)),
+        edit::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -270,12 +345,26 @@ fn chosen(term: &terminfo::Chosen) -> String {
     }
 }
 
+/// What both routes that write a workspace file answer with. The whole of it,
+/// because `refresh.rs` looks every 30 s and a client that re-read the list to
+/// see what it just wrote would draw what it replaced.
 #[derive(Debug, serde::Serialize)]
 struct Made {
     name: String,
     machine: String,
     repo: String,
     startup: Option<String>,
+}
+
+impl From<workspace::Workspace> for Made {
+    fn from(workspace: workspace::Workspace) -> Self {
+        Self {
+            name: workspace.name,
+            machine: workspace.machine,
+            repo: workspace.repo.display().to_string(),
+            startup: workspace.startup,
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -574,6 +663,148 @@ mod tests {
         .expect_err("the schema has no secrets field, and silently dropping one would be worse");
     }
 
+    /// **The refusal Y-126 is about, as the client receives it.** The detection
+    /// is proved against a real tmux in
+    /// [`yantra-core/tests/edit.rs`](../../yantra-core/tests/edit.rs); what is
+    /// proved here is that it arrives as something to act on rather than a 500,
+    /// since no test in this crate can reach the handler itself — `edit::edit`
+    /// reads the operator's own config directory and ssh's to the machine it
+    /// names.
+    #[tokio::test]
+    async fn a_session_open_on_the_machine_being_left_is_a_conflict_and_not_a_failure() {
+        let refused = edit::Error::SessionOpen {
+            workspace: "personal-website".to_string(),
+            machine: "cachyos-g14".to_string(),
+        };
+
+        let response = Refused::Verb {
+            status: from_edit(&refused),
+            said: chain(&refused),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("the body is in memory");
+        let said = String::from_utf8_lossy(&body);
+        assert!(said.contains("personal-website"), "{said}");
+        assert!(said.contains("cachyos-g14"), "{said}");
+        assert!(said.contains("yantra down personal-website"), "{said}");
+    }
+
+    /// R-23 over HTTP: a machine that could not be asked has decided nothing, so
+    /// it is neither the caller's mistake nor a success — and the cause travels
+    /// with it, because *ssh failed* alone sends the operator nowhere.
+    #[tokio::test]
+    async fn a_machine_that_could_not_be_asked_refuses_without_blaming_the_request() {
+        let refused = edit::Error::CannotTell {
+            workspace: "personal-website".to_string(),
+            machine: "pi".to_string(),
+            source: Box::new(yantra_core::ssh::Error::Transport {
+                host: "pi".to_string(),
+                diagnosis: "connect to host pi port 22: Connection refused".to_string(),
+            }),
+        };
+
+        let response = Refused::Verb {
+            status: from_edit(&refused),
+            said: chain(&refused),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("the body is in memory");
+        let said = String::from_utf8_lossy(&body);
+        assert!(said.contains("Connection refused"), "{said}");
+    }
+
+    /// The move nothing is holding: `edit` reaches the machine only when
+    /// `machine` really changes, so a workspace nothing runs on comes back whole
+    /// — which is what a form redraws from, the read model being up to 30 s old.
+    #[test]
+    fn an_edit_that_went_through_answers_the_workspace_as_it_now_reads() {
+        let answered = serde_json::to_value(Made::from(workspace::Workspace {
+            name: "personal-website".to_string(),
+            machine: "bishwajeets-macbook-pro".to_string(),
+            repo: "/home/<user>/Github/site".into(),
+            startup: None,
+        }))
+        .expect("a DTO of owned strings");
+
+        assert_eq!(
+            answered,
+            serde_json::json!({
+                "name": "personal-website",
+                "machine": "bishwajeets-macbook-pro",
+                "repo": "/home/<user>/Github/site",
+                "startup": null,
+            })
+        );
+    }
+
+    #[test]
+    fn an_edit_fails_the_way_the_verbs_beside_it_do() {
+        assert_eq!(
+            from_edit(&edit::Error::Workspace(workspace::Error::NotFound {
+                name: "nosuch".to_string(),
+                path: "/nowhere".into(),
+            })),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            from_edit(&edit::Error::Workspace(workspace::Error::InvalidName {
+                name: "../etc/passwd".to_string(),
+            })),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            from_edit(&edit::Error::Workspace(workspace::Error::Empty {
+                field: "machine"
+            })),
+            StatusCode::BAD_REQUEST,
+            "a field emptied by the request is the request's fault"
+        );
+        assert_eq!(
+            from_edit(&edit::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// The distinction a PATCH is silently wrong without: `"startup": null`
+    /// clears the command and an absent `startup` leaves it, and serde folds
+    /// both into `None` on its own.
+    #[test]
+    fn the_edit_body_tells_a_field_left_alone_from_one_cleared() {
+        let one: Change = serde_json::from_str(r#"{"repo":"/code/site"}"#).expect("one field");
+        assert_eq!(
+            one.repo.as_deref(),
+            Some(std::path::Path::new("/code/site"))
+        );
+        assert!(one.startup.is_none(), "an absent startup is not an edit");
+
+        let cleared: Change = serde_json::from_str(r#"{"startup":null}"#).expect("a shell again");
+        assert_eq!(cleared.startup, Some(None));
+        assert!(cleared.names_a_field(), "clearing a field is naming it");
+
+        let set: Change = serde_json::from_str(r#"{"startup":"npm run dev"}"#).expect("a command");
+        assert_eq!(
+            workspace::Changes::from(set).startup,
+            Some(Some("npm run dev".to_string()))
+        );
+
+        assert!(
+            !serde_json::from_str::<Change>("{}")
+                .expect("an empty body parses")
+                .names_a_field(),
+            "an edit that names no field has nothing to do"
+        );
+        serde_json::from_str::<Change>(r#"{"name":"renamed"}"#)
+            .expect_err("the filename is the identity, and a typo must not read as a rename");
+    }
+
     /// `GET /workspaces` is `api.rs`'s and `POST /workspaces` is this module's,
     /// on one path in two routers. Recorded because merging them *reads* like a
     /// conflict: axum merges the method routers, and only two handlers for the
@@ -628,5 +859,52 @@ mod tests {
         assert!(matches!(claude.agent, Some(Agent::Claude)));
 
         serde_json::from_str::<Start>(r#"{"agentt":"claude"}"#).expect_err("a typo is refused");
+    }
+
+    /// `PATCH /workspaces/{name}` sits one segment above `{name}/status`, which
+    /// `api.rs` owns on the same merged router. A 405 here would say the method
+    /// never reached a handler; the read below it says the new path did not
+    /// swallow the old one.
+    #[tokio::test]
+    async fn editing_is_authorised_and_does_not_shadow_the_route_below_it() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let app = crate::api::router()
+            .with_state(crate::heartbeat::Fleet::default())
+            .merge(router(tailnet(vec![])));
+
+        let mut edit = Request::patch("/workspaces/site")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"repo":"/code/site"}"#))
+            .expect("a PATCH with a JSON body");
+        edit.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+
+        let refused = app
+            .clone()
+            .oneshot(edit)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(
+            refused.status(),
+            StatusCode::FORBIDDEN,
+            "the PATCH reached authorisation rather than a 405, and this tailnet holds nobody"
+        );
+
+        let status = app
+            .oneshot(
+                Request::get("/workspaces/site/status")
+                    .body(Body::empty())
+                    .expect("a GET"),
+            )
+            .await
+            .expect("the router is infallible");
+        assert_eq!(
+            status.status(),
+            StatusCode::OK,
+            "the read one segment below still answers for itself"
+        );
     }
 }
