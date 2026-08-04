@@ -157,10 +157,13 @@ from `bishwajeets-macbook-pro` arrived from peer address `100.x.x.x` — *this* 
 caller only in `X-Forwarded-For`, alongside `Tailscale-User-Login`. So every write through the HTTPS
 port is attributed to whichever machine runs the proxy.
 
-Nothing breaks today: that address is the owner's own untagged node, so writes from the phone are
-authorised, which is what M5 needs. What is lost is the *failure mode* ADR-0016 exists for — a tagged
-CI runner or a node shared in from another tailnet would be authorised too. **Y-118** carries the
-fix; ADR-0016 has a dated amendment recording it.
+**Closed on 2026-08-05 by [ADR-0017](adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
+(Y-118).** The daemon now takes the caller's address from `X-Forwarded-For` when — and only when —
+the TCP peer is one of its own bind addresses, which is what a request that came through the proxy on
+this machine looks like and what nothing off it can produce. Everywhere else the peer is the caller
+as before, so a forged header on `:7717` still changes nothing, and a forwarded value that is not
+exactly one address is refused rather than repaired. A tagged CI runner or a node shared in from
+another tailnet is now refused on both ports.
 
 ## Testing
 

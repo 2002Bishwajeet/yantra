@@ -103,6 +103,10 @@ fn dashboard() -> Result<Router, Error> {
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
+    // ADR-0017 §2: the set bound here is exactly the set a forwarded address may
+    // arrive from, so the authoriser is built from it rather than from anything
+    // that could drift.
+    let authoriser = write::Authoriser::new(inventory.clone(), &addresses);
     let fleet = heartbeat::Fleet::default();
     refresh::spawn(&fleet.model, inventory.clone());
     let app = Router::new()
@@ -111,8 +115,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             "/api",
             api::router()
                 .with_state(fleet.clone())
-                .merge(write::router(inventory.clone()))
-                .merge(terminal::router(inventory.clone())),
+                .merge(write::router(authoriser.clone()))
+                .merge(terminal::router(authoriser)),
         )
         .merge(heartbeat::router())
         .with_state(fleet)

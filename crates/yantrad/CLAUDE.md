@@ -90,8 +90,9 @@ may do what `yantra` can already do, which is what stops it growing a richer API
 reach. A new verb here starts in the CLI.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
-the source address is resolved **live** through `whois`, and anything that is not this owner's own
-untagged node is refused. Three rules that are easy to get subtly wrong:
+the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
+untagged node is refused. *Which* address that is, is ADR-0017's — see the proxy section below.
+Three rules that are easy to get subtly wrong:
 
 - **A `tailscale` that cannot answer is `503`, never `403`.** Nothing was decided about the caller,
   and blaming them is a lie about which thing broke.
@@ -154,9 +155,11 @@ the far side draws the pane's current contents for whichever client attaches —
 screen included, in [`tests/pty.rs`](../yantra-core/tests/pty.rs). A window of the last N bytes would
 be a second copy of what tmux already has, and it is the copy Q5 is about.
 
-This route is correctly authorised on 7717 and **reachable-but-unauthorised through 8443** until
-Y-118 lands, for the reason the proxy section below gives. That is not new to this route, and it
-matters more here than it does to a button.
+This route is authorised on both ports since Y-118 (ADR-0017), and its test is the refusal that
+proves it: a forwarded address resolving to a **tagged** node does not get an upgrade even though the
+TCP peer is ours. That the peer must be a real one is why these tests bind a **real `TcpListener`** —
+`WebSocketUpgrade` strips `OnUpgrade` during extraction, so a `tower::oneshot` never reaches the
+handler and would assert a status the authoriser never produced.
 
 ## The dashboard's types are checked against these routes, not trusted to match
 
@@ -184,13 +187,30 @@ publicly-trusted certificate for the machine's `*.ts.net` name, so **do not term
 not add a cert crate** — the daemon speaks plain HTTP on 7717 and that is the whole design. It also
 proxies to the **tailnet address**, because loopback is refused above.
 
-**The proxy launders the source address, and that defeats the identity check.** Measured 2026-08-03:
-a request from another machine arrives at the backend from *this* node's address, with the caller in
-`X-Forwarded-For` and `Tailscale-User-Login`. Writes through 8443 are therefore all attributed to
-whichever machine runs the proxy — which is this owner's own untagged node, so they succeed, and
-ADR-0016's check rejects nothing it would otherwise have rejected. Its dated amendment records this;
-**Y-118** decides what to do. Until then, do not read `allowed()` as protection against a tagged or
-shared-in node — it is only that on the direct port.
+**The proxy launders the source address, and [ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
+is what unlaunders it** (Y-118, 2026-08-05). Measured 2026-08-03: a request from another machine
+arrives at the backend from *this* node's address, with the caller in `X-Forwarded-For` and
+`Tailscale-User-Login`. So the caller's address is the TCP peer **unless the peer is one of the
+addresses `listen_on` bound**, and then it is `X-Forwarded-For` — that condition and no other.
+`allowed()` is now protection on both ports.
+
+Three things about that rule are easy to get subtly wrong, and each is a security bug in a different
+direction:
+
+- **The trusted set is the bound addresses, not "local".** Not loopback, which is never bound; not
+  any private range. Widening it by one address gives whatever holds that address the run of the
+  fleet.
+- **An absent header is not a refusal.** It means nothing proxied the request, which is every call on
+  7717 — refusing it would leave the CLI's own port answering 503.
+- **One address or refuse.** `tailscaled` writes exactly one with `Set`, so a comma list, a second
+  header line or anything unparseable means something unmeasured is in the path. Do not take the
+  leftmost entry; that is how a caller-supplied entry becomes an identity.
+
+**The trust is in the local hop, not in `tailscale serve`.** Any process on this machine can connect
+to a bind address and name whatever caller it likes — no escalation under
+[ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md), since a
+local process can already call the library, but it is now written down. **Putting a second reverse
+proxy in front of 7717 is the condition to revisit that ADR.**
 
 ## Nothing expensive happens on the request path
 
