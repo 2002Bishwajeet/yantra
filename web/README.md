@@ -172,8 +172,12 @@ Three rules, and the second is why this is not a loop:
   server.
 
 What this cannot see: whether a phone's `close` event fires at all when the screen
-wakes. If a socket dies without either end noticing, nothing reopens and nothing
-here would know — there is still no ping and no idle timeout on the daemon side.
+wakes. If a socket dies without either end noticing, nothing here reopens and
+nothing here would know — but **the daemon now notices** (Y-134). It pings every
+20 s and ends a socket that misses two in a row, so the `ssh`, the pty and the
+tmux client behind an abandoned terminal are released without anything on this
+side having to detect the loss. The browser answers those pings itself, below
+`WebSocket`, so nothing in `Terminal.tsx` participates and nothing here changed.
 
 **`ws: true` on the dev proxy is load-bearing.** The string form of a Vite proxy
 entry forwards plain requests only, so without it the terminal in `npm run dev`

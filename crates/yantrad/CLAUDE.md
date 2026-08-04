@@ -155,6 +155,19 @@ the far side draws the pane's current contents for whichever client attaches —
 screen included, in [`tests/pty.rs`](../yantra-core/tests/pty.rs). A window of the last N bytes would
 be a second copy of what tmux already has, and it is the copy Q5 is about.
 
+**The daemon originates a ping, and a peer that stops answering loses the socket** (Y-134). Nothing
+else here is on a timer, so before this a socket whose peer vanished held the `ssh` child, the pty
+master and the tmux client on the far side until a `send` failed — and a send needs the far side to
+print first, which an agent thinking quietly never does. **A timer measured on traffic is the wrong
+instrument in both directions**: output in progress is not idleness, and silence is not death. Only
+the pong separates them, and it is a protocol frame rather than the stream, so Q5's line above is
+untouched — nothing reads what is on it. Two consecutive unanswered pings twenty seconds apart end
+the socket, which drops the `Terminal`; a pong resets the count, so a terminal that prints nothing
+for an hour is never closed. The ping starts at the upgrade rather than at the pty, because the
+socket outlives the terminal at both ends and a caller that never sends a size holds a task too.
+`MissedTickBehavior::Delay` is load-bearing: `pty::open` can outlast an interval, and the default
+burst would deliver catch-up ticks as misses the peer was given no chance to answer.
+
 This route is authorised on both ports since Y-118 (ADR-0017), and its test is the refusal that
 proves it: a forwarded address resolving to a **tagged** node does not get an upgrade even though the
 TCP peer is ours. That the peer must be a real one is why these tests bind a **real `TcpListener`** —
