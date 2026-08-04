@@ -122,12 +122,18 @@ before the upgrade rather than leaving a reader to notice: `up` starts a process
 terminal runs whatever the person on the other end types.
 
 **The frames carry no envelope, because the protocol already carries two kinds.** Binary is terminal
-bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…}`, and it must
-arrive **before** anything else, because a pty is opened with a window and nothing else tells the
-daemon how big a browser is; from the daemon it is the reason a terminal could not be opened, which a
-close frame cannot hold — that reason is capped at 123 bytes and an ssh diagnosis is longer. The size
-is in `contract.gen.ts` beside every other shape on this seam, and is the first entry there that the
-*browser* writes rather than reads.
+bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…,"term":…}`,
+and it must arrive **before** anything else, because a pty is opened with a window and a terminal and
+nothing else tells the daemon how big a browser is or which one it is; from the daemon it is the
+reason a terminal could not be opened, which a close frame cannot hold — that reason is capped at 123
+bytes and an ssh diagnosis is longer. The size is in `contract.gen.ts` beside every other shape on
+this seam, and is the first entry there that the *browser* writes rather than reads.
+
+**`term` is the caller's and this crate names none of its own** (Y-130). I-36 refuses a *user's*
+`TERM` as an input, and this is not one: it is a constant in the dashboard's own code, `xterm-256color`
+for the xterm.js it runs, and `terminfo::choose` probes it against the far side regardless. One
+message does both jobs, so it arrives again on every resize and is not read there — a caller cannot
+become a different terminal without opening another socket.
 
 **Do not log the stream.** Q5 closed *reference-only, always* and names a terminal stream in the
 sentence that closed it, so a resolved secret can be on this one. Log the lifecycle; never the

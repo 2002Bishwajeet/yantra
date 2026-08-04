@@ -294,5 +294,6 @@ export const resumed = {
 
 export const terminalSize = {
   "cols": 120,
-  "rows": 40
+  "rows": 40,
+  "term": "xterm-256color"
 } satisfies TerminalSize
