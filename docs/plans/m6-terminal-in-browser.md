@@ -77,6 +77,18 @@ than the paste it replaces. **This is the first task and it is a spike, not a fe
 transport layer is proven against a real sshd and a real tmux in a disposable podman container, and
 this is squarely transport.
 
+> **Answered 2026-08-04 by Y-127**, in [`crates/yantra-core/tests/pty.rs`](../../crates/yantra-core/tests/pty.rs).
+> `^C` written to the master kills the process in the remote pane, proved by the process being gone
+> rather than by bytes on the screen. Three things the measurement changed. **I-18's rule stands and
+> its reason does not**: a pty deliberately built *without* a controlling terminal still interrupts —
+> the child here is `ssh`, so the `0x03` is a forwarded byte and the `SIGINT` is made by the far
+> side's line discipline — and what the missing controlling terminal actually loses is `SIGWINCH`.
+> **R2's fallback is misdescribed**: `ssh -tt` plus plain pipes interrupts perfectly well; what it
+> loses is the *window*, reporting an `80x24` nobody chose. So the pty earns its place in Y-128 on
+> **resize**, not on `^C`. And the negative control is sharper than expected: with no terminal at
+> either end — `Exec`'s shape — tmux does not fail to be interrupted, it refuses to start
+> (`open terminal failed: not a terminal`).
+
 ### 3.2 R2's mitigation for multi-viewer sizing is already the default, and is not a mitigation
 
 R2 §3 names the one user-visible unknown and offers a fix:
@@ -132,9 +144,11 @@ it, which is why §5 orders them the way it does.
 ### 3.4 Nothing in the tree can open a socket or a PTY yet
 
 `axum` is pinned at 0.8.9 with `default-features = false, features = ["http1", "json", "tokio"]` —
-**no `ws`**. `portable-pty` is named in [`CLAUDE.md`](../../CLAUDE.md) §B1's stack and appears in no
-`Cargo.toml`. Both are additions to a workspace that runs `just deny` on every change, so each lands
-with its licence and advisory audit in the same PR that adds it.
+**no `ws`**. `portable-pty` is named in [`CLAUDE.md`](../../CLAUDE.md) §B1's stack and, until Y-127,
+appeared in no `Cargo.toml`; it is now a **dev-dependency of `yantra-core`** and nothing links it,
+which is what let the spike answer §3.1 without deciding where the module lives. Both are additions
+to a workspace that runs `just deny` on every change, so each lands with its licence and advisory
+audit in the same PR that adds it.
 
 R2 is emphatic about the one to avoid: **do not plan on `node-pty`** — a native N-API addon, and the
 whole reason the PTY sits on the daemon side. That is also **R-24** holding: no Rust build may

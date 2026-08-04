@@ -48,3 +48,4 @@ ssh connection. Each also exposes a generic half taking an `Exec`, which is what
 - [CLAUDE.md](CLAUDE.md): the crate's own working rules, including which invariant binds which module.
 - [../../tracker.md](../../tracker.md): project state — milestones, open tasks, decisions, risks.
 - [tests/common/mod.rs](tests/common/mod.rs): the disposable sshd + tmux container every integration test runs against.
+- [tests/pty.rs](tests/pty.rs): Y-127's spike, which tests nothing in `src/` — four ssh connections differing only in how the local end is given a terminal, answering whether `^C` reaches a process in a remote pane. It is where I-18 was finally measured; its header says what each arm found.

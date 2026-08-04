@@ -77,6 +77,9 @@ generates a keypair per run, passes `-F /dev/null`, and tears down in `Drop`.
   never silently skipped.
 - **Produce the state, do not describe it.** A test that hand-builds a dead pane cannot see I-47;
   one that really runs `kill -9` can.
+- `portable-pty` is a **dev-dependency**, reaching only `tests/pty.rs`. Y-127 needed a real pty to
+  answer a question and did not need one in `src/`; moving it into `[dependencies]` is the decision
+  Y-128 makes, against the reach this crate guards above.
 
 ## Adding a module
 
