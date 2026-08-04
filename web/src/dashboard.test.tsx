@@ -224,7 +224,7 @@ describe('the workspaces table', () => {
     }
     const { container } = render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {})}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[workspace]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -237,7 +237,7 @@ describe('the workspaces table', () => {
   it('names the path a file goes in when the look succeeded and found nothing', () => {
     render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {})}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[]}
         rowKey={(row) => row.name}
         empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -265,7 +265,7 @@ describe('a workspace row on a phone', () => {
   function draw() {
     return render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {})}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[site]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -298,6 +298,7 @@ describe('a workspace row on a phone', () => {
       'REPO',
       'STARTUP',
       'TERMINAL',
+      'EDIT',
     ])
     expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
   })
@@ -538,8 +539,11 @@ describe('the command a row carries', () => {
     const opened: string[] = []
     render(
       <DataTable
-        columns={workspaceColumns(running, { looked: 'never' }, (name) =>
-          opened.push(name),
+        columns={workspaceColumns(
+          running,
+          { looked: 'never' },
+          (name) => opened.push(name),
+          () => {},
         )}
         rows={[yantra]}
         rowKey={(one) => one.name}
@@ -913,6 +917,161 @@ describe('creating a workspace', () => {
     expect(
       screen.getByText(/a secret stays a reference the shell resolves/),
     ).toBeTruthy()
+  })
+})
+
+/** Y-126. The tests that matter are what a `PATCH` form gets wrong: a field
+ *  nobody touched must not be sent, an emptied `startup` must be sent as `null`
+ *  rather than dropped — absent leaves it alone — and the refusal that stops a
+ *  live session being stranded must read as a refusal and not as a crash. */
+describe('editing a workspace', () => {
+  const site: Workspace = {
+    name: 'site',
+    machine: 'cachyos-g14',
+    repo: '/code/site',
+    startup: 'claude',
+  }
+  const mac = machine({
+    name: 'bishwajeets-macbook-pro',
+    os: 'macOS',
+    online: false,
+  })
+
+  // The whole body as it went on the wire, because `{}` and `{"startup":null}`
+  // are the same object once JSON.parse has dropped the difference.
+  function stubEdit(status: number, body: unknown, workspace = site) {
+    const patched = vi.fn()
+    const looks: Record<string, Looked<unknown>> = {
+      '/api/machines': { looked: 'ok', age_seconds: 2, data: [machine(), mac] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [workspace] },
+      '/api/sessions': { looked: 'never' },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patched(path, String(init.body))
+          return Promise.resolve({
+            status,
+            json: () => Promise.resolve(body),
+            text: () => Promise.resolve(String(body)),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(looks[path] ?? { looked: 'never' }),
+        })
+      }),
+    )
+    return patched
+  }
+
+  // The three labels are the create form's three, so every field is asked for
+  // by the id this form gives it rather than by its text.
+  const fields = () => ({
+    machine: screen.getByLabelText('Machine', { selector: '#edit-machine' }),
+    repo: screen.getByLabelText('Repo', { selector: '#edit-repo' }),
+    startup: screen.getByLabelText('Startup', { selector: '#edit-startup' }),
+  })
+
+  async function open() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await screen.findByLabelText('Repo', { selector: '#edit-repo' })
+  }
+
+  const save = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+  it('sends the field that changed and no other, and draws the answer', async () => {
+    const patched = stubEdit(200, { ...site, repo: '/code/fixed' })
+    render(<App />)
+    await open()
+
+    expect(screen.getByText('Edit site')).toBeTruthy()
+    fireEvent.change(fields().repo, { target: { value: '/code/fixed' } })
+    save()
+
+    expect(await screen.findByText('Edited site.')).toBeTruthy()
+    // A body naming `machine` would be a move of a workspace nobody moved.
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"repo":"/code/fixed"}',
+    )
+    expect(screen.getByText('/code/fixed')).toBeTruthy()
+    // The read model is 30 s behind its own write, which is what re-reading to
+    // confirm would have drawn.
+    expect(screen.getByText('/code/site')).toBeTruthy()
+  })
+
+  it('clears a startup command rather than leaving it alone', async () => {
+    const patched = stubEdit(200, { ...site, startup: null })
+    render(<App />)
+    await open()
+
+    fireEvent.change(fields().startup, { target: { value: '' } })
+    save()
+
+    expect(await screen.findByText(/will open a plain shell/)).toBeTruthy()
+    // `null`, not a missing key: absent is the one that leaves it alone.
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"startup":null}',
+    )
+  })
+
+  it('reads a session still open as a refusal to move it, never as a crash', async () => {
+    const said =
+      'cannot move site off cachyos-g14: a tmux session named site is still open there — `yantra down site` ends it'
+    const patched = stubEdit(409, said)
+    render(<App />)
+    await open()
+
+    fireEvent.change(fields().machine, {
+      target: { value: 'bishwajeets-macbook-pro' },
+    })
+    save()
+
+    // The daemon's own sentence, which is where the workspace, the machine and
+    // the command that ends the refusal are.
+    expect(await screen.findByText(said)).toBeTruthy()
+    expect(screen.getByText(/still open on the machine this would leave/)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/^Edited /)).toBeNull()
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"machine":"bishwajeets-macbook-pro"}',
+    )
+  })
+
+  it('sends nothing at all when nothing in the form differs', async () => {
+    const patched = stubEdit(200, site)
+    render(<App />)
+    await open()
+    save()
+
+    expect(await screen.findByText(/Nothing here differs/)).toBeTruthy()
+    // A body naming no field is the daemon's 400, and it would read as one.
+    expect(patched).not.toHaveBeenCalled()
+  })
+
+  // ADR-0009: a machine name is an ssh destination, so it may be an
+  // `~/.ssh/config` alias no tailnet reading lists.
+  it('keeps a machine the tailnet does not list, so a repo fix is not a move', async () => {
+    const alias = { ...site, machine: 'homelab-box' }
+    const patched = stubEdit(200, { ...alias, repo: '/code/fixed' }, alias)
+    render(<App />)
+    await open()
+
+    expect((fields().machine as HTMLSelectElement).value).toBe('homelab-box')
+    fireEvent.change(fields().repo, { target: { value: '/code/fixed' } })
+    save()
+
+    expect(await screen.findByText('Edited site.')).toBeTruthy()
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"repo":"/code/fixed"}',
+    )
   })
 })
 

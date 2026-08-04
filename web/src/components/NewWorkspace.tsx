@@ -53,7 +53,7 @@ async function create(body: Create): Promise<Sent> {
   }
 }
 
-const field =
+export const field =
   'border-input bg-background focus-visible:ring-ring/50 rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-[3px]'
 
 /** The `201` carries the whole workspace, and it is rendered from there: the
