@@ -118,6 +118,15 @@ or R2's option (c), control mode, which is explicitly v2. **The plan does not pi
 a decision with a visible cost either way, it belongs to the row that first attaches a second client,
 and that row must measure it against a real browser rather than inherit R2's sentence.
 
+> **2026-08-04 (Y-131): measured, and the choice this section declined to make turned out not to be one.** Two live
+> clients on one window, both real, show that `latest` is the client used **last** — not the smallest, and not the
+> newest attachment. A phone attaching does shrink the desktop, and the desktop's next keystroke takes it back with
+> the phone still attached; the reflow reverses when a client leaves and no pane content is lost. The paragraph above
+> is therefore right that nothing avoids the resize and wrong that it is a standing cost. `window-size manual` was
+> measured and rejected — it also stops the only client resizing its own window — and control mode stays v2. **Yantra
+> sets no tmux option**, and the behaviour is pinned by `crates/yantra-core/tests/two_clients.rs` and recorded as
+> I-54.
+
 ### 3.3 A terminal is the largest write in the product, and its authoriser has a known hole
 
 Every write route resolves its caller through
