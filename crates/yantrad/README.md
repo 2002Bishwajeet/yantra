@@ -32,6 +32,13 @@ source address is resolved live, and anything that is not this owner's own untag
 `403`. A `tailscale` that cannot answer is **`503`** — nothing was decided about the caller, so
 blaming them would be a lie about which thing broke.
 
+**Which address that is depends on where the connection came from**
+([ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)): when
+the TCP peer is one of the daemon's own bind addresses the request was proxied on this machine, so
+`X-Forwarded-For` names the caller; otherwise the peer does, and a header sent straight to `7717` is
+ignored. A forwarded value that is not exactly one address is a **`503`** — nothing was decided, and
+the caller did not write it.
+
 `PATCH /api/workspaces/{name}` rewrites only the fields the body names, and answers the workspace as
 it now reads — the same shape `POST /api/workspaces` answers with. `"startup": null` clears the
 startup command and an absent `startup` leaves it alone; a body naming no field at all is a `400`.

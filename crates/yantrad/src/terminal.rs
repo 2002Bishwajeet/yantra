@@ -33,30 +33,32 @@ use std::net::SocketAddr;
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, State};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
 
-use crate::write::{Refused, allowed, chain};
+use crate::write::{Authoriser, Refused, allowed, chain};
 
-pub fn router<I, S>(inventory: I) -> Router<S>
+pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
     Router::new()
         .route("/workspaces/{name}/terminal", get(attach::<I>))
-        .with_state(inventory)
+        .with_state(authoriser)
 }
 
 async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
-    State(inventory): State<I>,
+    State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&inventory, from.ip()).await?;
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
     tracing::info!("terminal {name} for {}", caller.node);
 
     Ok(upgrade.on_upgrade(move |socket| bridge(socket, name)))
@@ -200,23 +202,34 @@ mod tests {
 
     const ME: u64 = 1;
 
+    const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+    fn tailnet(callers: Vec<(IpAddr, Caller)>) -> Fake {
+        Fake {
+            machines: Vec::new(),
+            addresses: Vec::new(),
+            callers: callers.into_iter().collect::<BTreeMap<_, _>>(),
+            owner: ME,
+        }
+    }
+
+    /// Bound to nothing, so the loopback peer is never ours and no header is
+    /// read — the direct port, which is what these tests stood on before
+    /// ADR-0017.
+    fn direct(caller: Option<Caller>) -> Authoriser<Fake> {
+        Authoriser::new(
+            tailnet(caller.map(|caller| (LOCAL, caller)).into_iter().collect()),
+            &[],
+        )
+    }
+
     /// A real listener, because `oneshot` never gives axum the upgrade it
     /// extracts: the peer address a refusal turns on is the one the kernel
     /// reports, so the tailnet is faked at loopback rather than at 100.64/10.
-    async fn handshake(caller: Option<Caller>) -> String {
-        let local = IpAddr::V4(Ipv4Addr::LOCALHOST);
-        let fake = Fake {
-            machines: Vec::new(),
-            addresses: Vec::new(),
-            callers: caller
-                .map(|caller| (local, caller))
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
-            owner: ME,
-        };
-        let app = Router::new().nest("/api", router(fake));
+    async fn handshake(authoriser: Authoriser<Fake>, forwarded: &str) -> String {
+        let app = Router::new().nest("/api", router(authoriser));
 
-        let listener = TcpListener::bind((local, 0)).await.expect("a free port");
+        let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
         let address = listener.local_addr().expect("it is bound");
         tokio::spawn(async move {
             let _ = axum::serve(
@@ -229,12 +242,16 @@ mod tests {
         let mut stream = TcpStream::connect(address).await.expect("the daemon is up");
         stream
             .write_all(
-                b"GET /api/workspaces/api/terminal HTTP/1.1\r\n\
-                  Host: yantra\r\n\
-                  Connection: Upgrade\r\n\
-                  Upgrade: websocket\r\n\
-                  Sec-WebSocket-Version: 13\r\n\
-                  Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+                format!(
+                    "GET /api/workspaces/api/terminal HTTP/1.1\r\n\
+                     Host: yantra\r\n\
+                     Connection: Upgrade\r\n\
+                     Upgrade: websocket\r\n\
+                     Sec-WebSocket-Version: 13\r\n\
+                     Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                     {forwarded}\r\n"
+                )
+                .as_bytes(),
             )
             .await
             .expect("the request is written");
@@ -261,10 +278,10 @@ mod tests {
     #[tokio::test]
     async fn a_caller_who_is_not_the_owner_is_not_upgraded() {
         for refused in [caller(ME + 1, &[]), caller(ME, &["tag:ci"])] {
-            let status = handshake(Some(refused)).await;
+            let status = handshake(direct(Some(refused)), "").await;
             assert!(status.starts_with("HTTP/1.1 403"), "{status}");
         }
-        let stranger = handshake(None).await;
+        let stranger = handshake(direct(None), "").await;
         assert!(stranger.starts_with("HTTP/1.1 403"), "{stranger}");
     }
 
@@ -272,8 +289,34 @@ mod tests {
     /// Nothing opens here — the pty waits for a size that never arrives.
     #[tokio::test]
     async fn this_owners_untagged_node_is_upgraded() {
-        let status = handshake(Some(caller(ME, &[]))).await;
+        let status = handshake(direct(Some(caller(ME, &[]))), "").await;
         assert!(status.starts_with("HTTP/1.1 101"), "{status}");
+    }
+
+    /// **ADR-0017 on the route that hands over a shell.** Loopback is declared
+    /// as what this daemon bound, which is the only way a test can stand where
+    /// `tailscale serve` stands: the peer is then ours, and the header names a
+    /// tagged node the proxy would otherwise have laundered into the owner's.
+    #[tokio::test]
+    async fn a_forwarded_tagged_node_is_not_upgraded_even_though_the_peer_is_ours() {
+        let tagged: IpAddr = "100.64.0.4".parse().expect("v4");
+        let ours = || {
+            Authoriser::new(
+                tailnet(vec![
+                    (LOCAL, caller(ME, &[])),
+                    (tagged, caller(ME, &["tag:ci"])),
+                ]),
+                &[SocketAddr::new(LOCAL, 7717)],
+            )
+        };
+
+        let refused = handshake(ours(), "X-Forwarded-For: 100.64.0.4\r\n").await;
+        assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+
+        // The proxy's own node still opens one, so the refusal above is the
+        // forwarded address being read rather than the hop being distrusted.
+        let unproxied = handshake(ours(), "").await;
+        assert!(unproxied.starts_with("HTTP/1.1 101"), "{unproxied}");
     }
 
     /// Two numbers and a name, and nothing else. A typo that silently opened an

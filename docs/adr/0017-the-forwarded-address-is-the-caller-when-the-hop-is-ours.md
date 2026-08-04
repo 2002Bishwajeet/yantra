@@ -1,7 +1,7 @@
 # ADR-0017 — The forwarded address is the caller, when the hop is ours
 
 - **Date:** 2026-08-03
-- **Status:** proposed
+- **Status:** accepted (2026-08-05, by the owner — Y-118)
 - **Amends:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md) — **how the
   caller's address is obtained**, which decisions 2 and 4 assumed rather than stated. The predicate
   itself is untouched: same user, no tags, resolved by `whois`. Decisions 1, 3 and 5 — writes are the

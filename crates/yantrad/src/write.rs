@@ -1,6 +1,13 @@
 //! The routes that **act**, and the identity that authorises them
 //! ([ADR-0016](../../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)).
 //!
+//! **The caller's address is not always the TCP peer**
+//! ([ADR-0017](../../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)):
+//! when the peer is one of this daemon's own bind addresses the connection was
+//! opened here by a proxy, and `X-Forwarded-For` is the caller. That condition
+//! and nothing else — reaching 7717 directly, a caller can write the header,
+//! and there the peer is its own address rather than ours.
+//!
 //! Until Y-112 the API answered 405 to every write and the dashboard handed
 //! over a command to paste into a terminal, which from a phone is worth
 //! nothing. These routes are the CLI's own verbs and nothing more: the daemon
@@ -13,20 +20,75 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::{down, edit, resume, terminfo, tmux, up, workspace};
 
+/// `tailscaled` writes this with `Set` from the connection it terminated, so it
+/// carries one address and never a list ([ADR-0017]).
+///
+/// [ADR-0017]: ../../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md
+const FORWARDED_FOR: &str = "x-forwarded-for";
+
+/// Who to ask about a caller, and the addresses this daemon bound.
+///
+/// The second is ADR-0017 §2's whole test for whether a forwarded address may
+/// be believed, and it is `listen_on`'s set exactly — not "a private address",
+/// not any local interface, and never loopback, which is never bound.
+#[derive(Clone)]
+pub struct Authoriser<I> {
+    inventory: I,
+    bound: Arc<[IpAddr]>,
+}
+
+impl<I: Inventory> Authoriser<I> {
+    pub fn new(inventory: I, bound: &[SocketAddr]) -> Self {
+        Self {
+            inventory,
+            bound: bound.iter().map(SocketAddr::ip).collect(),
+        }
+    }
+
+    /// ADR-0017 §1. The TCP peer is the caller, unless the peer is one of our
+    /// own bind addresses: nothing off this machine can open a connection that
+    /// appears to come from one, so a request that does was opened here by a
+    /// proxy that terminated the caller's and wrote its address down.
+    ///
+    /// §3: one address or refuse. An absent header is not a refusal — it means
+    /// nothing proxied this, and the peer stands as it does on 7717.
+    fn caller_address(&self, peer: IpAddr, headers: &HeaderMap) -> Result<IpAddr, Refused> {
+        if !self.bound.contains(&peer) {
+            return Ok(peer);
+        }
+        let mut forwarded = headers.get_all(FORWARDED_FOR).iter();
+        let Some(only) = forwarded.next() else {
+            return Ok(peer);
+        };
+        if forwarded.next().is_some() {
+            return Err(Refused::Forwarded(
+                "a proxy on this machine forwarded more than one address, and `tailscale serve` writes exactly one",
+            ));
+        }
+        only.to_str()
+            .ok()
+            .and_then(|address| address.trim().parse().ok())
+            .ok_or(Refused::Forwarded(
+                "a proxy on this machine forwarded something that is not one address, and `tailscale serve` writes exactly one",
+            ))
+    }
+}
+
 /// Generic in `S` so it merges into a router whose own state is something
 /// else: `with_state` decides the *resulting* state type, and a concrete
 /// `Router<()>` here would pin the whole tree to `()`.
-pub fn router<I, S>(inventory: I) -> Router<S>
+pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
@@ -37,14 +99,21 @@ where
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
-        .with_state(inventory)
+        .with_state(authoriser)
 }
 
-/// ADR-0016 §2. Every branch that cannot *prove* the caller is this owner's own
-/// untagged node refuses, which is the same shape `listen_on` already has: the
-/// only default available is the permissive one.
-pub(crate) async fn allowed<I: Inventory>(inventory: &I, from: IpAddr) -> Result<Caller, Refused> {
-    let caller = inventory
+/// ADR-0016 §2, on the address ADR-0017 §1 picks. Every branch that cannot
+/// *prove* the caller is this owner's own untagged node refuses, which is the
+/// same shape `listen_on` already has: the only default available is the
+/// permissive one.
+pub(crate) async fn allowed<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: IpAddr,
+    headers: &HeaderMap,
+) -> Result<Caller, Refused> {
+    let from = authoriser.caller_address(peer, headers)?;
+    let caller = authoriser
+        .inventory
         .whois(from)
         .await
         .map_err(Refused::CannotAsk)?
@@ -53,7 +122,11 @@ pub(crate) async fn allowed<I: Inventory>(inventory: &I, from: IpAddr) -> Result
     if !caller.tags.is_empty() {
         return Err(Refused::Tagged(caller.tags));
     }
-    let owner = inventory.owner().await.map_err(Refused::CannotAsk)?;
+    let owner = authoriser
+        .inventory
+        .owner()
+        .await
+        .map_err(Refused::CannotAsk)?;
     if caller.user != owner {
         return Err(Refused::NotYours(caller.node));
     }
@@ -107,11 +180,12 @@ struct Create {
 }
 
 async fn make<I: Inventory + Clone + Send + Sync + 'static>(
-    State(inventory): State<I>,
+    State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(create): Json<Create>,
 ) -> Result<(StatusCode, Json<Made>), Refused> {
-    let caller = allowed(&inventory, from.ip()).await?;
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
     tracing::info!("new {} for {}", create.name, caller.node);
 
     let workspace = workspace::create(
@@ -184,12 +258,13 @@ impl From<Change> for workspace::Changes {
 }
 
 async fn change<I: Inventory + Clone + Send + Sync + 'static>(
-    State(inventory): State<I>,
+    State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     Json(change): Json<Change>,
 ) -> Result<Json<Made>, Refused> {
-    let caller = allowed(&inventory, from.ip()).await?;
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
     if !change.names_a_field() {
         return Err(Refused::Verb {
             status: StatusCode::BAD_REQUEST,
@@ -224,12 +299,13 @@ fn from_edit(error: &edit::Error) -> StatusCode {
 }
 
 async fn open<I: Inventory + Clone + Send + Sync + 'static>(
-    State(inventory): State<I>,
+    State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Path(name): Path<String>,
     body: Option<Json<Start>>,
 ) -> Result<Json<Opened>, Refused> {
-    let caller = allowed(&inventory, from.ip()).await?;
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
     let agent = body
         .and_then(|Json(start)| start.agent)
         .map(up::Agent::from);
@@ -256,11 +332,12 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
-    State(inventory): State<I>,
+    State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Stopped>, Refused> {
-    let caller = allowed(&inventory, from.ip()).await?;
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
     tracing::info!("down {name} for {}", caller.node);
 
     let report = down::down(&name).await.map_err(|error| Refused::Verb {
@@ -281,11 +358,12 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn again<I: Inventory + Clone + Send + Sync + 'static>(
-    State(inventory): State<I>,
+    State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Resumed>, Refused> {
-    let caller = allowed(&inventory, from.ip()).await?;
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
     tracing::info!("resume {name} for {}", caller.node);
 
     let report = resume::resume(&name, term())
@@ -453,7 +531,14 @@ pub(crate) enum Refused {
     NotYours(String),
     Tagged(Vec<String>),
     CannotAsk(inventory::Error),
-    Verb { status: StatusCode, said: String },
+    /// ADR-0017 §3, kept apart from [`Self::CannotAsk`] because nothing broke:
+    /// something unmeasured is in the local path, and a guess repaired out of
+    /// it would be the confident lie R-23 is about.
+    Forwarded(&'static str),
+    Verb {
+        status: StatusCode,
+        said: String,
+    },
 }
 
 impl IntoResponse for Refused {
@@ -481,6 +566,12 @@ impl IntoResponse for Refused {
             Self::CannotAsk(error) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("could not establish who is calling: {}", chain(&error)),
+            ),
+            // 503 for the same reason: the caller did not write this header and
+            // is not what went wrong, so a 4xx would name them.
+            Self::Forwarded(said) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("could not establish who is calling: {said}"),
             ),
             Self::Verb { status, said } => (status, said),
         };
@@ -519,11 +610,36 @@ mod tests {
         }
     }
 
+    /// Bound to nothing, so no peer is ever ours and every test below reads the
+    /// address exactly as ADR-0016 wrote it.
+    fn direct(fake: Fake) -> Authoriser<Fake> {
+        Authoriser::new(fake, &[])
+    }
+
+    /// Bound to [`address(1)`], which is where `tailscale serve` proxies to and
+    /// therefore the peer a proxied request arrives from.
+    fn behind_the_proxy(fake: Fake) -> Authoriser<Fake> {
+        Authoriser::new(fake, &[SocketAddr::new(address(1), 7717)])
+    }
+
+    fn forwarded(values: &[&str]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for value in values {
+            headers.append(
+                FORWARDED_FOR,
+                value.parse().expect("a header value of ASCII"),
+            );
+        }
+        headers
+    }
+
     #[tokio::test]
     async fn this_owners_untagged_node_is_allowed() {
         let fake = tailnet(vec![(address(2), caller(ME, &[]))]);
 
-        let allowed = allowed(&fake, address(2)).await.expect("my own node");
+        let allowed = allowed(&direct(fake), address(2), &HeaderMap::new())
+            .await
+            .expect("my own node");
 
         assert_eq!(allowed.user, ME);
     }
@@ -534,7 +650,7 @@ mod tests {
     async fn a_node_belonging_to_someone_else_is_refused() {
         let fake = tailnet(vec![(address(3), caller(ME + 1, &[]))]);
 
-        let refused = allowed(&fake, address(3))
+        let refused = allowed(&direct(fake), address(3), &HeaderMap::new())
             .await
             .expect_err("not this owner");
 
@@ -548,14 +664,16 @@ mod tests {
     async fn a_tagged_node_is_refused_even_though_the_owner_matches() {
         let fake = tailnet(vec![(address(4), caller(ME, &["tag:ci"]))]);
 
-        let refused = allowed(&fake, address(4)).await.expect_err("tagged");
+        let refused = allowed(&direct(fake), address(4), &HeaderMap::new())
+            .await
+            .expect_err("tagged");
 
         assert!(matches!(refused, Refused::Tagged(_)), "{refused:?}");
     }
 
     #[tokio::test]
     async fn an_address_belonging_to_no_peer_is_refused() {
-        let refused = allowed(&tailnet(vec![]), address(9))
+        let refused = allowed(&direct(tailnet(vec![])), address(9), &HeaderMap::new())
             .await
             .expect_err("nobody holds it");
 
@@ -587,13 +705,118 @@ mod tests {
             }
         }
 
-        let refused = allowed(&Down, address(2)).await.expect_err("cannot ask");
+        let refused = allowed(&Authoriser::new(Down, &[]), address(2), &HeaderMap::new())
+            .await
+            .expect_err("cannot ask");
 
         assert!(matches!(refused, Refused::CannotAsk(_)), "{refused:?}");
         assert_eq!(
             refused.into_response().status(),
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    /// ADR-0017 §1, the half that keeps the direct port as ADR-0016 wrote it: a
+    /// caller reaching 7717 can put anything in the header, and its own address
+    /// is the peer rather than ours, so the header is not read. A tagged node
+    /// that could launder itself through one would be the hole widened, not
+    /// closed.
+    #[tokio::test]
+    async fn a_forwarded_address_from_a_peer_that_is_not_ours_is_not_the_caller() {
+        let fake = tailnet(vec![
+            (address(2), caller(ME, &[])),
+            (address(4), caller(ME, &["tag:ci"])),
+        ]);
+
+        let refused = allowed(
+            &behind_the_proxy(fake),
+            address(4),
+            &forwarded(&["100.64.0.2"]),
+        )
+        .await
+        .expect_err("the peer is the caller here");
+
+        assert!(matches!(refused, Refused::Tagged(_)), "{refused:?}");
+    }
+
+    /// **The acceptance criterion ADR-0017 names**, and the case the proxy
+    /// would otherwise authorise in silence: the peer *is* ours, so the
+    /// forwarded address is the caller — and it resolves to a tagged node.
+    #[tokio::test]
+    async fn a_forwarded_address_from_one_of_our_own_bind_addresses_is_the_caller() {
+        let fake = tailnet(vec![
+            (address(1), caller(ME, &[])),
+            (address(4), caller(ME, &["tag:ci"])),
+        ]);
+
+        let refused = allowed(
+            &behind_the_proxy(fake),
+            address(1),
+            &forwarded(&["100.64.0.4"]),
+        )
+        .await
+        .expect_err("the proxy is not the caller");
+
+        assert!(matches!(refused, Refused::Tagged(_)), "{refused:?}");
+
+        // Named in the refusal, so the address that was judged is the forwarded
+        // one and not the peer this daemon would otherwise have believed.
+        let stranger = allowed(
+            &behind_the_proxy(tailnet(vec![(address(1), caller(ME, &[]))])),
+            address(1),
+            &forwarded(&["100.64.0.9"]),
+        )
+        .await
+        .expect_err("nobody holds it");
+        assert!(
+            matches!(stranger, Refused::NotAPeer(judged) if judged == address(9)),
+            "{stranger:?}"
+        );
+    }
+
+    /// ADR-0017 §3. An absent header is not a refusal — it says nothing proxied
+    /// this, which is every request on 7717.
+    #[tokio::test]
+    async fn a_request_from_our_own_bind_address_with_no_header_is_the_peer() {
+        let fake = tailnet(vec![(address(1), caller(ME, &[]))]);
+
+        let allowed = allowed(&behind_the_proxy(fake), address(1), &HeaderMap::new())
+            .await
+            .expect("the local hop, unproxied");
+
+        assert_eq!(allowed.user, ME);
+    }
+
+    /// ADR-0017 §3's other half: `tailscaled` writes exactly one address with
+    /// `Set`, so a list, a second line or a value that is not an address means
+    /// something unmeasured is in the path — refused rather than repaired, and
+    /// **not** by taking one entry out of a list.
+    #[tokio::test]
+    async fn a_forwarded_header_that_is_not_one_address_is_refused() {
+        let fleet = || {
+            tailnet(vec![
+                (address(1), caller(ME, &[])),
+                (address(2), caller(ME, &[])),
+            ])
+        };
+
+        for header in [
+            forwarded(&["100.64.0.2, 100.64.0.9"]),
+            forwarded(&["100.64.0.2", "100.64.0.9"]),
+            forwarded(&[""]),
+            forwarded(&["cachyos-g14"]),
+        ] {
+            let refused = allowed(&behind_the_proxy(fleet()), address(1), &header)
+                .await
+                .expect_err("one address or refuse");
+
+            assert!(matches!(refused, Refused::Forwarded(_)), "{refused:?}");
+            assert_eq!(
+                refused.into_response().status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the caller did not write this header, so refusing them names the wrong thing"
+            );
+        }
     }
 
     #[test]
@@ -817,7 +1040,7 @@ mod tests {
 
         let app = crate::api::router()
             .with_state(crate::heartbeat::Fleet::default())
-            .merge(router(tailnet(vec![])));
+            .merge(router(direct(tailnet(vec![]))));
 
         let read = app
             .clone()
@@ -873,7 +1096,7 @@ mod tests {
 
         let app = crate::api::router()
             .with_state(crate::heartbeat::Fleet::default())
-            .merge(router(tailnet(vec![])));
+            .merge(router(direct(tailnet(vec![]))));
 
         let mut edit = Request::patch("/workspaces/site")
             .header(header::CONTENT_TYPE, "application/json")

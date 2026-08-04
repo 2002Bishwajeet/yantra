@@ -34,13 +34,15 @@ only, so nothing here has been seen on macOS.
 
 ## Open work
 
-Task rows live in [`tracker.md` §3](../../tracker.md). Open and touching this crate: **Y-118** —
-`tailscale serve` launders the caller's address, so ADR-0016's authoriser sees the proxy; the ADR was
-accepted 2026-08-03 (Y-103) and is therefore immutable, so the fix is an amending or superseding ADR
-rather than an edit. **Proposed 2026-08-03 as
-[ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)** — the
-forwarded address is the caller when the TCP peer is one of this daemon's own bind addresses — and it
-awaits the owner, so nothing here changes yet. **Y-020** is closed and its telemetry ADR ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md))
+Task rows live in [`tracker.md` §3](../../tracker.md), which is where to look for what is open.
+
+**Y-118, which this section named as open against this crate, closed on 2026-08-05.** `tailscale serve` launders the caller's address, so ADR-0016's
+authoriser saw the proxy;
+[ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md) — the
+forwarded address is the caller when the TCP peer is one of this daemon's own bind addresses, and
+never otherwise — was accepted by the owner and built in
+[`write.rs`](src/write.rs), which `terminal.rs` calls. ADR-0016 stays immutable and carries a second
+dated amendment saying so. **Y-020** is closed and its telemetry ADR ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md))
 was accepted on the same day.
 
 **Y-044 is closed** — dropped 2026-08-02 without being built. Session state is derived from tmux
