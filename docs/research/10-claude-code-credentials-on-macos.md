@@ -408,6 +408,13 @@ headless guidance, and no mention of the `Background` launchd domain anywhere in
   untested, still the promising direction, and deliberately out of scope — Y-122's row already says
   it is an ADR-shaped decision for the owner, and I-44 records that `launchctl asuser` needs root so
   it cannot be checked over ssh.
+  **Answered on 2026-08-05, at the Mac's keyboard rather than over ssh: it does inherit.** A window
+  forked by a tmux server started from Terminal.app on `bishwajeets-macbook-pro` reads
+  `Claude Code-credentials` (exit **0**) and answers `loggedIn: true`, `authMethod: "claude.ai"`,
+  where the same commands over ssh on that machine, with the same `$HOME`, exit **36** and answer
+  `false`. `launchctl managername` prints `Background` in **both** and is not the discriminator. The
+  measurement is recorded on [ADR-0018 §8](../adr/0018-the-tmux-server-carries-the-macos-login-session.md);
+  this note's scope decision is unchanged, and it still does not design the launchd agent.
 - **Whether `ANTHROPIC_UNIX_SOCKET` could carry a credential from a GUI-domain process to an ssh
   one.** It is documented only as a network-isolation transport for containers. Naming it is not
   proposing it.
