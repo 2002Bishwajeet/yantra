@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 axum.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
@@ -21,7 +22,6 @@ yantra-core.workspace = true
 # `tower` is axum's own; it is here only so a test can drive the router
 # directly and assert what it refuses.
 [dev-dependencies]
-serde_json.workspace = true
 # A fixture beat cannot be built without it: `sent_at` is an `OffsetDateTime`.
 time.workspace = true
 tower.workspace = true

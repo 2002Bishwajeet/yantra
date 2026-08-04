@@ -29,7 +29,7 @@ getrandom = "0.4"
 # The heartbeat's `sent_at` is the first timestamp Yantra writes (ADR-0013).
 # `serde-well-known` is the whole of what it needs: RFC 3339 in and out.
 time = { version = "0.3", features = ["serde-well-known"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 tower = { version = "0.5", features = ["util"] }
 # `fs` only: `ServeDir` resolves paths against the root and refuses to escape it,
 # which is the part of static serving that is worth not writing by hand.

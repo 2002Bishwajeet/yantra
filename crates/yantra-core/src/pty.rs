@@ -152,7 +152,11 @@ impl Terminal {
     }
 
     /// Sends `bytes` as though they were typed.
-    pub async fn write(&self, bytes: Vec<u8>) -> Result<(), Error> {
+    ///
+    /// `&mut` where `&` would compile: the pty master is not `Sync`, so a future
+    /// holding `&Terminal` across an await is not `Send` — and the task on the
+    /// other end of Y-129's socket is.
+    pub async fn write(&mut self, bytes: Vec<u8>) -> Result<(), Error> {
         let writer = Arc::clone(&self.writer);
         // Blocking, and it really can block: `ssh` stops reading its stdin when
         // the connection stalls, and a pty's buffer is a few kilobytes (I-13).

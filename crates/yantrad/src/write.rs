@@ -42,7 +42,7 @@ where
 /// ADR-0016 §2. Every branch that cannot *prove* the caller is this owner's own
 /// untagged node refuses, which is the same shape `listen_on` already has: the
 /// only default available is the permissive one.
-async fn allowed<I: Inventory>(inventory: &I, from: IpAddr) -> Result<Caller, Refused> {
+pub(crate) async fn allowed<I: Inventory>(inventory: &I, from: IpAddr) -> Result<Caller, Refused> {
     let caller = inventory
         .whois(from)
         .await
@@ -250,7 +250,7 @@ fn from_workspace(error: Option<&workspace::Error>) -> StatusCode {
 /// `thiserror`'s `Display` is one line and the cause is the useful half, so the
 /// chain is walked rather than shown as a bare summary the operator must guess
 /// behind.
-fn chain(error: &dyn std::error::Error) -> String {
+pub(crate) fn chain(error: &dyn std::error::Error) -> String {
     let mut said = error.to_string();
     let mut source = error.source();
     while let Some(next) = source {
@@ -357,7 +357,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
 }
 
 #[derive(Debug)]
-enum Refused {
+pub(crate) enum Refused {
     NotAPeer(IpAddr),
     NotYours(String),
     Tagged(Vec<String>),

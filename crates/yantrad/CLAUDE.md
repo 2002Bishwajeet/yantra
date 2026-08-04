@@ -113,6 +113,30 @@ list to find what it just made will draw an empty one.
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
 generalise the exception — a *read* that awaits ssh is still the bug that rule exists to prevent.
 
+## The route that hands a terminal over
+
+`GET /api/workspaces/{name}/terminal` upgrades to a WebSocket carrying
+[`pty::Terminal`](../yantra-core/src/pty.rs) (Y-129). **An upgrade is a `GET`, so it does not inherit
+the check above — and it is the route that most needs one.** `terminal.rs` calls `allowed()` by name
+before the upgrade rather than leaving a reader to notice: `up` starts a process Yantra chose, and a
+terminal runs whatever the person on the other end types.
+
+**The frames carry no envelope, because the protocol already carries two kinds.** Binary is terminal
+bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…}`, and it must
+arrive **before** anything else, because a pty is opened with a window and nothing else tells the
+daemon how big a browser is; from the daemon it is the reason a terminal could not be opened, which a
+close frame cannot hold — that reason is capped at 123 bytes and an ssh diagnosis is longer. The size
+is in `contract.gen.ts` beside every other shape on this seam, and is the first entry there that the
+*browser* writes rather than reads.
+
+**Do not log the stream.** Q5 closed *reference-only, always* and names a terminal stream in the
+sentence that closed it, so a resolved secret can be on this one. Log the lifecycle; never the
+payload, not truncated and not at debug.
+
+This route is correctly authorised on 7717 and **reachable-but-unauthorised through 8443** until
+Y-118 lands, for the reason the proxy section below gives. That is not new to this route, and it
+matters more here than it does to a button.
+
 ## The dashboard's types are checked against these routes, not trusted to match
 
 `contract.rs` (Y-124) drives the real `api::router()` over a fake snapshot and commits every answer
@@ -126,6 +150,10 @@ TypeScript rather than JSON because an imported JSON module has its string liter
 literal is written. The write answers are serialised from their DTOs rather than fetched, since those
 handlers authorise a live tailnet caller and then await ssh; what that leaves unchecked is status
 codes, headers and every refusal body, none of which is JSON.
+
+**`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
+daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
+one message identically; that the daemon then accepts it is `terminal.rs`'s own test.
 
 ## TLS is not this crate's job, and the proxy costs it something
 
@@ -149,6 +177,12 @@ shared-in node — it is only that on the direct port.
 or not anyone is looking, so a handler that calls `sessions::list` per request turns one open tab
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
+
+**Two things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
+at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
+rather than to a request. Neither licenses a **read** that awaits ssh, which is still the bug this
+module exists to prevent.
 
 The interval is a constant for the same reason the port is. `ControlPersist=300` means anything under
 five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the

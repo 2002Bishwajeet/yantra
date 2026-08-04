@@ -12,6 +12,7 @@ import type {
   Opened,
   Resumed,
   Stopped,
+  TerminalSize,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -290,3 +291,8 @@ export const resumed = {
   "resumed": false,
   "term": "xterm-256color"
 } satisfies Resumed
+
+export const terminalSize = {
+  "cols": 120,
+  "rows": 40
+} satisfies TerminalSize

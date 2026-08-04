@@ -26,6 +26,7 @@ mod api;
 mod contract;
 mod heartbeat;
 mod refresh;
+mod terminal;
 mod web;
 mod write;
 
@@ -110,7 +111,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             "/api",
             api::router()
                 .with_state(fleet.clone())
-                .merge(write::router(inventory.clone())),
+                .merge(write::router(inventory.clone()))
+                .merge(terminal::router(inventory.clone())),
         )
         .merge(heartbeat::router())
         .with_state(fleet)
