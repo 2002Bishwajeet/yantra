@@ -22,7 +22,7 @@ toml = "1"
 # etcetera over dirs: `dirs` pulls option-ext (MPL-2.0), and its macOS config dir
 # is ~/Library/Application Support, not the ~/.config we document.
 etcetera = "0.11"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "signal", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "signal", "io-util", "sync"] }
 base64 = "0.23"
 yantra-core = { path = "crates/yantra-core" }
 getrandom = "0.4"
