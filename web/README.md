@@ -1,9 +1,9 @@
 # yantra web — the dashboard
 
-One page, six sections — a terminal when one is open, then machines, workspaces, a
-form that makes one, sessions, agents — over the API `yantrad` serves at `/api`. The
-four readings poll; the form and every workspace row write. No router, no state
-library, no navigation.
+One page — a terminal when one is open, then machines, workspaces, a form that
+edits one when a row asks for it, a form that makes one, sessions, agents — over
+the API `yantrad` serves at `/api`. The four readings poll; the forms and every
+workspace row write. No router, no state library, no navigation.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -247,6 +247,54 @@ secret in it stays a reference (`op://…`, `pass show …`) the shell resolves.
 check is made over that string — a heuristic over an arbitrary command either
 misses the real case or refuses a legitimate one.
 
+## The write that changes one (Y-126)
+
+`EditWorkspace.tsx` sends `PATCH /api/workspaces/{name}`, opened by the **Edit**
+button every workspace row carries and closed by the one in the form. It is what
+the row exists for: a typo in `repo` used to need an ssh session, which a phone
+does not have.
+
+- **A field nobody touched is not in the body.** The form diffs what was typed
+  against the workspace it opened from and sends only what differs, because
+  absent means *leave it alone*. A form that PATCHed all three every time would
+  turn fixing a typo in `repo` into a move of `machine` — and a move is the one
+  edit a live session refuses ([Y-117](../tracker.md), I-30). Nothing differing
+  sends nothing at all, since a body naming no field is the daemon's `400`.
+- **Emptying `startup` sends `"startup": null`, which is the only `null` that
+  means anything on this route.** It is `--no-startup`; a missing key leaves the
+  command alone. Without it a startup command set once could never be taken away
+  from a phone, which is half of why the row was opened.
+- **The `409` is a refusal, not a crash, and is drawn as one.** A session still
+  open on the machine being left keeps the plain alert rather than the
+  destructive one, and the daemon's own sentence is shown whole — it names the
+  workspace, the machine it may not leave and the `yantra down` that ends the
+  refusal. Inventing wording for it here would be a second, worse copy of a
+  sentence [`edit.rs`](../crates/yantra-core/src/edit.rs) already writes. `503`
+  covers both a `tailscale` that could not answer and a machine that could not
+  be asked, so its sentence claims neither: nothing was decided and nothing
+  changed.
+- **It renders the `200`'s own body, and the next edit is measured against
+  that.** Same reason the create form renders its `201`: the read model is up to
+  30 s behind, so re-reading to confirm draws what was just replaced. Comparing
+  a second edit against the answer rather than the stale row is what stops it
+  re-sending a `machine` that already moved.
+- **The picker keeps a machine the tailnet does not list.**
+  [ADR-0009](../docs/adr/0009-machine-names-are-ssh-destinations.md) allows an
+  `~/.ssh/config` alias, and a `<select>` without the workspace's own machine in
+  it would silently select another — turning a repo fix into a move nobody
+  asked for.
+
+A section beside the create form rather than a control inside the row: three
+fields and a picker do not fit a table column, and the row already opens a
+section this way for the terminal. **There is no name field** — the route
+addresses a workspace by its name, so renaming is a create and a delete, which
+neither `yantra edit` nor this route is.
+
+What it cannot catch: the row it opens from is up to 30 s old, so a workspace
+changed elsewhere in between is drawn as it was. It is not clobbered — an
+untouched field is compared to the stale value, matches, and is never sent — but
+the form will show what it replaced until the next look.
+
 ## Installable on a phone (Y-114)
 
 `public/manifest.webmanifest` plus `public/sw.js`, registered from `main.tsx` on
@@ -315,7 +363,8 @@ step are where a mismatch surfaces. A DTO that moved without the file being
 regenerated fails on the Rust side first, saying so.
 
 It does not cover status codes, headers or the refusal bodies — those are plain
-text, and `Act.tsx` and `NewWorkspace.tsx` still map them by hand.
+text, and `Act.tsx`, `NewWorkspace.tsx` and `EditWorkspace.tsx` still map them by
+hand.
 
 ## The seam
 
@@ -347,7 +396,9 @@ src/
   columns.tsx        four Column<T>[] arrays: the four tables, as data
   components/
     Section.tsx      the looked switch; children run only in the ok branch
-    NewWorkspace.tsx the create form
+    NewWorkspace.tsx the create form; owns the field class
+    EditWorkspace.tsx the edit form — sends only the fields that differ, and
+                     `startup: null` where one was emptied
     Act.tsx          start / stop / resume, per workspace row; owns the button
     Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
                      drops. Key it on the name

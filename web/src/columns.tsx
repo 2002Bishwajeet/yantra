@@ -131,6 +131,7 @@ export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
   machines: Looked<Machine[]>,
   open: (name: string) => void,
+  edit: (name: string) => void,
 ): Column<Workspace>[] {
   return [
     { header: 'WORKSPACE', cell: (workspace) => workspace.name },
@@ -165,6 +166,20 @@ export function workspaceColumns(
             Open terminal
           </button>
         ),
+    },
+    // The form itself is a section rather than a cell: three fields and a
+    // picker do not fit a column, and the row already opens one this way.
+    {
+      header: 'EDIT',
+      cell: (workspace) => (
+        <button
+          type="button"
+          className={button}
+          onClick={() => edit(workspace.name)}
+        >
+          Edit
+        </button>
+      ),
     },
   ]
 }

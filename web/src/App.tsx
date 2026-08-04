@@ -11,6 +11,7 @@ import {
 } from '@/columns'
 import { Command } from '@/components/Command'
 import { DataTable } from '@/components/DataTable'
+import { EditWorkspace } from '@/components/EditWorkspace'
 import { NewWorkspace } from '@/components/NewWorkspace'
 import { Section } from '@/components/Section'
 import { Terminal } from '@/components/Terminal'
@@ -28,6 +29,13 @@ export default function App() {
   // addressable, and one that was would promise a deep link that survives a
   // reload, which is a socket this page cannot yet reopen (Y-132).
   const [open, setOpen] = useState<string | null>(null)
+  // The name, not the row: the workspace the form edits comes from the reading
+  // every 30 s, so holding the row would edit against a copy of it.
+  const [editing, setEditing] = useState<string | null>(null)
+  const chosen =
+    workspaces.looked === 'ok'
+      ? workspaces.data.find((one) => one.name === editing)
+      : undefined
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
@@ -54,13 +62,28 @@ export default function App() {
       <Section title="Workspaces" query={workspaces}>
         {(rows) => (
           <DataTable
-            columns={workspaceColumns(sessions, machines, setOpen)}
+            columns={workspaceColumns(sessions, machines, setOpen, setEditing)}
             rows={rows}
             rowKey={(workspace) => workspace.name}
             empty="no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml"
           />
         )}
       </Section>
+
+      {/* Beside the create form rather than inside the row it was opened from:
+          the fields are the same fields, and a phone gives them the width. */}
+      {chosen && (
+        <Section title={`Edit ${chosen.name}`} query={machines}>
+          {(rows) => (
+            <EditWorkspace
+              key={chosen.name}
+              workspace={chosen}
+              machines={rows}
+              onClose={() => setEditing(null)}
+            />
+          )}
+        </Section>
+      )}
 
       {/* The machines reading is the picker, so the form draws only where there
           is really something to choose from. */}
