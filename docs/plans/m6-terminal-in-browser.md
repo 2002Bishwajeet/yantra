@@ -188,6 +188,20 @@ a terminal, and a well-known one. M6 is the first caller that can send a real `T
 `terminfo::choose` already knows how to negotiate it against what the far side has (I-43). This is a
 small thing that will look like an oversight later if it is not written down now.
 
+### 3.8 The CLI honesty check is already satisfied, which is worth showing rather than assuming
+
+[`crates/yantrad/CLAUDE.md`](../../crates/yantrad/CLAUDE.md) holds a rule that would otherwise stop
+Y-129 dead: *"Anything the web UI can do must be expressible in `yantra` first. That is what stops the
+daemon growing a second, richer API that the CLI cannot reach."* It is why Y-126 built `yantra edit`
+before the route, and why `up`/`down`/`resume` exist as verbs before they were buttons.
+
+**A browser terminal clears it, and does so without adding a verb.** `yantra attach` is the CLI
+expression of exactly this capability and already ships — it resolves the same plan and then
+`execve`s ssh, handing the process over. M6 does not give the CLI a second way to do that; it gives
+the *browser* the way the CLI already has. What the daemon gains is a transport, not a decision, and
+[ADR-0005](../adr/0005-core-logic-in-a-library-crate.md) is why the PTY lands in `yantra-core` while
+only the socket lands in `yantrad`.
+
 ## 4. What this milestone does not settle
 
 - **Control mode (`tmux -CC`)** is R2's v2 streaming transport and stays v2. One connection per
