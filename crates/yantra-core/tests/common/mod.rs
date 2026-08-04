@@ -36,6 +36,8 @@ const IMAGE: &str = "localhost/yantra-fixture:2";
 pub const USER: &str = "yantra";
 const HOST: &str = "127.0.0.1";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
+const BUILD_ATTEMPTS: u32 = 2;
+const BUILD_RETRY_PAUSE: Duration = Duration::from_secs(2);
 
 /// A running container with sshd and tmux inside, removed on drop.
 #[derive(Debug)]
@@ -248,22 +250,36 @@ fn podman(args: &[&str]) -> Result<std::process::Output> {
 }
 
 /// Builds the image on first use; later runs reuse it from the local store.
+///
+/// The build fetches Alpine packages, so on a fresh CI runner the whole suite
+/// sits behind one third-party fetch; it gets a second attempt (Y-133).
 fn ensure_image() -> Result<()> {
     if podman(&["image", "exists", IMAGE])?.status.success() {
         return Ok(());
     }
     let context = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture");
-    let out = Command::new("podman")
-        .args(["build", "-t", IMAGE, "."])
-        .current_dir(&context)
-        .output()
-        .context("spawning podman build")?;
-    if !out.status.success() {
-        bail!(
-            "building {IMAGE} from {} failed: {}",
-            context.display(),
+    let mut failures = Vec::new();
+    for attempt in 1..=BUILD_ATTEMPTS {
+        if attempt > 1 {
+            sleep(BUILD_RETRY_PAUSE);
+        }
+        let out = Command::new("podman")
+            .args(["build", "-t", IMAGE, "."])
+            .current_dir(&context)
+            .output()
+            .context("spawning podman build")?;
+        if out.status.success() {
+            return Ok(());
+        }
+        failures.push(format!(
+            "attempt {attempt}/{BUILD_ATTEMPTS} ({}): {}",
+            out.status,
             String::from_utf8_lossy(&out.stderr).trim()
-        );
+        ));
     }
-    Ok(())
+    bail!(
+        "building {IMAGE} from {} failed every attempt:\n{}",
+        context.display(),
+        failures.join("\n")
+    );
 }
