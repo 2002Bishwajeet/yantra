@@ -141,6 +141,13 @@ around it from the page that would host it. **Y-118 is `proposed` as [ADR-0017](
 and a proposal is not a decision — it is the owner's.** The layers beneath the route do not wait on
 it, which is why §5 orders them the way it does.
 
+> **Built 2026-08-04 by Y-129**, in [`crates/yantrad/src/terminal.rs`](../../crates/yantrad/src/terminal.rs),
+> and this paragraph is what the route ships behind rather than what it works around. `allowed()` is
+> called unchanged: on **7717** the route refuses a tagged node and anyone who is not the owner,
+> proved over a real listener; through **8443** it authorises whoever runs the proxy, exactly as
+> every write already does. Nothing reads `Tailscale-User-*` and nothing trusts `X-Forwarded-For` —
+> the hole stays one hole, in one place, for Y-118 to close for every route at once.
+
 ### 3.4 Nothing in the tree can open a socket or a PTY yet
 
 `axum` is pinned at 0.8.9 with `default-features = false, features = ["http1", "json", "tokio"]` —
@@ -159,6 +166,11 @@ audit in the same PR that adds it.
 > because it would buy an amount invisible to `ls -lh` and cost a build combination CI never
 > compiles. `tokio`'s `sync` feature came with it, for the bounded channel that carries output out of
 > the reader thread, and measured free.
+
+> **Landed 2026-08-04 by Y-129.** `ws` is on the workspace `axum` line, since `yantrad` is the only
+> crate that names axum at all. It brings `tokio-tungstenite`, `tungstenite`, `sha1` and its digest
+> stack, and a second `base64` — `just deny` passes, with three duplicate-version warnings added to
+> the four already there (`base64`, `getrandom`, `r-efi`; `multiple-versions` is `warn`).
 
 R2 is emphatic about the one to avoid: **do not plan on `node-pty`** — a native N-API addon, and the
 whole reason the PTY sits on the daemon side. That is also **R-24** holding: no Rust build may
@@ -211,6 +223,11 @@ That comment is true today and stops being true in this milestone: a browser run
 a terminal, and a well-known one. M6 is the first caller that can send a real `TERM`, and
 `terminfo::choose` already knows how to negotiate it against what the far side has (I-43). This is a
 small thing that will look like an oversight later if it is not written down now.
+
+> **Y-129 did not do it, on purpose.** The socket opens on `terminfo::FALLBACK` exactly as the three
+> write verbs do, and its size message is two numbers with `deny_unknown_fields`, so a `term` sent
+> today is refused rather than dropped. Y-130 adds the field on both sides in one change: the Rust
+> test that names it, `web/src/api.ts`, and `just fixtures`.
 
 ### 3.8 The CLI honesty check is already satisfied, which is worth showing rather than assuming
 

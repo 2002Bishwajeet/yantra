@@ -15,6 +15,11 @@
 //! The write answers are serialised from their DTOs rather than fetched from
 //! the router: those handlers `await` ssh and authorise a real tailnet caller,
 //! neither of which a unit test has.
+//!
+//! `terminalSize` is the first entry travelling the other way — a shape the
+//! *browser* writes and the daemon reads (Y-129). `satisfies` checks the same
+//! thing about it, which is that the two sides spell one message identically;
+//! that the daemon then accepts it is [`crate::terminal`]'s own test.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,6 +56,7 @@ import type {
   Opened,
   Resumed,
   Stopped,
+  TerminalSize,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -112,6 +118,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
         ),
     ];
     out.extend(crate::write::answers());
+    out.extend(crate::terminal::answers());
     out
 }
 

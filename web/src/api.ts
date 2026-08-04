@@ -67,6 +67,13 @@ export type Resumed = {
   term: string
 }
 
+/** The text frame a browser sends on `GET /api/workspaces/{name}/terminal`,
+ *  first and on every resize. Binary frames either way are terminal bytes. */
+export type TerminalSize = {
+  rows: number
+  cols: number
+}
+
 export type Session = {
   name: string
   windows: number
