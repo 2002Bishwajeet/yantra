@@ -239,6 +239,49 @@ The outcomes, and what each one decides:
 That last row is the point. The exec agent does not rescue this if inheritance does not work; it only
 costs more to discover the same thing.
 
+> **The probe was run on 2026-08-05 (Y-122), and the premise holds — but not by the test this section
+> named.** The owner ran step 1 at the Mac's keyboard (`tmux new-session -d -s yantra-probe`, in
+> Terminal.app on `bishwajeets-macbook-pro`); everything else ran from `cachyos-g14` over ssh.
+>
+> **The socket premise holds.** `$TMPDIR` reported inside Terminal.app and `$TMPDIR` reported in the
+> ssh session were byte-identical, and `tmux ls` over ssh listed the probe session. The ssh client
+> reaches the GUI session's server on the default socket, so §1's precondition needs no explicit `-S`
+> path.
+>
+> **The inheritance premise holds, on the outcome that decides it.** Same `$HOME`, same binary, same
+> machine, minutes apart: over plain ssh `claude auth status` answered `loggedIn: false` /
+> `authMethod: "none"` and `security find-generic-password -s "Claude Code-credentials" -w` exited
+> **36**; in a window forked by the Terminal.app-started tmux server the same two answered
+> `loggedIn: true` / `authMethod: "claude.ai"` and exited **0**. And what is inherited is the
+> *keychain*, not a file: `~/.claude/.credentials.json` is present on that Mac, so a `claude` that
+> preferred the file would have answered `true` over ssh, which has the same `$HOME`. It answered
+> `false`.
+>
+> **What did not survive is the discriminator, and the outcome table above is what that corrects.**
+> `launchctl managername` printed **`Background`** in the ssh session *and* in a process forked by the
+> GUI session's tmux server. It does not distinguish the two contexts, so nothing about keychain reach
+> may be read off it — including step 2's use of it, the first row's `gui/<uid>` clause, and the third
+> row, whose *`Background` … the premise fails* is the reading this measurement contradicts. Had it
+> been followed, this ADR would have fallen back to Alternative A on evidence that decides nothing.
+> The `loggedIn` pair is the whole test.
+>
+> Two clauses for whoever implements this. `tmux` is not on that Mac's non-interactive ssh `PATH`
+> (**I-34** again), so §1's precondition and §5's gate must resolve it absolutely, as §7.3 already
+> requires of the launchd job. And macOS has no `timeout`: the first attempt wrapped both commands in
+> it and both returned exit **127** — a measurement of nothing that looked like a symmetrical result.
+> The numbers above are the redone run.
+>
+> The probe honoured the boundary step 3 set. Only `loggedIn` and `authMethod` were read out of
+> `claude auth status` — the two fields `agent.rs`'s `Status` names — so the account email, `orgId`,
+> `orgName` and `subscriptionType` never left the Mac, and the keychain secret was read only as an
+> exit code with its value discarded. The probe session and its scripts were removed afterwards, and
+> `tmux ls` then reported no server running.
+>
+> **This does not change the Status, which stays `proposed`.** What it settles is upstream of the
+> decision, not the decision: **Consequences → Paid**'s *"the premise is unverified until §8 is run"*
+> is answered, and nothing else in that list moves. Whether the ADR is accepted is the owner's and is
+> deliberately not part of the change that recorded this.
+
 ## Alternatives considered
 
 ### A. Do nothing — Yantra says *this machine cannot start an agent*, and why
