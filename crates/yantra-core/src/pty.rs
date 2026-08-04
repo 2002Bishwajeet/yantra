@@ -12,6 +12,10 @@
 //! [`attach::remote_command`] renders from those, over the same multiplexed
 //! socket as every other ssh Yantra opens (I-20, I-28).
 //!
+//! **Reconnecting is opening another one.** tmux draws the pane's current
+//! contents for every client that attaches — measured, alternate screen
+//! included — so replay is the far side's and no buffer belongs here (Y-132).
+//!
 //! A pty rather than `ssh -tt` with pipes because of the window, not the
 //! keystrokes: Y-127 measured both interrupting, and only the pty carries a size
 //! the caller chose — pipes report openssh's `80x24` and have nothing to resize.

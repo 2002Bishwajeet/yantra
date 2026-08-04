@@ -230,6 +230,18 @@ nothing here breaks that rule by existing. What it forecloses is **logging the s
 `pipe-pane` transcript and the "replay last N bytes on reconnect" buffer are both places a resolved
 secret would land at rest. Replay is therefore in-memory and bounded, or it is not built.
 
+> **Answered 2026-08-04 by Y-132: it is not built, and the alternative is better rather than
+> merely safer.** tmux draws the pane's current contents for every client that attaches — measured
+> against the container's tmux 3.5a and this machine's 3.7b, alternate screen included — so a second
+> socket is a second attach and the screen arrives from the far side. A window of the last N bytes
+> would have been a second copy of that, cut at an arbitrary offset that can land inside a CSI
+> sequence, and R2 §7's own numbers say what it would have bought: two trivial `echo`s are 966 bytes
+> and an agent redrawing a TUI produces MB/min, so any cap small enough to be honest replays a
+> fraction of a second of the case this milestone exists for — while still being large enough to hold
+> a resolved secret, which is the class Q5 forecloses rather than the size. **What was capped instead
+> is the browser's reopening**, five attempts half a second apart, because every one of them is an
+> `ssh` connection and a tmux client on a machine that may be asleep.
+
 ### 3.7 `term()` currently answers a question the browser can answer properly
 
 [`write.rs`](../../crates/yantrad/src/write.rs):
@@ -298,7 +310,7 @@ only the socket lands in `yantrad`.
 | Y-118 | Identity from the forwarded address | Not new, and not this milestone's to decide — but 3.3 makes it the gate on M6 being reachable from the phone at all. Owner's, `proposed` as ADR-0017. |
 | Y-130 | xterm.js in the dashboard, on the workspace that has a session | The browser half, and where 3.5's three answers get chosen — overlay or route, which primitive holds it, what the service worker must not touch. First caller that can send a real `TERM` (3.7). `Command.tsx`'s `attach` paste is what it replaces. **Done**: a sixth section in the `Card` the others use, `xterm-256color`, and the paste is a button. |
 | Y-131 | Resize forwarding, and what happens to the other client | 3.2 — the decision R2 could not make and this plan deliberately does not, measured against a real second client rather than inherited. |
-| Y-132 | Reconnect without losing the screen | R2 names replay-last-N as Yantra's to build. In-memory and bounded, never at rest (3.6). |
+| Y-132 | Reconnect without losing the screen | R2 names replay-last-N as Yantra's to build. In-memory and bounded, never at rest (3.6). **Done**: not built — tmux draws the pane for whichever client attaches, so the browser reopens the socket and the screen arrives from the far side. |
 
 **Y-127 through Y-128 depend on nothing and are the bulk of the risk.** Y-129 ships behind the
 refusal in its own row; everything the owner has to decide is downstream of the work, which is the

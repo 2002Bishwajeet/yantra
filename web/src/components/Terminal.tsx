@@ -21,6 +21,18 @@ import {
  *  aborts (I-36). */
 const TERM = 'xterm-256color'
 
+/** How many times a socket that went away with nothing to say is reopened, and
+ *  how long apart. A phone waking or a network changing hands is one attempt
+ *  and half a second, and nobody sees it; a daemon that is down is given up on
+ *  rather than hammered, because every attempt is an `ssh` connection and a
+ *  tmux client on a machine that may be asleep. The budget is per outage — a
+ *  socket that printed anything worked, and refills it.
+ *
+ *  Exported so the tests assert the budget this file declares rather than a
+ *  number copied out of it. */
+export const ATTEMPTS = 5
+export const PAUSE = 500
+
 type Ended = { ended: 'no' } | { ended: 'yes'; said: string | null }
 
 /** The socket and xterm.js, wired to each other and to nothing that renders.
@@ -37,16 +49,19 @@ function attach(
   fit.fit()
   xterm.focus()
 
-  const socket = new WebSocket(
-    `${location.origin.replace(/^http/, 'ws')}/api/workspaces/${encodeURIComponent(name)}/terminal`,
-  )
-  socket.binaryType = 'arraybuffer'
+  const url = `${location.origin.replace(/^http/, 'ws')}/api/workspaces/${encodeURIComponent(name)}/terminal`
+  let socket: WebSocket | undefined
+  let waiting: ReturnType<typeof setTimeout> | undefined
+  let attempts = 0
+  let finished = false
+
   const send = (frame: string | Uint8Array<ArrayBuffer>) => {
-    if (socket.readyState === WebSocket.OPEN) socket.send(frame)
+    if (socket?.readyState === WebSocket.OPEN) socket.send(frame)
   }
 
-  // A pty is opened with a window, so this is what *starts* the terminal; every
-  // later one resizes it.
+  // A pty is opened with a window, so this is what *starts* the terminal and
+  // every later one resizes it — and a reopened socket needs the first sense
+  // again, its pty being as new as it is.
   const measure = () => {
     fit.fit()
     send(
@@ -58,23 +73,47 @@ function attach(
     )
   }
 
+  const open = () => {
+    const live = new WebSocket(url)
+    socket = live
+    live.binaryType = 'arraybuffer'
+    live.onopen = measure
+    live.onmessage = (frame: MessageEvent<string | ArrayBuffer>) => {
+      attempts = 0
+      // Text from the daemon is why a terminal could not be opened. Written to
+      // the screen it would be indistinguishable from something the session
+      // said — and reopening a socket that was refused only refuses again.
+      if (typeof frame.data === 'string') {
+        finished = true
+        over(frame.data)
+      } else xterm.write(new Uint8Array(frame.data))
+    }
+    // **The screen is not lost with the socket.** tmux draws the pane's
+    // contents for whichever client attaches next, so reopening is the whole of
+    // replay and nothing on this side keeps the stream (Q5).
+    live.onclose = () => {
+      if (finished) return
+      if (attempts >= ATTEMPTS) {
+        over(null)
+        return
+      }
+      attempts += 1
+      waiting = setTimeout(open, PAUSE)
+    }
+  }
+
   const bytes = new TextEncoder()
   const typed = xterm.onData((data) => send(bytes.encode(data)))
 
-  socket.onopen = measure
-  socket.onmessage = (frame: MessageEvent<string | ArrayBuffer>) => {
-    // Text from the daemon is why a terminal could not be opened. Written to
-    // the screen it would be indistinguishable from something the session said.
-    if (typeof frame.data === 'string') over(frame.data)
-    else xterm.write(new Uint8Array(frame.data))
-  }
-  socket.onclose = () => over(null)
+  open()
   window.addEventListener('resize', measure)
 
   return () => {
+    finished = true
+    clearTimeout(waiting)
     window.removeEventListener('resize', measure)
     typed.dispose()
-    socket.close()
+    socket?.close()
     xterm.dispose()
   }
 }
@@ -123,8 +162,9 @@ export function Terminal({
         {end.ended === 'yes' &&
           (end.said === null ? (
             <p className="text-muted-foreground text-sm">
-              The terminal ended. Detaching never stops a session, and whether
-              this one is still running is what the Workspaces row says.
+              The terminal ended, and reopening it did not bring it back.
+              Detaching never stops a session, and whether this one is still
+              running is what the Workspaces row says.
             </p>
           ) : (
             <Alert variant="destructive">

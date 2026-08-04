@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { type WebSocket as Client, WebSocket as Ws, WebSocketServer } from 'ws'
-import { Terminal } from './components/Terminal'
+import { ATTEMPTS, PAUSE, Terminal } from './components/Terminal'
 
 const PORT = 57130
 
@@ -26,10 +26,15 @@ function daemon() {
   const asked: string[] = []
   let live: Client | undefined
   let closed = false
+  let refusing = false
 
   server.on('connection', (socket, request) => {
     live = socket
     asked.push(request.url ?? '')
+    if (refusing) {
+      socket.close()
+      return
+    }
     socket.on('message', (data: Buffer, binary: boolean) => {
       heard.push(binary ? { bytes: [...data] } : { text: data.toString() })
     })
@@ -45,6 +50,12 @@ function daemon() {
     print: (bytes: string) => live?.send(Buffer.from(bytes), { binary: true }),
     say: (text: string) => live?.send(text, { binary: false }),
     hangUp: () => live?.close(),
+    /** A daemon that takes the connection and drops it having said nothing —
+     *  which is the one shape the page cannot tell from a network that went
+     *  away, and so the one it must stop retrying by counting. */
+    keepHangingUp: () => {
+      refusing = true
+    },
     // `close` stops the listener and waits for the sockets on it, so the
     // clients have to be let go before it can finish.
     stop: () =>
@@ -160,24 +171,79 @@ describe('the terminal in the dashboard', () => {
     expect(daemonised.heard[1]).toEqual(daemonised.heard[0])
   })
 
-  it('ends the socket when it is closed, so nothing is left attached', async () => {
+  /** Closing is the one end that means it — nothing is left attached, and
+   *  nothing is reopened. */
+  it('ends the socket when it is closed, and does not reopen it', async () => {
     const { unmount } = render(<Terminal name="yantra" onClose={() => {}} />)
     await waitFor(() => expect(daemonised.heard.length).toBe(1))
 
     unmount()
     await waitFor(() => expect(daemonised.ended()).toBe(true))
+
+    await new Promise((done) => setTimeout(done, PAUSE * 3))
+    expect(daemonised.asked.length).toBe(1)
   })
 
-  /** Y-132's starting point: a socket that goes away is not an error, and the
-   *  session it was attached to is still running. */
-  it('says a socket that ended with no reason differently from one that gave one', async () => {
+  /** **Y-132.** Nothing here replays anything: the page opens another socket,
+   *  and the tmux on the far side draws the pane for whichever client attaches
+   *  next. What this proves is the half the browser owns — that a socket which
+   *  went away with nothing to say is reopened, and told the window again,
+   *  because a pty is opened with one. */
+  it('reopens a socket that dropped, and says how big it is on the new one', async () => {
+    render(<Terminal name="yantra" onClose={() => {}} />)
+    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    daemonised.print('claude is thinking')
+    await waitFor(() => expect(screenText()).toContain('claude is thinking'))
+
+    daemonised.hangUp()
+
+    await waitFor(() => expect(daemonised.asked.length).toBe(2), {
+      timeout: 3000,
+    })
+    expect(daemonised.asked[1]).toBe('/api/workspaces/yantra/terminal')
+    await waitFor(() => expect(daemonised.heard.length).toBe(2))
+    expect(daemonised.heard[1]).toEqual(daemonised.heard[0])
+
+    daemonised.print('and it is still thinking')
+    await waitFor(() =>
+      expect(screenText()).toContain('and it is still thinking'),
+    )
+    expect(screen.queryByText(/The terminal ended/)).toBeNull()
+  })
+
+  /** A reason from the daemon is a refusal — the workspace has no session, the
+   *  machine is asleep — and reopening a refused socket only refuses again. */
+  it('does not reopen a socket the daemon gave a reason for', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
     await waitFor(() => expect(daemonised.heard.length).toBe(1))
 
+    daemonised.say('ssh: connect to host cachyos-g14 port 22: No route to host')
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
     daemonised.hangUp()
-    await waitFor(() =>
-      expect(screen.getByText(/The terminal ended/)).toBeTruthy(),
+
+    // Proving a thing does not happen needs a window: this is the whole of the
+    // retry budget with room to spare.
+    await new Promise((done) => setTimeout(done, PAUSE * (ATTEMPTS + 2)))
+    expect(daemonised.asked.length).toBe(1)
+  })
+
+  /** **The cap, and it is a cap on attempts rather than on anything kept.**
+   *  Every one of them is an `ssh` connection and a tmux client on a machine
+   *  that may be asleep, so a terminal that cannot be got back has to stop
+   *  asking — and say so differently from a terminal that was refused. */
+  it('gives up after a bounded number of attempts rather than reopening forever', async () => {
+    render(<Terminal name="yantra" onClose={() => {}} />)
+    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+
+    daemonised.keepHangingUp()
+    daemonised.hangUp()
+
+    await waitFor(
+      () => expect(screen.getByText(/The terminal ended/)).toBeTruthy(),
+      { timeout: PAUSE * (ATTEMPTS + 4) },
     )
     expect(screen.queryByRole('alert')).toBeNull()
-  })
+    // The first socket, then the five it is worth reopening.
+    expect(daemonised.asked.length).toBe(ATTEMPTS + 1)
+  }, 10000)
 })

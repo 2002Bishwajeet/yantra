@@ -124,9 +124,11 @@ decisions, each of which could reasonably have gone the other way:
 - **A sixth section, not a route and not an overlay.** `App.tsx` holds one
   `string | null`; the terminal draws above the other five when it is set. `yantrad`
   would serve a deep link — `web.rs` falls back to `index.html` — but a URL for a
-  terminal promises a socket reopened on load, which is [Y-132](../tracker.md). An
-  overlay would be the first thing here that traps focus, over a screen a phone
-  gives the whole of anyway.
+  terminal promises a socket reopened on load, which Y-130 left to
+  [Y-132](../tracker.md) and Y-132 answered only for a terminal already on the
+  screen; whether this page gets a router is still nobody's decision. An overlay
+  would be the first thing here that traps focus, over a screen a phone gives the
+  whole of anyway.
 - **The same `Card` the other sections use, so no primitive was vendored.**
   `Section` takes a `Looked<T>` and a terminal is not a reading, so this composes
   `Card` itself. `Act.tsx` exports its button class rather than having it copied.
@@ -141,8 +143,37 @@ decisions, each of which could reasonably have gone the other way:
 
 **Text frames from the daemon are errors, not output.** Writing one to the screen
 would make it indistinguishable from something the session printed, so it is drawn
-as an alert beside the terminal. A close with nothing said is not an error at all:
-the screen stops where it was and says so.
+as an alert beside the terminal. A close with nothing said is not an error at all,
+and is what reconnect turns on.
+
+## Reconnect (Y-132)
+
+**A socket that went away with nothing to say is reopened, and nothing here replays
+anything.** tmux draws the pane's current contents for whichever client attaches
+next — measured against a real tmux in `crates/yantra-core/tests/pty.rs`, alternate
+screen included — so a second socket is a second attach and the screen arrives from
+the far side. A buffer of the last N bytes would have been a second, worse copy of
+what tmux already holds, and Q5 names a terminal stream in the sentence that closed
+it.
+
+Three rules, and the second is why this is not a loop:
+
+- **A close with a reason is not retried.** Text from the daemon means the terminal
+  could not be opened — no session, an asleep machine — and reopening a refused
+  socket refuses again.
+- **`ATTEMPTS` and `PAUSE` are the cap, and it is a cap on attempts rather than on
+  anything kept.** Five reopens half a second apart: a phone waking or a network
+  changing hands costs one of them and is invisible, and every attempt beyond that
+  is an `ssh` connection and a tmux client on a machine that may be asleep. The
+  budget refills on any frame received, so it bounds an outage rather than a
+  terminal's life.
+- **Unmounting means it.** Closing the terminal clears the pending reopen before it
+  closes the socket, or `cleanup()` in one test reconnects into the next one's
+  server.
+
+What this cannot see: whether a phone's `close` event fires at all when the screen
+wakes. If a socket dies without either end noticing, nothing reopens and nothing
+here would know — there is still no ping and no idle timeout on the daemon side.
 
 **`ws: true` on the dev proxy is load-bearing.** The string form of a Vite proxy
 entry forwards plain requests only, so without it the terminal in `npm run dev`
@@ -318,7 +349,8 @@ src/
     Section.tsx      the looked switch; children run only in the ok branch
     NewWorkspace.tsx the create form
     Act.tsx          start / stop / resume, per workspace row; owns the button
-    Terminal.tsx     xterm.js on the session's WebSocket. Key it on the name
+    Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
+                     drops. Key it on the name
     DataTable.tsx    a table, or a block per row on a phone; owns "we looked
                      and there is nothing"
     Status.tsx       tone -> appearance; the only file that knows about colour
