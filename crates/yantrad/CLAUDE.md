@@ -2,7 +2,7 @@
 
 **It serves, it looks, it answers, and it acts.** Y-069 made it an `axum` server, Y-070 gave it a
 background read model, Y-071 put that model on the wire at `/api`, Y-108 added `POST /heartbeat`, and
-Y-112 and Y-116 gave it the four writes a dashboard needs. The most useful thing you can do here is
+Y-112, Y-116 and Y-126 gave it the writes a dashboard needs. The most useful thing you can do here is
 still not write code before a milestone needs it.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
@@ -83,8 +83,9 @@ status. Assert on the body.
 
 ## The routes that act
 
-`POST /api/workspaces` and `POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
-nothing more**, being `yantra new`, `up`, `down` and `resume`. The daemon
+`POST /api/workspaces`, `PATCH /api/workspaces/{name}` and
+`POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
+nothing more**, being `yantra new`, `edit`, `up`, `down` and `resume`. The daemon
 may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
 reach. A new verb here starts in the CLI.
 
@@ -104,10 +105,20 @@ already taken, which is **`409`** rather than `400`. The caller asked for someth
 the world already answers, and telling them to fix their request would send them looking for a
 mistake they did not make.
 
-**A workspace created this way is not in the read model yet.** `refresh.rs` looks every 30 s, so
+**`PATCH` is the one that refuses**, and the refusal is [`edit.rs`](../yantra-core/src/edit.rs)'s
+rather than a guard added here (Y-126). Moving `machine` while a tmux session is open on the machine
+being left is **`409`**: the session would stay where nothing looks for it and every later verb would
+report it as absent (I-30), and `yantra down` is what clears it. A machine that could not be asked is
+**`503`** — R-23's shape, and the same reason a `tailscale` that cannot answer is not a `403`.
+**Absent and `null` are different on this route**: `"startup": null` clears the command and no
+`startup` key leaves it alone, which serde folds together unless the field is read into an
+`Option<Option<_>>` by hand — getting that wrong is how a `PATCH` blanks a field nobody named. A body
+naming no field is a `400`, exactly as `yantra edit` with no flags is a usage error.
+
+**A workspace written this way is not in the read model yet.** `refresh.rs` looks every 30 s, so
 `GET /api/workspaces` keeps answering without it for up to that long — measured at 15 s on the first
-try. The `201` carries the whole workspace back for exactly this reason: a client that re-reads the
-list to find what it just made will draw an empty one.
+try. The `201` and the `PATCH`'s `200` carry the whole workspace back for exactly this reason: a
+client that re-reads the list to find what it just wrote will draw what was there before.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
