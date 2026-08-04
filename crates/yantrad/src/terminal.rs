@@ -27,19 +27,45 @@
 //! the daemon how big a browser is or which one it is; from the daemon it is the
 //! reason a terminal could not be opened, which a close frame cannot carry —
 //! that reason is capped at 123 bytes and an ssh diagnosis is longer.
+//!
+//! **The daemon originates the ping, because nothing else here is on a timer**
+//! (Y-134). A [`pty::Terminal`] owns the local `ssh`, the pty master and the
+//! reader thread, and its `Drop` is what detaches the tmux client on the far
+//! side — so a socket whose peer vanished holds all of it until a send fails,
+//! and a send needs the far side to print first, which an agent thinking
+//! quietly never does. **The instrument is a ping and never a traffic timer**:
+//! output in progress is not idleness and silence is not death, so neither
+//! direction of the stream says anything about whether the peer is there. The
+//! pong RFC 6455 requires does, and it is a protocol frame rather than the
+//! stream, so Q5's line above still holds — nothing reads what is on it.
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
+use tokio::time::MissedTickBehavior;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
 
 use crate::write::{Authoriser, Refused, allowed, chain};
+
+/// Long enough that a socket nobody is typing at costs one frame a browser
+/// answers in microseconds; short enough that what a vanished peer holds is
+/// bounded well under the kernel's own retransmission budget.
+#[cfg(not(test))]
+const PING_EVERY: Duration = Duration::from_secs(20);
+#[cfg(test)]
+const PING_EVERY: Duration = Duration::from_millis(200);
+
+/// One unanswered ping is a phone whose radio slept or a busy main thread; two
+/// in a row is a peer that is not there.
+const MISSES: u8 = 2;
 
 pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
 where
@@ -88,26 +114,22 @@ impl From<&Size> for pty::Size {
 }
 
 async fn bridge(mut socket: WebSocket, name: String) {
-    let Some(first) = first_size(&mut socket).await else {
-        return;
-    };
-
-    let mut terminal = match pty::open(&name, &first.term, (&first).into()).await {
-        Ok(terminal) => terminal,
-        Err(error) => {
-            let said = chain(&error);
-            tracing::warn!("no terminal for {name}: {said}");
-            let _ = socket.send(Message::Text(said.into())).await;
-            return;
-        }
-    };
+    // The pty arrives with the first control frame, so the socket outlives the
+    // terminal at both ends and the ping has to cover the whole of it.
+    let mut terminal: Option<pty::Terminal> = None;
+    let mut unanswered = 0u8;
+    let mut pings = tokio::time::interval(PING_EVERY);
+    // Delay, not the default burst: opening the pty can outlast an interval,
+    // and catch-up ticks would count as misses nobody was given time to answer.
+    pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         // The arms carry the event out rather than handling it, so the borrows
         // `select!` holds end before either side is touched again.
         let event = tokio::select! {
-            printed = terminal.read() => Either::Printed(printed),
+            printed = printed(&mut terminal) => Either::Printed(printed),
             typed = socket.recv() => Either::Typed(typed),
+            _ = pings.tick() => Either::Quiet,
         };
 
         match event {
@@ -117,14 +139,31 @@ async fn bridge(mut socket: WebSocket, name: String) {
                 }
             }
             Either::Typed(Some(Ok(Message::Binary(bytes)))) => {
-                if let Err(error) = terminal.write(bytes.into()).await {
+                if let Some(open) = terminal.as_mut()
+                    && let Err(error) = open.write(bytes.into()).await
+                {
                     tracing::warn!("terminal {name} stopped accepting input: {error}");
                     break;
                 }
             }
-            Either::Typed(Some(Ok(Message::Text(text)))) => resize(&terminal, &name, &text),
-            // Ping and pong are axum's to answer.
+            Either::Typed(Some(Ok(Message::Text(text)))) => {
+                if !control(&mut socket, &mut terminal, &name, &text).await {
+                    break;
+                }
+            }
+            Either::Typed(Some(Ok(Message::Pong(_)))) => unanswered = 0,
+            // An inbound ping is still axum's to answer.
             Either::Typed(Some(Ok(_))) => {}
+            Either::Quiet => {
+                if unanswered >= MISSES {
+                    tracing::info!("terminal {name} answered no ping");
+                    break;
+                }
+                unanswered += 1;
+                if socket.send(Message::Ping(Bytes::new())).await.is_err() {
+                    break;
+                }
+            }
             Either::Printed(None) | Either::Typed(None | Some(Err(_))) => break,
         }
     }
@@ -134,27 +173,52 @@ async fn bridge(mut socket: WebSocket, name: String) {
 enum Either {
     Printed(Option<Vec<u8>>),
     Typed(Option<Result<Message, axum::Error>>),
+    Quiet,
+}
+
+/// A `select!` arm has to be a future, and nothing is printed before there is
+/// something to print it.
+async fn printed(terminal: &mut Option<pty::Terminal>) -> Option<Vec<u8>> {
+    match terminal {
+        Some(open) => open.read().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// A pty is opened with a window, so the first control frame is what starts the
-/// terminal rather than what resizes it.
-async fn first_size(socket: &mut WebSocket) -> Option<Size> {
-    while let Some(Ok(message)) = socket.recv().await {
-        if let Message::Text(text) = message {
-            return match serde_json::from_str::<Size>(&text) {
-                Ok(size) => Some(size),
-                Err(_) => {
-                    let _ = socket
-                        .send(Message::Text(
-                            "a terminal opens with {\"rows\":…,\"cols\":…,\"term\":…}".into(),
-                        ))
-                        .await;
-                    None
-                }
-            };
+/// terminal and every later one resizes it. `false` ends the socket.
+async fn control(
+    socket: &mut WebSocket,
+    terminal: &mut Option<pty::Terminal>,
+    name: &str,
+    text: &str,
+) -> bool {
+    if let Some(open) = terminal.as_ref() {
+        resize(open, name, text);
+        return true;
+    }
+
+    let Ok(size) = serde_json::from_str::<Size>(text) else {
+        let _ = socket
+            .send(Message::Text(
+                "a terminal opens with {\"rows\":…,\"cols\":…,\"term\":…}".into(),
+            ))
+            .await;
+        return false;
+    };
+
+    match pty::open(name, &size.term, (&size).into()).await {
+        Ok(open) => {
+            *terminal = Some(open);
+            true
+        }
+        Err(error) => {
+            let said = chain(&error);
+            tracing::warn!("no terminal for {name}: {said}");
+            let _ = socket.send(Message::Text(said.into())).await;
+            false
         }
     }
-    None
 }
 
 /// A window that could not be parsed or set leaves a working terminal at the
@@ -196,13 +260,16 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::timeout;
     use yantra_core::inventory::{Caller, Fake};
 
     const ME: u64 = 1;
 
     const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+    const PING: u8 = 0x9;
 
     fn tailnet(callers: Vec<(IpAddr, Caller)>) -> Fake {
         Fake {
@@ -226,7 +293,7 @@ mod tests {
     /// A real listener, because `oneshot` never gives axum the upgrade it
     /// extracts: the peer address a refusal turns on is the one the kernel
     /// reports, so the tailnet is faked at loopback rather than at 100.64/10.
-    async fn handshake(authoriser: Authoriser<Fake>, forwarded: &str) -> String {
+    async fn connect(authoriser: Authoriser<Fake>, forwarded: &str) -> BufReader<TcpStream> {
         let app = Router::new().nest("/api", router(authoriser));
 
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
@@ -256,12 +323,52 @@ mod tests {
             .await
             .expect("the request is written");
 
-        let mut status = String::new();
         BufReader::new(stream)
+    }
+
+    async fn handshake(authoriser: Authoriser<Fake>, forwarded: &str) -> String {
+        let mut status = String::new();
+        connect(authoriser, forwarded)
+            .await
             .read_line(&mut status)
             .await
             .expect("an HTTP response");
         status
+    }
+
+    /// Past the handshake and onto the frames, which is where a ping is.
+    async fn upgraded(authoriser: Authoriser<Fake>) -> BufReader<TcpStream> {
+        let mut socket = connect(authoriser, "").await;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = socket.read_line(&mut line).await.expect("a header");
+            assert!(read > 0, "the response ended before its headers did");
+            if line == "\r\n" {
+                return socket;
+            }
+            assert!(!line.starts_with("HTTP/1.1 4"), "{line}");
+        }
+    }
+
+    /// Server frames are unmasked, and nothing the daemon sends before a pty
+    /// exists is longer than a control frame may be, so the header is two bytes.
+    async fn frame(socket: &mut BufReader<TcpStream>) -> std::io::Result<(u8, Vec<u8>)> {
+        let mut head = [0u8; 2];
+        socket.read_exact(&mut head).await?;
+        let mut payload = vec![0u8; usize::from(head[1] & 0x7f)];
+        socket.read_exact(&mut payload).await?;
+        Ok((head[0] & 0x0f, payload))
+    }
+
+    /// A client frame must be masked or the far side is entitled to drop the
+    /// socket, which would prove liveness detection works by breaking it.
+    async fn pong(socket: &mut BufReader<TcpStream>) {
+        socket
+            .get_mut()
+            .write_all(&[0x8a, 0x80, 0, 0, 0, 0])
+            .await
+            .expect("a pong is written");
     }
 
     fn caller(user: u64, tags: &[&str]) -> Caller {
@@ -317,6 +424,49 @@ mod tests {
         // forwarded address being read rather than the hop being distrusted.
         let unproxied = handshake(ours(), "").await;
         assert!(unproxied.starts_with("HTTP/1.1 101"), "{unproxied}");
+    }
+
+    /// **The half of Y-134 that is easy to break.** An agent that runs quietly
+    /// for an hour prints nothing and takes nothing, and a daemon that reaped it
+    /// would have killed the thing M6 exists for. Nothing is typed here, nothing
+    /// is printed, and every frame the daemon originates is another ping.
+    #[tokio::test]
+    async fn a_peer_that_answers_is_not_closed_however_long_it_prints_nothing() {
+        let mut socket = upgraded(direct(Some(caller(ME, &[])))).await;
+
+        for _ in 0..6 {
+            let (opcode, _) = timeout(PING_EVERY * 3, frame(&mut socket))
+                .await
+                .expect("a ping within three intervals")
+                .expect("a peer that answers is still connected");
+            assert_eq!(opcode, PING, "the daemon closed a peer that was answering");
+            pong(&mut socket).await;
+        }
+    }
+
+    /// The other half, and the one the row was opened for: the peer is gone,
+    /// the far side has printed nothing to fail a send on, and the socket ends
+    /// anyway — which is what drops the `Terminal` when there is one.
+    #[tokio::test]
+    async fn a_peer_that_stops_answering_is_closed() {
+        let mut socket = upgraded(direct(Some(caller(ME, &[])))).await;
+
+        let unanswered = timeout(PING_EVERY * 8, async {
+            let mut sent = 0u8;
+            loop {
+                match frame(&mut socket).await {
+                    Ok((PING, _)) => sent += 1,
+                    _ => return sent,
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(
+            unanswered.ok(),
+            Some(MISSES),
+            "a socket nobody answered outlived its pings"
+        );
     }
 
     /// Two numbers and a name, and nothing else. A typo that silently opened an
