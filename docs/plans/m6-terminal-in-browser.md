@@ -150,6 +150,16 @@ which is what let the spike answer §3.1 without deciding where the module lives
 to a workspace that runs `just deny` on every change, so each lands with its licence and advisory
 audit in the same PR that adds it.
 
+> **Settled 2026-08-04 by Y-128**, in [`crates/yantra-core/src/pty.rs`](../../crates/yantra-core/src/pty.rs).
+> `portable-pty` is a plain **dependency** of `yantra-core`, on the measurement rather than on the
+> argument: `just appliance-size` puts `yantra-agent` at 441,264 bytes against 441,280 before — the
+> binary R-12 guards came out *smaller* — while `yantrad` and `yantra`, neither of which calls the
+> module yet, grew about 0.15 %. That is the crate's own note about the dependency edge holding a
+> second time: the edge is nearly free, the **call graph** is where +319 KB lives. No cargo feature,
+> because it would buy an amount invisible to `ls -lh` and cost a build combination CI never
+> compiles. `tokio`'s `sync` feature came with it, for the bounded channel that carries output out of
+> the reader thread, and measured free.
+
 R2 is emphatic about the one to avoid: **do not plan on `node-pty`** — a native N-API addon, and the
 whole reason the PTY sits on the daemon side. That is also **R-24** holding: no Rust build may
 acquire a Node dependency, and a PTY in the browser-facing layer would be exactly that.

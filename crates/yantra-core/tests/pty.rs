@@ -14,6 +14,10 @@
 //! session, the victim and the remote command are identical in all of them, and
 //! the remote command comes from [`attach::remote_command`] rather than being
 //! written out here (I-34, I-35, I-36/I-43).
+//!
+//! **Y-128 turned the first arm into [`yantra_core::pty`]**, and the two tests
+//! that come first below ask the module the same questions in the same
+//! container — the spike's four are kept behind them as the comparison.
 
 #![allow(clippy::expect_used)]
 
@@ -27,9 +31,11 @@ use anyhow::{Result, bail};
 use common::{SshFixture, USER};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use yantra_core::attach;
+use yantra_core::pty::{self, Terminal};
 use yantra_core::ssh::{Exec, Machine, Ssh};
-use yantra_core::terminfo;
+use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
+use yantra_core::workspace::Workspace;
 
 const SESSION: &str = "ptyspike";
 /// Long enough that only a signal can end it inside the test's lifetime, and
@@ -57,6 +63,14 @@ const RESIZED: PtySize = PtySize {
 /// How tmux spells a client's size back.
 fn size_of(window: PtySize) -> String {
     format!("{}x{}", window.cols, window.rows)
+}
+
+/// The same window in the module's spelling, which has no pixels in it.
+fn cells(window: PtySize) -> pty::Size {
+    pty::Size {
+        rows: window.rows,
+        cols: window.cols,
+    }
 }
 
 struct Lab {
@@ -135,6 +149,21 @@ impl Lab {
             terminfo::FALLBACK,
         ));
         args
+    }
+
+    /// What [`attach::plan`] would have resolved, with the parts that need a
+    /// machine — the tmux path (I-34) — resolved against the real one.
+    fn plan(&self) -> attach::Plan {
+        attach::Plan {
+            workspace: Workspace {
+                name: SESSION.to_owned(),
+                machine: self.fixture.host().to_owned(),
+                repo: std::path::PathBuf::from("/tmp"),
+                startup: None,
+            },
+            tmux: self.tmux.clone(),
+            term: Chosen::Known(terminfo::FALLBACK.to_owned()),
+        }
     }
 
     async fn ask(&self, command: &str) -> Result<String> {
@@ -347,6 +376,90 @@ fn merge_into(seen: &Arc<Mutex<Vec<u8>>>, mut reader: Box<dyn Read + Send>) {
             }
         }
     });
+}
+
+/// Reads until the far side has printed `wanted`, so a test asserts on what the
+/// remote tmux drew rather than on bytes having arrived at all.
+async fn screen_showing(terminal: &mut Terminal, wanted: &str) -> Result<String> {
+    let deadline = Instant::now() + PATIENCE;
+    let mut seen = String::new();
+    while Instant::now() < deadline {
+        match tokio::time::timeout(deadline - Instant::now(), terminal.read()).await {
+            Ok(Some(bytes)) => seen.push_str(&String::from_utf8_lossy(&bytes)),
+            Ok(None) => bail!("the terminal ended before it drew `{wanted}`: {seen:?}"),
+            Err(_) => break,
+        }
+        if seen.contains(wanted) {
+            return Ok(seen);
+        }
+    }
+    bail!("`{wanted}` never reached this end: {seen:?}")
+}
+
+/// Y-128's module doing all four things a caller needs, against the same real
+/// sshd and real tmux. The command it runs is `attach`'s, so the tmux path is
+/// the one resolved on that machine (I-34) and the session survives a login
+/// shell (I-35).
+#[tokio::test]
+async fn the_module_carries_bytes_both_ways_and_resizes() -> Result<()> {
+    let Some(lab) = Lab::start("module").await? else {
+        return Ok(());
+    };
+    let mut terminal = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
+
+    // Bytes out are the far side's screen, and tmux's status line names the
+    // session it attached to.
+    screen_showing(&mut terminal, SESSION).await?;
+    assert_eq!(
+        lab.client_size().await?,
+        size_of(WINDOW),
+        "the window the caller asked for is the one the far side sees"
+    );
+
+    lab.start_the_victim().await?;
+    terminal.write(vec![ETX]).await?;
+    assert!(
+        lab.wait_for(|lab| Box::pin(lab.victim_is_gone())).await?,
+        "`{VICTIM}` survived a `^C` written to the module"
+    );
+
+    terminal.resize(cells(RESIZED))?;
+    assert!(
+        lab.wait_for(|lab| Box::pin(
+            async move { Ok(lab.client_size().await? == size_of(RESIZED)) }
+        ))
+        .await?,
+        "resizing must reach the far side"
+    );
+    Ok(())
+}
+
+/// **I-27's other half, and it lands differently here.** Killing the local `ssh`
+/// leaves a remote *command* orphaned, because it reparents to PID 1 — but this
+/// one owns a remote terminal, so sshd hangs it up and tmux detaches. The
+/// session is left running, which is the point: ending it is `down`'s.
+#[tokio::test]
+async fn dropping_the_terminal_detaches_and_leaves_the_session_alone() -> Result<()> {
+    let Some(lab) = Lab::start("teardown").await? else {
+        return Ok(());
+    };
+    let mut terminal = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
+    screen_showing(&mut terminal, SESSION).await?;
+    assert!(lab.a_client_is_attached().await?);
+
+    drop(terminal);
+
+    assert!(
+        lab.wait_for(|lab| Box::pin(async move { Ok(!lab.a_client_is_attached().await?) }))
+            .await?,
+        "the far side must not be left holding a client nobody is behind"
+    );
+    assert_eq!(
+        lab.display("#{session_name}").await?,
+        SESSION,
+        "and the session itself outlives the terminal"
+    );
+    Ok(())
 }
 
 /// The question Y-127 exists to answer, and the answer is yes.
