@@ -59,9 +59,11 @@ pub(crate) async fn allowed<I: Inventory>(inventory: &I, from: IpAddr) -> Result
     Ok(caller)
 }
 
-/// `up` and `resume` want the terminal the session should assume, and a browser
-/// has none. `terminfo::FALLBACK` is the entry chosen precisely for far sides
-/// that may know nothing better (I-36), and `Chosen` reports what was used.
+/// `up` and `resume` open a session nobody is yet sitting at, so there is no
+/// client terminal to name — the browser names its own when it attaches
+/// ([`crate::terminal`]). `terminfo::FALLBACK` is the entry chosen precisely for
+/// far sides that may know nothing better (I-36), and `Chosen` reports what was
+/// used.
 fn term() -> &'static str {
     terminfo::FALLBACK
 }

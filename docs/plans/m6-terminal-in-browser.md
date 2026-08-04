@@ -197,6 +197,18 @@ bail-out it had to be restructured around, and `npm run compiled` greps the bund
 own sentinel as a build gate. **A socket hook is the same shape of hazard** — an effect with a
 cleanup, a ref, and a conditional — so expect to hit it and check the gate rather than assume.
 
+> **Answered 2026-08-04 by Y-130**, and all three went the smaller way.
+> **A sixth section**, drawn above the other five when a workspace name is set and by nothing else:
+> a route would have to mean something on a reload, and reopening a socket on load is Y-132's. **The
+> `Card` the other five sit in** holds it, so no primitive was vendored — `Section` takes a
+> `Looked<T>` and a terminal is not a reading, so [`Terminal.tsx`](../../web/src/components/Terminal.tsx)
+> composes `Card` directly. **The worker needed no change**: the socket is under `/api`, which Y-114's
+> regex already excludes, and a handshake never reaches a `fetch` handler anyway — `sw.test.ts`
+> asserts it because moving the route out from under `/api` would break it silently.
+> **The compiler's bail-out was real and was not the socket**: it refused `EffectSetState`, so a
+> different workspace is a remount rather than a reset. It compiled `Terminal.tsx` and the gate
+> passed. The bill is the bundle — **256.61 kB → 592.73 kB**.
+
 ### 3.6 The terminal stream is the one place Q5 names by name
 
 Q5 closed *reference-only, always*, and its wording is not incidental:
@@ -228,6 +240,19 @@ small thing that will look like an oversight later if it is not written down now
 > write verbs do, and its size message is two numbers with `deny_unknown_fields`, so a `term` sent
 > today is refused rather than dropped. Y-130 adds the field on both sides in one change: the Rust
 > test that names it, `web/src/api.ts`, and `just fixtures`.
+
+> **Done 2026-08-04 by Y-130, and the answer is `xterm-256color` — which is `FALLBACK`'s own value,
+> so what changed is provenance and not bytes.** The field is required, the daemon names no terminal
+> of its own, and `choose` short-circuits on this value so the attach pays for no `infocmp` probe.
+> The evidence is in the tracker row; the part worth repeating here is that the two entries that
+> *look* better are both worse. ncurses ships `vscode|xterm.js`, and it is in the optional terminfo
+> package, **absent from Apple's 2015 ncurses**, and stale enough to disable `initc` where xterm.js
+> implements OSC 4. `xterm-direct` is absent from the same database and misrenders the 256-colour
+> palette besides. I-36 is about a terminal the far side has, and the Mac is the machine it names.
+> **I-36's other half still holds**: the client's `TERM` is not trusted as an input here either —
+> what the browser sends is a constant in Yantra's own code, not something read from a user's
+> environment. And `write.rs`'s comment is now true rather than deleted: `up` and `resume` open a
+> session nobody is yet sitting at.
 
 ### 3.8 The CLI honesty check is already satisfied, which is worth showing rather than assuming
 
@@ -262,7 +287,7 @@ only the socket lands in `yantrad`.
 | Y-128 | `pty.rs`: the attach command under a pseudo-terminal, with resize and close | The core half. Reuses `attach::plan` whole — §2 is the argument for not rewriting it — and adds the third ssh call shape, because `Exec` cannot carry one. Adds `portable-pty` (3.4). |
 | Y-129 | `GET /api/workspaces/{name}/terminal` — the WebSocket, authorised | Adds axum's `ws` feature. Calls `allowed()` explicitly, because an upgrade is a `GET` and would otherwise be a read (3.3). **Refuses a forwarded caller until Y-118 is decided.** |
 | Y-118 | Identity from the forwarded address | Not new, and not this milestone's to decide — but 3.3 makes it the gate on M6 being reachable from the phone at all. Owner's, `proposed` as ADR-0017. |
-| Y-130 | xterm.js in the dashboard, on the workspace that has a session | The browser half, and where 3.5's three answers get chosen — overlay or route, which primitive holds it, what the service worker must not touch. First caller that can send a real `TERM` (3.7). `Command.tsx`'s `attach` paste is what it replaces. |
+| Y-130 | xterm.js in the dashboard, on the workspace that has a session | The browser half, and where 3.5's three answers get chosen — overlay or route, which primitive holds it, what the service worker must not touch. First caller that can send a real `TERM` (3.7). `Command.tsx`'s `attach` paste is what it replaces. **Done**: a sixth section in the `Card` the others use, `xterm-256color`, and the paste is a button. |
 | Y-131 | Resize forwarding, and what happens to the other client | 3.2 — the decision R2 could not make and this plan deliberately does not, measured against a real second client rather than inherited. |
 | Y-132 | Reconnect without losing the screen | R2 names replay-last-N as Yantra's to build. In-memory and bounded, never at rest (3.6). |
 

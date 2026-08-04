@@ -1,8 +1,9 @@
 # yantra web — the dashboard
 
-One page, five sections — machines, workspaces, a form that makes one, sessions,
-agents — over the API `yantrad` serves at `/api`. The four readings poll; the form
-and every workspace row write. No router, no state library, no navigation.
+One page, six sections — a terminal when one is open, then machines, workspaces, a
+form that makes one, sessions, agents — over the API `yantrad` serves at `/api`. The
+four readings poll; the form and every workspace row write. No router, no state
+library, no navigation.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -108,10 +109,59 @@ has no terminal to paste into.
   which it is. **Resume is not offered** to such a workspace at all, for
   ADR-0015's reason, which is the shape Y-097 already chose.
 
-`Command` stays exactly where no write exists: a row offers `yantra attach` when
-a session really was seen, and nothing otherwise. The agents section still hands
-over `up` and `resume` as pastes — [Y-097](../tracker.md)'s derivation, untouched
-here.
+`Command` stays exactly where no write exists. The workspace row's `attach` paste
+became a button in [Y-130](../tracker.md) — see below — and the sessions and agents
+sections still hand over pastes, the first for a session Yantra did not open and so
+has no route for, the second because ADR-0011's trust prompt is answered by a person
+wherever they are.
+
+## The terminal (Y-130)
+
+`Terminal.tsx` is xterm.js on `GET /api/workspaces/{name}/terminal`, opened by the
+`Open terminal` button in a workspace row and closed by the one in its header. Four
+decisions, each of which could reasonably have gone the other way:
+
+- **A sixth section, not a route and not an overlay.** `App.tsx` holds one
+  `string | null`; the terminal draws above the other five when it is set. `yantrad`
+  would serve a deep link — `web.rs` falls back to `index.html` — but a URL for a
+  terminal promises a socket reopened on load, which is [Y-132](../tracker.md). An
+  overlay would be the first thing here that traps focus, over a screen a phone
+  gives the whole of anyway.
+- **The same `Card` the other sections use, so no primitive was vendored.**
+  `Section` takes a `Looked<T>` and a terminal is not a reading, so this composes
+  `Card` itself. `Act.tsx` exports its button class rather than having it copied.
+- **`TERM` is `xterm-256color`**, sent in the first control frame and on every
+  resize. It is what every xterm.js consumer sends and the one entry both
+  `ncurses-base` and Apple's 2015 ncurses carry; ncurses' own `xterm.js` alias and
+  `xterm-direct` are in neither, and I-36 says an entry the far side lacks is an
+  attach that aborts. This is not the client's `TERM` in I-36's sense — it is a
+  constant in this code, not something read from a user's environment.
+- **The stream is never stored.** No frame reaches `console`, nothing is persisted,
+  and the scrollback is xterm.js's own, in the element, gone with it (Q5).
+
+**Text frames from the daemon are errors, not output.** Writing one to the screen
+would make it indistinguishable from something the session printed, so it is drawn
+as an alert beside the terminal. A close with nothing said is not an error at all:
+the screen stops where it was and says so.
+
+**`ws: true` on the dev proxy is load-bearing.** The string form of a Vite proxy
+entry forwards plain requests only, so without it the terminal in `npm run dev`
+connects to nothing.
+
+Two things `src/terminal.test.tsx` records because they cost an hour each.
+**jsdom's own `WebSocket` cannot connect under vitest** — jsdom builds it on
+undici's, undici constructs the global `Event`, and the jsdom environment has
+replaced that class, so the handshake dies in `dispatchEvent` saying *"must be an
+instance of Event. Received an instance of Event"* and the socket times out. The
+`ws` client is stubbed in for it: a second real implementation talking to a real
+server, not a stand-in for the socket under test. And **xterm.js wants the legacy
+`MediaQueryList.addListener`**, which the `matchMedia` stub `dashboard.test.tsx`
+carries does not have.
+
+What that suite cannot reach: `FitAddon.proposeDimensions()` answers `undefined`
+where nothing has a width, so the sizes asserted in CI are xterm's own 80x24 and
+the arithmetic needs a browser. Nor has any of this met a real daemon — the server
+it talks to speaks the protocol and knows nothing of a pty.
 
 ## The shape a phone gets (Y-121)
 
@@ -179,6 +229,12 @@ envelope, exactly as it does with no worker installed. Offline reads as offline.
 A cached reading would be R-23's confident lie with a longer memory, and
 `src/sw.test.ts` runs the shipped `sw.js` against a fake `caches` to prove it —
 including that a reading planted in the cache by hand is still not served.
+
+**The terminal socket is covered by that same exclusion and is asserted anyway.**
+It is under `/api`, and a WebSocket handshake never reaches a `fetch` handler in
+the first place, so nothing had to change for Y-130. What the test pins is the
+route's *address*: moving it out from under `/api` would put a terminal in the
+cache silently.
 
 The shell is **network first**, one path for navigations and assets alike, so a
 cached response only ever means the network was not there. Navigations share the
@@ -261,12 +317,13 @@ src/
   components/
     Section.tsx      the looked switch; children run only in the ok branch
     NewWorkspace.tsx the create form
-    Act.tsx          start / stop / resume, per workspace row
+    Act.tsx          start / stop / resume, per workspace row; owns the button
+    Terminal.tsx     xterm.js on the session's WebSocket. Key it on the name
     DataTable.tsx    a table, or a block per row on a phone; owns "we looked
                      and there is nothing"
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
   index.css          the token vocabulary — the whole integration surface
-  App.tsx            five <Section>s
+  App.tsx            the sections, and which terminal is open
 ```

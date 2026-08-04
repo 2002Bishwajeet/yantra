@@ -68,10 +68,12 @@ export type Resumed = {
 }
 
 /** The text frame a browser sends on `GET /api/workspaces/{name}/terminal`,
- *  first and on every resize. Binary frames either way are terminal bytes. */
+ *  first and on every resize. Binary frames either way are terminal bytes, and
+ *  a text frame coming back is why the terminal could not be opened. */
 export type TerminalSize = {
   rows: number
   cols: number
+  term: string
 }
 
 export type Session = {

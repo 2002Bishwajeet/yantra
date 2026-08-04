@@ -7,7 +7,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
-import { Act } from '@/components/Act'
+import { Act, button } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -95,24 +95,24 @@ export const machineColumns: Column<Machine>[] = [
   },
 ]
 
-/** Y-113 left one paste here and took the other: `up` is a button now, and
- *  `attach` is not, because ADR-0011's TUI wants a terminal this page has none
- *  of. Only a look that succeeded can say a session is there to attach to. */
-export function workspaceCommand(
+/** Y-113 left `attach` as a paste because ADR-0011's TUI wants a terminal this
+ *  page had none of; Y-130 gives it one, so the paste is a button. Only a look
+ *  that succeeded can say there is a session to attach to — and the name goes
+ *  into a URL the browser encodes rather than a shell someone pastes, so
+ *  `USABLE_NAME` guards the two commands below and not this. */
+export function attachable(
   workspace: Workspace,
   sessions: Looked<MachineSessions[]>,
-): string | null {
-  if (!USABLE_NAME.test(workspace.name)) return null
-
+): boolean {
   const answer =
     sessions.looked === 'ok'
       ? sessions.data.find((one) => one.machine === workspace.machine)
       : undefined
-  const running =
+
+  return (
     answer?.reached === 'yes' &&
     answer.sessions.some((session) => session.name === workspace.name)
-
-  return running ? `yantra attach ${workspace.name}` : null
+  )
 }
 
 /** What the button is about to touch, said before it is tapped: the machine the
@@ -130,6 +130,7 @@ function target(
 export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
   machines: Looked<Machine[]>,
+  open: (name: string) => void,
 ): Column<Workspace>[] {
   return [
     { header: 'WORKSPACE', cell: (workspace) => workspace.name },
@@ -153,11 +154,17 @@ export function workspaceColumns(
     { header: 'REPO', cell: (workspace) => workspace.repo },
     { header: 'STARTUP', cell: (workspace) => workspace.startup ?? '' },
     {
-      header: 'COMMAND',
-      cell: (workspace) => {
-        const command = workspaceCommand(workspace, sessions)
-        return command && <Command command={command} />
-      },
+      header: 'TERMINAL',
+      cell: (workspace) =>
+        attachable(workspace, sessions) && (
+          <button
+            type="button"
+            className={button}
+            onClick={() => open(workspace.name)}
+          >
+            Open terminal
+          </button>
+        ),
     },
   ]
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Looked, Machine, MachineSessions, Workspace } from '@/api'
 import {
   type AgentRow,
@@ -12,6 +13,7 @@ import { Command } from '@/components/Command'
 import { DataTable } from '@/components/DataTable'
 import { NewWorkspace } from '@/components/NewWorkspace'
 import { Section } from '@/components/Section'
+import { Terminal } from '@/components/Terminal'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useAgents, useLooked } from '@/useLooked'
 
@@ -22,10 +24,18 @@ export default function App() {
   const workspaces = useLooked<Workspace[]>('/api/workspaces')
   const sessions = useLooked<MachineSessions[]>('/api/sessions')
   const agents = useAgents(workspaces)
+  // A sixth section rather than a route: nothing else on this page is
+  // addressable, and one that was would promise a deep link that survives a
+  // reload, which is a socket this page cannot yet reopen (Y-132).
+  const [open, setOpen] = useState<string | null>(null)
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
       <h1 className="font-heading text-2xl font-semibold">Yantra</h1>
+
+      {open !== null && (
+        <Terminal key={open} name={open} onClose={() => setOpen(null)} />
+      )}
 
       <Section title="Machines" query={machines}>
         {(rows) => (
@@ -44,7 +54,7 @@ export default function App() {
       <Section title="Workspaces" query={workspaces}>
         {(rows) => (
           <DataTable
-            columns={workspaceColumns(sessions, machines)}
+            columns={workspaceColumns(sessions, machines, setOpen)}
             rows={rows}
             rowKey={(workspace) => workspace.name}
             empty="no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml"

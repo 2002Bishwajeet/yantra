@@ -23,10 +23,10 @@
 //! The frames need no envelope, because the protocol already carries two kinds.
 //! **Binary is terminal bytes**, in both directions. **Text is control**: from
 //! the browser it is always a [`Size`], which must arrive before anything else
-//! because a pty is opened with a window and nothing else tells the daemon how
-//! big a browser is; from the daemon it is the reason a terminal could not be
-//! opened, which a close frame cannot carry — that reason is capped at 123 bytes
-//! and an ssh diagnosis is longer.
+//! because a pty is opened with a window and a terminal, and nothing else tells
+//! the daemon how big a browser is or which one it is; from the daemon it is the
+//! reason a terminal could not be opened, which a close frame cannot carry —
+//! that reason is capped at 123 bytes and an ssh diagnosis is longer.
 
 use std::net::SocketAddr;
 
@@ -36,7 +36,7 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::response::Response;
 use axum::routing::get;
 use yantra_core::inventory::Inventory;
-use yantra_core::{pty, terminfo};
+use yantra_core::pty;
 
 use crate::write::{Refused, allowed, chain};
 
@@ -62,18 +62,22 @@ async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(upgrade.on_upgrade(move |socket| bridge(socket, name)))
 }
 
-/// The browser's window, in cells. The one fact a terminal needs that only the
-/// far end of the socket has.
+/// The browser's window and the terminal it is, which are the facts about the
+/// caller that only the far end of the socket has.
+///
+/// I-36 refuses a *user's* `TERM` as an input; this one is a constant the
+/// dashboard's own code holds, and `terminfo::choose` probes it either way.
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[serde(deny_unknown_fields)]
 struct Size {
     rows: u16,
     cols: u16,
+    term: String,
 }
 
-impl From<Size> for pty::Size {
-    fn from(size: Size) -> Self {
+impl From<&Size> for pty::Size {
+    fn from(size: &Size) -> Self {
         Self {
             rows: size.rows,
             cols: size.cols,
@@ -82,11 +86,11 @@ impl From<Size> for pty::Size {
 }
 
 async fn bridge(mut socket: WebSocket, name: String) {
-    let Some(size) = first_size(&mut socket).await else {
+    let Some(first) = first_size(&mut socket).await else {
         return;
     };
 
-    let mut terminal = match pty::open(&name, terminfo::FALLBACK, size).await {
+    let mut terminal = match pty::open(&name, &first.term, (&first).into()).await {
         Ok(terminal) => terminal,
         Err(error) => {
             let said = chain(&error);
@@ -132,15 +136,15 @@ enum Either {
 
 /// A pty is opened with a window, so the first control frame is what starts the
 /// terminal rather than what resizes it.
-async fn first_size(socket: &mut WebSocket) -> Option<pty::Size> {
+async fn first_size(socket: &mut WebSocket) -> Option<Size> {
     while let Some(Ok(message)) = socket.recv().await {
         if let Message::Text(text) = message {
             return match serde_json::from_str::<Size>(&text) {
-                Ok(size) => Some(size.into()),
+                Ok(size) => Some(size),
                 Err(_) => {
                     let _ = socket
                         .send(Message::Text(
-                            "a terminal opens with {\"rows\":…,\"cols\":…}".into(),
+                            "a terminal opens with {\"rows\":…,\"cols\":…,\"term\":…}".into(),
                         ))
                         .await;
                     None
@@ -153,10 +157,13 @@ async fn first_size(socket: &mut WebSocket) -> Option<pty::Size> {
 
 /// A window that could not be parsed or set leaves a working terminal at the
 /// wrong size, which is worth saying and is not worth ending a session over.
+///
+/// One message does both jobs, so `term` arrives again here and is not read: a
+/// caller cannot become a different terminal without opening another socket.
 fn resize(terminal: &pty::Terminal, name: &str, text: &str) {
     match serde_json::from_str::<Size>(text) {
         Ok(size) => {
-            if let Err(error) = terminal.resize(size.into()) {
+            if let Err(error) = terminal.resize((&size).into()) {
                 tracing::warn!("terminal {name}: {error}");
             }
         }
@@ -175,8 +182,9 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         serde_json::to_value(Size {
             rows: 40,
             cols: 120,
+            term: "xterm-256color".to_owned(),
         })
-        .expect("two numbers"),
+        .expect("two numbers and a name"),
     )]
 }
 
@@ -268,21 +276,27 @@ mod tests {
         assert!(status.starts_with("HTTP/1.1 101"), "{status}");
     }
 
-    /// `{"rows":…,"cols":…}` and nothing else. A typo that silently opened an
-    /// 80x24 terminal would look like a browser that cannot measure itself.
+    /// Two numbers and a name, and nothing else. A typo that silently opened an
+    /// 80x24 terminal would look like a browser that cannot measure itself, and
+    /// one that silently fell back would look like a terminal that lost colour.
     #[test]
-    fn a_window_is_two_numbers_and_a_typo_is_not_one() {
-        let size: Size = serde_json::from_str(r#"{"rows":40,"cols":120}"#).expect("a window");
+    fn a_window_is_two_numbers_and_the_terminal_the_caller_is() {
+        let size: Size = serde_json::from_str(r#"{"rows":40,"cols":120,"term":"xterm-256color"}"#)
+            .expect("a window");
         assert_eq!(
-            pty::Size::from(size),
+            pty::Size::from(&size),
             pty::Size {
                 rows: 40,
                 cols: 120
             }
         );
+        assert_eq!(size.term, "xterm-256color");
 
-        serde_json::from_str::<Size>(r#"{"rows":40}"#).expect_err("a window has two sides");
-        serde_json::from_str::<Size>(r#"{"rows":40,"cols":120,"term":"xterm"}"#)
-            .expect_err("Y-130 adds a field here, and it should fail until it does");
+        serde_json::from_str::<Size>(r#"{"rows":40,"term":"xterm-256color"}"#)
+            .expect_err("a window has two sides");
+        serde_json::from_str::<Size>(r#"{"rows":40,"cols":120}"#)
+            .expect_err("a caller that does not say what it is");
+        serde_json::from_str::<Size>(r#"{"rows":40,"cols":120,"term":"xterm","font":"mono"}"#)
+            .expect_err("a field this seam does not carry");
     }
 }

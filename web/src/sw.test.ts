@@ -114,6 +114,24 @@ describe('the service worker', () => {
     expect(await ask(handlers, '/api/machines')).toBeUndefined()
   })
 
+  /** The socket is under `/api`, so the exclusion that already existed covers
+   *  it — and a handshake never reaches a worker's `fetch` at all. Both are why
+   *  this is a test rather than a line of code: moving the route out from under
+   *  `/api` is what would put a terminal in the cache, and it would do it
+   *  silently. */
+  it('never intercepts the terminal socket, handshake or path', async () => {
+    served['/api/workspaces/yantra/terminal'] = 'a shell'
+    const handlers = load()
+
+    expect(await ask(handlers, '/api/workspaces/yantra/terminal')).toBeUndefined()
+    expect(
+      await ask(handlers, '/api/workspaces/yantra/terminal', {
+        mode: 'websocket',
+      }),
+    ).toBeUndefined()
+    expect(cached.size).toBe(0)
+  })
+
   it('leaves the daemon its other routes and every write alone', async () => {
     const handlers = load()
 

@@ -22,12 +22,12 @@ import {
   agentColumns,
   agentCommand,
   agentState,
+  attachable,
   machineColumns,
   sessionColumns,
   sessionCommand,
   type SessionRow,
   workspaceColumns,
-  workspaceCommand,
 } from './columns'
 import { Command } from './components/Command'
 import { DataTable } from './components/DataTable'
@@ -224,7 +224,7 @@ describe('the workspaces table', () => {
     }
     const { container } = render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {})}
         rows={[workspace]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -237,7 +237,7 @@ describe('the workspaces table', () => {
   it('names the path a file goes in when the look succeeded and found nothing', () => {
     render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {})}
         rows={[]}
         rowKey={(row) => row.name}
         empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -265,7 +265,7 @@ describe('a workspace row on a phone', () => {
   function draw() {
     return render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {})}
         rows={[site]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -297,7 +297,7 @@ describe('a workspace row on a phone', () => {
       'ACT',
       'REPO',
       'STARTUP',
-      'COMMAND',
+      'TERMINAL',
     ])
     expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
   })
@@ -485,38 +485,37 @@ describe('the command a row carries', () => {
     { machine: 'cachyos-g14', reached: 'yes', sessions: [session] },
   ])
 
-  it('offers attach only when the session was really seen', () => {
-    expect(workspaceCommand(yantra, running)).toBe('yantra attach yantra')
+  it('offers a terminal only when the session was really seen', () => {
+    expect(attachable(yantra, running)).toBe(true)
 
     const idle = ok<MachineSessions[]>([
       { machine: 'cachyos-g14', reached: 'yes', sessions: [] },
     ])
-    expect(workspaceCommand(yantra, idle)).toBeNull()
+    expect(attachable(yantra, idle)).toBe(false)
   })
 
-  // Y-113: `up` is a button, so the row no longer hands over a command for it.
-  // Attach is the one verb with no write behind it (Y-078).
-  it('hands over no command where a button acts, and none where nothing is open', () => {
+  // Y-113 made `up` a button; Y-130 made the last paste in this row one too.
+  it('offers nothing where a look failed, and nothing where nothing is open', () => {
     const failed: Looked<MachineSessions[]> = {
       looked: 'failed',
       age_seconds: 1,
       error: 'tailscaled is down',
     }
-    expect(workspaceCommand(yantra, failed)).toBeNull()
-    expect(workspaceCommand(yantra, { looked: 'never' })).toBeNull()
+    expect(attachable(yantra, failed)).toBe(false)
+    expect(attachable(yantra, { looked: 'never' })).toBe(false)
   })
 
   it('does not read an unreachable machine as a machine with a session', () => {
     const unreachable = ok<MachineSessions[]>([
       { machine: 'cachyos-g14', reached: 'no', error: 'connection timed out' },
     ])
-    expect(workspaceCommand(yantra, unreachable)).toBeNull()
+    expect(attachable(yantra, unreachable)).toBe(false)
   })
 
-  it('refuses a name the daemon would not have allowed rather than quoting it', () => {
-    expect(workspaceCommand({ ...yantra, name: 'yantra; rm -rf ~' }, running)).toBeNull()
-    expect(workspaceCommand({ ...yantra, name: '../escape' }, running)).toBeNull()
-    expect(workspaceCommand({ ...yantra, name: '' }, running)).toBeNull()
+  it('still refuses a name the daemon would not have allowed a command for', () => {
+    const hostile = { ...yantra, name: 'yantra; rm -rf ~' }
+    expect(sessionCommand({ machine: 'cachyos-g14', session: { ...session, name: hostile.name } }, ok([hostile]))).toBeNull()
+    expect(agentCommand({ workspace: hostile, status: null })).toBeNull()
   })
 
   it('builds a session row command from the workspace name, never from tmux', () => {
@@ -535,16 +534,20 @@ describe('the command a row carries', () => {
     expect(sessionCommand(row, { looked: 'never' })).toBeNull()
   })
 
-  it('puts the command in the row, and leaves the machines table without one', () => {
+  it('puts the terminal in the row, naming the workspace it would open', () => {
+    const opened: string[] = []
     render(
       <DataTable
-        columns={workspaceColumns(running, { looked: 'never' })}
+        columns={workspaceColumns(running, { looked: 'never' }, (name) =>
+          opened.push(name),
+        )}
         rows={[yantra]}
         rowKey={(one) => one.name}
         empty="no workspaces yet"
       />,
     )
-    expect(screen.getByText('yantra attach yantra')).toBeTruthy()
+    fireEvent.click(screen.getByText('Open terminal'))
+    expect(opened).toEqual(['yantra'])
     expect(machineColumns.some((column) => column.header === 'COMMAND')).toBe(false)
   })
 })

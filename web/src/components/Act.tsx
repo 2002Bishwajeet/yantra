@@ -105,7 +105,7 @@ async function act(workspace: Workspace, verb: Verb): Promise<Acted> {
   }
 }
 
-const button =
+export const button =
   'border-input rounded-md border px-2 py-1 text-xs disabled:opacity-50'
 
 /** The three verbs as buttons, so a phone needs no terminal. They await ssh —
