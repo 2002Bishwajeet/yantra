@@ -105,6 +105,14 @@ no-node:
       exit 1
     fi
 
+    # This recipe asserts what ci.yml does, so a ci.yml that stopped running it
+    # would pass every line above. Measured on Y-140's own branch, where the job
+    # was written and then lost to a `git checkout`, green.
+    if ! steps .github/workflows/ci.yml | grep -qE -- 'just no-node'; then
+      echo "no-node: ci.yml no longer runs this check, so nothing asserts any of the above on a pull request" >&2
+      exit 1
+    fi
+
     # Unreachable from a default build, rather than merely unused by one: an
     # optional dependency that got promoted would still want web/dist.
     if cargo tree -p yantrad --edges normal | grep -q include_dir; then
