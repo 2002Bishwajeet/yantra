@@ -123,9 +123,15 @@ empty `known_hosts` — Yantra's own, under its state directory, not the user's
   agent, and an agent is a login session the appliance does not have.
 - **`ControlPath` is a 90-byte budget (I-28)** and comes from `machine_at`, which prefers
   `runtime_dir()` and falls back to `data_dir()`. Under a systemd **user** unit with lingering that is
-  `/run/user/<uid>/yantra/cm/%C`, short and correct. Under a **system** unit there is no
-  `XDG_RUNTIME_DIR` unless `RuntimeDirectory=` supplies one, and the fallback path is longer. The
-  choice between the two unit kinds is therefore an ssh decision as much as a supervision one.
+  `/run/user/<uid>/yantra/cm/%C` — **27 bytes, 65** once `%C` expands to the 40 I-28 charges for it.
+  A **system** unit has no `XDG_RUNTIME_DIR`, and **`RuntimeDirectory=` does not supply one**: it sets
+  `$RUNTIME_DIRECTORY`, and `runtime_dir()` does not move. So the path is `data_dir()`'s —
+  `/home/yantra/.local/share/yantra/cm/%C` under `User=yantra`, **38 bytes, 76** expanded. Both fit,
+  so the budget did not decide the unit kind and the *ordering* did: a `--user` unit cannot express
+  `After=tailscaled.service`, the user manager having no such unit. Measured under a real transient
+  unit of each kind ([Y-142](../../tracker.md#3-task-board)); eleven bytes is the system unit's whole
+  price, and the fourteen left over are a function of the account name rather than of anything Yantra
+  picks.
 - **`tailscale ssh` would remove the key-distribution problem entirely** and stays inside I-20 —
   it is still the system `ssh` binary, with `tailscaled` intercepting port 22. It is an option to
   weigh, not a decision this plan takes, and it is ACL work on the owner's side.
