@@ -164,6 +164,7 @@ flowchart TB
 | Credentials on disk | Yantra stores **none**. It never asks for a password: `BatchMode=yes` means a machine that wants one fails instead of prompting | ✅ |
 | Agent account tokens | Yantra never reads them. `claude auth status` prints an email, an org id and a subscription type; the struct that parses it **names only two fields**, so the rest cannot reach a log line | ✅ a deliberate privacy boundary |
 | Secrets in workspaces | **Policy, not yet code.** The schema has no secrets field at all. When it gains one it holds a *reference* (`op://…`, `pass show …`, a sops path) resolved at launch and never written to disk, logs, the API or a terminal stream | ⬜ not implemented — Q5 |
+| The notifier's relay | The first secret Yantra actually holds (Y-146). A `Relay` is a URL and an optional token, in memory only — never a workspace field, never the API, never a log line. Its `Debug` is written by hand and redacts **both**: the token by §B4, and the URL because on a public relay the topic is the password | ✅ tested — neither survives being printed, and no error carries either. Where it comes from is Y-147's |
 
 ### The two things to understand before trusting this
 

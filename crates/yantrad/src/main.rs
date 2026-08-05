@@ -26,6 +26,7 @@ mod api;
 #[allow(clippy::expect_used)]
 mod contract;
 mod heartbeat;
+mod notify;
 mod refresh;
 mod terminal;
 mod web;
@@ -126,7 +127,9 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     // that could drift.
     let authoriser = write::Authoriser::new(inventory.clone(), &addresses);
     let fleet = heartbeat::Fleet::default();
-    refresh::spawn(&fleet.model, inventory.clone());
+    // Y-147 is what fills this in, from the unit's environment; until it does
+    // there is nowhere to send to and the notifier is not started at all.
+    refresh::spawn(&fleet.model, inventory.clone(), None);
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .nest(

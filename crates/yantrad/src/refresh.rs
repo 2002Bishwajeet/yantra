@@ -8,8 +8,11 @@ use std::time::Duration;
 
 use tokio::sync::RwLock;
 use yantra_core::inventory::Inventory;
+use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::{sessions, status, workspace};
+
+use crate::notify::Notifier;
 
 /// `ssh.rs` sets `ControlPersist=300`, so anything under five minutes keeps
 /// every ssh master warm — the poll is what makes the fleet fast rather than a
@@ -25,7 +28,15 @@ pub type Model = Arc<RwLock<Snapshot>>;
 /// The agent class is the expensive one and the only one that is not fleet-wide
 /// by construction, so [`yantra_core::status::fleet`] groups it by machine —
 /// which is what keeps `EVERY` affordable as workspaces are added.
-pub fn spawn<I: Inventory + Send + Sync + 'static>(model: &Model, inventory: I) {
+///
+/// It is also the one the notifier reads: two consecutive agent readings are
+/// the whole of its input, so `relay` adds a send to a loop that already exists
+/// rather than a loop of its own.
+pub fn spawn<I: Inventory + Send + Sync + 'static>(
+    model: &Model,
+    inventory: I,
+    relay: Option<Relay>,
+) {
     let machines = model.clone();
     tokio::spawn(async move {
         loop {
@@ -52,8 +63,9 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(model: &Model, inventory: I) 
 
     let agents = model.clone();
     tokio::spawn(async move {
+        let mut notifier = relay.map(Notifier::new);
         loop {
-            look_at_agents(&agents).await;
+            look_at_agents(&agents, notifier.as_mut()).await;
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -74,9 +86,15 @@ async fn look_at_sessions(model: &Model) {
     model.write().await.sessions = Some(Arc::new(reading));
 }
 
-async fn look_at_agents(model: &Model) {
-    let reading = Reading::new(status::fleet().await);
-    model.write().await.agents = Some(Arc::new(reading));
+/// The reading lands in the model before anything is sent, so a browser never
+/// waits on a relay — and a look that *failed* tells nobody anything, because
+/// an unknown fleet is not a changed one (I-47).
+async fn look_at_agents(model: &Model, notifier: Option<&mut Notifier>) {
+    let reading = Arc::new(Reading::new(status::fleet().await));
+    model.write().await.agents = Some(reading.clone());
+    if let (Some(notifier), Ok(fleet)) = (notifier, reading.value()) {
+        notifier.tell(fleet).await;
+    }
 }
 
 #[cfg(test)]
