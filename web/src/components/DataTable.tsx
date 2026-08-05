@@ -54,9 +54,8 @@ export function DataTable<T>({
     )
   }
 
-  // One block per row, every column kept and labelled: a column dropped below a
-  // breakpoint is a fact the page stops saying, and it would not have been
-  // enough anyway — two of the six are already wider than the screen.
+  // Every column kept and labelled: dropping one below a breakpoint is a fact
+  // the page stops saying, and the ones a cut must keep overflow on their own.
   if (phone) {
     return (
       <div className="divide-border flex flex-col divide-y">
