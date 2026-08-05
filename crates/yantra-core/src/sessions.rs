@@ -39,6 +39,7 @@ pub enum Error {
 /// full `ConnectTimeout`, and sequentially those add up.
 pub async fn list() -> Result<Vec<MachineSessions>, Error> {
     let mut machines: Vec<String> = workspace::list()?
+        .workspaces
         .into_iter()
         .map(|workspace| workspace.machine)
         .collect();

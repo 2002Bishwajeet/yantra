@@ -921,6 +921,7 @@ mod tests {
         assert_eq!(
             from_create(&workspace::Error::InvalidName {
                 name: "../etc/passwd".to_string(),
+                path: "/srv/workspaces/../etc/passwd.toml".into(),
             }),
             StatusCode::BAD_REQUEST
         );
@@ -1150,6 +1151,7 @@ mod tests {
         assert_eq!(
             from_edit(&edit::Error::Workspace(workspace::Error::InvalidName {
                 name: "../etc/passwd".to_string(),
+                path: "/srv/workspaces/../etc/passwd.toml".into(),
             })),
             StatusCode::BAD_REQUEST
         );

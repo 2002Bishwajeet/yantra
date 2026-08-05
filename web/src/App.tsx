@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Looked, Machine, MachineSessions, Workspace } from '@/api'
+import type { Listed, Looked, Machine, MachineSessions, Workspace } from '@/api'
 import {
   type AgentRow,
   agentColumns,
@@ -22,7 +22,8 @@ export default function App() {
   // Four independent readings, so each section stamps its own age; one shared
   // "last updated" would be true of at most one of them.
   const machines = useLooked<Machine[]>('/api/machines')
-  const workspaces = useLooked<Workspace[]>('/api/workspaces')
+  const listed = useLooked<Listed[]>('/api/workspaces')
+  const workspaces = loaded(listed)
   const sessions = useLooked<MachineSessions[]>('/api/sessions')
   const agents = useAgents(workspaces)
   // A sixth section rather than a route: nothing else on this page is
@@ -59,13 +60,14 @@ export default function App() {
       {/* Each section's command reads the *other* class, so a look that failed
           costs the command its precision and never its honesty. The machines
           reading is read the same way, to say what a button is about to touch. */}
-      <Section title="Workspaces" query={workspaces}>
-        {(rows) => (
-          <DataTable
-            columns={workspaceColumns(sessions, machines, setOpen, setEditing)}
-            rows={rows}
-            rowKey={(workspace) => workspace.name}
-            empty="no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml"
+      <Section title="Workspaces" query={listed}>
+        {(entries) => (
+          <Workspaces
+            entries={entries}
+            sessions={sessions}
+            machines={machines}
+            open={setOpen}
+            edit={setEditing}
           />
         )}
       </Section>
@@ -103,6 +105,60 @@ export default function App() {
         {(rows) => <Agents rows={rows} />}
       </Section>
     </main>
+  )
+}
+
+/** The entries that are workspaces. Everything below acts on one — an edit form,
+ *  a row's buttons, a session's command, a per-workspace status fetch — and a
+ *  file that did not load is not something any of them can be asked about. */
+function loaded(listed: Looked<Listed[]>): Looked<Workspace[]> {
+  if (listed.looked !== 'ok') return listed
+  return {
+    ...listed,
+    data: listed.data.flatMap((one) => (one.loaded === 'yes' ? [one] : [])),
+  }
+}
+
+/** A file that did not load is named below the table rather than given a row in
+ *  it: `MACHINE`, `ACT`, `TERMINAL` and `EDIT` have nothing to put in one, and
+ *  `EDIT` could not repair it anyway — `update` loads before it writes, so the
+ *  file is the fix. R-23 is met by naming it loudly with its reason. */
+function Workspaces({
+  entries,
+  sessions,
+  machines,
+  open,
+  edit,
+}: {
+  entries: Listed[]
+  sessions: Looked<MachineSessions[]>
+  machines: Looked<Machine[]>
+  open: (name: string) => void
+  edit: (name: string) => void
+}) {
+  const rows = entries.flatMap((one) => (one.loaded === 'yes' ? [one] : []))
+  const unusable = entries.flatMap((one) => (one.loaded === 'no' ? [one] : []))
+
+  return (
+    <div className="flex flex-col gap-2">
+      <DataTable
+        columns={workspaceColumns(sessions, machines, open, edit)}
+        rows={rows}
+        rowKey={(workspace) => workspace.name}
+        empty={
+          unusable.length === 0
+            ? 'no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml'
+            : 'no file in that directory is a workspace'
+        }
+      />
+      {unusable.map((one) => (
+        <Alert key={one.name} variant="destructive">
+          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
+            {`${one.name} unusable: ${one.error}`}
+          </AlertDescription>
+        </Alert>
+      ))}
+    </div>
   )
 }
 

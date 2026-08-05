@@ -52,10 +52,18 @@ Quote it with `tmux::sq`, or send it as a value the shell never parses. A worksp
 
 **A file gets the same refusals a request gets.** `workspace::parse` asks `blank_field`, which is the
 one predicate `create` and `update` ask, so a workspace `create` would not write is one `load` will
-not read (Y-137, after Y-119 closed the writing half alone). Two consequences to know before changing
-it: a blank required field stops the whole of `list()` exactly as malformed TOML does, and `yantra
-edit` cannot repair such a file, because `update` loads before it writes — the file is the fix, as it
-is for a mistyped key.
+not read (Y-137, after Y-119 closed the writing half alone). The consequence to know before changing
+it: `yantra edit` cannot repair such a file, because `update` loads before it writes — the file is
+the fix, as it is for a mistyped key.
+
+**A file that does not load costs only itself** (Y-141). `list` returns a `Listing`: the workspaces
+that loaded, and every file that did not under its name with its reason. The outer `Result` is still
+there and is about the *directory* — no config dir, a directory that cannot be read — because none of
+those says which workspaces exist. Two rules bind anything reading it: a caller that wants workspaces
+takes `.workspaces` and never sees past `.unusable` (`status::fleet` carries them to the top of what
+it returns, since a file with no machine belongs to no `MachineStatus`), and **whatever displays a
+listing names the failures rather than dropping them** — below the table, never as a row in it, since
+every column a row has is something to act on and a broken file has none of them.
 
 Two things a test cannot check by searching the output: correctly-escaped text still *contains* the
 payload, inside quotes. Assert the exact string, and prove the behaviour on a real `/bin/sh` in a

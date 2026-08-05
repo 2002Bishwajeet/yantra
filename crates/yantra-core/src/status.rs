@@ -99,6 +99,16 @@ pub struct MachineStatus {
     pub reports: Result<Vec<Report>, Error>,
 }
 
+/// What one look at the whole fleet found.
+#[derive(Debug)]
+pub struct Fleet {
+    pub machines: Vec<MachineStatus>,
+    /// A file that did not load names no machine, so it belongs to no
+    /// [`MachineStatus`] — and dropping it here would leave the one class that
+    /// reads a workspace's state unable to say the file exists (Y-141).
+    pub unusable: Vec<workspace::Unusable>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -138,9 +148,10 @@ pub async fn status(name: &str) -> Result<Report, Error> {
 /// and `ControlMaster` caches no failure, so per-workspace would make a sleeping
 /// machine cost ten seconds for each workspace that names it. Here it costs ten
 /// seconds once, whatever N is.
-pub async fn fleet() -> Result<Vec<MachineStatus>, Error> {
+pub async fn fleet() -> Result<Fleet, Error> {
+    let listing = workspace::list()?;
     let mut by_machine: BTreeMap<String, Vec<Workspace>> = BTreeMap::new();
-    for workspace in workspace::list()? {
+    for workspace in listing.workspaces {
         by_machine
             .entry(workspace.machine.clone())
             .or_default()
@@ -174,7 +185,10 @@ pub async fn fleet() -> Result<Vec<MachineStatus>, Error> {
             reports,
         });
     }
-    Ok(answers)
+    Ok(Fleet {
+        machines: answers,
+        unusable: listing.unusable,
+    })
 }
 
 /// A pane query that fails after tmux has already answered is the connection

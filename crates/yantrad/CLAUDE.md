@@ -282,10 +282,11 @@ and *the look itself failed*. I-47 is the same mistake one layer down. All four 
 the wrong one.
 
 **A failed look replaces the previous good one, and that is Y-071's decision rather than an
-accident.** Every class-level error here is local and persistent — `tailscale` missing, a malformed
-workspace file — so retaining a stale reading would hide a fault the operator has to fix, and go on
+accident.** Every class-level error here is local and persistent — `tailscale` missing, no config
+directory — so retaining a stale reading would hide a fault the operator has to fix, and go on
 hiding it. The transient case is a *machine* that did not answer, and that already survives inside a
-successful reading.
+successful reading. **A malformed workspace file is no longer one of them** (Y-141): it is an entry
+of `data` saying `loaded: "no"` with its reason, and the class stays `ok`.
 
 ## What is already decided
 

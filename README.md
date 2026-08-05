@@ -105,8 +105,9 @@ startup = "nvim"                      # optional; omit for just a shell
 That is the whole schema. An unknown key is an error rather than a line that is silently ignored
 ([ADR-0007](docs/adr/0007-workspace-schema-v1.md)), and so is a key left blank: `machine = ""`,
 `repo = ""` or `startup = ""` is refused when the file is *read*, naming the file, the field and the
-workspace. One such file stops `yantra ls workspaces` and the dashboard's workspace table for all of
-them, exactly as a syntax error does — fix the line or move the file aside.
+workspace. Such a file costs only itself: `yantra ls workspaces` and the dashboard's workspace table
+still show every workspace that loaded, and name the one that did not with its reason underneath —
+fix the line or move the file aside.
 
 **The box you are sitting at is the awkward case.** If it is served by Tailscale SSH rather than its
 own `sshd`, it cannot ssh to *itself* — Tailscale SSH is peer-to-peer, and there is no listener behind

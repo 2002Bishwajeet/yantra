@@ -10,6 +10,7 @@ import {
 import type {
   AgentState,
   Beat,
+  Listed,
   Looked,
   Machine,
   MachineSessions,
@@ -54,6 +55,12 @@ function viewport(width: number) {
 
 beforeEach(() => viewport(1280))
 
+/** A workspace as `GET /api/workspaces` lists it, which since Y-141 says
+ *  whether the file loaded. */
+function listed(workspace: Workspace): Listed {
+  return { loaded: 'yes', ...workspace }
+}
+
 function machine(overrides: Partial<Machine> = {}): Machine {
   return {
     name: 'cachyos-g14',
@@ -83,19 +90,18 @@ function beat(overrides: Partial<Beat> = {}): Beat {
 // A number stands for a status code the daemon answers instead of a body, which
 // only `/api/workspaces/:name/status` does.
 function stubFetch(answers: Record<string, Looked<unknown> | number>) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((path: string) => {
-      const answer = answers[path]
-      return typeof answer === 'number'
-        ? Promise.resolve({ ok: false, status: answer })
-        : Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve(answer),
-          })
-    }),
-  )
+  const asked = vi.fn((path: string) => {
+    const answer = answers[path]
+    return typeof answer === 'number'
+      ? Promise.resolve({ ok: false, status: answer })
+      : Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(answer),
+        })
+  })
+  vi.stubGlobal('fetch', asked)
+  return asked
 }
 
 describe('the looked envelope', () => {
@@ -249,6 +255,63 @@ describe('the workspaces table', () => {
         'no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml',
       ),
     ).toBeTruthy()
+  })
+
+  /** Y-141, and the mirror of the sessions test below: the broken file is named
+   *  with its reason, and it costs the workspaces beside it nothing. */
+  it('names a file that did not load without emptying the table', async () => {
+    stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [
+          listed({
+            name: 'yantra',
+            machine: 'cachyos-g14',
+            repo: '/home/<user>/Github/homelab/yantra',
+            startup: null,
+          }),
+          {
+            loaded: 'no',
+            name: 'site',
+            error:
+              'workspace `site` at /home/<user>/.config/yantra/workspaces/site.toml has an empty `machine`',
+          },
+        ],
+      },
+      '/api/sessions': { looked: 'never' },
+      '/api/workspaces/yantra/status': 404,
+    })
+    render(<App />)
+
+    expect(await screen.findByText(/site unusable:/)).toBeTruthy()
+    expect(screen.getByText(/empty `machine`/)).toBeTruthy()
+    // Still a row, and still the only one — the failure is a note under the
+    // table rather than a row with nothing to act on in it.
+    expect(screen.getByText('yantra')).toBeTruthy()
+    expect(screen.queryByText(/^no workspaces yet/)).toBeNull()
+  })
+
+  /** A per-workspace fetch for a file that did not load would ask about a name
+   *  the agent class has no report for, and read back as `no report yet`. */
+  it('asks for no agent status for a file that did not load', async () => {
+    const asked = stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [{ loaded: 'no', name: 'site', error: 'not valid TOML' }],
+      },
+      '/api/sessions': { looked: 'never' },
+    })
+
+    render(<App />)
+    await screen.findByText(/site unusable:/)
+
+    expect(
+      asked.mock.calls.some(([path]) => String(path).includes('site/status')),
+    ).toBe(false)
   })
 })
 
@@ -866,7 +929,7 @@ describe('the agents section', () => {
     }
     stubFetch({
       '/api/machines': { looked: 'never' },
-      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [yantra] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [listed(yantra)] },
       '/api/sessions': { looked: 'never' },
       '/api/workspaces/yantra/status': {
         looked: 'ok',
@@ -894,7 +957,7 @@ describe('the agents section', () => {
       '/api/workspaces': {
         looked: 'ok',
         age_seconds: 2,
-        data: [yantra, fresh],
+        data: [listed(yantra), listed(fresh)],
       },
       '/api/sessions': { looked: 'never' },
       '/api/workspaces/yantra/status': {
@@ -1083,7 +1146,11 @@ describe('editing a workspace', () => {
     const patched = vi.fn()
     const looks: Record<string, Looked<unknown>> = {
       '/api/machines': { looked: 'ok', age_seconds: 2, data: [machine(), mac] },
-      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [workspace] },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [listed(workspace)],
+      },
       '/api/sessions': { looked: 'never' },
     }
     vi.stubGlobal(
@@ -1239,7 +1306,11 @@ describe('acting on a workspace', () => {
     const posted = vi.fn()
     const looks: Record<string, Looked<unknown>> = {
       '/api/machines': { looked: 'ok', age_seconds: 2, data: [mac] },
-      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [workspace] },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [listed(workspace)],
+      },
     }
     vi.stubGlobal(
       'fetch',
