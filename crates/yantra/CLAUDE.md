@@ -39,8 +39,11 @@ a supervising parent would have to forward `SIGWINCH`, relay signals and reap a 
 ## Saying things
 
 - **Name the fix, not just the fault.** `downgrade_notice` ends with the exact command that ends the
-  problem; `KEYCHAIN_NOTE` explains why a Mac that works in a terminal says *not logged in* over ssh
-  (I-44). An error a user cannot act on is half an error.
+  problem; `KEYCHAIN_NOTE` explains why a Mac that works in a terminal can still say *not logged
+  in* (I-44). It stopped suggesting `ssh <machine> claude auth status` in Y-151: since
+  [ADR-0018](../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md) §5 that is
+  the one process whose answer is known to be wrong, and sending someone to reproduce a false
+  negative is worse than saying nothing. An error a user cannot act on is half an error.
 - **Print the reason with the verdict.** `describe(Verdict::Unclear { because })` carries its own
   explanation, because "unclear" alone tells no one anything.
 - `report_error` walks the `source()` chain — the useful detail is usually a level or two down, so

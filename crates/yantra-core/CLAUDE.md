@@ -23,12 +23,13 @@ bind where:
 | --- | --- |
 | `ssh.rs` | I-20 (system binary), I-25 (silent failure), I-26 (payload is base64, never quoted), I-27 (orphans), I-28 (`ControlPath` ≤ 90 bytes) |
 | `pty.rs` | I-18 (a controlling terminal, or no resize), I-13 (never block a tokio worker), I-27 (a remote *terminal* is hung up where a remote command is orphaned), and `ssh.rs`'s whole list through `Ssh::tty_argv` — **except I-26**: the envelope's `/bin/sh` reads from a pipe, which is the one stdin tmux refuses — and **I-54**, which is why a second viewer needs no tmux option |
-| `tmux.rs` | I-1 (`duplicate session:` is success), I-2 (name charset), I-4 (`remain-on-exit`), I-21 (`=name` is **session-only**), I-40 (never set `default-terminal`), I-41 (match the bracketed reason), I-42 (no tabs in `-F`), I-47/I-48 (dead-pane status *and* signal, both spellings) |
+| `tmux.rs` | I-1 (`duplicate session:` is success), I-2 (name charset), I-4 (`remain-on-exit`), I-21 (`=name` is **session-only**), I-40 (never set `default-terminal`), I-41 (match the bracketed reason), I-42 (no tabs in `-F`), I-47/I-48 (dead-pane status *and* signal, both spellings), **I-55** (`run_shell` reports a failed command on the same stdout as its output) |
 | `terminfo.rs` | I-36, I-43 (two terminfo databases on one machine) |
-| `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain), I-49 (an agent at the trust prompt is inert), **I-53** (`auth status` reports the credential it found, never that it works), I-51 (tmux's own quotes around a start command) |
+| `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain — and since Y-151 the reason the gate runs *inside* the tmux server there, ADR-0018 §5), I-49 (an agent at the trust prompt is inert), **I-53** (`auth status` reports the credential it found, never that it works), I-51 (tmux's own quotes around a start command) |
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
 | `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010 |
+| `up.rs` / `resume.rs` | I-1 through `tmux.rs`, and **I-44** — on macOS `up` refuses when no tmux server is running rather than starting one (ADR-0018 §1). The far side's OS is a *parameter* of the generic half, so the branch is drivable from a Linux container |
 | `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
 | `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |

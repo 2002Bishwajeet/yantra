@@ -13,16 +13,17 @@
 //!   cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture
 //! ```
 //!
-//! **One of these needs a person at that machine first**: Y-139's transcript
-//! measurement wants a tmux server started from a GUI login, and refuses without
-//! one. Its own doc comment says why and what to run.
+//! **Two of these need a person at that machine first**: Y-139's transcript
+//! measurement and Y-151's gate both want a tmux server started from a GUI
+//! login, and both refuse without one. Their own doc comments say why and what
+//! to run.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use yantra_core::agent::{Claude, TRUST_PROMPT};
 use yantra_core::logs::{self, Who};
-use yantra_core::ssh::{Exec as _, Machine, Ssh};
+use yantra_core::ssh::{self, Exec as _, Machine, Os, Ssh};
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
 use yantra_core::{up, workspace};
@@ -145,6 +146,92 @@ async fn the_terminal_probe_tells_real_macos_apart() -> anyhow::Result<()> {
         terminfo::choose(&ssh, terminfo::FALLBACK).await?,
         Chosen::Known(terminfo::FALLBACK.to_owned())
     );
+    Ok(())
+}
+
+/// **Y-151, and the half of [ADR-0018] no container can reach.** The mechanics
+/// of §1 and §5 are proved against a real tmux in `tests/up_walking_skeleton.rs`
+/// and `tests/agent.rs`; **launchd is not a thing a container has**, so that a
+/// server started from a GUI login is what makes the credential readable can
+/// only be measured here. A green CI run is not evidence for any of it.
+///
+/// The claim under test is the pair, on one machine minutes apart: `claude auth
+/// status` asked **over ssh** answers `loggedIn: false` (**I-44** — that process
+/// is in launchd's `Background` domain), and asked **inside the tmux server**
+/// that will fork the agent answers `loggedIn: true`. Only the second is
+/// asserted, because it is the one §5 rests on; the first is printed, and a run
+/// where both agree is called out rather than quietly passed — it would mean
+/// this measurement separated nothing.
+///
+/// **I-53 bounds what a pass means**: a credential was *found* where the agent
+/// will run. Not that it works, not that the agent can talk to Anthropic. Y-139
+/// is the row that needs an assistant turn for that.
+///
+/// It refuses when there is no tmux server rather than starting one, which is
+/// §1 itself: a server this test started over ssh would be the `Background`
+/// server whose panes cannot read the keychain, and the run would measure the
+/// thing being avoided. At the Mac's own keyboard, in Terminal.app, left
+/// running:
+///
+/// ```text
+/// tmux new-session -d -s yantra-gui
+/// ```
+///
+/// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
+#[tokio::test]
+#[ignore = "needs the real MacBook and a tmux server started from a GUI login; set YANTRA_MAC=user@host"]
+async fn the_gate_finds_a_credential_in_the_server_where_ssh_finds_none() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y151"),
+    })?;
+
+    let os = ssh::os(&ssh).await?;
+    anyhow::ensure!(
+        os == Os::MacOs,
+        "{dest} answered `uname -s` as {os:?}, so it is not the machine ADR-0018 is about and \
+         this run would prove nothing about the precondition or the gate"
+    );
+
+    // I-34 twice over: neither binary is on that machine's ssh `PATH`.
+    let tmux = Tmux::resolve(&ssh).await?;
+    let claude = Claude::resolve(&ssh).await?;
+    anyhow::ensure!(
+        !tmux.list(&ssh).await?.is_empty(),
+        "no tmux server on {dest}. ADR-0018 §1 is exactly that this must not be started over ssh \
+         — a server started here forks panes in launchd's `Background` domain, which is where the \
+         login keychain is unreadable (I-44), so the run would measure the failure it exists to \
+         avoid. Start it at the Mac's own keyboard, in Terminal.app: \
+         `tmux new-session -d -s yantra-gui`, and leave it running."
+    );
+
+    let over_ssh = claude.auth(&ssh, &tmux, Os::Other).await?;
+    let in_server = claude.auth(&ssh, &tmux, Os::MacOs).await?;
+    println!(
+        "over ssh:        loggedIn {}, authMethod {}\n\
+         in that server:  loggedIn {}, authMethod {}",
+        over_ssh.logged_in, over_ssh.method, in_server.logged_in, in_server.method
+    );
+
+    anyhow::ensure!(
+        in_server.logged_in,
+        "the gate found no credential in that tmux server (authMethod `{}`), so ADR-0018 §5 buys \
+         nothing on this machine as it stands. Either the server was itself started somewhere \
+         without the login keychain — over ssh, most likely — or `run-shell` did not reach the \
+         process it was supposed to. Refusing rather than passing on nothing.",
+        in_server.method
+    );
+    if over_ssh.logged_in {
+        println!(
+            "note: ssh answered `true` as well, so I-44 was not in force on this run and the \
+             pair separated nothing — the gate is still in the right place, but this run is not \
+             the evidence for it"
+        );
+    }
     Ok(())
 }
 

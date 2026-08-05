@@ -16,7 +16,7 @@ mod common;
 use anyhow::Result;
 use common::{SshFixture, USER};
 use yantra_core::resume::{self, Outcome};
-use yantra_core::ssh::{Exec, Machine, Ssh};
+use yantra_core::ssh::{Exec, Machine, Os, Ssh};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::Workspace;
 use yantra_core::{agent, up};
@@ -159,7 +159,7 @@ async fn a_workspace_with_no_session_gets_one_with_the_agent_continuing_in_it() 
     };
     let ws = workspace("resumenone");
 
-    let outcome = resume::of(&lab.ssh, &lab.tmux, &ws).await?;
+    let outcome = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other).await?;
     lab.settle().await?;
 
     let launch = launched(outcome).expect("a workspace with no session must be resumed");
@@ -188,8 +188,8 @@ async fn an_agent_killed_mid_session_is_restarted_in_the_pane_it_died_in() -> Re
     };
     let ws = workspace("resumekilled");
 
-    let first = agent::prepare(&lab.ssh, REPO).await?;
-    up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command)).await?;
+    let first = agent::prepare(&lab.ssh, REPO, &lab.tmux, Os::Other).await?;
+    up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command), Os::Other).await?;
     lab.settle().await?;
 
     let before = lab.pane_of(&ws.name).await?;
@@ -201,7 +201,7 @@ async fn an_agent_killed_mid_session_is_restarted_in_the_pane_it_died_in() -> Re
         "the precondition is a really dead pane, which is what makes respawn the only way back"
     );
 
-    let outcome = resume::of(&lab.ssh, &lab.tmux, &ws).await?;
+    let outcome = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other).await?;
     lab.settle().await?;
 
     let second = launched(outcome).expect("a killed agent has a conversation to continue");
@@ -248,13 +248,13 @@ async fn resuming_a_running_agent_leaves_it_exactly_where_it_was() -> Result<()>
     let ws = workspace("resumerunning");
     lab.registry(Some(REPO)).await?;
 
-    let launch = agent::prepare(&lab.ssh, REPO).await?;
-    up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command)).await?;
+    let launch = agent::prepare(&lab.ssh, REPO, &lab.tmux, Os::Other).await?;
+    up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command), Os::Other).await?;
     lab.settle().await?;
     let before = lab.pane_of(&ws.name).await?;
 
     assert_eq!(
-        resume::of(&lab.ssh, &lab.tmux, &ws).await?,
+        resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other).await?,
         Outcome::AlreadyRunning
     );
     lab.settle().await?;
@@ -290,7 +290,7 @@ async fn an_agent_waiting_at_the_trust_prompt_is_refused_and_left_alone() -> Res
     lab.settle().await?;
     let before = lab.pane_of(&ws.name).await?;
 
-    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other)
         .await
         .expect_err("an agent at the trust dialog cannot be resumed");
     assert!(
@@ -327,8 +327,8 @@ async fn a_repo_that_is_gone_is_refused_before_the_pane_is_respawned() -> Result
     };
     let ws = workspace("resumenorepo");
 
-    let first = agent::prepare(&lab.ssh, REPO).await?;
-    up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command)).await?;
+    let first = agent::prepare(&lab.ssh, REPO, &lab.tmux, Os::Other).await?;
+    up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command), Os::Other).await?;
     lab.settle().await?;
 
     let before = lab.pane_of(&ws.name).await?;
@@ -337,7 +337,7 @@ async fn a_repo_that_is_gone_is_refused_before_the_pane_is_respawned() -> Result
     lab.ssh.exec(&format!("rm -rf {REPO}")).await?;
     lab.settle().await?;
 
-    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other)
         .await
         .expect_err("a repo the machine no longer has cannot be resumed into");
     assert!(
@@ -361,7 +361,7 @@ async fn a_repo_that_is_gone_is_refused_before_the_pane_is_respawned() -> Result
     // The same refusal on the other path: with no session at all, `resume` goes
     // through `up::open`, and the two verbs have to agree.
     lab.tmux.kill(&lab.ssh, &ws.name).await?;
-    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other)
         .await
         .expect_err("opening into a missing repo is refused too");
     assert!(
@@ -402,7 +402,7 @@ async fn a_live_pane_the_registry_does_not_know_about_is_never_respawned() -> Re
     lab.settle().await?;
     let before = lab.pane_of(&ws.name).await?;
 
-    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other)
         .await
         .expect_err("a pane with something unknown in it is not resumable");
     assert!(matches!(err, resume::Error::Unclear { .. }), "{err:?}");
@@ -436,7 +436,7 @@ async fn a_session_that_never_had_an_agent_is_refused_as_such() -> Result<()> {
     lab.settle().await?;
     let before = lab.pane_of(&ws.name).await?;
 
-    let err = resume::of(&lab.ssh, &lab.tmux, &ws)
+    let err = resume::of(&lab.ssh, &lab.tmux, &ws, Os::Other)
         .await
         .expect_err("there is no conversation to continue");
     assert!(matches!(err, resume::Error::NoAgent { .. }), "{err:?}");
@@ -465,7 +465,13 @@ async fn a_hostile_repo_path_never_executes_when_resuming() -> Result<()> {
     };
     lab.ssh.exec("rm -f /tmp/pwned-resume").await?;
 
-    let launch = agent::resume(&lab.ssh, "/tmp/x'; touch /tmp/pwned-resume; '").await?;
+    let launch = agent::resume(
+        &lab.ssh,
+        "/tmp/x'; touch /tmp/pwned-resume; '",
+        &lab.tmux,
+        Os::Other,
+    )
+    .await?;
     lab.ssh.exec(&launch.command).await?;
 
     let out = lab

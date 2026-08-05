@@ -38,7 +38,7 @@
 //! [`brainstorm.md`]: ../../../docs/brainstorm.md
 
 use crate::agent::{self, Launch};
-use crate::ssh::{self, Exec, Ssh};
+use crate::ssh::{self, Exec, Os, Ssh};
 use crate::status::{self, Verdict};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Pane, Tmux};
@@ -134,8 +134,9 @@ pub async fn resume(name: &str, term: &str) -> Result<Report, Error> {
 
     let ssh = Ssh::new(ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?)?;
     let tmux = Tmux::resolve(&ssh).await?;
+    let os = ssh::os(&ssh).await?;
     let term = terminfo::choose(&ssh, term).await?;
-    let outcome = of(&ssh, &tmux, &workspace).await?;
+    let outcome = of(&ssh, &tmux, &workspace, os).await?;
 
     Ok(Report {
         workspace,
@@ -149,7 +150,17 @@ pub async fn resume(name: &str, term: &str) -> Result<Report, Error> {
 ///
 /// The agent is prepared *after* the state is known, so a refusal costs no
 /// round trip to `claude auth status` and leaves nothing half-started.
-pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: &Workspace) -> Result<Outcome, Error> {
+///
+/// ADR-0018 §1 is asked first and not left to [`up::open`], because every plan
+/// but one prepares the agent before it reaches there — and on macOS that gate
+/// runs inside the server this refuses to create.
+pub async fn of<E: Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    workspace: &Workspace,
+    os: Os,
+) -> Result<Outcome, Error> {
+    up::require_login_server(exec, tmux, os, &workspace.machine).await?;
     let status = status::of(exec, tmux, workspace.clone()).await?;
     let repo = workspace.repo.to_string_lossy();
     let named = || workspace.name.clone();
@@ -163,15 +174,15 @@ pub async fn of<E: Exec>(exec: &E, tmux: &Tmux, workspace: &Workspace) -> Result
             because,
         }),
         Plan::Open => {
-            let launch = agent::resume(exec, &repo).await?;
-            up::open(exec, tmux, workspace, Some(&launch.command)).await?;
+            let launch = agent::resume(exec, &repo, tmux, os).await?;
+            up::open(exec, tmux, workspace, Some(&launch.command), os).await?;
             Ok(Outcome::Resumed(launch))
         }
         Plan::Respawn(pane_id) => {
             // Y-081 binds both paths or neither: `Plan::Open` inherits the check
             // from `up::open`, and a respawn goes straight to tmux instead.
             up::ensure_repo(exec, workspace, &repo).await?;
-            let launch = agent::resume(exec, &repo).await?;
+            let launch = agent::resume(exec, &repo, tmux, os).await?;
             tmux.respawn(exec, pane_id, &launch.command).await?;
             Ok(Outcome::Resumed(launch))
         }

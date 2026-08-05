@@ -406,6 +406,9 @@ fn from_up(error: &up::Error) -> StatusCode {
         // The machine answered, and what it said is that the directory is not
         // there — which a `git clone` or an edit to `repo` changes.
         up::Error::NoRepo { .. } => StatusCode::CONFLICT,
+        // ADR-0018 §1: a refusal about state, and the person at that Mac is who
+        // changes it by starting a tmux server from their own login session.
+        up::Error::NoLoginServer { .. } => StatusCode::CONFLICT,
         up::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

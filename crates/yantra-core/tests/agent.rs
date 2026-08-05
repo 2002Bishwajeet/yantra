@@ -20,7 +20,7 @@ mod common;
 use anyhow::Result;
 use common::{SshFixture, USER};
 use yantra_core::agent::{self, Claude};
-use yantra_core::ssh::{Exec, Machine, Ssh};
+use yantra_core::ssh::{Exec, Machine, Os, Ssh};
 use yantra_core::tmux::Tmux;
 use yantra_core::up;
 use yantra_core::workspace::Workspace;
@@ -29,6 +29,12 @@ use yantra_core::workspace::Workspace;
 /// non-interactive `PATH` — which is the whole reason [`agent`] carries a
 /// candidate list that includes `$HOME` where [`yantra_core::tmux`]'s does not.
 const INSTALLED_AT: &str = "/home/yantra/.local/bin/claude";
+
+/// Where the stub records the pid that forked the shell it ran in — the one
+/// thing about ADR-0018 §5 a container can settle, and unreadable afterwards
+/// from the ssh session that asked. Read out of `/proc` because busybox `ps`
+/// ignores `-p`, and answers nothing at all rather than failing.
+const FORKED_BY: &str = "/tmp/claude-auth-forked-by";
 
 struct Lab {
     _fixture: SshFixture,
@@ -78,6 +84,7 @@ impl Lab {
         let script = format!(
             "#!/bin/sh\n\
              if [ \"$1\" = auth ]; then\n\
+             \x20 awk '/^PPid:/ {{print $2}}' /proc/$PPID/status > {FORKED_BY}\n\
              \x20 printf '%s\\n' '{{\"loggedIn\":{flag},\"authMethod\":\"{method}\",\
              \"apiProvider\":\"firstParty\",\"email\":\"someone@example.com\"}}'\n\
              \x20 exit {code}\n\
@@ -170,11 +177,11 @@ async fn an_agent_that_cannot_authenticate_is_refused_and_opens_nothing() -> Res
     let ws = workspace("agentauth", "/tmp");
 
     let claude = Claude::resolve(&lab.ssh).await?;
-    let auth = claude.auth(&lab.ssh).await?;
+    let auth = claude.auth(&lab.ssh, &lab.tmux, Os::Other).await?;
     assert!(!auth.logged_in);
     assert_eq!(auth.method, "none");
 
-    let err = agent::prepare(&lab.ssh, "/tmp")
+    let err = agent::prepare(&lab.ssh, "/tmp", &lab.tmux, Os::Other)
         .await
         .expect_err("an agent that is not logged in cannot be prepared");
     assert!(matches!(err, agent::Error::NotLoggedIn { .. }), "{err:?}");
@@ -185,6 +192,75 @@ async fn an_agent_that_cannot_authenticate_is_refused_and_opens_nothing() -> Res
         !sessions.iter().any(|s| s.name == ws.name),
         "nothing may be left half-open by a refusal: {sessions:?}"
     );
+    Ok(())
+}
+
+/// **ADR-0018 §5's mechanism, and the half of it a container can settle.**
+///
+/// The gate has to run in the process tree of the server that will fork the
+/// agent, because on macOS the answer depends on which process asks (I-44).
+/// `tmux run-shell` is what does that here: one round trip, forked from the
+/// server, output handed back on this connection. Both halves are asserted —
+/// the JSON arrives, and the process that produced it was forked by the tmux
+/// server rather than by sshd.
+///
+/// **What no container can show is why that matters.** launchd domains do not
+/// exist here, and a green run says nothing about whether a Mac's keychain
+/// becomes readable — only `manual_macbook.rs` can ask that.
+///
+/// The negative case is the one that pins the `exit 0`: `auth status` exits 1
+/// when it is not logged in (measured on 2.1.220), and tmux appends
+/// `'…' returned 1` to the very stdout this JSON is parsed out of.
+#[tokio::test]
+async fn the_macos_gate_runs_in_the_tmux_server_and_its_answer_comes_back() -> Result<()> {
+    let Some(lab) = Lab::start("agent-gate").await? else {
+        return Ok(());
+    };
+    let ws = workspace("agentgate", "/tmp");
+    let opened = lab.tmux.ensure(&lab.ssh, &ws.name, "/tmp", None).await?;
+    let server = lab
+        .ssh
+        .exec(&format!(
+            "{} display-message -p '#{{pid}}'",
+            lab.tmux.path()
+        ))
+        .await?;
+    let server = String::from_utf8_lossy(&server.stdout).trim().to_owned();
+
+    for logged_in in [true, false] {
+        lab.install_claude(logged_in).await?;
+        lab.ssh.exec(&format!("rm -f {FORKED_BY}")).await?;
+
+        let claude = Claude::resolve(&lab.ssh).await?;
+        let auth = claude.auth(&lab.ssh, &lab.tmux, Os::MacOs).await?;
+        assert_eq!(
+            auth.logged_in, logged_in,
+            "the JSON has to survive the trip through the server"
+        );
+
+        let forked_by = lab.ssh.exec(&format!("cat {FORKED_BY}")).await?;
+        assert_eq!(
+            String::from_utf8_lossy(&forked_by.stdout).trim(),
+            server,
+            "the gate must run in a process the tmux server forked, or it is the \
+             wrong process and I-44 answers for it"
+        );
+    }
+
+    // The contrast, on one machine minutes apart, which is the shape the Mac's
+    // own paired measurement has: over ssh nothing of the server is involved.
+    lab.ssh.exec(&format!("rm -f {FORKED_BY}")).await?;
+    let claude = Claude::resolve(&lab.ssh).await?;
+    claude.auth(&lab.ssh, &lab.tmux, Os::Other).await?;
+    let forked_by = lab.ssh.exec(&format!("cat {FORKED_BY}")).await?;
+    assert_ne!(
+        String::from_utf8_lossy(&forked_by.stdout).trim(),
+        server,
+        "the ssh route is the one ADR-0018 §5 moves off, so it must not land there by accident"
+    );
+
+    assert!(!opened.session().pane_id.is_empty());
+    lab.tmux.kill(&lab.ssh, &ws.name).await?;
     Ok(())
 }
 
@@ -199,8 +275,8 @@ async fn the_agent_runs_in_the_repo_under_the_id_yantra_chose() -> Result<()> {
     lab.ssh.exec("mkdir -p /tmp/agentrepo").await?;
     let ws = workspace("agentrun", "/tmp/agentrepo");
 
-    let launch = agent::prepare(&lab.ssh, "/tmp/agentrepo").await?;
-    let opened = up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command)).await?;
+    let launch = agent::prepare(&lab.ssh, "/tmp/agentrepo", &lab.tmux, Os::Other).await?;
+    let opened = up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command), Os::Other).await?;
     assert!(opened.was_created());
     lab.ssh.exec("sleep 1").await?;
 
@@ -246,7 +322,13 @@ async fn a_hostile_repo_path_never_executes_on_the_far_side() -> Result<()> {
     lab.install_claude(true).await?;
     lab.ssh.exec("rm -f /tmp/pwned").await?;
 
-    let launch = agent::prepare(&lab.ssh, "/tmp/x'; touch /tmp/pwned; '").await?;
+    let launch = agent::prepare(
+        &lab.ssh,
+        "/tmp/x'; touch /tmp/pwned; '",
+        &lab.tmux,
+        Os::Other,
+    )
+    .await?;
     // Runs it directly rather than through tmux: what is under test is the
     // command, and tmux would only add a layer between it and the shell.
     lab.ssh.exec(&launch.command).await?;
@@ -276,20 +358,20 @@ async fn a_second_up_does_not_start_a_second_agent() -> Result<()> {
     lab.ssh.exec("mkdir -p /tmp/twicerepo").await?;
     let ws = workspace("agenttwice", "/tmp/twicerepo");
 
-    let first = agent::prepare(&lab.ssh, "/tmp/twicerepo").await?;
+    let first = agent::prepare(&lab.ssh, "/tmp/twicerepo", &lab.tmux, Os::Other).await?;
     assert!(
-        up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command))
+        up::open(&lab.ssh, &lab.tmux, &ws, Some(&first.command), Os::Other)
             .await?
             .was_created()
     );
     lab.ssh.exec("sleep 1").await?;
 
-    let second = agent::prepare(&lab.ssh, "/tmp/twicerepo").await?;
+    let second = agent::prepare(&lab.ssh, "/tmp/twicerepo", &lab.tmux, Os::Other).await?;
     assert_ne!(
         first.session_id, second.session_id,
         "each prepare picks a fresh id, so a leak would be visible"
     );
-    let again = up::open(&lab.ssh, &lab.tmux, &ws, Some(&second.command)).await?;
+    let again = up::open(&lab.ssh, &lab.tmux, &ws, Some(&second.command), Os::Other).await?;
     assert!(!again.was_created(), "the second open attaches");
     lab.ssh.exec("sleep 1").await?;
 

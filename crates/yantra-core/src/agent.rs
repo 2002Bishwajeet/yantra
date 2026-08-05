@@ -15,8 +15,8 @@
 //!
 //! [ADR-0011]: ../../../docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md
 
-use crate::ssh::Exec;
-use crate::tmux::sq;
+use crate::ssh::{Exec, Os};
+use crate::tmux::{Tmux, sq};
 
 /// Searched in order when `PATH` fails.
 ///
@@ -193,19 +193,37 @@ impl Claude {
         Ok(serde_json::from_slice(&out.stdout).unwrap_or_default())
     }
 
-    /// Asks the agent whether it can talk to Anthropic at all.
+    /// Asks the agent which credential it can find — never whether it works
+    /// (**I-53**).
     ///
     /// The JSON is on stdout whether or not it is logged in, and the exit status
     /// is 1 in the negative case — so the status is not what is read here.
-    pub async fn auth<E: Exec>(&self, exec: &E) -> Result<Auth, Error> {
+    ///
+    /// On macOS the question is asked **inside the tmux server** rather than over
+    /// ssh, because the answer depends on which process asks: ssh lands in
+    /// launchd's `Background` domain, where the login keychain is unreadable
+    /// (**I-44**), while the pane the agent will run in is forked by that server
+    /// ([ADR-0018] §5). Over ssh this would answer `false` on a Mac forever and
+    /// refuse the one route that works.
+    ///
+    /// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
+    pub async fn auth<E: Exec>(&self, exec: &E, tmux: &Tmux, os: Os) -> Result<Auth, Error> {
         let out = exec
-            .exec(&format!("{} auth status", sq(&self.path)))
+            .exec(&auth_command(&self.path, tmux.path(), os))
             .await?;
         let status: Status = serde_json::from_slice(&out.stdout).map_err(|_| Error::Unreadable)?;
         Ok(Auth {
             logged_in: status.logged_in,
             method: status.auth_method,
         })
+    }
+}
+
+fn auth_command(claude: &str, tmux: &str, os: Os) -> String {
+    let ask = format!("{} auth status", sq(claude));
+    match os {
+        Os::Other => ask,
+        Os::MacOs => crate::tmux::run_shell(tmux, &ask),
     }
 }
 
@@ -225,19 +243,29 @@ enum Mode {
 /// against the machine that has the problem — `claude auth status` there answers
 /// `loggedIn: false`. Refusing turns a silent useless session into a refusal
 /// that names its reason.
-pub async fn prepare<E: Exec>(exec: &E, repo: &str) -> Result<Launch, Error> {
-    ready(exec, repo, Mode::New).await
+///
+/// `tmux` is where that check runs on macOS, and `os` is what decides — see
+/// [`Claude::auth`]. What a pass means is bounded by **I-53**: a credential was
+/// found where the agent will run, and nothing about whether it works.
+pub async fn prepare<E: Exec>(exec: &E, repo: &str, tmux: &Tmux, os: Os) -> Result<Launch, Error> {
+    ready(exec, repo, tmux, os, Mode::New).await
 }
 
 /// [`prepare`], for an agent that continues the last conversation in `repo`
 /// rather than starting one. The id is still Yantra's, and still fresh.
-pub async fn resume<E: Exec>(exec: &E, repo: &str) -> Result<Launch, Error> {
-    ready(exec, repo, Mode::Resume).await
+pub async fn resume<E: Exec>(exec: &E, repo: &str, tmux: &Tmux, os: Os) -> Result<Launch, Error> {
+    ready(exec, repo, tmux, os, Mode::Resume).await
 }
 
-async fn ready<E: Exec>(exec: &E, repo: &str, mode: Mode) -> Result<Launch, Error> {
+async fn ready<E: Exec>(
+    exec: &E,
+    repo: &str,
+    tmux: &Tmux,
+    os: Os,
+    mode: Mode,
+) -> Result<Launch, Error> {
     let claude = Claude::resolve(exec).await?;
-    let auth = claude.auth(exec).await?;
+    let auth = claude.auth(exec, tmux, os).await?;
     if !auth.logged_in {
         return Err(Error::NotLoggedIn {
             method: auth.method,
@@ -405,6 +433,28 @@ mod tests {
         assert!(
             !format!("{status:?}").contains("example.com"),
             "the account's email must not survive into anything Yantra can print"
+        );
+    }
+
+    /// ADR-0018 §5, as an exact string because every part of it is load-bearing:
+    /// the tmux path is absolute (I-34), the whole ask is one `run-shell`
+    /// argument, and the `exit 0` is what keeps tmux's own `'…' returned 1` off
+    /// the stdout this JSON is parsed out of.
+    #[test]
+    fn the_macos_gate_asks_inside_the_tmux_server_and_linux_asks_directly() {
+        assert_eq!(
+            auth_command(
+                "/Users/u/.local/bin/claude",
+                "/opt/homebrew/bin/tmux",
+                Os::MacOs
+            ),
+            "'/opt/homebrew/bin/tmux' run-shell \
+             ''\\''/Users/u/.local/bin/claude'\\'' auth status; exit 0'"
+        );
+        assert_eq!(
+            auth_command("/home/u/.local/bin/claude", "/usr/bin/tmux", Os::Other),
+            "'/home/u/.local/bin/claude' auth status",
+            "Linux reads the credential from a file, so the ssh session is the right process"
         );
     }
 

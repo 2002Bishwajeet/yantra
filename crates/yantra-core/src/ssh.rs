@@ -121,6 +121,36 @@ impl Machine {
     }
 }
 
+/// Which operating system the far side answered with, to the resolution the two
+/// macOS code paths need (ADR-0018 §1 and §5) and no finer.
+///
+/// Deliberately not [`crate::inventory::Os`]: that one is what *Tailscale* said
+/// about a node, and ADR-0009 leaves no key joining a workspace's `machine` to
+/// one of those. This is what the machine itself answered on this connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Os {
+    MacOs,
+    Other,
+}
+
+/// Asks the machine what it runs.
+///
+/// A `uname` that did not answer is an error rather than [`Os::Other`]: the
+/// caller gates a refusal on this, and defaulting would silently disable it on
+/// the one platform it exists for (R-23).
+pub async fn os<E: Exec>(exec: &E) -> Result<Os, Error> {
+    let out = exec.exec("uname -s").await?;
+    let said = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.success() || said.is_empty() {
+        return Err(Error::Uname { said });
+    }
+    Ok(if said == "Darwin" {
+        Os::MacOs
+    } else {
+        Os::Other
+    })
+}
+
 /// What the remote command did. Only produced when the sentinel came back, so
 /// `status` is always the command's own — never `ssh`'s.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +191,9 @@ pub enum Error {
     /// deliberately distinct from a command that ran and failed.
     #[error("ssh to {host} failed before the command reported a status: {diagnosis}")]
     Transport { host: String, diagnosis: String },
+
+    #[error("could not ask that machine which operating system it runs: `uname -s` said `{said}`")]
+    Uname { said: String },
 }
 
 /// The seam the layers above are tested against (§B2). Implementations of this

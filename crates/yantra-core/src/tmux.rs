@@ -570,6 +570,27 @@ pub(crate) fn sq(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Wraps `command` so a **running** server forks it and its stdout comes back on
+/// the caller's connection — one round trip, and the process-tree property
+/// [ADR-0018] §5 needs. Needs no session and creates none.
+///
+/// The `exit 0` is not tidiness: tmux appends `'…' returned N` to that same
+/// stdout when the command fails, which reaches a parser as trailing junk.
+/// Measured byte-identical on 3.5a and 3.7b, as is the absence of the command's
+/// own stderr — anything to be read back must be printed on stdout.
+///
+/// With no server this fails with one of [`no_server`]'s spellings, which is the
+/// state [`crate::up::require_login_server`] refuses ahead of it on macOS.
+///
+/// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
+pub(crate) fn run_shell(tmux: &str, command: &str) -> String {
+    format!(
+        "{} run-shell {}",
+        sq(tmux),
+        sq(&format!("{command}; exit 0"))
+    )
+}
+
 /// I-48, the reason [`signal_name`] exists at all.
 #[cfg(test)]
 mod signal_tests {
@@ -671,6 +692,17 @@ mod tests {
                 "{bad:?} must not silently vanish"
             );
         }
+    }
+
+    /// The command reaches tmux as **one** argument however many words it has,
+    /// and tmux's own report of a failed command stays off the stdout a caller
+    /// parses.
+    #[test]
+    fn a_run_shell_command_is_one_argument_and_never_reports_its_own_failure() {
+        assert_eq!(
+            run_shell("/opt/homebrew/bin/tmux", "'/u/claude' auth status"),
+            "'/opt/homebrew/bin/tmux' run-shell ''\\''/u/claude'\\'' auth status; exit 0'"
+        );
     }
 
     #[test]
