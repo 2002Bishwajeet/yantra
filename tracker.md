@@ -157,15 +157,15 @@ answer it. And one is a claim this file makes about `web/` that the code contrad
 loop can take any of them in any order without ordering damage, so `Depends` is `—` throughout. The
 interactions worth knowing are not dependencies: [Y-136](#3-task-board)'s buttons will say the wrong
 thing about a refusal until [Y-135](#3-task-board) fixes the status, and [Y-139](#3-task-board)'s ssh
-route is the one [Y-151](#3-task-board) unblocks while its GUI route is not blocked at all. Both are written into the rows rather than
-into the column, because a `Depends` that is not a blocker is a loop stalled on nothing.
+route is the one [Y-151](#3-task-board) unblocks while its GUI route is not blocked at all. Both are
+written into the rows rather than into the column, because a `Depends` that is not a blocker is a
+loop stalled on nothing.
 
 **What was the owner's still is.** Y-117 waits on M10, which is where the read model that surveys the
 tailnet gets built, and the macOS credential blocker was Y-122's and no other row's — Y-122 decided
-it, and the code is [Y-151](#3-task-board)'s. Everything M6
-opened has closed, Y-118 with it, so **what M6 waits on now is a browser rather than a branch** — the
-acceptance test in [§2](#2-milestones) is the owner's to run against the real fleet, and no code is
-in the way of it.
+it, and the code is [Y-151](#3-task-board)'s. Everything M6 opened has closed, Y-118 with it, so
+**what M6 waits on now is a browser rather than a branch** — the acceptance test in
+[§2](#2-milestones) is the owner's to run against the real fleet, and no code is in the way of it.
 
 **This paragraph does not say how many rows are open**, and that is [Y-120](#3-task-board)'s rule
 applied to the file that wrote it. The count was here for a day and went stale three times in it —
