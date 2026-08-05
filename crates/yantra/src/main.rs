@@ -18,7 +18,7 @@ use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::up;
-use yantra_core::workspace::{self, Workspace};
+use yantra_core::workspace::{self, Listing};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -588,9 +588,16 @@ async fn ls_sessions() -> ExitCode {
 /// client of the daemon, so this works with no `yantrad` running.
 fn ls_workspaces() -> ExitCode {
     match workspace::list() {
-        Ok(workspaces) => {
-            print!("{}", render_workspaces(&workspaces));
-            ExitCode::SUCCESS
+        Ok(listing) => {
+            print!("{}", render_workspaces(&listing));
+            // Non-zero on a partial answer, exactly as `ls sessions`: the table
+            // is still printed, but a caller must be able to tell it is
+            // incomplete.
+            if listing.unusable.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         Err(err) => {
             report_error(&err);
@@ -599,8 +606,14 @@ fn ls_workspaces() -> ExitCode {
     }
 }
 
-fn render_workspaces(workspaces: &[Workspace]) -> String {
-    if workspaces.is_empty() {
+/// A file that did not load is named **under** the table rather than given a
+/// row in it, which is `render_sessions`'s shape for an unreachable machine.
+/// Every column here is something to act on and a broken file has none of them:
+/// no machine, nothing to attach to, and nothing `yantra edit` can repair, since
+/// `update` loads before it writes and the file is the fix.
+fn render_workspaces(listing: &Listing) -> String {
+    let workspaces = &listing.workspaces;
+    if workspaces.is_empty() && listing.unusable.is_empty() {
         return format!(
             "no workspaces yet — make one at {}/<name>.toml\n",
             workspace::workspaces_dir()
@@ -621,12 +634,36 @@ fn render_workspaces(workspaces: &[Workspace]) -> String {
         })
         .collect();
 
-    let mut out = table(&["WORKSPACE", "MACHINE", "REPO", "STARTUP"], &rows);
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(&["WORKSPACE", "MACHINE", "REPO", "STARTUP"], &rows)
+    };
     out.push_str(&format!(
         "\n{} workspace{}\n",
         workspaces.len(),
         if workspaces.len() == 1 { "" } else { "s" }
     ));
+
+    for unusable in &listing.unusable {
+        out.push_str(&format!(
+            "  {} unusable: {}\n",
+            unusable.name,
+            chain(&unusable.error)
+        ));
+    }
+    out
+}
+
+/// The chain `report_error` prints, on one line: a footer under a table has no
+/// second line to give it, and the useful detail is a level or two down.
+fn chain(err: &dyn std::error::Error) -> String {
+    let mut out = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        out.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
     out
 }
 
@@ -831,6 +868,7 @@ mod tests {
     use super::*;
     use yantra_core::inventory::Os;
     use yantra_core::tmux::Summary;
+    use yantra_core::workspace::Workspace;
 
     /// clap's own check: conflicting flags, duplicate names, bad defaults.
     #[test]
@@ -1255,14 +1293,24 @@ mod tests {
         }
     }
 
+    fn listing(workspaces: Vec<Workspace>, unusable: Vec<workspace::Unusable>) -> Listing {
+        Listing {
+            workspaces,
+            unusable,
+        }
+    }
+
     /// A workspace with no `startup` is just a shell, which is a real state and
     /// not a missing one — so the cell is blank rather than saying `none`.
     #[test]
     fn a_workspace_with_no_startup_leaves_the_column_empty() {
-        let rendered = render_workspaces(&[
-            workspace("yantra", "cachyos-g14", Some("claude")),
-            workspace("scratch", "pi", None),
-        ]);
+        let rendered = render_workspaces(&listing(
+            vec![
+                workspace("yantra", "cachyos-g14", Some("claude")),
+                workspace("scratch", "pi", None),
+            ],
+            Vec::new(),
+        ));
         assert!(
             rendered.contains("yantra     cachyos-g14  /srv/yantra   claude"),
             "{rendered}"
@@ -1273,14 +1321,79 @@ mod tests {
         assert!(rendered.ends_with("2 workspaces\n"), "{rendered}");
     }
 
-    /// Absence is emptiness (`workspace::list` returns `Ok(vec![])` for a
+    /// Absence is emptiness (`workspace::list` returns an empty listing for a
     /// directory nobody has made), so this exits 0 — and a bare header row
     /// would tell a first-time user nothing about where to put a file.
     #[test]
     fn no_workspaces_names_where_one_goes_rather_than_printing_a_header() {
-        let rendered = render_workspaces(&[]);
+        let rendered = render_workspaces(&listing(Vec::new(), Vec::new()));
         assert!(rendered.contains("no workspaces yet"), "{rendered}");
         assert!(rendered.contains("<name>.toml"), "{rendered}");
+    }
+
+    /// Y-141's rule at the terminal: the file that did not load is named under
+    /// the table with its reason, and it takes none of the others with it.
+    #[test]
+    fn an_unusable_file_is_named_below_the_table_and_the_rest_still_print() {
+        let rendered = render_workspaces(&listing(
+            vec![workspace("yantra", "cachyos-g14", Some("claude"))],
+            vec![workspace::Unusable {
+                name: "site".to_owned(),
+                error: workspace::Error::Blank {
+                    name: "site".to_owned(),
+                    path: std::path::PathBuf::from("/srv/workspaces/site.toml"),
+                    field: "machine",
+                },
+            }],
+        ));
+
+        assert!(rendered.contains("yantra     cachyos-g14"), "{rendered}");
+        assert!(rendered.contains("1 workspace\n"), "{rendered}");
+        assert!(rendered.contains("site unusable:"), "{rendered}");
+        // The reason and the file, or the note sends nobody anywhere.
+        assert!(rendered.contains("empty `machine`"), "{rendered}");
+        assert!(rendered.contains("/srv/workspaces/site.toml"), "{rendered}");
+        // It is a note, not a row — the columns are all things to act on.
+        assert!(
+            !rendered.contains("site  \n") && !rendered.contains("\nsite "),
+            "an unusable file must not be drawn as a row: {rendered}"
+        );
+    }
+
+    /// A directory whose every file is broken is not an empty directory, so it
+    /// must not print the invitation to make a first workspace.
+    #[test]
+    fn a_directory_where_nothing_loads_says_so_rather_than_saying_it_is_empty() {
+        let rendered = render_workspaces(&listing(
+            Vec::new(),
+            vec![workspace::Unusable {
+                name: "site".to_owned(),
+                error: workspace::Error::InvalidName {
+                    name: "site".to_owned(),
+                    path: std::path::PathBuf::from("/srv/workspaces/site.toml"),
+                },
+            }],
+        ));
+
+        assert!(!rendered.contains("no workspaces yet"), "{rendered}");
+        assert!(rendered.contains("0 workspaces"), "{rendered}");
+        assert!(rendered.contains("site unusable:"), "{rendered}");
+    }
+
+    /// `report_error` walks the chain because the detail is a level down, and a
+    /// one-line footer that dropped it would name a fault nobody can act on.
+    #[test]
+    fn the_footer_carries_the_cause_and_not_only_the_headline() {
+        let error = workspace::Error::Unreadable {
+            name: "site".to_owned(),
+            path: std::path::PathBuf::from("/srv/workspaces/site.toml"),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+        assert!(
+            chain(&error).contains("permission denied"),
+            "{}",
+            chain(&error)
+        );
     }
 
     #[test]

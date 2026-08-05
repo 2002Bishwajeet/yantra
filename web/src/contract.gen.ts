@@ -6,6 +6,7 @@
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Listed,
   Looked,
   Machine,
   MachineSessions,
@@ -81,20 +82,27 @@ export const workspaces = {
   "age_seconds": 0,
   "data": [
     {
+      "loaded": "yes",
       "machine": "cachyos-g14",
       "name": "api",
       "repo": "/home/<user>/Github/site",
       "startup": "claude"
     },
     {
+      "loaded": "yes",
       "machine": "bishwajeets-macbook-pro",
       "name": "site",
       "repo": "/home/<user>/Github/site",
       "startup": null
+    },
+    {
+      "error": "workspace `typo` at /home/<user>/.config/yantra/workspaces/typo.toml has an empty `machine`, so nothing can open it — fill that line in or move the file aside",
+      "loaded": "no",
+      "name": "typo"
     }
   ],
   "looked": "ok"
-} satisfies Looked<Workspace[]>
+} satisfies Looked<Listed[]>
 
 export const sessions = {
   "age_seconds": 0,

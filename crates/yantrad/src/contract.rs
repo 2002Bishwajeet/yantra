@@ -35,7 +35,7 @@ use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{self, MachineStatus, Report, Verdict};
 use yantra_core::tmux::Summary;
-use yantra_core::workspace::Workspace;
+use yantra_core::workspace::{Listing, Unusable, Workspace};
 
 use crate::heartbeat::{Beats, Fleet};
 
@@ -50,6 +50,7 @@ const HEADER: &str = "\
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Listed,
   Looked,
   Machine,
   MachineSessions,
@@ -93,7 +94,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
         ),
         (
             "workspaces",
-            "Looked<Workspace[]>",
+            "Looked<Listed[]>",
             read(&fleet, "/workspaces").await,
         ),
         (
@@ -186,10 +187,13 @@ async fn fleet() -> Fleet {
             ),
             machine("n-3", "pi", true, None),
         ])))),
-        workspaces: Some(Arc::new(Reading::new(Ok(vec![
-            workspace("api", "cachyos-g14", Some("claude")),
-            workspace("site", "bishwajeets-macbook-pro", None),
-        ])))),
+        workspaces: Some(Arc::new(Reading::new(Ok(Listing {
+            workspaces: vec![
+                workspace("api", "cachyos-g14", Some("claude")),
+                workspace("site", "bishwajeets-macbook-pro", None),
+            ],
+            unusable: vec![unusable()],
+        })))),
         sessions: Some(Arc::new(Reading::new(Ok(vec![
             MachineSessions {
                 machine: "cachyos-g14".into(),
@@ -208,32 +212,35 @@ async fn fleet() -> Fleet {
                 }),
             },
         ])))),
-        agents: Some(Arc::new(Reading::new(Ok(vec![
-            MachineStatus {
-                machine: "cachyos-g14".into(),
-                workspaces: verdicts()
-                    .into_iter()
-                    .map(|(name, _)| workspace(name, "cachyos-g14", None))
-                    .collect(),
-                reports: Ok(verdicts()
-                    .into_iter()
-                    .map(|(name, verdict)| Report {
-                        workspace: workspace(name, "cachyos-g14", None),
-                        pane: None,
-                        agent: matches!(verdict, Verdict::Running).then(running),
-                        verdict,
-                    })
-                    .collect()),
-            },
-            MachineStatus {
-                machine: "pi".into(),
-                workspaces: vec![workspace("unreachable", "pi", None)],
-                reports: Err(status::Error::Ssh(yantra_core::ssh::Error::Transport {
-                    host: "pi".into(),
-                    diagnosis: "connect to host pi port 22: Connection refused".into(),
-                })),
-            },
-        ])))),
+        agents: Some(Arc::new(Reading::new(Ok(status::Fleet {
+            unusable: vec![unusable()],
+            machines: vec![
+                MachineStatus {
+                    machine: "cachyos-g14".into(),
+                    workspaces: verdicts()
+                        .into_iter()
+                        .map(|(name, _)| workspace(name, "cachyos-g14", None))
+                        .collect(),
+                    reports: Ok(verdicts()
+                        .into_iter()
+                        .map(|(name, verdict)| Report {
+                            workspace: workspace(name, "cachyos-g14", None),
+                            pane: None,
+                            agent: matches!(verdict, Verdict::Running).then(running),
+                            verdict,
+                        })
+                        .collect()),
+                },
+                MachineStatus {
+                    machine: "pi".into(),
+                    workspaces: vec![workspace("unreachable", "pi", None)],
+                    reports: Err(status::Error::Ssh(yantra_core::ssh::Error::Transport {
+                        host: "pi".into(),
+                        diagnosis: "connect to host pi port 22: Connection refused".into(),
+                    })),
+                },
+            ],
+        })))),
     });
 
     let mut beats = fleet.beats.write().await;
@@ -276,6 +283,20 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
         last_seen: last_seen.map(str::to_owned),
         expired: false,
         addresses: Vec::new(),
+    }
+}
+
+/// A file the listing refused. It is in the fixture rather than only in a
+/// hand-written stub for this file's own reason: a state nothing generated is a
+/// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
+fn unusable() -> Unusable {
+    Unusable {
+        name: "typo".into(),
+        error: yantra_core::workspace::Error::Blank {
+            name: "typo".into(),
+            path: "/home/<user>/.config/yantra/workspaces/typo.toml".into(),
+            field: "machine",
+        },
     }
 }
 
