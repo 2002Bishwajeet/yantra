@@ -50,6 +50,13 @@ binary is found and the other is not, which is the bug I-34 exists to name.
 Quote it with `tmux::sq`, or send it as a value the shell never parses. A workspace's `repo` and
 `machine` come from a file on disk, so they are a code-execution boundary, not user convenience.
 
+**A file gets the same refusals a request gets.** `workspace::parse` asks `blank_field`, which is the
+one predicate `create` and `update` ask, so a workspace `create` would not write is one `load` will
+not read (Y-137, after Y-119 closed the writing half alone). Two consequences to know before changing
+it: a blank required field stops the whole of `list()` exactly as malformed TOML does, and `yantra
+edit` cannot repair such a file, because `update` loads before it writes — the file is the fix, as it
+is for a mistyped key.
+
 Two things a test cannot check by searching the output: correctly-escaped text still *contains* the
 payload, inside quotes. Assert the exact string, and prove the behaviour on a real `/bin/sh` in a
 container test. `tests/agent.rs` does both — copy that shape.
