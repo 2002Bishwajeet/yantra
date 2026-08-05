@@ -281,6 +281,7 @@ describe('the workspaces table', () => {
         ],
       },
       '/api/sessions': { looked: 'never' },
+      '/api/workspaces/yantra/status': 404,
     })
     render(<App />)
 
