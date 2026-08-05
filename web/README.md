@@ -250,6 +250,13 @@ reload.
   `ACT` cell is on screen without a swipe, so it is where the table is allowed
   back.
 
+**Every number above is the workspaces table's, and it is the only one that was
+ever put in front of a phone.** The machines, sessions and agents tables were
+given the blocks by the component rather than by a measurement, and none of them
+has been drawn at 390 px in a real browser (Y-138). The widest unbounded thing
+left on the page is the agents table's `DETAIL` cell, which renders free-form
+daemon prose in `whitespace-pre-wrap`.
+
 **jsdom implements no `matchMedia` at all** — not a stub returning false, nothing
 — so `dashboard.test.tsx` supplies a width to every test and its stub evaluates
 the query `DataTable` really asks. The breakpoint stays the component's to choose.
