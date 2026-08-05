@@ -116,6 +116,20 @@ report it as absent (I-30), and `yantra down` is what clears it. A machine that 
 `Option<Option<_>>` by hand — getting that wrong is how a `PATCH` blanks a field nobody named. A body
 naming no field is a `400`, exactly as `yantra edit` with no flags is a usage error.
 
+**`up`, `down` and `resume` name every variant they can refuse with, and none of them has a
+wildcard** (Y-135). Before this each mapped a workspace error and sent *everything else* to `500`, so
+a state the daemon had correctly identified reached the dashboard as *the verb ran and failed*: an
+agent holding at claude's trust dialog (I-49), and — far commoner — one that cannot read the macOS
+login keychain (I-44). The rule the mappers apply is the one `from_create` and `from_edit` already
+wrote down. **`409`** is a refusal about state: the world already answers and a person changes that
+answer, which covers the trust dialog, an agent that is not logged in, a session opened as a shell, a
+workspace that runs something of its own, and a `repo` the machine does not have. **`503`** is
+nothing decided at all — ssh, tmux, terminfo, a status that could not be read, and a `resume` whose
+two sources disagree (R-23). **`500`** is left for what is genuinely this daemon's: no state
+directory, and a session id it could not generate. **Adding a variant to `up::Error`,
+`down::Error`, `resume::Error`, `agent::Error` or `status::Error` will not compile until it is given
+one of the three**, which is the whole point of the shape.
+
 **A workspace written this way is not in the read model yet.** `refresh.rs` looks every 30 s, so
 `GET /api/workspaces` keeps answering without it for up to that long — measured at 15 s on the first
 try. The `201` and the `PATCH`'s `200` carry the whole workspace back for exactly this reason: a

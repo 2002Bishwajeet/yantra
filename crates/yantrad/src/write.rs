@@ -29,7 +29,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
-use yantra_core::{down, edit, resume, terminfo, tmux, up, workspace};
+use yantra_core::{agent, down, edit, resume, status, terminfo, tmux, up, workspace};
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -293,7 +293,7 @@ fn from_edit(error: &edit::Error) -> StatusCode {
         edit::Error::SessionOpen { .. } => StatusCode::CONFLICT,
         edit::Error::CannotTell { .. } => StatusCode::SERVICE_UNAVAILABLE,
         edit::Error::Workspace(workspace::Error::Empty { .. }) => StatusCode::BAD_REQUEST,
-        edit::Error::Workspace(error) => from_workspace(Some(error)),
+        edit::Error::Workspace(error) => from_workspace(error),
         edit::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -314,7 +314,7 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
     let report = up::up(&name, term(), agent)
         .await
         .map_err(|error| Refused::Verb {
-            status: from_workspace(up_workspace(&error)),
+            status: from_up(&error),
             said: chain(&error),
         })?;
 
@@ -341,10 +341,7 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     tracing::info!("down {name} for {}", caller.node);
 
     let report = down::down(&name).await.map_err(|error| Refused::Verb {
-        status: from_workspace(match &error {
-            down::Error::Workspace(workspace) => Some(workspace),
-            _ => None,
-        }),
+        status: from_down(&error),
         said: chain(&error),
     })?;
 
@@ -369,11 +366,7 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
     let report = resume::resume(&name, term())
         .await
         .map_err(|error| Refused::Verb {
-            status: from_workspace(match &error {
-                resume::Error::Workspace(workspace) => Some(workspace),
-                resume::Error::Up(up) => up_workspace(up),
-                _ => None,
-            }),
+            status: from_resume(&error),
             said: chain(&error),
         })?;
 
@@ -384,21 +377,91 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
-fn up_workspace(error: &up::Error) -> Option<&workspace::Error> {
+/// A workspace that is not there is the caller's mistake and the likeliest one
+/// by far, since a fresh install has none at all. Everything else is the
+/// daemon's to explain — and everything else here really is this daemon reading
+/// its own files, which is what the mappers below took an `Option` away to keep
+/// true (Y-135).
+fn from_workspace(error: &workspace::Error) -> StatusCode {
     match error {
-        up::Error::Workspace(workspace) => Some(workspace),
-        _ => None,
+        workspace::Error::NotFound { .. } => StatusCode::NOT_FOUND,
+        workspace::Error::InvalidName { .. } => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
-/// A workspace that is not there is the caller's mistake and the likeliest one
-/// by far, since a fresh install has none at all. Everything else is the
-/// daemon's to explain.
-fn from_workspace(error: Option<&workspace::Error>) -> StatusCode {
+/// `up`'s refusals, one variant at a time and **no wildcard**: a variant added
+/// later must be given a status here rather than defaulting into a 500 the
+/// operator cannot act on (Y-135).
+fn from_up(error: &up::Error) -> StatusCode {
     match error {
-        Some(workspace::Error::NotFound { .. }) => StatusCode::NOT_FOUND,
-        Some(workspace::Error::InvalidName { .. }) => StatusCode::BAD_REQUEST,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
+        up::Error::Workspace(workspace) => from_workspace(workspace),
+        up::Error::Ssh(_) | up::Error::Tmux(_) | up::Error::Terminfo(_) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        up::Error::Agent(agent) => from_agent(agent),
+        // `Exists` one verb along: the request is reasonable, the world already
+        // answers, and `yantra edit --no-startup` is what changes the answer.
+        up::Error::StartupConflict { .. } => StatusCode::CONFLICT,
+        // The machine answered, and what it said is that the directory is not
+        // there — which a `git clone` or an edit to `repo` changes.
+        up::Error::NoRepo { .. } => StatusCode::CONFLICT,
+        up::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// **`NotLoggedIn` is a 409**, and it is the commonest instance of what Y-135 is
+/// about: on macOS an agent launched over ssh cannot read the login keychain
+/// (I-44), so the machine answered clearly and the answer is *not yet*. A person
+/// logging in at that machine is what changes it. `Unreadable` is the opposite —
+/// the check could not know, so it may not claim (R-23).
+fn from_agent(error: &agent::Error) -> StatusCode {
+    match error {
+        agent::Error::NotFound { .. } | agent::Error::NotLoggedIn { .. } => StatusCode::CONFLICT,
+        agent::Error::Unreadable | agent::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+        agent::Error::Random(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn from_status(error: &status::Error) -> StatusCode {
+    match error {
+        status::Error::Workspace(workspace) => from_workspace(workspace),
+        status::Error::Ssh(_) | status::Error::Tmux(_) | status::Error::Interrupted { .. } => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        status::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn from_down(error: &down::Error) -> StatusCode {
+    match error {
+        down::Error::Workspace(workspace) => from_workspace(workspace),
+        down::Error::Ssh(_) | down::Error::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
+        down::Error::Status(status) => from_status(status),
+        down::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn from_resume(error: &resume::Error) -> StatusCode {
+    match error {
+        resume::Error::Workspace(workspace) => from_workspace(workspace),
+        resume::Error::Ssh(_) | resume::Error::Tmux(_) | resume::Error::Terminfo(_) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        resume::Error::Agent(agent) => from_agent(agent),
+        resume::Error::Status(status) => from_status(status),
+        resume::Error::Up(up) => from_up(up),
+        // Three states the world already answers and a person can change: I-49's
+        // agent holding at the trust dialog, which ADR-0011 leaves to whoever is
+        // at that machine; a session opened as a shell; a workspace that runs
+        // something of its own.
+        resume::Error::AwaitingTrust { .. }
+        | resume::Error::NoAgent { .. }
+        | resume::Error::Startup { .. } => StatusCode::CONFLICT,
+        // The two sources disagree, so nothing was decided about that pane and
+        // naming either the caller or this daemon would be a guess (R-23).
+        resume::Error::Unclear { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        resume::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -822,16 +885,24 @@ mod tests {
     #[test]
     fn a_workspace_that_is_not_there_is_the_callers_mistake() {
         assert_eq!(
-            from_workspace(Some(&workspace::Error::NotFound {
+            from_workspace(&workspace::Error::NotFound {
                 name: "personal-website".to_string(),
                 path: "/nowhere".into(),
-            })),
+            }),
             StatusCode::NOT_FOUND
         );
         assert_eq!(
-            from_workspace(None),
+            from_workspace(&workspace::Error::NoConfigDir),
             StatusCode::INTERNAL_SERVER_ERROR,
-            "an ssh failure is not the caller's mistake"
+            "a user with no config directory did not make a bad request"
+        );
+        assert_eq!(
+            from_up(&up::Error::Workspace(workspace::Error::NotFound {
+                name: "personal-website".to_string(),
+                path: "/nowhere".into(),
+            })),
+            StatusCode::NOT_FOUND,
+            "the verbs reach it through their own errors, which is all this takes now"
         );
     }
 
@@ -942,6 +1013,105 @@ mod tests {
             .expect("the body is in memory");
         let said = String::from_utf8_lossy(&body);
         assert!(said.contains("Connection refused"), "{said}");
+    }
+
+    /// What the browser receives, built the only way this crate can: `up`,
+    /// `down` and `resume` each load the operator's own config directory and
+    /// ssh to the machine it names, so no test here reaches a handler.
+    async fn answered(status: StatusCode, error: &dyn std::error::Error) -> (StatusCode, String) {
+        let response = Refused::Verb {
+            status,
+            said: chain(error),
+        }
+        .into_response();
+
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("the body is in memory");
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// **Y-135's own case.** I-49: an agent holding at the trust dialog is inert
+    /// rather than broken — nothing has failed, a human has not answered a dialog
+    /// on their own machine, and ADR-0011 says that human is the only one who
+    /// may. A 500 draws that as *the verb ran and failed*.
+    #[tokio::test]
+    async fn an_agent_holding_at_the_trust_prompt_is_a_conflict_and_not_a_failure() {
+        let waiting = resume::Error::AwaitingTrust {
+            workspace: "personal-website".to_string(),
+        };
+
+        let (status, said) = answered(from_resume(&waiting), &waiting).await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("personal-website"), "{said}");
+        assert!(said.contains("trust prompt"), "{said}");
+    }
+
+    /// The commoner instance of the same bug, and the whole of I-44 as it arrives
+    /// at the dashboard: the Mac answered, and what it said is *not logged in*.
+    /// `up` reaches it directly and `resume` through both of its own paths, which
+    /// must agree — one 500 among them is the bug back.
+    #[tokio::test]
+    async fn an_agent_that_is_not_logged_in_is_a_conflict_and_not_a_failure() {
+        let keychain = || agent::Error::NotLoggedIn {
+            method: "none".to_string(),
+        };
+
+        let (status, said) = answered(from_up(&up::Error::Agent(keychain())), &keychain()).await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("not logged in"), "{said}");
+        assert_eq!(
+            from_resume(&resume::Error::Agent(keychain())),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            from_resume(&resume::Error::Up(up::Error::Agent(keychain()))),
+            StatusCode::CONFLICT
+        );
+    }
+
+    /// Both directions, so this is not read as *stop answering 500*: a directory
+    /// this daemon could not work out is still its own fault, and a machine that
+    /// could not be asked is neither that nor the caller's.
+    #[test]
+    fn what_is_this_daemons_fault_still_says_so_and_what_is_unknown_still_does_not() {
+        assert_eq!(
+            from_up(&up::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_resume(&resume::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_down(&down::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_up(&up::Error::Agent(agent::Error::Random(
+                std::io::Error::other("no entropy")
+            ))),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        assert_eq!(
+            from_down(&down::Error::Ssh(yantra_core::ssh::Error::Transport {
+                host: "pi".to_string(),
+                diagnosis: "connect to host pi port 22: Connection refused".to_string(),
+            })),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            from_resume(&resume::Error::Unclear {
+                workspace: "personal-website".to_string(),
+                because: "the pane is alive but claude knows of no agent in that directory",
+            }),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a resume that could not tell what is in the pane decided nothing"
+        );
     }
 
     /// The move nothing is holding: `edit` reaches the machine only when

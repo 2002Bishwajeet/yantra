@@ -53,6 +53,15 @@ there is no override.
 PATCH /api/workspaces/site   {"repo": "/home/<user>/code/site", "startup": null}
 ```
 
+`up`, `down` and `resume` refuse in the same three shapes, and every error they can carry is named
+one at a time (Y-135). A **`409`** is a refusal about state — the world already answers and a person
+changes that answer: an agent holding at claude's trust dialog, one that is not logged in, a session
+opened as a shell with no conversation to continue, a workspace that runs something of its own, a
+`repo` the machine does not have. A **`503`** is nothing decided at all — ssh, tmux, terminfo, a
+status that could not be read. A **`500`** is left for what is this daemon's own fault. Before this
+every error but a workspace's fell through to `500`, and the dashboard reported a crash where a
+human had simply not yet answered a dialog on their own machine.
+
 `POST /heartbeat` answers **`204` with nothing in it** and
 always will — a reply the agent could act on would make the agent something other than a reporter
 ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md)). The body names

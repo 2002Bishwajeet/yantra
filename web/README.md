@@ -98,8 +98,18 @@ has no terminal to paste into.
   against a `startup` that really was running.
 - **Every status keeps its own sentence** — `404` no such workspace, `400` an
   unusable name, `403` a node that is not the owner's, `422` a field the daemon
-  does not know, `503` a `tailscale` that could not answer, `500` the verb
-  itself. The plain-text body is the whole `source()` chain and is shown whole.
+  does not know, `409` a refusal about state, `503` nothing asked and nothing
+  decided, `500` the verb itself. The plain-text body is the whole `source()`
+  chain and is shown whole.
+- **The `409` is drawn as a refusal rather than a crash** (Y-135), the same way
+  the edit form draws its own. It is an agent holding at claude's trust dialog
+  (I-49) or one that is not logged in (I-44) — a state the daemon named
+  correctly, which a person changes at the machine itself, so the daemon's own
+  sentence is what says how. **The `503` no longer claims to be about Tailscale**
+  either: since the verbs answer it for a machine that could not be asked, a
+  sentence naming only the tailnet would be wrong half the time. `NewWorkspace`
+  keeps the narrower wording on purpose — `POST /api/workspaces` touches no
+  machine, so `whois` is still the only thing that can leave it undecided.
 - **Nothing may read as done while it is in flight.** These handlers `await`
   ssh and `ConnectTimeout` is 10 s, so the tapped button names what it is doing,
   the row says which machine it is waiting on, and all three are disabled — a
