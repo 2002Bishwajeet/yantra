@@ -207,8 +207,10 @@ what compiles for Windows is `yantra-agent`, still a stub. Windows' actual probl
 than the project, because reaching a Linux machine *through* the Mac sidesteps it entirely — one
 `ProxyJump` line in `~/.ssh/config`, and no Yantra code at all. The Mac itself now has an accepted
 decision — [ADR-0018](adr/0018-the-tmux-server-carries-the-macos-login-session.md), which keeps ssh
-as the only transport and gives `yantra-agent` no new job — and nothing built on it yet: the risk
-retires when Y-151 ships the ADR's §1 and §5 and M7 installs its §7 launchd job.
+as the only transport and gives `yantra-agent` no new job — whose §1 and §5 are built and, since
+2026-08-05, measured on that machine (Y-151): inside a tmux server started at the Mac's own keyboard
+the gate finds a credential where ssh in the same run finds none. The risk retires when M7 installs
+the ADR's §7 launchd job, which is what puts such a server there with nobody at the keyboard.
 
 ---
 
