@@ -35,6 +35,25 @@ declined.
 **Test the refusal, not the bind.** A test asserting the daemon binds passes just as well when the
 fallback is `0.0.0.0`. That is R-22's stated retire condition and the shape to keep.
 
+## The refusal is the retry condition, and systemd is what waits
+
+[`yantrad.service`](yantrad.service) sits beside this file (Y-142). At a prompt `listen_on`'s refusal
+is a good error message; at boot it is a race, because `tailscaled` reports itself started when its
+socket is up rather than when the netmap has arrived. So the unit is `Restart=on-failure` with a
+`RestartSec` far enough apart that five refusals cannot reach systemd's ten-second start limit —
+which would leave a headless box `failed` permanently — and `After=tailscaled.service`, which orders
+the start and waits for no address. **Do not add an `ExecStartPre` that polls `tailscale status`**:
+that is a second retry mechanism in front of one that already exists.
+
+**It is a system unit, and `--user` with lingering lost on a measurement**: the user manager resolves
+`After=` among *user* units, where `tailscaled.service` is `not-found`, so the ordering this is
+written for would order against nothing. The price is paid in `ControlPath` — a system unit has no
+`XDG_RUNTIME_DIR`, so `machine_at` falls back to `data_dir()` and the path is 38 bytes rather than
+27, against I-28's 90.
+
+**What no restart covers is an address that changes while the daemon is healthy**, because nothing
+fails: I-58, recorded rather than fixed.
+
 ## The one write, and what it may not grow into
 
 `POST /heartbeat` ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md)

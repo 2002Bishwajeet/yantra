@@ -209,6 +209,15 @@ run containers is not blocked. CI sets `YANTRA_REQUIRE_PODMAN=1` (via
 `just test-ci`), which turns that skip into a failure — a silent skip there
 would mean the test had stopped checking anything.
 
+**There is a second container, and it runs a real `systemd`.**
+`crates/yantrad/tests/service_unit.rs` installs the appliance's units under
+systemd as PID 1 (Fedora, because Alpine ships none) and starts the real
+`yantrad` in a container that has no `tailscale` — so it refuses exactly as it
+would while `tailscaled` is still learning its address, and what the test watches
+is the supervisor retrying instead of giving up. It skips and labels itself the
+same way. What no container can show is the boot ordering against a real
+`tailscaled`.
+
 ## Cross-compiling for the appliance
 
 ```bash

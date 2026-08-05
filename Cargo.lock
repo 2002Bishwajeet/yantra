@@ -1373,6 +1373,7 @@ dependencies = [
 name = "yantrad"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "axum",
  "include_dir",
  "serde",

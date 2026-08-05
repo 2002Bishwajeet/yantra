@@ -1,0 +1,19 @@
+[Unit]
+Description=Yantra heartbeat agent
+Documentation=https://github.com/2002Bishwajeet/yantra
+After=tailscaled.service
+
+[Service]
+# ADR-0013 §4: `YANTRA_DAEMON=100.x.x.x:7717` is the whole configuration, kept
+# out of this file so installing a new unit cannot overwrite the address.
+EnvironmentFile=/etc/yantra/agent.env
+ExecStart=/usr/local/bin/yantra-agent
+User=yantra
+Restart=on-failure
+# Written for a start that keeps failing — an unreadable environment file, an
+# address that is not one. At the default 100 ms, five of those land inside
+# systemd's ten-second start limit and the agent stays `failed` for good.
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -60,8 +60,10 @@ stop.
 
 ## Its whole configuration
 
-`YANTRA_DAEMON=100.x.x.x:7717`, from the service unit — no flags, no config file, no state
-(ADR-0013 §4). **It is an address and the agent resolves no names**: a MagicDNS short name resolves
+`YANTRA_DAEMON=100.x.x.x:7717`, which [`yantra-agent.service`](yantra-agent.service) reads from
+`/etc/yantra/agent.env` — no flags, no config file, no state (ADR-0013 §4). It is outside the unit so
+that installing a newer unit cannot overwrite the address, and the unit does not prefix the
+`EnvironmentFile=` with `-`, so a machine nobody wrote that file on refuses and says which file. **It is an address and the agent resolves no names**: a MagicDNS short name resolves
 to `127.0.1.1` and the daemon does not listen there (I-50), so a name works for four of five agents
 and fails on the machine the developer is sitting at. A value that is not an address is refused at
 startup with that reason; a value that is an address but wrong fails per beat, once, and the agent
