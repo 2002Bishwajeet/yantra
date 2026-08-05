@@ -29,7 +29,7 @@ async function copyText(text: string, node: Node): Promise<boolean> {
 
 /** What is left where no write exists: `attach` puts a TUI in *this* terminal
  *  (ADR-0011), and a browser has none. Everything with a route behind it is a
- *  button now (Y-113). */
+ *  button — the workspace row's since Y-113, the agent row's since Y-136. */
 export function Command({ command }: { command: string }) {
   const text = useRef<HTMLElement>(null)
   const [outcome, setOutcome] = useState<keyof typeof labels>('ready')

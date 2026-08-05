@@ -74,11 +74,11 @@ The daemon names none of this: `reporting()` in `columns.tsx` owns the threshold
 owns the staleness one. Most of this tailnet is a phone, a tablet and two dead laptops, so *never
 heard from* is the permanent and correct state on most rows.
 
-## The buttons that act (Y-113)
+## The buttons that act (Y-113, Y-136)
 
-`Act.tsx` is one cell of every workspace row: **start, stop and resume**, posting
-to `/api/workspaces/{name}/{up,down,resume}`. It is what M5 exists for — a phone
-has no terminal to paste into.
+`Act.tsx` is one cell of every workspace row and one cell of every agent row:
+**start, stop and resume**, posting to `/api/workspaces/{name}/{up,down,resume}`.
+It is what M5 exists for — a phone has no terminal to paste into.
 
 - **There is no machine argument, and adding one would be a bug.** The target is
   `workspace.machine`, chosen when the workspace was written. A transient
@@ -118,12 +118,29 @@ has no terminal to paste into.
   ADR-0007 refuses an agent beside a workspace's own startup; the button says
   which it is. **Resume is not offered** to such a workspace at all, for
   ADR-0015's reason, which is the shape Y-097 already chose.
+- **The agents section gets the same component and one verb of it** (Y-136).
+  It reads `status.status.state`, so unlike the workspaces table it knows which
+  verb the row is for: `up` where no session is open, `resume` at each of the
+  four endings, and nothing at all where a `startup` makes ADR-0015 refuse. So
+  `Act` takes a `verb` prop that narrows it to that one, rather than being
+  forked or dropped in whole — a **Stop** beside an agent that has already
+  stopped is answerable, `down` on nothing saying exactly that, and still says
+  the page does not know what it is looking at. The workspaces table passes no
+  `verb` and keeps all three, because it reads no state and the daemon is the
+  only thing that can decide. That cell's header is `ACT`, not `COMMAND`.
+- **`USABLE_NAME` guards a paste and never a button.** The name in a command
+  someone types into a shell is checked against what `workspace::validate_name`
+  allows; the name in a button's URL is `encodeURIComponent`'d and refused by
+  the daemon's own `400`, which is the rule Y-130 already applied to the
+  terminal button.
 
-`Command` stays exactly where no write exists. The workspace row's `attach` paste
-became a button in [Y-130](../tracker.md) — see below — and the sessions and agents
-sections still hand over pastes, the first for a session Yantra did not open and so
-has no route for, the second because ADR-0011's trust prompt is answered by a person
-wherever they are.
+`Command` stays exactly where no write exists, and what is left there is `attach`
+in both places it appears. The workspace row's paste became a button in
+[Y-130](../tracker.md) — see below — and the agent row's `up` and `resume` became
+buttons in Y-136. The sessions section and the four agent states that answer
+`attach` keep theirs for one reason: `attach` execs `ssh -t` and hands *this*
+terminal over (ADR-0011), which is also who answers the trust prompt. A session
+Yantra did not open has no command at all, every verb taking a workspace name.
 
 ## The terminal (Y-130)
 
@@ -413,7 +430,8 @@ src/
     NewWorkspace.tsx the create form; owns the field class
     EditWorkspace.tsx the edit form — sends only the fields that differ, and
                      `startup: null` where one was emptied
-    Act.tsx          start / stop / resume, per workspace row; owns the button
+    Act.tsx          start / stop / resume per workspace row, and the one verb
+                     an agent row's state is for; owns the button class
     Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
                      drops. Key it on the name
     DataTable.tsx    a table, or a block per row on a phone; owns "we looked
