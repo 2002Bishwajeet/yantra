@@ -1,0 +1,19 @@
+# Disposable systemd container for the service-unit tests (Y-142).
+#
+# The sshd + tmux fixture next door (yantra-core/tests/fixture) exists because
+# mocks lie about SSH; this one exists for the same reason one layer out, since
+# a unit file is worth only what a real `systemd` says about it. What it cannot
+# hold is a real `tailscaled`, so `After=` is read from the unit and never
+# watched — that is the boundary Q19 asked about.
+#
+# Fedora rather than the Alpine next door, which ships no systemd at all. The
+# host's freshly built `yantrad` is copied in and run, so this base's glibc must
+# not be older than the machine the tests were built on.
+
+FROM registry.fedoraproject.org/fedora:44
+
+RUN dnf -y install systemd && dnf clean all
+
+# PID 1 here is systemd, which takes SIGRTMIN+3 as "power off" and ignores SIGTERM.
+STOPSIGNAL SIGRTMIN+3
+CMD ["/usr/lib/systemd/systemd"]

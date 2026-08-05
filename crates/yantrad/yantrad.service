@@ -1,0 +1,17 @@
+[Unit]
+Description=Yantra control-plane daemon
+Documentation=https://github.com/2002Bishwajeet/yantra
+After=tailscaled.service
+
+[Service]
+ExecStart=/usr/local/bin/yantrad
+User=yantra
+Restart=on-failure
+# Written for the boot race rather than for a crash: `yantrad` refuses to start
+# until Tailscale can name this machine's addresses, and `tailscaled` answers
+# before its netmap arrives. At the default 100 ms, five of those refusals land
+# inside systemd's ten-second start limit and the box stays `failed` for good.
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

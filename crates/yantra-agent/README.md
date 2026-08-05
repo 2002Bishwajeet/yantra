@@ -12,7 +12,8 @@ code. The request is eleven lines of HTTP/1.1 written by hand over a `std::net::
 crate, no async runtime, no TLS — WireGuard already encrypts the path. A failed POST drops that beat
 rather than queueing it, the interval never changes, and the agent does not exit.
 
-Its whole configuration is one environment variable, set by the service unit:
+Its whole configuration is one environment variable, which
+[`yantra-agent.service`](yantra-agent.service) reads from `/etc/yantra/agent.env`:
 
 ```
 YANTRA_DAEMON=100.x.x.x:7717
@@ -26,7 +27,9 @@ start, free RAM, free disk, CPU load and power state every beat. Every reader th
 reports the value that loses a placement rather than a guess, because the alternative is placing work
 on a machine that cannot take it.
 
-**It is not yet installable.** Nothing starts it at boot; that is M7's. Run it from a terminal.
+**On Linux it has a unit and nowhere it is installed from.** [`yantra-agent.service`](yantra-agent.service)
+starts it at boot (Y-142); the recipe that copies binary, unit and environment file onto a machine is
+Y-145's, and macOS still has neither. Until then, run it from a terminal.
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
 seven fields are and why; [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) measures how each
