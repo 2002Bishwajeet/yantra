@@ -1,8 +1,11 @@
 # ADR-0018 — On macOS the tmux server carries the login session, and Yantra gains no second transport
 
 - **Date:** 2026-08-03
-- **Status:** proposed — this one is the owner's to accept ([Y-122](../../tracker.md))
-- **Closes on acceptance:** Y-122, and **R-21** with it
+- **Status:** accepted 2026-08-05, by the owner ([Y-122](../../tracker.md)) — after §8's premise was
+  measured at the Mac's own keyboard and held
+- **Closed by acceptance:** Y-122, whose deliverable was this decision. **R-21 is not closed** — it
+  says macOS agents cannot authenticate, and that stays true until §1 and §5 ship (Y-151) and M7
+  installs §7's launchd job. Closing a risk because a decision exists is the confident lie R-23 names
 - **Rests on:** [research 10](../research/10-claude-code-credentials-on-macos.md), which settled that
   this is architecture and not a setting, and on **I-44** / **I-53** in
   [`crates/yantra-core/tracker.md`](../../crates/yantra-core/tracker.md)
