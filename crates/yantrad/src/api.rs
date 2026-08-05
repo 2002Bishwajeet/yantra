@@ -8,11 +8,11 @@
 //!
 //! **A failed look replaces the previous good one**, which is `refresh.rs`'s
 //! behaviour and is kept deliberately: every error a class can raise here is
-//! local and persistent — `tailscale` missing, a malformed workspace file, no
-//! config directory — so a retained stale reading would hide a fault the
-//! operator has to fix, and go on hiding it. The transient case that would
-//! justify staleness is a *machine* that did not answer, and Y-054 already
-//! keeps that inside a successful reading rather than losing it.
+//! local and persistent — `tailscale` missing, no config directory — so a
+//! retained stale reading would hide a fault the operator has to fix, and go on
+//! hiding it. The transient cases stay inside a successful reading rather than
+//! being lost: a *machine* that did not answer (Y-054), and a workspace *file*
+//! that did not load (Y-141).
 //!
 //! DTOs live here rather than as `Serialize` on `yantra_core`'s types: a JSON
 //! body is rendering, and ADR-0005 put rendering in the caller.

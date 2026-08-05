@@ -74,6 +74,27 @@ The daemon names none of this: `reporting()` in `columns.tsx` owns the threshold
 owns the staleness one. Most of this tailnet is a phone, a tablet and two dead laptops, so *never
 heard from* is the permanent and correct state on most rows.
 
+## A workspace file that did not load (Y-141)
+
+`GET /api/workspaces` lists one entry per **file**, and each says whether it
+loaded: `api.ts`'s `Listed` is `{loaded: 'yes'} & Workspace` or `{loaded: 'no',
+name, error}`. Before this one broken `.toml` made the whole class
+`looked: 'failed'` and this page drew nothing at all — for every workspace the
+operator has.
+
+**The failure is named below the table, never drawn as a row in it.** That is the
+row's real decision and it is about the columns: a file that did not load has no
+machine to show a `<Status>` for, nothing for `ACT` or `TERMINAL` to target, and
+`EDIT` cannot repair it — the daemon's `update` loads before it writes, so the
+file is the fix. A table of things you can act on must not carry a row you
+cannot, and R-23 is met by naming the file loudly with its whole reason, in the
+same `<Alert variant="destructive">` an unreachable machine gets in Sessions.
+
+`App.tsx`'s `loaded()` is the one narrowing: everything that acts on a workspace
+— the edit form, `workspaceColumns`, `attachable`, `sessionCommand` and
+`useAgents` — takes the entries that loaded, so **no per-workspace status is ever
+fetched for a file that is not one**.
+
 ## The buttons that act (Y-113, Y-136)
 
 `Act.tsx` is one cell of every workspace row and one cell of every agent row:
