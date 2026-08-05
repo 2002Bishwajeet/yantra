@@ -279,11 +279,16 @@ async fn resume(name: &str) -> ExitCode {
 /// I-44, in the one place someone meets it. Without this the message reads as
 /// nonsense on a Mac where `claude` works perfectly in a terminal — which is
 /// every Mac, because the keychain is reachable there and not over ssh.
+///
+/// It no longer suggests `ssh <machine> claude auth status`: since ADR-0018 §5
+/// that is the one process whose answer is known to be wrong, and sending
+/// someone to reproduce a false negative is worse than saying nothing.
 const KEYCHAIN_NOTE: &str = "\
-\x20 note: on macOS the agent's token lives in the login keychain, which a process
-        launched over ssh cannot read — so a machine that works when you sit at
-        it still answers `not logged in` here. check with:
-          ssh <machine> claude auth status";
+\x20 note: on macOS the agent's token lives in the login keychain, and only a
+        process the login session forked can read it. yantra asks inside that
+        machine's tmux server for that reason, so this answer means the server
+        itself was started without the keychain — over ssh, most likely. start
+        one from a login session on that machine and try again.";
 
 async fn show_logs(name: &str, lines: usize) -> ExitCode {
     match logs::logs(name, lines).await {
