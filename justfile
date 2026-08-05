@@ -31,6 +31,8 @@ test-ci:
 
 # The checks no container can make (I-34, ADR-0009). Needs the machine to be
 # reachable and named in ~/.ssh/config; CI cannot run these and does not try.
+# Y-139's transcript measurement also needs a tmux server started from a GUI
+# login on that machine (I-44) and refuses without one — see the test's header.
 test-mac machine:
     YANTRA_MAC={{machine}} cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture
 
