@@ -28,8 +28,8 @@ bind where:
 | `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain — and since Y-151 the reason the gate runs *inside* the tmux server there, ADR-0018 §5), I-49 (an agent at the trust prompt is inert), **I-53** (`auth status` reports the credential it found, never that it works), I-51 (tmux's own quotes around a start command) |
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
-| `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010 |
-| `up.rs` / `resume.rs` | I-1 through `tmux.rs`, and **I-44** — on macOS `up` refuses when no tmux server is running rather than starting one (ADR-0018 §1). The far side's OS is a *parameter* of the generic half, so the branch is drivable from a Linux container |
+| `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010, **I-57** (`InvalidName`'s path is built, not read) |
+| `up.rs` / `resume.rs` | I-1 through `tmux.rs`, and **I-44** — on macOS `up` refuses when no tmux server is running rather than starting one (ADR-0018 §1), and **I-56**, the window between that check and `tmux.ensure`. The far side's OS is a *parameter* of the generic half, so the branch is drivable from a Linux container |
 | `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
 | `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
