@@ -120,6 +120,23 @@ pub enum Error {
 
     #[error("a workspace's {field} cannot be empty")]
     Empty { field: &'static str },
+
+    /// [`Empty`](Error::Empty)'s counterpart on the reading side, and a separate
+    /// variant because the two are different faults: that one is a request this
+    /// refused to write, and this one is a file already on disk. So it names the
+    /// file — and says what refusing it costs, since one unusable file stops the
+    /// whole of [`list`] and an operator told only that `demo` is broken cannot
+    /// tell why everything else has gone with it (R-23).
+    #[error(
+        "workspace `{name}` at {} has an empty `{field}`, so nothing can open it — and no \
+         workspace can be listed until that line is filled in or the file is moved aside",
+        path.display()
+    )]
+    Blank {
+        name: String,
+        path: PathBuf,
+        field: &'static str,
+    },
 }
 
 /// `~/.config/yantra/workspaces`, or the platform equivalent.
@@ -197,19 +214,33 @@ fn create_in(
     load_from(dir, name)
 }
 
-fn non_empty(machine: &str, repo: &Path, startup: Option<&str>) -> Result<(), Error> {
+/// The one predicate both paths ask, so a file [`create`] would refuse to write
+/// is a file [`load`] refuses to read and neither can drift from the other. Y-119
+/// closed the writing half alone and Y-137 the reading half.
+///
+/// `repo` is compared empty rather than trimmed because it is a path and `"  "`
+/// is a legal name for one; `up` refuses a `repo` the machine does not have,
+/// on that machine, which is where a path stops being guesswork (Y-081).
+fn blank_field(machine: &str, repo: &Path, startup: Option<&str>) -> Option<&'static str> {
     if machine.trim().is_empty() {
-        return Err(Error::Empty { field: "machine" });
+        return Some("machine");
     }
     if repo.as_os_str().is_empty() {
-        return Err(Error::Empty { field: "repo" });
+        return Some("repo");
     }
     // Refused rather than read as `None`: absent already means "just a shell",
     // and coercing here would have two callers disagree about what they wrote.
     if startup.is_some_and(|startup| startup.trim().is_empty()) {
-        return Err(Error::Empty { field: "startup" });
+        return Some("startup");
     }
-    Ok(())
+    None
+}
+
+fn non_empty(machine: &str, repo: &Path, startup: Option<&str>) -> Result<(), Error> {
+    match blank_field(machine, repo, startup) {
+        Some(field) => Err(Error::Empty { field }),
+        None => Ok(()),
+    }
 }
 
 /// Rewrites an existing workspace, leaving every field the caller did not name.
@@ -290,9 +321,12 @@ pub fn load(name: &str) -> Result<Workspace, Error> {
 /// Every workspace, name-sorted. A missing directory is an empty list — nobody
 /// has made one yet, which is not an error.
 ///
-/// A malformed file stops the listing, deliberately: silently omitting a
-/// workspace would report "no sessions on that machine" for a machine that was
-/// never queried, and a wrong answer is worse than a refusal.
+/// A file that does not load stops the listing, deliberately: silently omitting
+/// a workspace would report "no sessions on that machine" for a machine that was
+/// never queried, and a wrong answer is worse than a refusal. That covers a
+/// [`Blank`](Error::Blank) required field as well as [`Malformed`](Error::Malformed)
+/// TOML — one rule for one class, since two rules would have the listing's
+/// contract depend on *which way* a file is unusable (Y-137, Y-141).
 pub fn list() -> Result<Vec<Workspace>, Error> {
     list_in(&workspaces_dir()?)
 }
@@ -380,6 +414,14 @@ fn parse(name: &str, path: &Path, text: &str) -> Result<Workspace, Error> {
         path: path.to_owned(),
         source: Box::new(source),
     })?;
+
+    if let Some(field) = blank_field(&on_disk.machine, &on_disk.repo, on_disk.startup.as_deref()) {
+        return Err(Error::Blank {
+            name: name.to_owned(),
+            path: path.to_owned(),
+            field,
+        });
+    }
 
     Ok(Workspace {
         name: name.to_owned(),
@@ -507,6 +549,121 @@ mod tests {
         assert!(
             matches!(load_from(&dir, "typo"), Err(Error::Malformed { .. })),
             "a mistyped key is an error, not a silently ignored line"
+        );
+        Ok(())
+    }
+
+    /// Y-119 closed `create` and left `load` open, so a hand-edited file walked
+    /// a blank command into `up` and a blank destination into ssh. Each field is
+    /// asserted through `load_from`, which is what every CLI verb and every
+    /// route reaches.
+    #[test]
+    fn a_blank_required_field_is_refused_at_load_and_the_refusal_says_where() -> std::io::Result<()>
+    {
+        let files = [
+            (
+                "nomachine.toml",
+                "machine = \"\"\nrepo = \"/srv/x\"\n",
+                "machine",
+            ),
+            ("norepo.toml", "machine = \"pi\"\nrepo = \"\"\n", "repo"),
+            (
+                "nostartup.toml",
+                "machine = \"pi\"\nrepo = \"/srv/x\"\nstartup = \"\"\n",
+                "startup",
+            ),
+        ];
+        let dir = dir_with("blank-on-disk", &files.map(|(file, body, _)| (file, body)))?;
+
+        for (file, _, field) in files {
+            let name = file.trim_end_matches(".toml");
+            let refused = load_from(&dir, name).expect_err("a blank field is not a value");
+            assert!(
+                matches!(&refused, Error::Blank { field: f, .. } if *f == field),
+                "{refused}",
+            );
+            // R-23: the file, the field and the workspace, or the operator has
+            // to go looking for a file they could have fixed in a second.
+            let said = refused.to_string();
+            for part in [name, field, &dir.join(file).display().to_string()] {
+                assert!(said.contains(part), "`{part}` is missing from: {said}");
+            }
+        }
+        Ok(())
+    }
+
+    /// The two paths ask one predicate, so what `create` refuses to write is
+    /// what `load` refuses to read — including `machine` and `startup` being
+    /// trimmed while `repo` is not, `"  "` being a legal name for a path.
+    #[test]
+    fn whitespace_is_blank_for_the_same_fields_on_disk_as_in_a_request() -> std::io::Result<()> {
+        let dir = dir_with(
+            "blank-whitespace",
+            &[
+                ("spaces.toml", "machine = \"   \"\nrepo = \"/srv/x\"\n"),
+                (
+                    "spacedstartup.toml",
+                    "machine = \"pi\"\nrepo = \"/srv/x\"\nstartup = \"  \"\n",
+                ),
+                ("spacedrepo.toml", "machine = \"pi\"\nrepo = \"   \"\n"),
+            ],
+        )?;
+
+        for (name, field) in [("spaces", "machine"), ("spacedstartup", "startup")] {
+            let refused = load_from(&dir, name).expect_err("whitespace is not a value");
+            assert!(
+                matches!(&refused, Error::Blank { field: f, .. } if *f == field),
+                "{refused}",
+            );
+        }
+        assert_eq!(
+            load_from(&dir, "spacedrepo")
+                .expect("a padded path is a path")
+                .repo,
+            PathBuf::from("   "),
+            "`repo` is the one `non_empty` does not trim, and the two halves must agree"
+        );
+        Ok(())
+    }
+
+    /// The state this row exists to keep distinguishable: absent is *just a
+    /// shell* (ADR-0007) and must go on loading, or refusing `Some("")` would
+    /// have cost the very thing it protects.
+    #[test]
+    fn an_absent_startup_still_loads_as_just_a_shell() -> std::io::Result<()> {
+        let dir = dir_with(
+            "still-a-shell",
+            &[("shell.toml", "machine = \"pi\"\nrepo = \"/srv/x\"\n")],
+        )?;
+
+        assert_eq!(
+            load_from(&dir, "shell")
+                .expect("a workspace with no startup")
+                .startup,
+            None,
+        );
+        assert_eq!(list_in(&dir).expect("and it lists").len(), 1);
+        Ok(())
+    }
+
+    /// The decision Y-137 made, pinned rather than left to reading: a blank
+    /// field is treated as a malformed file is, which is a whole listing that
+    /// refuses. Y-141 is where changing that for **both** would be argued.
+    #[test]
+    fn a_blank_field_stops_the_listing_exactly_as_malformed_toml_does() -> std::io::Result<()> {
+        let dir = dir_with(
+            "listing-blank",
+            &[
+                ("good.toml", "machine = \"a\"\nrepo = \"/tmp\"\n"),
+                ("blank.toml", "machine = \"\"\nrepo = \"/tmp\"\n"),
+            ],
+        )?;
+
+        let refused = list_in(&dir).expect_err("one unusable file stops the listing");
+        assert!(matches!(refused, Error::Blank { .. }), "{refused}");
+        assert!(
+            refused.to_string().contains("no workspace can be listed"),
+            "a refusal that takes the others with it has to say so: {refused}",
         );
         Ok(())
     }
