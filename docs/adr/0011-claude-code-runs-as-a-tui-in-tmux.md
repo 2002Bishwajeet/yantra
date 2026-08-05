@@ -23,6 +23,19 @@ five seconds. The macOS half of that claim is still untested — Q12, now blocke
 what stopped the re-run was authentication, not transcript writing: the file was created and grew to
 57,841 bytes while `session_attached` stayed 0 throughout.
 
+> **The untested half was measured on 2026-08-05 (Y-139), and both clauses above have stopped
+> holding: Q12 is answered and Y-059 closed long before it.** The run was on
+> `bishwajeets-macbook-pro` — the OS #63545 was filed against — inside a tmux server started at that
+> Mac's own keyboard, and **R-1 did not reproduce there either.** Across a 90-second window the
+> transcript's mtime advanced through three values and the turn count climbed 2 → 4 → 6, with
+> `session_attached` read as 0 before every reading, and the agent answered. So the argument this
+> paragraph makes is stronger than when it was written rather than weaker: the claim it had to make
+> on Linux evidence alone now has evidence on both operating systems this fleet runs.
+>
+> **What that is evidence of, exactly.** One 90-second run under an active conversation, on one
+> machine, on one version. The failure mode did not occur; that is not proof that an intermittent
+> one cannot.
+
 So the argument for headless has weakened, and the argument against it has not moved.
 
 **Headless costs the product its point.** Yantra exists so that a session started on one machine can
