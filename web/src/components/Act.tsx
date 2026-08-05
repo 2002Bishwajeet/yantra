@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Opened, Resumed, Stopped, Workspace } from '@/api'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
-type Verb = 'up' | 'down' | 'resume'
+export type Verb = 'up' | 'down' | 'resume'
 
 type Acted =
   | { acted: 'no' }
@@ -115,10 +115,21 @@ export const button =
 
 /** The three verbs as buttons, so a phone needs no terminal. They await ssh —
  *  ten seconds against a machine that is asleep — so every one of them is
- *  disabled while one is in flight rather than reading as already done. */
-export function Act({ workspace }: { workspace: Workspace }) {
+ *  disabled while one is in flight rather than reading as already done.
+ *
+ *  `verb` narrows it to one, for a caller that read the agent's state and knows
+ *  which verb that state is for (Y-136). Absent, all three are offered and the
+ *  daemon decides, which is what a caller with no state to read must do. */
+export function Act({
+  workspace,
+  verb,
+}: {
+  workspace: Workspace
+  verb?: Verb
+}) {
   const [outcome, setOutcome] = useState<Acted>({ acted: 'no' })
   const acting = outcome.acted === 'acting'
+  const offers = (one: Verb) => verb === undefined || verb === one
 
   const tap = async (verb: Verb) => {
     setOutcome({ acted: 'acting', verb })
@@ -128,31 +139,35 @@ export function Act({ workspace }: { workspace: Workspace }) {
   return (
     <div className="flex max-w-xs flex-col gap-2">
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={button}
-          disabled={acting}
-          onClick={() => void tap('up')}
-        >
-          {outcome.acted === 'acting' && outcome.verb === 'up'
-            ? 'starting…'
-            : workspace.startup === null
-              ? 'Start claude'
-              : 'Start'}
-        </button>
-        <button
-          type="button"
-          className={button}
-          disabled={acting}
-          onClick={() => void tap('down')}
-        >
-          {outcome.acted === 'acting' && outcome.verb === 'down'
-            ? 'stopping…'
-            : 'Stop'}
-        </button>
+        {offers('up') && (
+          <button
+            type="button"
+            className={button}
+            disabled={acting}
+            onClick={() => void tap('up')}
+          >
+            {outcome.acted === 'acting' && outcome.verb === 'up'
+              ? 'starting…'
+              : workspace.startup === null
+                ? 'Start claude'
+                : 'Start'}
+          </button>
+        )}
+        {offers('down') && (
+          <button
+            type="button"
+            className={button}
+            disabled={acting}
+            onClick={() => void tap('down')}
+          >
+            {outcome.acted === 'acting' && outcome.verb === 'down'
+              ? 'stopping…'
+              : 'Stop'}
+          </button>
+        )}
         {/* ADR-0015 refuses a workspace that starts something of its own, so
             the button is not offered where it could only ever be refused. */}
-        {workspace.startup === null && (
+        {offers('resume') && workspace.startup === null && (
           <button
             type="button"
             className={button}

@@ -18,6 +18,7 @@ import type {
   WorkspaceStatus,
 } from './api'
 import {
+  agentAct,
   type AgentRow,
   agentColumns,
   agentCommand,
@@ -617,6 +618,37 @@ describe('the agents section', () => {
     },
   }
 
+  function agents(rows: AgentRow[]) {
+    render(
+      <DataTable
+        columns={agentColumns}
+        rows={rows}
+        rowKey={(row) => row.workspace.name}
+        empty="no workspaces yet"
+      />,
+    )
+  }
+
+  function stubPost(status: number, body: unknown) {
+    const posted = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        posted(
+          path,
+          init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        )
+        return Promise.resolve({
+          ok: status < 400,
+          status,
+          json: () => Promise.resolve(body),
+          text: () => Promise.resolve(String(body)),
+        })
+      }),
+    )
+    return posted
+  }
+
   it('reads a shell session as ordinary and a contradiction as wrong', () => {
     const shell = agentState(reported({ state: 'no_agent' }).status)
     expect(shell.tone).not.toBe('bad')
@@ -676,19 +708,18 @@ describe('the agents section', () => {
     expect(screen.queryByText(/yantra (resume|attach|up)/)).toBeNull()
   })
 
-  it('offers resume where resume is what the state is for', () => {
+  it('picks the verb the state is for, and attach where there is no route', () => {
+    expect(agentAct(reported({ state: 'no_session' }))).toBe('up')
     for (const state of ['finished', 'stopped'] as const) {
-      expect(agentCommand(reported({ state }))).toBe('yantra resume yantra')
+      expect(agentAct(reported({ state }))).toBe('resume')
     }
-    expect(agentCommand(reported({ state: 'crashed', exit_status: 1 }))).toBe(
-      'yantra resume yantra',
+    expect(agentAct(reported({ state: 'crashed', exit_status: 1 }))).toBe(
+      'resume',
     )
-    expect(agentCommand(reported({ state: 'killed', signal: 'KILL' }))).toBe(
-      'yantra resume yantra',
+    expect(agentAct(reported({ state: 'killed', signal: 'KILL' }))).toBe(
+      'resume',
     )
-  })
 
-  it('offers attach where resume would refuse, and up where nothing is open', () => {
     for (const state of [
       'running',
       'awaiting_trust',
@@ -698,22 +729,131 @@ describe('the agents section', () => {
       const row = reported(
         state === 'unclear' ? { state, because: 'why' } : { state },
       )
+      expect(agentAct(row)).toBe('attach')
       expect(agentCommand(row)).toBe('yantra attach yantra')
     }
-    expect(agentCommand(reported({ state: 'no_session' }))).toBe(
-      'yantra up yantra',
-    )
+
+    // The two with a route behind them are no longer anything to paste.
+    expect(agentCommand(reported({ state: 'no_session' }))).toBeNull()
+    expect(agentCommand(reported({ state: 'finished' }))).toBeNull()
   })
 
   it('does not offer resume to a workspace resume refuses on sight', () => {
     const editor = { ...yantra, startup: 'nvim' }
     expect(
-      agentCommand(reported({ state: 'crashed', exit_status: 1 }, editor)),
+      agentAct(reported({ state: 'crashed', exit_status: 1 }, editor)),
     ).toBeNull()
-    expect(agentCommand(unreachable)).toBeNull()
+    expect(agentAct(unreachable)).toBeNull()
+  })
 
+  // Y-130's rule, now that this cell has both kinds: `USABLE_NAME` guards the
+  // string someone pastes into a shell, and never the name a button puts into
+  // a URL the browser encodes — that one is the daemon's own 400 to refuse.
+  it('withholds the paste from a name a shell would mangle, and not the button', () => {
     const hostile = { ...yantra, name: 'yantra; rm -rf ~' }
-    expect(agentCommand(reported({ state: 'finished' }, hostile))).toBeNull()
+    expect(agentCommand(reported({ state: 'running' }, hostile))).toBeNull()
+
+    const posted = stubPost(400, 'invalid workspace name')
+    agents([reported({ state: 'no_session' }, hostile)])
+    fireEvent.click(screen.getByRole('button', { name: 'Start claude' }))
+
+    expect(posted).toHaveBeenCalledWith(
+      '/api/workspaces/yantra%3B%20rm%20-rf%20~/up',
+      { agent: 'claude' },
+    )
+  })
+
+  // M5's own sentence, in the one section that still failed it: a phone has no
+  // terminal to paste `yantra up` into.
+  it('starts an agent from the page instead of handing over a command', async () => {
+    const posted = stubPost(200, {
+      machine: 'cachyos-g14',
+      session: 'created',
+      launched: true,
+      term: 'xterm-256color',
+    })
+    agents([reported({ state: 'no_session' })])
+
+    expect(screen.queryByText('yantra up yantra')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Start claude' }))
+
+    expect(await screen.findByText('Started on cachyos-g14.')).toBeTruthy()
+    // ADR-0007 names the agent only where the workspace starts nothing of its
+    // own, and the machine is never in the body — it is the workspace's (Y-117).
+    expect(posted).toHaveBeenCalledWith('/api/workspaces/yantra/up', {
+      agent: 'claude',
+    })
+  })
+
+  it('resumes each of the four endings, and posts resume rather than up', async () => {
+    const posted = stubPost(200, {
+      machine: 'cachyos-g14',
+      resumed: true,
+      term: 'xterm-256color',
+    })
+    agents([
+      reported({ state: 'finished' }),
+      reported({ state: 'stopped' }, { ...yantra, name: 'halted' }),
+      reported({ state: 'crashed', exit_status: 3 }, { ...yantra, name: 'dead' }),
+      reported({ state: 'killed', signal: 'term' }, { ...yantra, name: 'shot' }),
+    ])
+
+    const buttons = screen.getAllByRole('button', { name: 'Resume' })
+    expect(buttons.length).toBe(4)
+    expect(screen.queryByText(/yantra resume/)).toBeNull()
+
+    fireEvent.click(buttons[0])
+    expect(await screen.findByText(/Resumed on cachyos-g14/)).toBeTruthy()
+    expect(posted).toHaveBeenCalledWith(
+      '/api/workspaces/yantra/resume',
+      undefined,
+    )
+  })
+
+  // The decision this row settled, pinned rather than left to reading: the
+  // workspaces table offers all three verbs because it reads no state, and
+  // this one reads a state, so it offers the one verb that state is for.
+  it('offers one verb and never a stop beside an agent that has stopped', () => {
+    agents([
+      reported({ state: 'no_session' }),
+      reported({ state: 'finished' }, { ...yantra, name: 'ended' }),
+    ])
+
+    expect(screen.getByRole('button', { name: 'Start claude' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    // And neither verb is offered twice: no resume where nothing has run, no
+    // start where a session is waiting to be continued.
+    expect(screen.getAllByRole('button', { name: /^(Start|Resume)/ }).length).toBe(2)
+  })
+
+  it('leaves attach a command, there being no route to hand a terminal over', () => {
+    agents([
+      reported({ state: 'running' }),
+      reported({ state: 'awaiting_trust' }, { ...yantra, name: 'trusting' }),
+      reported({ state: 'no_agent' }, { ...yantra, name: 'shell' }),
+      reported({ state: 'unclear', because: 'why' }, { ...yantra, name: 'ghost' }),
+    ])
+
+    expect(screen.getAllByText(/^yantra attach /).length).toBe(4)
+    expect(
+      screen.queryByRole('button', { name: /^(Start|Stop|Resume)/ }),
+    ).toBeNull()
+  })
+
+  // Y-135 is what makes this button worth having here: the state it refuses
+  // over is one this very table renders by name, and it is not a crash.
+  it('draws a refusal about state as a refusal, not as a verb that failed', async () => {
+    const said =
+      'claude on cachyos-g14 is not logged in: run `claude` there and sign in'
+    stubPost(409, said)
+    agents([reported({ state: 'finished' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+
+    expect(await screen.findByText(/Nothing broke and nothing ran/)).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/The verb ran and failed/)).toBeNull()
   })
 
   it('says the trust prompt twice and hands over a command, never a dialog', async () => {
