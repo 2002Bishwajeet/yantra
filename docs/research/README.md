@@ -25,6 +25,7 @@ is a broken build rather than a reader's problem.
 | R8 | React + React Compiler + Vite — what "latest" means today | [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md), Y-072 | [08-react-and-the-compiler.md](08-react-and-the-compiler.md) |
 | R9 | Component libraries, judged on whether the look is swappable | [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md), Y-072 | [09-component-libraries.md](09-component-libraries.md) |
 | R10 | Claude Code credentials on macOS — is the store a setting? | I-44, Y-122 | [10-claude-code-credentials-on-macos.md](10-claude-code-credentials-on-macos.md) |
+| R11 | The appliance's hardware — microcontroller, PCB, or only a printer? | Q15, M8, M9 | [11-appliance-hardware.md](11-appliance-hardware.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that
