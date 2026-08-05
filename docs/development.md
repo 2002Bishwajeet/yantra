@@ -97,9 +97,26 @@ YANTRA_WEB=$PWD/web/dist cargo run --bin yantrad
 says so on `/`; point it somewhere with no `index.html` and it refuses to start rather than answering
 404 to every request, which reads as a broken dashboard instead of a wrong path.
 
-Assets are not embedded in the binary. That is R-24: embedding makes every `fmt`, `clippy`, `test`
-and cross-build job depend on npm, and the only thing that wants one file to copy is the M7
-appliance.
+**The default build embeds nothing**, and that is R-24: a build that wants `web/dist`
+unconditionally makes every `fmt`, `clippy`, `test` and cross-build job depend on npm.
+
+The M7 appliance is the one thing that wants a single file to copy, and it gets it from a cargo
+feature that is **absent from `default`** (Y-140):
+
+```bash
+just appliance-embedded    # npm build, then yantrad --features embed-dashboard for the Pi 5
+just test-embedded         # the feature's own tests; `just test` cannot reach them
+```
+
+Both need npm and neither is reachable from `just check` or `just ci`, the same rule the
+`landing-*` recipes follow. **`just no-node` is what holds the line** — it is part of `check`, it
+greps every recipe the Rust gate runs and `ci.yml` itself for the feature, for `--all-features` and
+for npm, and it fails if the default dependency graph ever carries `include_dir`. A green build says
+nothing about *which* jobs needed npm to get there, which is why the assertion is a negative one.
+
+**`YANTRA_WEB` still wins over the embedded copy, and a wrong one still refuses.** A binary that
+carries a dashboard does not quietly serve it over a directory you named and mistyped — the variable
+is the half a person can get wrong, so it keeps the refusal.
 
 ## The dashboard over HTTPS
 

@@ -42,12 +42,17 @@ tracker's Decisions or Open questions section and flag it.
 ## Before you push
 
 ```sh
-just check      # fmt --check + clippy -D warnings + nextest. The gate.
-just deny       # licence and advisory audit, when dependencies changed
+just check      # fmt --check + clippy -D warnings + nextest + deny + no-node. The gate.
+just deny       # licence and advisory audit on its own, when dependencies changed
 ```
 
 `just check` must pass. `-D warnings` is where the workspace clippy lints
 (`unwrap_used` / `expect_used` / `panic` = warn, `unsafe_code` = forbid) actually bite.
+
+**`no-node` is a negative assertion and it will fail on a change that looks harmless.** Nothing the
+Rust gate runs may pass `--all-features` or enable `yantrad`'s `embed-dashboard`, because that
+feature compiles the built dashboard in and so needs npm — R-24. Building the dashboard belongs in
+`just appliance-embedded` and in `.github/workflows/embed.yml`, never in `ci.yml`.
 
 ## Verification means reality
 

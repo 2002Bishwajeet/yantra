@@ -92,6 +92,18 @@ Run it with `yantrad`. It listens on **port 7717**, on the addresses Tailscale s
 holds, and refuses to start if it cannot learn them. There is no flag to change either — with no
 authentication (Q6, personal-first), where it listens is the whole security model.
 
+`YANTRA_WEB` points it at a directory of built assets. Unset it and the API serves alone and `/`
+says how; point it at a directory with no `index.html` and it refuses to start rather than answering
+404 to everything, which reads as a broken dashboard instead of a typo in one variable.
+
+For the M7 appliance there is a second way, and it is a cargo feature that is **off by default**:
+`just appliance-embedded` builds `yantrad --features embed-dashboard`, which compiles `web/dist`
+into the binary so a Pi 5 gets one file to copy instead of a binary, a directory and a variable. The
+default build is byte-for-byte unaffected and still needs no Node — R-24, and `just no-node` is the
+check that keeps it true. **A directory that was named still wins, and a wrong one is still a
+refusal**: the copy inside the binary cannot be mistyped and the variable can, so the fallible half
+keeps the refusal rather than being quietly papered over by a stale dashboard.
+
 It speaks **plain HTTP and always will**. TLS belongs to `tailscale serve`, which already holds and
 renews a certificate for the machine's `*.ts.net` name — `just https` puts the dashboard on
 `https://<machine>.<tailnet>.ts.net:8443/`, which is what a phone needs and what the PWA's secure

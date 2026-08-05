@@ -96,6 +96,21 @@ jobs:
           tool: just,cargo-deny
       - run: just deny
 
+  no-node:
+    # R-24's assertion, and it is the negative one the other jobs cannot make:
+    # that this file is green proves the default build works, never that no job
+    # here turned the embed feature on to get there. See the recipe.
+    name: no-node
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: just
+      - run: just no-node
+
   cross:
     # The Pi 5 appliance target. ADR-0004 chose Rust partly because this build
     # is a one-liner, so it is a first-class gate rather than a release detail.

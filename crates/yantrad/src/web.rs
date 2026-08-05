@@ -1,17 +1,29 @@
 //! Serving the dashboard itself, so looking at it does not require a laptop
 //! running a development server (Y-073).
 //!
-//! Assets are served from a directory rather than embedded in the binary. R-24
-//! is why: embedding makes every `fmt`, `clippy`, `test` and musl cross-build
-//! job depend on npm, and the only thing that needs one file to copy is the M7
-//! appliance, which does not exist. The feature flag that row describes arrives
-//! with the appliance that wants it.
+//! **`YANTRA_WEB` names a directory, and that is still the default build's only
+//! way to serve anything.** R-24 is why: a build that wants `web/dist`
+//! unconditionally makes every `fmt`, `clippy`, `test` and musl cross-build job
+//! depend on npm.
+//!
+//! Y-140 added the other half for M7, which wants one file to copy onto a
+//! Pi 5: the `embed-dashboard` feature compiles `web/dist` into the binary.
+//! It is **absent from `default`** and reachable only through the `embedded`
+//! module below, which does not exist without it — so nothing in `just check`
+//! or `just ci` needs npm, and `just no-node` is the check that keeps it so.
+//!
+//! **A set `YANTRA_WEB` wins over the embedded copy and a wrong one still
+//! refuses**; see `main.rs`'s `dashboard` for why that direction and not the
+//! other.
 
 use std::path::{Path, PathBuf};
 
 use axum::Router;
 use axum::http::StatusCode;
 use tower_http::services::{ServeDir, ServeFile};
+
+#[cfg(feature = "embed-dashboard")]
+mod embedded;
 
 /// The built dashboard's directory — `web/dist` after `npm run build`.
 const DIR: &str = "YANTRA_WEB";
@@ -46,6 +58,18 @@ pub fn router(dir: &Path) -> Result<Router, NoIndex> {
     // The fallback is what makes a deep link work: the browser asks for
     // `/workspaces/yantra`, no such file exists, and the app routes it itself.
     Ok(Router::new().fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index))))
+}
+
+/// The dashboard this binary carries, which is `None` for every build that
+/// leaves `embed-dashboard` off — meaning every build the Rust gate makes.
+#[cfg(feature = "embed-dashboard")]
+pub fn embedded() -> Option<Router> {
+    Some(embedded::router())
+}
+
+#[cfg(not(feature = "embed-dashboard"))]
+pub fn embedded() -> Option<Router> {
+    None
 }
 
 /// What answers when no dashboard is configured. A bare 404 would be read as
