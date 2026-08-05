@@ -36,6 +36,10 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Reached only under yantrad's `embed-dashboard` feature. A proc macro rather
+# than a build script, so nothing about it runs on a build that leaves the
+# feature off — which is R-24's first clause, avoided by construction.
+include_dir = "0.7"
 portable-pty = "0.9"
 
 [workspace.lints.rust]

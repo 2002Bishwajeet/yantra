@@ -1,4 +1,13 @@
 # cargo-deny: licence and advisory policy.
+
+# An optional dependency is still one this repo ships, and `yantrad`'s
+# `embed-dashboard` is off by default, so a resolve without it would audit
+# nothing that feature adds. Here rather than as `--all-features` on the recipe:
+# that flag must never appear in a `just` recipe (Y-140, R-24), and this is a
+# metadata resolve rather than a build, so it costs no npm.
+[graph]
+all-features = true
+
 [advisories]
 yanked = "deny"
 

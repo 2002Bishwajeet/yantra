@@ -60,26 +60,45 @@ R-22 is unchanged as a boundary and larger as a blast radius — anything that r
 now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
 is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.
 
-## It serves the dashboard, from a directory
+## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,
 so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
 `index.html` rather than a 404, which is what makes a deep link work.
 
-**Assets are a directory, not an embed.** R-24 is the reason: embedding makes every `fmt`, `clippy`,
-`test` and musl cross-build job depend on npm, and the only thing that needs one file to copy is the
-M7 appliance. Y-073's row describes a cargo feature for that; it arrives with the appliance that
-wants it, not before.
+**The default build embeds nothing, and R-24 is why**: a build that wants `web/dist` unconditionally
+makes every `fmt`, `clippy`, `test` and musl cross-build job depend on npm. Y-140 added the other
+half for the appliance that wanted one file to copy, and every part of its shape exists to keep that
+sentence true. The `embed-dashboard` feature is **absent from `default`**, `include_dir` is an
+**optional** dependency, and [`web/embedded.rs`](src/web/embedded.rs) is behind a `#[cfg]` — so a
+default build neither reads `web/dist` nor compiles the macro that would.
+
+**Nothing in `just check` or `just ci` may turn it on, and `--all-features` is the specific thing
+that must never appear.** `just lint` and `just test` do not pass it today, and one added later for
+tidiness would put npm on clippy, on the test job and on the cross-build at once, silently.
+**`just no-node` is that omission made into a red build**: it is part of `check`, it greps every
+recipe the Rust gate would run and `ci.yml` itself, and it fails if `include_dir` ever reaches the
+default dependency graph. The one job that *does* build with the feature is
+[`.github/workflows/embed.yml`](../../.github/workflows/embed.yml) — a workflow of its own, because
+`ci.yml` has no path filter and a Node step there runs on every Rust pull request.
+
+**`YANTRA_WEB` wins over the embedded copy, and a set-but-wrong one still refuses.** That is Y-140's
+one real decision and it is about which of the two may be silently wrong: the embedded dashboard is
+fixed at build time and has nothing to mistype, while the variable is typed by a person at deploy
+time. Falling back would leave someone editing the directory they pointed at while a stale copy
+ignored them — R-23's confident lie, which is what the refusal exists to prevent.
 
 Two failure shapes, deliberately different. **Unset** is a normal deployment — the API serves alone
-and `/` says so *and says how*. **Set but wrong** refuses at startup, because a `ServeDir` over a
-missing directory answers 404 to everything, and that reads as a broken dashboard rather than a typo
-in one environment variable.
+and `/` says so *and says how*, or serves the embedded copy when the binary was built with one.
+**Set but wrong** refuses at startup, because a `ServeDir` over a missing directory answers 404 to
+everything, and that reads as a broken dashboard rather than a typo in one environment variable.
 
 One thing the tests record because it is not obvious: a path that climbs out of the root answers
 **200 with the app**, not 403 or 404. `ServeDir` refuses the climb and the SPA fallback then treats
 the path as one the app routes, so a traversal attempt and a deep link are indistinguishable by
-status. Assert on the body.
+status. Assert on the body. **The embedded half answers it identically**, and its tests say so —
+there the climb needs no guard at all, because a lookup in a table the compiler built has no
+directory to walk.
 
 ## The routes that act
 
