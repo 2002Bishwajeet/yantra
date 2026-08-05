@@ -226,9 +226,15 @@ file target/aarch64-unknown-linux-musl/release/yantrad
 # ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
 ```
 
-~330 KB per binary, statically linked, no runtime on the target. If this stops
-working, say so loudly — [ADR-0004](adr/0004-rust-for-the-daemon.md) chose Rust
-partly on the strength of it.
+Statically linked, no runtime on the target. `just appliance-size` reports what
+each one costs; measured on 2026-08-05 that is **3.5 MB** for `yantrad`, 1.2 MB
+for `yantra` and 432 KB for `yantra-agent`, or **4.1 MB** for the `yantrad` that
+carries the dashboard — the one file the appliance copies. The daemon's number
+moved by 1.1 MB in Y-146, which is what an HTTPS client with a bundled root store
+costs; it is still inside ADR-0004's ~5 MB. If any of this stops working, say so
+loudly — [ADR-0004](adr/0004-rust-for-the-daemon.md) chose Rust partly on the
+strength of it, and **the startup numbers it also promised are still unmeasured**
+(Y-149).
 
 ## Gotchas that will cost you an afternoon
 

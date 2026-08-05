@@ -33,6 +33,7 @@ bind where:
 | `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
 | `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
+| `notify.rs` | **I-49** through `status.rs` — the trust dialog is the notification that matters — and I-47's lesson one layer up: a machine that could not be asked keeps what it had, because unknown is not changed. **I-59** is the hole this leaves ([`yantrad/tracker.md`](../yantrad/tracker.md)) |
 
 ## What `yantra-agent` may call
 
@@ -45,6 +46,14 @@ That agent must stay tiny (R-12). The *dependency edge* is nearly free — 11 KB
 `CANDIDATES` is shared rather than copied because the agent's label probe hits I-34's wall for
 `docker` and `tmux` exactly as `claude` does. Two lists that drifted would produce a fleet where one
 binary is found and the other is not, which is the bug I-34 exists to name.
+
+**`ureq` is in this crate and `notify.rs` is the only thing that reaches it** (Y-146), which is the
+sharpest measurement of that rule so far. Adding the dependency and calling nothing changed all three
+aarch64-musl binaries by **exactly zero bytes**; calling it from the daemon cost `yantrad`
+**+1,137,016 bytes (+48.6 %)** while `yantra` and `yantra-agent`, which do not, paid 1,632 and 600.
+The cost is TLS: `rustls`, `ring` and a bundled Mozilla root store, which a static musl binary has to
+carry because the appliance image is not promised a system trust store. Anything here that grows a
+`use ureq` outside `notify.rs` is spending that budget again somewhere it was not weighed.
 
 ## Anything that reaches a remote shell
 

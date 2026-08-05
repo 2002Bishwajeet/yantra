@@ -79,6 +79,38 @@ R-22 is unchanged as a boundary and larger as a blast radius — anything that r
 now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
 is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.
 
+## The one thing it sends, and the two rules that keep it useful
+
+`notify.rs` runs off the **agents** loop in `refresh.rs` and adds no poll, no ssh and no timer: two
+consecutive readings are its whole input, and [`yantra_core::notify`](../yantra-core/src/notify.rs)
+holds what a difference between them means. `Verdict` is the vocabulary — `AwaitingTrust` above all
+(I-49), then a `Running` that stopped being one — and **never a telemetry threshold**, which
+ADR-0013's non-goals rule out against this milestone by name.
+
+Four rules bind anything that touches it:
+
+- **The first look after a start says nothing.** Nothing is persisted, so a fresh daemon has no
+  previous state — and a `None` read as *everything just changed* mails a report about every session
+  on the fleet at every reboot. **A restart is therefore a hole**, recorded as I-58's neighbour in
+  [`tracker.md`](tracker.md) rather than fixed.
+- **A failed send drops that notification.** No queue, no retry, no replay. A queue is state on a box
+  whose whole point is that it holds none, and `yantra-agent`'s `Log` is the precedent for the
+  logging too: the first failure out loud, the rest swallowed until one lands.
+- **A look that failed tells nobody anything.** An unknown fleet is not a changed one, and the same
+  rule one level down is why a machine that could not be asked *keeps* the verdicts it had rather
+  than reading as gone — otherwise a laptop that sleeps announces itself every night and then hides
+  the crash it wakes up with.
+- **The reading is in the model before anything is sent**, and the whole pass has a budget well under
+  the refresh interval. A notifier that makes a browser wait on a relay is worse than one that drops.
+
+**The body names the workspace and the verdict and nothing else** (Q16, still open): `Notification`
+has no field for a machine or a repo, so widening what a public relay is told is an edit here. The
+destination is a `Relay`, whose `Debug` is hand-written because both halves of it are secrets — the
+token by §B4 and Q5, and the topic because on ntfy.sh the topic *is* the password. No error below it
+carries either, which is why a failure that could quote the URL back is reported by kind instead.
+
+**Where the relay comes from is Y-147's**, not this crate's: `main.rs` starts no notifier today.
+
 ## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,

@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # feature off — which is R-24's first clause, avoided by construction.
 include_dir = "0.7"
 portable-pty = "0.9"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

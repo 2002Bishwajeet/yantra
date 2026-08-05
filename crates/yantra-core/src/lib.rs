@@ -17,6 +17,7 @@ pub mod edit;
 pub mod heartbeat;
 pub mod inventory;
 pub mod logs;
+pub mod notify;
 pub mod pty;
 pub mod resume;
 pub mod sessions;
