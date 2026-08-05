@@ -1159,15 +1159,28 @@ describe('acting on a workspace', () => {
     render(<App />)
     await tap('Start claude')
 
-    expect(
-      await screen.findByText(/could not ask Tailscale who is calling/),
-    ).toBeTruthy()
+    expect(await screen.findByText(/Nothing could be asked/)).toBeTruthy()
     expect(screen.getByText(said)).toBeTruthy()
     expect(
       screen.queryByText(
         /knows no workspace|not one the daemon accepts|not on a node/,
       ),
     ).toBeNull()
+  })
+
+  // Y-135 and I-49: a human has not answered a dialog on their own machine,
+  // which ADR-0011 leaves to them. Nothing failed, so nothing may say it did.
+  it('draws an agent holding at the trust prompt as a refusal, not a crash', async () => {
+    const said =
+      "`personal-website` is holding at claude's trust prompt, so it has no conversation to continue"
+    stubAct({ status: 409, body: said })
+    render(<App />)
+    await tap('Resume')
+
+    expect(await screen.findByText(/Nothing broke and nothing ran/)).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/The verb ran and failed/)).toBeNull()
   })
 
   it('keeps a missing workspace apart from a verb that ran and failed', async () => {

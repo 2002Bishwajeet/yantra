@@ -18,9 +18,14 @@ const refusals: Record<number, string> = {
   400: 'That workspace name is not one the daemon accepts.',
   403: "This browser is not on a node this tailnet's owner holds.",
   404: 'The daemon knows no workspace by that name.',
+  // Y-135: a state the daemon named correctly — an agent holding at the trust
+  // dialog (I-49), one that is not logged in (I-44) — is not a crash.
+  409: 'Nothing broke and nothing ran: the machine already answers this, and the sentence below says what has to change first.',
   422: 'The dashboard sent a field the daemon does not know.',
   500: 'The verb ran and failed. What it says below is the whole chain.',
-  503: 'The daemon could not ask Tailscale who is calling, so nothing about you was decided.',
+  // Both halves, since Y-135: the tailnet could not say who is calling, or the
+  // workspace's own machine could not be asked.
+  503: 'Nothing could be asked, so nothing about you or that machine was decided and nothing ran.',
 }
 
 function refusal(status: number | null): string {
@@ -174,7 +179,9 @@ export function Act({ workspace }: { workspace: Workspace }) {
       )}
 
       {outcome.acted === 'refused' && (
-        <Alert variant="destructive">
+        // A refusal the daemon reasoned about is not a crash, and the `409` is
+        // the one that reads as one if it is painted like a failure.
+        <Alert variant={outcome.status === 409 ? 'default' : 'destructive'}>
           <AlertTitle className="text-xs">
             {refusal(outcome.status)}
           </AlertTitle>
