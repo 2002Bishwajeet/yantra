@@ -130,6 +130,7 @@ yantra down yantra               # stop it, giving the agent a chance to shut do
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine
+yantra notify 'needs you'        # publish a message to the relay you configured
 yantra fix-terminfo <machine>    # teach a machine about your terminal
 ```
 

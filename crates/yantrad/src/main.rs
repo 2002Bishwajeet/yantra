@@ -19,6 +19,7 @@ use std::process::ExitCode;
 use axum::Router;
 use axum::routing::get;
 use yantra_core::inventory::{Inventory, Tailscale};
+use yantra_core::notify::RELAY_URL;
 
 mod api;
 // Y-124: it only compares the routes against the dashboard's committed fixture.
@@ -127,9 +128,15 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     // that could drift.
     let authoriser = write::Authoriser::new(inventory.clone(), &addresses);
     let fleet = heartbeat::Fleet::default();
-    // Y-147 is what fills this in, from the unit's environment; until it does
-    // there is nowhere to send to and the notifier is not started at all.
-    refresh::spawn(&fleet.model, inventory.clone(), None);
+    let relay = yantra_core::notify::from_env();
+
+    // The unit's environment is not the shell's, so a headless box needs the
+    // journal to say which of the two it got.
+    match &relay {
+        Some(_) => tracing::info!("notifying the relay {} names", RELAY_URL),
+        None => tracing::info!("no {}, so nothing is notified", RELAY_URL),
+    }
+    refresh::spawn(&fleet.model, inventory.clone(), relay);
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .nest(

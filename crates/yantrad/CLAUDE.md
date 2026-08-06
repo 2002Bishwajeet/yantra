@@ -103,13 +103,24 @@ Four rules bind anything that touches it:
 - **The reading is in the model before anything is sent**, and the whole pass has a budget well under
   the refresh interval. A notifier that makes a browser wait on a relay is worse than one that drops.
 
-**The body names the workspace and the verdict and nothing else** (Q16, still open): `Notification`
+**The body names the workspace and the verdict and nothing else**: `Notification`
 has no field for a machine or a repo, so widening what a public relay is told is an edit here. The
 destination is a `Relay`, whose `Debug` is hand-written because both halves of it are secrets — the
 token by §B4 and Q5, and the topic because on ntfy.sh the topic *is* the password. No error below it
 carries either, which is why a failure that could quote the URL back is reported by kind instead.
 
-**Where the relay comes from is Y-147's**, not this crate's: `main.rs` starts no notifier today.
+**Q16 was answered wider than it was asked** (Y-147): the relay is a general publish channel and this
+notifier is only its first caller, so a body is whatever the caller passed and Yantra composes
+nothing into it. What binds this crate is unchanged — the fleet notification is still a workspace and
+a verdict — and what changed is that this is now one caller's choice rather than the channel's limit.
+
+**The relay comes from the environment**: `YANTRA_NTFY_URL` and `YANTRA_NTFY_TOKEN`, read once in
+`main.rs` and handed to `refresh::spawn`. An absent URL is a daemon with no relay and is **not** a
+refusal to start — it is every deployment but the appliance, and it is the one this crate's tests
+run. The token is never a workspace field, never written to disk, never logged and never served,
+which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that leaves the tailnet.
+The startup line saying which of the two it got is there because a unit's environment is not the
+shell's, and a headless box has only the journal to say so.
 
 ## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 

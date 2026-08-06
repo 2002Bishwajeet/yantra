@@ -118,6 +118,36 @@ nothing about *which* jobs needed npm to get there, which is why the assertion i
 carries a dashboard does not quietly serve it over a directory you named and mistyped — the variable
 is the half a person can get wrong, so it keeps the refusal.
 
+## Notifications
+
+Two environment variables, read by `yantrad` at startup and by `yantra notify` per run:
+
+```bash
+export YANTRA_NTFY_URL=https://ntfy.sh/<topic>   # where to publish
+export YANTRA_NTFY_TOKEN=tk_...                  # only if the topic is protected
+
+yantra notify 'needs you' --title api --priority 4
+```
+
+`YANTRA_NTFY_URL` unset means no relay, which is not an error — the daemon runs exactly as it did and
+sends nothing, and it says which of the two it got in its first few log lines, because a unit's
+environment is not the shell's. Subscribe to the same topic in the ntfy app to receive them.
+
+**The relay is a general publish channel, not the notifier's private wire.** Anything with something
+to say can send a line — a session's status, *needs attention*, a workflow, a reminder — and the
+fleet notifier is only the first caller. There is no message taxonomy: the body is whatever you
+passed, and one channel per session is a second URL rather than a second feature.
+
+**On the public server the topic name is the only password there is** — ntfy's own docs say so, and
+anyone who knows a topic can read it and publish to it. So use a high-entropy topic, or run your own
+ntfy and keep the body on the tailnet. **The token is read from the environment and from nowhere
+else**: never a workspace field, never a file Yantra writes, never a log line and never the API
+(§B4). For the appliance it belongs in a systemd drop-in — `systemctl edit yantrad` — rather than in
+the unit this repo ships.
+
+`yantra notify` is the diagnostic for a box with no screen: it proves the topic, the token and egress
+in one command, and every refusal names the variable that would change it without printing its value.
+
 ## The dashboard over HTTPS
 
 `yantrad` speaks plain HTTP and will keep doing so. TLS is `tailscale serve`'s job: it already holds

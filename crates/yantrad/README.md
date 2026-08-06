@@ -104,6 +104,13 @@ check that keeps it true. **A directory that was named still wins, and a wrong o
 refusal**: the copy inside the binary cannot be mistyped and the variable can, so the fallible half
 keeps the refusal rather than being quietly papered over by a stale dashboard.
 
+`YANTRA_NTFY_URL` points it at a relay to publish session changes to, and `YANTRA_NTFY_TOKEN`
+authenticates against one that is protected. Unset the first and the daemon sends nothing, which is
+not an error; the token is read from the environment and from nowhere else — never a workspace field,
+never a file, never a log line, never the API. `yantra notify` publishes to the same channel by hand,
+which is how a box with no screen proves the topic works. See
+[`docs/development.md`](../../docs/development.md).
+
 It speaks **plain HTTP and always will**. TLS belongs to `tailscale serve`, which already holds and
 renews a certificate for the machine's `*.ts.net` name — `just https` puts the dashboard on
 `https://<machine>.<tailnet>.ts.net:8443/`, which is what a phone needs and what the PWA's secure

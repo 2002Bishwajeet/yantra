@@ -16,6 +16,7 @@
 - `yantra down <workspace>`: stop the session, reporting how the agent ended.
 - `yantra ls machines`: the tailnet, advisory only.
 - `yantra ls sessions`: tmux sessions on every machine a workspace names.
+- `yantra notify <message> [--title T] [--priority 1-5]`: publish to the relay `YANTRA_NTFY_URL` names, with `YANTRA_NTFY_TOKEN` if the topic is protected (Y-147). The body is sent as written — the relay is a general channel and the fleet notifier is only its other caller — and the one command that proves topic, token and egress from a box with no screen. Every refusal names the variable that would change it and neither the token nor the URL is ever printed.
 - `yantra fix-terminfo <machine>`: teach a machine the terminal you are sitting at.
 
 ## Source
