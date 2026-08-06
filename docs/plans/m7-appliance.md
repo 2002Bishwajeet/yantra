@@ -102,7 +102,15 @@ with no other way in.
 
 **[D], read from the code and not measured**, because this tailnet has no tagged node to measure it
 against — and that is a cheap thing to fix without buying anything: one ephemeral tagged node is
-enough to see what `owner()` and `whois` then return. The alternative is disabling key expiry for
+enough to see what `owner()` and `whois` then return.
+
+> **2026-08-06: cheap, but two owner actions rather than one.** The tailnet was read rather than
+> assumed: **no node carries a `Tags` field**, here or among the peers, and one `UserID` owns every
+> machine in the netmap. A key cannot apply a tag the policy file has not defined, so the ACL needs a
+> `tagOwners` entry before Settings → Keys can mint against it — and the key wants **ephemeral,
+> pre-approved and single-use**, so the node deletes itself on disconnect and the credential cannot
+> be replayed. Neither step is code, which is what makes this row wait on the owner rather than on
+> the box. The alternative is disabling key expiry for
 that one node in the admin console, which is an owner action rather than a code change and belongs in
 the install document either way.
 
