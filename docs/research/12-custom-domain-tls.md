@@ -175,6 +175,34 @@ challenge records, so its blast radius is one TXT record rather than the domain.
 **This is the recommendation.** It removes the failure mode in §5 entirely and costs one CNAME
 created once by hand.
 
+## 6a. One name, a landing page outside and a dashboard inside — and why it stops at one person
+
+**Asked directly: can the domain serve a public landing page, and then show the dashboard once
+someone is on the tailnet?** For a single owner, **yes**, and it is ordinary split-horizon DNS: a
+public `A` record answers the world with the landing host, and Tailscale split DNS overrides the same
+name for tailnet members with the node's `100.x`. Two servers may hold valid certificates for one
+name simultaneously; nothing about that is unusual. The only oddity is that the owner's own devices
+are always on the tailnet, so they never see their own landing page without leaving it.
+
+**It does not generalise to other people, and the reason is the certificate rather than the DNS.**
+Another user's appliance would need a certificate valid for a name *this* owner controls. They cannot
+obtain one — DNS-01 proves control of the domain, and they do not have it — so the only mechanism is
+**shipping the private key inside every install**. One extraction from any user's box compromises the
+name for every other user, irrecoverably. That is precisely what certificates exist to prevent, and
+no amount of care in the installer changes it.
+
+**So the shape that works:**
+
+| Audience | Name | Certificate |
+| --- | --- | --- |
+| The public | `cloudx.run` — the landing page | Ordinary public hosting |
+| Any other user | **their own** `<host>.<their-tailnet>.ts.net` | Tailscale issues, browsers trust, renews itself |
+| This owner | `yantra.cloudx.run`, split DNS, no public `A` | DNS-01, per §6 |
+
+The middle row costs nothing and is strictly safer: no domain, no DNS, no proxy, and no key from
+anyone. **A shared vanity URL is the expensive version of a thing every user already has for free**,
+and the landing page's job is to name it rather than to replace it.
+
 ## 7. What we would actually run
 
 Static certificate, if the files are simply uploaded:
