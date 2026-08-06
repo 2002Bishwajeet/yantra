@@ -71,6 +71,30 @@ and a second record, not something this one covers.
 **Nothing about the topology is hard.** The whole cost of this note is in §4–§6, and every bit of it
 is about obtaining and *renewing* a certificate browsers already trust — never about reachability.
 
+### The record does not have to be public — the challenge does
+
+**"Public DNS record" and "publicly reachable service" are different claims, and only the second one
+matters for safety.** Still, if the record itself is unwanted in public DNS, it need not be there:
+
+| | Where the name resolves | Cost |
+| --- | --- | --- |
+| **Public `A` record** | Everywhere; routes only on the tailnet | Nothing. Works on every device, iPhone included |
+| **Tailscale split DNS** | Tailnet members only; **absent from public DNS** | A nameserver on the tailnet — which the appliance is the natural host for |
+| `/etc/hosts` per device | Wherever it is written | Does not work on iOS, and scales by hand |
+
+**But a publicly-trusted certificate cannot be obtained privately.** DNS-01 asks the CA to read
+`_acme-challenge.<name>` **TXT from public DNS**, at issuance and at every renewal. The `A` record is
+never queried by the CA and can stay private; the challenge record cannot. So:
+
+- **trusted certificate with no public `A` record** — split DNS plus a public `_acme-challenge`. Fine;
+- **nothing public at all** — then the certificate must come from a private CA whose root is
+  installed on **every** device that opens the page, a phone included. That is a real chore and a
+  browser warning on any device that was missed.
+
+**Who can use it is settled by tailnet membership, not by DNS.** Another person reaches this by being
+on the tailnet; both rows above then behave identically for them. Someone not on the tailnet is given
+nothing by either.
+
 **It is a disclosure, and a small one, but name it.** [R-22](../../tracker.md#7-risk-register) says
 the bind address is the entire security model and lists *machine names, workspace names, repo paths*
 as what that protects. A tailnet IP in public DNS is less than any of those — it is unroutable and
