@@ -62,6 +62,15 @@ get a working setup that mysteriously refuses.
 address. It resolves for the whole internet and **functions only from inside the tailnet**, because
 `100.64.0.0/10` is CGNAT space that routes nowhere else. No split-horizon DNS needed.
 
+**This is the property being asked for, and it is free.** Publishing the record exposes nothing:
+there is no listener on a public interface, no port forward, and the address is unroutable from
+outside. Every device on the tailnet reaches the name; everything else resolves it and then has
+nowhere to send a packet. Note the address is **per-tailnet** — a second tailnet is a second address
+and a second record, not something this one covers.
+
+**Nothing about the topology is hard.** The whole cost of this note is in §4–§6, and every bit of it
+is about obtaining and *renewing* a certificate browsers already trust — never about reachability.
+
 **It is a disclosure, and a small one, but name it.** [R-22](../../tracker.md#7-risk-register) says
 the bind address is the entire security model and lists *machine names, workspace names, repo paths*
 as what that protects. A tailnet IP in public DNS is less than any of those — it is unroutable and
@@ -107,7 +116,25 @@ exists precisely so that nobody has to tend it. That is a silent failure with a 
 
 The eligibility gate may also simply not be met; that is an account fact, not a technical one.
 
-## 6. The way around all of it — delegate only the challenge
+## 6. Two ways around all of it, and the cheap one needs nothing set up
+
+### By hand, today, with no API at all
+
+`certbot certonly --manual --preferred-challenges dns -d yantra.cloudx.run` prints a TXT record,
+waits, and issues once the record resolves. The record is pasted into Namecheap's web UI like any
+other. **None of §5 applies** — no API means no eligibility gate, no allow-list, no plugin, no
+`xcaddy` build. This is the fastest route to a working page and it is a perfectly good starting
+point.
+
+Its whole cost is the renewal. Let's Encrypt certificates last **90 days**, `--manual` cannot renew
+unattended by design, and the failure is the dashboard going untrusted on a day nobody was thinking
+about it. **Certificate lifetimes are also being shortened industry-wide**, so do not assume a
+purchased certificate buys a comfortable year — check the current maximum when this is actually done
+rather than taking a number from this note.
+
+### Delegate only the challenge
+
+
 
 **`_acme-challenge` can be delegated with a CNAME, and it is the standard escape hatch.** Namecheap
 keeps the domain and keeps serving the `A` record. A single static CNAME is added once:
