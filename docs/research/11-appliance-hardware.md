@@ -374,26 +374,48 @@ something the design needs, and becomes something the budget may buy if it is fr
 | SanDisk High Endurance microSDHC 32 GB | €27.50 |
 | SanDisk Max Endurance 64 GB | €52.90 |
 | Raspberry Pi branded A2 32 GB / 64 GB | €17.60 / €28.80 — **both sold out** |
+| Official Raspberry Pi M.2 HAT+ (Welectron) | €11.90 |
 | Third-party M.2 HAT for Pi 5, M-Key | €12.50 |
+| Geekworm X1001 | €12.93 |
 | Pimoroni NVMe Base | €16.90 |
+| Intenso 250 GB NVMe, **2280** | €47.29 |
+| Silicon Power P34A6X 256 GB, 2280 | €50.99 |
+| SK Hynix BC901 256 GB, **2242** | €49.90 |
+| Transcend MTE300S 256 GB, **2230** | €109.00 |
 
 **Buy the 64 GB endurance card, because it costs €0.40 more than the 32 GB one.** That is not a
 recommendation about capacity; it is what the shelf looked like on the day, and it is the kind of
 fact that inverts without warning — NAND is in the same squeeze as DRAM, which is why the two
 cheapest cards on that list are the ones nobody can ship.
 
-**NVMe does not fit and does not earn its place here.** The HAT is €12.50–16.90 *before* a drive, the
-drive is the larger half, and the reason to want it — a database — was deleted from this project four
-days before this note was first written. Once the board is paid for at this ceiling there is no room
-for an NVMe stack, **so the power question below is very likely moot for this build** and is recorded
-because it will not be moot for the next one.
+**NVMe does not fit, and now the arithmetic says so rather than the prose.** The cheapest credible
+stack is a HAT at **€11.90** plus a 2280 drive at **€47.29** — about **€59** before the board. Added
+to the 1 GB Pi 5 with its supply and cooler that is **€124.39**, and to the recommended 2 GB basket
+**€146.39**. **Both are over the ceiling, and the smaller of them is over it while buying the board
+this note otherwise treats as the fallback.** So the honest answer to *does NVMe fit under €120
+alongside the board* is **no**, at any combination checked on 2026-08-06.
+
+**Two form-factor traps, since a HAT's slot length is not a detail.** The **official M.2 HAT+ takes
+2230 and 2242 only** — and 2230 is where the German shelf has emptied out, leaving the Transcend
+MTE300S at **€109.00** as the only buyable 256 GB, a **~2.3× premium over the same capacity in
+2280**. **2242 is the way out**: an SK Hynix BC901 256 GB at **€49.90** fits the official HAT, which
+is also the one designed to coexist with the Active Cooler via a 16 mm stacking header. A third-party
+HAT taking 2280 is cheaper per gigabyte and is a different mechanical problem for a printed case.
+
+And the reason to want any of it — a database — was deleted from this project four days before this
+note was first written. **So the power question below is very likely moot for this build**, and is
+recorded because it will not be moot for the next one.
 
 > **What nobody has measured, and it is not a small gap.** There is **no published same-system A/B of
 > Pi 5 idle draw with and without an NVMe drive attached**. The *"+1–2 W"* figure that circulates is
 > an estimate in a summary table, not a measurement — and the Pi cannot settle it itself, because
 > **`pmic_read_adc` does not see the 5 V rail**, which is where the drive's draw lands. Two
 > independent sources say so. **The instrument that would settle it is an inline USB-C power meter**,
-> and until somebody puts one on this, any number here would be an average of forum posts.
+> and until somebody puts one on this, any number here would be an average of forum posts. The
+> closest thing to a reading found anywhere is a Pimoroni forum post putting a Pi 5 with an NVMe Base
+> and a drive at roughly **550 mA, about 2.75 W in total** — which is close enough to a bare Pi 5's
+> idle to be interesting and has **no matched baseline on the same board**, so it cannot carry the
+> claim it looks like it carries.
 >
 > **Worse, the usual fixes cut against the requirement.** The two workarounds every flaky-NVMe thread
 > recommends both *raise* idle draw: `pcie_aspm=off` increases board-level consumption by a Raspberry
@@ -402,9 +424,11 @@ because it will not be moot for the next one.
 > answer and this box's efficiency requirement can pull against each other**, and which wins is not
 > knowable from the literature.
 
-**The third option is a USB SSD**, and this note could not price it honestly: BerryBase sells the
-enclosures — an ICY BOX NVMe/SATA M.2 dock at **€17.90**, a RAIDSONIC M.2 NVMe case at **€24.90** —
-but a complete, credible USB SSD around 256 GB was **not sourced**, so no total is claimed for it.
+**The third option is a USB SSD, and it is the cheapest way to leave the SD card** — €45.99 for a
+ready-made Netac 250 GB, against **€60.88** to build the same thing from a €13.59 Digitus enclosure
+and a €47.29 drive. **Buy the ready-made one** unless the specific bridge chip matters; assembling it
+costs €15 more to get a part you chose. Even so it is €46 on top of a board that has already spent
+the budget, and a USB enclosure is one more thing to fit inside a printed case.
 
 **The recommendation is therefore the A2 endurance card, with R6's caveat attached rather than
 answered.** SD wear is real, it is now the OS's writes rather than an application's, and the card is
@@ -653,6 +677,10 @@ checks it, the Pi 5's advantage was smaller than this note assumed throughout.
   §8.3. No same-system A/B is published, the circulating *"+1–2 W"* is an estimate rather than a
   reading, and `pmic_read_adc` cannot see the 5 V rail the drive sits on. **An inline USB-C meter is
   the instrument that would close this**, and nobody has put one on it.
+- **A cheapest price on a comparison site is not a buyable price.** Several NVMe figures that look
+  best on `geizhals.de` resolve to a single eBay or marketplace seller rather than a shop; the drives
+  quoted above were traced to a named merchant. This is the trap that makes a storage budget look
+  €20 smaller than it is.
 - **The thin-client idle figures are weaker than the Pi's.** The Futro S740's flattering 2.9 W is one
   hobbyist's meter, contradicted by the same author's later ~5 W; the parkytowers Wyse and HP numbers
   do not state whether they are wall or board level, and that page labels the t640's as *claimed*.
@@ -718,6 +746,13 @@ checks it, the Pi 5's advantage was smaller than this note assumed throughout.
 - [Welectron](https://www.welectron.com) · Pi 5 1/4/8/16 GB · the independent check on BerryBase
 - [RAM-König](https://www.ram-koenig.de/refurbished-thin-clients/) · Futro S740, S7010, S540 and
   Wyse 5070 refurb listings, incl. VAT · read off the live category page
+- [Alternate](https://www.alternate.de), [Amazon.de](https://www.amazon.de) and
+  [geizhals.de](https://geizhals.de) · NVMe drives in 2230, 2242 and 2280, the Digitus and UGREEN
+  enclosures, and the Netac USB SSD · **offer lists traced to a named merchant**, because several
+  headline comparison prices are single marketplace sellers
+- [Raspberry Pi M.2 HAT+ documentation](https://www.raspberrypi.com/documentation/accessories/m2-hat-plus.html)
+  · 2230 and 2242 only, the 16 mm stacking header that clears the Active Cooler, the 3 A limit, and
+  the verbatim *"not certified for Gen 3.0 speeds"* warning
 
 **§8 — the memory market, from Raspberry Pi's own announcements**
 - [1GB Raspberry Pi 5 at $45, and memory-driven price rises](https://www.raspberrypi.com/news/1gb-raspberry-pi-5-now-available-at-45-and-memory-driven-price-rises/)
@@ -728,6 +763,10 @@ checks it, the Pi 5's advantage was smaller than this note assumed throughout.
   · 2026-04-01 · the third round, and the sentence holding 1 GB and 2 GB *"between $35 and $65"*
 
 **§8 — power, measured**
+- [`jfikar/RPi5-power`](https://github.com/jfikar/RPi5-power) and
+  [Raspberry Pi forums t=368054](https://forums.raspberrypi.com/viewtopic.php?t=368054) · the PMIC
+  does not see the USB, HAT or NVMe branches; a Raspberry Pi engineer on APST exit latencies and why
+  not to reach for `pcie_aspm=off`
 - [Jeff Geerling — the 2 GB Pi 5's smaller die and its idle power](https://www.jeffgeerling.com/blog/2024/new-2gb-pi-5-has-33-smaller-die-30-idle-power-savings/)
   · D0 2.4 W against C1 3.3 W / 3.2 W, and the delidded die measurements behind it
 - [raspberry.tips — Raspberry Pi power consumption, all models](https://raspberry.tips/en/raspberrypi-tutorials/raspberry-pi-power-consumption-update-2026-all-models-compared)
