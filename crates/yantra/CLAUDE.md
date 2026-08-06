@@ -13,6 +13,11 @@ true* — how to reach a machine, what a verdict means, whether a session exists
 library, even when it would be three lines shorter inline. The test is whether the web UI would need
 the same logic: if yes, it is not CLI code.
 
+**This crate is no longer cheap, and `yantra notify` is why**: reaching
+[`yantra_core::notify`](../yantra-core/CLAUDE.md) reaches `ureq` and its bundled root store, and the
+aarch64-musl binary went 1,256,496 → 2,451,504 bytes for it (Y-147). Nothing else here sends
+anything, and a verb that wants to should be weighed on `just appliance-size` the same way.
+
 ## Exit codes are a contract
 
 Someone will put these in a shell script, so they are behaviour, not cosmetics.
@@ -46,6 +51,11 @@ a supervising parent would have to forward `SIGWINCH`, relay signals and reap a 
   negative is worse than saying nothing. An error a user cannot act on is half an error.
 - **Print the reason with the verdict.** `describe(Verdict::Unclear { because })` carries its own
   explanation, because "unclear" alone tells no one anything.
+- **`notify` names the variable and never the value** (Y-147). It is the one command run from a box
+  with no screen, so each refusal says which piece of configuration would change it —
+  `YANTRA_NTFY_URL` when nothing is configured, `YANTRA_NTFY_TOKEN` when a topic answered 401 or 403
+  and none was set. Neither the token nor the URL is ever printed, here or by the library's errors:
+  on the public relay the topic *is* the password.
 - `report_error` walks the `source()` chain — the useful detail is usually a level or two down, so
   never flatten an error to its top line.
 - Multi-line string constants: Rust's `\` line-continuation eats leading whitespace, so an indented

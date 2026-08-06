@@ -13,6 +13,7 @@ use yantra_core::agent;
 use yantra_core::attach;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
+use yantra_core::notify;
 use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
@@ -108,6 +109,17 @@ enum Command {
         #[command(subcommand)]
         target: LsTarget,
     },
+    /// Publish a message to the relay this machine is configured with
+    Notify {
+        /// What to say. It is sent as written and nothing is composed into it
+        message: String,
+        /// A headline shown above it
+        #[arg(long)]
+        title: Option<String>,
+        /// Urgency, 1 (min) to 5 (max)
+        #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
+        priority: Option<u8>,
+    },
     /// Teach a machine about the terminal you are sitting at
     FixTerminfo {
         /// ssh destination, spelled the way a workspace's `machine` spells it
@@ -173,6 +185,18 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Workspaces,
         }) => ls_workspaces(),
+        Some(Command::Notify {
+            message,
+            title,
+            priority,
+        }) => {
+            publish(notify::Message {
+                body: message,
+                title,
+                priority,
+            })
+            .await
+        }
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
@@ -533,6 +557,53 @@ fn downgrade_notice(machine: &str, wanted: &str) -> String {
          \x20       colour depth and styled underlines are what that costs.\n\
          \x20       fix it once with: yantra fix-terminfo {machine}",
         terminfo::FALLBACK
+    )
+}
+
+/// The one command that proves a topic, a token and egress from a box with no
+/// screen, so every refusal names the variable that would change it — and the
+/// token is never one of the things printed (§B4).
+async fn publish(message: notify::Message) -> ExitCode {
+    let Some(relay) = notify::from_env() else {
+        eprintln!("yantra: no relay is configured, so there is nowhere to publish to");
+        eprintln!("{}", relay_note());
+        return ExitCode::FAILURE;
+    };
+    match notify::post(&relay, message).await {
+        Ok(()) => {
+            println!("published");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, notify::Error::Refused { status: 401 | 403 })
+                && std::env::var_os(notify::RELAY_TOKEN).is_none()
+            {
+                eprintln!("{}", token_note());
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn relay_note() -> String {
+    format!(
+        "\x20 note: the topic is the address, so publishing needs one:\n\
+         \x20         {}=https://ntfy.sh/<topic> yantra notify 'hello'\n\
+         \x20       on the public server that topic is the only password there is,\n\
+         \x20       so make it one nobody guesses — or point this at your own ntfy.",
+        notify::RELAY_URL
+    )
+}
+
+/// A protected topic answers the same way a wrong one does, and the difference
+/// between them is a variable that is not set.
+fn token_note() -> String {
+    format!(
+        "\x20 note: that topic wants credentials and {} is not set.\n\
+         \x20       it is read from the environment and nowhere else — yantra never\n\
+         \x20       writes it to a file, a log or the API.",
+        notify::RELAY_TOKEN
     )
 }
 
@@ -906,6 +977,47 @@ mod tests {
             Cli::try_parse_from(["yantra", "up", "demo", "--agent", "aider"]).is_err(),
             "an agent Yantra does not ship must be refused by name, not started"
         );
+    }
+
+    /// The message is the whole of what is required: a title and a priority are
+    /// ntfy's headers, and 1–5 is the scale it documents, so a 9 is refused here
+    /// rather than by a relay on a box nobody is looking at.
+    #[test]
+    fn notify_takes_a_message_and_bounds_the_priority() {
+        let plain =
+            Cli::try_parse_from(["yantra", "notify", "needs you"]).expect("a body is enough");
+        assert!(matches!(
+            plain.command,
+            Some(Command::Notify {
+                title: None,
+                priority: None,
+                ..
+            })
+        ));
+
+        let dressed = Cli::try_parse_from([
+            "yantra",
+            "notify",
+            "needs you",
+            "--title",
+            "api",
+            "--priority",
+            "5",
+        ])
+        .expect("a title and a priority parse");
+        assert!(matches!(
+            dressed.command,
+            Some(Command::Notify {
+                priority: Some(5),
+                ..
+            })
+        ));
+
+        assert!(
+            Cli::try_parse_from(["yantra", "notify", "hi", "--priority", "9"]).is_err(),
+            "a priority ntfy has no meaning for is refused by name"
+        );
+        assert!(Cli::try_parse_from(["yantra", "notify"]).is_err());
     }
 
     /// Every field is optional on its own and at least one is mandatory

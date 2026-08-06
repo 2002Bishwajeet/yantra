@@ -57,7 +57,7 @@ impl Notifier {
 /// dropped rather than retried against a relay that has just said no.
 async fn send(relay: &Relay, notifications: &[Notification]) -> Result<(), String> {
     for notification in notifications {
-        post(relay, notification)
+        post(relay, notification.message())
             .await
             .map_err(|error| error.to_string())?;
     }

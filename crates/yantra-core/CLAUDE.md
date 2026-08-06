@@ -33,7 +33,7 @@ bind where:
 | `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
 | `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
-| `notify.rs` | **I-49** through `status.rs` — the trust dialog is the notification that matters — and I-47's lesson one layer up: a machine that could not be asked keeps what it had, because unknown is not changed. **I-59** is the hole this leaves ([`yantrad/tracker.md`](../yantrad/tracker.md)) |
+| `notify.rs` | **I-49** through `status.rs` — the trust dialog is the notification that matters — and I-47's lesson one layer up: a machine that could not be asked keeps what it had, because unknown is not changed. **I-59** is the hole this leaves ([`yantrad/tracker.md`](../yantrad/tracker.md)). §B4 binds the other half (Y-147): the relay's URL and token are read from the environment and from nowhere else, and the body is the caller's — nothing here composes a workspace's resolved secret into one |
 
 ## What `yantra-agent` may call
 
@@ -54,6 +54,13 @@ aarch64-musl binaries by **exactly zero bytes**; calling it from the daemon cost
 The cost is TLS: `rustls`, `ring` and a bundled Mozilla root store, which a static musl binary has to
 carry because the appliance image is not promised a system trust store. Anything here that grows a
 `use ureq` outside `notify.rs` is spending that budget again somewhere it was not weighed.
+
+**Y-147 spent it again without adding a `use`**, which is the part worth reading twice: `yantra
+notify` put the CLI into the same call graph and `yantra` went **1,256,496 → 2,451,504 bytes
+(+1,195,008, +95.1 %)**, while `yantrad` moved 1,712 for an environment read and `yantra-agent` came
+out at **exactly** the byte count it started at for the third measurement running. So the budget is
+per *binary that reaches this module*, not per crate and not per import — a second caller pays the
+whole bill, and the question to ask of the next one is whether that caller needs to send from itself.
 
 ## Anything that reaches a remote shell
 

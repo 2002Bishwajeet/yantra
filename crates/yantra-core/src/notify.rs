@@ -1,4 +1,5 @@
-//! The difference between two consecutive looks at the fleet, and one send.
+//! The difference between two consecutive looks at the fleet, and the channel
+//! that difference goes out on.
 //!
 //! **A notifier is a diff of consecutive snapshots and nothing more** — no poll,
 //! no ssh, no timer of its own ([the M7 plan] §3.6). [`Verdict`] is the whole
@@ -15,10 +16,12 @@
 //! - **A failed send drops that notification.** No queue, no retry, no replay —
 //!   a queue is state on a box whose whole point is that it holds none.
 //!
-//! **Q16 is open and this module is built to its prior**: a notification names
-//! the workspace and the verdict, never the machine or the repo. [`Notification`]
-//! has no field for either, so widening what a public relay is told is an edit
-//! here rather than a line that grew somewhere else.
+//! **Q16 was answered wider than it was asked** (Y-147): the relay is a general
+//! publish channel and the fleet notifier is only its first caller. Anything
+//! with something to say sends a [`Message`]; [`Notification`] renders into one
+//! rather than being the only thing sendable. Yantra ships the mechanism and
+//! invents no content, so what a relay is told is decided by whoever called and
+//! by the URL the operator chose.
 //!
 //! [the M7 plan]: ../../../docs/plans/m7-appliance.md
 
@@ -32,8 +35,9 @@ use crate::status::{Fleet, Verdict};
 /// for this and a relay that is a black hole must not push the next look out.
 const TIMEOUT: Duration = Duration::from_secs(3);
 
-/// One workspace, and what it now is. **The two fields are the whole of what
-/// leaves the tailnet** (Q16).
+/// One workspace, and what it now is. **The two fields are the whole of what the
+/// fleet notifier says**, which is the shape Q16's prior asked for and is now one
+/// caller's choice rather than the channel's limit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
     pub workspace: String,
@@ -43,6 +47,16 @@ pub struct Notification {
 impl fmt::Display for Notification {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.workspace, phrase(&self.verdict))
+    }
+}
+
+impl Notification {
+    pub fn message(&self) -> Message {
+        Message {
+            body: self.to_string(),
+            title: None,
+            priority: None,
+        }
     }
 }
 
@@ -141,7 +155,25 @@ fn notable(before: Option<&Verdict>, after: &Verdict) -> bool {
         )
 }
 
-/// Where a notification goes.
+/// What a caller wants published. `title` and `priority` are ntfy's `Title` and
+/// `Priority` headers ([the M7 plan] §3.4), and 1 to 5 is the scale that server
+/// documents.
+///
+/// **The body is the caller's and Yantra composes nothing into it.** §B4 lists
+/// where a workspace's secret *value* may never reach — SQLite, a log, the API,
+/// a terminal stream — and a third-party relay is on that list: a reference is
+/// resolved at launch, on the machine that runs the agent, and never on the way
+/// out of here.
+///
+/// [the M7 plan]: ../../../docs/plans/m7-appliance.md
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub body: String,
+    pub title: Option<String>,
+    pub priority: Option<u8>,
+}
+
+/// Where a message goes.
 ///
 /// **Neither field is ever printed.** The token is a value Yantra was handed and
 /// never stores (§B4, Q5), and on a public relay the topic in the URL is the
@@ -153,11 +185,29 @@ pub struct Relay {
 }
 
 impl Relay {
-    /// The token is a reference resolved by the caller, not something this crate
-    /// reads or writes — where it comes from is the caller's (Y-147).
     pub fn new(url: String, token: Option<String>) -> Self {
         Self { url, token }
     }
+}
+
+/// The topic URL to publish to, and what authenticates against it.
+pub const RELAY_URL: &str = "YANTRA_NTFY_URL";
+pub const RELAY_TOKEN: &str = "YANTRA_NTFY_TOKEN";
+
+/// **The environment is the only place either is read from** (§B4, and ADR-0013
+/// §4's precedent for `YANTRA_DAEMON`): not a workspace field, not a file Yantra
+/// writes, not the API.
+pub fn from_env() -> Option<Relay> {
+    configured(
+        std::env::var(RELAY_URL).ok(),
+        std::env::var(RELAY_TOKEN).ok(),
+    )
+}
+
+/// Both halves are arguments rather than reads, so the rule is testable without
+/// an environment variable — `yantrad`'s `dashboard` is the same shape.
+fn configured(url: Option<String>, token: Option<String>) -> Option<Relay> {
+    Some(Relay::new(url?, token))
 }
 
 impl fmt::Debug for Relay {
@@ -182,18 +232,17 @@ pub enum Error {
 ///
 /// The send is blocking and runs on a blocking thread, because the caller's
 /// runtime is serving terminals on its workers (I-13).
-pub async fn post(relay: &Relay, notification: &Notification) -> Result<(), Error> {
+pub async fn post(relay: &Relay, message: Message) -> Result<(), Error> {
     let url = relay.url.clone();
     let token = relay.token.clone();
-    let body = notification.to_string();
-    tokio::task::spawn_blocking(move || send(&url, token.as_deref(), &body))
+    tokio::task::spawn_blocking(move || send(&url, token.as_deref(), &message))
         .await
         .map_err(|_| Error::Unreachable {
             reason: "the send did not finish".to_owned(),
         })?
 }
 
-fn send(url: &str, token: Option<&str>, body: &str) -> Result<(), Error> {
+fn send(url: &str, token: Option<&str>, message: &Message) -> Result<(), Error> {
     let mut request = ureq::post(url)
         .config()
         .timeout_global(Some(TIMEOUT))
@@ -201,7 +250,13 @@ fn send(url: &str, token: Option<&str>, body: &str) -> Result<(), Error> {
     if let Some(token) = token {
         request = request.header("Authorization", &format!("Bearer {token}"));
     }
-    match request.send(body) {
+    if let Some(title) = &message.title {
+        request = request.header("Title", title);
+    }
+    if let Some(priority) = message.priority {
+        request = request.header("Priority", &priority.to_string());
+    }
+    match request.send(&message.body) {
         Ok(_) => Ok(()),
         Err(ureq::Error::StatusCode(status)) => Err(Error::Refused { status }),
         Err(error) => Err(Error::Unreachable {
@@ -452,7 +507,9 @@ mod tests {
     }
 
     /// A real socket, not a mock (§B3) — what is under test is the request that
-    /// leaves. It is plain HTTP, so it says nothing about TLS.
+    /// leaves. It is plain HTTP on loopback, so it says nothing about TLS,
+    /// nothing about the bundled root store, and nothing about ntfy accepting
+    /// any of it.
     fn serve(listener: TcpListener, status: &'static str) -> JoinHandle<String> {
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("the notifier connects");
@@ -506,6 +563,8 @@ mod tests {
             .expect("the dialog is news")
     }
 
+    /// The fleet path, unchanged by the channel underneath it: one line, no
+    /// `Title`, no `Priority`, and neither the machine nor the repo.
     #[tokio::test]
     async fn the_relay_reads_the_workspace_the_verdict_and_the_token() {
         let (listener, address) = listener();
@@ -515,17 +574,22 @@ mod tests {
             Some("tk_notarealtoken".to_owned()),
         );
 
-        post(&relay, &notification()).await.expect("200 is sent");
+        post(&relay, notification().message())
+            .await
+            .expect("200 is sent");
 
         let request = served.join().expect("the listener thread");
         assert!(
             request.starts_with("POST /yantra-test HTTP/1.1\r\n"),
             "{request}"
         );
+        let headers = request.to_lowercase();
         assert!(
-            request
-                .to_lowercase()
-                .contains("authorization: bearer tk_notarealtoken"),
+            headers.contains("authorization: bearer tk_notarealtoken"),
+            "{request}"
+        );
+        assert!(
+            !headers.contains("title:") && !headers.contains("priority:"),
             "{request}"
         );
         assert!(
@@ -534,7 +598,97 @@ mod tests {
         );
         assert!(
             !request.contains("/srv/repo") && !request.contains("cachyos-g14"),
-            "Q16: neither the repo nor the machine leaves the tailnet — {request}"
+            "the fleet notifier still names neither the repo nor the machine — {request}"
+        );
+    }
+
+    /// The channel the notifier is only the first caller of: the body is the
+    /// caller's, and the two things ntfy carries beside it are headers.
+    #[tokio::test]
+    async fn a_message_reaches_the_wire_with_its_title_and_its_priority() {
+        let (listener, address) = listener();
+        let served = serve(listener, "200 OK");
+        let relay = Relay::new(format!("http://{address}/yantra-test"), None);
+
+        post(
+            &relay,
+            Message {
+                body: "context is at 90 %".to_owned(),
+                title: Some("y-147".to_owned()),
+                priority: Some(4),
+            },
+        )
+        .await
+        .expect("200 is sent");
+
+        // `ureq` writes header names lowercased, and HTTP says a reader may not
+        // care — so the assertion does not either.
+        let request = served.join().expect("the listener thread");
+        let headers = request.to_lowercase();
+        assert!(headers.contains("title: y-147\r\n"), "{request}");
+        assert!(headers.contains("priority: 4\r\n"), "{request}");
+        assert!(request.ends_with("context is at 90 %"), "{request}");
+    }
+
+    /// The daemon runs with nothing configured today, and that is a deployment
+    /// rather than a fault.
+    #[test]
+    fn an_environment_that_names_no_url_configures_no_relay() {
+        assert!(configured(None, Some("tk_notarealtoken".to_owned())).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_url_with_no_token_sends_no_authorization_header() {
+        let (listener, address) = listener();
+        let served = serve(listener, "200 OK");
+        let relay = configured(Some(format!("http://{address}/yantra-test")), None)
+            .expect("a url is a relay");
+
+        post(
+            &relay,
+            Message {
+                body: "hello".to_owned(),
+                title: None,
+                priority: None,
+            },
+        )
+        .await
+        .expect("200 is sent");
+
+        let request = served.join().expect("the listener thread");
+        assert!(
+            !request.to_lowercase().contains("authorization:"),
+            "{request}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_url_and_a_token_put_a_bearer_on_the_wire() {
+        let (listener, address) = listener();
+        let served = serve(listener, "200 OK");
+        let relay = configured(
+            Some(format!("http://{address}/yantra-test")),
+            Some("tk_notarealtoken".to_owned()),
+        )
+        .expect("a url is a relay");
+
+        post(
+            &relay,
+            Message {
+                body: "hello".to_owned(),
+                title: None,
+                priority: None,
+            },
+        )
+        .await
+        .expect("200 is sent");
+
+        let request = served.join().expect("the listener thread");
+        assert!(
+            request
+                .to_lowercase()
+                .contains("authorization: bearer tk_notarealtoken"),
+            "{request}"
         );
     }
 
@@ -561,7 +715,7 @@ mod tests {
         drop(listener);
         let relay = Relay::new(format!("http://{address}/yantra-test"), None);
 
-        let dropped = post(&relay, &notification())
+        let dropped = post(&relay, notification().message())
             .await
             .expect_err("nothing is listening");
 
@@ -577,7 +731,7 @@ mod tests {
             Some("tk_notarealtoken".to_owned()),
         );
 
-        let refused = post(&relay, &notification())
+        let refused = post(&relay, notification().message())
             .await
             .expect_err("403 is not a delivered notification");
 
