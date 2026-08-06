@@ -154,3 +154,99 @@ appliance-size: appliance
     @ls -lh target/aarch64-unknown-linux-musl/release/yantrad \
             target/aarch64-unknown-linux-musl/release/yantra \
             target/aarch64-unknown-linux-musl/release/yantra-agent
+
+# A binary that is only cross-compiled cannot be run, so the other three numbers
+# ADR-0004 owes M7 — idle RSS, idle CPU, CLI cold-start — are measured on the
+# target this machine executes. musl rather than the host toolchain because
+# mallocng is what the appliance links and it is most of the RSS. Whichever box
+# Q15 picks, this is a floor and not its answer.
+runtime_target := "x86_64-unknown-linux-musl"
+
+# Three settings, all of them arguable, so they are named rather than inline.
+# Four of `refresh::EVERY`'s 30 s cycles to settle; ten more to average CPU
+# over, because a jiffy is 10 ms and a shorter window prices an idle daemon in
+# single digits of them; enough CLI runs to see a spread rather than a number.
+runtime_settle := "125"
+runtime_window := "300"
+runtime_samples := "50"
+
+# `yantrad` refuses to start unless Tailscale tells it which addresses this
+# machine holds (R-22), and on the machine that builds it 7717 is already bound
+# by the developer's own. So it runs in a user + network namespace carrying this
+# node's real addresses on `lo`: the refusal is answered by the real `tailscale`
+# over its socket, which crosses the namespace, and the bind is a real one on a
+# port nobody else holds. No root, and nothing of the daemon is stubbed.
+appliance-runtime:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # $EPOCHREALTIME below carries the locale's decimal separator.
+    export LC_ALL=C
+    cargo zigbuild --release --target {{runtime_target}} -p yantrad -p yantra
+    release="$PWD/target/{{runtime_target}}/release"
+
+    # An empty config is the floor: workspaces cost ssh, and what the appliance
+    # will hold is not what this machine holds.
+    config=$(mktemp -d)
+    trap 'rm -rf "$config"' EXIT
+    mkdir -p "$config/yantra/workspaces"
+
+    XDG_CONFIG_HOME="$config" unshare --user --map-root-user --net -- bash -c '
+      set -eu
+      ip link set lo up
+      for address in $(tailscale ip); do
+        case $address in
+          *:*) ip -6 addr add "$address/128" dev lo ;;
+          *)   ip addr add "$address/32" dev lo ;;
+        esac
+      done
+      exec "$0"' "$release/yantrad" &
+    daemon=$!
+    trap 'kill -TERM '"$daemon"' 2>/dev/null; rm -rf "$config"' EXIT
+
+    sleep {{runtime_settle}}
+    kill -0 "$daemon" 2>/dev/null || {
+      echo "appliance-runtime: yantrad is not running, so there is nothing to measure" >&2
+      exit 1
+    }
+
+    # Fields 16 and 17 are the reaped children, and leaving them out would price
+    # a daemon whose whole idle workload is spawning `tailscale` at its own
+    # bookkeeping. Reported either side of the sum, because the gap is the point.
+    ticks=$(getconf CLK_TCK)
+    cpu() { awk -v want="$1" '{print want == "self" ? $14 + $15 : $16 + $17}' "/proc/$daemon/stat"; }
+    self_before=$(cpu self) children_before=$(cpu children)
+    sleep {{runtime_window}}
+    self_after=$(cpu self) children_after=$(cpu children)
+
+    echo
+    echo "yantrad, {{runtime_target}}, idle, {{runtime_settle}}s after start:"
+    grep -E '^Vm(RSS|HWM)|^Rss' "/proc/$daemon/status"
+    grep Pss_Anon "/proc/$daemon/smaps_rollup"
+    awk -v s="$(( self_after - self_before ))" -v c="$(( children_after - children_before ))" \
+        -v t="$ticks" -v w={{runtime_window}} \
+      'BEGIN { printf "CPU\t%.3f%% of one core over %ds, of which %.3f%% is the processes it spawned\n",
+                      (s + c) / t / w * 100, w, c / t / w * 100 }'
+
+    # Cold is the binary's page cache evicted before every run —
+    # posix_fadvise(DONTNEED), which needs no root and is what `dd iflag=nocache
+    # count=0` does. Warm is the same loop without it, so the pair prices the read.
+    spread() {
+      sort -n | awk -v label="$1" '{ v[NR] = $1 }
+        END { printf "%s\tn=%d  min %.1f  p50 %.1f  p90 %.1f  max %.1f ms\n",
+                     label, NR, v[1]/1000, v[int(NR*0.5)]/1000, v[int(NR*0.9)]/1000, v[NR]/1000 }'
+    }
+    samples() {
+      for _ in $(seq {{runtime_samples}}); do
+        if [[ $1 == cold ]]; then
+          dd if="$release/yantra" iflag=nocache count=0 of=/dev/null status=none
+        fi
+        local start=${EPOCHREALTIME/./}
+        "$release/yantra" --version > /dev/null
+        echo $(( ${EPOCHREALTIME/./} - start ))
+      done
+    }
+
+    echo
+    echo "yantra --version, {{runtime_target}}:"
+    samples cold | spread cold
+    samples warm | spread warm

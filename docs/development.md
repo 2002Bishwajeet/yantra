@@ -59,6 +59,7 @@ just test         # tests only
 just deny         # licence + advisory audit
 just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
 just appliance    # cross-compile arm64 binaries for the Pi 5
+just appliance-runtime  # idle RSS, idle CPU and CLI cold-start, on this machine
 ```
 
 `just fixtures` is the one recipe you run *because* a test told you to: `just
@@ -257,14 +258,59 @@ file target/aarch64-unknown-linux-musl/release/yantrad
 ```
 
 Statically linked, no runtime on the target. `just appliance-size` reports what
-each one costs; measured on 2026-08-05 that is **3.5 MB** for `yantrad`, 1.2 MB
+each one costs; measured on 2026-08-06 that is **3.4 MB** for `yantrad`, **2.4 MB**
 for `yantra` and 432 KB for `yantra-agent`, or **4.1 MB** for the `yantrad` that
-carries the dashboard — the one file the appliance copies. The daemon's number
-moved by 1.1 MB in Y-146, which is what an HTTPS client with a bundled root store
-costs; it is still inside ADR-0004's ~5 MB. If any of this stops working, say so
-loudly — [ADR-0004](adr/0004-rust-for-the-daemon.md) chose Rust partly on the
-strength of it, and **the startup numbers it also promised are still unmeasured**
-(Y-149).
+carries the dashboard — the one file the appliance copies. Both of the first two
+grew by about 1.1 MB for the same reason, an HTTPS client with a bundled root
+store: `yantrad` when Y-146 called it, `yantra` when Y-147 gave the CLI `notify`
+([`yantra-core/CLAUDE.md`](../crates/yantra-core/CLAUDE.md) has the bytes either
+side of each). Both are still inside ADR-0004's ~5 MB. If any of this stops
+working, say so loudly — [ADR-0004](adr/0004-rust-for-the-daemon.md) chose Rust
+partly on the strength of it.
+
+## What the appliance costs at idle
+
+Size is the number a cross-compile can report; the other three ADR-0004 owes M7
+need a binary that runs, so they are measured on the musl target this machine
+executes rather than on the one it builds for.
+
+```bash
+just appliance-runtime
+```
+
+Measured 2026-08-06 on `cachyos-g14`, `x86_64-unknown-linux-musl`, with `yantrad`
+idle over an **empty workspace directory** and nothing running but its own
+30-second refresh loops:
+
+| | Measured | ADR-0004 |
+| --- | --- | --- |
+| Idle RSS | **3,780 kB**, of which 1,080 kB is anonymous — the rest is the binary's own pages. Three runs landed between 3,504 and 3,780 | ~15 MB |
+| Idle CPU | **0.053 % of one core** over five minutes, and 0.050 of that is the `tailscale` the refresh loop spawns rather than the daemon itself | — |
+| `yantra --version`, cold | **p50 4.0 ms**, p90 4.4 ms, max 10.5 (warm: p50 1.5 ms) | — |
+
+**The ADR names all three and priced one**, so only the first row is a
+comparison; idle CPU and CLI cold-start were promised as reports, not as targets.
+
+RSS is `/proc/PID/status`, CPU is that process's own jiffies **plus the ones it
+reaped** — leave the children out and a daemon whose idle workload is spawning
+`tailscale` prices itself at almost nothing. *Cold* means the binary's page cache
+dropped before every run with `posix_fadvise(DONTNEED)`, which needs no root; the
+warm row is the same loop without it, so the pair prices the read rather than
+guessing at it.
+
+**Why the recipe uses a namespace.** `yantrad` refuses to start unless Tailscale
+tells it which addresses this machine holds (R-22), and on the machine that
+builds it 7717 is usually already bound by the developer's own daemon. So it runs
+in a user + network namespace carrying this node's real addresses on `lo` — the
+real `tailscale` answers over its socket, which crosses the namespace, so the
+refusal is *satisfied* rather than worked around, and the bind is a real one on a
+port nobody else holds. No root, and nothing of the daemon is stubbed.
+
+**These are not the appliance's numbers.** Q15 has not picked a box, and this is
+a laptop: slower cores and an SD card would move cold-start most. It is a floor
+in the other direction too — an empty workspace directory buys no ssh, and a
+daemon holding a real fleet's snapshot costs more than this by whatever the
+snapshot weighs.
 
 ## Gotchas that will cost you an afternoon
 
