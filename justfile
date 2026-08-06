@@ -122,6 +122,31 @@ no-node:
       exit 1
     fi
 
+    # The behavioural half, asserted for the same reason as the job above: a
+    # check nothing runs asserts nothing.
+    if ! steps .github/workflows/ci.yml | grep -qE -- 'just build-without-node'; then
+      echo "no-node: ci.yml no longer builds with node shadowed, so nothing exercises R-24's condition itself" >&2
+      exit 1
+    fi
+
+# What `no-node` cannot read: it greps the recipes, this runs two of them with
+# node, npm and npx shadowed by stubs that fail. It names the three binaries in
+# order to remove them, which is why that recipe's list cannot include this one.
+build-without-node:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stubs=$(mktemp -d)
+    trap 'rm -rf "$stubs"' EXIT
+    for tool in node npm npx; do
+      printf '#!/bin/sh\necho "%s: absent here by design (R-24)" >&2\nexit 127\n' "$tool" >"$stubs/$tool"
+      chmod +x "$stubs/$tool"
+      if [ "$(PATH="$stubs:$PATH" command -v "$tool")" != "$stubs/$tool" ]; then
+        echo "build-without-node: $tool is not shadowed, so a green run would prove nothing" >&2
+        exit 1
+      fi
+    done
+    PATH="$stubs:$PATH" just build lint
+
 # The dashboard's own build. Same rule as the landing recipes below: it needs
 # npm, so nothing reachable from `ci` or `check` may depend on it.
 web-build:
