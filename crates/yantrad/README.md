@@ -94,7 +94,10 @@ authentication (Q6, personal-first), where it listens is the whole security mode
 
 `YANTRA_WEB` points it at a directory of built assets. Unset it and the API serves alone and `/`
 says how; point it at a directory with no `index.html` and it refuses to start rather than answering
-404 to everything, which reads as a broken dashboard instead of a typo in one variable.
+404 to everything, which reads as a broken dashboard instead of a typo in one variable. **A
+directory that vanishes after that check is a `503` and a log line**, never a blank page and never an
+exit: the API, the heartbeat and the terminal socket are still serving, and only the dashboard's
+files are gone.
 
 For the M7 appliance there is a second way, and it is a cargo feature that is **off by default**:
 `just appliance-embedded` builds `yantrad --features embed-dashboard`, which compiles `web/dist`

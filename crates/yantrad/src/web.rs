@@ -17,9 +17,13 @@
 //! other.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::Router;
 use axum::http::StatusCode;
+use axum::middleware::map_response;
+use axum::response::{IntoResponse, Response};
 use tower_http::services::{ServeDir, ServeFile};
 
 #[cfg(feature = "embed-dashboard")]
@@ -55,9 +59,53 @@ pub fn router(dir: &Path) -> Result<Router, NoIndex> {
     if !index.is_file() {
         return Err(NoIndex(dir.to_path_buf()));
     }
+    let quiet = Arc::new(AtomicBool::new(false));
     // The fallback is what makes a deep link work: the browser asks for
     // `/workspaces/yantra`, no such file exists, and the app routes it itself.
-    Ok(Router::new().fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index))))
+    Ok(Router::new()
+        .fallback_service(ServeDir::new(dir).fallback(ServeFile::new(&index)))
+        .layer(map_response(move |answer| {
+            still_there(index.clone(), Arc::clone(&quiet), answer)
+        })))
+}
+
+/// The startup check does not survive the directory being deleted under a
+/// running daemon — a `YANTRA_WEB` pointing into a git worktree that was later
+/// removed — and `ServeDir` then answers an empty 404 to everything, which is
+/// the deep link's own status and reads as a blank dashboard.
+///
+/// The stat is reached only by a 404, which the SPA fallback above makes rare
+/// while the directory is there. Exiting is not the alternative: the API, the
+/// heartbeat and the terminal socket are all still serving, and only the
+/// dashboard's files are gone.
+async fn still_there(index: PathBuf, quiet: Arc<AtomicBool>, answer: Response) -> Response {
+    if answer.status() != StatusCode::NOT_FOUND {
+        if quiet.swap(false, Ordering::Relaxed) {
+            tracing::info!("the dashboard is readable again");
+        }
+        return answer;
+    }
+    if index.is_file() {
+        return answer;
+    }
+    // `yantra-agent`'s `Log`: said once, and said again only after it comes
+    // back, so a browser reloading does not fill the journal.
+    if !quiet.swap(true, Ordering::Relaxed) {
+        tracing::error!(
+            "the dashboard is gone from {} — serving the API alone until it returns. {}",
+            index.display(),
+            how()
+        );
+    }
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        format!(
+            "yantrad can no longer read the dashboard at {}. {}\n",
+            index.display(),
+            how()
+        ),
+    )
+        .into_response()
 }
 
 /// The dashboard this binary carries, which is `None` for every build that
@@ -191,6 +239,64 @@ mod tests {
         let refused = router(&dir).expect_err("nothing to serve");
 
         assert!(refused.to_string().contains("index.html"), "{refused}");
+    }
+
+    /// The startup refusal only looks once, and the directory can go away after
+    /// it: `YANTRA_WEB` pointed into a git worktree that was later removed.
+    /// Before this the answer was an empty 404 — a blank page carrying the deep
+    /// link's own status, with nothing in the journal.
+    #[tokio::test]
+    async fn a_directory_that_vanishes_after_startup_is_said_rather_than_served_blank() {
+        let dir = temp("vanished");
+        built(&dir);
+        let router = router(&dir).expect("a directory with an index");
+        std::fs::remove_dir_all(&dir).expect("the worktree it pointed into, removed");
+
+        for path in ["/", "/app.js", "/workspaces/yantra"] {
+            let (status, body) = get(router.clone(), path).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            assert!(body.contains(DIR), "{path}: {body}");
+        }
+    }
+
+    /// Nothing about the failure is cached, so the directory coming back is a
+    /// working dashboard rather than a restart.
+    #[tokio::test]
+    async fn a_directory_that_comes_back_serves_again() {
+        let dir = temp("returns");
+        built(&dir);
+        let router = router(&dir).expect("a directory with an index");
+        std::fs::remove_dir_all(&dir).expect("gone");
+        assert_eq!(
+            get(router.clone(), "/").await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        built(&dir);
+
+        let (status, body) = get(router, "/").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Yantra"), "{body}");
+    }
+
+    /// The dashboard is the app's *fallback*, so losing its files may not reach
+    /// the routes beside it — `/healthz` standing in for `/api` and the terminal
+    /// socket, which `main.rs` mounts the same way.
+    #[tokio::test]
+    async fn losing_the_dashboard_does_not_take_the_api_with_it() {
+        let dir = temp("api-survives");
+        built(&dir);
+        let app = Router::new()
+            .route("/healthz", axum::routing::get(|| async { "ok" }))
+            .fallback_service(router(&dir).expect("a directory with an index"));
+        std::fs::remove_dir_all(&dir).expect("gone");
+
+        let (status, body) = get(app.clone(), "/healthz").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, "ok");
+
+        assert_eq!(get(app, "/").await.0, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
