@@ -98,6 +98,12 @@ YANTRA_WEB=$PWD/web/dist cargo run --bin yantrad
 says so on `/`; point it somewhere with no `index.html` and it refuses to start rather than answering
 404 to every request, which reads as a broken dashboard instead of a wrong path.
 
+**A directory that vanishes *after* start is the same mistake one step later** — a `YANTRA_WEB`
+pointing into a git worktree that was then removed, which is how M6's acceptance run found it. The
+daemon keeps serving the API, the heartbeat and the terminal socket, and every request for the
+dashboard answers **503** naming the path and saying how, with one line in the journal the first time
+and another when the directory comes back.
+
 **The default build embeds nothing**, and that is R-24: a build that wants `web/dist`
 unconditionally makes every `fmt`, `clippy`, `test` and cross-build job depend on npm.
 

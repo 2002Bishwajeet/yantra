@@ -150,10 +150,19 @@ fixed at build time and has nothing to mistype, while the variable is typed by a
 time. Falling back would leave someone editing the directory they pointed at while a stale copy
 ignored them — R-23's confident lie, which is what the refusal exists to prevent.
 
-Two failure shapes, deliberately different. **Unset** is a normal deployment — the API serves alone
+Three failure shapes, deliberately different. **Unset** is a normal deployment — the API serves alone
 and `/` says so *and says how*, or serves the embedded copy when the binary was built with one.
 **Set but wrong** refuses at startup, because a `ServeDir` over a missing directory answers 404 to
 everything, and that reads as a broken dashboard rather than a typo in one environment variable.
+**Right at startup and gone afterwards** is the same 404 that the startup refusal exists to prevent,
+arriving too late for it: M6's acceptance run had `YANTRA_WEB` pointing into a git worktree that was
+then deleted, and the daemon went on answering `/` with an empty 404 and said nothing. It is now a
+**`503` naming the path and saying how**, plus a log line said once and another when the directory
+comes back. **Do not make it an exit** — the API, the heartbeat and the terminal socket are still
+serving, and a daemon that dies because a directory vanished is worse than one that reports it. The
+check hangs off the 404 path rather than the request path, because while the directory is there the
+SPA fallback means almost nothing 404s. **The embedded half cannot have this failure**: its files are
+a table the compiler built.
 
 One thing the tests record because it is not obvious: a path that climbs out of the root answers
 **200 with the app**, not 403 or 404. `ServeDir` refuses the climb and the SPA fallback then treats
