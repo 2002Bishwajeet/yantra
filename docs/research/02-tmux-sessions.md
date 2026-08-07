@@ -63,6 +63,19 @@ every pane and yields structured events instead of scraping. **Honest caveat on 
 browser tabs = two tmux clients, so the smaller clamps pane size. Set `window-size latest` / `aggressive-resize`,
 accept it, or go to (c).
 
+> **2026-08-04 (Y-131): the caveat is real and its mechanism is not the one written above.** `window-size` already
+> defaults to `latest` and `aggressive-resize` to `off`, so the suggested settings were never absent. And **nothing
+> clamps to the smaller client**: with two live clients on one window, measured through `pty::Terminal` against a real
+> tmux, a **larger** latecomer takes the window exactly as a smaller one does. `latest` means the client used *last* —
+> attaching takes the window, and then a single keystroke on any other client takes it back while both are still
+> attached, so the size follows whoever is typing. Its cost is bounded and reversible: the pane reflows to the narrow
+> client and reflows back when that client leaves, with the text intact, and a window with one client left returns to
+> that client's size untouched. So the choice the table offers is not between three mitigations — it is *accept*, and
+> Yantra sets no tmux option for this. Recorded as **I-54**; the alternative `window-size manual` was measured too and
+> stops the *only* client resizing its own window, which is why it was rejected. Verified on tmux **3.5a** (the CI
+> fixture) and **3.7b** (`cachyos-g14`), step for step identical. `aggressive-resize` was not measured — it governs a
+> window smaller than the session, which is not this.
+
 ### 4. Surviving a reboot
 
 tmux sessions are children of the `tmux server`; reboot kills it and everything in it. All **[D]**: **tmux-resurrect**

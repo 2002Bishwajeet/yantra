@@ -8,11 +8,11 @@
 //!
 //! **A failed look replaces the previous good one**, which is `refresh.rs`'s
 //! behaviour and is kept deliberately: every error a class can raise here is
-//! local and persistent — `tailscale` missing, a malformed workspace file, no
-//! config directory — so a retained stale reading would hide a fault the
-//! operator has to fix, and go on hiding it. The transient case that would
-//! justify staleness is a *machine* that did not answer, and Y-054 already
-//! keeps that inside a successful reading rather than losing it.
+//! local and persistent — `tailscale` missing, no config directory — so a
+//! retained stale reading would hide a fault the operator has to fix, and go on
+//! hiding it. The transient cases stay inside a successful reading rather than
+//! being lost: a *machine* that did not answer (Y-054), and a workspace *file*
+//! that did not load (Y-141).
 //!
 //! DTOs live here rather than as `Serialize` on `yantra_core`'s types: a JSON
 //! body is rendering, and ADR-0005 put rendering in the caller.
@@ -56,10 +56,18 @@ async fn machines(State(model): State<Model>, State(beats): State<Beats>) -> imp
     }))
 }
 
+/// The look succeeding and a file in it being unusable are different things
+/// (Y-141), so a broken `.toml` is an entry of `data` rather than the whole
+/// answer becoming `looked: "failed"`.
 async fn workspaces(State(model): State<Model>) -> impl IntoResponse {
     let snapshot = model.read().await.clone();
-    Json(Answer::of(snapshot.workspaces.as_deref(), |workspaces| {
-        workspaces.iter().map(Workspace::of).collect::<Vec<_>>()
+    Json(Answer::of(snapshot.workspaces.as_deref(), |listing| {
+        listing
+            .workspaces
+            .iter()
+            .map(Listed::of)
+            .chain(listing.unusable.iter().map(Listed::unusable))
+            .collect::<Vec<_>>()
     }))
 }
 
@@ -92,15 +100,25 @@ async fn workspace_status(State(model): State<Model>, Path(name): Path<String>) 
             .into_response();
         }
     };
-    match WorkspaceStatus::find(fleet, &name) {
+    match WorkspaceStatus::find(&fleet.machines, &name) {
         Some(data) => Json(Answer::Ok { age_seconds, data }).into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(Missing {
-                error: format!("no workspace named `{name}`"),
+                error: absent(fleet, &name),
             }),
         )
             .into_response(),
+    }
+}
+
+/// A file that did not load is not a workspace that is not there, and saying it
+/// is would send someone looking for a file sitting in the directory broken
+/// (R-23). Still a 404: there is no workspace to report a state for either way.
+fn absent(fleet: &yantra_core::status::Fleet, name: &str) -> String {
+    match fleet.unusable.iter().find(|one| one.name == name) {
+        Some(unusable) => because(&unusable.error),
+        None => format!("no workspace named `{name}`"),
     }
 }
 
@@ -216,20 +234,47 @@ impl Beat {
 }
 
 #[derive(Debug, serde::Serialize)]
-struct Workspace {
+struct Listed {
     name: String,
-    machine: String,
-    repo: String,
-    startup: Option<String>,
+    #[serde(flatten)]
+    loaded: Loaded,
 }
 
-impl Workspace {
+/// Y-054's rule applied to a file rather than a machine: one that did not load
+/// stays in the list under its name carrying why, rather than becoming an
+/// absence. The page names it below the table instead of drawing it as a row —
+/// see `web/src/App.tsx` for what a row would have had nothing to put in.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "loaded", rename_all = "lowercase")]
+enum Loaded {
+    Yes {
+        machine: String,
+        repo: String,
+        startup: Option<String>,
+    },
+    No {
+        error: String,
+    },
+}
+
+impl Listed {
     fn of(workspace: &yantra_core::workspace::Workspace) -> Self {
         Self {
             name: workspace.name.clone(),
-            machine: workspace.machine.clone(),
-            repo: workspace.repo.display().to_string(),
-            startup: workspace.startup.clone(),
+            loaded: Loaded::Yes {
+                machine: workspace.machine.clone(),
+                repo: workspace.repo.display().to_string(),
+                startup: workspace.startup.clone(),
+            },
+        }
+    }
+
+    fn unusable(unusable: &yantra_core::workspace::Unusable) -> Self {
+        Self {
+            name: unusable.name.clone(),
+            loaded: Loaded::No {
+                error: because(&unusable.error),
+            },
         }
     }
 }
@@ -425,6 +470,7 @@ mod tests {
     use yantra_core::snapshot::Snapshot;
     use yantra_core::status::{self, Report};
     use yantra_core::tmux::Summary;
+    use yantra_core::workspace::{Listing, Unusable};
 
     async fn get(fleet: Fleet, path: &str) -> (StatusCode, Value) {
         let response = router()
@@ -542,6 +588,7 @@ mod tests {
             sessions: Some(Arc::new(Reading::new(Err(sessions::Error::Workspace(
                 yantra_core::workspace::Error::InvalidName {
                     name: "has.dot".into(),
+                    path: "/home/<user>/.config/yantra/workspaces/has.dot.toml".into(),
                 },
             ))))),
             ..Snapshot::default()
@@ -561,7 +608,10 @@ mod tests {
     #[tokio::test]
     async fn a_stale_reading_is_served_with_its_age_rather_than_as_live() {
         let model = holding(Snapshot {
-            workspaces: Some(Arc::new(Reading::new(Ok(Vec::new())))),
+            workspaces: Some(Arc::new(Reading::new(Ok(Listing {
+                workspaces: Vec::new(),
+                unusable: Vec::new(),
+            })))),
             ..Snapshot::default()
         });
         tokio::time::sleep(Duration::from_millis(1_100)).await;
@@ -611,6 +661,74 @@ mod tests {
             answers[1]["error"]
                 .as_str()
                 .is_some_and(|e| e.contains("connection timed out")),
+            "{body}"
+        );
+    }
+
+    /// Y-141 on the wire, and the same assertion as the machine one above: the
+    /// file that did not load is in the array carrying why, and the workspace
+    /// beside it is still there — before this, one broken `.toml` made the whole
+    /// answer `looked: "failed"` and emptied the page.
+    #[tokio::test]
+    async fn a_workspace_file_that_did_not_load_reaches_the_json_with_its_reason() {
+        let model = holding(Snapshot {
+            workspaces: Some(Arc::new(Reading::new(Ok(Listing {
+                workspaces: vec![workspace("api", "cachyos-g14")],
+                unusable: vec![Unusable {
+                    name: "site".into(),
+                    error: yantra_core::workspace::Error::Blank {
+                        name: "site".into(),
+                        path: "/home/<user>/.config/yantra/workspaces/site.toml".into(),
+                        field: "machine",
+                    },
+                }],
+            })))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(model, "/workspaces").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        let listed = body["data"].as_array().expect("one entry per file");
+        assert_eq!(listed.len(), 2, "{body}");
+        assert_eq!(listed[0]["loaded"], "yes");
+        assert_eq!(listed[0]["machine"], "cachyos-g14");
+        assert_eq!(listed[1]["loaded"], "no");
+        assert_eq!(listed[1]["name"], "site");
+        assert!(listed[1].get("machine").is_none(), "{body}");
+        assert!(
+            listed[1]["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("site.toml") && e.contains("machine")),
+            "the file and the field, or nobody can fix it: {body}"
+        );
+    }
+
+    /// A file sitting in the directory broken is not a name nobody has used, and
+    /// answering the second sends someone looking for a file that is right
+    /// there (R-23). The status is still 404 — there is no workspace either way.
+    #[tokio::test]
+    async fn a_status_asked_for_an_unusable_file_says_why_rather_than_no_such_workspace() {
+        let model = looking_past(
+            vec![on_machine(
+                "bishwajeets-macbook-pro",
+                Ok(vec![report("api", Verdict::Running)]),
+            )],
+            vec![Unusable {
+                name: "site".into(),
+                error: yantra_core::workspace::Error::Blank {
+                    name: "site".into(),
+                    path: "/home/<user>/.config/yantra/workspaces/site.toml".into(),
+                    field: "repo",
+                },
+            }],
+        );
+
+        let (code, body) = get(model, "/workspaces/site/status").await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("site.toml") && e.contains("repo")),
             "{body}"
         );
     }
@@ -752,9 +870,16 @@ mod tests {
         }
     }
 
-    fn looking_at(fleet: Vec<MachineStatus>) -> Fleet {
+    fn looking_at(machines: Vec<MachineStatus>) -> Fleet {
+        looking_past(machines, Vec::new())
+    }
+
+    fn looking_past(machines: Vec<MachineStatus>, unusable: Vec<Unusable>) -> Fleet {
         holding(Snapshot {
-            agents: Some(Arc::new(Reading::new(Ok(fleet)))),
+            agents: Some(Arc::new(Reading::new(Ok(status::Fleet {
+                machines,
+                unusable,
+            })))),
             ..Snapshot::default()
         })
     }
@@ -776,6 +901,7 @@ mod tests {
             agents: Some(Arc::new(Reading::new(Err(status::Error::Workspace(
                 yantra_core::workspace::Error::InvalidName {
                     name: "has.dot".into(),
+                    path: "/home/<user>/.config/yantra/workspaces/has.dot.toml".into(),
                 },
             ))))),
             ..Snapshot::default()

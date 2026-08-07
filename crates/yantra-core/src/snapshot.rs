@@ -29,8 +29,8 @@ use std::time::{Duration, Instant};
 
 use crate::inventory::{self, MachineInfo};
 use crate::sessions::{self, MachineSessions};
-use crate::status::{self, MachineStatus};
-use crate::workspace::{self, Workspace};
+use crate::status::{self, Fleet};
+use crate::workspace::{self, Listing};
 
 /// One look, and the moment it finished.
 ///
@@ -61,12 +61,14 @@ impl<T> Reading<T> {
 
 /// What the tailnet said, or why it could not be asked.
 pub type Machines = Reading<Result<Vec<MachineInfo>, inventory::Error>>;
-pub type Workspaces = Reading<Result<Vec<Workspace>, workspace::Error>>;
+/// The workspaces the directory holds, and the files in it that are not
+/// workspaces — a look that succeeded can still carry a broken file (Y-141).
+pub type Workspaces = Reading<Result<Listing, workspace::Error>>;
 /// One entry per machine, each carrying its own answer or its own failure.
 pub type Sessions = Reading<Result<Vec<MachineSessions>, sessions::Error>>;
 /// Also one entry per machine rather than per workspace — see
 /// [`crate::status::fleet`] for what that costs and why.
-pub type Agents = Reading<Result<Vec<MachineStatus>, status::Error>>;
+pub type Agents = Reading<Result<Fleet, status::Error>>;
 
 /// Each class costs something different to look at, so each is looked at on its
 /// own and carries its own age. Behind an [`Arc`] so a handler can take the
@@ -107,7 +109,10 @@ mod tests {
     #[test]
     fn cloning_a_snapshot_does_not_reset_an_age() {
         let snapshot = Snapshot {
-            workspaces: Some(Arc::new(Reading::new(Ok(Vec::new())))),
+            workspaces: Some(Arc::new(Reading::new(Ok(Listing {
+                workspaces: Vec::new(),
+                unusable: Vec::new(),
+            })))),
             ..Snapshot::default()
         };
         std::thread::sleep(Duration::from_millis(20));

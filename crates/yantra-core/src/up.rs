@@ -5,7 +5,7 @@
 //! return value the caller can assert on, not a promise.
 
 use crate::agent::{self, Launch};
-use crate::ssh::{self, Machine, Ssh};
+use crate::ssh::{self, Machine, Os, Ssh};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Opened, Tmux};
 use crate::workspace::{self, Workspace};
@@ -70,6 +70,18 @@ pub enum Error {
         machine: String,
     },
 
+    /// ADR-0018 §1. A tmux server started by an ssh command sits in launchd's
+    /// `Background` domain, and every pane it forks is a process that cannot
+    /// read the login keychain (I-44) — so on macOS Yantra opens sessions in a
+    /// server the login session started, or in none at all.
+    #[error(
+        "`{machine}` runs macOS and has no tmux server, and Yantra will not start one there: \
+         panes in a server started over ssh cannot read the login keychain, so the agent would \
+         come up unauthenticated. Start one from a login session on that machine — in Terminal: \
+         `tmux new-session -d`"
+    )]
+    NoLoginServer { machine: String },
+
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
 }
@@ -95,10 +107,18 @@ pub async fn up(name: &str, term: &str, agent: Option<Agent>) -> Result<Report, 
 
     let ssh = Ssh::new(machine_for(&workspace)?)?;
     let tmux = Tmux::resolve(&ssh).await?;
+    let os = ssh::os(&ssh).await?;
     let term = terminfo::choose(&ssh, term).await?;
 
+    // Ahead of the gate rather than only inside `open`: on macOS that gate runs
+    // inside the server this refuses to create, so asking here is what names the
+    // reason instead of leaving the check to fail at a socket that is not there.
+    require_login_server(&ssh, &tmux, os, &workspace.machine).await?;
+
     let launch = match agent {
-        Some(Agent::Claude) => Some(agent::prepare(&ssh, &workspace.repo.to_string_lossy()).await?),
+        Some(Agent::Claude) => {
+            Some(agent::prepare(&ssh, &workspace.repo.to_string_lossy(), &tmux, os).await?)
+        }
         None => None,
     };
 
@@ -107,6 +127,7 @@ pub async fn up(name: &str, term: &str, agent: Option<Agent>) -> Result<Report, 
         &tmux,
         &workspace,
         launch.as_ref().map(|l| l.command.as_str()),
+        os,
     )
     .await?;
 
@@ -127,17 +148,43 @@ pub async fn up(name: &str, term: &str, agent: Option<Agent>) -> Result<Report, 
 ///
 /// `agent_command` replaces the workspace's own `startup` rather than joining
 /// it; [`up`] refuses the case where both are set, so only one can arrive here.
+///
+/// `os` arrives as an argument rather than being read from the machine here, so
+/// a container test on Linux can drive the macOS branch of
+/// [`require_login_server`] and see the refusal.
 pub async fn open<E: ssh::Exec>(
     exec: &E,
     tmux: &Tmux,
     workspace: &Workspace,
     agent_command: Option<&str>,
+    os: Os,
 ) -> Result<Opened, Error> {
+    require_login_server(exec, tmux, os, &workspace.machine).await?;
     let repo = workspace.repo.to_string_lossy();
     ensure_repo(exec, workspace, &repo).await?;
     let startup = agent_command.or(workspace.startup.as_deref());
     let opened = tmux.ensure(exec, &workspace.name, &repo, startup).await?;
     Ok(opened)
+}
+
+/// ADR-0018 §1: on macOS, refuse rather than create the tmux server.
+///
+/// Linux is untouched — I-1's plain `new-session -d` with `duplicate session:`
+/// treated as success is reached exactly as before, and this costs that platform
+/// no round trip at all. [`Tmux::list`] already answers an empty vec when there
+/// is no server, so *is one running* needs no new tmux primitive.
+pub(crate) async fn require_login_server<E: ssh::Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    os: Os,
+    machine: &str,
+) -> Result<(), Error> {
+    if os == Os::Other || !tmux.list(exec).await?.is_empty() {
+        return Ok(());
+    }
+    Err(Error::NoLoginServer {
+        machine: machine.to_owned(),
+    })
 }
 
 /// Refuses a `repo` the machine does not have, before anything is opened.

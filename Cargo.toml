@@ -22,20 +22,26 @@ toml = "1"
 # etcetera over dirs: `dirs` pulls option-ext (MPL-2.0), and its macOS config dir
 # is ~/Library/Application Support, not the ~/.config we document.
 etcetera = "0.11"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "signal", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "signal", "io-util", "sync"] }
 base64 = "0.23"
 yantra-core = { path = "crates/yantra-core" }
 getrandom = "0.4"
 # The heartbeat's `sent_at` is the first timestamp Yantra writes (ADR-0013).
 # `serde-well-known` is the whole of what it needs: RFC 3339 in and out.
 time = { version = "0.3", features = ["serde-well-known"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 tower = { version = "0.5", features = ["util"] }
 # `fs` only: `ServeDir` resolves paths against the root and refuses to escape it,
 # which is the part of static serving that is worth not writing by hand.
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.7", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Reached only under yantrad's `embed-dashboard` feature. A proc macro rather
+# than a build script, so nothing about it runs on a build that leaves the
+# feature off — which is R-24's first clause, avoided by construction.
+include_dir = "0.7"
+portable-pty = "0.9"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

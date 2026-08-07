@@ -75,6 +75,80 @@ impl Machine {
     fn known_hosts(&self) -> PathBuf {
         self.state_dir.join("known_hosts")
     }
+
+    /// The connection every `ssh` Yantra runs shares: one multiplexed socket per
+    /// machine (I-20) inside I-28's path budget, and this machine's own
+    /// known-hosts rather than the caller's.
+    fn connection_args(&self) -> Vec<String> {
+        let mut options = vec![
+            "BatchMode=yes".to_owned(),
+            "StrictHostKeyChecking=accept-new".to_owned(),
+            "LogLevel=ERROR".to_owned(),
+            "ConnectTimeout=10".to_owned(),
+            // The only defence against a host that freezes without closing TCP.
+            "ServerAliveInterval=15".to_owned(),
+            "ServerAliveCountMax=3".to_owned(),
+            "ControlMaster=auto".to_owned(),
+            format!("ControlPersist={CONTROL_PERSIST}"),
+            format!("ControlPath={}", self.control_path().display()),
+            format!("UserKnownHostsFile={}", self.known_hosts().display()),
+        ];
+
+        let mut args = Vec::new();
+        if let Some(port) = self.port {
+            args.push("-p".to_owned());
+            args.push(port.to_string());
+        }
+        if let Some(identity) = &self.identity {
+            args.push("-i".to_owned());
+            args.push(identity.display().to_string());
+            options.push("IdentitiesOnly=yes".to_owned());
+        }
+        for option in options {
+            args.push("-o".to_owned());
+            args.push(option);
+        }
+        args
+    }
+
+    /// The control sockets live here, and `ssh` will not create the directory.
+    fn prepare_sockets(&self) -> Result<(), Error> {
+        let sockets = self.state_dir.join("cm");
+        std::fs::create_dir_all(&sockets).map_err(|source| Error::StateDir {
+            path: sockets,
+            source,
+        })
+    }
+}
+
+/// Which operating system the far side answered with, to the resolution the two
+/// macOS code paths need (ADR-0018 §1 and §5) and no finer.
+///
+/// Deliberately not [`crate::inventory::Os`]: that one is what *Tailscale* said
+/// about a node, and ADR-0009 leaves no key joining a workspace's `machine` to
+/// one of those. This is what the machine itself answered on this connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Os {
+    MacOs,
+    Other,
+}
+
+/// Asks the machine what it runs.
+///
+/// A `uname` that did not answer is an error rather than [`Os::Other`]: the
+/// caller gates a refusal on this, and defaulting would silently disable it on
+/// the one platform it exists for (R-23).
+pub async fn os<E: Exec>(exec: &E) -> Result<Os, Error> {
+    let out = exec.exec("uname -s").await?;
+    let said = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.success() || said.is_empty() {
+        return Err(Error::Uname { said });
+    }
+    Ok(if said == "Darwin" {
+        Os::MacOs
+    } else {
+        Os::Other
+    })
 }
 
 /// What the remote command did. Only produced when the sentinel came back, so
@@ -117,6 +191,9 @@ pub enum Error {
     /// deliberately distinct from a command that ran and failed.
     #[error("ssh to {host} failed before the command reported a status: {diagnosis}")]
     Transport { host: String, diagnosis: String },
+
+    #[error("could not ask that machine which operating system it runs: `uname -s` said `{said}`")]
+    Uname { said: String },
 }
 
 /// The seam the layers above are tested against (§B2). Implementations of this
@@ -148,51 +225,38 @@ impl Ssh {
         }
         Ok(Self { machine })
     }
+
+    /// The argv for an `ssh` that must have a terminal at both ends — the third
+    /// call shape, and the one [`Exec`] cannot express. Same multiplexed socket
+    /// and same known-hosts as [`Exec::exec`]; `-tt` where that sets
+    /// `RequestTTY=no`, and ssh's own diagnostics left on the screen the user is
+    /// looking at.
+    pub(crate) fn tty_argv(&self, command: &str) -> Result<Vec<String>, Error> {
+        self.machine.prepare_sockets()?;
+        let mut args = self.machine.connection_args();
+        args.push("-tt".to_owned());
+        args.push(self.machine.destination());
+        args.push("--".to_owned());
+        args.push(command.to_owned());
+        Ok(args)
+    }
 }
 
 impl Exec for Ssh {
     async fn exec(&self, command: &str) -> Result<Output, Error> {
         let m = &self.machine;
 
-        let sockets = m.state_dir.join("cm");
-        std::fs::create_dir_all(&sockets).map_err(|source| Error::StateDir {
-            path: sockets.clone(),
-            source,
-        })?;
+        m.prepare_sockets()?;
 
         let log = LogFile::new(&m.state_dir)?;
         let nonce = nonce()?;
 
         let mut cmd = tokio::process::Command::new("ssh");
         cmd.arg("-E").arg(log.path());
-        for opt in [
-            "BatchMode=yes",
-            "StrictHostKeyChecking=accept-new",
-            "LogLevel=ERROR",
-            // A ~/.ssh/config that forces a pty would corrupt stdout with CRLF
-            // and merge stderr into it.
-            "RequestTTY=no",
-            "ConnectTimeout=10",
-            // The only defence against a host that freezes without closing TCP.
-            "ServerAliveInterval=15",
-            "ServerAliveCountMax=3",
-            "ControlMaster=auto",
-        ] {
-            cmd.arg("-o").arg(opt);
-        }
-        cmd.arg("-o")
-            .arg(format!("ControlPersist={CONTROL_PERSIST}"));
-        cmd.arg("-o")
-            .arg(format!("ControlPath={}", m.control_path().display()));
-        cmd.arg("-o")
-            .arg(format!("UserKnownHostsFile={}", m.known_hosts().display()));
-        if let Some(port) = m.port {
-            cmd.arg("-p").arg(port.to_string());
-        }
-        if let Some(identity) = &m.identity {
-            cmd.arg("-i").arg(identity);
-            cmd.arg("-o").arg("IdentitiesOnly=yes");
-        }
+        cmd.args(m.connection_args());
+        // A ~/.ssh/config that forces a pty would corrupt stdout with CRLF and
+        // merge stderr into it.
+        cmd.arg("-o").arg("RequestTTY=no");
         cmd.arg(m.destination());
         cmd.arg(payload(command, &nonce));
 
@@ -382,6 +446,40 @@ mod tests {
             Ssh::new(machine),
             Err(Error::ControlPathTooLong { .. })
         ));
+    }
+
+    /// The two halves of the pty argv that a reader has to take on trust
+    /// otherwise: it is the same multiplexed connection, and it is the one
+    /// caller that must not be refused a terminal.
+    #[test]
+    fn the_pty_argv_shares_the_socket_and_never_refuses_a_terminal() {
+        let state_dir = std::env::temp_dir().join("yantra-tty-argv");
+        let ssh = Ssh::new(Machine {
+            host: "example".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: state_dir.clone(),
+        })
+        .expect("the path is short enough");
+
+        let argv = ssh.tty_argv("tmux attach -t '=demo'").expect("an argv");
+        let _ = std::fs::remove_dir_all(&state_dir);
+
+        assert!(
+            argv.iter()
+                .any(|arg| arg.starts_with("ControlPath=") && arg.contains("cm")),
+            "the pty rides the same socket as every other ssh: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|arg| arg == "RequestTTY=no"),
+            "`exec`'s refusal of a terminal must not follow it here: {argv:?}"
+        );
+        assert!(argv.contains(&"-tt".to_owned()));
+        assert_eq!(
+            argv.last().map(String::as_str),
+            Some("tmux attach -t '=demo'")
+        );
     }
 
     #[test]

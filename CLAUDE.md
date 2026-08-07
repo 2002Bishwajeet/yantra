@@ -126,9 +126,9 @@ path over an elegant abstraction. Resist generalising before the third use.
 
 ## B2. Orchestrate, don't reinvent
 
-Yantra coordinates `ssh`, `tmux`, `tailscale`, `docker`, and agent CLIs. If your design starts
-implementing a terminal multiplexer, an SSH client, or a container runtime, **stop** — that is the
-signal you have misread the project.
+Yantra coordinates `ssh`, `tmux`, `tailscale`, `docker`, and agent CLIs — `docker` names intended
+scope, not a shipped capability (Y-125). If your design starts implementing a terminal multiplexer,
+an SSH client, or a container runtime, **stop** — that is the signal you have misread the project.
 
 Concretely: transport is the **system `ssh` binary** with `ControlMaster` multiplexing (I-20), not
 `russh`. Keep SSH, tmux, telemetry and hardware behind narrow traits — these are the four seams where
@@ -158,8 +158,12 @@ traits' own implementations must be tested against the real thing.
   [`crates/yantra-core/tracker.md`](crates/yantra-core/tracker.md) holds most of them, and
   `tracker.md §1b` says where the rest are. They are rules research proved the hard way; violating
   one produces a bug that looks like something else.
-- **Commits carry no co-author, "Generated with", or AI-attribution trailers of any kind.** The repo
-  owner set this rule explicitly. Plain, professional messages only.
+- **Commits carry no AI attribution — no `Co-Authored-By` naming an assistant, no "Generated with",
+  no session trailer.** The repo owner set this rule explicitly. Plain, professional messages only.
+  **A bot trailer is not AI attribution** (owner, 2026-08-03): GitHub's squash merge lifts
+  `Co-authored-by: dependabot[bot]` out of the PR body, and it stays. The rule is about what is
+  claimed to have written the code, not about the trailer as a form — so an audit greps for the
+  assistant, not for `Co-Authored-By`.
 - Task IDs `Y-NNN` from `tracker.md`. Commits: `Y-030: add cargo workspace skeleton`.
   Branches: `y-030-cargo-skeleton`. One branch per issue, one PR per branch. **`Y-2xx` is reserved
   for the landing page**, which keeps its own tracker on its own branch — it has taken a number this
@@ -181,6 +185,11 @@ traits' own implementations must be tested against the real thing.
   a link that stops resolving is a broken build, a copied fact is a reader's problem — and when a
   count or a name must be restated, treat changing it as part of the work, not as tidying up
   afterwards.
+- **A milestone does not close until the whole-system documents say what shipped.**
+  [`docs/architecture.md`](docs/architecture.md), the root [`README.md`](README.md) and
+  [`llms.txt`](llms.txt) describe *state* rather than a change, so the rule above never catches them —
+  no one PR makes them wrong. Sweep them when a milestone row goes ✅: architecture.md still called
+  `yantrad` a health-check server three milestones after it stopped being one.
 - **A new instruction from the owner lands in the file that binds it, not only in the reply.** If it
   is how work is done it belongs here or in the crate's `CLAUDE.md`; if it is what to build it is a
   `tracker.md` row; if it is a decision it is an ADR. An instruction that lives only in a

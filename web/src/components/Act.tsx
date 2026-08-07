@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Opened, Resumed, Stopped, Workspace } from '@/api'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
-type Verb = 'up' | 'down' | 'resume'
+export type Verb = 'up' | 'down' | 'resume'
 
 type Acted =
   | { acted: 'no' }
@@ -18,9 +18,14 @@ const refusals: Record<number, string> = {
   400: 'That workspace name is not one the daemon accepts.',
   403: "This browser is not on a node this tailnet's owner holds.",
   404: 'The daemon knows no workspace by that name.',
+  // Y-135: a state the daemon named correctly — an agent holding at the trust
+  // dialog (I-49), one that is not logged in (I-44) — is not a crash.
+  409: 'Nothing broke and nothing ran: the machine already answers this, and the sentence below says what has to change first.',
   422: 'The dashboard sent a field the daemon does not know.',
   500: 'The verb ran and failed. What it says below is the whole chain.',
-  503: 'The daemon could not ask Tailscale who is calling, so nothing about you was decided.',
+  // Both halves, since Y-135: the tailnet could not say who is calling, or the
+  // workspace's own machine could not be asked.
+  503: 'Nothing could be asked, so nothing about you or that machine was decided and nothing ran.',
 }
 
 function refusal(status: number | null): string {
@@ -105,15 +110,26 @@ async function act(workspace: Workspace, verb: Verb): Promise<Acted> {
   }
 }
 
-const button =
+export const button =
   'border-input rounded-md border px-2 py-1 text-xs disabled:opacity-50'
 
 /** The three verbs as buttons, so a phone needs no terminal. They await ssh —
  *  ten seconds against a machine that is asleep — so every one of them is
- *  disabled while one is in flight rather than reading as already done. */
-export function Act({ workspace }: { workspace: Workspace }) {
+ *  disabled while one is in flight rather than reading as already done.
+ *
+ *  `verb` narrows it to one, for a caller that read the agent's state and knows
+ *  which verb that state is for (Y-136). Absent, all three are offered and the
+ *  daemon decides, which is what a caller with no state to read must do. */
+export function Act({
+  workspace,
+  verb,
+}: {
+  workspace: Workspace
+  verb?: Verb
+}) {
   const [outcome, setOutcome] = useState<Acted>({ acted: 'no' })
   const acting = outcome.acted === 'acting'
+  const offers = (one: Verb) => verb === undefined || verb === one
 
   const tap = async (verb: Verb) => {
     setOutcome({ acted: 'acting', verb })
@@ -123,31 +139,35 @@ export function Act({ workspace }: { workspace: Workspace }) {
   return (
     <div className="flex max-w-xs flex-col gap-2">
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={button}
-          disabled={acting}
-          onClick={() => void tap('up')}
-        >
-          {outcome.acted === 'acting' && outcome.verb === 'up'
-            ? 'starting…'
-            : workspace.startup === null
-              ? 'Start claude'
-              : 'Start'}
-        </button>
-        <button
-          type="button"
-          className={button}
-          disabled={acting}
-          onClick={() => void tap('down')}
-        >
-          {outcome.acted === 'acting' && outcome.verb === 'down'
-            ? 'stopping…'
-            : 'Stop'}
-        </button>
+        {offers('up') && (
+          <button
+            type="button"
+            className={button}
+            disabled={acting}
+            onClick={() => void tap('up')}
+          >
+            {outcome.acted === 'acting' && outcome.verb === 'up'
+              ? 'starting…'
+              : workspace.startup === null
+                ? 'Start claude'
+                : 'Start'}
+          </button>
+        )}
+        {offers('down') && (
+          <button
+            type="button"
+            className={button}
+            disabled={acting}
+            onClick={() => void tap('down')}
+          >
+            {outcome.acted === 'acting' && outcome.verb === 'down'
+              ? 'stopping…'
+              : 'Stop'}
+          </button>
+        )}
         {/* ADR-0015 refuses a workspace that starts something of its own, so
             the button is not offered where it could only ever be refused. */}
-        {workspace.startup === null && (
+        {offers('resume') && workspace.startup === null && (
           <button
             type="button"
             className={button}
@@ -174,7 +194,9 @@ export function Act({ workspace }: { workspace: Workspace }) {
       )}
 
       {outcome.acted === 'refused' && (
-        <Alert variant="destructive">
+        // A refusal the daemon reasoned about is not a crash, and the `409` is
+        // the one that reads as one if it is painted like a failure.
+        <Alert variant={outcome.status === 409 ? 'default' : 'destructive'}>
           <AlertTitle className="text-xs">
             {refusal(outcome.status)}
           </AlertTitle>

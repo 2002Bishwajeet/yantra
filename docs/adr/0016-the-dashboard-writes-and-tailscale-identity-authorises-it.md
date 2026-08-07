@@ -139,3 +139,23 @@ here is that granting them later has to be deliberate.
 > which is decision 4's own reasoning turned around, and it is only sound because the connection came
 > from `tailscaled` on this machine. That is a decision, so it gets its own task (**Y-118**) and, if
 > it changes what may be trusted, its own ADR.
+>
+> **2026-08-03 (Y-118): that ADR is written and is
+> [ADR-0017](0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md), which proposes taking
+> the caller's address from `X-Forwarded-For` when — and only when — the TCP peer is one of this
+> daemon's own bind addresses.** It amends how the caller's address is *obtained* in decisions 2 and
+> 4 and leaves the predicate, the live lookup and the closed failure alone. **It is proposed, not
+> accepted**: this line records where the decision went, not that it has been taken, and nothing
+> above changes until the owner takes it.
+
+> **Amendment, 2026-08-05 (Y-118): the owner took it, and the address decision 2 resolves is no
+> longer always the TCP peer.**
+>
+> [ADR-0017](0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md) is **accepted** and
+> built. Where the peer is one of this daemon's own bind addresses the caller's address now comes
+> from `X-Forwarded-For`, and everywhere else the peer stands exactly as written above. Nothing in
+> the decisions is retracted and the predicate is untouched — `whois`, live, same user, no tags,
+> everything else refused — so what the amendment above described as a hole is closed at its own
+> layer rather than by anything changing here. Read that ADR before this one's §4: identity still
+> never comes from a name in a header, and the *address* is believed only because the connection
+> arrived from this machine.

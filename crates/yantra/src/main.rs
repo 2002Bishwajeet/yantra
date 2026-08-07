@@ -13,12 +13,13 @@ use yantra_core::agent;
 use yantra_core::attach;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
+use yantra_core::notify;
 use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::up;
-use yantra_core::workspace::{self, Workspace};
+use yantra_core::workspace::{self, Listing};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -56,6 +57,25 @@ enum Command {
         #[arg(long)]
         startup: Option<String>,
     },
+    /// Change an existing workspace's fields
+    #[command(group(clap::ArgGroup::new("fields").required(true).multiple(true)
+        .args(["machine", "repo", "startup", "no_startup"])))]
+    Edit {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// ssh destination to run it on, as `~/.ssh/config` spells it
+        #[arg(long)]
+        machine: Option<String>,
+        /// Path to the repository **on that machine**, not on this one
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Command to run when the session opens, instead of an agent
+        #[arg(long, conflicts_with = "no_startup")]
+        startup: Option<String>,
+        /// Drop the startup command, so the session opens a plain shell
+        #[arg(long)]
+        no_startup: bool,
+    },
     /// Attach this terminal to a workspace's session
     Attach {
         /// Workspace name, without the `.toml`
@@ -88,6 +108,17 @@ enum Command {
     Ls {
         #[command(subcommand)]
         target: LsTarget,
+    },
+    /// Publish a message to the relay this machine is configured with
+    Notify {
+        /// What to say. It is sent as written and nothing is composed into it
+        message: String,
+        /// A headline shown above it
+        #[arg(long)]
+        title: Option<String>,
+        /// Urgency, 1 (min) to 5 (max)
+        #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
+        priority: Option<u8>,
     },
     /// Teach a machine about the terminal you are sitting at
     FixTerminfo {
@@ -123,6 +154,23 @@ async fn main() -> ExitCode {
             repo,
             startup,
         }) => new(&workspace, &machine, &repo, startup.as_deref()),
+        Some(Command::Edit {
+            workspace,
+            machine,
+            repo,
+            startup,
+            no_startup,
+        }) => {
+            edit(
+                &workspace,
+                &workspace::Changes {
+                    machine,
+                    repo,
+                    startup: startup.map(Some).or(no_startup.then_some(None)),
+                },
+            )
+            .await
+        }
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
@@ -137,6 +185,18 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Workspaces,
         }) => ls_workspaces(),
+        Some(Command::Notify {
+            message,
+            title,
+            priority,
+        }) => {
+            publish(notify::Message {
+                body: message,
+                title,
+                priority,
+            })
+            .await
+        }
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
@@ -243,11 +303,16 @@ async fn resume(name: &str) -> ExitCode {
 /// I-44, in the one place someone meets it. Without this the message reads as
 /// nonsense on a Mac where `claude` works perfectly in a terminal — which is
 /// every Mac, because the keychain is reachable there and not over ssh.
+///
+/// It no longer suggests `ssh <machine> claude auth status`: since ADR-0018 §5
+/// that is the one process whose answer is known to be wrong, and sending
+/// someone to reproduce a false negative is worse than saying nothing.
 const KEYCHAIN_NOTE: &str = "\
-\x20 note: on macOS the agent's token lives in the login keychain, which a process
-        launched over ssh cannot read — so a machine that works when you sit at
-        it still answers `not logged in` here. check with:
-          ssh <machine> claude auth status";
+\x20 note: on macOS the agent's token lives in the login keychain, and only a
+        process the login session forked can read it. yantra asks inside that
+        machine's tmux server for that reason, so this answer means the server
+        itself was started without the keychain — over ssh, most likely. start
+        one from a login session on that machine and try again.";
 
 async fn show_logs(name: &str, lines: usize) -> ExitCode {
     match logs::logs(name, lines).await {
@@ -387,6 +452,32 @@ fn new(name: &str, machine: &str, repo: &Path, startup: Option<&str>) -> ExitCod
     }
 }
 
+async fn edit(name: &str, changes: &workspace::Changes) -> ExitCode {
+    match yantra_core::edit::edit(name, changes).await {
+        Ok(edited) => {
+            let workspace = &edited.workspace;
+            if edited.changed {
+                println!("edited {} on {}", workspace.name, workspace.machine);
+            } else {
+                println!(
+                    "{} on {} already reads that way",
+                    workspace.name, workspace.machine
+                );
+            }
+            println!("  repo:   {}", workspace.repo.display());
+            match &workspace.startup {
+                Some(startup) => println!("  startup: {startup}"),
+                None => println!("  startup: none, so the session opens a shell"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
 async fn down(name: &str) -> ExitCode {
     match yantra_core::down::down(name).await {
         Ok(report) => {
@@ -469,6 +560,53 @@ fn downgrade_notice(machine: &str, wanted: &str) -> String {
     )
 }
 
+/// The one command that proves a topic, a token and egress from a box with no
+/// screen, so every refusal names the variable that would change it — and the
+/// token is never one of the things printed (§B4).
+async fn publish(message: notify::Message) -> ExitCode {
+    let Some(relay) = notify::from_env() else {
+        eprintln!("yantra: no relay is configured, so there is nowhere to publish to");
+        eprintln!("{}", relay_note());
+        return ExitCode::FAILURE;
+    };
+    match notify::post(&relay, message).await {
+        Ok(()) => {
+            println!("published");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, notify::Error::Refused { status: 401 | 403 })
+                && std::env::var_os(notify::RELAY_TOKEN).is_none()
+            {
+                eprintln!("{}", token_note());
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn relay_note() -> String {
+    format!(
+        "\x20 note: the topic is the address, so publishing needs one:\n\
+         \x20         {}=https://ntfy.sh/<topic> yantra notify 'hello'\n\
+         \x20       on the public server that topic is the only password there is,\n\
+         \x20       so make it one nobody guesses — or point this at your own ntfy.",
+        notify::RELAY_URL
+    )
+}
+
+/// A protected topic answers the same way a wrong one does, and the difference
+/// between them is a variable that is not set.
+fn token_note() -> String {
+    format!(
+        "\x20 note: that topic wants credentials and {} is not set.\n\
+         \x20       it is read from the environment and nowhere else — yantra never\n\
+         \x20       writes it to a file, a log or the API.",
+        notify::RELAY_TOKEN
+    )
+}
+
 async fn fix_terminfo(machine: &str) -> ExitCode {
     let term = local_term();
     match terminfo::install_on(machine, &term).await {
@@ -526,9 +664,16 @@ async fn ls_sessions() -> ExitCode {
 /// client of the daemon, so this works with no `yantrad` running.
 fn ls_workspaces() -> ExitCode {
     match workspace::list() {
-        Ok(workspaces) => {
-            print!("{}", render_workspaces(&workspaces));
-            ExitCode::SUCCESS
+        Ok(listing) => {
+            print!("{}", render_workspaces(&listing));
+            // Non-zero on a partial answer, exactly as `ls sessions`: the table
+            // is still printed, but a caller must be able to tell it is
+            // incomplete.
+            if listing.unusable.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         Err(err) => {
             report_error(&err);
@@ -537,8 +682,14 @@ fn ls_workspaces() -> ExitCode {
     }
 }
 
-fn render_workspaces(workspaces: &[Workspace]) -> String {
-    if workspaces.is_empty() {
+/// A file that did not load is named **under** the table rather than given a
+/// row in it, which is `render_sessions`'s shape for an unreachable machine.
+/// Every column here is something to act on and a broken file has none of them:
+/// no machine, nothing to attach to, and nothing `yantra edit` can repair, since
+/// `update` loads before it writes and the file is the fix.
+fn render_workspaces(listing: &Listing) -> String {
+    let workspaces = &listing.workspaces;
+    if workspaces.is_empty() && listing.unusable.is_empty() {
         return format!(
             "no workspaces yet — make one at {}/<name>.toml\n",
             workspace::workspaces_dir()
@@ -559,12 +710,36 @@ fn render_workspaces(workspaces: &[Workspace]) -> String {
         })
         .collect();
 
-    let mut out = table(&["WORKSPACE", "MACHINE", "REPO", "STARTUP"], &rows);
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(&["WORKSPACE", "MACHINE", "REPO", "STARTUP"], &rows)
+    };
     out.push_str(&format!(
         "\n{} workspace{}\n",
         workspaces.len(),
         if workspaces.len() == 1 { "" } else { "s" }
     ));
+
+    for unusable in &listing.unusable {
+        out.push_str(&format!(
+            "  {} unusable: {}\n",
+            unusable.name,
+            chain(&unusable.error)
+        ));
+    }
+    out
+}
+
+/// The chain `report_error` prints, on one line: a footer under a table has no
+/// second line to give it, and the useful detail is a level or two down.
+fn chain(err: &dyn std::error::Error) -> String {
+    let mut out = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        out.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
     out
 }
 
@@ -769,6 +944,7 @@ mod tests {
     use super::*;
     use yantra_core::inventory::Os;
     use yantra_core::tmux::Summary;
+    use yantra_core::workspace::Workspace;
 
     /// clap's own check: conflicting flags, duplicate names, bad defaults.
     #[test]
@@ -800,6 +976,110 @@ mod tests {
         assert!(
             Cli::try_parse_from(["yantra", "up", "demo", "--agent", "aider"]).is_err(),
             "an agent Yantra does not ship must be refused by name, not started"
+        );
+    }
+
+    /// The message is the whole of what is required: a title and a priority are
+    /// ntfy's headers, and 1–5 is the scale it documents, so a 9 is refused here
+    /// rather than by a relay on a box nobody is looking at.
+    #[test]
+    fn notify_takes_a_message_and_bounds_the_priority() {
+        let plain =
+            Cli::try_parse_from(["yantra", "notify", "needs you"]).expect("a body is enough");
+        assert!(matches!(
+            plain.command,
+            Some(Command::Notify {
+                title: None,
+                priority: None,
+                ..
+            })
+        ));
+
+        let dressed = Cli::try_parse_from([
+            "yantra",
+            "notify",
+            "needs you",
+            "--title",
+            "api",
+            "--priority",
+            "5",
+        ])
+        .expect("a title and a priority parse");
+        assert!(matches!(
+            dressed.command,
+            Some(Command::Notify {
+                priority: Some(5),
+                ..
+            })
+        ));
+
+        assert!(
+            Cli::try_parse_from(["yantra", "notify", "hi", "--priority", "9"]).is_err(),
+            "a priority ntfy has no meaning for is refused by name"
+        );
+        assert!(Cli::try_parse_from(["yantra", "notify"]).is_err());
+    }
+
+    /// Every field is optional on its own and at least one is mandatory
+    /// together, because `yantra edit demo` asks for nothing and a verb that
+    /// silently did nothing would read as one that worked.
+    #[test]
+    fn edit_takes_any_field_but_needs_at_least_one() {
+        let one = Cli::try_parse_from(["yantra", "edit", "demo", "--repo", "/srv/x"])
+            .expect("one field is enough");
+        assert!(matches!(
+            one.command,
+            Some(Command::Edit {
+                machine: None,
+                startup: None,
+                no_startup: false,
+                ..
+            })
+        ));
+
+        Cli::try_parse_from([
+            "yantra",
+            "edit",
+            "demo",
+            "--machine",
+            "mac",
+            "--startup",
+            "nvim",
+        ])
+        .expect("several fields at once");
+        assert!(
+            Cli::try_parse_from(["yantra", "edit", "demo"]).is_err(),
+            "an edit that names no field has nothing to do"
+        );
+    }
+
+    /// The two ways to spell a `startup` are mutually exclusive: `--startup ''`
+    /// is refused by the library, so clearing one needs its own flag rather than
+    /// an empty value, and asking for both at once is a contradiction.
+    #[test]
+    fn a_startup_can_be_set_or_dropped_but_not_both() {
+        let dropped = Cli::try_parse_from(["yantra", "edit", "demo", "--no-startup"])
+            .expect("`--no-startup` parses");
+        assert!(matches!(
+            dropped.command,
+            Some(Command::Edit {
+                no_startup: true,
+                startup: None,
+                ..
+            })
+        ));
+
+        assert!(
+            Cli::try_parse_from([
+                "yantra",
+                "edit",
+                "demo",
+                "--startup",
+                "nvim",
+                "--no-startup"
+            ])
+            .is_err(),
+            "setting and dropping the same field is not an instruction"
         );
     }
 
@@ -1130,14 +1410,24 @@ mod tests {
         }
     }
 
+    fn listing(workspaces: Vec<Workspace>, unusable: Vec<workspace::Unusable>) -> Listing {
+        Listing {
+            workspaces,
+            unusable,
+        }
+    }
+
     /// A workspace with no `startup` is just a shell, which is a real state and
     /// not a missing one — so the cell is blank rather than saying `none`.
     #[test]
     fn a_workspace_with_no_startup_leaves_the_column_empty() {
-        let rendered = render_workspaces(&[
-            workspace("yantra", "cachyos-g14", Some("claude")),
-            workspace("scratch", "pi", None),
-        ]);
+        let rendered = render_workspaces(&listing(
+            vec![
+                workspace("yantra", "cachyos-g14", Some("claude")),
+                workspace("scratch", "pi", None),
+            ],
+            Vec::new(),
+        ));
         assert!(
             rendered.contains("yantra     cachyos-g14  /srv/yantra   claude"),
             "{rendered}"
@@ -1148,14 +1438,79 @@ mod tests {
         assert!(rendered.ends_with("2 workspaces\n"), "{rendered}");
     }
 
-    /// Absence is emptiness (`workspace::list` returns `Ok(vec![])` for a
+    /// Absence is emptiness (`workspace::list` returns an empty listing for a
     /// directory nobody has made), so this exits 0 — and a bare header row
     /// would tell a first-time user nothing about where to put a file.
     #[test]
     fn no_workspaces_names_where_one_goes_rather_than_printing_a_header() {
-        let rendered = render_workspaces(&[]);
+        let rendered = render_workspaces(&listing(Vec::new(), Vec::new()));
         assert!(rendered.contains("no workspaces yet"), "{rendered}");
         assert!(rendered.contains("<name>.toml"), "{rendered}");
+    }
+
+    /// Y-141's rule at the terminal: the file that did not load is named under
+    /// the table with its reason, and it takes none of the others with it.
+    #[test]
+    fn an_unusable_file_is_named_below_the_table_and_the_rest_still_print() {
+        let rendered = render_workspaces(&listing(
+            vec![workspace("yantra", "cachyos-g14", Some("claude"))],
+            vec![workspace::Unusable {
+                name: "site".to_owned(),
+                error: workspace::Error::Blank {
+                    name: "site".to_owned(),
+                    path: std::path::PathBuf::from("/srv/workspaces/site.toml"),
+                    field: "machine",
+                },
+            }],
+        ));
+
+        assert!(rendered.contains("yantra     cachyos-g14"), "{rendered}");
+        assert!(rendered.contains("1 workspace\n"), "{rendered}");
+        assert!(rendered.contains("site unusable:"), "{rendered}");
+        // The reason and the file, or the note sends nobody anywhere.
+        assert!(rendered.contains("empty `machine`"), "{rendered}");
+        assert!(rendered.contains("/srv/workspaces/site.toml"), "{rendered}");
+        // It is a note, not a row — the columns are all things to act on.
+        assert!(
+            !rendered.contains("site  \n") && !rendered.contains("\nsite "),
+            "an unusable file must not be drawn as a row: {rendered}"
+        );
+    }
+
+    /// A directory whose every file is broken is not an empty directory, so it
+    /// must not print the invitation to make a first workspace.
+    #[test]
+    fn a_directory_where_nothing_loads_says_so_rather_than_saying_it_is_empty() {
+        let rendered = render_workspaces(&listing(
+            Vec::new(),
+            vec![workspace::Unusable {
+                name: "site".to_owned(),
+                error: workspace::Error::InvalidName {
+                    name: "site".to_owned(),
+                    path: std::path::PathBuf::from("/srv/workspaces/site.toml"),
+                },
+            }],
+        ));
+
+        assert!(!rendered.contains("no workspaces yet"), "{rendered}");
+        assert!(rendered.contains("0 workspaces"), "{rendered}");
+        assert!(rendered.contains("site unusable:"), "{rendered}");
+    }
+
+    /// `report_error` walks the chain because the detail is a level down, and a
+    /// one-line footer that dropped it would name a fault nobody can act on.
+    #[test]
+    fn the_footer_carries_the_cause_and_not_only_the_headline() {
+        let error = workspace::Error::Unreadable {
+            name: "site".to_owned(),
+            path: std::path::PathBuf::from("/srv/workspaces/site.toml"),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+        assert!(
+            chain(&error).contains("permission denied"),
+            "{}",
+            chain(&error)
+        );
     }
 
     #[test]

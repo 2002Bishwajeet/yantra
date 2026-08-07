@@ -8,9 +8,18 @@ license.workspace = true
 [lints]
 workspace = true
 
+# Absent from `default` on purpose, and it must stay absent: turning it on needs
+# `web/dist`, which needs npm, which is R-24 arriving in every Rust job at once.
+# `just no-node` is the check that says so. `include_dir` is optional, so the
+# default build does not compile it — `cargo tree -p yantrad` is the proof.
+[features]
+embed-dashboard = ["dep:include_dir"]
+
 [dependencies]
 axum.workspace = true
+include_dir = { workspace = true, optional = true }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
@@ -21,7 +30,9 @@ yantra-core.workspace = true
 # `tower` is axum's own; it is here only so a test can drive the router
 # directly and assert what it refuses.
 [dev-dependencies]
-serde_json.workspace = true
+# The systemd fixture shells out to `podman` and reports what it said, the same
+# way the sshd one in `yantra-core` does.
+anyhow.workspace = true
 # A fixture beat cannot be built without it: `sent_at` is an `OffsetDateTime`.
 time.workspace = true
 tower.workspace = true

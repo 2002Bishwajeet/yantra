@@ -2,7 +2,7 @@
 
 **It serves, it looks, it answers, and it acts.** Y-069 made it an `axum` server, Y-070 gave it a
 background read model, Y-071 put that model on the wire at `/api`, Y-108 added `POST /heartbeat`, and
-Y-112 and Y-116 gave it the four writes a dashboard needs. The most useful thing you can do here is
+Y-112, Y-116 and Y-126 gave it the writes a dashboard needs. The most useful thing you can do here is
 still not write code before a milestone needs it.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
@@ -35,6 +35,25 @@ declined.
 **Test the refusal, not the bind.** A test asserting the daemon binds passes just as well when the
 fallback is `0.0.0.0`. That is R-22's stated retire condition and the shape to keep.
 
+## The refusal is the retry condition, and systemd is what waits
+
+[`yantrad.service`](yantrad.service) sits beside this file (Y-142). At a prompt `listen_on`'s refusal
+is a good error message; at boot it is a race, because `tailscaled` reports itself started when its
+socket is up rather than when the netmap has arrived. So the unit is `Restart=on-failure` with a
+`RestartSec` far enough apart that five refusals cannot reach systemd's ten-second start limit —
+which would leave a headless box `failed` permanently — and `After=tailscaled.service`, which orders
+the start and waits for no address. **Do not add an `ExecStartPre` that polls `tailscale status`**:
+that is a second retry mechanism in front of one that already exists.
+
+**It is a system unit, and `--user` with lingering lost on a measurement**: the user manager resolves
+`After=` among *user* units, where `tailscaled.service` is `not-found`, so the ordering this is
+written for would order against nothing. The price is paid in `ControlPath` — a system unit has no
+`XDG_RUNTIME_DIR`, so `machine_at` falls back to `data_dir()` and the path is 38 bytes rather than
+27, against I-28's 90.
+
+**What no restart covers is an address that changes while the daemon is healthy**, because nothing
+fails: I-58, recorded rather than fixed.
+
 ## The one write, and what it may not grow into
 
 `POST /heartbeat` ([ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md)
@@ -60,37 +79,101 @@ R-22 is unchanged as a boundary and larger as a blast radius — anything that r
 now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
 is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.
 
-## It serves the dashboard, from a directory
+## The one thing it sends, and the two rules that keep it useful
+
+`notify.rs` runs off the **agents** loop in `refresh.rs` and adds no poll, no ssh and no timer: two
+consecutive readings are its whole input, and [`yantra_core::notify`](../yantra-core/src/notify.rs)
+holds what a difference between them means. `Verdict` is the vocabulary — `AwaitingTrust` above all
+(I-49), then a `Running` that stopped being one — and **never a telemetry threshold**, which
+ADR-0013's non-goals rule out against this milestone by name.
+
+Four rules bind anything that touches it:
+
+- **The first look after a start says nothing.** Nothing is persisted, so a fresh daemon has no
+  previous state — and a `None` read as *everything just changed* mails a report about every session
+  on the fleet at every reboot. **A restart is therefore a hole**, recorded as I-58's neighbour in
+  [`tracker.md`](tracker.md) rather than fixed.
+- **A failed send drops that notification.** No queue, no retry, no replay. A queue is state on a box
+  whose whole point is that it holds none, and `yantra-agent`'s `Log` is the precedent for the
+  logging too: the first failure out loud, the rest swallowed until one lands.
+- **A look that failed tells nobody anything.** An unknown fleet is not a changed one, and the same
+  rule one level down is why a machine that could not be asked *keeps* the verdicts it had rather
+  than reading as gone — otherwise a laptop that sleeps announces itself every night and then hides
+  the crash it wakes up with.
+- **The reading is in the model before anything is sent**, and the whole pass has a budget well under
+  the refresh interval. A notifier that makes a browser wait on a relay is worse than one that drops.
+
+**The body names the workspace and the verdict and nothing else**: `Notification`
+has no field for a machine or a repo, so widening what a public relay is told is an edit here. The
+destination is a `Relay`, whose `Debug` is hand-written because both halves of it are secrets — the
+token by §B4 and Q5, and the topic because on ntfy.sh the topic *is* the password. No error below it
+carries either, which is why a failure that could quote the URL back is reported by kind instead.
+
+**Q16 was answered wider than it was asked** (Y-147): the relay is a general publish channel and this
+notifier is only its first caller, so a body is whatever the caller passed and Yantra composes
+nothing into it. What binds this crate is unchanged — the fleet notification is still a workspace and
+a verdict — and what changed is that this is now one caller's choice rather than the channel's limit.
+
+**The relay comes from the environment**: `YANTRA_NTFY_URL` and `YANTRA_NTFY_TOKEN`, read once in
+`main.rs` and handed to `refresh::spawn`. An absent URL is a daemon with no relay and is **not** a
+refusal to start — it is every deployment but the appliance, and it is the one this crate's tests
+run. The token is never a workspace field, never written to disk, never logged and never served,
+which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that leaves the tailnet.
+The startup line saying which of the two it got is there because a unit's environment is not the
+shell's, and a headless box has only the journal to say so.
+
+## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,
 so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
 `index.html` rather than a 404, which is what makes a deep link work.
 
-**Assets are a directory, not an embed.** R-24 is the reason: embedding makes every `fmt`, `clippy`,
-`test` and musl cross-build job depend on npm, and the only thing that needs one file to copy is the
-M7 appliance. Y-073's row describes a cargo feature for that; it arrives with the appliance that
-wants it, not before.
+**The default build embeds nothing, and R-24 is why**: a build that wants `web/dist` unconditionally
+makes every `fmt`, `clippy`, `test` and musl cross-build job depend on npm. Y-140 added the other
+half for the appliance that wanted one file to copy, and every part of its shape exists to keep that
+sentence true. The `embed-dashboard` feature is **absent from `default`**, `include_dir` is an
+**optional** dependency, and [`web/embedded.rs`](src/web/embedded.rs) is behind a `#[cfg]` — so a
+default build neither reads `web/dist` nor compiles the macro that would.
+
+**Nothing in `just check` or `just ci` may turn it on, and `--all-features` is the specific thing
+that must never appear.** `just lint` and `just test` do not pass it today, and one added later for
+tidiness would put npm on clippy, on the test job and on the cross-build at once, silently.
+**`just no-node` is that omission made into a red build**: it is part of `check`, it greps every
+recipe the Rust gate would run and `ci.yml` itself, and it fails if `include_dir` ever reaches the
+default dependency graph. The one job that *does* build with the feature is
+[`.github/workflows/embed.yml`](../../.github/workflows/embed.yml) — a workflow of its own, because
+`ci.yml` has no path filter and a Node step there runs on every Rust pull request.
+
+**`YANTRA_WEB` wins over the embedded copy, and a set-but-wrong one still refuses.** That is Y-140's
+one real decision and it is about which of the two may be silently wrong: the embedded dashboard is
+fixed at build time and has nothing to mistype, while the variable is typed by a person at deploy
+time. Falling back would leave someone editing the directory they pointed at while a stale copy
+ignored them — R-23's confident lie, which is what the refusal exists to prevent.
 
 Two failure shapes, deliberately different. **Unset** is a normal deployment — the API serves alone
-and `/` says so *and says how*. **Set but wrong** refuses at startup, because a `ServeDir` over a
-missing directory answers 404 to everything, and that reads as a broken dashboard rather than a typo
-in one environment variable.
+and `/` says so *and says how*, or serves the embedded copy when the binary was built with one.
+**Set but wrong** refuses at startup, because a `ServeDir` over a missing directory answers 404 to
+everything, and that reads as a broken dashboard rather than a typo in one environment variable.
 
 One thing the tests record because it is not obvious: a path that climbs out of the root answers
 **200 with the app**, not 403 or 404. `ServeDir` refuses the climb and the SPA fallback then treats
 the path as one the app routes, so a traversal attempt and a deep link are indistinguishable by
-status. Assert on the body.
+status. Assert on the body. **The embedded half answers it identically**, and its tests say so —
+there the climb needs no guard at all, because a lookup in a table the compiler built has no
+directory to walk.
 
 ## The routes that act
 
-`POST /api/workspaces` and `POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
-nothing more**, being `yantra new`, `up`, `down` and `resume`. The daemon
+`POST /api/workspaces`, `PATCH /api/workspaces/{name}` and
+`POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
+nothing more**, being `yantra new`, `edit`, `up`, `down` and `resume`. The daemon
 may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
 reach. A new verb here starts in the CLI.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
-the source address is resolved **live** through `whois`, and anything that is not this owner's own
-untagged node is refused. Three rules that are easy to get subtly wrong:
+the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
+untagged node is refused. *Which* address that is, is ADR-0017's — see the proxy section below.
+Three rules that are easy to get subtly wrong:
 
 - **A `tailscale` that cannot answer is `503`, never `403`.** Nothing was decided about the caller,
   and blaming them is a lie about which thing broke.
@@ -104,14 +187,108 @@ already taken, which is **`409`** rather than `400`. The caller asked for someth
 the world already answers, and telling them to fix their request would send them looking for a
 mistake they did not make.
 
-**A workspace created this way is not in the read model yet.** `refresh.rs` looks every 30 s, so
+**`PATCH` is the one that refuses**, and the refusal is [`edit.rs`](../yantra-core/src/edit.rs)'s
+rather than a guard added here (Y-126). Moving `machine` while a tmux session is open on the machine
+being left is **`409`**: the session would stay where nothing looks for it and every later verb would
+report it as absent (I-30), and `yantra down` is what clears it. A machine that could not be asked is
+**`503`** — R-23's shape, and the same reason a `tailscale` that cannot answer is not a `403`.
+**Absent and `null` are different on this route**: `"startup": null` clears the command and no
+`startup` key leaves it alone, which serde folds together unless the field is read into an
+`Option<Option<_>>` by hand — getting that wrong is how a `PATCH` blanks a field nobody named. A body
+naming no field is a `400`, exactly as `yantra edit` with no flags is a usage error.
+
+**`up`, `down` and `resume` name every variant they can refuse with, and none of them has a
+wildcard** (Y-135). Before this each mapped a workspace error and sent *everything else* to `500`, so
+a state the daemon had correctly identified reached the dashboard as *the verb ran and failed*: an
+agent holding at claude's trust dialog (I-49), and — far commoner — one that cannot read the macOS
+login keychain (I-44). The rule the mappers apply is the one `from_create` and `from_edit` already
+wrote down. **`409`** is a refusal about state: the world already answers and a person changes that
+answer, which covers the trust dialog, an agent whose credential the gate did not find, a session
+opened as a shell, a workspace that runs something of its own, a `repo` the machine does not have,
+and — since Y-151 — a macOS machine with **no tmux server**, which
+[ADR-0018](../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md) §1 forbids Yantra
+to start there and a person fixes by starting one from their own login session. **`503`** is
+nothing decided at all — ssh, tmux, terminfo, a status that could not be read, and a `resume` whose
+two sources disagree (R-23). **`500`** is left for what is genuinely this daemon's: no state
+directory, and a session id it could not generate. **Adding a variant to `up::Error`,
+`down::Error`, `resume::Error`, `agent::Error` or `status::Error` will not compile until it is given
+one of the three**, which is the whole point of the shape.
+
+**A workspace written this way is not in the read model yet.** `refresh.rs` looks every 30 s, so
 `GET /api/workspaces` keeps answering without it for up to that long — measured at 15 s on the first
-try. The `201` carries the whole workspace back for exactly this reason: a client that re-reads the
-list to find what it just made will draw an empty one.
+try. The `201` and the `PATCH`'s `200` carry the whole workspace back for exactly this reason: a
+client that re-reads the list to find what it just wrote will draw what was there before.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
 generalise the exception — a *read* that awaits ssh is still the bug that rule exists to prevent.
+
+## The route that hands a terminal over
+
+`GET /api/workspaces/{name}/terminal` upgrades to a WebSocket carrying
+[`pty::Terminal`](../yantra-core/src/pty.rs) (Y-129). **An upgrade is a `GET`, so it does not inherit
+the check above — and it is the route that most needs one.** `terminal.rs` calls `allowed()` by name
+before the upgrade rather than leaving a reader to notice: `up` starts a process Yantra chose, and a
+terminal runs whatever the person on the other end types.
+
+**The frames carry no envelope, because the protocol already carries two kinds.** Binary is terminal
+bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…,"term":…}`,
+and it must arrive **before** anything else, because a pty is opened with a window and a terminal and
+nothing else tells the daemon how big a browser is or which one it is; from the daemon it is the
+reason a terminal could not be opened, which a close frame cannot hold — that reason is capped at 123
+bytes and an ssh diagnosis is longer. The size is in `contract.gen.ts` beside every other shape on
+this seam, and is the first entry there that the *browser* writes rather than reads.
+
+**`term` is the caller's and this crate names none of its own** (Y-130). I-36 refuses a *user's*
+`TERM` as an input, and this is not one: it is a constant in the dashboard's own code, `xterm-256color`
+for the xterm.js it runs, and `terminfo::choose` probes it against the far side regardless. One
+message does both jobs, so it arrives again on every resize and is not read there — a caller cannot
+become a different terminal without opening another socket.
+
+**Do not log the stream, and do not buffer it.** Q5 closed *reference-only, always* and names a
+terminal stream in the sentence that closed it, so a resolved secret can be on this one. Log the
+lifecycle; never the payload, not truncated and not at debug. **Reconnect needs no buffer here**
+(Y-132): a browser whose socket dropped opens another, this route opens another pty, and the tmux on
+the far side draws the pane's current contents for whichever client attaches — measured, alternate
+screen included, in [`tests/pty.rs`](../yantra-core/tests/pty.rs). A window of the last N bytes would
+be a second copy of what tmux already has, and it is the copy Q5 is about.
+
+**The daemon originates a ping, and a peer that stops answering loses the socket** (Y-134). Nothing
+else here is on a timer, so before this a socket whose peer vanished held the `ssh` child, the pty
+master and the tmux client on the far side until a `send` failed — and a send needs the far side to
+print first, which an agent thinking quietly never does. **A timer measured on traffic is the wrong
+instrument in both directions**: output in progress is not idleness, and silence is not death. Only
+the pong separates them, and it is a protocol frame rather than the stream, so Q5's line above is
+untouched — nothing reads what is on it. Two consecutive unanswered pings twenty seconds apart end
+the socket, which drops the `Terminal`; a pong resets the count, so a terminal that prints nothing
+for an hour is never closed. The ping starts at the upgrade rather than at the pty, because the
+socket outlives the terminal at both ends and a caller that never sends a size holds a task too.
+`MissedTickBehavior::Delay` is load-bearing: `pty::open` can outlast an interval, and the default
+burst would deliver catch-up ticks as misses the peer was given no chance to answer.
+
+This route is authorised on both ports since Y-118 (ADR-0017), and its test is the refusal that
+proves it: a forwarded address resolving to a **tagged** node does not get an upgrade even though the
+TCP peer is ours. That the peer must be a real one is why these tests bind a **real `TcpListener`** —
+`WebSocketUpgrade` strips `OnUpgrade` during extraction, so a `tower::oneshot` never reaches the
+handler and would assert a status the authoriser never produced.
+
+## The dashboard's types are checked against these routes, not trusted to match
+
+`contract.rs` (Y-124) drives the real `api::router()` over a fake snapshot and commits every answer
+to [`web/src/contract.gen.ts`](../../web/src/contract.gen.ts) as TypeScript that `satisfies` the
+types in `web/src/api.ts`. **Move a DTO here and `just test` goes red**, saying `just fixtures`;
+regenerate without moving `api.ts` and `tsc` goes red instead. Before this the two sides were kept in
+step by convention, and a renamed field left every test green and the dashboard blank.
+
+TypeScript rather than JSON because an imported JSON module has its string literals widened to
+`string`, which none of `api.ts`'s discriminated unions accepts — the assertion has to sit where the
+literal is written. The write answers are serialised from their DTOs rather than fetched, since those
+handlers authorise a live tailnet caller and then await ssh; what that leaves unchecked is status
+codes, headers and every refusal body, none of which is JSON.
+
+**`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
+daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
+one message identically; that the daemon then accepts it is `terminal.rs`'s own test.
 
 ## TLS is not this crate's job, and the proxy costs it something
 
@@ -121,13 +298,30 @@ publicly-trusted certificate for the machine's `*.ts.net` name, so **do not term
 not add a cert crate** — the daemon speaks plain HTTP on 7717 and that is the whole design. It also
 proxies to the **tailnet address**, because loopback is refused above.
 
-**The proxy launders the source address, and that defeats the identity check.** Measured 2026-08-03:
-a request from another machine arrives at the backend from *this* node's address, with the caller in
-`X-Forwarded-For` and `Tailscale-User-Login`. Writes through 8443 are therefore all attributed to
-whichever machine runs the proxy — which is this owner's own untagged node, so they succeed, and
-ADR-0016's check rejects nothing it would otherwise have rejected. Its dated amendment records this;
-**Y-118** decides what to do. Until then, do not read `allowed()` as protection against a tagged or
-shared-in node — it is only that on the direct port.
+**The proxy launders the source address, and [ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
+is what unlaunders it** (Y-118, 2026-08-05). Measured 2026-08-03: a request from another machine
+arrives at the backend from *this* node's address, with the caller in `X-Forwarded-For` and
+`Tailscale-User-Login`. So the caller's address is the TCP peer **unless the peer is one of the
+addresses `listen_on` bound**, and then it is `X-Forwarded-For` — that condition and no other.
+`allowed()` is now protection on both ports.
+
+Three things about that rule are easy to get subtly wrong, and each is a security bug in a different
+direction:
+
+- **The trusted set is the bound addresses, not "local".** Not loopback, which is never bound; not
+  any private range. Widening it by one address gives whatever holds that address the run of the
+  fleet.
+- **An absent header is not a refusal.** It means nothing proxied the request, which is every call on
+  7717 — refusing it would leave the CLI's own port answering 503.
+- **One address or refuse.** `tailscaled` writes exactly one with `Set`, so a comma list, a second
+  header line or anything unparseable means something unmeasured is in the path. Do not take the
+  leftmost entry; that is how a caller-supplied entry becomes an identity.
+
+**The trust is in the local hop, not in `tailscale serve`.** Any process on this machine can connect
+to a bind address and name whatever caller it likes — no escalation under
+[ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md), since a
+local process can already call the library, but it is now written down. **Putting a second reverse
+proxy in front of 7717 is the condition to revisit that ADR.**
 
 ## Nothing expensive happens on the request path
 
@@ -135,6 +329,12 @@ shared-in node — it is only that on the direct port.
 or not anyone is looking, so a handler that calls `sessions::list` per request turns one open tab
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
+
+**Two things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
+at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
+rather than to a request. Neither licenses a **read** that awaits ssh, which is still the bug this
+module exists to prevent.
 
 The interval is a constant for the same reason the port is. `ControlPersist=300` means anything under
 five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the
@@ -147,10 +347,11 @@ and *the look itself failed*. I-47 is the same mistake one layer down. All four 
 the wrong one.
 
 **A failed look replaces the previous good one, and that is Y-071's decision rather than an
-accident.** Every class-level error here is local and persistent — `tailscale` missing, a malformed
-workspace file — so retaining a stale reading would hide a fault the operator has to fix, and go on
+accident.** Every class-level error here is local and persistent — `tailscale` missing, no config
+directory — so retaining a stale reading would hide a fault the operator has to fix, and go on
 hiding it. The transient case is a *machine* that did not answer, and that already survives inside a
-successful reading.
+successful reading. **A malformed workspace file is no longer one of them** (Y-141): it is an entry
+of `data` saying `loaded: "no"` with its reason, and the class stays `ok`.
 
 ## What is already decided
 

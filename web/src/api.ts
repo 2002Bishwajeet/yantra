@@ -42,6 +42,18 @@ export type Workspace = {
   startup: string | null
 }
 
+/** One entry of `GET /api/workspaces`. Y-054's rule applied to a file rather
+ *  than a machine: one that did not load stays in the list under its name
+ *  carrying why, and the workspaces beside it are still answered.
+ *
+ *  A failed entry is named *below* the table rather than drawn as a row in it —
+ *  it has no machine to show a state for, nothing for `ACT` or `TERMINAL` to
+ *  target, and `EDIT` cannot repair it, since `update` loads before it writes
+ *  and the file is the fix. */
+export type Listed =
+  | ({ loaded: 'yes' } & Workspace)
+  | { loaded: 'no'; name: string; error: string }
+
 /** `POST /api/workspaces/{name}/up`. `attached` beside `launched: false` is the
  *  idempotent success §B4 requires, and never a failure to report (I-30). */
 export type Opened = {
@@ -64,6 +76,15 @@ export type Stopped = {
 export type Resumed = {
   machine: string
   resumed: boolean
+  term: string
+}
+
+/** The text frame a browser sends on `GET /api/workspaces/{name}/terminal`,
+ *  first and on every resize. Binary frames either way are terminal bytes, and
+ *  a text frame coming back is why the terminal could not be opened. */
+export type TerminalSize = {
+  rows: number
+  cols: number
   term: string
 }
 

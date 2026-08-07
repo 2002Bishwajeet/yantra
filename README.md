@@ -86,6 +86,14 @@ a path on the *far* side, and `up` is what discovers it is not there, on that ma
 session exists. It does refuse an empty `--startup`: leaving the flag off is what means *just a
 shell*, and a blank one would be a command that cannot run.
 
+Changing one afterwards is `yantra edit`, which takes the same flags and rewrites only the ones you
+name. **It refuses to change `machine` while a session is open on the machine that field currently
+points at**: that session lives in tmux *on a machine*, and `down`, `resume`, `status` and `logs`
+all find it by reading the field — so moving it would leave the session behind where nothing looks
+for it, and every one of those verbs would then report its absence as success. Stop it first. A
+machine that cannot be reached is refused for the same reason, because *unreachable* and *empty*
+are not the same answer.
+
 The filename is the name, so the two can never disagree:
 
 ```toml
@@ -95,7 +103,11 @@ startup = "nvim"                      # optional; omit for just a shell
 ```
 
 That is the whole schema. An unknown key is an error rather than a line that is silently ignored
-([ADR-0007](docs/adr/0007-workspace-schema-v1.md)).
+([ADR-0007](docs/adr/0007-workspace-schema-v1.md)), and so is a key left blank: `machine = ""`,
+`repo = ""` or `startup = ""` is refused when the file is *read*, naming the file, the field and the
+workspace. Such a file costs only itself: `yantra ls workspaces` and the dashboard's workspace table
+still show every workspace that loaded, and name the one that did not with its reason underneath —
+fix the line or move the file aside.
 
 **The box you are sitting at is the awkward case.** If it is served by Tailscale SSH rather than its
 own `sshd`, it cannot ssh to *itself* — Tailscale SSH is peer-to-peer, and there is no listener behind
@@ -107,6 +119,7 @@ Then:
 
 ```bash
 yantra new site --machine mac --repo /Users/me/code/site   # write a workspace
+yantra edit site --repo /Users/me/code/website             # change one that exists
 yantra up yantra                 # open the session (run again to attach)
 yantra up yantra --agent claude  # ...and start Claude Code in it
 yantra attach yantra             # hand this terminal to the session
@@ -117,6 +130,7 @@ yantra down yantra               # stop it, giving the agent a chance to shut do
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine
+yantra notify 'needs you'        # publish a message to the relay you configured
 yantra fix-terminfo <machine>    # teach a machine about your terminal
 ```
 

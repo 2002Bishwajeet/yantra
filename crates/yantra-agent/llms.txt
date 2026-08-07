@@ -3,12 +3,13 @@
 > The per-machine heartbeat agent. It exists because Tailscale exposes zero telemetry and SSH polling
 > cannot see a sleeping laptop, so the scheduler would otherwise be blind to the one question it most
 > needs answered. Pushes a heartbeat every 10s; the daemon marks a machine stale at 30s.
-> **Implemented apart from its install story.** Deliberately tiny: it reports, it does not decide.
+> **Implemented, with a unit on Linux and a recipe that installs it.** Deliberately tiny: it reports, it does not decide.
 
 ## Source
 
 - [src/main.rs](src/main.rs): the 10 s loop, a hand-written HTTP/1.1 POST over
   `std::net::TcpStream`, and the log-once-then-quiet failure latch.
+- [yantra-agent.service](yantra-agent.service): the systemd unit that starts it at boot (Y-142, R-12). `YANTRA_DAEMON` arrives from `/etc/yantra/agent.env` rather than from the unit, so a newer unit cannot overwrite the address; without that file the unit refuses and names it. Tested beside the daemon's in [yantrad/tests/service_unit.rs](../yantrad/tests/service_unit.rs), and copied onto a box by `just appliance-install` (Y-145) — which installs the unit and never that file, for the same reason.
 - [src/probes.rs](src/probes.rs): the seven fields, measured. Fixed facts once at start, the rest per beat; every reader fails pessimistic; `Power::Battery` has one construction site.
 
 ## What decides its shape

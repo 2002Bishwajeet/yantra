@@ -33,19 +33,26 @@ tracker's Decisions or Open questions section and flag it.
   and the task ID in parentheses when one exists:
   `feat: add cargo workspace skeleton (Y-030)`. Work with no tracker task just takes the prefix.
   One format everywhere, so history stays greppable and machine-readable.
-- **No trailers.** Commits carry **no `Co-Authored-By`, no "Generated with …", no AI attribution of
-  any kind.** Whoever pressed the button owns the change. This applies to PR titles and bodies too.
+- **No AI attribution.** Commits carry **no `Co-Authored-By` naming an assistant, no "Generated
+  with …", no session trailer.** Whoever pressed the button owns the change. This applies to PR
+  titles and bodies too. A bot trailer is a different thing and is fine — a dependabot squash
+  carries `Co-authored-by: dependabot[bot]`, and that stays.
 - Small, logical commits. One giant squashed drop is not reviewable.
 
 ## Before you push
 
 ```sh
-just check      # fmt --check + clippy -D warnings + nextest. The gate.
-just deny       # licence and advisory audit, when dependencies changed
+just check      # fmt --check + clippy -D warnings + nextest + deny + no-node. The gate.
+just deny       # licence and advisory audit on its own, when dependencies changed
 ```
 
 `just check` must pass. `-D warnings` is where the workspace clippy lints
 (`unwrap_used` / `expect_used` / `panic` = warn, `unsafe_code` = forbid) actually bite.
+
+**`no-node` is a negative assertion and it will fail on a change that looks harmless.** Nothing the
+Rust gate runs may pass `--all-features` or enable `yantrad`'s `embed-dashboard`, because that
+feature compiles the built dashboard in and so needs npm — R-24. Building the dashboard belongs in
+`just appliance-embedded` and in `.github/workflows/embed.yml`, never in `ci.yml`.
 
 ## Verification means reality
 
@@ -76,10 +83,11 @@ Re-verify anything version-sensitive before relying on it. Mark claims you execu
 
 ## Scope
 
-Yantra orchestrates `ssh`, `tmux`, `tailscale`, `docker` and agent CLIs. If a change starts
-implementing a terminal multiplexer, an SSH client or a container runtime, stop — that is the signal
-the project has been misread. **Provisioning is a permanent non-goal**: Yantra adopts machines that
-already exist; it never creates, images or destroys them.
+Yantra orchestrates `ssh`, `tmux`, `tailscale`, `docker` and agent CLIs — `docker` names intended
+scope, not a shipped capability (Y-125). If a change starts implementing a terminal multiplexer, an
+SSH client or a container runtime, stop — that is the signal the project has been misread.
+**Provisioning is a permanent non-goal**: Yantra adopts machines that already exist; it never
+creates, images or destroys them.
 
 ## Pull requests
 

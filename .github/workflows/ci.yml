@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: just
       - run: just fmt-check
@@ -50,7 +50,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: just
       - run: just lint
@@ -64,7 +64,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: just,cargo-nextest
       # ubuntu-24.04 ships podman preinstalled; fail loudly here rather than
@@ -91,10 +91,43 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: just,cargo-deny
       - run: just deny
+
+  no-node:
+    # R-24's assertion, and it is the negative one the other jobs cannot make:
+    # that this file is green proves the default build works, never that no job
+    # here turned the embed feature on to get there. See the recipe.
+    name: no-node
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: just
+      - run: just no-node
+
+  build-without-node:
+    # R-24's condition, made rather than found: this runner ships Node, so the
+    # gate's own build and lint run here with the three binaries shadowed by
+    # stubs that fail. The job above reads what the recipes say; this one is
+    # what a `build.rs` shelling out to npm actually meets.
+    name: build without node
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: just
+      - run: just build-without-node
 
   cross:
     # The Pi 5 appliance target. ADR-0004 chose Rust partly because this build
@@ -110,7 +143,7 @@ jobs:
       # cargo-zigbuild needs a zig; the version lives in the composite action.
       - name: Set up zig
         uses: ./.github/actions/setup-zig
-      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: just,cargo-zigbuild
       - run: just appliance

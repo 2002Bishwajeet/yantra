@@ -1,4 +1,5 @@
-import type { Looked, Machine, MachineSessions, Workspace } from '@/api'
+import { useState } from 'react'
+import type { Listed, Looked, Machine, MachineSessions, Workspace } from '@/api'
 import {
   type AgentRow,
   agentColumns,
@@ -10,8 +11,10 @@ import {
 } from '@/columns'
 import { Command } from '@/components/Command'
 import { DataTable } from '@/components/DataTable'
+import { EditWorkspace } from '@/components/EditWorkspace'
 import { NewWorkspace } from '@/components/NewWorkspace'
 import { Section } from '@/components/Section'
+import { Terminal } from '@/components/Terminal'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useAgents, useLooked } from '@/useLooked'
 
@@ -19,13 +22,29 @@ export default function App() {
   // Four independent readings, so each section stamps its own age; one shared
   // "last updated" would be true of at most one of them.
   const machines = useLooked<Machine[]>('/api/machines')
-  const workspaces = useLooked<Workspace[]>('/api/workspaces')
+  const listed = useLooked<Listed[]>('/api/workspaces')
+  const workspaces = loaded(listed)
   const sessions = useLooked<MachineSessions[]>('/api/sessions')
   const agents = useAgents(workspaces)
+  // A sixth section rather than a route: nothing else on this page is
+  // addressable, and one that was would promise a deep link that survives a
+  // reload, which is a socket this page cannot yet reopen (Y-132).
+  const [open, setOpen] = useState<string | null>(null)
+  // The name, not the row: the workspace the form edits comes from the reading
+  // every 30 s, so holding the row would edit against a copy of it.
+  const [editing, setEditing] = useState<string | null>(null)
+  const chosen =
+    workspaces.looked === 'ok'
+      ? workspaces.data.find((one) => one.name === editing)
+      : undefined
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
       <h1 className="font-heading text-2xl font-semibold">Yantra</h1>
+
+      {open !== null && (
+        <Terminal key={open} name={open} onClose={() => setOpen(null)} />
+      )}
 
       <Section title="Machines" query={machines}>
         {(rows) => (
@@ -41,16 +60,32 @@ export default function App() {
       {/* Each section's command reads the *other* class, so a look that failed
           costs the command its precision and never its honesty. The machines
           reading is read the same way, to say what a button is about to touch. */}
-      <Section title="Workspaces" query={workspaces}>
-        {(rows) => (
-          <DataTable
-            columns={workspaceColumns(sessions, machines)}
-            rows={rows}
-            rowKey={(workspace) => workspace.name}
-            empty="no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml"
+      <Section title="Workspaces" query={listed}>
+        {(entries) => (
+          <Workspaces
+            entries={entries}
+            sessions={sessions}
+            machines={machines}
+            open={setOpen}
+            edit={setEditing}
           />
         )}
       </Section>
+
+      {/* Beside the create form rather than inside the row it was opened from:
+          the fields are the same fields, and a phone gives them the width. */}
+      {chosen && (
+        <Section title={`Edit ${chosen.name}`} query={machines}>
+          {(rows) => (
+            <EditWorkspace
+              key={chosen.name}
+              workspace={chosen}
+              machines={rows}
+              onClose={() => setEditing(null)}
+            />
+          )}
+        </Section>
+      )}
 
       {/* The machines reading is the picker, so the form draws only where there
           is really something to choose from. */}
@@ -70,6 +105,60 @@ export default function App() {
         {(rows) => <Agents rows={rows} />}
       </Section>
     </main>
+  )
+}
+
+/** The entries that are workspaces. Everything below acts on one — an edit form,
+ *  a row's buttons, a session's command, a per-workspace status fetch — and a
+ *  file that did not load is not something any of them can be asked about. */
+function loaded(listed: Looked<Listed[]>): Looked<Workspace[]> {
+  if (listed.looked !== 'ok') return listed
+  return {
+    ...listed,
+    data: listed.data.flatMap((one) => (one.loaded === 'yes' ? [one] : [])),
+  }
+}
+
+/** A file that did not load is named below the table rather than given a row in
+ *  it: `MACHINE`, `ACT`, `TERMINAL` and `EDIT` have nothing to put in one, and
+ *  `EDIT` could not repair it anyway — `update` loads before it writes, so the
+ *  file is the fix. R-23 is met by naming it loudly with its reason. */
+function Workspaces({
+  entries,
+  sessions,
+  machines,
+  open,
+  edit,
+}: {
+  entries: Listed[]
+  sessions: Looked<MachineSessions[]>
+  machines: Looked<Machine[]>
+  open: (name: string) => void
+  edit: (name: string) => void
+}) {
+  const rows = entries.flatMap((one) => (one.loaded === 'yes' ? [one] : []))
+  const unusable = entries.flatMap((one) => (one.loaded === 'no' ? [one] : []))
+
+  return (
+    <div className="flex flex-col gap-2">
+      <DataTable
+        columns={workspaceColumns(sessions, machines, open, edit)}
+        rows={rows}
+        rowKey={(workspace) => workspace.name}
+        empty={
+          unusable.length === 0
+            ? 'no workspaces yet — make one below, or at ~/.config/yantra/workspaces/<name>.toml'
+            : 'no file in that directory is a workspace'
+        }
+      />
+      {unusable.map((one) => (
+        <Alert key={one.name} variant="destructive">
+          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
+            {`${one.name} unusable: ${one.error}`}
+          </AlertDescription>
+        </Alert>
+      ))}
+    </div>
   )
 }
 

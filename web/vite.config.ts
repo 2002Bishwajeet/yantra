@@ -31,7 +31,14 @@ export default defineConfig({
   // yantrad binds this machine's Tailscale addresses and refuses loopback
   // (R-22), so `npm run dev` supplies the real target.
   server: {
-    proxy: { '/api': process.env.YANTRA_API ?? 'http://127.0.0.1:7717' },
+    proxy: {
+      // `ws`, because the terminal is an upgrade on this same prefix and the
+      // string form of a proxy entry forwards only the plain requests.
+      '/api': {
+        target: process.env.YANTRA_API ?? 'http://127.0.0.1:7717',
+        ws: true,
+      },
+    },
   },
   test: { environment: 'jsdom' },
 })

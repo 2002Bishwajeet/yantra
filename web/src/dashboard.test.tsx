@@ -10,6 +10,7 @@ import {
 import type {
   AgentState,
   Beat,
+  Listed,
   Looked,
   Machine,
   MachineSessions,
@@ -18,16 +19,17 @@ import type {
   WorkspaceStatus,
 } from './api'
 import {
+  agentAct,
   type AgentRow,
   agentColumns,
   agentCommand,
   agentState,
+  attachable,
   machineColumns,
   sessionColumns,
   sessionCommand,
   type SessionRow,
   workspaceColumns,
-  workspaceCommand,
 } from './columns'
 import { Command } from './components/Command'
 import { DataTable } from './components/DataTable'
@@ -52,6 +54,12 @@ function viewport(width: number) {
 }
 
 beforeEach(() => viewport(1280))
+
+/** A workspace as `GET /api/workspaces` lists it, which since Y-141 says
+ *  whether the file loaded. */
+function listed(workspace: Workspace): Listed {
+  return { loaded: 'yes', ...workspace }
+}
 
 function machine(overrides: Partial<Machine> = {}): Machine {
   return {
@@ -82,19 +90,18 @@ function beat(overrides: Partial<Beat> = {}): Beat {
 // A number stands for a status code the daemon answers instead of a body, which
 // only `/api/workspaces/:name/status` does.
 function stubFetch(answers: Record<string, Looked<unknown> | number>) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((path: string) => {
-      const answer = answers[path]
-      return typeof answer === 'number'
-        ? Promise.resolve({ ok: false, status: answer })
-        : Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve(answer),
-          })
-    }),
-  )
+  const asked = vi.fn((path: string) => {
+    const answer = answers[path]
+    return typeof answer === 'number'
+      ? Promise.resolve({ ok: false, status: answer })
+      : Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(answer),
+        })
+  })
+  vi.stubGlobal('fetch', asked)
+  return asked
 }
 
 describe('the looked envelope', () => {
@@ -224,7 +231,7 @@ describe('the workspaces table', () => {
     }
     const { container } = render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[workspace]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -237,7 +244,7 @@ describe('the workspaces table', () => {
   it('names the path a file goes in when the look succeeded and found nothing', () => {
     render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[]}
         rowKey={(row) => row.name}
         empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -248,6 +255,63 @@ describe('the workspaces table', () => {
         'no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml',
       ),
     ).toBeTruthy()
+  })
+
+  /** Y-141, and the mirror of the sessions test below: the broken file is named
+   *  with its reason, and it costs the workspaces beside it nothing. */
+  it('names a file that did not load without emptying the table', async () => {
+    stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [
+          listed({
+            name: 'yantra',
+            machine: 'cachyos-g14',
+            repo: '/home/<user>/Github/homelab/yantra',
+            startup: null,
+          }),
+          {
+            loaded: 'no',
+            name: 'site',
+            error:
+              'workspace `site` at /home/<user>/.config/yantra/workspaces/site.toml has an empty `machine`',
+          },
+        ],
+      },
+      '/api/sessions': { looked: 'never' },
+      '/api/workspaces/yantra/status': 404,
+    })
+    render(<App />)
+
+    expect(await screen.findByText(/site unusable:/)).toBeTruthy()
+    expect(screen.getByText(/empty `machine`/)).toBeTruthy()
+    // Still a row, and still the only one — the failure is a note under the
+    // table rather than a row with nothing to act on in it.
+    expect(screen.getByText('yantra')).toBeTruthy()
+    expect(screen.queryByText(/^no workspaces yet/)).toBeNull()
+  })
+
+  /** A per-workspace fetch for a file that did not load would ask about a name
+   *  the agent class has no report for, and read back as `no report yet`. */
+  it('asks for no agent status for a file that did not load', async () => {
+    const asked = stubFetch({
+      '/api/machines': { looked: 'never' },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [{ loaded: 'no', name: 'site', error: 'not valid TOML' }],
+      },
+      '/api/sessions': { looked: 'never' },
+    })
+
+    render(<App />)
+    await screen.findByText(/site unusable:/)
+
+    expect(
+      asked.mock.calls.some(([path]) => String(path).includes('site/status')),
+    ).toBe(false)
   })
 })
 
@@ -265,7 +329,7 @@ describe('a workspace row on a phone', () => {
   function draw() {
     return render(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' })}
+        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[site]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -297,7 +361,8 @@ describe('a workspace row on a phone', () => {
       'ACT',
       'REPO',
       'STARTUP',
-      'COMMAND',
+      'TERMINAL',
+      'EDIT',
     ])
     expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
   })
@@ -485,38 +550,37 @@ describe('the command a row carries', () => {
     { machine: 'cachyos-g14', reached: 'yes', sessions: [session] },
   ])
 
-  it('offers attach only when the session was really seen', () => {
-    expect(workspaceCommand(yantra, running)).toBe('yantra attach yantra')
+  it('offers a terminal only when the session was really seen', () => {
+    expect(attachable(yantra, running)).toBe(true)
 
     const idle = ok<MachineSessions[]>([
       { machine: 'cachyos-g14', reached: 'yes', sessions: [] },
     ])
-    expect(workspaceCommand(yantra, idle)).toBeNull()
+    expect(attachable(yantra, idle)).toBe(false)
   })
 
-  // Y-113: `up` is a button, so the row no longer hands over a command for it.
-  // Attach is the one verb with no write behind it (Y-078).
-  it('hands over no command where a button acts, and none where nothing is open', () => {
+  // Y-113 made `up` a button; Y-130 made the last paste in this row one too.
+  it('offers nothing where a look failed, and nothing where nothing is open', () => {
     const failed: Looked<MachineSessions[]> = {
       looked: 'failed',
       age_seconds: 1,
       error: 'tailscaled is down',
     }
-    expect(workspaceCommand(yantra, failed)).toBeNull()
-    expect(workspaceCommand(yantra, { looked: 'never' })).toBeNull()
+    expect(attachable(yantra, failed)).toBe(false)
+    expect(attachable(yantra, { looked: 'never' })).toBe(false)
   })
 
   it('does not read an unreachable machine as a machine with a session', () => {
     const unreachable = ok<MachineSessions[]>([
       { machine: 'cachyos-g14', reached: 'no', error: 'connection timed out' },
     ])
-    expect(workspaceCommand(yantra, unreachable)).toBeNull()
+    expect(attachable(yantra, unreachable)).toBe(false)
   })
 
-  it('refuses a name the daemon would not have allowed rather than quoting it', () => {
-    expect(workspaceCommand({ ...yantra, name: 'yantra; rm -rf ~' }, running)).toBeNull()
-    expect(workspaceCommand({ ...yantra, name: '../escape' }, running)).toBeNull()
-    expect(workspaceCommand({ ...yantra, name: '' }, running)).toBeNull()
+  it('still refuses a name the daemon would not have allowed a command for', () => {
+    const hostile = { ...yantra, name: 'yantra; rm -rf ~' }
+    expect(sessionCommand({ machine: 'cachyos-g14', session: { ...session, name: hostile.name } }, ok([hostile]))).toBeNull()
+    expect(agentCommand({ workspace: hostile, status: null })).toBeNull()
   })
 
   it('builds a session row command from the workspace name, never from tmux', () => {
@@ -535,16 +599,23 @@ describe('the command a row carries', () => {
     expect(sessionCommand(row, { looked: 'never' })).toBeNull()
   })
 
-  it('puts the command in the row, and leaves the machines table without one', () => {
+  it('puts the terminal in the row, naming the workspace it would open', () => {
+    const opened: string[] = []
     render(
       <DataTable
-        columns={workspaceColumns(running, { looked: 'never' })}
+        columns={workspaceColumns(
+          running,
+          { looked: 'never' },
+          (name) => opened.push(name),
+          () => {},
+        )}
         rows={[yantra]}
         rowKey={(one) => one.name}
         empty="no workspaces yet"
       />,
     )
-    expect(screen.getByText('yantra attach yantra')).toBeTruthy()
+    fireEvent.click(screen.getByText('Open terminal'))
+    expect(opened).toEqual(['yantra'])
     expect(machineColumns.some((column) => column.header === 'COMMAND')).toBe(false)
   })
 })
@@ -610,6 +681,37 @@ describe('the agents section', () => {
     },
   }
 
+  function agents(rows: AgentRow[]) {
+    render(
+      <DataTable
+        columns={agentColumns}
+        rows={rows}
+        rowKey={(row) => row.workspace.name}
+        empty="no workspaces yet"
+      />,
+    )
+  }
+
+  function stubPost(status: number, body: unknown) {
+    const posted = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        posted(
+          path,
+          init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        )
+        return Promise.resolve({
+          ok: status < 400,
+          status,
+          json: () => Promise.resolve(body),
+          text: () => Promise.resolve(String(body)),
+        })
+      }),
+    )
+    return posted
+  }
+
   it('reads a shell session as ordinary and a contradiction as wrong', () => {
     const shell = agentState(reported({ state: 'no_agent' }).status)
     expect(shell.tone).not.toBe('bad')
@@ -669,19 +771,18 @@ describe('the agents section', () => {
     expect(screen.queryByText(/yantra (resume|attach|up)/)).toBeNull()
   })
 
-  it('offers resume where resume is what the state is for', () => {
+  it('picks the verb the state is for, and attach where there is no route', () => {
+    expect(agentAct(reported({ state: 'no_session' }))).toBe('up')
     for (const state of ['finished', 'stopped'] as const) {
-      expect(agentCommand(reported({ state }))).toBe('yantra resume yantra')
+      expect(agentAct(reported({ state }))).toBe('resume')
     }
-    expect(agentCommand(reported({ state: 'crashed', exit_status: 1 }))).toBe(
-      'yantra resume yantra',
+    expect(agentAct(reported({ state: 'crashed', exit_status: 1 }))).toBe(
+      'resume',
     )
-    expect(agentCommand(reported({ state: 'killed', signal: 'KILL' }))).toBe(
-      'yantra resume yantra',
+    expect(agentAct(reported({ state: 'killed', signal: 'KILL' }))).toBe(
+      'resume',
     )
-  })
 
-  it('offers attach where resume would refuse, and up where nothing is open', () => {
     for (const state of [
       'running',
       'awaiting_trust',
@@ -691,22 +792,131 @@ describe('the agents section', () => {
       const row = reported(
         state === 'unclear' ? { state, because: 'why' } : { state },
       )
+      expect(agentAct(row)).toBe('attach')
       expect(agentCommand(row)).toBe('yantra attach yantra')
     }
-    expect(agentCommand(reported({ state: 'no_session' }))).toBe(
-      'yantra up yantra',
-    )
+
+    // The two with a route behind them are no longer anything to paste.
+    expect(agentCommand(reported({ state: 'no_session' }))).toBeNull()
+    expect(agentCommand(reported({ state: 'finished' }))).toBeNull()
   })
 
   it('does not offer resume to a workspace resume refuses on sight', () => {
     const editor = { ...yantra, startup: 'nvim' }
     expect(
-      agentCommand(reported({ state: 'crashed', exit_status: 1 }, editor)),
+      agentAct(reported({ state: 'crashed', exit_status: 1 }, editor)),
     ).toBeNull()
-    expect(agentCommand(unreachable)).toBeNull()
+    expect(agentAct(unreachable)).toBeNull()
+  })
 
+  // Y-130's rule, now that this cell has both kinds: `USABLE_NAME` guards the
+  // string someone pastes into a shell, and never the name a button puts into
+  // a URL the browser encodes — that one is the daemon's own 400 to refuse.
+  it('withholds the paste from a name a shell would mangle, and not the button', () => {
     const hostile = { ...yantra, name: 'yantra; rm -rf ~' }
-    expect(agentCommand(reported({ state: 'finished' }, hostile))).toBeNull()
+    expect(agentCommand(reported({ state: 'running' }, hostile))).toBeNull()
+
+    const posted = stubPost(400, 'invalid workspace name')
+    agents([reported({ state: 'no_session' }, hostile)])
+    fireEvent.click(screen.getByRole('button', { name: 'Start claude' }))
+
+    expect(posted).toHaveBeenCalledWith(
+      '/api/workspaces/yantra%3B%20rm%20-rf%20~/up',
+      { agent: 'claude' },
+    )
+  })
+
+  // M5's own sentence, in the one section that still failed it: a phone has no
+  // terminal to paste `yantra up` into.
+  it('starts an agent from the page instead of handing over a command', async () => {
+    const posted = stubPost(200, {
+      machine: 'cachyos-g14',
+      session: 'created',
+      launched: true,
+      term: 'xterm-256color',
+    })
+    agents([reported({ state: 'no_session' })])
+
+    expect(screen.queryByText('yantra up yantra')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Start claude' }))
+
+    expect(await screen.findByText('Started on cachyos-g14.')).toBeTruthy()
+    // ADR-0007 names the agent only where the workspace starts nothing of its
+    // own, and the machine is never in the body — it is the workspace's (Y-117).
+    expect(posted).toHaveBeenCalledWith('/api/workspaces/yantra/up', {
+      agent: 'claude',
+    })
+  })
+
+  it('resumes each of the four endings, and posts resume rather than up', async () => {
+    const posted = stubPost(200, {
+      machine: 'cachyos-g14',
+      resumed: true,
+      term: 'xterm-256color',
+    })
+    agents([
+      reported({ state: 'finished' }),
+      reported({ state: 'stopped' }, { ...yantra, name: 'halted' }),
+      reported({ state: 'crashed', exit_status: 3 }, { ...yantra, name: 'dead' }),
+      reported({ state: 'killed', signal: 'term' }, { ...yantra, name: 'shot' }),
+    ])
+
+    const buttons = screen.getAllByRole('button', { name: 'Resume' })
+    expect(buttons.length).toBe(4)
+    expect(screen.queryByText(/yantra resume/)).toBeNull()
+
+    fireEvent.click(buttons[0])
+    expect(await screen.findByText(/Resumed on cachyos-g14/)).toBeTruthy()
+    expect(posted).toHaveBeenCalledWith(
+      '/api/workspaces/yantra/resume',
+      undefined,
+    )
+  })
+
+  // The decision this row settled, pinned rather than left to reading: the
+  // workspaces table offers all three verbs because it reads no state, and
+  // this one reads a state, so it offers the one verb that state is for.
+  it('offers one verb and never a stop beside an agent that has stopped', () => {
+    agents([
+      reported({ state: 'no_session' }),
+      reported({ state: 'finished' }, { ...yantra, name: 'ended' }),
+    ])
+
+    expect(screen.getByRole('button', { name: 'Start claude' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    // And neither verb is offered twice: no resume where nothing has run, no
+    // start where a session is waiting to be continued.
+    expect(screen.getAllByRole('button', { name: /^(Start|Resume)/ }).length).toBe(2)
+  })
+
+  it('leaves attach a command, there being no route to hand a terminal over', () => {
+    agents([
+      reported({ state: 'running' }),
+      reported({ state: 'awaiting_trust' }, { ...yantra, name: 'trusting' }),
+      reported({ state: 'no_agent' }, { ...yantra, name: 'shell' }),
+      reported({ state: 'unclear', because: 'why' }, { ...yantra, name: 'ghost' }),
+    ])
+
+    expect(screen.getAllByText(/^yantra attach /).length).toBe(4)
+    expect(
+      screen.queryByRole('button', { name: /^(Start|Stop|Resume)/ }),
+    ).toBeNull()
+  })
+
+  // Y-135 is what makes this button worth having here: the state it refuses
+  // over is one this very table renders by name, and it is not a crash.
+  it('draws a refusal about state as a refusal, not as a verb that failed', async () => {
+    const said =
+      'claude on cachyos-g14 is not logged in: run `claude` there and sign in'
+    stubPost(409, said)
+    agents([reported({ state: 'finished' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+
+    expect(await screen.findByText(/Nothing broke and nothing ran/)).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/The verb ran and failed/)).toBeNull()
   })
 
   it('says the trust prompt twice and hands over a command, never a dialog', async () => {
@@ -719,7 +929,7 @@ describe('the agents section', () => {
     }
     stubFetch({
       '/api/machines': { looked: 'never' },
-      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [yantra] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [listed(yantra)] },
       '/api/sessions': { looked: 'never' },
       '/api/workspaces/yantra/status': {
         looked: 'ok',
@@ -747,7 +957,7 @@ describe('the agents section', () => {
       '/api/workspaces': {
         looked: 'ok',
         age_seconds: 2,
-        data: [yantra, fresh],
+        data: [listed(yantra), listed(fresh)],
       },
       '/api/sessions': { looked: 'never' },
       '/api/workspaces/yantra/status': {
@@ -913,6 +1123,165 @@ describe('creating a workspace', () => {
   })
 })
 
+/** Y-126. The tests that matter are what a `PATCH` form gets wrong: a field
+ *  nobody touched must not be sent, an emptied `startup` must be sent as `null`
+ *  rather than dropped — absent leaves it alone — and the refusal that stops a
+ *  live session being stranded must read as a refusal and not as a crash. */
+describe('editing a workspace', () => {
+  const site: Workspace = {
+    name: 'site',
+    machine: 'cachyos-g14',
+    repo: '/code/site',
+    startup: 'claude',
+  }
+  const mac = machine({
+    name: 'bishwajeets-macbook-pro',
+    os: 'macOS',
+    online: false,
+  })
+
+  // The whole body as it went on the wire, because `{}` and `{"startup":null}`
+  // are the same object once JSON.parse has dropped the difference.
+  function stubEdit(status: number, body: unknown, workspace = site) {
+    const patched = vi.fn()
+    const looks: Record<string, Looked<unknown>> = {
+      '/api/machines': { looked: 'ok', age_seconds: 2, data: [machine(), mac] },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [listed(workspace)],
+      },
+      '/api/sessions': { looked: 'never' },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patched(path, String(init.body))
+          return Promise.resolve({
+            status,
+            json: () => Promise.resolve(body),
+            text: () => Promise.resolve(String(body)),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(looks[path] ?? { looked: 'never' }),
+        })
+      }),
+    )
+    return patched
+  }
+
+  // The three labels are the create form's three, so every field is asked for
+  // by the id this form gives it rather than by its text.
+  const fields = () => ({
+    machine: screen.getByLabelText('Machine', { selector: '#edit-machine' }),
+    repo: screen.getByLabelText('Repo', { selector: '#edit-repo' }),
+    startup: screen.getByLabelText('Startup', { selector: '#edit-startup' }),
+  })
+
+  async function open() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await screen.findByLabelText('Repo', { selector: '#edit-repo' })
+  }
+
+  const save = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+  it('sends the field that changed and no other, and draws the answer', async () => {
+    const patched = stubEdit(200, { ...site, repo: '/code/fixed' })
+    render(<App />)
+    await open()
+
+    expect(screen.getByText('Edit site')).toBeTruthy()
+    fireEvent.change(fields().repo, { target: { value: '/code/fixed' } })
+    save()
+
+    expect(await screen.findByText('Edited site.')).toBeTruthy()
+    // A body naming `machine` would be a move of a workspace nobody moved.
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"repo":"/code/fixed"}',
+    )
+    expect(screen.getByText('/code/fixed')).toBeTruthy()
+    // The read model is 30 s behind its own write, which is what re-reading to
+    // confirm would have drawn.
+    expect(screen.getByText('/code/site')).toBeTruthy()
+  })
+
+  it('clears a startup command rather than leaving it alone', async () => {
+    const patched = stubEdit(200, { ...site, startup: null })
+    render(<App />)
+    await open()
+
+    fireEvent.change(fields().startup, { target: { value: '' } })
+    save()
+
+    expect(await screen.findByText(/will open a plain shell/)).toBeTruthy()
+    // `null`, not a missing key: absent is the one that leaves it alone.
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"startup":null}',
+    )
+  })
+
+  it('reads a session still open as a refusal to move it, never as a crash', async () => {
+    const said =
+      'cannot move site off cachyos-g14: a tmux session named site is still open there — `yantra down site` ends it'
+    const patched = stubEdit(409, said)
+    render(<App />)
+    await open()
+
+    fireEvent.change(fields().machine, {
+      target: { value: 'bishwajeets-macbook-pro' },
+    })
+    save()
+
+    // The daemon's own sentence, which is where the workspace, the machine and
+    // the command that ends the refusal are.
+    expect(await screen.findByText(said)).toBeTruthy()
+    expect(screen.getByText(/still open on the machine this would leave/)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/^Edited /)).toBeNull()
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"machine":"bishwajeets-macbook-pro"}',
+    )
+  })
+
+  it('sends nothing at all when nothing in the form differs', async () => {
+    const patched = stubEdit(200, site)
+    render(<App />)
+    await open()
+    save()
+
+    expect(await screen.findByText(/Nothing here differs/)).toBeTruthy()
+    // A body naming no field is the daemon's 400, and it would read as one.
+    expect(patched).not.toHaveBeenCalled()
+  })
+
+  // ADR-0009: a machine name is an ssh destination, so it may be an
+  // `~/.ssh/config` alias no tailnet reading lists.
+  it('keeps a machine the tailnet does not list, so a repo fix is not a move', async () => {
+    const alias = { ...site, machine: 'homelab-box' }
+    const patched = stubEdit(200, { ...alias, repo: '/code/fixed' }, alias)
+    render(<App />)
+    await open()
+
+    expect((fields().machine as HTMLSelectElement).value).toBe('homelab-box')
+    fireEvent.change(fields().repo, { target: { value: '/code/fixed' } })
+    save()
+
+    expect(await screen.findByText('Edited site.')).toBeTruthy()
+    expect(patched).toHaveBeenCalledWith(
+      '/api/workspaces/site',
+      '{"repo":"/code/fixed"}',
+    )
+  })
+})
+
 /** Y-113. The tests that matter are the dishonest readings: an idempotent `up`
  *  must not read as a failure, a `tailscale` that could not answer must not read
  *  as the caller's fault, and a request still awaiting ssh must not read as
@@ -937,7 +1306,11 @@ describe('acting on a workspace', () => {
     const posted = vi.fn()
     const looks: Record<string, Looked<unknown>> = {
       '/api/machines': { looked: 'ok', age_seconds: 2, data: [mac] },
-      '/api/workspaces': { looked: 'ok', age_seconds: 2, data: [workspace] },
+      '/api/workspaces': {
+        looked: 'ok',
+        age_seconds: 2,
+        data: [listed(workspace)],
+      },
     }
     vi.stubGlobal(
       'fetch',
@@ -997,15 +1370,28 @@ describe('acting on a workspace', () => {
     render(<App />)
     await tap('Start claude')
 
-    expect(
-      await screen.findByText(/could not ask Tailscale who is calling/),
-    ).toBeTruthy()
+    expect(await screen.findByText(/Nothing could be asked/)).toBeTruthy()
     expect(screen.getByText(said)).toBeTruthy()
     expect(
       screen.queryByText(
         /knows no workspace|not one the daemon accepts|not on a node/,
       ),
     ).toBeNull()
+  })
+
+  // Y-135 and I-49: a human has not answered a dialog on their own machine,
+  // which ADR-0011 leaves to them. Nothing failed, so nothing may say it did.
+  it('draws an agent holding at the trust prompt as a refusal, not a crash', async () => {
+    const said =
+      "`personal-website` is holding at claude's trust prompt, so it has no conversation to continue"
+    stubAct({ status: 409, body: said })
+    render(<App />)
+    await tap('Resume')
+
+    expect(await screen.findByText(/Nothing broke and nothing ran/)).toBeTruthy()
+    expect(screen.getByText(said)).toBeTruthy()
+    expect(screen.getByRole('alert').className).not.toContain('destructive')
+    expect(screen.queryByText(/The verb ran and failed/)).toBeNull()
   })
 
   it('keeps a missing workspace apart from a verb that ran and failed', async () => {

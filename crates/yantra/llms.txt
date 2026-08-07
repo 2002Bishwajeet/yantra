@@ -7,6 +7,8 @@
 
 ## Commands
 
+- `yantra new <workspace> --machine M --repo P [--startup CMD]`: write a workspace file. Refuses to overwrite one that exists.
+- `yantra edit <workspace> [--machine M] [--repo P] [--startup CMD | --no-startup]`: change one that already does. **Refuses to change `machine` while a session is open on the one it would leave** — that session would stay where nothing looks for it (I-30). Needs at least one field.
 - `yantra up <workspace> [--agent claude]`: open the workspace's tmux session, optionally launching Claude Code in it. Running it twice attaches rather than duplicating.
 - `yantra resume <workspace>`: put the agent back on the conversation it left off, in the pane it died in. Refuses when the pane holds something it did not start.
 - `yantra logs <workspace> [-n N]`: the last N turns of the agent's transcript, plus how long since anything was written.
@@ -14,6 +16,7 @@
 - `yantra down <workspace>`: stop the session, reporting how the agent ended.
 - `yantra ls machines`: the tailnet, advisory only.
 - `yantra ls sessions`: tmux sessions on every machine a workspace names.
+- `yantra notify <message> [--title T] [--priority 1-5]`: publish to the relay `YANTRA_NTFY_URL` names, with `YANTRA_NTFY_TOKEN` if the topic is protected (Y-147). The body is sent as written — the relay is a general channel and the fleet notifier is only its other caller — and the one command that proves topic, token and egress from a box with no screen. Every refusal names the variable that would change it and neither the token nor the URL is ever printed.
 - `yantra fix-terminfo <machine>`: teach a machine the terminal you are sitting at.
 
 ## Source

@@ -7,7 +7,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
-import { Act } from '@/components/Act'
+import { Act, button, type Verb } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -95,24 +95,24 @@ export const machineColumns: Column<Machine>[] = [
   },
 ]
 
-/** Y-113 left one paste here and took the other: `up` is a button now, and
- *  `attach` is not, because ADR-0011's TUI wants a terminal this page has none
- *  of. Only a look that succeeded can say a session is there to attach to. */
-export function workspaceCommand(
+/** Y-113 left `attach` as a paste because ADR-0011's TUI wants a terminal this
+ *  page had none of; Y-130 gives it one, so the paste is a button. Only a look
+ *  that succeeded can say there is a session to attach to — and the name goes
+ *  into a URL the browser encodes rather than a shell someone pastes, so
+ *  `USABLE_NAME` guards the two commands below and not this. */
+export function attachable(
   workspace: Workspace,
   sessions: Looked<MachineSessions[]>,
-): string | null {
-  if (!USABLE_NAME.test(workspace.name)) return null
-
+): boolean {
   const answer =
     sessions.looked === 'ok'
       ? sessions.data.find((one) => one.machine === workspace.machine)
       : undefined
-  const running =
+
+  return (
     answer?.reached === 'yes' &&
     answer.sessions.some((session) => session.name === workspace.name)
-
-  return running ? `yantra attach ${workspace.name}` : null
+  )
 }
 
 /** What the button is about to touch, said before it is tapped: the machine the
@@ -130,6 +130,8 @@ function target(
 export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
   machines: Looked<Machine[]>,
+  open: (name: string) => void,
+  edit: (name: string) => void,
 ): Column<Workspace>[] {
   return [
     { header: 'WORKSPACE', cell: (workspace) => workspace.name },
@@ -153,11 +155,31 @@ export function workspaceColumns(
     { header: 'REPO', cell: (workspace) => workspace.repo },
     { header: 'STARTUP', cell: (workspace) => workspace.startup ?? '' },
     {
-      header: 'COMMAND',
-      cell: (workspace) => {
-        const command = workspaceCommand(workspace, sessions)
-        return command && <Command command={command} />
-      },
+      header: 'TERMINAL',
+      cell: (workspace) =>
+        attachable(workspace, sessions) && (
+          <button
+            type="button"
+            className={button}
+            onClick={() => open(workspace.name)}
+          >
+            Open terminal
+          </button>
+        ),
+    },
+    // The form itself is a section rather than a cell: three fields and a
+    // picker do not fit a column, and the row already opens one this way.
+    {
+      header: 'EDIT',
+      cell: (workspace) => (
+        <button
+          type="button"
+          className={button}
+          onClick={() => edit(workspace.name)}
+        >
+          Edit
+        </button>
+      ),
     },
   ]
 }
@@ -255,28 +277,36 @@ function agentDetail(status: WorkspaceStatus | null): string {
 }
 
 /** Y-097's third verb, derivable at last: `resume` respawns exactly the four
- *  endings, and refuses on sight a workspace whose `startup` is not an agent. */
-export function agentCommand(row: AgentRow): string | null {
-  const { name, startup } = row.workspace
-  if (!USABLE_NAME.test(name)) return null
+ *  endings, and refuses on sight a workspace whose `startup` is not an agent.
+ *  Two of the three have a route behind them and are buttons (Y-136); `attach`
+ *  execs `ssh -t` and hands this terminal over (ADR-0011), so it has none. */
+export function agentAct(row: AgentRow): Verb | 'attach' | null {
   if (!row.status || row.status.reached === 'no') return null
 
   switch (row.status.status.state) {
     case 'no_session':
-      return `yantra up ${name}`
+      return 'up'
     case 'finished':
     case 'stopped':
     case 'crashed':
     case 'killed':
-      return startup === null ? `yantra resume ${name}` : null
+      return row.workspace.startup === null ? 'resume' : null
     // Attach is the whole answer to the trust prompt: ADR-0011 says the one who
     // answers that dialog is a person, never Yantra.
     case 'running':
     case 'awaiting_trust':
     case 'no_agent':
     case 'unclear':
-      return `yantra attach ${name}`
+      return 'attach'
   }
+}
+
+/** The one command left, and the name is checked because this one really is
+ *  pasted into a shell — what goes into a button's URL is not (Y-130). */
+export function agentCommand(row: AgentRow): string | null {
+  const { name } = row.workspace
+  if (agentAct(row) !== 'attach' || !USABLE_NAME.test(name)) return null
+  return `yantra attach ${name}`
 }
 
 export const agentColumns: Column<AgentRow>[] = [
@@ -291,9 +321,18 @@ export const agentColumns: Column<AgentRow>[] = [
       </span>
     ),
   },
+  // `ACT` rather than `COMMAND`, which is what the cell held before the two
+  // verbs with a route became buttons — and what the workspaces table calls
+  // the same thing. Only one verb is offered, because this section read the
+  // state: a Stop beside an agent that has already stopped is answerable and
+  // still says the page does not know what it is looking at.
   {
-    header: 'COMMAND',
+    header: 'ACT',
     cell: (row) => {
+      const act = agentAct(row)
+      if (act === 'up' || act === 'resume') {
+        return <Act workspace={row.workspace} verb={act} />
+      }
       const command = agentCommand(row)
       return command && <Command command={command} />
     },

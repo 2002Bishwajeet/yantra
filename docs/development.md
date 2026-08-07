@@ -57,8 +57,15 @@ just ci           # everything CI runs: check + the arm64 cross-build
 just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
-just appliance    # cross-compile arm64 binaries for the Pi 5
+just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
+just appliance    # cross-compile the appliance binaries (arm64 by default)
+just appliance-runtime  # idle RSS, idle CPU and CLI cold-start, on this machine
 ```
+
+`just fixtures` is the one recipe you run *because* a test told you to: `just
+test` compares `web/src/contract.gen.ts` against what `/api` now answers, and a
+DTO that moved without it fails there. See
+[`crates/yantrad/CLAUDE.md`](../crates/yantrad/CLAUDE.md).
 
 `just ci` is exactly what CI runs — the workflow in `.github/workflows/ci.yml`
 invokes these same recipes rather than its own copy of the commands, one recipe
@@ -91,9 +98,63 @@ YANTRA_WEB=$PWD/web/dist cargo run --bin yantrad
 says so on `/`; point it somewhere with no `index.html` and it refuses to start rather than answering
 404 to every request, which reads as a broken dashboard instead of a wrong path.
 
-Assets are not embedded in the binary. That is R-24: embedding makes every `fmt`, `clippy`, `test`
-and cross-build job depend on npm, and the only thing that wants one file to copy is the M7
-appliance.
+**The default build embeds nothing**, and that is R-24: a build that wants `web/dist`
+unconditionally makes every `fmt`, `clippy`, `test` and cross-build job depend on npm.
+
+The M7 appliance is the one thing that wants a single file to copy, and it gets it from a cargo
+feature that is **absent from `default`** (Y-140):
+
+```bash
+just appliance-embedded    # npm build, then yantrad --features embed-dashboard for the Pi 5
+just test-embedded         # the feature's own tests; `just test` cannot reach them
+```
+
+Both need npm and neither is reachable from `just check` or `just ci`, the same rule the
+`landing-*` recipes follow. **`just no-node` is what holds the line** — it is part of `check`, it
+greps every recipe the Rust gate runs and `ci.yml` itself for the feature, for `--all-features` and
+for npm, and it fails if the default dependency graph ever carries `include_dir`. A green build says
+nothing about *which* jobs needed npm to get there, which is why the assertion is a negative one.
+
+**`just build-without-node` is the other half, and it runs rather than reads** (Y-148). It writes
+stubs for `node`, `npm` and `npx` that exit non-zero, puts them first on `PATH`, and runs `just build
+lint` behind them, so a `build.rs` that shells out by name reds the build instead of passing quietly
+on a runner that happens to ship Node. It is CI-only, like `test-ci` — `ci.yml` runs it on every pull
+request and `no-node` fails if that job ever disappears — but it takes no arguments and no fixture,
+so run it by hand whenever a build script or a proc macro is what you are changing.
+
+**`YANTRA_WEB` still wins over the embedded copy, and a wrong one still refuses.** A binary that
+carries a dashboard does not quietly serve it over a directory you named and mistyped — the variable
+is the half a person can get wrong, so it keeps the refusal.
+
+## Notifications
+
+Two environment variables, read by `yantrad` at startup and by `yantra notify` per run:
+
+```bash
+export YANTRA_NTFY_URL=https://ntfy.sh/<topic>   # where to publish
+export YANTRA_NTFY_TOKEN=tk_...                  # only if the topic is protected
+
+yantra notify 'needs you' --title api --priority 4
+```
+
+`YANTRA_NTFY_URL` unset means no relay, which is not an error — the daemon runs exactly as it did and
+sends nothing, and it says which of the two it got in its first few log lines, because a unit's
+environment is not the shell's. Subscribe to the same topic in the ntfy app to receive them.
+
+**The relay is a general publish channel, not the notifier's private wire.** Anything with something
+to say can send a line — a session's status, *needs attention*, a workflow, a reminder — and the
+fleet notifier is only the first caller. There is no message taxonomy: the body is whatever you
+passed, and one channel per session is a second URL rather than a second feature.
+
+**On the public server the topic name is the only password there is** — ntfy's own docs say so, and
+anyone who knows a topic can read it and publish to it. So use a high-entropy topic, or run your own
+ntfy and keep the body on the tailnet. **The token is read from the environment and from nowhere
+else**: never a workspace field, never a file Yantra writes, never a log line and never the API
+(§B4). For the appliance it belongs in a systemd drop-in — `systemctl edit yantrad` — rather than in
+the unit this repo ships.
+
+`yantra notify` is the diagnostic for a box with no screen: it proves the topic, the token and egress
+in one command, and every refusal names the variable that would change it without printing its value.
 
 ## The dashboard over HTTPS
 
@@ -151,10 +212,13 @@ from `bishwajeets-macbook-pro` arrived from peer address `100.x.x.x` — *this* 
 caller only in `X-Forwarded-For`, alongside `Tailscale-User-Login`. So every write through the HTTPS
 port is attributed to whichever machine runs the proxy.
 
-Nothing breaks today: that address is the owner's own untagged node, so writes from the phone are
-authorised, which is what M5 needs. What is lost is the *failure mode* ADR-0016 exists for — a tagged
-CI runner or a node shared in from another tailnet would be authorised too. **Y-118** carries the
-fix; ADR-0016 has a dated amendment recording it.
+**Closed on 2026-08-05 by [ADR-0017](adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
+(Y-118).** The daemon now takes the caller's address from `X-Forwarded-For` when — and only when —
+the TCP peer is one of its own bind addresses, which is what a request that came through the proxy on
+this machine looks like and what nothing off it can produce. Everywhere else the peer is the caller
+as before, so a forged header on `:7717` still changes nothing, and a forwarded value that is not
+exactly one address is refused rather than repaired. A tagged CI runner or a node shared in from
+another tailnet is now refused on both ports.
 
 ## Testing
 
@@ -183,6 +247,15 @@ run containers is not blocked. CI sets `YANTRA_REQUIRE_PODMAN=1` (via
 `just test-ci`), which turns that skip into a failure — a silent skip there
 would mean the test had stopped checking anything.
 
+**There is a second container, and it runs a real `systemd`.**
+`crates/yantrad/tests/service_unit.rs` installs the appliance's units under
+systemd as PID 1 (Fedora, because Alpine ships none) and starts the real
+`yantrad` in a container that has no `tailscale` — so it refuses exactly as it
+would while `tailscaled` is still learning its address, and what the test watches
+is the supervisor retrying instead of giving up. It skips and labels itself the
+same way. What no container can show is the boot ordering against a real
+`tailscaled`.
+
 ## Cross-compiling for the appliance
 
 ```bash
@@ -191,9 +264,69 @@ file target/aarch64-unknown-linux-musl/release/yantrad
 # ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
 ```
 
-~330 KB per binary, statically linked, no runtime on the target. If this stops
+**Every `appliance*` recipe takes a target and defaults to `aarch64-unknown-linux-musl`**, because
+[Q15](../tracker.md#6-open-questions) has not answered which box and *Pi 5 / N100* is two
+architectures. `just appliance x86_64-unknown-linux-musl` builds the mini-PC's, after one
+`rustup target add x86_64-unknown-linux-musl`.
+
+Getting those binaries onto a box is `just appliance-install <host>`, which is also the update.
+[`appliance.md`](appliance.md) is the runbook: what the box needs first, where the workspace TOMLs
+come from, and why a running binary is replaced by a rename rather than a copy.
+
+Statically linked, no runtime on the target. `just appliance-size` reports what
+each one costs; measured on 2026-08-06 that is **3.4 MB** for `yantrad`, **2.4 MB**
+for `yantra` and 432 KB for `yantra-agent`, or **4.1 MB** for the `yantrad` that
+carries the dashboard — the one file the appliance copies. Both of the first two
+grew by about 1.1 MB for the same reason, an HTTPS client with a bundled root
+store: `yantrad` when Y-146 called it, `yantra` when Y-147 gave the CLI `notify`
+([`yantra-core/CLAUDE.md`](../crates/yantra-core/CLAUDE.md) has the bytes either
+side of each). Both are still inside ADR-0004's ~5 MB. If any of this stops
 working, say so loudly — [ADR-0004](adr/0004-rust-for-the-daemon.md) chose Rust
 partly on the strength of it.
+
+## What the appliance costs at idle
+
+Size is the number a cross-compile can report; the other three ADR-0004 owes M7
+need a binary that runs, so they are measured on the musl target this machine
+executes rather than on the one it builds for.
+
+```bash
+just appliance-runtime
+```
+
+Measured 2026-08-06 on `cachyos-g14`, `x86_64-unknown-linux-musl`, with `yantrad`
+idle over an **empty workspace directory** and nothing running but its own
+30-second refresh loops:
+
+| | Measured | ADR-0004 |
+| --- | --- | --- |
+| Idle RSS | **3,780 kB**, of which 1,080 kB is anonymous — the rest is the binary's own pages. Three runs landed between 3,504 and 3,780 | ~15 MB |
+| Idle CPU | **0.053 % of one core** over five minutes, and 0.050 of that is the `tailscale` the refresh loop spawns rather than the daemon itself | — |
+| `yantra --version`, cold | **p50 4.0 ms**, p90 4.4 ms, max 10.5 (warm: p50 1.5 ms) | — |
+
+**The ADR names all three and priced one**, so only the first row is a
+comparison; idle CPU and CLI cold-start were promised as reports, not as targets.
+
+RSS is `/proc/PID/status`, CPU is that process's own jiffies **plus the ones it
+reaped** — leave the children out and a daemon whose idle workload is spawning
+`tailscale` prices itself at almost nothing. *Cold* means the binary's page cache
+dropped before every run with `posix_fadvise(DONTNEED)`, which needs no root; the
+warm row is the same loop without it, so the pair prices the read rather than
+guessing at it.
+
+**Why the recipe uses a namespace.** `yantrad` refuses to start unless Tailscale
+tells it which addresses this machine holds (R-22), and on the machine that
+builds it 7717 is usually already bound by the developer's own daemon. So it runs
+in a user + network namespace carrying this node's real addresses on `lo` — the
+real `tailscale` answers over its socket, which crosses the namespace, so the
+refusal is *satisfied* rather than worked around, and the bind is a real one on a
+port nobody else holds. No root, and nothing of the daemon is stubbed.
+
+**These are not the appliance's numbers.** Q15 has not picked a box, and this is
+a laptop: slower cores and an SD card would move cold-start most. It is a floor
+in the other direction too — an empty workspace directory buys no ssh, and a
+daemon holding a real fleet's snapshot costs more than this by whatever the
+snapshot weighs.
 
 ## Gotchas that will cost you an afternoon
 
