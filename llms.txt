@@ -27,7 +27,7 @@ the repo.
 - [yantra-core](crates/yantra-core/llms.txt): all the orchestration — ssh, tmux, agents, inventory, workspaces. Never prints, never exits. This is where nearly all the code is.
 - [yantra](crates/yantra/llms.txt): the CLI. Renders and chooses exit codes; decides nothing.
 - [yantrad](crates/yantrad/llms.txt): the daemon. An axum server binding only this machine's Tailscale addresses: a read-only JSON API over a background snapshot, the writes (`POST /heartbeat`, and `new`/`edit`/`up`/`down`/`resume` per workspace, authorised by Tailscale identity), a WebSocket that bridges a workspace's session to a browser under the same authorisation, and the dashboard itself.
-- [yantra-agent](crates/yantra-agent/llms.txt): the per-machine heartbeat — seven probes, a 10 s loop and a hand-written POST. Install is M7's.
+- [yantra-agent](crates/yantra-agent/llms.txt): the per-machine heartbeat — seven probes, a 10 s loop and a hand-written POST. It has a unit on Linux and a recipe that installs it.
 
 ## Decisions
 

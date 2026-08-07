@@ -34,16 +34,18 @@ and Yantra restores the context — picking a machine, opening the session, and 
 
 ## Status
 
-🚧 **Usable from the CLI, against real machines, with a real agent.** Four milestones are closed.
+🚧 **Usable from the CLI, against real machines, with a real agent.** M0–M4 are closed, and M5's
+buildable work is finished — what is left of it is a demonstration on the Mac, not code.
 
 `yantra up <workspace>` opens a tmux session in a repo on a machine reached over SSH — idempotently,
 so running it twice attaches rather than duplicating. With `--agent claude` it launches Claude Code
 in that session, and `logs` / `status` / `down` watch it and stop it. All four were verified end to
 end against a live Claude Code on a real machine, not a stub.
 
-`yantrad` now serves too, though only a health check so far — it listens on this machine's Tailscale
-addresses and refuses to start anywhere else. Still ahead: the HTTP API, the web UI, the scheduler,
-the browser terminal, and the hardware.
+`yantrad` serves that same work to a browser: the read model the dashboard draws, the writes behind
+its buttons, and a pty for each terminal attached from a page. It listens on this machine's Tailscale
+addresses and refuses to start anywhere else. Still ahead: placement — picking the machine for you
+rather than offering a list to tap — and the hardware.
 
 **Start here → [`tracker.md`](tracker.md)** — the single source of truth for what is decided, what is
 being worked on, and what is still an open question.
@@ -59,8 +61,11 @@ cd yantra
 cargo install --path crates/yantra
 ```
 
-That installs the `yantra` CLI to `~/.cargo/bin`. Nothing else needs installing — the daemon does not
-exist yet, and Yantra runs no software on the machines it manages.
+That installs the `yantra` CLI to `~/.cargo/bin`. The daemon and the per-machine agent are built and
+copied rather than installed here: `just appliance` builds all three for the appliance target, and
+`just appliance-install <host>` copies them and both systemd units over ssh onto the always-on box
+Yantra itself runs on — the same recipe that updates it afterwards
+([docs/appliance.md](docs/appliance.md)).
 
 **On the machines you want to reach**, you need what Yantra orchestrates rather than anything of
 Yantra's own:
