@@ -185,6 +185,11 @@ traits' own implementations must be tested against the real thing.
   a link that stops resolving is a broken build, a copied fact is a reader's problem — and when a
   count or a name must be restated, treat changing it as part of the work, not as tidying up
   afterwards.
+- **A milestone does not close until the whole-system documents say what shipped.**
+  [`docs/architecture.md`](docs/architecture.md), the root [`README.md`](README.md) and
+  [`llms.txt`](llms.txt) describe *state* rather than a change, so the rule above never catches them —
+  no one PR makes them wrong. Sweep them when a milestone row goes ✅: architecture.md still called
+  `yantrad` a health-check server three milestones after it stopped being one.
 - **A new instruction from the owner lands in the file that binds it, not only in the reply.** If it
   is how work is done it belongs here or in the crate's `CLAUDE.md`; if it is what to build it is a
   `tracker.md` row; if it is a decision it is an ADR. An instruction that lives only in a
