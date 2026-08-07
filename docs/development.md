@@ -58,7 +58,7 @@ just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
 just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
-just appliance    # cross-compile arm64 binaries for the Pi 5
+just appliance    # cross-compile the appliance binaries (arm64 by default)
 just appliance-runtime  # idle RSS, idle CPU and CLI cold-start, on this machine
 ```
 
@@ -256,6 +256,15 @@ just appliance
 file target/aarch64-unknown-linux-musl/release/yantrad
 # ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
 ```
+
+**Every `appliance*` recipe takes a target and defaults to `aarch64-unknown-linux-musl`**, because
+[Q15](../tracker.md#6-open-questions) has not answered which box and *Pi 5 / N100* is two
+architectures. `just appliance x86_64-unknown-linux-musl` builds the mini-PC's, after one
+`rustup target add x86_64-unknown-linux-musl`.
+
+Getting those binaries onto a box is `just appliance-install <host>`, which is also the update.
+[`appliance.md`](appliance.md) is the runbook: what the box needs first, where the workspace TOMLs
+come from, and why a running binary is replaced by a rename rather than a copy.
 
 Statically linked, no runtime on the target. `just appliance-size` reports what
 each one costs; measured on 2026-08-06 that is **3.4 MB** for `yantrad`, **2.4 MB**

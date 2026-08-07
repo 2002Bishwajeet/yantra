@@ -1,5 +1,11 @@
 # Yantra task runner.  `just` with no argument lists everything.
 
+# Q15 has not answered which box and `Pi 5 / N100` is two architectures, so
+# this is the default rather than the answer (docs/appliance.md).
+appliance_target := "aarch64-unknown-linux-musl"
+
+appliance_stage := "/tmp/yantra-install"
+
 default:
     @just --list
 
@@ -65,9 +71,10 @@ https-off:
 deny:
     cargo deny check
 
-# Cross-compile the appliance binaries for the Pi 5 / arm64 target.
-appliance:
-    cargo zigbuild --release --target aarch64-unknown-linux-musl \
+# Cross-compile the appliance binaries. Defaults to arm64; `just appliance
+# x86_64-unknown-linux-musl` is the mini-PC that M7's own `Pi 5 / N100` implies.
+appliance target=appliance_target:
+    cargo zigbuild --release --target {{target}} \
         -p yantrad -p yantra -p yantra-agent
 
 # R-24's assertion, and it is a negative one: no recipe the Rust gate runs may
@@ -129,10 +136,11 @@ web-build:
     npm --prefix web run build
 
 # M7's one file to copy: the appliance daemon with the dashboard inside it.
-appliance-embedded: web-build
-    cargo zigbuild --release --target aarch64-unknown-linux-musl \
+# Run it *after* `just appliance`, which builds a `yantrad` without one over it.
+appliance-embedded target=appliance_target: web-build
+    cargo zigbuild --release --target {{target}} \
         -p yantrad --features embed-dashboard
-    @ls -lh target/aarch64-unknown-linux-musl/release/yantrad
+    @ls -lh target/{{target}}/release/yantrad
 
 # The feature's tests. `just test` cannot run them by accident — the module they
 # live in does not exist without the feature.
@@ -150,10 +158,10 @@ landing-visual:
 
 # Size and startup are quality targets carried over from ADR-0003's
 # measurement discipline; the appliance milestone (M7) reports both.
-appliance-size: appliance
-    @ls -lh target/aarch64-unknown-linux-musl/release/yantrad \
-            target/aarch64-unknown-linux-musl/release/yantra \
-            target/aarch64-unknown-linux-musl/release/yantra-agent
+appliance-size target=appliance_target: (appliance target)
+    @ls -lh target/{{target}}/release/yantrad \
+            target/{{target}}/release/yantra \
+            target/{{target}}/release/yantra-agent
 
 # A binary that is only cross-compiled cannot be run, so the other three numbers
 # ADR-0004 owes M7 — idle RSS, idle CPU, CLI cold-start — are measured on the
@@ -250,3 +258,39 @@ appliance-runtime:
     echo "yantra --version, {{runtime_target}}:"
     samples cold | spread cold
     samples warm | spread warm
+
+# Install or update the appliance from the machine that builds it: nothing has
+# ever been published (Y-037), so a copy is the release. What the box needs
+# before the first one is docs/appliance.md's.
+appliance-install host target=appliance_target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    release="target/{{target}}/release"
+    for binary in yantrad yantra yantra-agent; do
+      [[ -x "$release/$binary" ]] || {
+        echo "appliance-install: no $release/$binary — run \`just appliance {{target}}\` first" >&2
+        exit 1
+      }
+    done
+
+    ssh {{host}} "rm -rf {{appliance_stage}} && mkdir -p {{appliance_stage}}"
+    scp "$release"/yantrad "$release"/yantra "$release"/yantra-agent \
+        crates/yantrad/yantrad.service crates/yantra-agent/yantra-agent.service \
+        {{host}}:{{appliance_stage}}/
+
+    # Renamed rather than written through, and staged in the destination
+    # directory because rename(2) cannot cross a filesystem — `install` and a
+    # cross-filesystem `mv` both work and neither is atomic (docs/appliance.md).
+    # `try-restart` leaves a first install's units stopped until that document's
+    # one-time setup has been done.
+    remote='set -eu
+    for binary in yantrad yantra yantra-agent; do
+      install -m 755 {{appliance_stage}}/$binary /usr/local/bin/$binary.new
+      mv -f /usr/local/bin/$binary.new /usr/local/bin/$binary
+    done
+    install -m 644 {{appliance_stage}}/yantrad.service {{appliance_stage}}/yantra-agent.service \
+        /etc/systemd/system/
+    rm -rf {{appliance_stage}}
+    systemctl daemon-reload
+    systemctl try-restart yantrad.service yantra-agent.service'
+    ssh -t {{host}} "sudo sh -c '$remote'"
