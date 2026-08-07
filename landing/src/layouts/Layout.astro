@@ -1,7 +1,10 @@
 ---
-import '@fontsource/eczar/400.css';
-import '@fontsource/eczar/600.css';
-import '@fontsource/ibm-plex-mono/400.css';
+/* Self-hosted rather than a system stack, and the reason is the snapshots, not the design:
+   `system-ui` resolves to a different face on the CI runner than on a developer's box, and the
+   mobile baselines failed at 2% of pixels while desktop slipped under the threshold. A bundled
+   face makes the page render identically everywhere. */
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/600.css';
 import '../styles/global.css';
 
 interface Props {
@@ -19,9 +22,7 @@ const { title, description } = Astro.props;
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     <meta name="description" content={description} />
-    {/* Light, not "light dark": a patta is a painted cloth and the cloth is light, so the dark
-        ground applies only when a viewer stamps data-theme on the root and asks for it. */}
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
   <body>
