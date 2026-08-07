@@ -142,6 +142,15 @@ I²C is still **`/dev/i2c-1`**, SPI still `/dev/spidev0.0`.
 **Permissions:** the daemon user needs `gpio`, `i2c`, `spi` and **`input`**; restart the session after
 `usermod`. `/dev/leds0` has no shipped rule: add `KERNEL=="leds[0-9]*", GROUP="gpio", MODE="0660"`.
 
+> **Amended 2026-08-05 (Y-152).** Two things this section does not carry, both worked out in
+> [note 11](11-appliance-hardware.md). **The WS2812 row is silent on levels**: Pi 5 GPIO is 3.3 V and
+> a strip powered at 5 V wants 0.7 × V<sub>DD</sub> = 3.5 V to read a `1`, so *"userspace has no
+> timing responsibility"* is true about the protocol and says nothing about whether the line is
+> driven high enough — a `74AHCT125` or a dropped strip supply fixes it. **And the udev rule above is
+> right in a way that matters**: matching the subsystem by glob instead — `SUBSYSTEM=="*-pio"` —
+> leaves the driver loading cleanly and the LEDs dead, which was reported as a kernel fault against
+> two kernels in succession before being traced to it. Match the device node, as written above.
+
 ### Verdict: the hardware layer is file descriptors
 
 **On Pi 5 the kernel and RP1's PIO already provide the real-time layer.** The `rotary-encoder` overlay
