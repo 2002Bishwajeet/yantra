@@ -102,7 +102,15 @@ with no other way in.
 
 **[D], read from the code and not measured**, because this tailnet has no tagged node to measure it
 against — and that is a cheap thing to fix without buying anything: one ephemeral tagged node is
-enough to see what `owner()` and `whois` then return. The alternative is disabling key expiry for
+enough to see what `owner()` and `whois` then return.
+
+> **2026-08-06: cheap, but two owner actions rather than one.** The tailnet was read rather than
+> assumed: **no node carries a `Tags` field**, here or among the peers, and one `UserID` owns every
+> machine in the netmap. A key cannot apply a tag the policy file has not defined, so the ACL needs a
+> `tagOwners` entry before Settings → Keys can mint against it — and the key wants **ephemeral,
+> pre-approved and single-use**, so the node deletes itself on disconnect and the credential cannot
+> be replayed. Neither step is code, which is what makes this row wait on the owner rather than on
+> the box. The alternative is disabling key expiry for
 that one node in the admin console, which is an owner action rather than a code change and belongs in
 the install document either way.
 
@@ -226,7 +234,9 @@ notifier and one that gets muted in a week:
   definition says *Pi 5 / N100*, which is two architectures.
   [`release.yml`](../../.github/workflows/release.yml) does carry the other one, calling
   `x86_64-unknown-linux-musl` *"Linux dev boxes and the x86 mini-PC alternative to the Pi"*. So the
-  gap is in the recipes, not in the pipeline.
+  gap is in the recipes, not in the pipeline. **Closed by [Y-145](../../tracker.md#3-task-board)** as
+  a parameter rather than as a second set of recipes: every `appliance*` recipe takes a target and
+  defaults to `aarch64`, so the mini-PC is one argument and Q15 is untouched.
 - **The release build passes no `--features`**, so a published `yantrad` would carry no dashboard.
   The only build that embeds one is [`embed.yml`](../../.github/workflows/embed.yml), which is a
   check and uploads nothing.
@@ -236,6 +246,14 @@ notifier and one that gets muted in a week:
 **So M7 installs by building and copying**, from the machine that already builds everything, and the
 plan says so rather than leaving a row to discover it. The one non-obvious mechanic: a running binary
 cannot be overwritten in place (`ETXTBSY`) — copy beside it and rename over it, then restart.
+
+> **Measured by [Y-145](../../tracker.md#3-task-board) on 2026-08-06, and that last sentence is
+> stronger than the kernel is.** `ETXTBSY` is what `cp` and `scp` get, because they open the
+> destination `O_TRUNC`; `install(1)` and a `mv` from another filesystem unlink it first and
+> **succeed** against a live process. What they are not is atomic — each leaves a window where the
+> path is not a whole binary and `Restart=` can fire inside it — and that, rather than the errno, is
+> why the replacement is a `rename(2)` and why the staged name has to be in the destination
+> directory. See [`docs/appliance.md`](../appliance.md).
 
 **This is not provisioning.** The permanent non-goal is that Yantra never creates, images or destroys
 a machine; copying our own binary onto a box the owner already has is the same act as installing the

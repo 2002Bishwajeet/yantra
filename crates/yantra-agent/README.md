@@ -27,9 +27,12 @@ start, free RAM, free disk, CPU load and power state every beat. Every reader th
 reports the value that loses a placement rather than a guess, because the alternative is placing work
 on a machine that cannot take it.
 
-**On Linux it has a unit and nowhere it is installed from.** [`yantra-agent.service`](yantra-agent.service)
-starts it at boot (Y-142); the recipe that copies binary, unit and environment file onto a machine is
-Y-145's, and macOS still has neither. Until then, run it from a terminal.
+**On Linux it has a unit and a recipe that installs it.** [`yantra-agent.service`](yantra-agent.service)
+starts it at boot (Y-142), and `just appliance-install <host>` copies the binary and the unit onto a
+machine (Y-145, [`docs/appliance.md`](../../docs/appliance.md)). **The environment file is not
+copied**: it names the daemon *that* box reports to, and an install that wrote it would be exactly
+the overwrite ADR-0013 §4 keeps out of the unit. macOS still has neither — run it from a terminal
+there.
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
 seven fields are and why; [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) measures how each
