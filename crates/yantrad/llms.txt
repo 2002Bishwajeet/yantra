@@ -29,6 +29,6 @@
 
 ## Optional
 
-- [tracker.md](tracker.md): the invariants waiting here for the daemon that does not exist yet — SQLite, scheduling, PTY — plus two read off the daemon that does: I-58, `listen_on` runs once, so an address that moves under a healthy process is never noticed and `Restart=on-failure` never fires; and I-59, the same supervisor re-arming *the first look says nothing* and swallowing every change a restart straddles. None of them exercised by shipped code.
+- [tracker.md](tracker.md): the invariants waiting here for the daemon that does not exist yet — SQLite, scheduling, PTY, none of them exercised by shipped code — plus the ones read off the daemon that does: I-58, `listen_on` runs once, so an address that moves under a healthy process is never noticed and `Restart=on-failure` never fires; I-59, the same supervisor re-arming *the first look says nothing* and swallowing every change a restart straddles; and I-60, a startup check over something the filesystem owns being no guarantee at request time — the only one of the three that shipped code enforces rather than merely records, in [src/web.rs](src/web.rs), and the only one anyone has seen.
 - [../../tracker.md](../../tracker.md): M4 is the milestone that needs this. Open decisions that affect it are listed there.
 - [docs/vision.md](../../docs/vision.md): what the daemon is ultimately for.
