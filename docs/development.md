@@ -115,6 +115,13 @@ greps every recipe the Rust gate runs and `ci.yml` itself for the feature, for `
 for npm, and it fails if the default dependency graph ever carries `include_dir`. A green build says
 nothing about *which* jobs needed npm to get there, which is why the assertion is a negative one.
 
+**`just build-without-node` is the other half, and it runs rather than reads** (Y-148). It writes
+stubs for `node`, `npm` and `npx` that exit non-zero, puts them first on `PATH`, and runs `just build
+lint` behind them, so a `build.rs` that shells out by name reds the build instead of passing quietly
+on a runner that happens to ship Node. It is CI-only, like `test-ci` — `ci.yml` runs it on every pull
+request and `no-node` fails if that job ever disappears — but it takes no arguments and no fixture,
+so run it by hand whenever a build script or a proc macro is what you are changing.
+
 **`YANTRA_WEB` still wins over the embedded copy, and a wrong one still refuses.** A binary that
 carries a dashboard does not quietly serve it over a directory you named and mistyped — the variable
 is the half a person can get wrong, so it keeps the refusal.
