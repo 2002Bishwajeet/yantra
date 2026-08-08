@@ -185,6 +185,14 @@ traits' own implementations must be tested against the real thing.
   a link that stops resolving is a broken build, a copied fact is a reader's problem — and when a
   count or a name must be restated, treat changing it as part of the work, not as tidying up
   afterwards.
+- **A `tracker.md` row says what to do and what *done* means, and stops.** The reasoning goes in the
+  PR, the commit, an ADR or a research note, and the row links it — the rule above, applied to rows.
+  Owner's ask, 2026-08-08: rows had grown into multi-sentence prose, and §B0 has every session read
+  `tracker.md` first, so its size is a cost every task pays before it starts. The file already cannot
+  be opened without targeted line offsets.
+- **Prune closed rows into [`docs/archive/`](docs/archive/) as they accumulate**, not only when a
+  milestone closes — one file per milestone, whose header records what moved and what deliberately
+  stayed behind.
 - **A milestone does not close until the whole-system documents say what shipped.**
   [`docs/architecture.md`](docs/architecture.md), the root [`README.md`](README.md) and
   [`llms.txt`](llms.txt) describe *state* rather than a change, so the rule above never catches them —
