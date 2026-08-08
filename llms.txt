@@ -36,6 +36,7 @@ something else.
 
 - [docs/adr/](docs/adr/): the ones that constrain most code are [0005](docs/adr/0005-core-logic-in-a-library-crate.md) (library crate), [0006](docs/adr/0006-ssh-exec-transport.md) (ssh transport), [0009](docs/adr/0009-machine-names-are-ssh-destinations.md) (machine names) and [0011](docs/adr/0011-claude-code-runs-as-a-tui-in-tmux.md) (the agent is a TUI).
 - [docs/research/](docs/research/): dated research notes, one per topic — its [README](docs/research/README.md) indexes them. Evidence as of their access date, not eternal truth — re-verify anything version-sensitive.
+- [docs/research/13-dashboard-revamp-and-github.md](docs/research/13-dashboard-revamp-and-github.md): read this before proposing anything about the dashboard, a router, or a Git provider. It measures what the page is against the founding UI principle, prices a GitHub clone against the decisions it collides with — persistence, secrets, and Tailscale identity — and records that of the two machines online, the one holding a working GitHub credential has no sshd and the one reachable over ssh has no credential, so nothing on this fleet can be cloned to today.
 
 ## Optional
 
