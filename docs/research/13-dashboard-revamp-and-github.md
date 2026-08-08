@@ -13,10 +13,16 @@ code says it is, because the reason written down for not having one has since st
 The clone is the hard one, and not for the reason it looks like: **GitHub's better-designed
 authentication is the one this daemon cannot hold**, and the only mechanism that satisfies
 [§B4](../../CLAUDE.md) without a superseding ADR is the one where **Yantra never sees a token at
-all** — verified working on this machine below.
+all**. That mechanism works — on exactly one machine, which happens to be the one that cannot be
+cloned to. The fleet was measured and **no machine on it can be cloned to today**, for two unrelated
+reasons neither of which is a bug in Yantra. §2.6.
 
 Accessed **2026-08-08**. Re-verify anything version-sensitive before relying on it — §B6. This note
 proposes and opens no tracker rows (§B0).
+
+**`[V]` marks a claim measured by running something**, with the command and its output given. Every
+other claim is read from a file in this repo or fetched from a documentation page listed in
+`## Sources`. Where neither applies the text says **unverified** and does not guess.
 
 ---
 
@@ -35,14 +41,19 @@ proposes and opens no tracker rows (§B0).
    issues an 8-hour user token with a 6-month refresh token; an OAuth App issues a token with no
    expiry and no refresh token. The App is the better security object and is **the one a daemon that
    persists nothing cannot use**. §2.1.
-4. **The credential does not have to enter Yantra.** `gh` is already installed, already logged in,
-   and already registered as git's credential helper on this machine — measured in §2.2. A private
-   clone over ssh needs no token from the daemon. That is the only option that is §B4-clean by
-   construction rather than by policy.
-5. **The single most important thing nobody has tested** is whether that holds on the Mac. If `gh`
-   keeps its token in the login keychain there, `ssh mac 'git clone …'` fails for exactly the reason
-   **I-44** documents for Claude Code, and the whole clean path has a hole in it on one of the two
-   machines that are on. §2.6. **Unverified — and cheap to test.**
+4. **The credential does not have to enter Yantra, and that is still the right mechanism.** `gh` is
+   already logged in and already registered as git's credential helper on `cachyos-g14` — `[V]`
+   §2.2 — so a private clone there needs no token from the daemon. It is the only option that is
+   §B4-clean by construction rather than by policy.
+5. **But it costs something, and the first draft of this note said it cost nothing. It was wrong.**
+   Measured on 2026-08-08 `[V]`: the Mac has **no `gh` binary at all**, its ssh key is **not
+   registered with the account**, and `cachyos-g14` — the machine that *does* hold a working
+   credential — **runs no sshd and cannot be cloned to.** §2.6. Of the two machines online, one
+   cannot be reached and the other cannot authenticate.
+6. **So the mechanism has a prerequisite nothing currently satisfies: every target machine needs its
+   own GitHub credential provisioned first**, by hand, before any dashboard clone button can work.
+   That is another per-machine manual setup step — the same shape as the ten-step appliance install,
+   and the same violation of `brainstorm.md:394`. §2.6a is about who does it and how.
 
 ---
 
@@ -195,14 +206,14 @@ target needs a credential. Six mechanisms, each judged on where the secret sits.
 
 | # | Mechanism | Where the secret sits | §B4 | Verdict |
 | --- | --- | --- | --- | --- |
-| 1 | **`gh` already logged in on the target, as git's credential helper** | the target machine's credential store | **compatible by construction** | recommended |
+| 1 | **`gh` already logged in on the target, as git's credential helper** | the target machine's credential store | **compatible by construction** | recommended — **but see §2.6: no machine in this fleet currently satisfies it as a clone target** |
 | 2 | Deploy key on the target | the target machine's `~/.ssh` | compatible | does not scale — see below |
 | 3 | ssh agent forwarding | the operator's agent, *lent* to the target | compatible in the letter | lends the key; see below |
 | 4 | Short-lived token on the ssh command line | **`argv`, world-readable** | **refused** | measured below |
 | 5 | GitHub App installation token (`ghs_`, 1 h) | the app **private key**, wherever it lives | refused unless the key is a reference | pushes the problem up one level |
 | 6 | Fine-grained PAT pasted into the dashboard | wherever the daemon puts it | refused | §2.1(b) |
 
-**Row 1, measured on this machine on 2026-08-08.** `gh` 2.96.0 is installed at `/usr/bin/gh`, `git`
+**Row 1, `[V]` on `cachyos-g14`, 2026-08-08.** `gh` 2.96.0 is installed at `/usr/bin/gh`, `git`
 is 2.55.0, and:
 
 ```
@@ -225,6 +236,10 @@ or log anything — §B4 is satisfied the way [ADR-0018](../adr/0018-the-tmux-se
 §4 satisfies it, *"by construction rather than by policy"*, and there is no place in the design where
 a secret would sit. This is the same argument ADR-0018 used to keep `claude`'s credential out of
 Yantra, applied to `git`'s.
+
+> **Read that paragraph as a statement about one machine, because that is all it is.** "Already
+> works" is true of `cachyos-g14` and of nothing else measured. §2.6 measures the rest of the fleet
+> and the answer is worse than this section's first draft assumed.
 
 **Row 2 is real and does not scale.** GitHub's own documentation: a deploy key *"grants access to a
 single repository"*, *"You can't reuse a deploy key for multiple repositories"*, and they *"don't
@@ -351,44 +366,101 @@ reconnect capped at five attempts half a second apart and no server-side buffer.
 **per-workspace only** — there is no *"give me a shell on machine X"* that is not a workspace. That
 is a genuine gap, it is small, and it mirrors an existing route exactly. §4 prices it.
 
-### 2.6 macOS — where the clean path may quietly fail, and nobody has checked
+### 2.6 The fleet was measured, and no machine on it can be cloned to today
 
-[ADR-0018](../adr/0018-the-tmux-server-carries-the-macos-login-session.md) §1: on macOS `up`
-**requires an existing tmux server and refuses when there is none**, because a server started over
-ssh is in launchd's `Background` domain and the `claude` it forks cannot read the login keychain
-(**I-44**). §7 hands M7 a launchd job to keep such a server alive; that job is not built.
+This section was drafted as a hypothesis about the macOS keychain. **The measurements came back and
+the hypothesis was not the problem — the problem is more basic and it is worse.** All `[V]`,
+2026-08-08, run from `cachyos-g14` over the tailnet.
 
-Two consequences for a GUI-driven *clone, then start an agent* on the Mac:
+| # | Measurement | Result |
+| --- | --- | --- |
+| 1 | `ssh -o BatchMode=yes <mac> 'gh --version'` | `zsh:1: command not found: gh` |
+| 2 | `ssh <mac> 'gh auth token'` | not retrievable — there is no `gh` |
+| 3 | `ssh <mac> 'ssh -T git@github.com'` | **`Permission denied (publickey)`** — `~/.ssh/id_ed25519` exists but is not registered with the account |
+| 4 | `ssh <mac> 'git --version'` / `git config credential.helper` | `git 2.50.1 (Apple Git-155)`, helper **`osxkeychain`** |
+| 5 | `ss -tlnp` on `cachyos-g14`, and `systemctl is-active sshd` | nothing on `:22`; **`inactive`**. `ssh cachyos-g14` → `Connection refused` |
 
-**The clone succeeds and the launch refuses, and that is correct.** `git` in the `Background` domain
-can clone perfectly well; `claude` in a `Background` tmux server cannot authenticate. So the flow
-half-completes, and ADR-0018's refusal — which names its reason — is the right outcome rather than a
-bug. A GUI must render that refusal as *"the Mac needs a login session"*, not as *"clone failed"*.
+**Read rows 1–3 together and the keychain question never arises.** The Mac does not have `gh`
+installed, so there is no `gh`-shaped credential to fail to read — I-44's constraint was never
+reached. And the ssh route is closed too: the key on that machine is not on the account, so
+`git clone git@github.com:…` fails at authentication before any of ADR-0018's reasoning applies.
+**Two independent reasons, neither of them subtle, and neither of them the one this note predicted.**
 
-**And here is the thing nobody has tested.** `gh auth status` on this Linux box reports its token is
-in the **keyring**. GitHub CLI's documentation says a token *"will be stored securely in the system
-credential store"*, falling back to *"writing the token to a plain text file"* when that is
-unavailable. On macOS the system credential store is **the login keychain** — which is exactly what
-I-44 proves an ssh session cannot read.
+**Row 5 is the sharp one, and it closes the loop.** Of the two machines currently online:
 
-> **Unverified, and it is the highest-value measurement in this note.** If `gh` on
-> `bishwajeets-macbook-pro` keeps its token in the login keychain, then
-> `ssh bishwajeets-macbook-pro 'git clone https://github.com/<owner>/<private>.git'` **fails to
-> authenticate for the same architectural reason Claude Code does** — and §2.2's clean path has a
-> hole in it on one of the two machines in this fleet that are on. I could not test it: I have no
-> access to that machine, and the `gh` documentation I could reach does not name its macOS backend.
->
-> **The test is one command and it settles the design**, in the shape ADR-0018 §8's probe already
-> established: from this machine, `ssh bishwajeets-macbook-pro 'gh auth status'` and
-> `ssh bishwajeets-macbook-pro 'git ls-remote https://github.com/<owner>/<a-private-repo>.git >/dev/null && echo ok'`.
-> If those work, §2.2 row 1 is the answer for the whole fleet. If they do not, macOS needs a
-> different mechanism and this note's recommendation is Mac-incomplete.
+| Machine | Holds a working GitHub credential? | Reachable as a clone target? |
+| --- | --- | --- |
+| `cachyos-g14` | **yes** — `gh`, keyring, credential helper (§2.2) | **no** — no sshd, `Connection refused` |
+| `bishwajeets-macbook-pro` | **no** — no `gh`, key not on the account | yes |
 
-**The appliance has the same shape of problem and a different cause.** `docs/appliance.md` creates
-the daemon's account as `useradd --system … --shell /usr/sbin/nologin yantra` — no GUI session, no
-desktop keyring, no login shell. `gh`'s documented fallback there is a plain-text file, which is a
-stored secret value by another name. **Also unverified**, and it means the recommendation in §2.2 may
-hold for the fleet's *workstations* and not for the box that is meant to run unattended.
+**The machine that can authenticate cannot be reached, and the machine that can be reached cannot
+authenticate.** So the §2.2 mechanism is real and **the fleet satisfies it nowhere**. A *Clone*
+button built today would fail on both machines, for two different reasons, and neither failure is a
+bug in Yantra.
+
+> **What survives, and what does not.** The recommendation does not change: `gh`-as-credential-helper
+> on the target is still the only mechanism that satisfies §B4 by construction, and §2.2's argument
+> for it is untouched. **What changes is the price.** The first draft of this note called it
+> "zero-cost" and that was wrong — it is zero-cost *in Yantra* and carries a real per-machine setup
+> cost outside it. §2.6a.
+
+**Row 4 leaves one thing genuinely open.** The Mac's `git` is configured with the `osxkeychain`
+credential helper, which is macOS's own store and not `gh`'s. **Whether that keychain currently holds
+a usable GitHub token is unverified** — proving it needs a fetch against a private repository, which
+was not run. So the Mac may already be one working credential away from clonable, or may need the
+whole of §2.6a; this note does not know which and will not guess. If it *does* hold a token, note that
+I-44's constraint becomes live again for exactly the reason this section originally predicted: an ssh
+session is in the `Background` launchd domain and the login keychain is what it cannot read. **That
+is the next measurement, and it is a `git ls-remote` against a private repo over ssh.**
+
+**ADR-0018's own constraint still applies to the half after the clone.** On macOS `up` requires an
+existing tmux server and refuses when there is none, because a server started over ssh is in
+`Background` and the `claude` it forks cannot read the login keychain (**I-44**); §7 hands M7 a
+launchd job that is not built. So even with a credential in place, *clone then start an agent* on the
+Mac **half-completes**: `git` in the `Background` domain clones fine, `claude` in a `Background` tmux
+server refuses. That refusal is correct, and a GUI must render it as *"the Mac needs a login
+session"* rather than as *"clone failed"*.
+
+**And the appliance has a third shape of the same problem.** `docs/appliance.md` creates the daemon's
+account as `useradd --system … --shell /usr/sbin/nologin yantra` — no GUI session, no desktop
+keyring, no login shell. `gh`'s documented fallback there is *"writing the token to a plain text
+file"*, which is a stored secret value by another name. **Unverified** (no such box is on the tailnet
+yet), and it means §2.2 may hold for workstations and not for the box that exists to run unattended.
+
+### 2.6a Who provisions the per-machine credential — and the loop it closes
+
+§2.6 turns the recommendation into a prerequisite: **before the dashboard can clone anything to a
+machine, that machine needs its own GitHub credential.** Yantra cannot install it — §B4 forbids
+Yantra from carrying the value, which is the whole reason this mechanism was chosen. So it is a
+person, once per machine, and the realistic options are:
+
+| How | What it takes on the target | Notes |
+| --- | --- | --- |
+| **`gh auth login`, then `gh auth setup-git`** | install `gh`; complete the device flow; the helper line lands in `~/.gitconfig` | what `cachyos-g14` already has. `--web` uses the device flow, so no ingress. On a headless box `--insecure-storage` is the documented fallback and it writes plaintext |
+| **Register the machine's existing ssh key** with the account | paste `~/.ssh/id_ed25519.pub` into GitHub | closes the Mac's row 3. One web action, no software installed |
+| **Git Credential Manager / `osxkeychain`** | already present on the Mac | conditional on §2.6 row 4, which is unverified |
+| Deploy key per repository | a key pair per repo per machine | §2.2 row 2 — does not scale to a repo browser |
+
+None of these is Yantra's to automate, and **that is the point rather than a gap to close**. The same
+reasoning that keeps `claude`'s credential out of Yantra (ADR-0018 §4) keeps `git`'s out, and the
+cost of both is a manual step on each machine.
+
+**The loop this closes is the one §1b opened, and it is worth naming explicitly.**
+[`docs/brainstorm.md:394`](../brainstorm.md) is the founding UI principle: *"Everything should be
+configurable from the interface. No YAML editing. No configuration files."* §1b found that the
+dashboard honours it for workspaces and that `docs/appliance.md` violates it completely with ten
+manual setup steps. **A per-machine GitHub credential is step eleven.** It is the same shape — a
+one-time human action on each machine, outside the interface, that nothing in the product can do for
+you and nothing in the product currently *tells* you about.
+
+So the spec's *"handle everything via dashboard"* runs into a pattern rather than a feature gap:
+**Yantra's design keeps pushing setup out to the machines on purpose, and the interface has never
+been given a way to say what is still missing.** That is the honest framing, and it suggests the
+cheapest useful thing this whole note points at is not a clone button at all — it is the dashboard
+being able to *report* a machine's readiness (has `gh`? has a credential? has an sshd? has a tmux
+server?) so the manual steps are at least visible where the work happens. That would have surfaced
+all five of §2.6's measurements without anyone running a single command by hand. **Proposed, not
+decided** — §B0.
 
 ### 2.7 Routing — half the recorded objection has expired, and the repo already says so
 
@@ -639,19 +711,32 @@ rule, not a tax: it keeps the CLI at parity for free.
 
 ### Genuinely independent — buildable today, no decision owed
 
-1. **The router and the page split** (§2.7). Web only. `web.rs` has served deep links since Y-073, and
-   Y-132 removed the recorded objection. Add one dependency, split `App.tsx` into routes, keep the
+1. **The router and the page split** (§2.7). Web only. `web.rs` has served deep links all along, and
+   Y-132 spent half the recorded objection. Add one dependency, split `App.tsx` into routes, keep the
    React Compiler check green.
 2. **`/machines/{name}` and `/workspaces/{name}` pages.** Existing reads, filtered. No daemon change.
 3. **A linkable terminal.** The socket and the reconnect already exist; this is a URL.
 
-### Blocked on a measurement, not on code — and each is one command
+**And one candidate §2.6a argues is better value than any clone work:** a **readiness reading per
+machine** — has an sshd, has `gh`, has a credential, has a tmux server. It needs no new decision, it
+is the same shape as the four readings the page already draws, and it would have surfaced every one
+of §2.6's five measurements without a human running a command. Proposed, not decided.
 
-4. **Does `gh`/`git` authenticate over ssh on the Mac?** (§2.6.) This decides whether the whole clean
-   path is fleet-wide or Linux-only. **Run this first — it is cheaper than any of the above and it
-   can invalidate §6's ordering.**
-5. **Can the appliance's `nologin` system account hold a `gh` credential at all?** (§2.6.) Decides
-   whether the always-on box can drive a clone or only the workstations can.
+### Not blocked on code — blocked on someone provisioning credentials
+
+4. **Register the Mac's `~/.ssh/id_ed25519.pub` with the account, or install `gh` on it** (§2.6 rows
+   1–3, §2.6a). Until one of these happens, no clone to the Mac authenticates by any mechanism.
+5. **Decide what to do about `cachyos-g14` having no sshd** (§2.6 row 5). It is the machine with a
+   working credential and it is not an ssh target, so it cannot be a clone target either. Whether
+   that box is *meant* to be one is the owner's — nothing in the repo says it is.
+
+### Blocked on a measurement — one command each, and both still open
+
+6. **Does the Mac's `osxkeychain` helper hold a usable GitHub token?** (§2.6 row 4.) A `git ls-remote`
+   against a private repository over ssh settles it. If it does, I-44's `Background`-domain constraint
+   becomes live for `git` exactly as it is for `claude`.
+7. **Can the appliance's `nologin` system account hold a `gh` credential at all?** (§2.6.) Decides
+   whether the always-on box can drive a clone or only the workstations can. No such box exists yet.
 
 ### Blocked on an ADR — §B0 forbids quietly building something else
 
@@ -676,9 +761,19 @@ proposes, the owner opens rows). This note deliberately opens nothing.
 For whoever writes them: the next unused ADR number is **0019** (0003 was withdrawn and is not
 reused; numbers are assigned when an ADR is written, never reserved).
 
-**A suggested order, if it helps:** measurement 4 → decision A → the router and pages (1–3, which
-need neither) → `yantra shell` + its route → `yantra clone` + decisions B and C → the repo browser
-last, because it is the only piece that might need decision A to come out the expensive way.
+**A suggested order, if it helps.** §2.6 changes it from the first draft's, and the change is worth
+stating: the clone work now sits behind something that is not code and not a decision either — it is
+somebody logging into two machines.
+
+1. **The router and the pages** (1–3). Blocked on nothing, and the only part of the spec that is.
+2. **The readiness reading**, if it is wanted. It makes the next three steps visible in the product
+   rather than in this note.
+3. **Provisioning (4–5) and the two measurements (6–7).** These gate every clone story and none of
+   them is engineering.
+4. **Decision A**, then `yantra shell` and its route (which decision A does not touch).
+5. **`yantra clone`** with decisions B and C.
+6. **The repo browser last** — it is the only piece that might need decision A to come out the
+   expensive way, and §2.6 has just made it the piece with the least evidence behind it.
 
 ---
 
@@ -734,7 +829,9 @@ All accessed **2026-08-08**.
   is a web-based browser flow"*; the token is stored in the system credential store, falling back to
   *"writing the token to a plain text file"*.
 
-**Measured on `cachyos-g14`, 2026-08-08**
+**`[V]` — measured 2026-08-08, all from `cachyos-g14`**
+
+*On `cachyos-g14` itself:*
 
 - `gh` 2.96.0, `git` 2.55.0, `ssh` present. `gh auth status` reports the account logged in with the
   token in the **keyring** and scopes `gist, read:org, repo, workflow`.
@@ -743,6 +840,17 @@ All accessed **2026-08-08**.
   machine with no token from Yantra.
 - A token embedded in a command string is visible to every local user in `ps -eo pid,user,args`, and
   `/proc` is mounted `rw,nosuid,nodev,noexec,relatime` with no `hidepid`.
+- `ss -tlnp` shows **nothing listening on `:22`**; `systemctl is-active sshd` → `inactive`;
+  `ssh cachyos-g14` → `Connection refused`. **This machine is not an ssh target.**
+
+*On `bishwajeets-macbook-pro`, over the tailnet:*
+
+- `ssh -o BatchMode=yes <mac> 'gh --version'` → `zsh:1: command not found: gh`. `gh auth token` is
+  therefore not retrievable — **there is no `gh` on that machine.**
+- `ssh <mac> 'ssh -T git@github.com'` → **`Permission denied (publickey)`**. `~/.ssh/id_ed25519`
+  exists; it is not registered with the account.
+- `git 2.50.1 (Apple Git-155)`, with `credential.helper` set to **`osxkeychain`**. Whether that
+  keychain holds a usable GitHub token is **unverified** — it needs a private-repo fetch, not run.
 
 **Yantra internal** — [`CLAUDE.md`](../../CLAUDE.md) §A2, §B0, §B1, §B2, §B4, §B5, §B6;
 [`crates/yantrad/CLAUDE.md`](../../crates/yantrad/CLAUDE.md) (the routes that act, the terminal route,
