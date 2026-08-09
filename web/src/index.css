@@ -10,6 +10,14 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-placeholder: var(--placeholder);
+    --animate-skeleton: skeleton 2s -1s infinite linear;
+    @keyframes skeleton {
+        to {
+            background-position: -200% 0;
+        }
+    }
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -86,6 +94,14 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    /* Y-164: the T3 Code primitives name five tokens shadcn's sheet does not
+       have. Without them a button has no radius and a scrollbar no thumb. */
+    --control-radius: 0.5rem;
+    --destructive-foreground: var(--destructive);
+    --placeholder: var(--muted-foreground);
+    --app-scrollbar-thumb: rgb(217 217 217);
+    --app-scrollbar-thumb-hover: rgb(191 191 191);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -121,6 +137,8 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --app-scrollbar-thumb: rgb(255 255 255 / 8%);
+    --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
   }
 }
 
