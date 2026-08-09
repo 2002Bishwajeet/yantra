@@ -156,6 +156,20 @@ Interactive, step by step, and **it must survive being run twice** (§B4 idempot
 **The one file it must never overwrite** is an existing `/etc/yantra/agent.env` or an existing
 workspace TOML. Scaffold when absent, leave alone when present, and say which it did.
 
+**2026-08-09, [Y-160](../../tracker.md#3-task-board), built:** steps 1–2 are
+[`install.sh`](../../install.sh) and steps 3–5 are [`provision.sh`](../../provision.sh) beside it.
+Four clauses above turned out narrower than they read. **Nothing asks before each fix**, because
+piping to a shell makes stdin the script — so the two fixes are the ones safe to make unasked
+(`systemctl enable --now` for a unit whose precondition holds, and `fix-terminfo`, which writes to a
+`~/.terminfo` and wants no root), and everything else is printed. **`agent.env` is never written**:
+`install.sh` always scaffolds it, so *leave alone when present* leaves nothing for step 4 to do, and
+the address is named as a command instead. **Step 6's re-run of `doctor` is not there** — the only
+fix that changes an answer is `fix-terminfo`, whose own exit status is the same evidence a re-read
+would collect, and a second sweep costs an ssh round trip per machine to learn it twice. And
+**`doctor`'s exit status is unreadable to this consumer**, since §3.1's `heartbeat` is never
+*present* from a caller that is not the daemon; the checks are read from `--json` instead, and that
+one is reported as the standing non-answer it is rather than as work.
+
 ---
 
 ## 5. The agent path
@@ -222,7 +236,9 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 
 **Y-156…Y-159 already exist** and cover publishing, an installer, exercising it against systemd, and
 hosting it. D2.6–D2.8 are those rows seen through this document. **[Y-160](../../tracker.md#3-task-board)
-is D2.1's consumer** — the §4 steps Y-157 deliberately leaves out.
+is D2.1's consumer** — the §4 steps Y-157 deliberately leaves out — and shipped 2026-08-09 as
+[`provision.sh`](../../provision.sh); what it does rather than prints, and why, is the note in §4.
+D2.9 and D2.10 are untouched by it: it prints both of those steps and performs neither.
 
 ---
 

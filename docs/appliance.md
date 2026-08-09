@@ -126,6 +126,40 @@ It ends by printing what is left, which is each thing above it deliberately did 
 [Y-144](../tracker.md#3-task-board): the box has no ssh identity any fleet machine authorises, so the
 daemon starts and every verb that reaches another machine fails.
 
+### Then provision it
+
+[`provision.sh`](../provision.sh) is the other half ([Y-160](../tracker.md#3-task-board),
+[D2](design/02-setup.md) §4): it does what it can of that list and turns everything else into a
+numbered step with the command that ends it. Run it the same way, after `install.sh`:
+
+```bash
+bash provision.sh
+```
+
+It is **beside** `install.sh` rather than inside it because [Y-158](../tracker.md#3-task-board)
+proves that script against a real systemd in a container, and enrolling a tailnet, logging into `gh`
+and generating a keypair are not things a container can prove.
+
+What it does for you, and nothing else: **enables and starts each unit** whose precondition holds —
+`yantrad` once Tailscale is up, `yantra-agent` once `/etc/yantra/agent.env` names an address — and
+**runs `yantra fix-terminfo <machine>`** for a machine that does not know this terminal, which writes
+to a `~/.terminfo` and wants no root.
+
+Everything else it names rather than does, each with its command: enrolling Tailscale (the auth key
+is the owner's, and [Q17](../tracker.md#6-open-questions)'s answer is conditional on
+[Y-143](../tracker.md#3-task-board)), the daemon's address
+([ADR-0013](adr/0013-the-heartbeat-carries-only-what-placement-scores.md) §4), generating the ssh
+identity ([Y-144](../tracker.md#3-task-board)), `gh auth login`, installing tmux or `claude` on a
+fleet machine, and creating the first workspace. **No credential is read, echoed or stored** — §B4
+is why the Tailscale line is `sudo tailscale up` and not an `--authkey` to paste.
+
+It reads the fleet through `yantra doctor --json`, asked **as the `yantra` account** the units run
+as, since that account's workspaces and ssh identity are the ones the daemon has. A check that
+answered `unknown` gets its reason and no instruction rather than being folded into the numbered
+list — the two send a reader to different places (R-23). `heartbeat` is the one check that is always
+unknown from here: the beats live in the running daemon's memory, and the dashboard's readiness card
+is what answers it. It exits 0 only when nothing is left, so an installer or an agent can loop on it.
+
 ### Where the units come from
 
 The archives hold the three binaries, a README and a LICENSE, and **no units** — so the script
