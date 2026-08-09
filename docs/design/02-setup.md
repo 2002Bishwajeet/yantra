@@ -3,7 +3,7 @@
 **Status:** proposed. Written 2026-08-09 from the owner's spec. Opens no rows (§B0) — §7 proposes
 them and the owner mints them. **The owner ruled §6's scope question on 2026-08-09** and opened
 [Y-160](../../tracker.md#3-task-board) beside Y-157; the DNS blocker on D2.8 was mine and is
-withdrawn.
+withdrawn. **[Y-163](../../tracker.md#3-task-board) is D2.1 and D2.2**, minted 2026-08-09.
 
 Companion to **[D1 — The dashboard you work in](01-dashboard.md)**. Both read the same probe (§3).
 
@@ -117,6 +117,18 @@ four separate pieces of work want it.
 Each result is **present / absent / unknown**, and *unknown* is never rendered as *absent* — the same
 three-state honesty the dashboard already keeps for readings (D1 §2).
 
+**2026-08-09, [Y-163](../../tracker.md#3-task-board), built:** the check names are
+`reachable`, `sshd`, `tmux`, `agent-cli`, `terminfo`, `provider-cli`, `provider-auth`,
+`login-session`, `heartbeat`, in that order, and the list is reported whole even for a machine that
+answered nothing. Two clauses of this table are narrower than they read.
+**`heartbeat` answers *unknown* from the CLI** and from anything else that is not the daemon: the
+beats live in `yantrad`'s memory and nothing persists them (Y-044), while ADR-0012 keeps the CLI a
+caller of the library rather than a client of the daemon — so the caller that can answer it is the
+one D2.3 puts the cards in. And **`login-session` is both halves of ADR-0018**: §1's *is there a
+server a login session started*, asked with `list-sessions` so none is created, and then §5's gate
+inside it — on Linux the same question asked directly, since the credential is a file that ssh
+session can read.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor
@@ -187,8 +199,8 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 
 | # | Work | Done when | Touches |
 | --- | --- | --- | --- |
-| **D2.1** | `yantra doctor` — the checks in §3.1, human-readable | every check reports present/absent/unknown against the real fleet, and *unknown* never reads as *absent* | `crates/yantra-core/src/`, `crates/yantra/src/main.rs` |
-| **D2.2** | `yantra doctor --json` and its schema | the shape is stable enough for an installer and an agent to consume; a test pins it | as above, `crates/yantrad/src/contract` |
+| **D2.1** | `yantra doctor` — the checks in §3.1, human-readable | ✅ **[Y-163](../../tracker.md#3-task-board)**, 2026-08-09 — run against the real fleet, and against a real sshd in a container for each state | `crates/yantra-core/src/doctor.rs`, `crates/yantra/src/main.rs` |
+| **D2.2** | `yantra doctor --json` and its schema | ✅ **[Y-163](../../tracker.md#3-task-board)**, 2026-08-09 — pinned by a test in the CLI, where the bytes a consumer reads are produced. `yantrad` serves none of it yet: that is D2.3's, and it reads the same types | as above |
 | **D2.3** | Readiness cards on `/` and `/m/{machine}` | every §3.1 check is visible without running a command | `web/src/` (needs D1.2) |
 | **D2.4** | The agent fragment (§5) | an agent given only it and a bare machine reaches "ready" or stops at a boundary row | a skill or `AGENTS.md` fragment |
 | **D2.5** | Rewrite [`docs/appliance.md`](../appliance.md) around §0–§2 | the six manual prerequisites become the boundary table; the installer/updater distinction is stated | `docs/appliance.md` |
@@ -231,3 +243,9 @@ Y-156–Y-159 and questions Q15, Q17; invariants I-34, I-44.
 [R13](../research/13-dashboard-revamp-and-github.md) and [D1](01-dashboard.md): `cachyos-g14` has no
 sshd; the Mac has no `gh` and an ssh key not registered with the account; `gh` 2.96.0 and `glab`
 1.109.0 are present on `cachyos-g14`, `tea` is not.
+
+**One of those is no longer true, measured 2026-08-09 by `yantra doctor` itself
+([Y-163](../../tracker.md#3-task-board)):** the Mac **has** `gh`, in `/opt/homebrew/bin`, and it
+finds no credential there — so what §3.1's `provider CLI` row cites the Mac for is now the
+`provider auth` row's. `cachyos-g14` still refuses the connection, which is the same run's evidence
+for the `sshd` row.
