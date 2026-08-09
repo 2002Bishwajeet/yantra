@@ -1,10 +1,13 @@
+import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import type { Listed } from '@/api'
-import { Link } from '@/components/Link'
 import { Section } from '@/components/Section'
 import { Terminal } from '@/components/Terminal'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { go, machinePath } from '@/router'
 import { useLooked } from '@/useLooked'
+
+/** `getRouteApi` rather than the route object: this module is loaded *by* the
+ *  route, so importing it back would be a cycle. */
+const route = getRouteApi('/w/$name')
 
 /** The workspace, which is its terminal — the socket reopens on its own, so the
  *  URL survives a reload (Y-132).
@@ -12,8 +15,10 @@ import { useLooked } from '@/useLooked'
  *  **The list is read before the socket is opened.** A round trip to the daemon
  *  is cheap and an attach is not: it is an `ssh` to a machine that may be
  *  asleep, and a mistyped name should never cost one. */
-export function OneWorkspace({ name }: { name: string }) {
+export function OneWorkspace() {
+  const { name } = route.useParams()
   const listed = useLooked<Listed[]>('/api/workspaces')
+  const navigate = useNavigate()
 
   // `children` is called only in the `ok` branch, so this draws the two states
   // that are not a workspace in the same words every other section uses.
@@ -52,9 +57,12 @@ export function OneWorkspace({ name }: { name: string }) {
   return (
     <>
       <p className="text-muted-foreground text-sm">
-        on <Link to={machinePath(entry.machine)}>{entry.machine}</Link>
+        on{' '}
+        <Link to="/m/$machine" params={{ machine: entry.machine }}>
+          {entry.machine}
+        </Link>
       </p>
-      <Terminal name={name} onClose={() => go('/')} />
+      <Terminal name={name} onClose={() => void navigate({ to: '/' })} />
     </>
   )
 }

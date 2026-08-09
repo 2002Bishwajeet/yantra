@@ -1,3 +1,4 @@
+import { getRouteApi } from '@tanstack/react-router'
 import type { Listed, Machine, MachineSessions } from '@/api'
 import { machineColumns, sessionColumns } from '@/columns'
 import { DataTable } from '@/components/DataTable'
@@ -6,12 +7,15 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Workspaces } from '@/routes/Fleet'
 import { loaded, sessionsWaiting, useLooked } from '@/useLooked'
 
+const route = getRouteApi('/m/$machine')
+
 /** One machine, out of the same three readings the fleet draws. Nothing here
  *  asks the daemon anything new — readiness (D2.1) is what will.
  *
  *  **No EDIT column.** A workspace is edited where it is listed; this page is
  *  what a machine is doing. */
-export function OneMachine({ machine }: { machine: string }) {
+export function OneMachine() {
+  const { machine } = route.useParams()
   const machines = useLooked<Machine[]>('/api/machines')
   const listed = useLooked<Listed[]>('/api/workspaces')
   const sessions = useLooked<MachineSessions[]>('/api/sessions')

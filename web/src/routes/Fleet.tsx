@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import type { Listed, Looked, Machine, MachineSessions, Workspace } from '@/api'
 import {
   type AgentRow,
@@ -15,7 +16,6 @@ import { EditWorkspace } from '@/components/EditWorkspace'
 import { NewWorkspace } from '@/components/NewWorkspace'
 import { Section } from '@/components/Section'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { go, workspacePath } from '@/router'
 import {
   agentsWaiting,
   loaded,
@@ -120,6 +120,7 @@ export function Workspaces({
 }) {
   const rows = entries.flatMap((one) => (one.loaded === 'yes' ? [one] : []))
   const unusable = entries.flatMap((one) => (one.loaded === 'no' ? [one] : []))
+  const navigate = useNavigate()
 
   return (
     <div className="flex flex-col gap-2">
@@ -127,7 +128,7 @@ export function Workspaces({
         columns={workspaceColumns(
           sessions,
           machines,
-          (name) => go(workspacePath(name)),
+          (name) => void navigate({ to: '/w/$name', params: { name } }),
           edit,
         )}
         rows={rows}

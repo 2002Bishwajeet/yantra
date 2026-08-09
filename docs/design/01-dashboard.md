@@ -318,11 +318,16 @@ rest port by copying, fixing the import alias, and deleting what is unused.
 scroll-area · skeleton · spinner · switch · field/form/input/label · separator · collapsible ·
 toggle-group.
 
-**Do not take:** its Effect runtime, TanStack Router, zustand, Clerk, its `libghostty-vt` WASM
+**Do not take:** its Effect runtime, ~~TanStack Router~~, zustand, Clerk, its `libghostty-vt` WASM
 terminal (Yantra has xterm.js), its `packages/ssh` (it sets `ControlMaster=no`, the opposite of I-20,
 because its case is one long tunnel and Yantra's is repeated short exec), or its
 `native/resource-monitor` (Yantra's [`probes.rs`](../../crates/yantra-agent/src/probes.rs) is
 zero-dependency and documents per-platform findings `sysinfo` would discard).
+
+> **TanStack Router struck from that list, 2026-08-09.** The owner ruled for battle-tested packages
+> in `web/` ([CLAUDE.md](../../CLAUDE.md) §B1, [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s
+> amendment), and [Y-162](../../tracker.md#3-task-board) adopted it. What stays refused is T3 Code's
+> *runtime* — Effect, zustand, Clerk — which is what this line was really about.
 
 **Attribution.** MIT requires the copyright notice and licence text to ship with any substantial
 portion. A `web/src/components/ui/THIRD-PARTY.md` naming T3 Tools Inc., the MIT text, the upstream

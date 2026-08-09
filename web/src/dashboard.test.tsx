@@ -31,6 +31,7 @@ import {
   type SessionRow,
   workspaceColumns,
 } from './columns'
+import { renderRouted } from './test/inRouter'
 import { Command } from './components/Command'
 import { DataTable } from './components/DataTable'
 import { Section } from './components/Section'
@@ -53,7 +54,11 @@ function viewport(width: number) {
   }))
 }
 
-beforeEach(() => viewport(1280))
+// TanStack Router scrolls on navigation and jsdom implements no `scrollTo`.
+beforeEach(() => {
+  viewport(1280)
+  vi.stubGlobal('scrollTo', () => {})
+})
 
 /** A workspace as `GET /api/workspaces` lists it, which since Y-141 says
  *  whether the file loaded. */
@@ -142,8 +147,8 @@ describe('the looked envelope', () => {
 })
 
 describe('the machines table', () => {
-  it('leaves LAST SEEN blank while a machine is online', () => {
-    const { container } = render(
+  it('leaves LAST SEEN blank while a machine is online', async () => {
+    const { container } = await renderRouted(
       <DataTable
         columns={machineColumns}
         rows={[machine()]}
@@ -155,8 +160,8 @@ describe('the machines table', () => {
     expect(cells).toEqual(['cachyos-g14', 'linux', 'online', 'readybeat 3s ago', ''])
   })
 
-  it('composes the status sentence and does not fold an expired key into offline', () => {
-    render(
+  it('composes the status sentence and does not fold an expired key into offline', async () => {
+    await renderRouted(
       <DataTable
         columns={machineColumns}
         rows={[machine({ online: false, expired: true, last_seen: '4d ago' })]}
@@ -173,8 +178,8 @@ describe('the machines table', () => {
  *  nothing has ever been heard from must not read as *asleep*, and one Tailscale
  *  still sees must not read as *ready* on the strength of that alone (R-23). */
 describe('the four heartbeat states', () => {
-  function draw(one: Machine) {
-    return render(
+  async function draw(one: Machine) {
+    return renderRouted(
       <DataTable
         columns={machineColumns}
         rows={[one]}
@@ -184,8 +189,8 @@ describe('the four heartbeat states', () => {
     )
   }
 
-  it('says never heard from, and never asleep, for a machine that has not beaten', () => {
-    draw(machine({ online: false, heartbeat: null }))
+  it('says never heard from, and never asleep, for a machine that has not beaten', async () => {
+    await draw(machine({ online: false, heartbeat: null }))
 
     expect(screen.getByText('never heard from')).toBeTruthy()
     expect(screen.queryByText('asleep or off')).toBeNull()
@@ -193,23 +198,23 @@ describe('the four heartbeat states', () => {
     expect(screen.queryByText(/beat .* ago/)).toBeNull()
   })
 
-  it('says up, but not reporting — and never ready — when only Tailscale sees it', () => {
-    draw(machine({ online: true, heartbeat: beat({ age_seconds: 92 }) }))
+  it('says up, but not reporting — and never ready — when only Tailscale sees it', async () => {
+    await draw(machine({ online: true, heartbeat: beat({ age_seconds: 92 }) }))
 
     expect(screen.getByText('up, but not reporting')).toBeTruthy()
     expect(screen.queryByText('ready')).toBeNull()
     expect(screen.getByText('beat 92s ago')).toBeTruthy()
   })
 
-  it('says asleep or off when the beats stopped and Tailscale lost it too', () => {
-    draw(machine({ online: false, heartbeat: beat({ age_seconds: 92 }) }))
+  it('says asleep or off when the beats stopped and Tailscale lost it too', async () => {
+    await draw(machine({ online: false, heartbeat: beat({ age_seconds: 92 }) }))
 
     expect(screen.getByText('asleep or off')).toBeTruthy()
     expect(screen.queryByText('never heard from')).toBeNull()
   })
 
-  it('is ready inside the threshold and reports what the beat carried', () => {
-    const { container } = draw(
+  it('is ready inside the threshold and reports what the beat carried', async () => {
+    const { container } = await draw(
       machine({
         heartbeat: beat({ age_seconds: 30, power: { battery: { percent: 42 } } }),
       }),
@@ -222,14 +227,14 @@ describe('the four heartbeat states', () => {
 })
 
 describe('the workspaces table', () => {
-  it('renders a null startup as a blank cell, not the word none', () => {
+  it('renders a null startup as a blank cell, not the word none', async () => {
     const workspace: Workspace = {
       name: 'yantra',
       machine: 'cachyos-g14',
       repo: '/home/<user>/Github/homelab/yantra',
       startup: null,
     }
-    const { container } = render(
+    const { container } = await renderRouted(
       <DataTable
         columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[workspace]}
@@ -241,8 +246,8 @@ describe('the workspaces table', () => {
     expect(cells[4]).toBe('')
   })
 
-  it('names the path a file goes in when the look succeeded and found nothing', () => {
-    render(
+  it('names the path a file goes in when the look succeeded and found nothing', async () => {
+    await renderRouted(
       <DataTable
         columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[]}
@@ -326,8 +331,8 @@ describe('a workspace row on a phone', () => {
     startup: null,
   }
 
-  function draw() {
-    return render(
+  async function draw() {
+    return renderRouted(
       <DataTable
         columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
         rows={[site]}
@@ -337,9 +342,9 @@ describe('a workspace row on a phone', () => {
     )
   }
 
-  it('puts the three verbs on the page instead of inside a table that scrolls', () => {
+  it('puts the three verbs on the page instead of inside a table that scrolls', async () => {
     viewport(390)
-    const { container } = draw()
+    const { container } = await draw()
 
     for (const name of ['Start claude', 'Stop', 'Resume']) {
       expect(screen.getByRole('button', { name })).toBeTruthy()
@@ -348,9 +353,9 @@ describe('a workspace row on a phone', () => {
     expect(container.querySelector('[data-slot="table-container"]')).toBeNull()
   })
 
-  it('drops no column — every fact the row carried is still labelled', () => {
+  it('drops no column — every fact the row carried is still labelled', async () => {
     viewport(390)
-    const { container } = draw()
+    const { container } = await draw()
 
     const labels = [...container.querySelectorAll('dt')].map(
       (one) => one.textContent,
@@ -367,9 +372,9 @@ describe('a workspace row on a phone', () => {
     expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
   })
 
-  it('keeps the table where there is room for one', () => {
+  it('keeps the table where there is room for one', async () => {
     viewport(1024)
-    const { container } = draw()
+    const { container } = await draw()
 
     expect(container.querySelector('table')).toBeTruthy()
   })
@@ -599,9 +604,9 @@ describe('the command a row carries', () => {
     expect(sessionCommand(row, { looked: 'never' })).toBeNull()
   })
 
-  it('puts the terminal in the row, naming the workspace it would open', () => {
+  it('puts the terminal in the row, naming the workspace it would open', async () => {
     const opened: string[] = []
-    render(
+    await renderRouted(
       <DataTable
         columns={workspaceColumns(
           running,

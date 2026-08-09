@@ -101,3 +101,24 @@ irrelevant at this scale; it is recorded because it is the argument someone will
 a Tailwind preset, or React components. Two of those three favour this decision outright and the third
 is neutral, so the answer does not change it; it changes only how much of the theme layer is worth
 building before it arrives.
+
+---
+
+> **Amendment, 2026-08-09 ([Y-162](../../tracker.md#3-task-board)).** Two premises above changed
+> upstream, and neither makes the decision wrong.
+>
+> **"Why shadcn is barely a dependency here" described the component layer, and it was accurate.**
+> The owner's instruction of 2026-08-09 is broader than that layer: *use battle-tested packages,
+> custom code only where it is not worth it.* So the web UI now takes maintained implementations for
+> routing (TanStack Router), server-state caching, and UI primitives, and ≈10 KB gzip on two packages
+> is no longer the shape of the dependency tree. [`CLAUDE.md`](../../CLAUDE.md) §B1 carries the rule;
+> it binds `web/` and nothing else. React, the compiler, Vite and the shadcn token vocabulary are all
+> unchanged, and the oxlint gate and `npm run compiled` still hold.
+>
+> **"Explicitly not a reason for this decision: bundle size or performance" no longer holds either.**
+> That sentence was written when the page was a read-only dashboard for one person on a tailnet.
+> [D1](../design/01-dashboard.md) makes it the interface the work is done *in*, from a phone, and the
+> owner asked for it to be fast. Y-162 measured the first load at **170 kB gzip before and 111 kB
+> after** — the router's own weight paid for several times over by splitting xterm.js onto the route
+> that uses it. Weight is now a thing this project measures; R9's finding that it was irrelevant was
+> true of the page R9 was looking at.

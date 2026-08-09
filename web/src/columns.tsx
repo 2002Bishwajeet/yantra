@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import type {
   Looked,
   Machine,
@@ -10,9 +11,7 @@ import type {
 import { Act, button, type Verb } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
-import { Link } from '@/components/Link'
 import { Status, type Tone } from '@/components/Status'
-import { machinePath } from '@/router'
 
 // What `workspace::validate_name` allows, restated rather than inherited: a
 // command someone pastes into a shell must not depend on the daemon's promise.
@@ -77,7 +76,9 @@ export const machineColumns: Column<Machine>[] = [
   {
     header: 'MACHINE',
     cell: (machine) => (
-      <Link to={machinePath(machine.name)}>{machine.name}</Link>
+      <Link to="/m/$machine" params={{ machine: machine.name }}>
+        {machine.name}
+      </Link>
     ),
   },
   { header: 'OS', cell: (machine) => machine.os },
@@ -151,7 +152,9 @@ export function workspaceColumns(
         // MagicDNS name costs 120 px of the 295 a phone has.
         return (
           <span className="inline-flex flex-col items-start gap-1">
-            <Link to={machinePath(workspace.machine)}>{workspace.machine}</Link>
+            <Link to="/m/$machine" params={{ machine: workspace.machine }}>
+              {workspace.machine}
+            </Link>
             {machine && <Status {...reporting(machine)} />}
           </span>
         )

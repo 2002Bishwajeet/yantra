@@ -1,9 +1,10 @@
 /**
- * The router, against the real History API jsdom implements. Y-161.
+ * The route wiring, mounted the way `main.tsx` mounts it. Y-161, Y-162.
  *
- * Every navigation here goes through the same `<a href>` a person taps, and the
- * assertions are on `location.pathname` and on what is drawn — which together
- * are the whole of what "this URL reloads into the same view" means.
+ * What is asserted here is ours — which component a path draws, what a link
+ * goes to, and that `/w/{name}` reads the list before it opens a socket.
+ * Matching, history and the modified-click rule are TanStack Router's and are
+ * not re-tested here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -15,7 +16,6 @@ import {
 } from '@testing-library/react'
 import type { Listed, Looked, Machine, Workspace } from './api'
 import App from './App'
-import { match } from './router'
 
 afterEach(() => {
   cleanup()
@@ -26,15 +26,17 @@ afterEach(() => {
 /** `DataTable` asks for a width and xterm.js asks for the device pixel ratio,
  *  and jsdom has no `matchMedia` for either — `dashboard.test.tsx` and
  *  `terminal.test.tsx` each record their half. */
-beforeEach(() =>
+beforeEach(() => {
+  // TanStack Router scrolls on navigation and jsdom implements no `scrollTo`.
+  vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: 1280 < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16,
     addEventListener: () => {},
     removeEventListener: () => {},
     addListener: () => {},
     removeListener: () => {},
-  })),
-)
+  }))
+})
 
 const laptop: Machine = {
   name: 'cachyos-g14',
@@ -101,32 +103,6 @@ function quietSocket(): string[] {
   return asked
 }
 
-describe('what a path means', () => {
-  it('reads the three routes and refuses everything else', () => {
-    expect(match('/')).toEqual({ at: 'fleet' })
-    expect(match('/m/cachyos-g14')).toEqual({
-      at: 'machine',
-      machine: 'cachyos-g14',
-    })
-    expect(match('/w/yantra')).toEqual({ at: 'workspace', name: 'yantra' })
-    // Trailing slashes are the same path, not a fourth one.
-    expect(match('/m/cachyos-g14/')).toEqual({
-      at: 'machine',
-      machine: 'cachyos-g14',
-    })
-    for (const path of ['/settings', '/m', '/m/', '/w/a/b', '/launch']) {
-      expect(match(path)).toEqual({ at: 'nowhere', path })
-    }
-  })
-
-  /** A name reaches the URL encoded, so it has to come back out — and a hand
-   *  typed `%zz` is not a name at all rather than a crash. */
-  it('decodes a name, and treats one that will not decode as no route', () => {
-    expect(match('/w/my%20site')).toEqual({ at: 'workspace', name: 'my site' })
-    expect(match('/w/%zz')).toEqual({ at: 'nowhere', path: '/w/%zz' })
-  })
-})
-
 describe('a URL typed into the bar', () => {
   it('lands on the machine rather than the fleet', async () => {
     fleet()
@@ -147,9 +123,7 @@ describe('a URL typed into the bar', () => {
     render(<App />)
 
     expect(await screen.findByText('Terminal — yantra')).toBeTruthy()
-    expect(asked).toEqual([
-      'ws://localhost:3000/api/workspaces/yantra/terminal',
-    ])
+    expect(asked).toEqual(['ws://localhost:3000/api/workspaces/yantra/terminal'])
   })
 
   /** The daemon falls every unknown path back to `index.html`, so this arrives
@@ -160,7 +134,7 @@ describe('a URL typed into the bar', () => {
 
     render(<App />)
 
-    expect(await screen.findByText('Nothing is at /settings.')).toBeTruthy()
+    expect(await screen.findByText(/Nothing is at/)).toBeTruthy()
     expect(screen.queryByText('Machines')).toBeNull()
   })
 
@@ -181,10 +155,11 @@ describe('moving between them', () => {
     fleet()
     render(<App />)
 
+    // Named twice on the fleet: its own row, and the workspace that runs there.
     fireEvent.click((await screen.findAllByText('cachyos-g14'))[0]!)
 
-    expect(location.pathname).toBe('/m/cachyos-g14')
-    await waitFor(() => expect(screen.queryByText('New workspace')).toBeNull())
+    await waitFor(() => expect(location.pathname).toBe('/m/cachyos-g14'))
+    expect(screen.queryByText('New workspace')).toBeNull()
 
     history.back()
 
@@ -192,16 +167,28 @@ describe('moving between them', () => {
     expect(await screen.findByText('New workspace')).toBeTruthy()
   })
 
-  /** A modified click is the browser's — a new tab is a thing people do to a
-   *  dashboard, and taking it over would break it silently. */
-  it('leaves a middle or modified click to the browser', async () => {
-    fleet()
+  it('opens the terminal route from the button in a workspace row', async () => {
+    fleet({
+      '/api/sessions': {
+        looked: 'ok',
+        age_seconds: 1,
+        data: [
+          {
+            machine: 'cachyos-g14',
+            reached: 'yes',
+            sessions: [
+              { name: 'yantra', windows: 1, attached: 0, created: 'today' },
+            ],
+          },
+        ],
+      },
+    })
+    quietSocket()
     render(<App />)
 
-    // Named twice on the fleet: its own row, and the workspace that runs there.
-    const link = (await screen.findAllByText('cachyos-g14'))[0]!
-    fireEvent.click(link, { metaKey: true })
+    fireEvent.click(await screen.findByText('Open terminal'))
 
-    expect(location.pathname).toBe('/')
+    await waitFor(() => expect(location.pathname).toBe('/w/yantra'))
+    expect(await screen.findByText('Terminal — yantra')).toBeTruthy()
   })
 })
