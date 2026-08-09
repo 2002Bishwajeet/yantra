@@ -1,7 +1,9 @@
 # D1 — The dashboard you work in
 
 **Status:** proposed. Written 2026-08-09 from the owner's spec. Opens no rows (§B0) — §9 proposes
-them and the owner mints them.
+them and the owner mints them. **The owner minted the first on 2026-08-09**:
+[Y-161](../../tracker.md#3-task-board) is D1.2, and D1.3, D1.5 and [D2](02-setup.md).3 were all
+waiting on it.
 
 **Read [R13](../research/13-dashboard-revamp-and-github.md) first.** It measured what the page is
 against the founding UI principle and priced a clone against the decisions it collides with. This
@@ -351,7 +353,7 @@ before it starts and what makes it done.
 | # | Work | Done when | Touches |
 | --- | --- | --- | --- |
 | **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | the listed components build, `npm run compiled` still reports the React Compiler working, `THIRD-PARTY.md` exists | `web/src/components/ui/`, `web/package.json` |
-| **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | each URL reloads into the same view; no daemon change | `web/src/App.tsx`, `web/src/routes/` |
+| **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | ✅ **[Y-161](../../tracker.md#3-task-board)**, 2026-08-09 — the History API, no dependency | `web/src/App.tsx`, `web/src/routes/` |
 | **D1.3** | One computed verb per workspace card (§2) | the four states each render one primary button; the rest is an overflow | `web/src/components/Act.tsx`, `columns.tsx` |
 | **D1.4** | Collapse four age lines into a freshness dot and one global *as of* (§2) | the three staleness states remain distinguishable | `web/src/useLooked.ts`, `Age.tsx` |
 | **D1.5** | `/w/{name}` lands in a full-height linkable terminal | the URL reopens the same pane after reload | `web/src/components/Terminal.tsx` |

@@ -1,9 +1,8 @@
 # yantra web — the dashboard
 
-One page — a terminal when one is open, then machines, workspaces, a form that
-edits one when a row asks for it, a form that makes one, sessions, agents — over
-the API `yantrad` serves at `/api`. The four readings poll; the forms and every
-workspace row write. No router, no state library, no navigation.
+Three routes over the API `yantrad` serves at `/api` — the fleet at `/`, one
+machine at `/m/{machine}`, a workspace and its terminal at `/w/{name}`. The
+readings poll; the forms and every workspace row write. No state library.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -169,14 +168,11 @@ Yantra did not open has no command at all, every verb taking a workspace name.
 `Open terminal` button in a workspace row and closed by the one in its header. Four
 decisions, each of which could reasonably have gone the other way:
 
-- **A sixth section, not a route and not an overlay.** `App.tsx` holds one
-  `string | null`; the terminal draws above the other five when it is set. `yantrad`
-  would serve a deep link — `web.rs` falls back to `index.html` — but a URL for a
-  terminal promises a socket reopened on load, which Y-130 left to
-  [Y-132](../tracker.md) and Y-132 answered only for a terminal already on the
-  screen; whether this page gets a router is still nobody's decision. An overlay
-  would be the first thing here that traps focus, over a screen a phone gives the
-  whole of anyway.
+- **A sixth section, not a route and not an overlay** — until
+  [Y-161](../tracker.md) made it `/w/{name}`. Y-130 left the URL alone because it
+  promises a socket reopened on load; Y-132 built that, and the route is what
+  spends it. An overlay would still be the first thing here that traps focus,
+  over a screen a phone gives the whole of anyway.
 - **The same `Card` the other sections use, so no primitive was vendored.**
   `Section` takes a `Looked<T>` and a terminal is not a reading, so this composes
   `Card` itself. `Act.tsx` exports its button class rather than having it copied.
@@ -451,9 +447,17 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  useLooked.ts       the poll — every read, class or agent
+  useLooked.ts       the poll — every read, class or agent — and the three
+                     derivations over a reading the routes share
+  router.ts          three routes and `nowhere`; the History API, no dependency
   columns.tsx        four Column<T>[] arrays: the four tables, as data
+  routes/
+    Fleet.tsx        `/` — the five sections and the edit form
+    OneMachine.tsx   `/m/{machine}` — the same readings, filtered to one
+    OneWorkspace.tsx `/w/{name}` — the workspace, which is its terminal
   components/
+    Link.tsx         an `<a>` that pushes state; a modified click is the
+                     browser's
     Section.tsx      the looked switch; children run only in the ok branch
     NewWorkspace.tsx the create form; owns the field class
     EditWorkspace.tsx the edit form — sends only the fields that differ, and
@@ -468,5 +472,26 @@ src/
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
   index.css          the token vocabulary — the whole integration surface
-  App.tsx            the sections, and which terminal is open
+  App.tsx            the heading, and which route is drawn
 ```
+
+## The router (Y-161)
+
+`router.ts` is the History API and 60 lines, and no dependency was added for it.
+[D1](../docs/design/01-dashboard.md) §7 already refuses TanStack Router with the
+rest of T3 Code's runtime, and seven static paths with one segment each do not
+earn a router's own upgrade treadmill. What is here is `match()`, a
+`useSyncExternalStore` over `popstate`, and `Link`.
+
+- **`nowhere` is a state, not a fallback to `/`.** `web.rs` answers every unknown
+  path with `index.html`, so a mistyped URL arrives as a page; drawing the fleet
+  under it would make the address bar a lie.
+- **A modified or middle click is left to the browser.** `Link` renders a real
+  `<a href>` and takes over only the plain left click, so a new tab still works.
+- **`pushState` fires no event**, so a navigation this page makes notifies the
+  subscribers itself. The back button is the half the browser announces.
+- **`/w/{name}` reads the workspace list before it opens a socket.** A round trip
+  to the daemon is cheap and an attach is an `ssh` to a machine that may be
+  asleep, so a mistyped name never costs one.
+- **A machine's page has no `EDIT` column.** `workspaceColumns` takes `null` for
+  it: a workspace is edited where it is listed, and the form is `/`'s.

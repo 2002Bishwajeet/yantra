@@ -10,7 +10,9 @@ import type {
 import { Act, button, type Verb } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
+import { Link } from '@/components/Link'
 import { Status, type Tone } from '@/components/Status'
+import { machinePath } from '@/router'
 
 // What `workspace::validate_name` allows, restated rather than inherited: a
 // command someone pastes into a shell must not depend on the daemon's promise.
@@ -72,7 +74,12 @@ function power(state: Power): string {
 }
 
 export const machineColumns: Column<Machine>[] = [
-  { header: 'MACHINE', cell: (machine) => machine.name },
+  {
+    header: 'MACHINE',
+    cell: (machine) => (
+      <Link to={machinePath(machine.name)}>{machine.name}</Link>
+    ),
+  },
   { header: 'OS', cell: (machine) => machine.os },
   { header: 'STATUS', cell: (machine) => <Status {...reachability(machine)} /> },
   {
@@ -131,7 +138,8 @@ export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
   machines: Looked<Machine[]>,
   open: (name: string) => void,
-  edit: (name: string) => void,
+  // Null on a machine's own page: a workspace is edited where it is listed.
+  edit: ((name: string) => void) | null,
 ): Column<Workspace>[] {
   return [
     { header: 'WORKSPACE', cell: (workspace) => workspace.name },
@@ -143,7 +151,7 @@ export function workspaceColumns(
         // MagicDNS name costs 120 px of the 295 a phone has.
         return (
           <span className="inline-flex flex-col items-start gap-1">
-            {workspace.machine}
+            <Link to={machinePath(workspace.machine)}>{workspace.machine}</Link>
             {machine && <Status {...reporting(machine)} />}
           </span>
         )
@@ -169,18 +177,22 @@ export function workspaceColumns(
     },
     // The form itself is a section rather than a cell: three fields and a
     // picker do not fit a column, and the row already opens one this way.
-    {
-      header: 'EDIT',
-      cell: (workspace) => (
-        <button
-          type="button"
-          className={button}
-          onClick={() => edit(workspace.name)}
-        >
-          Edit
-        </button>
-      ),
-    },
+    ...(edit
+      ? [
+          {
+            header: 'EDIT',
+            cell: (workspace: Workspace) => (
+              <button
+                type="button"
+                className={button}
+                onClick={() => edit(workspace.name)}
+              >
+                Edit
+              </button>
+            ),
+          },
+        ]
+      : []),
   ]
 }
 

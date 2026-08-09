@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { Looked, Workspace, WorkspaceStatus } from './api'
+import type {
+  Listed,
+  Looked,
+  MachineSessions,
+  Workspace,
+  WorkspaceStatus,
+} from './api'
 import type { AgentRow } from './columns'
 
 // The daemon refreshes every 30 s, so this buys no fresher data — it keeps the
@@ -144,4 +150,39 @@ export function useAgents(workspaces: Looked<Workspace[]>): Looked<AgentRow[]> {
       status: answer.data[workspace.name] ?? null,
     })),
   }
+}
+
+/** The entries that are workspaces. Everything downstream acts on one — an edit
+ *  form, a row's buttons, a session's command, a per-workspace status fetch —
+ *  and a file that did not load is not something any of them can be asked
+ *  about. */
+export function loaded(listed: Looked<Listed[]>): Looked<Workspace[]> {
+  if (listed.looked !== 'ok') return listed
+  return {
+    ...listed,
+    data: listed.data.flatMap((one) => (one.loaded === 'yes' ? [one] : [])),
+  }
+}
+
+/** The machines the next sweep will pay an ssh timeout for — Y-100's evidence
+ *  that an age near the threshold is ordinary rather than a refresh that died. */
+export function sessionsWaiting(sessions: Looked<MachineSessions[]>): string[] {
+  return sessions.looked === 'ok'
+    ? sessions.data.flatMap((answer) =>
+        answer.reached === 'no' ? [answer.machine] : [],
+      )
+    : []
+}
+
+/** The same for the agent class, which reaches the same machines and pays the
+ *  same timeout — deduplicated, since it answers per workspace. */
+export function agentsWaiting(agents: Looked<AgentRow[]>): string[] {
+  if (agents.looked !== 'ok') return []
+  return [
+    ...new Set(
+      agents.data.flatMap((row) =>
+        row.status?.reached === 'no' ? [row.status.machine] : [],
+      ),
+    ),
+  ]
 }
