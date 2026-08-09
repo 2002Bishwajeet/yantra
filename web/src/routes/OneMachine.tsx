@@ -1,7 +1,15 @@
 import { getRouteApi } from '@tanstack/react-router'
-import type { Listed, Looked, Machine, MachineSessions, Workspace } from '@/api'
+import type {
+  Listed,
+  Looked,
+  Machine,
+  MachineSessions,
+  Readiness as Report,
+  Workspace,
+} from '@/api'
 import { machineColumns, sessionColumns } from '@/columns'
 import { DataTable } from '@/components/DataTable'
+import { Readiness } from '@/components/Readiness'
 import { Section } from '@/components/Section'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Workspaces } from '@/routes/Fleet'
@@ -9,8 +17,8 @@ import { loaded, sessionsWaiting, useAgents, useLooked } from '@/useLooked'
 
 const route = getRouteApi('/m/$machine')
 
-/** One machine, out of the same three readings the fleet draws. Nothing here
- *  asks the daemon anything new — readiness (D2.1) is what will.
+/** One machine, out of the fleet's own readings filtered to it, plus D2.3's
+ *  readiness — the one thing on this page the fleet does not already draw.
  *
  *  **No EDIT column.** A workspace is edited where it is listed; this page is
  *  what a machine is doing. */
@@ -27,6 +35,15 @@ export function OneMachine() {
       ? { ...all, data: all.data.filter((one) => one.machine === machine) }
       : all
   const agents = useAgents(mine)
+  const readiness = useLooked<Report>(
+    `/api/machines/${encodeURIComponent(machine)}/readiness`,
+  )
+  // The sweep asks the machines a workspace names, so this route 404s for the
+  // rest — which `useLooked` reads as a failed look. Answering it from the
+  // workspaces reading says *not asked* rather than *the look broke*, which is
+  // the same distinction the sessions section below already draws.
+  const asked =
+    all.looked !== 'ok' || all.data.some((one) => one.machine === machine)
 
   return (
     <>
@@ -56,6 +73,39 @@ export function OneMachine() {
           )
         }}
       </Section>
+
+      {asked ? (
+        <Section title="Readiness" query={readiness}>
+          {(report) => (
+            <Readiness
+              machine={
+                machines.looked === 'ok'
+                  ? machines.data.find((one) => one.name === machine)
+                  : undefined
+              }
+              report={report}
+            />
+          )}
+        </Section>
+      ) : (
+        // The workspaces reading is what decided this, so it is the one whose
+        // age the section stamps.
+        <Section title="Readiness" query={listed}>
+          {() => (
+            <Alert>
+              <AlertTitle>
+                No workspace names this machine, so nothing has asked it
+                anything.
+              </AlertTitle>
+              <AlertDescription>
+                The sweep asks the machines a workspace names. Give this one a
+                workspace and the next pass covers it; `yantra doctor
+                &lt;machine&gt;` asks it now without one.
+              </AlertDescription>
+            </Alert>
+          )}
+        </Section>
+      )}
 
       <Section title="Workspaces" query={listed}>
         {(entries) => (

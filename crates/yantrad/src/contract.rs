@@ -29,6 +29,7 @@ use axum::http::Request;
 use serde_json::Value;
 use tower::ServiceExt as _;
 use yantra_core::agent::Running;
+use yantra_core::doctor;
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::inventory::{MachineInfo, Os};
 use yantra_core::sessions::{self, MachineSessions};
@@ -55,6 +56,7 @@ import type {
   Machine,
   MachineSessions,
   Opened,
+  Readiness,
   Resumed,
   Stopped,
   TerminalSize,
@@ -106,6 +108,16 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             "agents",
             "Looked<WorkspaceStatus>[]",
             Value::Array(agents(&fleet).await),
+        ),
+        (
+            "readiness",
+            "Looked<Readiness[]>",
+            read(&fleet, "/readiness").await,
+        ),
+        (
+            "oneReadiness",
+            "Looked<Readiness>",
+            read(&fleet, "/machines/cachyos-g14/readiness").await,
         ),
         (
             "notLooked",
@@ -241,7 +253,10 @@ async fn fleet() -> Fleet {
                 },
             ],
         })))),
-        readiness: None,
+        readiness: Some(Arc::new(Reading::new(Ok(vec![
+            swept("cachyos-g14"),
+            swept("bishwajeets-macbook-pro"),
+        ])))),
     });
 
     let mut beats = fleet.beats.write().await;
@@ -290,6 +305,34 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
 /// A file the listing refused. It is in the fixture rather than only in a
 /// hand-written stub for this file's own reason: a state nothing generated is a
 /// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
+/// Three checks rather than the nine `doctor` runs: what a page has to render
+/// is one of three states beside a name and a sentence, and the ninth of those
+/// tells it nothing the third did not.
+fn swept(machine: &str) -> doctor::Report {
+    doctor::Report {
+        machine: machine.into(),
+        checks: vec![
+            doctor::Check {
+                check: "reachable",
+                state: doctor::State::Present,
+                detail: "a command ran there and reported its own status".into(),
+            },
+            doctor::Check {
+                check: "provider-auth",
+                state: doctor::State::Absent,
+                detail: "`gh` is installed there and no account is logged in".into(),
+            },
+            // The daemon fills this one in from the beats it holds, so the
+            // fixture's value is the substitution's rather than the library's.
+            doctor::Check {
+                check: doctor::HEARTBEAT,
+                state: doctor::State::Unknown,
+                detail: "only the running daemon holds the beats".into(),
+            },
+        ],
+    }
+}
+
 fn unusable() -> Unusable {
     Unusable {
         name: "typo".into(),

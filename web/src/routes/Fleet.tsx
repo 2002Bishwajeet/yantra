@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import type { Listed, Looked, Machine, MachineSessions, Workspace } from '@/api'
+import { Link } from '@tanstack/react-router'
+import type {
+  Listed,
+  Looked,
+  Machine,
+  MachineSessions,
+  Readiness as Report,
+  Workspace,
+} from '@/api'
 import {
   type AgentRow,
   agentColumns,
@@ -13,6 +21,7 @@ import { Command } from '@/components/Command'
 import { DataTable } from '@/components/DataTable'
 import { EditWorkspace } from '@/components/EditWorkspace'
 import { NewWorkspace } from '@/components/NewWorkspace'
+import { Readiness } from '@/components/Readiness'
 import { Section } from '@/components/Section'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -31,6 +40,7 @@ export function Fleet() {
   const workspaces = loaded(listed)
   const sessions = useLooked<MachineSessions[]>('/api/sessions')
   const agents = useAgents(workspaces)
+  const readiness = useLooked<Report[]>('/api/readiness')
   // The name, not the row: the workspace the form edits comes from the reading
   // every 30 s, so holding the row would edit against a copy of it.
   const [editing, setEditing] = useState<string | null>(null)
@@ -50,6 +60,10 @@ export function Fleet() {
             empty="no machines on this tailnet"
           />
         )}
+      </Section>
+
+      <Section title="Readiness" query={readiness}>
+        {(reports) => <Ready reports={reports} machines={machines} />}
       </Section>
 
       {/* Each section's command reads the *other* class, so a look that failed
@@ -100,6 +114,45 @@ export function Fleet() {
         {(rows) => <Agents rows={rows} />}
       </Section>
     </>
+  )
+}
+
+/** One card per machine the sweep covered, which is the machines a workspace
+ *  names rather than the whole tailnet — a machine none of them names has not
+ *  been asked, and saying so is D2's own distinction between *not ready* and
+ *  *not looked at*. */
+export function Ready({
+  reports,
+  machines,
+}: {
+  reports: Report[]
+  machines: Looked<Machine[]>
+}) {
+  const listed = machines.looked === 'ok' ? machines.data : []
+
+  return (
+    <div className="flex flex-col gap-4">
+      {reports.length === 0 && (
+        <p className="text-muted-foreground text-sm">
+          no workspace names a machine, so nothing has been asked
+        </p>
+      )}
+      {reports.map((report) => (
+        <div className="flex flex-col gap-2" key={report.machine}>
+          <Link
+            className="text-sm font-medium"
+            params={{ machine: report.machine }}
+            to="/m/$machine"
+          >
+            {report.machine}
+          </Link>
+          <Readiness
+            machine={listed.find((one) => one.name === report.machine)}
+            report={report}
+          />
+        </div>
+      ))}
+    </div>
   )
 }
 
