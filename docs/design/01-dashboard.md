@@ -346,6 +346,13 @@ design-system §7's `--accent` bridge applies to them unchanged. Adopting Pattac
 piece of work whose diff is `index.css`, exactly as
 [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md) promised.
 
+> **Not quite unchanged, 2026-08-09 ([Y-164](../../tracker.md#3-task-board)).** T3 Code's primitives
+> also name five tokens shadcn's sheet does not have — `--control-radius`, `--destructive-foreground`,
+> `--placeholder` and the two `--app-scrollbar-thumb*`. The port added them to
+> [`index.css`](../../web/src/index.css) at T3's values. The bridge still applies; the swap point is five
+> lines larger than this section assumed. Tooltip's opt-in `variant="glass"` was **not** bridged — it
+> wants T3's `dropdown-glass`, which is a glass system rather than a token.
+
 ---
 
 ## 9. Work units
@@ -357,7 +364,7 @@ before it starts and what makes it done.
 
 | # | Work | Done when | Touches |
 | --- | --- | --- | --- |
-| **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | the listed components build, `npm run compiled` still reports the React Compiler working, `THIRD-PARTY.md` exists | `web/src/components/ui/`, `web/package.json` |
+| **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | ✅ **[Y-164](../../tracker.md#3-task-board)**, 2026-08-09 — fifteen of them, pinned to commit `963ebf5b`. `dialog`, `sheet`, `menu`, `select`, `combobox`, `command` and `spinner` import `lucide-react` and wait on it | `web/src/components/ui/`, `web/src/index.css` |
 | **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | ✅ **[Y-161](../../tracker.md#3-task-board)**, 2026-08-09 — the History API, no dependency | `web/src/App.tsx`, `web/src/routes/` |
 | **D1.3** | One computed verb per workspace card (§2) | the four states each render one primary button; the rest is an overflow | `web/src/components/Act.tsx`, `columns.tsx` |
 | **D1.4** | Collapse four age lines into a freshness dot and one global *as of* (§2) | the three staleness states remain distinguishable | `web/src/useLooked.ts`, `Age.tsx` |

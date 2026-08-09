@@ -58,8 +58,12 @@ and neither is optional:
 - **`npm run compiled`** greps the bundle for `react.memo_cache_sentinel`, which
   only the compiler emits. `npm run build` runs it.
 
-Three files under `src/components/ui/` bail out today and the build says so.
-They are shadcn's generated source; see below.
+Three files under `src/components/ui/` bail out in the build and it says so —
+`badge`, `card`, `empty`, all shadcn's generated source, all on the same
+`AssignmentPattern` in a destructured default. **The T3 Code copies hit it too**
+(Y-164): `input`, `popover`, `scroll-area`, `separator`, `toggle-group` and
+`tooltip`. No route imports them yet, so they are absent from the bundle and only
+`npm test` compiles them — which is where their warnings appear.
 
 ## The four heartbeat states
 
@@ -426,10 +430,13 @@ hand.
 
 A design system is arriving from elsewhere. Two rules keep it a one-file change:
 
-1. **Never edit `src/components/ui/`.** It is shadcn's output and is regenerable;
-   all composition wraps it. `components.json` has `"cssVariables": true`, which
-   **cannot be changed after init** — switching would mean deleting and
-   reinstalling every component.
+1. **Never edit `src/components/ui/`.** It is vendored — five files from shadcn's
+   CLI and fifteen copied from T3 Code — and all of it is regenerable or
+   re-copyable; composition wraps it. `components.json` has `"cssVariables":
+   true`, which **cannot be changed after init** — switching would mean deleting
+   and reinstalling every component. Where each file came from, and the MIT
+   notice T3 Code's copies carry with them:
+   [`ui/THIRD-PARTY.md`](src/components/ui/THIRD-PARTY.md).
 2. **Call sites pass a `tone`, never a colour.** `Status.tsx` is the only file
    that maps a domain state to an appearance.
 
@@ -437,6 +444,16 @@ A design system is arriving from elsewhere. Two rules keep it a one-file change:
 marked as the swap point. Light and dark both work through
 `prefers-color-scheme`; Q6 ruled out a theme switcher, so shadcn's `.dark` class
 was rewired to the media query rather than left with nothing to toggle it.
+
+**The T3 Code copies widened the seam by five tokens (Y-164).** They are built on
+the same shadcn variable names, but not only on those: `--control-radius`,
+`--destructive-foreground`, `--placeholder` and the two `--app-scrollbar-thumb*`
+are T3's own, and without them a button has no radius and a scrollbar no thumb.
+They sit in `index.css` beside the rest, at T3's values, so the swap point is
+still one file. One thing was deliberately **not** bridged: `TooltipPopup`'s
+`variant="glass"` wants a `dropdown-glass` class built on a `--glass-opacity` /
+`--glass-blur` pair, which is a glass system rather than a token — use the
+default variant until a design system rules on it.
 
 ## Layout
 
@@ -476,7 +493,9 @@ src/
                      and there is nothing"
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
-    ui/              shadcn output. NEVER EDITED.
+    ui/              vendored primitives. NEVER EDITED. Five are shadcn's CLI
+                     output; fifteen are copied from T3 Code and each says so
+                     in a header. THIRD-PARTY.md carries the MIT notice
   index.css          the token vocabulary — the whole integration surface
   App.tsx            mounts the router and the query client; `Shell` in
                      routes/ is the heading
