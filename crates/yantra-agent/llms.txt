@@ -9,7 +9,7 @@
 
 - [src/main.rs](src/main.rs): the 10 s loop, a hand-written HTTP/1.1 POST over
   `std::net::TcpStream`, and the log-once-then-quiet failure latch.
-- [yantra-agent.service](yantra-agent.service): the systemd unit that starts it at boot (Y-142, R-12). `YANTRA_DAEMON` arrives from `/etc/yantra/agent.env` rather than from the unit, so a newer unit cannot overwrite the address; without that file the unit refuses and names it. Tested beside the daemon's in [yantrad/tests/service_unit.rs](../yantrad/tests/service_unit.rs), and copied onto a box by `just appliance-install` (Y-145) — which installs the unit and never that file, for the same reason.
+- [yantra-agent.service](yantra-agent.service): the systemd unit that starts it at boot (Y-142, R-12). `YANTRA_DAEMON` arrives from `/etc/yantra/agent.env` rather than from the unit, so a newer unit cannot overwrite the address; without that file the unit refuses and names it. Tested beside the daemon's in [yantrad/tests/service_unit.rs](../yantrad/tests/service_unit.rs), and put onto a box by `just appliance-install` (Y-145) or by [install.sh](../../install.sh) (Y-157) — neither of which writes that file over one that is already there, for the same reason.
 - [src/probes.rs](src/probes.rs): the seven fields, measured. Fixed facts once at start, the rest per beat; every reader fails pessimistic; `Power::Battery` has one construction site.
 
 ## What decides its shape

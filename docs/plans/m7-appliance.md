@@ -247,6 +247,11 @@ notifier and one that gets muted in a week:
 plan says so rather than leaving a row to discover it. The one non-obvious mechanic: a running binary
 cannot be overwritten in place (`ETXTBSY`) — copy beside it and rename over it, then restart.
 
+**Both halves exist now.** `just appliance-install` copies from a checkout
+([Y-145](../../tracker.md#3-task-board)); [`install.sh`](../../install.sh) fetches the published
+release onto the box itself and verifies it before it installs anything
+([Y-157](../../tracker.md#3-task-board), [`docs/appliance.md`](../appliance.md)).
+
 > **Measured by [Y-145](../../tracker.md#3-task-board) on 2026-08-06, and that last sentence is
 > stronger than the kernel is.** `ETXTBSY` is what `cp` and `scp` get, because they open the
 > destination `O_TRUNC`; `install(1)` and a `mv` from another filesystem unlink it first and

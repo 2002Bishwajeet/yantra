@@ -52,7 +52,7 @@ being worked on, and what is still an open question.
 
 ## Install
 
-**[v0.1.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.1.0)** is the first release — static musl archives for `aarch64` and `x86_64`, plus a `yantra-agent` for macOS and Windows, all verified against `SHA256SUMS`. **The released `yantrad` carries the dashboard inside it**, so the appliance is one file rather than a binary, a directory and a variable. There is no installer script yet ([Y-157](tracker.md)), so to build from source you need
+**[v0.1.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.1.0)** is the first release — static musl archives for `aarch64` and `x86_64`, plus a `yantra-agent` for macOS and Windows, all verified against `SHA256SUMS`. **The released `yantrad` carries the dashboard inside it**, so the appliance is one file rather than a binary, a directory and a variable. [`install.sh`](install.sh) puts that release on an always-on Linux box in one pinned command — it verifies what it fetched, enables nothing and enrols nothing ([docs/appliance.md](docs/appliance.md)). To build from source you need
 [rustup](https://rustup.rs); the toolchain version is pinned by `rust-toolchain.toml`.
 
 ```bash
