@@ -162,7 +162,7 @@ Tailscale ACL or generates and distributes an ssh key has crossed a line the own
 | Blocker | Effect |
 | --- | --- |
 | **Y-156 — nothing has ever been published** | there is no artifact for an installer to fetch and no version to name. The release workflow exists and was rehearsed green; what is missing is a tag and a version. |
-| **Q17 unrecorded** | the owner ruled *tagged* verbally on 2026-08-08 and it is not written down. The installer cannot emit a `tailscale up` line until it is. |
+| **Q17 answered** | *tagged*, recorded 2026-08-09 — but **Y-143 is a condition on it, not a follow-up**. The hazard it names is read from the code and never measured, and if a tagged node turns out to refuse every write, the enrolment step is written against a different answer. |
 | **Q15 answered** | the Pi 5, 2 GB, ruled 2026-08-09. It never blocked this — it blocks M8 and M9. |
 | **Y-144 open** | the appliance has no ssh identity of its own; §2 row 2 is the design for creating one. |
 
@@ -205,7 +205,7 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 
 | # | Work | Blocked on |
 | --- | --- | --- |
-| **D2.9** | The Tailscale enrolment step | **Q17** must be recorded before a `tailscale up` line can be written |
+| **D2.9** | The Tailscale enrolment step | **Y-143** — Q17 is answered *tagged*, and the measurement it is conditional on decides what the `tailscale up` line says |
 | **D2.10** | Generate the appliance's ssh identity and print its public key | **Y-144**, and confirmation that generation is Yantra's rather than the owner's (§2) |
 
 **Y-156…Y-159 already exist** and cover publishing, an installer, exercising it against systemd, and
