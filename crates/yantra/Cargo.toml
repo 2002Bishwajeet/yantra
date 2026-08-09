@@ -10,5 +10,6 @@ workspace = true
 
 [dependencies]
 clap.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 yantra-core.workspace = true

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
+use yantra_core::doctor::{self, Report, State};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
@@ -120,6 +121,14 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
         priority: Option<u8>,
     },
+    /// Say what each machine can and cannot do — a read, it changes nothing
+    Doctor {
+        /// ssh destination to check. Every machine a workspace names, if omitted
+        machine: Option<String>,
+        /// Print the checks as JSON, for an installer or an agent to read
+        #[arg(long)]
+        json: bool,
+    },
     /// Teach a machine about the terminal you are sitting at
     FixTerminfo {
         /// ssh destination, spelled the way a workspace's `machine` spells it
@@ -197,6 +206,7 @@ async fn main() -> ExitCode {
             })
             .await
         }
+        Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
@@ -623,6 +633,103 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
             report_error(&err);
             ExitCode::FAILURE
         }
+    }
+}
+
+/// D2 §3.2: this verb is a **read**, so there is no `--fix` and nothing here
+/// asks for one. Exit 0 means every check answered *present* — an `unknown` is
+/// not a yes, which is what lets an installer loop on this command.
+async fn doctor(machine: Option<&str>, json: bool) -> ExitCode {
+    let term = local_term();
+    let reports = match machine {
+        Some(machine) => vec![doctor::machine(machine, &term).await],
+        None => match doctor::fleet(&term).await {
+            Ok(reports) => reports,
+            Err(err) => {
+                report_error(&err);
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+
+    if json {
+        match render_doctor_json(&reports) {
+            Ok(rendered) => print!("{rendered}"),
+            Err(err) => {
+                report_error(&err);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        print!("{}", render_doctor(&reports));
+    }
+
+    // An empty fleet is not a clean one: nothing was asked, so nothing is known.
+    if !reports.is_empty() && reports.iter().all(Report::ready) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// The shape an installer and an agent read (D2.2), and a test pins it.
+/// `machines` is an object rather than a bare array so a later reading can be
+/// added beside it without moving what is already there.
+fn render_doctor_json(reports: &[Report]) -> Result<String, serde_json::Error> {
+    let mut document = serde_json::Map::new();
+    document.insert("machines".to_owned(), serde_json::to_value(reports)?);
+    Ok(format!("{}\n", serde_json::to_string_pretty(&document)?))
+}
+
+/// The state is a **word** rather than a symbol, and that is the whole reason
+/// this column exists: `unknown` must never be readable as `absent` (R-23).
+fn render_doctor(reports: &[Report]) -> String {
+    if reports.is_empty() {
+        return "no workspace names a machine, so nothing was checked\n  \
+                to check one anyway: yantra doctor <machine>\n"
+            .to_owned();
+    }
+
+    let rows: Vec<Vec<String>> = reports
+        .iter()
+        .flat_map(|report| {
+            report.checks.iter().map(move |check| {
+                vec![
+                    report.machine.clone(),
+                    check.check.to_owned(),
+                    state(check.state).to_owned(),
+                    check.detail.clone(),
+                ]
+            })
+        })
+        .collect();
+
+    let mut out = table(&["MACHINE", "CHECK", "STATE", "DETAIL"], &rows);
+    let count = |wanted: State| {
+        reports
+            .iter()
+            .flat_map(|report| &report.checks)
+            .filter(|check| check.state == wanted)
+            .count()
+    };
+    out.push_str(&format!(
+        "\n{} check{} on {} machine{}: {} present, {} absent, {} unknown\n",
+        rows.len(),
+        if rows.len() == 1 { "" } else { "s" },
+        reports.len(),
+        if reports.len() == 1 { "" } else { "s" },
+        count(State::Present),
+        count(State::Absent),
+        count(State::Unknown),
+    ));
+    out
+}
+
+fn state(state: State) -> &'static str {
+    match state {
+        State::Present => "present",
+        State::Absent => "absent",
+        State::Unknown => "unknown",
     }
 }
 
@@ -1399,6 +1506,122 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("unreachable"), "{rendered}");
+    }
+
+    /// The machine is optional because a box being installed has no workspace
+    /// yet, and there is deliberately no `--fix` to parse (D2 §3.2).
+    #[test]
+    fn doctor_takes_an_optional_machine_and_a_json_flag() {
+        let fleet = Cli::try_parse_from(["yantra", "doctor"]).expect("a bare doctor parses");
+        assert!(matches!(
+            fleet.command,
+            Some(Command::Doctor {
+                machine: None,
+                json: false
+            })
+        ));
+
+        let one = Cli::try_parse_from(["yantra", "doctor", "pi", "--json"])
+            .expect("a machine and --json parse");
+        assert!(matches!(
+            one.command,
+            Some(Command::Doctor {
+                machine: Some(machine),
+                json: true
+            }) if machine == "pi"
+        ));
+
+        assert!(
+            Cli::try_parse_from(["yantra", "doctor", "--fix"]).is_err(),
+            "doctor is a read, and a flag that changes a machine must not be silently accepted"
+        );
+    }
+
+    fn check(name: &'static str, state: State, detail: &str) -> doctor::Check {
+        doctor::Check {
+            check: name,
+            state,
+            detail: detail.to_owned(),
+        }
+    }
+
+    /// **D2.2's pin.** An installer and an agent read these bytes, so the field
+    /// names, the three state spellings and the envelope are a contract — this
+    /// test failing means a consumer somewhere breaks, not that it needs
+    /// updating. (Keys are alphabetical because that is what `serde_json`'s map
+    /// does; the check *order* is `doctor`'s and is asserted in its own tests.)
+    #[test]
+    fn the_json_shape_is_pinned() {
+        let rendered = render_doctor_json(&[Report {
+            machine: "pi".to_owned(),
+            checks: vec![
+                check("reachable", State::Present, "a command ran there"),
+                check("sshd", State::Absent, "nothing is listening"),
+                check("heartbeat", State::Unknown, "nothing to read"),
+            ],
+        }])
+        .expect("a report serialises");
+
+        assert_eq!(
+            rendered,
+            r#"{
+  "machines": [
+    {
+      "checks": [
+        {
+          "check": "reachable",
+          "detail": "a command ran there",
+          "state": "present"
+        },
+        {
+          "check": "sshd",
+          "detail": "nothing is listening",
+          "state": "absent"
+        },
+        {
+          "check": "heartbeat",
+          "detail": "nothing to read",
+          "state": "unknown"
+        }
+      ],
+      "machine": "pi"
+    }
+  ]
+}
+"#
+        );
+    }
+
+    /// R-23 at the surface a person reads: the two failure states are different
+    /// words in a column of their own, and the footer counts them apart.
+    #[test]
+    fn an_unknown_check_never_renders_as_an_absent_one() {
+        let rendered = render_doctor(&[Report {
+            machine: "pi".to_owned(),
+            checks: vec![
+                check("reachable", State::Absent, "the connection was refused"),
+                check("tmux", State::Unknown, "nothing behind ssh could be asked"),
+            ],
+        }]);
+
+        assert!(rendered.contains("reachable  absent"), "{rendered}");
+        assert!(rendered.contains("tmux       unknown"), "{rendered}");
+        assert!(
+            rendered.ends_with("2 checks on 1 machine: 0 present, 1 absent, 1 unknown\n"),
+            "{rendered}"
+        );
+        for line in rendered.lines() {
+            assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
+        }
+    }
+
+    /// A fleet with nothing in it is not a clean one — nothing was asked, so the
+    /// output must not look like nine passes, and `doctor` exits non-zero.
+    #[test]
+    fn no_machines_says_nothing_was_checked_and_names_the_way_to_check_one() {
+        let rendered = render_doctor(&[]);
+        assert!(rendered.contains("nothing was checked"), "{rendered}");
+        assert!(rendered.contains("yantra doctor <machine>"), "{rendered}");
     }
 
     fn workspace(name: &str, machine: &str, startup: Option<&str>) -> Workspace {
