@@ -95,12 +95,13 @@ a machine the way a workspace does (ADR-0009).
 how long ago. Which ages mean a dead agent is ADR-0013 §7's, and this daemon names none of those
 states, the same rule that keeps `/api/machines` serving an age and `online` rather than a verdict.
 **What differs here is that a check is already a verdict**: `/api/machines` hands the page a number
-and `State::Present` hands it a green tick, so a machine whose agent died an hour ago reads *ready*
-on this route while the machines table beside it reads *asleep or off*. The detail carries the age,
-so nothing is hidden, but a card that draws only the state will be confidently wrong. Fixing it means
-naming the 30 s threshold a third time — the agent's `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`
-being the first two, with no constant either can share — which is why it is recorded here rather than
-patched.
+and `State::Present` hands it a green tick, so a machine whose agent died an hour ago is *present* on
+this route while the machines table beside it reads *asleep or off*. **The card reconciles it and
+this route must not**: `Readiness.tsx` draws the `heartbeat` row out of the machines reading through
+`reporting()`, which already owns the threshold — so the state is named once, where every other
+heartbeat state is named, and nothing here parses a detail or writes 30 s down a third time beside
+`yantra-agent`'s `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`. A second consumer of this route
+inherits the same obligation, and a test in `dashboard.test.tsx` is what says so out loud.
 
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.

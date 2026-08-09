@@ -125,3 +125,17 @@ export type WorkspaceStatus = { workspace: string; machine: string } & (
   | { reached: 'yes'; status: AgentState; session: AgentSession | null }
   | { reached: 'no'; error: string }
 )
+
+/** [D2](../../docs/design/02-setup.md) §3.1's checks, one report per machine.
+ *  `unknown` is a question that could not be asked and is never a shade of
+ *  `absent` — the two send a reader to different places (R-23). */
+export type CheckState = 'present' | 'absent' | 'unknown'
+
+export type Check = {
+  check: string
+  state: CheckState
+  // What was found, or why nothing could be. Carries no credential.
+  detail: string
+}
+
+export type Readiness = { machine: string; checks: Check[] }

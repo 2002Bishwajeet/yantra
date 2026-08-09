@@ -10,10 +10,12 @@ import {
 import type {
   AgentState,
   Beat,
+  Check,
   Listed,
   Looked,
   Machine,
   MachineSessions,
+  Readiness,
   Session,
   Workspace,
   WorkspaceStatus,
@@ -35,6 +37,8 @@ import {
 import { renderHookQueried } from './test/inQuery'
 import { renderRouted } from './test/inRouter'
 import { Command } from './components/Command'
+import { Readiness as ReadinessCard } from './components/Readiness'
+import { Ready } from './routes/Fleet'
 import { DataTable } from './components/DataTable'
 import { Section } from './components/Section'
 import { useLooked } from './useLooked'
@@ -765,6 +769,113 @@ describe('copying a command', () => {
 
     expect(await screen.findByText('copied')).toBeTruthy()
     expect(writeText).toHaveBeenCalledWith('yantra attach yantra')
+  })
+})
+
+/** D2 §3.1's checks drawn rather than run (Y-168). The daemon serves the reading
+ *  and this page names the states, which is the same split `/api/machines` and
+ *  `reporting()` already have — and the heartbeat check is where it bites. */
+describe('the readiness cards', () => {
+  function check(one: Partial<Check> = {}): Check {
+    return {
+      check: 'reachable',
+      state: 'present',
+      detail: 'a command ran there and reported its own status',
+      ...one,
+    }
+  }
+
+  const report = (checks: Check[]): Readiness => ({
+    machine: 'cachyos-g14',
+    checks,
+  })
+
+  it('never paints a question that could not be asked as a thing that is missing', () => {
+    render(
+      <ReadinessCard
+        machine={machine()}
+        report={report([
+          check({ check: 'tmux', state: 'absent', detail: 'no tmux there' }),
+          check({
+            check: 'provider-auth',
+            state: 'unknown',
+            detail: 'could not be asked: ssh said nothing',
+          }),
+        ])}
+      />,
+    )
+
+    // R-23: the two send a reader to different places, so they may not share a
+    // tone — one installs something, the other goes and looks.
+    const [absent, unknown] = [...document.querySelectorAll('[data-slot="badge"]')]
+    expect(absent?.className).not.toBe(unknown?.className)
+    expect(screen.getByText('no tmux there')).toBeTruthy()
+    expect(screen.getByText(/could not be asked/)).toBeTruthy()
+  })
+
+  /** The daemon answers `heartbeat` *present* for any beat that ever arrived and
+   *  names none of ADR-0013 §7's states. If the card drew that state it would
+   *  say ready beside a machines table saying asleep or off. */
+  it('does not read a beat that stopped an hour ago as a machine that is ready', () => {
+    const stale = machine({ online: false, heartbeat: beat({ age_seconds: 3600 }) })
+    render(
+      <ReadinessCard
+        machine={stale}
+        report={report([
+          check({ check: 'heartbeat', state: 'present', detail: 'a beat arrived 3600s ago' }),
+        ])}
+      />,
+    )
+
+    // The words the machines table uses for the same machine, not the daemon's.
+    expect(screen.getByText(/nothing has arrived for 3600s/)).toBeTruthy()
+    expect(screen.queryByText('a beat arrived 3600s ago')).toBeNull()
+  })
+
+  it('still reads a beat inside the threshold as present', () => {
+    render(
+      <ReadinessCard
+        machine={machine()}
+        report={report([
+          check({ check: 'heartbeat', state: 'present', detail: 'a beat arrived 3s ago' }),
+        ])}
+      />,
+    )
+    expect(screen.getByText(/19942 MB free/)).toBeTruthy()
+  })
+
+  /** The join is the machine name, and a report the tailnet list does not hold
+   *  cannot be reconciled at all — which is unknown, never absent. */
+  it('leaves the beat unknown for a machine the tailnet does not list', () => {
+    render(
+      <ReadinessCard
+        machine={undefined}
+        report={report([check({ check: 'heartbeat', state: 'present', detail: 'a beat arrived 3s ago' })])}
+      />,
+    )
+    expect(screen.getByText(/lists no machine of that name/)).toBeTruthy()
+  })
+
+  it('says nothing has been asked rather than drawing an empty fleet', async () => {
+    await renderRouted(<Ready machines={{ looked: 'never' }} reports={[]} />)
+    expect(screen.getByText(/no workspace names a machine/)).toBeTruthy()
+  })
+
+  /** A machine no workspace names 404s, which `useLooked` reads as a failed
+   *  look — and *the look broke* is a different sentence from *nothing asked*. */
+  it('reads a machine no workspace names as not asked, not as a broken look', async () => {
+    stubFetch({
+      '/api/machines': { looked: 'ok', age_seconds: 1, data: [machine({ name: 'pi' })] },
+      '/api/workspaces': { looked: 'ok', age_seconds: 1, data: [] },
+      '/api/sessions': { looked: 'never' },
+      '/api/machines/pi/readiness': 404,
+    })
+    history.pushState(null, '', '/m/pi')
+    render(<App />)
+
+    expect(await screen.findByText(/No workspace names this machine/)).toBeTruthy()
+    expect(screen.queryByText('The look failed.')).toBeNull()
+    history.pushState(null, '', '/')
   })
 })
 

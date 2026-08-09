@@ -105,6 +105,27 @@ machine that did not answer ssh cannot be repaired from a workspace row, so the 
 it to one — that table hands over a paste for `attach` because ADR-0011 gives the terminal to a
 person, so it cannot share this one.
 
+## The readiness cards, and the one check they overrule (Y-168)
+
+`GET /api/readiness` and `GET /api/machines/{name}/readiness` serve
+[D2](../docs/design/02-setup.md) §3.1's checks off the daemon's own sweep, so the page draws them
+rather than running anything. Three states, three tones, and `unknown` is never a shade of `absent` —
+one sends you to install something, the other to go and look (R-23).
+
+**`heartbeat` is the exception, and it is drawn from the machines reading instead.** The daemon
+answers it *present* for any beat that ever arrived, carrying the age in the detail, because it names
+none of ADR-0013 §7's four states — that split is the same one `/api/machines` has always had. But a
+check is already a verdict where an age is not, so drawing `present` straight would put a green tick
+beside a machines table saying *asleep or off* about the same machine. `Readiness.tsx` runs the
+`heartbeat` row through `reporting()`, which owns the threshold already, so the state is named once
+and the two sections cannot disagree. A machine the tailnet does not list stays `unknown`, because
+there is nothing to reconcile against.
+
+**A machine no workspace names is not a failure.** The sweep asks the machines a workspace names, so
+the one-machine route `404`s for the rest and `useLooked` reads that as a failed look. `/m/$machine`
+answers it from the workspaces reading instead and says *nothing has asked it anything* — the same
+distinction the sessions section below it already draws.
+
 ## A workspace file that did not load (Y-141)
 
 `GET /api/workspaces` lists one entry per **file**, and each says whether it
@@ -554,6 +575,9 @@ src/
                      drops. Key it on the name
     DataTable.tsx    a table, or a block per row on a phone; owns "we looked
                      and there is nothing"
+    Readiness.tsx    D2 §3.1's checks as three tones, and the one place the
+                     daemon's `heartbeat` answer is reconciled with the
+                     machines reading
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              vendored primitives. NEVER EDITED. Five are shadcn's CLI
