@@ -14,6 +14,13 @@ set -euo pipefail
 # install another release; a new tag needs this default bumped.
 VERSION="${YANTRA_VERSION:-0.1.0}"
 
+# The commit that tag was built from. Named rather than resolved, because a tag
+# is a mutable ref — v0.1.0's was moved once already — and the two files below it
+# fetches decide what runs as root. It is the rule `just pinned` enforces on
+# every GitHub action, applied to the one other place this repo fetches
+# executable configuration over the network. Bump it with VERSION.
+COMMIT="${YANTRA_COMMIT:-1c5056b63b1b5c835d3a07976fea88151b9e9372}"
+
 REPO=2002Bishwajeet/yantra
 BIN_DIR=/usr/local/bin
 AGENT_ENV=/etc/yantra/agent.env
@@ -65,10 +72,11 @@ fetch "$work/SHA256SUMS" "$download/SHA256SUMS"
 tar -C "$work" -xzf "$work/$archive"
 staged="$work/yantra-$VERSION-$target"
 
-# The archives carry no units, so they come from the same tag the binaries were
+# The archives carry no units, so they come from the commit the binaries were
 # built at — a unit from `main` beside a binary from a tag is drift in the one
-# file that decides how the binary starts. These two are not in SHA256SUMS.
-raw="https://raw.githubusercontent.com/$REPO/refs/tags/v$VERSION"
+# file that decides how the binary starts. These two are not in SHA256SUMS,
+# which lists archives, so the commit is the whole of what pins them.
+raw="https://raw.githubusercontent.com/$REPO/$COMMIT"
 fetch "$work/yantrad.service" "$raw/crates/yantrad/yantrad.service"
 fetch "$work/yantra-agent.service" "$raw/crates/yantra-agent/yantra-agent.service"
 

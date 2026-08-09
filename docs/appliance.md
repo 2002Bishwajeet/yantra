@@ -91,13 +91,13 @@ Until [Y-159](../tracker.md) serves it from a name that resolves off the tailnet
 the tag it installs:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/refs/tags/v0.1.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh | bash
 ```
 
 Read it before running it if you would rather — it is one file, and it is the same file:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/refs/tags/v0.1.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh -o install.sh
 less install.sh
 bash install.sh
 ```
@@ -129,14 +129,21 @@ daemon starts and every verb that reaches another machine fails.
 ### Where the units come from
 
 The archives hold the three binaries, a README and a LICENSE, and **no units** — so the script
-fetches `yantrad.service` and `yantra-agent.service` from `raw.githubusercontent.com` at
-`refs/tags/v$VERSION`. The unit and the binary then come from one commit, where a unit taken from
-`main` beside a binary built at a tag is drift in the one file that decides how the binary starts.
+fetches `yantrad.service` and `yantra-agent.service` from `raw.githubusercontent.com`. A unit taken
+from `main` beside a binary built at a tag is drift in the one file that decides how the binary
+starts, so both come from the release's own commit.
 
-The cost, stated because it is real: two more fetches, a second host, and **those two files are not
-covered by `SHA256SUMS`**, which lists archives and nothing else. The alternative is adding the units
-to the archives in [`release.yml`](../.github/workflows/release.yml), which is self-contained and
-checksummed — and could not install v0.1.0, whose archives are published and do not contain them.
+**From the commit, not from `refs/tags/v$VERSION`.** A tag is a mutable ref — v0.1.0's was deleted
+and re-cut the day it was published — so a tag pins nothing, and these two files decide what runs as
+root. `COMMIT` sits beside `VERSION` in the script and is bumped with it. That is
+[`just pinned`](../justfile)'s own rule, which fails CI for a GitHub action naming a tag, applied to
+the one other place this repo fetches executable configuration over the network.
+
+The cost, stated because it is real: two more fetches, a second host, a second constant to bump, and
+**those two files are not covered by `SHA256SUMS`**, which lists archives and nothing else — the
+commit is the whole of what pins them. The alternative is adding the units to the archives in
+[`release.yml`](../.github/workflows/release.yml), which is self-contained and checksummed — and
+could not install v0.1.0, whose archives are published and do not contain them.
 
 ## Install, and update
 
