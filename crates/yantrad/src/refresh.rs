@@ -94,9 +94,6 @@ async fn look_at_sessions(model: &Model) {
     model.write().await.sessions = Some(Arc::new(reading));
 }
 
-/// The reading lands in the model before anything is sent, so a browser never
-/// waits on a relay — and a look that *failed* tells nobody anything, because
-/// an unknown fleet is not a changed one (I-47).
 /// The dearest look of the five — nine checks over ssh per machine — and the
 /// reason it is a look rather than a handler: `doctor` costs a browser poll far
 /// more than a session list does, and the rule about ssh on the request path is
@@ -107,6 +104,9 @@ async fn look_at_readiness(model: &Model) {
     model.write().await.readiness = Some(Arc::new(reading));
 }
 
+/// The reading lands in the model before anything is sent, so a browser never
+/// waits on a relay — and a look that *failed* tells nobody anything, because
+/// an unknown fleet is not a changed one (I-47).
 async fn look_at_agents(model: &Model, notifier: Option<&mut Notifier>) {
     let reading = Arc::new(Reading::new(status::fleet().await));
     model.write().await.agents = Some(reading.clone());

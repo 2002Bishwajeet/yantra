@@ -91,14 +91,24 @@ beat has arrived, *absent* where none has since this process started, and *unkno
 list holds no node of that name, because the beats are keyed on the node id (I-5) and a report names
 a machine the way a workspace does (ADR-0009).
 
-**No age threshold, deliberately.** Any beat that arrived is *present* carrying how long ago. Which
-ages mean a dead agent is ADR-0013 §7's, and this daemon names none of those states — the same rule
-that keeps `/api/machines` serving an age and `online` rather than a verdict.
+**No age threshold, deliberately — and it is not free.** Any beat that arrived is *present* carrying
+how long ago. Which ages mean a dead agent is ADR-0013 §7's, and this daemon names none of those
+states, the same rule that keeps `/api/machines` serving an age and `online` rather than a verdict.
+**What differs here is that a check is already a verdict**: `/api/machines` hands the page a number
+and `State::Present` hands it a green tick, so a machine whose agent died an hour ago reads *ready*
+on this route while the machines table beside it reads *asleep or off*. The detail carries the age,
+so nothing is hidden, but a card that draws only the state will be confidently wrong. Fixing it means
+naming the 30 s threshold a third time — the agent's `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`
+being the first two, with no constant either can share — which is why it is recorded here rather than
+patched.
 
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
-It runs at the same interval as the other four: `ControlPersist=300` means a slower loop would pay a
-fresh handshake per machine, where this one rides the masters they keep warm. The one-machine route
+It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
+handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
+their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
+to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
+--json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine route
 reads that same sweep, so a machine no workspace names is a **404** — `doctor::fleet` asks the
 machines workspaces name, and asking a machine per request is the thing this shape refuses.
 
