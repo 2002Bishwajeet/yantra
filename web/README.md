@@ -1,8 +1,8 @@
 # yantra web — the dashboard
 
 Three routes over the API `yantrad` serves at `/api` — the fleet at `/`, one
-machine at `/m/{machine}`, a workspace and its terminal at `/w/{name}`. The
-readings poll; the forms and every workspace row write. No state library.
+machine at `/m/$machine`, a workspace and its terminal at `/w/$name`, on
+TanStack Router. The readings poll; the forms and every workspace row write.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -449,15 +449,18 @@ src/
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
   useLooked.ts       the poll — every read, class or agent — and the three
                      derivations over a reading the routes share
-  router.ts          three routes and `nowhere`; the History API, no dependency
+  router.ts          TanStack Router: three routes, `notFoundComponent`, and
+                     `getRouter(history)` so a test can drive a memory history
   columns.tsx        four Column<T>[] arrays: the four tables, as data
   routes/
+    Shell.tsx        the heading and the `<Outlet/>`, plus `Nowhere`
     Fleet.tsx        `/` — the five sections and the edit form
-    OneMachine.tsx   `/m/{machine}` — the same readings, filtered to one
-    OneWorkspace.tsx `/w/{name}` — the workspace, which is its terminal
+    OneMachine.tsx   `/m/$machine` — the same readings, filtered to one
+    OneWorkspace.tsx `/w/$name` — the workspace, which is its terminal. The one
+                     code-split route: xterm.js is a third of the bundle
+  test/
+    inRouter.tsx     `renderRouted` — a one-route memory router around a subject
   components/
-    Link.tsx         an `<a>` that pushes state; a modified click is the
-                     browser's
     Section.tsx      the looked switch; children run only in the ok branch
     NewWorkspace.tsx the create form; owns the field class
     EditWorkspace.tsx the edit form — sends only the fields that differ, and
@@ -472,26 +475,39 @@ src/
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
   index.css          the token vocabulary — the whole integration surface
-  App.tsx            the heading, and which route is drawn
+  App.tsx            mounts the router; `Shell` in routes/ is the heading
 ```
 
-## The router (Y-161)
+## The router (Y-161, Y-162)
 
-`router.ts` is the History API and 60 lines, and no dependency was added for it.
-[D1](../docs/design/01-dashboard.md) §7 already refuses TanStack Router with the
-rest of T3 Code's runtime, and seven static paths with one segment each do not
-earn a router's own upgrade treadmill. What is here is `match()`, a
-`useSyncExternalStore` over `popstate`, and `Link`.
+**[TanStack Router](https://tanstack.com/router)**, code-based routes in
+`src/router.ts`. Y-161 hand-rolled one over the History API; the owner ruled on
+2026-08-09 that `web/` takes battle-tested packages and writes its own only where
+a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1, and an amendment on
+[ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md).
 
-- **`nowhere` is a state, not a fallback to `/`.** `web.rs` answers every unknown
-  path with `index.html`, so a mistyped URL arrives as a page; drawing the fleet
-  under it would make the address bar a lie.
-- **A modified or middle click is left to the browser.** `Link` renders a real
-  `<a href>` and takes over only the plain left click, so a new tab still works.
-- **`pushState` fires no event**, so a navigation this page makes notifies the
-  subscribers itself. The back button is the half the browser announces.
-- **`/w/{name}` reads the workspace list before it opens a socket.** A round trip
+- **The history is a parameter.** `getRouter(history)` is
+  [T3 Code](https://github.com/pingdotgg/t3code)'s shape, copied: the entry point
+  passes a browser history and a test passes a memory one, with no branch inside.
+- **`/w/$name` is the only split route, and the split is why the package pays for
+  itself.** xterm.js and its CSS are a third of the bundle and the fleet page
+  never touches them. First load went **170 kB gzip to 111 kB**, and the
+  terminal's 85 kB arrives when a terminal does. `lazyRouteComponent` does it;
+  the component reads its own params through `getRouteApi('/w/$name')`, because
+  importing the route back into the module the route loads would be a cycle.
+- **Params are typed.** `<Link to="/m/$machine" params={{ machine }}>` fails to
+  compile on a typo, which the string builders in Y-161 could not do.
+- **`notFoundComponent` is a state, not a redirect.** `web.rs` answers every
+  unknown path with `index.html`, so a mistyped URL arrives as a page; drawing
+  the fleet under it would make the address bar a lie.
+- **`/w/$name` reads the workspace list before it opens a socket.** A round trip
   to the daemon is cheap and an attach is an `ssh` to a machine that may be
   asleep, so a mistyped name never costs one.
 - **A machine's page has no `EDIT` column.** `workspaceColumns` takes `null` for
   it: a workspace is edited where it is listed, and the form is `/`'s.
+
+**A `<Link>` needs a router in context**, so a test that renders a column on its
+own supplies one: `src/test/inRouter.tsx`'s `renderRouted` builds a one-route
+memory router around the subject. It **awaits `router.load()`** — a router
+resolves its first match asynchronously, and rendering without that draws an
+empty document, which reads as a missing element rather than as a race.

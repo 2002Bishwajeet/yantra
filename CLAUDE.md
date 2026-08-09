@@ -121,6 +121,15 @@ see its 2026-08-02 amendment.
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
 the daemon, the CLI or the agent. TypeScript's only home is the browser.
 
+**In the browser, reach for the battle-tested package first; write it yourself only where the package
+is not worth its cost.** Owner's instruction, 2026-08-09, and it inverts §A2's default *for `web/`
+only*: routing, caching, and UI primitives are solved problems with maintained implementations, and a
+hand-rolled version is a maintenance liability rather than a saving. The dashboard is meant to be
+**fast and genuinely useful**, and that is what the packages buy — TanStack Router's code splitting
+took the first load from 170 kB gzip to 111 kB in the change that introduced it (Y-162). This does
+**not** relax §B1's first paragraph or §B2: the daemon, the CLI and the agent are unaffected, and
+`ssh`/`tmux`/`tailscale` are still orchestrated rather than reimplemented.
+
 **Rust punishes design churn**, and M0–M1 is where the design is least settled. Prefer a working ugly
 path over an elegant abstraction. Resist generalising before the third use.
 

@@ -1,37 +1,12 @@
-import { Link } from '@/components/Link'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { useRoute } from '@/router'
-import { Fleet } from '@/routes/Fleet'
-import { OneMachine } from '@/routes/OneMachine'
-import { OneWorkspace } from '@/routes/OneWorkspace'
+import { useState } from 'react'
+import { createBrowserHistory, RouterProvider } from '@tanstack/react-router'
+import { type AppRouter, getRouter } from '@/router'
 
-export default function App() {
-  const route = useRoute()
-
-  return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
-      <h1 className="font-heading text-2xl font-semibold">
-        <Link to="/">Yantra</Link>
-      </h1>
-
-      {route.at === 'fleet' && <Fleet />}
-      {/* Keyed on the name: a different machine is a different set of readings,
-          and the same is true of a workspace's socket (Y-130). */}
-      {route.at === 'machine' && (
-        <OneMachine key={route.machine} machine={route.machine} />
-      )}
-      {route.at === 'workspace' && (
-        <OneWorkspace key={route.name} name={route.name} />
-      )}
-      {route.at === 'nowhere' && (
-        <Alert variant="destructive">
-          <AlertTitle>Nothing is at {route.path}.</AlertTitle>
-          <AlertDescription>
-            <Link to="/">The fleet</Link> is where the machines and workspaces
-            are.
-          </AlertDescription>
-        </Alert>
-      )}
-    </main>
-  )
+/** The page is the router's — `Shell` in `routes/` is the heading and the
+ *  `<Outlet/>`. A router is made per mount rather than once per module: it holds
+ *  the history subscription and the match state, and a test that reused them
+ *  would start where the last one finished. */
+export default function App({ router }: { router?: AppRouter }) {
+  const [made] = useState(() => router ?? getRouter(createBrowserHistory()))
+  return <RouterProvider router={made} />
 }
