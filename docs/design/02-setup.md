@@ -1,7 +1,9 @@
 # D2 — Setting a machine up
 
 **Status:** proposed. Written 2026-08-09 from the owner's spec. Opens no rows (§B0) — §7 proposes
-them and the owner mints them.
+them and the owner mints them. **The owner ruled §6's scope question on 2026-08-09** and opened
+[Y-160](../../tracker.md#3-task-board) beside Y-157; the DNS blocker on D2.8 was mine and is
+withdrawn.
 
 Companion to **[D1 — The dashboard you work in](01-dashboard.md)**. Both read the same probe (§3).
 
@@ -161,15 +163,19 @@ Tailscale ACL or generates and distributes an ssh key has crossed a line the own
 | --- | --- |
 | **Y-156 — nothing has ever been published** | there is no artifact for an installer to fetch and no version to name. The release workflow exists and was rehearsed green; what is missing is a tag and a version. |
 | **Q17 unrecorded** | the owner ruled *tagged* verbally on 2026-08-08 and it is not written down. The installer cannot emit a `tailscale up` line until it is. |
-| **Q15 parked** | "which box" — blocks M8 and M9, not this. |
+| **Q15 answered** | the Pi 5, 2 GB, ruled 2026-08-09. It never blocked this — it blocks M8 and M9. |
 | **Y-144 open** | the appliance has no ssh identity of its own; §2 row 2 is the design for creating one. |
 
-### The scope question for the owner
+### The scope question, ruled 2026-08-09
 
-**Y-157 as written is narrower than this document.** It says *"an installer script: fetch, verify,
-and scaffold the one file it must never overwrite."* What §4 describes is a **provisioning**
-installer — accounts, Tailscale, systemd, provider CLIs, `doctor`. That is a widening, not a
-clarification. Widen Y-157, or add rows beside it? §B0 makes it the owner's call.
+**Y-157 is narrower than §4, and it stays that way.** The owner's ruling is **beside, not wider**:
+[Y-160](../../tracker.md#3-task-board) carries the provisioning half and Y-157 keeps its original
+text.
+
+**The seam is testability, not taste.** Y-157 is exactly the part
+[Y-158](../../tracker.md#3-task-board) can prove against a real systemd as PID 1 in a disposable
+podman container (§B3, Q19). Enrolling a real Tailscale, logging into `gh`, generating a keypair —
+none of that is provable that way. Fold them together and Y-158 loses its subject.
 
 ---
 
@@ -193,7 +199,7 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 | --- | --- | --- |
 | **D2.6** | `install.sh` — §4 steps 1–6 | **Y-156**: a tag, a version, and a published artifact to fetch |
 | **D2.7** | Run it against a real systemd | D2.6 |
-| **D2.8** | Host it on a name that resolves off the tailnet | D2.6, and the parked DNS decision |
+| **D2.8** | Host it on a name that resolves off the tailnet | D2.6 alone. The host is the landing site, which [`landing.yml`](../../.github/workflows/landing.yml) already deploys publicly; the dashboard's own name stays on `.ts.net` (ruled 2026-08-09), and the two were never the same problem. |
 
 ### Blocked on a decision
 
@@ -203,8 +209,8 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 | **D2.10** | Generate the appliance's ssh identity and print its public key | **Y-144**, and confirmation that generation is Yantra's rather than the owner's (§2) |
 
 **Y-156…Y-159 already exist** and cover publishing, an installer, exercising it against systemd, and
-hosting it. D2.6–D2.8 are those rows seen through this document; the widening in §6 is what needs
-ruling on before they are worked.
+hosting it. D2.6–D2.8 are those rows seen through this document. **[Y-160](../../tracker.md#3-task-board)
+is D2.1's consumer** — the §4 steps Y-157 deliberately leaves out.
 
 ---
 
