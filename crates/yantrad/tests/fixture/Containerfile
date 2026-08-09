@@ -1,4 +1,5 @@
-# Disposable systemd container for the service-unit tests (Y-142).
+# Disposable systemd container for the service-unit and installer tests
+# (Y-142, Y-158).
 #
 # The sshd + tmux fixture next door (yantra-core/tests/fixture) exists because
 # mocks lie about SSH; this one exists for the same reason one layer out, since
@@ -12,7 +13,21 @@
 
 FROM registry.fedoraproject.org/fedora:44
 
-RUN dnf -y install systemd && dnf clean all
+# `openssl` and `python3` are the stand-in for github.com that release.sh
+# serves; `sudo` and an unprivileged account are how docs/appliance.md says to
+# run install.sh, and the branch that fails as root would pass without them.
+RUN dnf -y install systemd openssl python3 sudo && dnf clean all
+
+RUN useradd --create-home deploy && \
+    printf 'deploy ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/deploy && \
+    chmod 440 /etc/sudoers.d/deploy
+
+# `pam_unix` writes an audit record, and a container that cannot reach the
+# host's audit subsystem fails sudo with *cannot retrieve authentication info* —
+# green here and red on GitHub's runner, which has one. What the fixture asserts
+# is that install.sh elevates, never what PAM decides.
+RUN printf 'auth sufficient pam_permit.so\naccount sufficient pam_permit.so\nsession sufficient pam_permit.so\n' \
+    > /etc/pam.d/sudo
 
 # PID 1 here is systemd, which takes SIGRTMIN+3 as "power off" and ignores SIGTERM.
 STOPSIGNAL SIGRTMIN+3

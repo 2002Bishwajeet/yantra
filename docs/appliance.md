@@ -122,6 +122,12 @@ What it does:
    owner's ([`CLAUDE.md`](../CLAUDE.md) §B4) and [Q17](../tracker.md#6-open-questions) is not a
    script's to answer.
 
+**Steps 2 and 5–7 are the ones a second run has to get right, and
+[`crates/yantrad/tests/installer.rs`](../crates/yantrad/tests/installer.rs) runs it twice against a
+real systemd to say that it does** ([Y-158](../tracker.md#3-task-board)): an edited `agent.env`
+survives, the binaries replace while one of them is executing, and a corrupted archive installs
+nothing.
+
 It ends by printing what is left, which is each thing above it deliberately did not do, plus
 [Y-144](../tracker.md#3-task-board): the box has no ssh identity any fleet machine authorises, so the
 daemon starts and every verb that reaches another machine fails.
