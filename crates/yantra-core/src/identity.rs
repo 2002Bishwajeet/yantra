@@ -63,6 +63,9 @@ pub enum Error {
 
     #[error("`ssh-keygen` failed: {0}")]
     Keygen(String),
+
+    #[error("`{machine}` cannot be one `Host` pattern, so no block is written for it")]
+    UnusableMachine { machine: String },
 }
 
 /// Prepares `~/.ssh` for the account this runs as, for every machine a
@@ -87,6 +90,14 @@ pub fn prepare() -> Result<Prepared, Error> {
 
 /// The half the tests drive, against a directory that is not the developer's.
 pub fn prepare_in(dir: &Path, machines: &[String]) -> Result<Prepared, Error> {
+    // A name carrying a newline would write config lines of its own, and this
+    // file decides how every connection Yantra makes is made.
+    if let Some(machine) = machines.iter().find(|m| m.split_whitespace().count() != 1) {
+        return Err(Error::UnusableMachine {
+            machine: machine.clone(),
+        });
+    }
+
     let writing = |path: &Path| {
         let path = path.to_owned();
         move |source| Error::Write { path, source }
@@ -263,6 +274,22 @@ mod tests {
         let config = fs::read_to_string(&prepared.config).expect("readable");
         assert!(config.contains("ProxyJump bastion"), "{config}");
         assert!(config.contains("IdentitiesOnly yes"), "{config}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `machine` is validated as an ssh destination nowhere (ADR-0009), so it
+    /// arrives here as whatever a TOML on disk said.
+    #[test]
+    fn a_machine_name_that_would_write_its_own_config_lines_is_refused() {
+        let dir = scratch("injection");
+        let hostile = "cachyos-g14\nHost *\n    ProxyCommand touch /tmp/pwned".to_owned();
+
+        assert!(matches!(
+            prepare_in(&dir, &[hostile]),
+            Err(Error::UnusableMachine { .. })
+        ));
+        assert!(!dir.exists(), "refused before anything was written");
 
         let _ = fs::remove_dir_all(&dir);
     }
