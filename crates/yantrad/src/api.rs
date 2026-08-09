@@ -15,7 +15,10 @@
 //! that did not load (Y-141).
 //!
 //! DTOs live here rather than as `Serialize` on `yantra_core`'s types: a JSON
-//! body is rendering, and ADR-0005 put rendering in the caller.
+//! body is rendering, and ADR-0005 put rendering in the caller. **`doctor` is
+//! the exception**, for `Power`'s reason one route over: its check names and
+//! three states are the JSON contract D2.2 already publishes to an installer and
+//! an agent, so a DTO here would be a second spelling of a settled one.
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -24,8 +27,9 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, response::IntoResponse};
 use std::collections::BTreeMap;
+use yantra_core::doctor;
 use yantra_core::heartbeat::{Heartbeat, Power};
-use yantra_core::snapshot::Reading;
+use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
 
 use crate::heartbeat::{Beats, Fleet};
@@ -40,6 +44,8 @@ pub fn router() -> Router<Fleet> {
         .route("/workspaces", get(workspaces))
         .route("/sessions", get(sessions))
         .route("/workspaces/{name}/status", get(workspace_status))
+        .route("/readiness", get(readiness))
+        .route("/machines/{name}/readiness", get(machine_readiness))
 }
 
 /// The one route that joins two memories: the look Tailscale answered and what
@@ -110,6 +116,130 @@ async fn workspace_status(State(model): State<Model>, Path(name): Path<String>) 
         )
             .into_response(),
     }
+}
+
+/// `yantra doctor` on the wire, plus the one check it cannot answer — which is
+/// the whole of what this route adds over the terminal (D2 §3.1).
+async fn readiness(State(model): State<Model>, State(beats): State<Beats>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    let beats = beats.read().await;
+    Json(Answer::of(snapshot.readiness.as_deref(), |reports| {
+        reports
+            .iter()
+            .map(|report| answered(report, &snapshot, &beats))
+            .collect::<Vec<_>>()
+    }))
+}
+
+/// The second route naming a resource, so it has [`workspace_status`]'s fourth
+/// answer for the same reason: a machine the sweep did not cover is a **404**
+/// rather than a 200 whose absence a client has to notice. The sweep asks the
+/// machines workspaces name ([`yantra_core::doctor::fleet`]), which is not every
+/// machine on the tailnet.
+async fn machine_readiness(
+    State(model): State<Model>,
+    State(beats): State<Beats>,
+    Path(name): Path<String>,
+) -> Response {
+    let snapshot = model.read().await.clone();
+    let beats = beats.read().await;
+    let Some(reading) = snapshot.readiness.as_deref() else {
+        return Json(Answer::<doctor::Report>::Never).into_response();
+    };
+    let age_seconds = reading.age().as_secs();
+    let reports = match reading.value() {
+        Ok(reports) => reports,
+        Err(error) => {
+            return Json(Answer::<doctor::Report>::Failed {
+                age_seconds,
+                error: because(error),
+            })
+            .into_response();
+        }
+    };
+    match reports.iter().find(|report| report.machine == name) {
+        Some(report) => Json(Answer::Ok {
+            age_seconds,
+            data: answered(report, &snapshot, &beats),
+        })
+        .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(Missing {
+                error: format!("no workspace names a machine called `{name}`, so none was asked"),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// The library answers `heartbeat` *unknown* from every caller it has, and that
+/// is the architecture rather than a gap: the beats are in this process and
+/// nothing persists them (Y-044), while ADR-0012 keeps the CLI out of it. This
+/// is the daemon filling in its own check.
+fn answered(
+    report: &doctor::Report,
+    snapshot: &Snapshot,
+    beats: &BTreeMap<String, Reading<Heartbeat>>,
+) -> doctor::Report {
+    doctor::Report {
+        machine: report.machine.clone(),
+        checks: report
+            .checks
+            .iter()
+            .map(|check| match check.check {
+                doctor::HEARTBEAT => heard_from(&report.machine, snapshot, beats),
+                _ => check.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// I-5 one route over: a report names a machine the way a workspace does
+/// (ADR-0009) while a beat is keyed on the node id, so the join runs through the
+/// look Tailscale answered — and a machine that look does not hold stays
+/// *unknown*, because nothing here can tell *no beat* from *no node* (R-23).
+///
+/// **No age threshold.** A beat that arrived is *present* carrying how long ago;
+/// which ages mean a dead agent is ADR-0013 §7's, and this daemon names none of
+/// those states.
+fn heard_from(
+    machine: &str,
+    snapshot: &Snapshot,
+    beats: &BTreeMap<String, Reading<Heartbeat>>,
+) -> doctor::Check {
+    let says = |state, detail: String| doctor::Check {
+        check: doctor::HEARTBEAT,
+        state,
+        detail,
+    };
+    let Some(id) = node_id(machine, snapshot) else {
+        return says(
+            doctor::State::Unknown,
+            "no tailnet node here answers to that name, so whether it has beaten is not known"
+                .to_owned(),
+        );
+    };
+    match beats.get(id) {
+        Some(reading) => says(
+            doctor::State::Present,
+            format!("a beat arrived {}s ago", reading.age().as_secs()),
+        ),
+        None => says(
+            doctor::State::Absent,
+            "nothing has beaten from that machine since this daemon started — is `yantra-agent` \
+             running there?"
+                .to_owned(),
+        ),
+    }
+}
+
+fn node_id<'a>(machine: &str, snapshot: &'a Snapshot) -> Option<&'a str> {
+    let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
+    machines
+        .iter()
+        .find(|one| one.name == machine)
+        .map(|one| one.id.as_str())
 }
 
 /// A file that did not load is not a workspace that is not there, and saying it
@@ -550,7 +680,13 @@ mod tests {
     /// looked. An empty `data` here would draw an empty fleet and be believed.
     #[tokio::test]
     async fn a_class_nobody_has_looked_at_says_so_and_carries_no_data() {
-        for path in ["/machines", "/workspaces", "/sessions"] {
+        for path in [
+            "/machines",
+            "/workspaces",
+            "/sessions",
+            "/readiness",
+            "/machines/cachyos-g14/readiness",
+        ] {
             let body = get_json(holding(Snapshot::default()), path).await;
             assert_eq!(body, json!({"looked": "never"}), "{path}");
         }
@@ -837,6 +973,157 @@ mod tests {
         assert_eq!(
             body["data"][0]["heartbeat"]["power"],
             json!({"battery": {"percent": 42}}),
+            "{body}"
+        );
+    }
+
+    /// A report as the library produces one, `heartbeat` included: unknown,
+    /// because no caller of it holds the beats.
+    fn checked(machine: &str) -> doctor::Report {
+        doctor::Report {
+            machine: machine.into(),
+            checks: vec![
+                doctor::Check {
+                    check: "reachable",
+                    state: doctor::State::Present,
+                    detail: "a command ran there and reported its own status".into(),
+                },
+                doctor::Check {
+                    check: doctor::HEARTBEAT,
+                    state: doctor::State::Unknown,
+                    detail: "only the running daemon holds the beats".into(),
+                },
+            ],
+        }
+    }
+
+    /// The three memories these routes join: the sweep, the tailnet's own list
+    /// to key it against, and what has beaten.
+    async fn swept(
+        reports: Vec<doctor::Report>,
+        machines: Vec<MachineInfo>,
+        beats: &[(&str, Heartbeat)],
+    ) -> Fleet {
+        let fleet = holding(Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(machines)))),
+            readiness: Some(Arc::new(Reading::new(Ok(reports)))),
+            ..Snapshot::default()
+        });
+        let mut held = fleet.beats.write().await;
+        for (id, beat) in beats {
+            held.insert((*id).to_owned(), Reading::new(beat.clone()));
+        }
+        drop(held);
+        fleet
+    }
+
+    /// One report per machine, every check under its own name — D2 §3.1's list
+    /// is what an installer and a card both read, so nothing here is summarised
+    /// into a verdict the daemon would then own.
+    #[tokio::test]
+    async fn the_fleet_carries_every_check_of_every_machine_under_its_own_name() {
+        let fleet = swept(
+            vec![checked("cachyos-g14"), checked("pi")],
+            vec![machine("n-1", "cachyos-g14", true)],
+            &[],
+        )
+        .await;
+
+        let body = get_json(fleet, "/readiness").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        let reports = body["data"].as_array().expect("one report per machine");
+        assert_eq!(reports.len(), 2, "{body}");
+        assert_eq!(reports[0]["machine"], "cachyos-g14");
+        assert_eq!(reports[0]["checks"][0]["check"], "reachable");
+        assert_eq!(reports[0]["checks"][0]["state"], "present");
+        assert!(
+            reports[0]["checks"][0]["detail"].as_str().is_some(),
+            "a state with no detail is a state nobody can act on: {body}"
+        );
+    }
+
+    /// **The one thing this route adds over `yantra doctor`.** The library says
+    /// *unknown* from every caller it has (Y-044, ADR-0012); the beats are in
+    /// this process, so here the check is answered — and a machine that has
+    /// never beaten is *absent*, which sends a reader to the agent rather than
+    /// to the machine (R-23).
+    #[tokio::test]
+    async fn the_daemon_answers_the_one_check_the_library_leaves_unknown() {
+        let fleet = swept(
+            vec![checked("cachyos-g14"), checked("bishwajeets-macbook-pro")],
+            vec![
+                machine("n-1", "cachyos-g14", true),
+                machine("n-2", "bishwajeets-macbook-pro", true),
+            ],
+            &[("n-1", beat(Power::Ac))],
+        )
+        .await;
+
+        let body = get_json(fleet, "/readiness").await;
+        let beating = &body["data"][0]["checks"][1];
+        assert_eq!(beating["check"], "heartbeat", "{body}");
+        assert_eq!(beating["state"], "present", "{beating}");
+        let silent = &body["data"][1]["checks"][1];
+        assert_eq!(silent["state"], "absent", "{silent}");
+        assert!(
+            silent["detail"]
+                .as_str()
+                .is_some_and(|d| d.contains("yantra-agent")),
+            "{silent}"
+        );
+    }
+
+    /// I-5 is why the join is on the node id, and this is what it costs: a
+    /// report whose machine the tailnet list does not hold cannot be keyed, and
+    /// *unknown* is the only honest answer — *absent* would send someone to
+    /// restart an agent that is beating fine.
+    #[tokio::test]
+    async fn a_machine_the_tailnet_does_not_list_leaves_the_beat_unknown_rather_than_absent() {
+        let fleet = swept(
+            vec![checked("pi")],
+            vec![machine("n-1", "cachyos-g14", true)],
+            &[],
+        )
+        .await;
+
+        let body = get_json(fleet, "/readiness").await;
+        assert_eq!(body["data"][0]["checks"][1]["state"], "unknown", "{body}");
+    }
+
+    /// The card on `/m/{machine}` reads one machine, and reads the same answer
+    /// the fleet carries for it — including the beat, which is the check that
+    /// makes this route worth serving.
+    #[tokio::test]
+    async fn one_machine_answers_the_report_the_fleet_holds_for_it() {
+        let fleet = swept(
+            vec![checked("cachyos-g14"), checked("pi")],
+            vec![machine("n-1", "cachyos-g14", true)],
+            &[("n-1", beat(Power::Battery { percent: 42 }))],
+        )
+        .await;
+
+        let body = get_json(fleet, "/machines/cachyos-g14/readiness").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"]["machine"], "cachyos-g14", "{body}");
+        assert_eq!(body["data"]["checks"][1]["state"], "present", "{body}");
+    }
+
+    /// [`workspace_status`]'s rule at machine granularity: a 200 with no `data`
+    /// would make a client infer absence from a missing field, and the sweep
+    /// asks the machines workspaces name rather than the whole tailnet.
+    #[tokio::test]
+    async fn a_machine_no_sweep_covered_is_not_found_rather_than_an_empty_answer() {
+        let fleet = swept(
+            vec![checked("cachyos-g14")],
+            vec![machine("n-1", "cachyos-g14", true)],
+            &[],
+        )
+        .await;
+
+        let (code, body) = get(fleet, "/machines/nosuch/readiness").await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "{body}");
+        assert!(
+            body["error"].as_str().is_some_and(|e| e.contains("nosuch")),
             "{body}"
         );
     }

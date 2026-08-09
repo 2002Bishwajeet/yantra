@@ -241,6 +241,7 @@ async fn fleet() -> Fleet {
                 },
             ],
         })))),
+        readiness: None,
     });
 
     let mut beats = fleet.beats.write().await;

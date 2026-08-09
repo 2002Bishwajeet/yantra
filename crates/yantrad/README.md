@@ -19,6 +19,8 @@ API the CLI cannot reach.
 | `GET /api/workspaces` | `yantra ls workspaces` |
 | `GET /api/sessions` | `yantra ls sessions` |
 | `GET /api/workspaces/{name}/status` | `yantra status <name>` |
+| `GET /api/readiness` | `yantra doctor` |
+| `GET /api/machines/{name}/readiness` | `yantra doctor <machine>` |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
@@ -79,6 +81,17 @@ beat is the one thing on this route that `yantra ls machines` cannot yet show.
  "heartbeat": {"age_seconds": 1, "arch": "x86_64", "labels": ["gpu", "podman", "tmux"],
                "free_ram_mb": 7866, "free_disk_mb": 361282, "cpu_busy_pct": 8, "power": "ac"}}
 ```
+
+`GET /api/readiness` is [D2](../../docs/design/02-setup.md) §3.1's checks per machine, swept in the
+background like every other read, and `GET /api/machines/{name}/readiness` is one machine of it. The
+sweep asks the machines a workspace names, so a machine none of them names is a `404` here even
+though `yantra doctor <machine>` would go and ask it.
+
+**`heartbeat` is the one check these routes answer and the terminal cannot.** The library reports it
+*unknown* from every caller it has, because the beats are in this process and nothing persists them;
+here a beat that arrived is *present* with its age, a machine that has never beaten is *absent*, and
+one the tailnet list does not hold stays *unknown* — the beats are keyed on the node id, and a report
+names a machine the way a workspace does.
 
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:
 

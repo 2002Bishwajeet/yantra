@@ -30,7 +30,9 @@ const TERMINFO: &str = "terminfo";
 const PROVIDER_CLI: &str = "provider-cli";
 const PROVIDER_AUTH: &str = "provider-auth";
 const LOGIN_SESSION: &str = "login-session";
-const HEARTBEAT: &str = "heartbeat";
+/// Public because the one caller that can answer this check finds it by name —
+/// see [`heartbeat`].
+pub const HEARTBEAT: &str = "heartbeat";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.

@@ -27,6 +27,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::doctor;
 use crate::inventory::{self, MachineInfo};
 use crate::sessions::{self, MachineSessions};
 use crate::status::{self, Fleet};
@@ -69,6 +70,9 @@ pub type Sessions = Reading<Result<Vec<MachineSessions>, sessions::Error>>;
 /// Also one entry per machine rather than per workspace — see
 /// [`crate::status::fleet`] for what that costs and why.
 pub type Agents = Reading<Result<Fleet, status::Error>>;
+/// Every [`crate::doctor`] check per machine. The dearest class to look at, and
+/// the only one whose answer a person changes by installing something.
+pub type Readiness = Reading<Result<Vec<doctor::Report>, doctor::Error>>;
 
 /// Each class costs something different to look at, so each is looked at on its
 /// own and carries its own age. Behind an [`Arc`] so a handler can take the
@@ -79,6 +83,7 @@ pub struct Snapshot {
     pub workspaces: Option<Arc<Workspaces>>,
     pub sessions: Option<Arc<Sessions>>,
     pub agents: Option<Arc<Agents>>,
+    pub readiness: Option<Arc<Readiness>>,
 }
 
 #[cfg(test)]
@@ -103,6 +108,7 @@ mod tests {
         assert!(snapshot.workspaces.is_none());
         assert!(snapshot.sessions.is_none());
         assert!(snapshot.agents.is_none());
+        assert!(snapshot.readiness.is_none());
     }
 
     /// The clone a handler serves is the same reading, not a re-taken one.
