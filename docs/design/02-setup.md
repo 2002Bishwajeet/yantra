@@ -196,7 +196,7 @@ Tailscale ACL or generates and distributes an ssh key has crossed a line the own
 | **Y-156 — nothing has ever been published** | there is no artifact for an installer to fetch and no version to name. The release workflow exists and was rehearsed green; what is missing is a tag and a version. |
 | **Q17 answered** | *tagged*, recorded 2026-08-09 — but **Y-143 is a condition on it, not a follow-up**. The hazard it names is read from the code and never measured, and if a tagged node turns out to refuse every write, the enrolment step is written against a different answer. |
 | **Q15 answered** | the Pi 5, 2 GB, ruled 2026-08-09. It never blocked this — it blocks M8 and M9. |
-| **Y-144 open** | the appliance has no ssh identity of its own; §2 row 2 is the design for creating one. |
+| **Y-144 open** | the appliance has no ssh identity of its own; §2 row 2 is the design for creating one, and `yantra ssh-identity` is now that design built. What stays open is the decision above it, not the verb. |
 
 ### The scope question, ruled 2026-08-09
 
