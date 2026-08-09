@@ -1,6 +1,14 @@
-import { useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { EllipsisIcon } from 'lucide-react'
 import type { Opened, Resumed, Stopped, Workspace } from '@/api'
+import type { Chosen } from '@/columns'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+
+const Overflow = lazy(() =>
+  import('@/components/Overflow').then((it) => ({ default: it.Overflow })),
+)
 
 export type Verb = 'up' | 'down' | 'resume'
 
@@ -113,6 +121,156 @@ async function act(workspace: Workspace, verb: Verb): Promise<Acted> {
 export const button =
   'border-input rounded-md border px-2 py-1 text-xs disabled:opacity-50'
 
+const inFlight: Record<Verb, string> = {
+  up: 'starting…',
+  down: 'stopping…',
+  resume: 'resuming…',
+}
+
+/** Everything that is only true after a tap: what is still awaited, and what the
+ *  daemon said. Nothing is drawn before one, so a row that has not been used
+ *  carries no space for it. */
+function Outcome({ outcome, machine }: { outcome: Acted; machine: string }) {
+  return (
+    <>
+      {outcome.acted === 'acting' && (
+        <span className="text-muted-foreground text-xs">
+          waiting on {machine} — ssh gives it ten seconds
+        </span>
+      )}
+
+      {outcome.acted === 'done' && (
+        <Alert>
+          <AlertTitle className="text-xs">{outcome.said}</AlertTitle>
+        </Alert>
+      )}
+
+      {outcome.acted === 'refused' && (
+        // A refusal the daemon reasoned about is not a crash, and the `409` is
+        // the one that reads as one if it is painted like a failure.
+        <Alert variant={outcome.status === 409 ? 'default' : 'destructive'}>
+          <AlertTitle className="text-xs">
+            {refusal(outcome.status)}
+          </AlertTitle>
+          {/* The daemon's own chain, whole: it names the machine, the command
+              and what ssh said, which is the actionable half. */}
+          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
+            {outcome.said}
+          </AlertDescription>
+        </Alert>
+      )}
+    </>
+  )
+}
+
+/** D1 §2: the one verb the row's state is for, and the rest behind an overflow.
+ *  Every verb is still reachable — what is gone is the reader having to work out
+ *  which of three this state wants.
+ *
+ *  `chosen` is computed in `columns.tsx` beside the other state readings, and is
+ *  passed in rather than derived here so that this file holds no opinion about
+ *  what an agent's state means. */
+export function Actions({
+  workspace,
+  chosen,
+  terminal,
+  // Null on a machine's own page: a workspace is edited where it is listed.
+  edit,
+}: {
+  workspace: Workspace
+  chosen: Chosen
+  terminal: boolean
+  edit: ((name: string) => void) | null
+}) {
+  const [outcome, setOutcome] = useState<Acted>({ acted: 'no' })
+  const acting = outcome.acted === 'acting'
+  // Two flags rather than one: `armed` is what fetches the overflow's chunk and
+  // never unsets, `open` is what the menu itself is doing.
+  const [armed, setArmed] = useState(false)
+  const [open, setOpen] = useState(false)
+  const more = useRef<HTMLButtonElement>(null)
+
+  const tap = async (verb: Verb) => {
+    setOutcome({ acted: 'acting', verb })
+    setOutcome(await act(workspace, verb))
+  }
+
+  return (
+    <div className="flex max-w-xs flex-col gap-2">
+      <div className="flex items-center gap-2">
+        {chosen.does === 'post' && (
+          <Button
+            disabled={acting}
+            onClick={() => void tap(chosen.verb)}
+            size="sm"
+          >
+            {outcome.acted === 'acting' ? inFlight[outcome.verb] : chosen.label}
+          </Button>
+        )}
+
+        {chosen.does === 'open' && (
+          <Button
+            render={<Link params={{ name: workspace.name }} to="/w/$name" />}
+            size="sm"
+          >
+            {chosen.label}
+          </Button>
+        )}
+
+        {chosen.does === 'fix' && (
+          <Button
+            render={
+              <Link params={{ machine: workspace.machine }} to="/m/$machine" />
+            }
+            size="sm"
+            variant="outline"
+          >
+            {chosen.label}
+          </Button>
+        )}
+
+        {/* R-23: a reading that has not arrived is not a workspace that is down,
+            so the button says so and refuses to guess a verb for it. */}
+        {chosen.does === 'wait' && (
+          <Button disabled size="sm" variant="outline">
+            {chosen.label}
+          </Button>
+        )}
+
+        <Button
+          aria-label={`More for ${workspace.name}`}
+          onClick={() => {
+            setArmed(true)
+            setOpen(true)
+          }}
+          ref={more}
+          size="icon-sm"
+          variant="outline"
+        >
+          <EllipsisIcon />
+        </Button>
+        {armed && (
+          <Suspense fallback={null}>
+            <Overflow
+              acting={acting}
+              anchor={more}
+              chosen={chosen}
+              edit={edit}
+              onOpenChange={setOpen}
+              onVerb={(verb) => void tap(verb)}
+              open={open}
+              terminal={terminal}
+              workspace={workspace}
+            />
+          </Suspense>
+        )}
+      </div>
+
+      <Outcome machine={workspace.machine} outcome={outcome} />
+    </div>
+  )
+}
+
 /** The three verbs as buttons, so a phone needs no terminal. They await ssh —
  *  ten seconds against a machine that is asleep — so every one of them is
  *  disabled while one is in flight rather than reading as already done.
@@ -147,7 +305,7 @@ export function Act({
             onClick={() => void tap('up')}
           >
             {outcome.acted === 'acting' && outcome.verb === 'up'
-              ? 'starting…'
+              ? inFlight.up
               : workspace.startup === null
                 ? 'Start claude'
                 : 'Start'}
@@ -161,7 +319,7 @@ export function Act({
             onClick={() => void tap('down')}
           >
             {outcome.acted === 'acting' && outcome.verb === 'down'
-              ? 'stopping…'
+              ? inFlight.down
               : 'Stop'}
           </button>
         )}
@@ -175,38 +333,13 @@ export function Act({
             onClick={() => void tap('resume')}
           >
             {outcome.acted === 'acting' && outcome.verb === 'resume'
-              ? 'resuming…'
+              ? inFlight.resume
               : 'Resume'}
           </button>
         )}
       </div>
 
-      {acting && (
-        <span className="text-muted-foreground text-xs">
-          waiting on {workspace.machine} — ssh gives it ten seconds
-        </span>
-      )}
-
-      {outcome.acted === 'done' && (
-        <Alert>
-          <AlertTitle className="text-xs">{outcome.said}</AlertTitle>
-        </Alert>
-      )}
-
-      {outcome.acted === 'refused' && (
-        // A refusal the daemon reasoned about is not a crash, and the `409` is
-        // the one that reads as one if it is painted like a failure.
-        <Alert variant={outcome.status === 409 ? 'default' : 'destructive'}>
-          <AlertTitle className="text-xs">
-            {refusal(outcome.status)}
-          </AlertTitle>
-          {/* The daemon's own chain, whole: it names the machine, the command
-              and what ssh said, which is the actionable half. */}
-          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-            {outcome.said}
-          </AlertDescription>
-        </Alert>
-      )}
+      <Outcome machine={workspace.machine} outcome={outcome} />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import type {
   AgentState,
@@ -24,6 +25,7 @@ import {
   agentCommand,
   agentState,
   attachable,
+  chosen,
   machineColumns,
   sessionColumns,
   sessionCommand,
@@ -236,7 +238,12 @@ describe('the workspaces table', () => {
     }
     const { container } = await renderRouted(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
+        columns={workspaceColumns(
+          { looked: 'never' },
+          { looked: 'never' },
+          { looked: 'never' },
+          () => {},
+        )}
         rows={[workspace]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -249,7 +256,12 @@ describe('the workspaces table', () => {
   it('names the path a file goes in when the look succeeded and found nothing', async () => {
     await renderRouted(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
+        columns={workspaceColumns(
+          { looked: 'never' },
+          { looked: 'never' },
+          { looked: 'never' },
+          () => {},
+        )}
         rows={[]}
         rowKey={(row) => row.name}
         empty="no workspaces yet — make one at ~/.config/yantra/workspaces/<name>.toml"
@@ -320,6 +332,102 @@ describe('the workspaces table', () => {
   })
 })
 
+/** D1 §2, built by Y-167. The row used to offer three verbs and make the reader
+ *  pick; it now reads the agent state and offers the one that state is for. */
+describe('the one verb a row computes', () => {
+  const yantra: Workspace = {
+    name: 'yantra',
+    machine: 'cachyos-g14',
+    repo: '/home/<user>/Github/homelab/yantra',
+    startup: null,
+  }
+
+  function at(state: AgentState, workspace = yantra): WorkspaceStatus {
+    return {
+      workspace: workspace.name,
+      machine: workspace.machine,
+      reached: 'yes',
+      status: state,
+      session: null,
+    }
+  }
+
+  it('offers no verb at all until something has been read', () => {
+    // R-23: a row whose agent look has not landed is not a row that is down,
+    // and Start is exactly the guess that would read as knowledge.
+    expect(chosen(yantra, null)).toEqual({ does: 'wait', label: 'reading…' })
+  })
+
+  it('sends an unreachable machine to the machine, not at a verb that will fail', () => {
+    const answer = chosen(yantra, {
+      workspace: 'yantra',
+      machine: 'cachyos-g14',
+      reached: 'no',
+      error: 'ssh: connect to host cachyos-g14 port 22: Connection refused',
+    })
+    expect(answer).toEqual({ does: 'fix', label: 'Fix' })
+  })
+
+  it('starts what is down and names the agent it will start', () => {
+    expect(chosen(yantra, at({ state: 'no_session' }))).toEqual({
+      does: 'post',
+      verb: 'up',
+      label: 'Start claude',
+    })
+    const editor = { ...yantra, startup: 'npm run dev' }
+    expect(chosen(editor, at({ state: 'no_session' }, editor))).toEqual({
+      does: 'post',
+      verb: 'up',
+      label: 'Start',
+    })
+  })
+
+  it('opens a session that is alive rather than acting on it', () => {
+    for (const state of ['running', 'no_agent'] as const) {
+      expect(chosen(yantra, at({ state }))).toEqual({
+        does: 'open',
+        label: 'Open',
+      })
+    }
+    expect(chosen(yantra, at({ state: 'unclear', because: 'R-2' }))).toEqual({
+      does: 'open',
+      label: 'Open',
+    })
+  })
+
+  /** I-49 is the one state waiting on a person, and ADR-0011 says the person is
+   *  never Yantra — so it gets its own word rather than a generic Open. */
+  it('says a trust prompt is waiting for you and does not call it running', () => {
+    expect(chosen(yantra, at({ state: 'awaiting_trust' }))).toEqual({
+      does: 'open',
+      label: 'Answer',
+    })
+  })
+
+  it('resumes each of the four endings, and only where resume is allowed', () => {
+    const endings = [
+      { state: 'finished' },
+      { state: 'stopped' },
+      { state: 'crashed', exit_status: 1 },
+      { state: 'killed', signal: 'SIGKILL' },
+    ] as const
+    for (const state of endings) {
+      expect(chosen(yantra, at(state))).toEqual({
+        does: 'post',
+        verb: 'resume',
+        label: 'Resume',
+      })
+      // ADR-0015 refuses resume for a workspace that starts something of its
+      // own, so what is offered is the session it left behind.
+      const editor = { ...yantra, startup: 'npm run dev' }
+      expect(chosen(editor, at(state, editor))).toEqual({
+        does: 'open',
+        label: 'Open',
+      })
+    }
+  })
+})
+
 /** Y-121. The buttons were 15 px past the right edge of a 390 px phone, in a
  *  749 px table inside 295 px of card. Below the breakpoint there is no table,
  *  so there is nothing to swipe sideways and nothing to fall off the end of. */
@@ -334,7 +442,12 @@ describe('a workspace row on a phone', () => {
   async function draw() {
     return renderRouted(
       <DataTable
-        columns={workspaceColumns({ looked: 'never' }, { looked: 'never' }, () => {}, () => {})}
+        columns={workspaceColumns(
+          { looked: 'never' },
+          { looked: 'never' },
+          { looked: 'never' },
+          () => {},
+        )}
         rows={[site]}
         rowKey={(row) => row.name}
         empty="no workspaces yet"
@@ -342,33 +455,30 @@ describe('a workspace row on a phone', () => {
     )
   }
 
-  it('puts the three verbs on the page instead of inside a table that scrolls', async () => {
+  it('puts the verbs on the page instead of inside a table that scrolls', async () => {
     viewport(390)
     const { container } = await draw()
 
+    fireEvent.click(
+      screen.getByRole('button', { name: 'More for personal-website' }),
+    )
     for (const name of ['Start claude', 'Stop', 'Resume']) {
-      expect(screen.getByRole('button', { name })).toBeTruthy()
+      expect(await screen.findByText(name)).toBeTruthy()
     }
     expect(container.querySelector('table')).toBeNull()
     expect(container.querySelector('[data-slot="table-container"]')).toBeNull()
   })
 
-  it('drops no column — every fact the row carried is still labelled', async () => {
+  /** Y-167 took two columns away, and neither held a fact: the terminal and the
+   *  edit form are verbs, and they moved into the overflow beside the others. */
+  it('drops no fact — every one the row carried is still labelled', async () => {
     viewport(390)
     const { container } = await draw()
 
     const labels = [...container.querySelectorAll('dt')].map(
       (one) => one.textContent,
     )
-    expect(labels).toEqual([
-      'WORKSPACE',
-      'MACHINE',
-      'ACT',
-      'REPO',
-      'STARTUP',
-      'TERMINAL',
-      'EDIT',
-    ])
+    expect(labels).toEqual(['WORKSPACE', 'MACHINE', 'ACT', 'REPO', 'STARTUP'])
     expect(screen.getByText('/Users/<user>/Github/personal-website')).toBeTruthy()
   })
 
@@ -604,14 +714,13 @@ describe('the command a row carries', () => {
     expect(sessionCommand(row, { looked: 'never' })).toBeNull()
   })
 
-  it('puts the terminal in the row, naming the workspace it would open', async () => {
-    const opened: string[] = []
+  it('puts the terminal behind the overflow, as a link and not a callback', async () => {
     await renderRouted(
       <DataTable
         columns={workspaceColumns(
           running,
           { looked: 'never' },
-          (name) => opened.push(name),
+          { looked: 'never' },
           () => {},
         )}
         rows={[yantra]}
@@ -619,8 +728,12 @@ describe('the command a row carries', () => {
         empty="no workspaces yet"
       />,
     )
-    fireEvent.click(screen.getByText('Open terminal'))
-    expect(opened).toEqual(['yantra'])
+    fireEvent.click(screen.getByRole('button', { name: 'More for yantra' }))
+
+    // A link rather than a handler, so the row obeys a middle click the way
+    // every other route in this page does.
+    const open = await screen.findByText('Open terminal')
+    expect(open.closest('a')?.getAttribute('href')).toBe('/w/yantra')
     expect(machineColumns.some((column) => column.header === 'COMMAND')).toBe(false)
   })
 })
@@ -1187,8 +1300,10 @@ describe('editing a workspace', () => {
     startup: screen.getByLabelText('Startup', { selector: '#edit-startup' }),
   })
 
+  // Y-167 moved EDIT out of its own column and into the row's overflow.
   async function open() {
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'More for site' }))
+    fireEvent.click(await screen.findByText('Edit'))
     await screen.findByLabelText('Repo', { selector: '#edit-repo' })
   }
 
@@ -1307,7 +1422,14 @@ describe('acting on a workspace', () => {
 
   type Answer = { status: number; body: unknown } | 'never'
 
-  function stubAct(answer: Answer, workspace = site) {
+  /** Y-167: the row's one button is the one its agent state is for, so a test
+   *  about a verb has to say what state the workspace is in for it to be the
+   *  verb on offer. `no_session` is *Start*; the rest are behind the overflow. */
+  function stubAct(
+    answer: Answer,
+    workspace = site,
+    state: AgentState = { state: 'no_session' },
+  ) {
     const posted = vi.fn()
     const looks: Record<string, Looked<unknown>> = {
       '/api/machines': { looked: 'ok', age_seconds: 2, data: [mac] },
@@ -1315,6 +1437,17 @@ describe('acting on a workspace', () => {
         looked: 'ok',
         age_seconds: 2,
         data: [listed(workspace)],
+      },
+      [`/api/workspaces/${workspace.name}/status`]: {
+        looked: 'ok',
+        age_seconds: 2,
+        data: {
+          workspace: workspace.name,
+          machine: workspace.machine,
+          reached: 'yes',
+          status: state,
+          session: null,
+        },
       },
     }
     vi.stubGlobal(
@@ -1343,8 +1476,20 @@ describe('acting on a workspace', () => {
     return posted
   }
 
+  /** Scoped to the workspaces card: since Y-167 both it and the agents section
+   *  compute a verb from the same reading, so the fleet names it twice. Awaited
+   *  rather than read, because the router resolves its first match after this. */
+  const card = async () =>
+    within((await screen.findByText('Workspaces')).closest('[data-slot="card"]')!)
+
   const tap = async (name: string) =>
-    fireEvent.click(await screen.findByRole('button', { name }))
+    fireEvent.click(await (await card()).findByRole('button', { name }))
+
+  /** The verbs the state is not for, which is where all three still live. */
+  const overflow = async () =>
+    fireEvent.click(
+      await (await card()).findByRole('button', { name: /^More for/ }),
+    )
 
   it('reads a second up as attached rather than as a failure', async () => {
     stubAct({
@@ -1389,7 +1534,7 @@ describe('acting on a workspace', () => {
   it('draws an agent holding at the trust prompt as a refusal, not a crash', async () => {
     const said =
       "`personal-website` is holding at claude's trust prompt, so it has no conversation to continue"
-    stubAct({ status: 409, body: said })
+    stubAct({ status: 409, body: said }, site, { state: 'stopped' })
     render(<App />)
     await tap('Resume')
 
@@ -1425,7 +1570,8 @@ describe('acting on a workspace', () => {
     expect(screen.queryByRole('alert')).toBeNull()
 
     fireEvent.click(flight)
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await overflow()
+    fireEvent.click(await screen.findByText('Stop'))
     expect(posted).toHaveBeenCalledTimes(1)
   })
 
@@ -1445,7 +1591,9 @@ describe('acting on a workspace', () => {
 
     // Once in the machines table, once beside the workspace it will act on.
     expect((await screen.findAllByText('asleep or off')).length).toBe(2)
-    const start = await screen.findByRole('button', { name: 'Start claude' })
+    const start = await (await card()).findByRole('button', {
+      name: 'Start claude',
+    })
     expect(start.hasAttribute('disabled')).toBe(false)
 
     fireEvent.click(start)
@@ -1464,20 +1612,25 @@ describe('acting on a workspace', () => {
       body: { machine: 'bishwajeets-macbook-pro', stopped: false, ending: null },
     })
     render(<App />)
-    await tap('Stop')
+    await overflow()
+    fireEvent.click(await screen.findByText('Stop'))
 
     expect(await screen.findByText(/nothing to stop/)).toBeTruthy()
     expect(screen.getByRole('alert').className).not.toContain('destructive')
 
     cleanup()
-    stubAct({
-      status: 200,
-      body: {
-        machine: 'bishwajeets-macbook-pro',
-        resumed: false,
-        term: 'xterm-256color',
+    stubAct(
+      {
+        status: 200,
+        body: {
+          machine: 'bishwajeets-macbook-pro',
+          resumed: false,
+          term: 'xterm-256color',
+        },
       },
-    })
+      site,
+      { state: 'stopped' },
+    )
     render(<App />)
     await tap('Resume')
 
@@ -1503,9 +1656,12 @@ describe('acting on a workspace', () => {
     )
     render(<App />)
     await tap('Start')
+    await overflow()
 
-    // ADR-0015 refuses it on sight, and ADR-0007 refuses the agent beside it.
-    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull()
+    // ADR-0015 refuses it on sight, and ADR-0007 refuses the agent beside it —
+    // so it is missing from the overflow too, which is where the rest live.
+    expect(await screen.findByText('Stop')).toBeTruthy()
+    expect(screen.queryByText('Resume')).toBeNull()
     expect(posted).toHaveBeenCalledWith(
       '/api/workspaces/personal-website/up',
       {},

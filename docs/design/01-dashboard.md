@@ -62,6 +62,20 @@ card should already know:
 
 Everything else goes in an overflow. Fewer decisions is the whole job.
 
+> **Built 2026-08-09 by [Y-167](../../tracker.md#3-task-board), and the first row's label
+> changed.** *Resume* is already the name of a route that respawns an agent that **ended**, so
+> using the same word for a session that is **alive** would have made one word mean two things in
+> one column. A live session is **Open** — a URL, not a verb the daemon runs — and *Resume* stays
+> the POST. Two states the table does not name were read off the same reading rather than guessed:
+> an ended agent whose `startup` is not an agent gets **Open** too, because ADR-0015 refuses resume
+> for it; and a row whose agent look has not landed yet gets no verb at all, because Start would be
+> a guess painted as knowledge (R-23). `awaiting_trust` gets its own word, **Answer** — it is the
+> one state waiting on a person, and ADR-0011 says the person is never Yantra.
+>
+> **The overflow is loaded on the first tap, not the first paint.** Base UI's menu is 29 kB gzip
+> measured on this branch, which is a quarter of the fleet's whole first load, and the trigger is
+> anchored to rather than wrapped so nothing about the button waits on the chunk.
+
 **Keep the staleness honesty.** The page distinguishes *nobody looked* from *a look failed* from *a
 machine did not answer*, and stamps every reading's age
 ([`useLooked.ts`](../../web/src/useLooked.ts)). That is rare and correct — never drop it. But four
@@ -377,7 +391,7 @@ before it starts and what makes it done.
 | --- | --- | --- | --- |
 | **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | ✅ **[Y-164](../../tracker.md#3-task-board)** and **[Y-166](../../tracker.md#3-task-board)**, 2026-08-09 — the whole take list, twenty-four files pinned to commit `963ebf5b`. Y-164 took the fifteen that need no icon; Y-166 added `lucide-react` and the seven overlays | `web/src/components/ui/`, `web/src/index.css`, `web/package.json` |
 | **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | ✅ **[Y-161](../../tracker.md#3-task-board)**, 2026-08-09 — the History API, no dependency | `web/src/App.tsx`, `web/src/routes/` |
-| **D1.3** | One computed verb per workspace card (§2) | **[Y-167](../../tracker.md#3-task-board)**, opened 2026-08-09 — the four states each render one primary button; the rest is an overflow | `web/src/components/Act.tsx`, `columns.tsx` |
+| **D1.3** | One computed verb per workspace card (§2) | ✅ **[Y-167](../../tracker.md#3-task-board)**, 2026-08-09 — `chosen()` reads the agent state and the row draws the one button it is for; TERMINAL and EDIT stopped being columns and became overflow items | `web/src/components/Act.tsx`, `Overflow.tsx`, `columns.tsx` |
 | **D1.4** | Collapse four age lines into a freshness dot and one global *as of* (§2) | the three staleness states remain distinguishable | `web/src/useLooked.ts`, `Age.tsx` |
 | **D1.5** | `/w/{name}` lands in a full-height linkable terminal | the URL reopens the same pane after reload | `web/src/components/Terminal.tsx` |
 | **D1.6** | Terminal fidelity tests 1–8 (§4.5) | eight tests, each named for its row, green against a real pty | `web/src/terminal.test.tsx`, `crates/yantra-core/src/pty.rs` |
