@@ -147,29 +147,39 @@ pub enum Error {
     Ssh(#[from] crate::ssh::Error),
 }
 
+/// Finds `binary` on the far side in one round trip, searching [`CANDIDATES`]
+/// when the non-interactive `PATH` fails (**I-34**).
+///
+/// `&'static str` rather than `&str`: the name is interpolated into a remote
+/// shell command, so nothing that came out of a config file or a request may
+/// reach it. Yantra's own binary names are the only callers there can be.
+pub async fn locate<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<String>, Error> {
+    // `$HOME` is left unquoted in the loop so the remote shell expands it;
+    // every path here is a constant, so there is nothing to inject.
+    let probe = format!(
+        "p=$(command -v {binary} 2>/dev/null)\n\
+         case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
+         for d in {dirs}; do\n\
+         \x20 [ -x \"$d/{binary}\" ] && {{ printf '%s\\n' \"$d/{binary}\"; exit 0; }}\n\
+         done\n\
+         exit 1\n",
+        dirs = CANDIDATES.join(" "),
+    );
+
+    let out = exec.exec(&probe).await?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    Ok((out.success() && path.starts_with('/')).then_some(path))
+}
+
 impl Claude {
     /// Finds `claude` on the far side in one round trip (I-34).
     pub async fn resolve<E: Exec>(exec: &E) -> Result<Self, Error> {
-        // `$HOME` is left unquoted in the loop so the remote shell expands it;
-        // every path here is a constant, so there is nothing to inject.
-        let probe = format!(
-            "p=$(command -v claude 2>/dev/null)\n\
-             case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
-             for d in {dirs}; do\n\
-             \x20 [ -x \"$d/claude\" ] && {{ printf '%s\\n' \"$d/claude\"; exit 0; }}\n\
-             done\n\
-             exit 1\n",
-            dirs = CANDIDATES.join(" "),
-        );
-
-        let out = exec.exec(&probe).await?;
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-        if out.success() && path.starts_with('/') {
-            return Ok(Self { path });
+        match locate(exec, "claude").await? {
+            Some(path) => Ok(Self { path }),
+            None => Err(Error::NotFound {
+                searched: CANDIDATES.join(", "),
+            }),
         }
-        Err(Error::NotFound {
-            searched: CANDIDATES.join(", "),
-        })
     }
 
     pub fn path(&self) -> &str {

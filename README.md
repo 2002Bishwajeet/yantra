@@ -136,6 +136,7 @@ yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine
 yantra notify 'needs you'        # publish a message to the relay you configured
+yantra doctor [machine] [--json] # what each machine can and cannot do — a read, it changes nothing
 yantra fix-terminfo <machine>    # teach a machine about your terminal
 ```
 
@@ -143,9 +144,10 @@ yantra fix-terminfo <machine>    # teach a machine about your terminal
 README it cannot drift.
 
 **Exit codes are a contract**, documented in [`crates/yantra/CLAUDE.md`](crates/yantra/CLAUDE.md).
-The two worth knowing: `status` exits 1 when nothing is running, so `yantra status x && …` reads the
-way it looks; and `ls sessions` exits 1 if a machine was unreachable, so a caller can tell the table
-is partial.
+The three worth knowing: `status` exits 1 when nothing is running, so `yantra status x && …` reads
+the way it looks; `ls sessions` exits 1 if a machine was unreachable, so a caller can tell the table
+is partial; and `doctor` exits 0 only when every check on every machine is *present*, which is what
+lets an installer re-run it until clean.
 
 ## API reference
 
