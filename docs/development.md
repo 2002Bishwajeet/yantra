@@ -57,6 +57,7 @@ just ci           # everything CI runs: check + the arm64 cross-build
 just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
+just pinned       # every GitHub action names a commit, never a tag
 just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
 just appliance    # cross-compile the appliance binaries (arm64 by default)
 just appliance-runtime  # idle RSS, idle CPU and CLI cold-start, on this machine

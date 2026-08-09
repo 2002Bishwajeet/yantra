@@ -10,7 +10,7 @@ default:
     @just --list
 
 # The gate. Run before every commit.
-check: fmt-check lint test deny no-node
+check: fmt-check lint test deny no-node pinned
 
 # Everything CI runs — the workflow calls these same recipes, so they cannot drift.
 ci: check appliance
@@ -81,6 +81,26 @@ appliance target=appliance_target:
 # turn `embed-dashboard` on, pass `--all-features`, or reach npm. A green build
 # says nothing about which jobs needed npm to succeed, so this reads the recipes
 # and the workflows rather than the result. Part of `check`, not a note.
+# Every `uses:` names a 40-hex commit. A tag is mutable — a major tag is
+# repointed at every release, and any tag can be force-pushed — and an action
+# runs arbitrary code with the job's token, which for `release.yml` can publish.
+pinned:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # `uses: ./…` is this repo's own composite actions, which move with the
+    # commit that reads them and cannot be repointed by anyone else.
+    floating=$(grep -rn --include='*.yml' --include='*.yaml' -E '^[[:space:]]*-?[[:space:]]*uses:' .github \
+      | grep -vE 'uses:[[:space:]]*\./' \
+      | grep -vE 'uses:[[:space:]]*[^@]+@[0-9a-f]{40}([[:space:]]|$)' || true)
+
+    if [ -n "$floating" ]; then
+      echo "pinned: these actions name a tag rather than a commit:" >&2
+      echo "$floating" >&2
+      exit 1
+    fi
+    echo "pinned: every action names a commit"
+
 no-node:
     #!/usr/bin/env bash
     set -euo pipefail
