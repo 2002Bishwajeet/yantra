@@ -4,12 +4,13 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**v0.1.0 is published** ([Y-156](../tracker.md), 2026-08-09) and **there is still no installer
-script** ([Y-157](../tracker.md)), so the install is what it has always been: a build on the machine
-that already builds everything, and a copy — one recipe, `just appliance-install`, which is also the
-update. What the release changes for this document is the *fetch* path it will replace this one with,
-and one fact about the artifact: **the released `yantrad` is built with `embed-dashboard`**, so a
-fetched binary serves the dashboard with no `YANTRA_WEB` and no `web/dist` beside it.
+**v0.1.0 is published** ([Y-156](../tracker.md), 2026-08-09) and there are two ways in.
+[`install.sh`](../install.sh) fetches that release onto the box itself and verifies it before it
+installs anything ([Y-157](../tracker.md)); `just appliance-install` builds on the machine that
+already builds everything and copies over ssh, and is also the update. Both put the same three
+binaries and the same two units in the same places. One fact about the artifact matters to the
+first: **the released `yantrad` is built with `embed-dashboard`**, so a fetched binary serves the
+dashboard with no `YANTRA_WEB` and no `web/dist` beside it.
 
 ## Which architecture
 
@@ -28,7 +29,8 @@ than the default needs `rustup target add <target>` once.
 ## What the box needs before the first install
 
 The recipe copies binaries and units. It creates no accounts, writes no configuration and enrols
-nothing — everything below is a one-time action on the box itself.
+nothing — everything below is a one-time action on the box itself. [`install.sh`](../install.sh)
+creates the account and scaffolds an addressless `agent.env`; it enrols nothing either.
 
 - **Tailscale**, up and logged in. `yantrad` refuses to start until it can ask `tailscaled` which
   addresses this machine holds, deliberately ([`crates/yantrad/CLAUDE.md`](../crates/yantrad/CLAUDE.md)).
@@ -77,6 +79,71 @@ They name machines as **ssh destinations**, resolved by the appliance's own `~/.
 by Yantra, so a name that works on your laptop means nothing on the box until Y-144's config is
 there. `yantra new` on the appliance writes into the same directory — under whichever account runs
 it, which is why the daemon's account is the one that matters.
+
+## Install from a release
+
+[`install.sh`](../install.sh) is this same install done on the box itself, from a published release
+rather than from a checkout — no toolchain, no zig, no cross build, and nothing that needs the
+developer's machine. It is **pinned to a version**: a release is a fixed set of checksummed archives,
+and a `latest` that moved would make one command install different bytes on different days.
+
+Until [Y-159](../tracker.md) serves it from a name that resolves off the tailnet, it is fetched from
+the tag it installs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh | bash
+```
+
+Read it before running it if you would rather — it is one file, and it is the same file:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+Run it as the account you ssh in as, **not** as root: it calls `sudo` for the steps that need one,
+exactly as `just appliance-install` does. It asks nothing — piping a script to a shell makes stdin
+the script, so a prompt would have nowhere to read from. `YANTRA_VERSION=0.2.0 bash install.sh`
+installs a different release.
+
+What it does:
+
+1. reads `uname -m` and picks the `aarch64` or `x86_64` musl archive — there is no other Linux build;
+2. fetches that archive and `SHA256SUMS`, and checks one against the other. **A mismatch stops the
+   run before anything is installed**: what produces one is a corrupted download or a substituted
+   archive, and neither is repaired by fetching again;
+3. fetches both units from the same tag — see below;
+4. creates the `yantra` account if it is absent;
+5. renames each binary into `/usr/local/bin`, for the reason [below](#why-the-rename);
+6. installs both units and reloads systemd, **enabling neither**;
+7. writes `/etc/yantra/agent.env` **only if it is absent**, and with no address in it;
+8. reports whether Tailscale is installed and up, and **never enrols it** — the auth key is the
+   owner's ([`CLAUDE.md`](../CLAUDE.md) §B4) and [Q17](../tracker.md#6-open-questions) is not a
+   script's to answer.
+
+It ends by printing what is left, which is each thing above it deliberately did not do, plus
+[Y-144](../tracker.md#3-task-board): the box has no ssh identity any fleet machine authorises, so the
+daemon starts and every verb that reaches another machine fails.
+
+### Where the units come from
+
+The archives hold the three binaries, a README and a LICENSE, and **no units** — so the script
+fetches `yantrad.service` and `yantra-agent.service` from `raw.githubusercontent.com`. A unit taken
+from `main` beside a binary built at a tag is drift in the one file that decides how the binary
+starts, so both come from the release's own commit.
+
+**From the commit, not from `refs/tags/v$VERSION`.** A tag is a mutable ref — v0.1.0's was deleted
+and re-cut the day it was published — so a tag pins nothing, and these two files decide what runs as
+root. `COMMIT` sits beside `VERSION` in the script and is bumped with it. That is
+[`just pinned`](../justfile)'s own rule, which fails CI for a GitHub action naming a tag, applied to
+the one other place this repo fetches executable configuration over the network.
+
+The cost, stated because it is real: two more fetches, a second host, a second constant to bump, and
+**those two files are not covered by `SHA256SUMS`**, which lists archives and nothing else — the
+commit is the whole of what pins them. The alternative is adding the units to the archives in
+[`release.yml`](../.github/workflows/release.yml), which is self-contained and checksummed — and
+could not install v0.1.0, whose archives are published and do not contain them.
 
 ## Install, and update
 

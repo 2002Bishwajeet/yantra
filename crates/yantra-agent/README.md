@@ -28,11 +28,13 @@ reports the value that loses a placement rather than a guess, because the altern
 on a machine that cannot take it.
 
 **On Linux it has a unit and a recipe that installs it.** [`yantra-agent.service`](yantra-agent.service)
-starts it at boot (Y-142), and `just appliance-install <host>` copies the binary and the unit onto a
-machine (Y-145, [`docs/appliance.md`](../../docs/appliance.md)). **The environment file is not
-copied**: it names the daemon *that* box reports to, and an install that wrote it would be exactly
-the overwrite ADR-0013 §4 keeps out of the unit. macOS still has neither — run it from a terminal
-there.
+starts it at boot (Y-142), `just appliance-install <host>` copies the binary and the unit onto a
+machine (Y-145), and [`install.sh`](../../install.sh) fetches both from a published release on the
+box itself (Y-157, [`docs/appliance.md`](../../docs/appliance.md)). **Neither writes over an
+environment file that exists**: it names the daemon *that* box reports to, and an install that
+rewrote it would be exactly the overwrite ADR-0013 §4 keeps out of the unit — the script scaffolds
+it only when it is absent, and with no address in it. macOS still has neither unit nor installer —
+run it from a terminal there.
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
 seven fields are and why; [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) measures how each
