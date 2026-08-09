@@ -19,6 +19,7 @@ yantra ls sessions               # what is running, everywhere
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
+yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:

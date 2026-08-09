@@ -57,7 +57,7 @@ rather than losing one.
 | | Yantra does it | Yantra prepares it, you finish | Only you |
 | --- | --- | --- | --- |
 | **Tailscale** | `tailscale up` with a key supplied out of band | prints the exact `tailscale up --authkey …` when it cannot run it | ACLs, tags, key-expiry policy, the admin console (**Q17**) |
-| **ssh** | generates the keypair, writes `~/.ssh/config` and `known_hosts` | **prints the public key to place** | placing it in `authorized_keys` on each machine |
+| **ssh** | generates the keypair and writes `~/.ssh/config`, when `yantra ssh-identity` is invoked; `known_hosts` is its own and needs no step at all | **prints the public key to place** | placing it in `authorized_keys`, and `HostName`/`Port`/`User`/`ProxyJump` on each machine |
 | **`yantra` account** | `useradd --system --create-home …`, directories, permissions | — | — |
 | **daemon config** | writes `/etc/yantra/agent.env` from one interactive prompt | — | — |
 | **provider CLI** | detects `gh` / `glab`, reports auth state | prints `gh auth login` or `glab auth login --hostname <host>` | the browser login itself |
@@ -68,6 +68,12 @@ rather than losing one.
 **The ssh row is split deliberately.** The owner said ssh keys are theirs. Generating a keypair
 locally is zero-risk and saves a step; only *distributing* the public key is genuinely theirs. If
 even generation should be manual, this table is where that changes.
+
+**That confirmation has not happened, and Y-144 shipped a shape that survives either answer.**
+`yantra ssh-identity` is a verb the owner invokes; nothing calls it for them, and `provision.sh`
+still prints it as a numbered step rather than running it. If generation is confirmed as Yantra's,
+the installer calls a verb that already exists; if it is not, the verb is simply never called
+automatically and this table is all that changes.
 
 **Secrets never enter this path.** §B4 is unconditional: the Tailscale auth key is read from a prompt
 or the environment and never written to a file Yantra owns, never logged, never echoed, and never
@@ -200,8 +206,10 @@ text.
 
 **The seam is testability, not taste.** Y-157 is exactly the part
 [Y-158](../../tracker.md#3-task-board) can prove against a real systemd as PID 1 in a disposable
-podman container (§B3, Q19). Enrolling a real Tailscale, logging into `gh`, generating a keypair —
-none of that is provable that way. Fold them together and Y-158 loses its subject.
+podman container (§B3, Q19). Enrolling a real Tailscale, logging into `gh`, authorising a key on a
+machine the owner owns — none of that is provable that way. Fold them together and Y-158 loses its
+subject. (Y-144 has since proved the *generating* half in a container; placing the public key is the
+half that stays outside one.)
 
 ---
 
@@ -232,7 +240,7 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 | # | Work | Blocked on |
 | --- | --- | --- |
 | **D2.9** | The Tailscale enrolment step | **Y-143** — Q17 is answered *tagged*, and the measurement it is conditional on decides what the `tailscale up` line says |
-| **D2.10** | Generate the appliance's ssh identity and print its public key | **Y-144**, and confirmation that generation is Yantra's rather than the owner's (§2) |
+| **D2.10** | Generate the appliance's ssh identity and print its public key | **still blocked on confirmation that generation is Yantra's rather than the owner's** (§2). [Y-144](../../tracker.md#3-task-board) landed the verb — `yantra ssh-identity`, invoked and never automatic, proved against a real sshd from a keypair made at test time — so what is left here is the decision, not the code |
 
 **Y-156…Y-159 already exist** and cover publishing, an installer, exercising it against systemd, and
 hosting it. D2.6–D2.8 are those rows seen through this document. **[Y-160](../../tracker.md#3-task-board)

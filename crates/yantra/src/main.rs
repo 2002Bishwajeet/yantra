@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
 use yantra_core::doctor::{self, Report, State};
+use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
@@ -134,6 +135,8 @@ enum Command {
         /// ssh destination, spelled the way a workspace's `machine` spells it
         machine: String,
     },
+    /// Prepare this account's ssh identity, and print the public key to place
+    SshIdentity,
 }
 
 /// Spelled out rather than a bare bool so that adding a second agent is a new
@@ -208,6 +211,7 @@ async fn main() -> ExitCode {
         }
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
+        Some(Command::SshIdentity) => ssh_identity(),
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -635,6 +639,55 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
         }
     }
 }
+
+/// D2 §2's ssh row, the *Yantra prepares it, you finish* column. **Invoked and
+/// never automatic**: whether generating the keypair is Yantra's job rather than
+/// the owner's is still unconfirmed, so nothing calls this for them.
+fn ssh_identity() -> ExitCode {
+    match identity::prepare() {
+        Ok(prepared) => {
+            let key = prepared.key.display();
+            if prepared.generated {
+                println!("key:    {key}, generated");
+            } else {
+                println!("key:    {key}, already here and left alone");
+            }
+            let config = prepared.config.display();
+            if prepared.configured.is_empty() {
+                println!("config: {config}, unchanged");
+            } else {
+                println!(
+                    "config: {config}, a Host block added for {}",
+                    prepared.configured.join(", ")
+                );
+            }
+            if !prepared.left_alone.is_empty() {
+                println!(
+                    "        {} already named there, left as it is",
+                    prepared.left_alone.join(", ")
+                );
+            }
+            println!(
+                "\nplace this in ~/.ssh/authorized_keys on each machine, which is your half:\n"
+            );
+            println!("  {}\n", prepared.public_key);
+            println!("{IDENTITY_NOTE}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+const IDENTITY_NOTE: &str = "\
+The key has no passphrase: `BatchMode=yes` has nowhere to type one, and the alternative is
+an agent, which is a login session an appliance nobody logs into does not have.
+Add `User` to a block whose account name over there differs from this one's — `HostName`,
+`Port` and `ProxyJump` live in the same file and Yantra writes none of them (ADR-0009).
+`known_hosts` wants nothing: Yantra keeps its own beside its control sockets, and it fills
+on first contact.";
 
 /// D2 §3.2: this verb is a **read**, so there is no `--fix` and nothing here
 /// asks for one. Exit 0 means every check answered *present* — an `unknown` is

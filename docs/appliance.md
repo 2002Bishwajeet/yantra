@@ -60,8 +60,36 @@ creates the account and scaffolds an addressless `agent.env`; it enrols nothing 
   configuration, which is the thing ADR-0013 §4 keeps out of the unit in the first place.
 
 - **The ssh identity the appliance itself uses** to reach the fleet — a key, a config and a
-  `known_hosts` nobody typed. That is **[Y-144](../tracker.md#3-task-board)**'s and is not covered
-  here; without it the daemon starts and every verb that reaches a machine fails.
+  `known_hosts` nobody typed. Without it the daemon starts and every verb that reaches a machine
+  fails. One verb prepares the first two, for the account the units run as
+  ([Y-144](../tracker.md#3-task-board)):
+
+  ```bash
+  sudo -u yantra -H yantra ssh-identity
+  ```
+
+  It generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for
+  every machine a workspace names, and prints the public key. **`-H` matters**: without it `sudo`
+  may leave `HOME` as yours and the verb prepares the wrong account's `~/.ssh`. It is idempotent —
+  an existing key is kept, because regenerating it orphans every `authorized_keys` entry it is in,
+  and a machine the config already names is left exactly as it is.
+
+  **Two halves stay yours.** Placing that public key in each machine's `authorized_keys`, and the
+  `User`, `HostName`, `Port` or `ProxyJump` that say where a name points — Yantra never resolves a
+  name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)) and cannot know the account on
+  the far side. **Whether generation is Yantra's job at all is still unconfirmed**
+  ([D2 §2](design/02-setup.md)), which is why this is a verb you run rather than something an
+  install does.
+
+  **The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and the alternative is an
+  ssh agent — a login session a box nobody logs into does not have. It is readable by the `yantra`
+  account and that account alone, and anyone who can read it can reach every machine that
+  authorised it.
+
+  **`known_hosts` needs nothing.** Yantra keeps its own beside its control sockets and connects with
+  `StrictHostKeyChecking=accept-new`, so first contact records the host key with nobody there to
+  answer a prompt. A machine whose host key later *changes* is then a hard refusal — deliberately,
+  and it is a support call rather than something to configure away.
 
 ### The workspace files
 
@@ -76,8 +104,8 @@ ssh <host> 'sudo install -d -o yantra -g yantra /home/yantra/.config/yantra/work
 ```
 
 They name machines as **ssh destinations**, resolved by the appliance's own `~/.ssh/config` and never
-by Yantra, so a name that works on your laptop means nothing on the box until Y-144's config is
-there. `yantra new` on the appliance writes into the same directory — under whichever account runs
+by Yantra, so a name that works on your laptop means nothing on the box until `yantra ssh-identity`
+has written its half of that file and you have finished it. `yantra new` on the appliance writes into the same directory — under whichever account runs
 it, which is why the daemon's account is the one that matters.
 
 ## Install from a release
@@ -144,7 +172,7 @@ bash provision.sh
 
 It is **beside** `install.sh` rather than inside it because [Y-158](../tracker.md#3-task-board)
 proves that script against a real systemd in a container, and enrolling a tailnet, logging into `gh`
-and generating a keypair are not things a container can prove.
+and authorising a key on a machine the owner owns are not things a container can prove.
 
 What it does for you, and nothing else: **enables and starts each unit** whose precondition holds —
 `yantrad` once Tailscale is up, `yantra-agent` once `/etc/yantra/agent.env` names an address — and
@@ -154,8 +182,10 @@ to a `~/.terminfo` and wants no root.
 Everything else it names rather than does, each with its command: enrolling Tailscale (the auth key
 is the owner's, and [Q17](../tracker.md#6-open-questions)'s answer is conditional on
 [Y-143](../tracker.md#3-task-board)), the daemon's address
-([ADR-0013](adr/0013-the-heartbeat-carries-only-what-placement-scores.md) §4), generating the ssh
-identity ([Y-144](../tracker.md#3-task-board)), `gh auth login`, installing tmux or `claude` on a
+([ADR-0013](adr/0013-the-heartbeat-carries-only-what-placement-scores.md) §4), running
+`yantra ssh-identity` and placing the key it prints ([Y-144](../tracker.md#3-task-board) — the verb
+is invoked rather than run for you because [D2 §2](design/02-setup.md)'s confirmation that
+generation is Yantra's at all is still outstanding), `gh auth login`, installing tmux or `claude` on a
 fleet machine, and creating the first workspace. **No credential is read, echoed or stored** — §B4
 is why the Tailscale line is `sudo tailscale up` and not an `--authkey` to paste.
 

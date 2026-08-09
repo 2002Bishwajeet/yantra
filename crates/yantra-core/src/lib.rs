@@ -16,6 +16,7 @@ pub mod doctor;
 pub mod down;
 pub mod edit;
 pub mod heartbeat;
+pub mod identity;
 pub mod inventory;
 pub mod logs;
 pub mod notify;
