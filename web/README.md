@@ -60,10 +60,13 @@ and neither is optional:
 
 Three files under `src/components/ui/` bail out in the build and it says so —
 `badge`, `card`, `empty`, all shadcn's generated source, all on the same
-`AssignmentPattern` in a destructured default. **The T3 Code copies hit it too**
-(Y-164): `input`, `popover`, `scroll-area`, `separator`, `toggle-group` and
-`tooltip`. No route imports them yet, so they are absent from the bundle and only
-`npm test` compiles them — which is where their warnings appear.
+`AssignmentPattern` in a destructured default. **Many of the T3 Code copies hit
+it too** (Y-164, Y-166): `autocomplete`, `combobox`, `command`, `dialog`, `input`,
+`menu`, `popover`, `scroll-area`, `select`, `separator`, `sheet`, `toggle-group`
+and `tooltip`. No route imports them yet, so they are absent from the bundle and
+only `npm test` compiles them — which is where their warnings appear. Expect the
+build's count to rise when D1.3 wires them in; it is upstream's pattern, not a
+regression here.
 
 ## The four heartbeat states
 
@@ -431,7 +434,7 @@ hand.
 A design system is arriving from elsewhere. Two rules keep it a one-file change:
 
 1. **Never edit `src/components/ui/`.** It is vendored — five files from shadcn's
-   CLI and fifteen copied from T3 Code — and all of it is regenerable or
+   CLI and the rest copied from T3 Code — and all of it is regenerable or
    re-copyable; composition wraps it. `components.json` has `"cssVariables":
    true`, which **cannot be changed after init** — switching would mean deleting
    and reinstalling every component. Where each file came from, and the MIT
@@ -445,15 +448,40 @@ marked as the swap point. Light and dark both work through
 `prefers-color-scheme`; Q6 ruled out a theme switcher, so shadcn's `.dark` class
 was rewired to the media query rather than left with nothing to toggle it.
 
-**The T3 Code copies widened the seam by five tokens (Y-164).** They are built on
-the same shadcn variable names, but not only on those: `--control-radius`,
+**The T3 Code copies widened the seam (Y-164, Y-166).** They are built on the same
+shadcn variable names, but not only on those. Y-164 brought `--control-radius`,
 `--destructive-foreground`, `--placeholder` and the two `--app-scrollbar-thumb*`
-are T3's own, and without them a button has no radius and a scrollbar no thumb.
-They sit in `index.css` beside the rest, at T3's values, so the swap point is
-still one file. One thing was deliberately **not** bridged: `TooltipPopup`'s
-`variant="glass"` wants a `dropdown-glass` class built on a `--glass-opacity` /
-`--glass-blur` pair, which is a glass system rather than a token — use the
-default variant until a design system rules on it.
+— without them a button has no radius and a scrollbar no thumb. Y-166's overlays
+brought `--icon-muted`, `--secondary-label`, the two `--command-*-inset` and the
+`--glass-blur` / `--glass-opacity` / `--glass-saturation` trio. All of them sit in
+`index.css` at T3's values, so the swap point is still one file.
+
+**One of those is not a token, and that is the part to remember.** `.dialog-glass`,
+`.dialog-backdrop` and `.dropdown-glass` are *rules*, and `dialog`, `command`,
+`menu`, `select` and `combobox` name them in their class strings. A popup with no
+rule behind the name has **no background at all** — it is not a plainer popup, it
+is an unreadable one. A design system replacing `index.css` has to replace those
+three too. (T3's `.dark` selector is a `prefers-color-scheme` block here, for the
+same reason shadcn's is.) `TooltipPopup`'s opt-in `variant="glass"` works as a
+side effect of them arriving.
+
+## What the primitives cost (Y-166)
+
+Nothing imports them yet, so the JS first load is unchanged at **121 kB gzip**.
+Two numbers matter before D1.3 wires them in, both measured on this branch:
+
+- **`lucide-react` tree-shakes, and the named import is why.** Importing
+  `Spinner` — one icon out of ~1500 — costs **0.77 kB gzip**. Replacing a named
+  import with `import * as` does not: pulling all seven overlays that way cost
+  **85 kB gzip**. Keep the imports named.
+- **The weight is Base UI's positioning, not the icons.** `dialog` alone is
+  **+19 kB gzip**; `dialog` + `menu` + `spinner` together are **+41 kB**. That is
+  the same order as xterm.js, which `/w/$name` already code-splits — so a route
+  that opens a dialog should probably split too.
+
+**The CSS is not free even unimported.** Tailwind v4 scans the source tree, so it
+emits utilities for every class these files name whether or not anything renders
+them: the stylesheet went **12.7 kB gzip to 17.6 kB** on this change alone.
 
 ## Layout
 
@@ -494,9 +522,10 @@ src/
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              vendored primitives. NEVER EDITED. Five are shadcn's CLI
-                     output; fifteen are copied from T3 Code and each says so
+                     output; the rest are copied from T3 Code and each says so
                      in a header. THIRD-PARTY.md carries the MIT notice
-  index.css          the token vocabulary — the whole integration surface
+  index.css          the token vocabulary, plus the three glass rules the
+                     overlays name — the whole integration surface
   App.tsx            mounts the router and the query client; `Shell` in
                      routes/ is the heading
 ```

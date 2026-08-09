@@ -352,6 +352,17 @@ piece of work whose diff is `index.css`, exactly as
 > [`index.css`](../../web/src/index.css) at T3's values. The bridge still applies; the swap point is five
 > lines larger than this section assumed. Tooltip's opt-in `variant="glass"` was **not** bridged — it
 > wants T3's `dropdown-glass`, which is a glass system rather than a token.
+>
+> **And the overlays made that system compulsory, 2026-08-09
+> ([Y-166](../../tracker.md#3-task-board)).** `dropdown-glass` is not optional for `menu`, `select`
+> and `combobox`, and `dialog-glass`/`dialog-backdrop` are not optional for `dialog` and `command`:
+> a popup with no rule behind those class names has **no background at all**, not merely a plainer
+> one. All three are now in `index.css`, along with `--glass-blur`, `--glass-opacity`,
+> `--glass-saturation`, `--icon-muted`, `--secondary-label` and the two `--command-*-inset` tokens.
+> T3's `.dark` selector became this repo's `prefers-color-scheme` media query, because
+> [Q6](../../tracker.md#6-open-questions) ruled out a theme switcher. Tooltip's `glass` variant works
+> as a side effect. **A design system replacing this file must replace the three rules too** — they
+> are the first thing in `index.css` that is a surface rather than a token.
 
 ---
 
@@ -364,7 +375,7 @@ before it starts and what makes it done.
 
 | # | Work | Done when | Touches |
 | --- | --- | --- | --- |
-| **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | ✅ **[Y-164](../../tracker.md#3-task-board)**, 2026-08-09 — fifteen of them, pinned to commit `963ebf5b`. `dialog`, `sheet`, `menu`, `select`, `combobox`, `command` and `spinner` import `lucide-react` and wait on it | `web/src/components/ui/`, `web/src/index.css` |
+| **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | ✅ **[Y-164](../../tracker.md#3-task-board)** and **[Y-166](../../tracker.md#3-task-board)**, 2026-08-09 — the whole take list, twenty-four files pinned to commit `963ebf5b`. Y-164 took the fifteen that need no icon; Y-166 added `lucide-react` and the seven overlays | `web/src/components/ui/`, `web/src/index.css`, `web/package.json` |
 | **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | ✅ **[Y-161](../../tracker.md#3-task-board)**, 2026-08-09 — the History API, no dependency | `web/src/App.tsx`, `web/src/routes/` |
 | **D1.3** | One computed verb per workspace card (§2) | the four states each render one primary button; the rest is an overflow | `web/src/components/Act.tsx`, `columns.tsx` |
 | **D1.4** | Collapse four age lines into a freshness dot and one global *as of* (§2) | the three staleness states remain distinguishable | `web/src/useLooked.ts`, `Age.tsx` |
