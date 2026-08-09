@@ -84,8 +84,17 @@ jobs:
             archive: tar.gz
             dashboard: true
 
-          # macOS and Windows exist only for the heartbeat agent; the daemon and
-          # CLI are not shipped there (see the PR description for the reasoning).
+          # macOS exists only for the heartbeat agent; the daemon and CLI are
+          # not shipped there (see the PR description for the reasoning).
+          #
+          # **Windows is not here, and its absence is Q4's.** `probes.rs` carries
+          # a `compile_error!` for any other target — the probes are Linux and
+          # macOS only because Q4 is deliberately open — so a Windows entry
+          # claims an artifact the code refuses to produce. It was in this matrix
+          # from the first commit and green in the 2026-07-31 rehearsal; Y-106
+          # added the refusal afterwards and nothing re-ran this workflow until
+          # v0.1.0's tag. Restoring it needs the matrix entry, a `.exe` suffix in
+          # the staging step and a zip archive step — all removed with it.
           #
           # Per R-19 in ADR-0004, Apple targets are never cross-compiled from
           # Linux — that needs the Apple SDK via osxcross. They are built on a
@@ -100,11 +109,6 @@ jobs:
             os: macos-15
             packages: yantra-agent
             archive: tar.gz
-
-          - target: x86_64-pc-windows-msvc
-            os: windows-2025
-            packages: yantra-agent
-            archive: zip
 
     steps:
       - name: Checkout
@@ -234,13 +238,9 @@ jobs:
         run: |
           set -euo pipefail
           stage="yantra-${VERSION}-${TARGET}"
-          ext=""
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            ext=".exe"
-          fi
           mkdir -p "staging/$stage" artifacts
           for pkg in $PACKAGES; do
-            cp "target/$TARGET/release/${pkg}${ext}" "staging/$stage/"
+            cp "target/$TARGET/release/$pkg" "staging/$stage/"
           done
           cp README.md LICENSE "staging/$stage/"
           echo "STAGE=$stage" >> "$GITHUB_ENV"
@@ -251,13 +251,6 @@ jobs:
         run: |
           set -euo pipefail
           tar -C staging -czf "artifacts/${STAGE}.tar.gz" "$STAGE"
-
-      - name: Archive (zip)
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Compress-Archive -Path "staging/$env:STAGE" -DestinationPath "artifacts/$env:STAGE.zip"
 
       # Checksums are produced next to the archive on the machine that built it,
       # so a corrupted upload is detectable rather than merely unlikely. Written
@@ -333,11 +326,11 @@ jobs:
             echo "| \`x86_64-unknown-linux-musl\` | Linux x86_64 — \`yantrad\`, \`yantra\`, \`yantra-agent\` |"
             echo "| \`aarch64-apple-darwin\` | macOS Apple silicon — \`yantra-agent\` |"
             echo "| \`x86_64-apple-darwin\` | macOS Intel — \`yantra-agent\` |"
-            echo "| \`x86_64-pc-windows-msvc\` | Windows x86_64 — \`yantra-agent\` |"
             echo
             echo "Linux builds are statically linked against musl: no runtime dependencies."
-            echo "\`yantrad\` and \`yantra\` are Linux-only; macOS and Windows ship the"
-            echo "heartbeat agent only."
+            echo "\`yantrad\` and \`yantra\` are Linux-only and macOS ships the heartbeat"
+            echo "agent alone. There is no Windows build: the probes refuse to compile"
+            echo "there while Q4 is open."
             echo
             echo "Verify a download with:"
             echo
