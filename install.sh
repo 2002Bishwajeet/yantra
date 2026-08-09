@@ -135,9 +135,9 @@ What is left, none of which this script does for you:
   1. $env_step
   2. $tailscale_step
   3. Start them: \`sudo systemctl enable --now yantrad.service yantra-agent.service\`
-  4. Give this box an ssh identity the fleet authorises — a key, a ~/.ssh/config
-     and a known_hosts. Until it has one the daemon starts and every verb that
-     reaches another machine fails.
+  4. Give this box an ssh identity the fleet authorises, and place the public key
+     it prints: \`sudo -u yantra -H $BIN_DIR/yantra ssh-identity\`. Until it has
+     one the daemon starts and every verb that reaches another machine fails.
 
 provision.sh, from wherever you fetched this, does step 3 once 1 and 2 hold and
 prints whatever is still left, this box's and the fleet's.

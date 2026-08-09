@@ -98,9 +98,10 @@ start yantra-agent.service "$addressed" "Set YANTRA_DAEMON, which is a step abov
 # Asked as root: the account's home is its own, and a `test` that cannot read the
 # directory would report every box as having no identity.
 if ! as_root test -e "$home/.ssh/config"; then
-    step "Give the \`yantra\` account an ssh identity the fleet authorises — a key, a
-     \`~/.ssh/config\` and a \`known_hosts\`. Generating one is not this script's (Y-144):
-     \`sudo -u yantra ssh-keygen -t ed25519 -f $home/.ssh/id_yantra -N ''\`"
+    step "Give the \`yantra\` account an ssh identity the fleet authorises. Generating it is
+     not this script's (Y-144) — the verb writes the key and the config and prints the
+     public key to place. \`-H\`, so it prepares that account's \`~/.ssh\` and not yours:
+     \`sudo -u yantra -H $BIN ssh-identity\`"
 fi
 
 # --json rather than the table, because D2.2 pinned that shape for exactly this
@@ -142,8 +143,9 @@ while IFS=$'\t' read -r machine check state detail; do
 
     case "$check" in
     reachable)
-        step "Place the \`yantra\` account's public key in \`$machine\`'s authorized_keys and
-     give it a \`~/.ssh/config\` entry, then: \`sudo -u yantra ssh -o BatchMode=yes $machine true\`
+        step "Place the \`yantra\` account's public key in \`$machine\`'s authorized_keys —
+     \`sudo -u yantra -H $BIN ssh-identity\` prints it — and give that machine a
+     \`~/.ssh/config\` entry, then: \`sudo -u yantra ssh -o BatchMode=yes $machine true\`
 $evidence"
         ;;
     sshd)
