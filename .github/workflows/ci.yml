@@ -96,6 +96,19 @@ jobs:
           tool: just,cargo-deny
       - run: just deny
 
+  pinned:
+    # A tag is mutable and an action runs with the job's token, so `release.yml`
+    # taking one would put a stranger's code next to a `contents: write`. Needs
+    # no toolchain: it reads the workflows.
+    name: pinned
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: just
+      - run: just pinned
+
   no-node:
     # R-24's assertion, and it is the negative one the other jobs cannot make:
     # that this file is green proves the default build works, never that no job
