@@ -201,7 +201,7 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 | --- | --- | --- | --- |
 | **D2.1** | `yantra doctor` — the checks in §3.1, human-readable | ✅ **[Y-163](../../tracker.md#3-task-board)**, 2026-08-09 — run against the real fleet, and against a real sshd in a container for each state | `crates/yantra-core/src/doctor.rs`, `crates/yantra/src/main.rs` |
 | **D2.2** | `yantra doctor --json` and its schema | ✅ **[Y-163](../../tracker.md#3-task-board)**, 2026-08-09 — pinned by a test in the CLI, where the bytes a consumer reads are produced. `yantrad` serves none of it yet: that is D2.3's, and it reads the same types | as above |
-| **D2.3** | Readiness cards on `/` and `/m/{machine}` | every §3.1 check is visible without running a command | `web/src/` (needs D1.2) |
+| **D2.3** | Readiness cards on `/` and `/m/{machine}` | **[Y-168](../../tracker.md#3-task-board)**, opened 2026-08-09 — every §3.1 check is visible without running a command, over a `yantrad` route [Y-163](../../tracker.md#3-task-board) deliberately did not ship | `web/src/` (needs D1.2) |
 | **D2.4** | The agent fragment (§5) | an agent given only it and a bare machine reaches "ready" or stops at a boundary row | a skill or `AGENTS.md` fragment |
 | **D2.5** | Rewrite [`docs/appliance.md`](../appliance.md) around §0–§2 | the six manual prerequisites become the boundary table; the installer/updater distinction is stated | `docs/appliance.md` |
 
