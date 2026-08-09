@@ -42,7 +42,7 @@ something else.
 ## Optional
 
 - [docs/development.md](docs/development.md): local setup and daily commands.
-- [docs/appliance.md](docs/appliance.md): installing and updating the always-on box — what it needs first, and why the replacement is a rename. [install.sh](install.sh) is the fetch-and-verify half of it: a published release onto a fresh box, enabling nothing and enrolling nothing.
+- [docs/appliance.md](docs/appliance.md): installing and updating the always-on box — what it needs first, and why the replacement is a rename. [install.sh](install.sh) is the fetch-and-verify half of it: a published release onto a fresh box, enabling nothing and enrolling nothing. [provision.sh](provision.sh) is the other half: it reads `yantra doctor --json`, enables each unit whose precondition holds, and turns everything left into a numbered step with its command.
 - [docs/machines.md](docs/machines.md): the actual fleet this is developed against.
 - [docs/vision.md](docs/vision.md): the long-range shape, including the hardware panel.
 - [docs/session-log.md](docs/session-log.md): one line per working session, append-only. Newest last.
