@@ -4,14 +4,18 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**Nothing has ever been published** (Y-037): there is no release, no tag and no package. So the
-install is a build on the machine that already builds everything, and a copy — one recipe,
-`just appliance-install`, which is also the update.
+**v0.1.0 is published** ([Y-156](../tracker.md), 2026-08-09) and **there is still no installer
+script** ([Y-157](../tracker.md)), so the install is what it has always been: a build on the machine
+that already builds everything, and a copy — one recipe, `just appliance-install`, which is also the
+update. What the release changes for this document is the *fetch* path it will replace this one with,
+and one fact about the artifact: **the released `yantrad` is built with `embed-dashboard`**, so a
+fetched binary serves the dashboard with no `YANTRA_WEB` and no `web/dist` beside it.
 
 ## Which architecture
 
-**[Q15](../tracker.md#6-open-questions) is open** — *Pi 5 / N100* names two — so the recipes take a
-target and default to `aarch64-unknown-linux-musl`, which is what they have always built:
+**[Q15](../tracker.md#6-open-questions) is answered — the Pi 5, 2 GB** (2026-08-09), which is what
+`aarch64-unknown-linux-musl` already was. The recipes still take a target, so an x86_64 box is one
+argument rather than a second set of recipes:
 
 ```bash
 just appliance                                   # arm64: a Pi 5

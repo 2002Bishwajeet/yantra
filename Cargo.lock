@@ -1545,7 +1545,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "yantra"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -1555,7 +1555,7 @@ dependencies = [
 
 [[package]]
 name = "yantra-agent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "yantra-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -1583,7 +1583,7 @@ dependencies = [
 
 [[package]]
 name = "yantrad"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",

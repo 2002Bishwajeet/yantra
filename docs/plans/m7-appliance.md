@@ -240,7 +240,7 @@ notifier and one that gets muted in a week:
 - **The release build passes no `--features`**, so a published `yantrad` would carry no dashboard.
   The only build that embeds one is [`embed.yml`](../../.github/workflows/embed.yml), which is a
   check and uploads nothing.
-- **Nothing has ever been published** (Y-037) and the workspace version is `0.0.0`. Publishing needs
+- ~~**Nothing has ever been published** (Y-037) and the workspace version is `0.0.0`.~~ **Done 2026-08-09: v0.1.0** ([Y-156](../../tracker.md)). Publishing needed
   a tag and a version worth tagging, which is a decision above this milestone.
 
 **So M7 installs by building and copying**, from the machine that already builds everything, and the

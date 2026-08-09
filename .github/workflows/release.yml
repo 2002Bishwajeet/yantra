@@ -74,6 +74,7 @@ jobs:
             packages: yantrad yantra yantra-agent
             zigbuild: true
             archive: tar.gz
+            dashboard: true
 
           # Linux dev boxes and the x86 mini-PC alternative to the Pi.
           - target: x86_64-unknown-linux-musl
@@ -81,6 +82,7 @@ jobs:
             packages: yantrad yantra yantra-agent
             zigbuild: true
             archive: tar.gz
+            dashboard: true
 
           # macOS and Windows exist only for the heartbeat agent; the daemon and
           # CLI are not shipped there (see the PR description for the reasoning).
@@ -128,6 +130,23 @@ jobs:
         if: matrix.zigbuild
         uses: ./.github/actions/setup-zig
 
+      # Only the two targets that ship a `yantrad`, and only in this workflow.
+      # R-24 is retired by enforcement (Y-148): the gate is `just check` and
+      # `just ci` green where node is absent, and neither runs here. `embed.yml`
+      # already builds Rust from npm's output for the same reason.
+      - name: Setup Node
+        if: matrix.dashboard
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.18.1'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the dashboard
+        if: matrix.dashboard
+        run: npm ci && npm run build
+        working-directory: web
+
       - name: Install cargo-zigbuild
         if: matrix.zigbuild
         uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
@@ -143,12 +162,18 @@ jobs:
           TARGET: ${{ matrix.target }}
           PACKAGES: ${{ matrix.packages }}
           ZIGBUILD: ${{ matrix.zigbuild }}
+          DASHBOARD: ${{ matrix.dashboard }}
         run: |
           set -euo pipefail
           pkg_args=()
           for pkg in $PACKAGES; do
             pkg_args+=(-p "$pkg")
           done
+          # Package-qualified so only `yantrad` gets it; the CLI and the agent
+          # are built from the same command and neither has the feature.
+          if [ "$DASHBOARD" = "true" ]; then
+            pkg_args+=(--features yantrad/embed-dashboard)
+          fi
           if [ "$ZIGBUILD" = "true" ]; then
             cargo zigbuild --release --locked --target "$TARGET" "${pkg_args[@]}"
           else
@@ -182,6 +207,23 @@ jobs:
               *) echo "::error::$pkg is not statically linked"; exit 1 ;;
             esac
           done
+
+      # `include_str!` makes a missing `web/dist/index.html` a build error, so
+      # the feature cannot silently embed nothing — but it can silently be off.
+      # This is the assertion that it was on.
+      - name: Verify the dashboard is inside yantrad
+        if: matrix.dashboard
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if grep -aq 'assets/index-' "target/$TARGET/release/yantrad"; then
+            echo "yantrad carries the dashboard"
+          else
+            echo "::error::yantrad was built without embed-dashboard"
+            exit 1
+          fi
 
       - name: Stage archive contents
         shell: bash
