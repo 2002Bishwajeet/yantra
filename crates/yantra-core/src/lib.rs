@@ -12,6 +12,7 @@
 
 pub mod agent;
 pub mod attach;
+pub mod doctor;
 pub mod down;
 pub mod edit;
 pub mod heartbeat;
