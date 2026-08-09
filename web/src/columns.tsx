@@ -8,7 +8,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
-import { Act, button, type Verb } from '@/components/Act'
+import { Act, Actions, type Verb } from '@/components/Act'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -135,10 +135,70 @@ function target(
     : undefined
 }
 
+/** D1 §2's one verb, computed rather than offered. *Resume* stays the name of
+ *  the route that respawns an ended agent and is never borrowed for a live one:
+ *  a session you can walk back into is `open`, which is a URL rather than
+ *  anything the daemon runs. */
+export type Chosen =
+  | { does: 'wait'; label: string }
+  | { does: 'fix'; label: string }
+  | { does: 'open'; label: string }
+  | { does: 'post'; verb: Verb; label: string }
+
+export function chosen(
+  workspace: Workspace,
+  status: WorkspaceStatus | null,
+): Chosen {
+  // R-23: nothing has been read, so offering Start would be a guess painted as
+  // knowledge — and this is the state a row spends its first seconds in.
+  if (!status) return { does: 'wait', label: 'reading…' }
+  if (status.reached === 'no') return { does: 'fix', label: 'Fix' }
+
+  switch (status.status.state) {
+    case 'no_session':
+      return {
+        does: 'post',
+        verb: 'up',
+        label: workspace.startup === null ? 'Start claude' : 'Start',
+      }
+    // I-49 waits on a person and on nothing else, so it is worth its own word
+    // rather than reading as a session that is getting on with something.
+    case 'awaiting_trust':
+      return { does: 'open', label: 'Answer' }
+    case 'running':
+    case 'no_agent':
+    case 'unclear':
+      return { does: 'open', label: 'Open' }
+    case 'finished':
+    case 'stopped':
+    case 'crashed':
+    case 'killed':
+      // ADR-0015 refuses resume where the workspace starts something of its
+      // own, so what it left behind is a session to walk into, not a verb.
+      return workspace.startup === null
+        ? { does: 'post', verb: 'resume', label: 'Resume' }
+        : { does: 'open', label: 'Open' }
+  }
+}
+
+/** The agent class answers per workspace and collapses back into one reading, so
+ *  a class that is not `ok` gives every row the same `null` — which `chosen`
+ *  reads as *nothing has been looked at yet* rather than as a state. */
+function reportOn(
+  workspace: Workspace,
+  agents: Looked<AgentRow[]>,
+): WorkspaceStatus | null {
+  if (agents.looked !== 'ok') return null
+  return (
+    agents.data.find((row) => row.workspace.name === workspace.name)?.status ??
+    null
+  )
+}
+
 export function workspaceColumns(
   sessions: Looked<MachineSessions[]>,
   machines: Looked<Machine[]>,
-  open: (name: string) => void,
+  agents: Looked<AgentRow[]>,
   // Null on a machine's own page: a workspace is edited where it is listed.
   edit: ((name: string) => void) | null,
 ): Column<Workspace>[] {
@@ -162,40 +222,20 @@ export function workspaceColumns(
     },
     // Third, not last: the buttons are the whole point of this page, so they
     // come before the fields you only read — in a row and in a block alike.
-    { header: 'ACT', cell: (workspace) => <Act workspace={workspace} /> },
+    // Y-167 folded the TERMINAL and EDIT columns into the overflow behind it.
+    {
+      header: 'ACT',
+      cell: (workspace) => (
+        <Actions
+          chosen={chosen(workspace, reportOn(workspace, agents))}
+          edit={edit}
+          terminal={attachable(workspace, sessions)}
+          workspace={workspace}
+        />
+      ),
+    },
     { header: 'REPO', cell: (workspace) => workspace.repo },
     { header: 'STARTUP', cell: (workspace) => workspace.startup ?? '' },
-    {
-      header: 'TERMINAL',
-      cell: (workspace) =>
-        attachable(workspace, sessions) && (
-          <button
-            type="button"
-            className={button}
-            onClick={() => open(workspace.name)}
-          >
-            Open terminal
-          </button>
-        ),
-    },
-    // The form itself is a section rather than a cell: three fields and a
-    // picker do not fit a column, and the row already opens one this way.
-    ...(edit
-      ? [
-          {
-            header: 'EDIT',
-            cell: (workspace: Workspace) => (
-              <button
-                type="button"
-                className={button}
-                onClick={() => edit(workspace.name)}
-              >
-                Edit
-              </button>
-            ),
-          },
-        ]
-      : []),
   ]
 }
 

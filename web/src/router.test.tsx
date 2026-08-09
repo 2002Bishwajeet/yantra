@@ -167,7 +167,7 @@ describe('moving between them', () => {
     expect(await screen.findByText('New workspace')).toBeTruthy()
   })
 
-  it('opens the terminal route from the button in a workspace row', async () => {
+  it('opens the terminal route from the overflow in a workspace row', async () => {
     fleet({
       '/api/sessions': {
         looked: 'ok',
@@ -186,6 +186,7 @@ describe('moving between them', () => {
     quietSocket()
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: 'More for yantra' }))
     fireEvent.click(await screen.findByText('Open terminal'))
 
     await waitFor(() => expect(location.pathname).toBe('/w/yantra'))

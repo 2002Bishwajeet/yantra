@@ -58,15 +58,21 @@ and neither is optional:
 - **`npm run compiled`** greps the bundle for `react.memo_cache_sentinel`, which
   only the compiler emits. `npm run build` runs it.
 
-Three files under `src/components/ui/` bail out in the build and it says so —
-`badge`, `card`, `empty`, all shadcn's generated source, all on the same
-`AssignmentPattern` in a destructured default. **Many of the T3 Code copies hit
-it too** (Y-164, Y-166): `autocomplete`, `combobox`, `command`, `dialog`, `input`,
-`menu`, `popover`, `scroll-area`, `select`, `separator`, `sheet`, `toggle-group`
-and `tooltip`. No route imports them yet, so they are absent from the bundle and
-only `npm test` compiles them — which is where their warnings appear. Expect the
-build's count to rise when D1.3 wires them in; it is upstream's pattern, not a
+Files under `src/components/ui/` bail out in the build and it says so, all on
+the same `AssignmentPattern` in a destructured default: `badge`, `card` and
+`empty` are shadcn's generated source, and `menu` is a T3 Code copy that D1.3
+wired in. **Most of the other T3 copies hit it too** (Y-164, Y-166) —
+`autocomplete`, `combobox`, `command`, `dialog`, `input`, `popover`,
+`scroll-area`, `select`, `sheet`, `toggle-group`, `tooltip` — but no route
+imports them, so they are absent from the bundle and only `npm test` compiles
+them, which is where their warnings appear. It is upstream's pattern, not a
 regression here.
+
+**A chunk reporting `0` is not a bail-out.** `npm run compiled` counts the
+sentinel per chunk, and the constant is emitted once and hoisted, so a lazily
+split chunk can hold compiled components and still count zero — measured on
+`Overflow` (Y-167), whose compiled memo-cache indexing is in the chunk while the
+sentinel is not. The per-file check is the `logger`, and it is the one to read.
 
 ## The four heartbeat states
 
@@ -80,6 +86,24 @@ zeros. `online` picks the explanation and never decides whether a beat arrived (
 The daemon names none of this: `reporting()` in `columns.tsx` owns the threshold, the way `Age.tsx`
 owns the staleness one. Most of this tailnet is a phone, a tablet and two dead laptops, so *never
 heard from* is the permanent and correct state on most rows.
+
+## The one verb a row computes (Y-167)
+
+The row used to offer up, down and resume and make the reader work out which one this state was for.
+`chosen()` in `columns.tsx` reads the agent status instead and the row draws the single button it
+names — `Start`, `Resume`, `Open` or `Fix` — with everything else behind the overflow, including the
+terminal and the edit form, which stopped being columns. [D1](../docs/design/01-dashboard.md) §2 is
+the specification and its dated note records where the labels departed from it.
+
+Two of the readings are the ones worth knowing about. **A row that has read nothing gets no verb**:
+`Start` there would be a guess drawn as knowledge, so the button says so and is disabled (R-23) —
+and that is the state every row spends its first seconds in. **`Fix` is a link, not a verb**: a
+machine that did not answer ssh cannot be repaired from a workspace row, so the row hands over to
+`/m/{machine}` rather than offering something that could only fail.
+
+`Act.tsx` still holds the three-button control, which the agents section uses with `verb` narrowing
+it to one — that table hands over a paste for `attach` because ADR-0011 gives the terminal to a
+person, so it cannot share this one.
 
 ## A workspace file that did not load (Y-141)
 
@@ -465,10 +489,9 @@ three too. (T3's `.dark` selector is a `prefers-color-scheme` block here, for th
 same reason shadcn's is.) `TooltipPopup`'s opt-in `variant="glass"` works as a
 side effect of them arriving.
 
-## What the primitives cost (Y-166)
+## What the primitives cost (Y-166, Y-167)
 
-Nothing imports them yet, so the JS first load is unchanged at **121 kB gzip**.
-Two numbers matter before D1.3 wires them in, both measured on this branch:
+Two numbers, both measured here:
 
 - **`lucide-react` tree-shakes, and the named import is why.** Importing
   `Spinner` — one icon out of ~1500 — costs **0.77 kB gzip**. Replacing a named
@@ -481,7 +504,14 @@ Two numbers matter before D1.3 wires them in, both measured on this branch:
 
 **The CSS is not free even unimported.** Tailwind v4 scans the source tree, so it
 emits utilities for every class these files name whether or not anything renders
-them: the stylesheet went **12.7 kB gzip to 17.6 kB** on this change alone.
+them: the stylesheet went **12.7 kB gzip to 17.6 kB** on Y-166 alone.
+
+**D1.3 paid the menu's 29 kB and then split it back off.** Y-167 put an overflow
+on every workspace row, which took the fleet's first load from **121 to 165 kB
+gzip** — undoing the router's own win. So `Overflow.tsx` is a `lazy` module
+fetched on the first tap, and the first load is **124 kB** with 37 kB deferred.
+The trigger stays eager and the popup is *anchored* to it rather than wrapped by
+it, because a `MenuTrigger` would have dragged the chunk back in.
 
 ## Layout
 
@@ -497,7 +527,8 @@ src/
                      Query — and the three derivations the routes share
   router.ts          TanStack Router: three routes, `notFoundComponent`, and
                      `getRouter(history)` so a test can drive a memory history
-  columns.tsx        four Column<T>[] arrays: the four tables, as data
+  columns.tsx        four Column<T>[] arrays: the four tables, as data, plus
+                     `chosen()` — D1 §2's one verb, read off the agent state
   routes/
     Shell.tsx        the heading and the `<Outlet/>`, plus `Nowhere`
     Fleet.tsx        `/` — the five sections and the edit form
@@ -513,8 +544,12 @@ src/
     NewWorkspace.tsx the create form; owns the field class
     EditWorkspace.tsx the edit form — sends only the fields that differ, and
                      `startup: null` where one was emptied
-    Act.tsx          start / stop / resume per workspace row, and the one verb
-                     an agent row's state is for; owns the button class
+    Act.tsx          the workspace row's one computed verb and its overflow
+                     trigger, and the single verb an agent row's state is for;
+                     owns the button class and the outcome the daemon returned
+    Overflow.tsx     the verbs the row's state is not for. Its own module so
+                     Base UI's positioning loads on the first tap, not the
+                     first paint
     Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
                      drops. Key it on the name
     DataTable.tsx    a table, or a block per row on a phone; owns "we looked

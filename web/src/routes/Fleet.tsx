@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import type { Listed, Looked, Machine, MachineSessions, Workspace } from '@/api'
 import {
   type AgentRow,
@@ -62,6 +61,7 @@ export function Fleet() {
             entries={entries}
             sessions={sessions}
             machines={machines}
+            agents={agents}
             edit={setEditing}
           />
         )}
@@ -104,33 +104,29 @@ export function Fleet() {
 }
 
 /** A file that did not load is named below the table rather than given a row in
- *  it: `MACHINE`, `ACT`, `TERMINAL` and `EDIT` have nothing to put in one, and
- *  `EDIT` could not repair it anyway — `update` loads before it writes, so the
- *  file is the fix. R-23 is met by naming it loudly with its reason. */
+ *  it: `MACHINE` and `ACT` have nothing to put in one, and the edit form could
+ *  not repair it anyway — `update` loads before it writes, so the file is the
+ *  fix. R-23 is met by naming it loudly with its reason. */
 export function Workspaces({
   entries,
   sessions,
   machines,
+  agents,
   edit,
 }: {
   entries: Listed[]
   sessions: Looked<MachineSessions[]>
   machines: Looked<Machine[]>
+  agents: Looked<AgentRow[]>
   edit: ((name: string) => void) | null
 }) {
   const rows = entries.flatMap((one) => (one.loaded === 'yes' ? [one] : []))
   const unusable = entries.flatMap((one) => (one.loaded === 'no' ? [one] : []))
-  const navigate = useNavigate()
 
   return (
     <div className="flex flex-col gap-2">
       <DataTable
-        columns={workspaceColumns(
-          sessions,
-          machines,
-          (name) => void navigate({ to: '/w/$name', params: { name } }),
-          edit,
-        )}
+        columns={workspaceColumns(sessions, machines, agents, edit)}
         rows={rows}
         rowKey={(workspace) => workspace.name}
         empty={
