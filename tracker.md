@@ -11,7 +11,7 @@ Read it first. Update it last. If it disagrees with your memory, the file wins.
 | **Runtime** | **Rust** (daemon, CLI, per-machine agent) + **TypeScript** (web UI only) — see [ADR-0004](docs/adr/0004-rust-for-the-daemon.md) |
 | **Top risk** | **R-7** — Windows is a second path with no tmux and no Tailscale SSH server, and Q4 is still deliberately open. *R-21 (macOS agents cannot authenticate over ssh, I-44) is **downgraded**: it is real and unfixed, but Y-059 found a machine that works without touching it, so it costs a target rather than the milestone. R-1 refuted on Linux and, since Y-139 on 2026-08-05, on macOS too; R-2 is now handled in code — see I-47 and `status.rs`.* |
 | **Last updated** | 2026-08-09 |
-| **Updated by** | Claude (session: Y-161…Y-165 — the dashboard gets routes, a router, a query cache and T3 Code's primitives; `yantra doctor` lands beside them) |
+| **Updated by** | Claude (session: Y-161…Y-166 — the dashboard gets routes, a router, a query cache and the whole of T3 Code's primitive set; `yantra doctor` lands beside them) |
 
 ---
 
@@ -224,6 +224,7 @@ Y-120 deleted everywhere else; the table is the count.
 | Y-163 | `yantra doctor`, and `--json` for an installer and an agent to read | ✅ done | claude | — | **Done:** the nine checks in [D2](docs/design/02-setup.md) §3.1 report present/absent/unknown per machine, **an *unknown* never reads as an *absent*** (R-23), nothing is written (§3.2), and a test pins the JSON. D2.1 and D2.2; [Y-160](#3-task-board) is the consumer. `heartbeat` answers *unknown* from any caller that is not the daemon; why, and what running it corrected in D2 itself: [#200](https://github.com/2002Bishwajeet/yantra/pull/200). |
 | Y-164 | T3 Code's UI primitives, and the attribution the MIT licence requires | ✅ done | claude | Y-162 | **Done:** fifteen primitives mount under this repo's React, and [`THIRD-PARTY.md`](web/src/components/ui/THIRD-PARTY.md) names the commit they came from ([D1](docs/design/01-dashboard.md) §7, D1.1). Seven of §7's take list import `lucide-react` and wait on it. |
 | Y-165 | TanStack Query replaces the hand-rolled poll in `useLooked.ts` | ✅ done | claude | Y-162 | **Done:** `useQuery`/`useQueries`, the timer and the `AbortController` deleted, and `useLooked` still answers a `Looked<T>` so no call site moved. The envelope stays the daemon's and Query wraps it — `isError` is unreachable, one failure path ([`web/README.md`](web/README.md)). [CLAUDE.md](CLAUDE.md) §B1. |
+| Y-166 | `lucide-react`, and the seven overlay primitives [Y-164](#3-task-board) could not take | ✅ done | claude | Y-164 | **Done:** D1 §7's take list is complete at the same pinned commit, and the glass surfaces the overlays name are in `index.css` ([D1](docs/design/01-dashboard.md) §7, D1.1). Named imports keep `lucide-react` at 0.77 kB gzip; what the overlays cost is Base UI's ([`web/README.md`](web/README.md)). |
 
 ### Landing site — out of milestone
 

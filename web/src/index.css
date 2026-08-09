@@ -12,6 +12,8 @@
     --font-sans: 'Geist Variable', sans-serif;
     --color-destructive-foreground: var(--destructive-foreground);
     --color-placeholder: var(--placeholder);
+    --color-icon-muted: var(--icon-muted);
+    --color-secondary-label: var(--secondary-label);
     --animate-skeleton: skeleton 2s -1s infinite linear;
     @keyframes skeleton {
         to {
@@ -102,6 +104,17 @@
     --placeholder: var(--muted-foreground);
     --app-scrollbar-thumb: rgb(217 217 217);
     --app-scrollbar-thumb-hover: rgb(191 191 191);
+
+    /* Y-166: the overlay primitives add four more, and the glass trio the two
+       surface classes below read. A popup with no `.dropdown-glass` has no
+       background at all, so this is not decoration. */
+    --icon-muted: var(--muted-foreground);
+    --secondary-label: var(--muted-foreground);
+    --command-shell-inset: 0.5rem;
+    --command-content-inset: 1rem;
+    --glass-blur: 12px;
+    --glass-opacity: 80%;
+    --glass-saturation: 1.14;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -139,6 +152,63 @@
     --sidebar-ring: oklch(0.556 0 0);
     --app-scrollbar-thumb: rgb(255 255 255 / 8%);
     --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
+    --glass-blur: 16px;
+    --glass-saturation: 1.08;
+  }
+}
+
+/* Y-166: the surfaces `dialog`, `command`, `menu`, `select` and `combobox` name.
+   Copied from T3 Code at 963ebf5b; its `.dark` selector is a media query here
+   because Q6 ruled out a theme switcher. */
+@layer components {
+  .dialog-glass {
+    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
+  }
+
+  .dialog-backdrop {
+    background: color-mix(in srgb, var(--background) 60%, transparent);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+
+  /* T3's note: nesting the mix inside an 18% popover tint keeps high-contrast
+     page content from blooming through a menu. */
+  .dropdown-glass {
+    background: color-mix(
+      in srgb,
+      var(--popover) 18%,
+      color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .dialog-glass {
+      border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+      box-shadow:
+        inset 0 1px rgb(255 255 255 / 4%),
+        0 24px 72px -20px rgb(0 0 0 / 90%);
+    }
+    .dialog-backdrop {
+      background: color-mix(in srgb, var(--background) 64%, transparent);
+    }
+    .dropdown-glass {
+      box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
+    }
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .dialog-glass,
+    .dropdown-glass {
+      background: var(--popover) !important;
+    }
   }
 }
 
