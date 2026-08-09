@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import type {
   Listed,
   Looked,
@@ -16,11 +16,8 @@ const failed = (error: string) =>
   ({ looked: 'failed', age_seconds: 0, error }) as const
 
 // Outside the hook because the React Compiler bails out of any function whose
-// try/catch holds a conditional, and this one needs both. Null means aborted.
-async function look<T>(
-  path: string,
-  signal: AbortSignal,
-): Promise<Looked<T> | null> {
+// try/catch holds a conditional, and this one needs both.
+async function look<T>(path: string, signal: AbortSignal): Promise<Looked<T>> {
   try {
     const response = await fetch(path, { signal })
     // Every fleet state answers 200, so a non-200 is a fact about this browser
@@ -28,34 +25,23 @@ async function look<T>(
     if (!response.ok) return failed(`${path} answered ${response.status}`)
     return (await response.json()) as Looked<T>
   } catch (cause) {
-    return signal.aborted ? null : failed(String(cause))
+    // Rethrown rather than made an envelope, so Query reads the unmount as the
+    // cancellation it is instead of caching a failure nobody will see.
+    if (signal.aborted) throw cause
+    return failed(String(cause))
   }
 }
 
 /** Never throws: a dead daemon becomes the same `failed` envelope the daemon
- *  itself produces, so the page has one failure path rather than two. */
+ *  itself produces, so the page has one failure path rather than two — and
+ *  Query's own `isError` is therefore a state this page cannot reach. */
 export function useLooked<T>(path: string): Looked<T> {
-  const [answer, setAnswer] = useState<Looked<T>>({ looked: 'never' })
-
-  useEffect(() => {
-    const abort = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    const tick = async () => {
-      const next = await look<T>(path, abort.signal)
-      if (!next) return
-      setAnswer(next)
-      timer = setTimeout(() => void tick(), POLL_MS)
-    }
-    void tick()
-
-    return () => {
-      abort.abort()
-      clearTimeout(timer)
-    }
-  }, [path])
-
-  return answer
+  const { data } = useQuery({
+    queryKey: [path],
+    queryFn: ({ signal }) => look<T>(path, signal),
+    refetchInterval: POLL_MS,
+  })
+  return data ?? { looked: 'never' }
 }
 
 // Y-084's route is the one that answers something other than 200, and its 404
@@ -63,17 +49,21 @@ export function useLooked<T>(path: string): Looked<T> {
 const MISSING = 'missing'
 type OneAgent = Looked<WorkspaceStatus> | typeof MISSING
 
+const agentPath = (name: string) =>
+  `/api/workspaces/${encodeURIComponent(name)}/status`
+
 async function lookAtAgent(
   name: string,
   signal: AbortSignal,
 ): Promise<OneAgent> {
-  const path = `/api/workspaces/${encodeURIComponent(name)}/status`
+  const path = agentPath(name)
   try {
     const response = await fetch(path, { signal })
     if (response.status === 404) return MISSING
     if (!response.ok) return failed(`${path} answered ${response.status}`)
     return (await response.json()) as Looked<WorkspaceStatus>
   } catch (cause) {
+    if (signal.aborted) throw cause
     return failed(String(cause))
   }
 }
@@ -81,13 +71,16 @@ async function lookAtAgent(
 /** One reading answered N times, so the answers collapse back into it — and a
  *  name missing from it is that row's state, not the class failing. */
 function collapse(
-  answers: { name: string; answer: OneAgent }[],
+  answers: { name: string; answer: OneAgent | undefined }[],
 ): Looked<Record<string, WorkspaceStatus | null>> {
   const found: Record<string, WorkspaceStatus | null> = {}
   let age_seconds = 0
   let looked = false
 
   for (const { name, answer } of answers) {
+    // A name still in flight is not a name with no report, so the class waits
+    // for all of them — which is what one `Promise.all` used to say.
+    if (answer === undefined) return { looked: 'never' }
     if (answer === MISSING) {
       found[name] = null
       continue
@@ -106,39 +99,22 @@ function collapse(
 /** The agent class, which `/api` names one workspace at a time. The list to ask
  *  for is the workspaces class, so a look that failed there is not seen past. */
 export function useAgents(workspaces: Looked<Workspace[]>): Looked<AgentRow[]> {
-  // A name's charset excludes a newline (I-2), so this is a dependency that
-  // changes when the list does rather than when the poll replaces the object.
-  const asked =
-    workspaces.looked === 'ok'
-      ? workspaces.data.map((one) => one.name).join('\n')
-      : ''
-  const [answer, setAnswer] = useState<
-    Looked<Record<string, WorkspaceStatus | null>>
-  >({ looked: 'never' })
-
-  useEffect(() => {
-    const abort = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    const tick = async () => {
-      const names = asked === '' ? [] : asked.split('\n')
-      const answers = await Promise.all(
-        names.map(async (name) => ({
-          name,
-          answer: await lookAtAgent(name, abort.signal),
-        })),
-      )
-      if (abort.signal.aborted) return
-      setAnswer(collapse(answers))
-      timer = setTimeout(() => void tick(), POLL_MS)
-    }
-    void tick()
-
-    return () => {
-      abort.abort()
-      clearTimeout(timer)
-    }
-  }, [asked])
+  const names =
+    workspaces.looked === 'ok' ? workspaces.data.map((one) => one.name) : []
+  const results = useQueries({
+    queries: names.map((name) => ({
+      queryKey: [agentPath(name)],
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        lookAtAgent(name, signal),
+      refetchInterval: POLL_MS,
+    })),
+  })
+  const answer = collapse(
+    results.map((result, index) => ({
+      name: names[index],
+      answer: result.data,
+    })),
+  )
 
   if (workspaces.looked !== 'ok') return workspaces
   if (answer.looked !== 'ok') return answer

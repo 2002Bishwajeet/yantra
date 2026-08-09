@@ -2,7 +2,8 @@
 
 Three routes over the API `yantrad` serves at `/api` — the fleet at `/`, one
 machine at `/m/$machine`, a workspace and its terminal at `/w/$name`, on
-TanStack Router. The readings poll; the forms and every workspace row write.
+TanStack Router. The readings poll on TanStack Query; the forms and every
+workspace row write.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -447,8 +448,8 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  useLooked.ts       the poll — every read, class or agent — and the three
-                     derivations over a reading the routes share
+  useLooked.ts       the readings — every class and every agent, on TanStack
+                     Query — and the three derivations the routes share
   router.ts          TanStack Router: three routes, `notFoundComponent`, and
                      `getRouter(history)` so a test can drive a memory history
   columns.tsx        four Column<T>[] arrays: the four tables, as data
@@ -459,6 +460,8 @@ src/
     OneWorkspace.tsx `/w/$name` — the workspace, which is its terminal. The one
                      code-split route: xterm.js is a third of the bundle
   test/
+    inQuery.tsx      `renderHookQueried` — a client per call, for a hook that
+                     reads one out of context
     inRouter.tsx     `renderRouted` — a one-route memory router around a subject
   components/
     Section.tsx      the looked switch; children run only in the ok branch
@@ -475,7 +478,8 @@ src/
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              shadcn output. NEVER EDITED.
   index.css          the token vocabulary — the whole integration surface
-  App.tsx            mounts the router; `Shell` in routes/ is the heading
+  App.tsx            mounts the router and the query client; `Shell` in
+                     routes/ is the heading
 ```
 
 ## The router (Y-161, Y-162)
@@ -511,3 +515,55 @@ own supplies one: `src/test/inRouter.tsx`'s `renderRouted` builds a one-route
 memory router around the subject. It **awaits `router.load()`** — a router
 resolves its first match asynchronously, and rendering without that draws an
 empty document, which reads as a missing element rather than as a race.
+
+## The readings (Y-165)
+
+**[TanStack Query](https://tanstack.com/query)** replaces the `useState` +
+`useEffect` + `setTimeout` poll `useLooked.ts` used to be — the same ruling as
+the router, [CLAUDE.md](../CLAUDE.md) §B1. `useLooked` is `useQuery`, `useAgents`
+is `useQueries`, and both still hand back a `Looked<T>`, so no call site changed.
+
+**`Looked<T>` is the daemon's envelope and Query wraps it — it does not replace
+it.** `api.ts`'s three variants say *nobody looked*, *a look failed* and *a
+machine did not answer*, and R-23 is the whole reason they are three things.
+Query's `isLoading` and `isError` are a second, weaker vocabulary for the first
+two, so they are not read anywhere:
+
+- **The query function never throws**, except to re-raise an abort. A non-200
+  becomes `failed` inside it, because every fleet state answers 200 — so a
+  status code is a fact about this browser reaching the daemon, never about the
+  fleet — and the page keeps **one** failure path. `isError` is unreachable, and
+  `retry` therefore never fires in the app.
+- **`data === undefined` is `{looked: 'never'}`**, which is the same sentence the
+  daemon sends before its first sweep. Nothing distinguishes them, and nothing
+  should: neither is a reading.
+- **The abort is re-raised rather than swallowed** so Query cancels the query on
+  unmount instead of caching an envelope nobody asked for. Consuming the
+  `signal` is what makes cancellation happen at all — a query whose function
+  ignores it runs to completion after the component is gone.
+
+**The 5 s interval is not about freshness.** `refresh.rs` sweeps every 30 s, so
+a faster poll buys no newer data; it keeps the age each `<Section>` prints
+ticking. **`useQueries` waits for every name** before the agent class reads `ok`,
+which is what one `Promise.all` used to say — a workspace whose status is still
+in flight is not a workspace with no report, and rendering it as `null` would be
+R-23's lie in the one place the envelope cannot spell the difference. A `404`
+still *is* `null` for that row, because that is what the daemon means by it: the
+agent look has not seen a name the workspaces look has.
+
+**Two readings of the same path are now one request.** The key is the path, so
+`/` and `/m/{machine}` asking for `/api/workspaces` share a cache entry and a
+poll instead of running two of each.
+
+**It costs ≈10 kB gzip and the first load went 111 kB to 121 kB.** That is the
+opposite direction from Y-162's number and is worth saying plainly: what this
+buys is not weight but the deletion of hand-rolled request lifecycle — the
+timer, the `AbortController`, the two `useState`s and the `join('\n')`
+dependency that existed only to give an effect a stable array to compare.
+
+**A hook that reads a client out of context needs one supplied**, the same way a
+`<Link>` does: `src/test/inQuery.tsx`'s `renderHookQueried` makes a
+`QueryClient` **per call**, since one shared between tests answers the second
+from the first's cache, and sets `retry: false` so a rejected fetch is one
+fetch. Tests that render `<App/>` need nothing — it makes its own client per
+mount, for the reason it makes its own router.

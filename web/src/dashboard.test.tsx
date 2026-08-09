@@ -3,7 +3,6 @@ import {
   cleanup,
   fireEvent,
   render,
-  renderHook,
   screen,
   waitFor,
 } from '@testing-library/react'
@@ -31,6 +30,7 @@ import {
   type SessionRow,
   workspaceColumns,
 } from './columns'
+import { renderHookQueried } from './test/inQuery'
 import { renderRouted } from './test/inRouter'
 import { Command } from './components/Command'
 import { DataTable } from './components/DataTable'
@@ -445,7 +445,7 @@ describe('useLooked', () => {
       'fetch',
       vi.fn(() => Promise.reject(new Error('daemon is not running'))),
     )
-    const { result } = renderHook(() => useLooked('/api/machines'))
+    const { result } = renderHookQueried(() => useLooked('/api/machines'))
 
     await waitFor(() => expect(result.current.looked).toBe('failed'))
     expect(result.current).toMatchObject({
@@ -459,7 +459,7 @@ describe('useLooked', () => {
       'fetch',
       vi.fn(() => Promise.resolve({ ok: false, status: 404 })),
     )
-    const { result } = renderHook(() => useLooked('/api/machines'))
+    const { result } = renderHookQueried(() => useLooked('/api/machines'))
 
     await waitFor(() => expect(result.current.looked).toBe('failed'))
     expect(result.current).toMatchObject({ error: expect.stringContaining('404') })
@@ -467,7 +467,7 @@ describe('useLooked', () => {
 
   it('answers never before the first response', () => {
     stubFetch({ '/api/machines': { looked: 'ok', age_seconds: 0, data: [] } })
-    const { result } = renderHook(() => useLooked('/api/machines'))
+    const { result } = renderHookQueried(() => useLooked('/api/machines'))
     expect(result.current).toEqual({ looked: 'never' })
   })
 })
