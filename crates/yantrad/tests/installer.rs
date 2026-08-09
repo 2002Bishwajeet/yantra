@@ -79,6 +79,18 @@ impl Installer {
         ] {
             installer.systemd.copy_in(&from, to)?;
         }
+        // A sudo that cannot elevate makes install.sh look broken when it is the
+        // container that is, which is how this arrived (GitHub's runner, PAM).
+        let sudo = installer
+            .systemd
+            .exec_as(UNPRIVILEGED, &["sudo", "-n", "true"])?;
+        if !sudo.status.success() {
+            bail!(
+                "the fixture's own sudo does not work, so nothing below is about install.sh: {}",
+                String::from_utf8_lossy(&sudo.stderr).trim()
+            );
+        }
+
         installer.release(&["serve"])?;
         Ok(Some(installer))
     }

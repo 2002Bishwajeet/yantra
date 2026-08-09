@@ -19,7 +19,7 @@ use anyhow::{Context, Result, bail};
 
 /// Bump the tag when `tests/fixture/Containerfile` changes; the image is built
 /// once and then reused from the local store.
-const IMAGE: &str = "localhost/yantra-systemd:2";
+const IMAGE: &str = "localhost/yantra-systemd:3";
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const BUILD_ATTEMPTS: u32 = 2;
 const BUILD_RETRY_PAUSE: Duration = Duration::from_secs(2);

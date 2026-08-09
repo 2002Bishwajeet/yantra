@@ -22,6 +22,13 @@ RUN useradd --create-home deploy && \
     printf 'deploy ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/deploy && \
     chmod 440 /etc/sudoers.d/deploy
 
+# `pam_unix` writes an audit record, and a container that cannot reach the
+# host's audit subsystem fails sudo with *cannot retrieve authentication info* —
+# green here and red on GitHub's runner, which has one. What the fixture asserts
+# is that install.sh elevates, never what PAM decides.
+RUN printf 'auth sufficient pam_permit.so\naccount sufficient pam_permit.so\nsession sufficient pam_permit.so\n' \
+    > /etc/pam.d/sudo
+
 # PID 1 here is systemd, which takes SIGRTMIN+3 as "power off" and ignores SIGTERM.
 STOPSIGNAL SIGRTMIN+3
 CMD ["/usr/lib/systemd/systemd"]
