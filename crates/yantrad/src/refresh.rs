@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use yantra_core::inventory::Inventory;
 use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Reading, Snapshot};
-use yantra_core::{sessions, status, workspace};
+use yantra_core::{doctor, sessions, status, workspace};
 
 use crate::notify::Notifier;
 
@@ -69,6 +69,14 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
             tokio::time::sleep(EVERY).await;
         }
     });
+
+    let readiness = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_readiness(&readiness).await;
+            tokio::time::sleep(EVERY).await;
+        }
+    });
 }
 
 async fn look_at_machines<I: Inventory>(model: &Model, inventory: &I) {
@@ -84,6 +92,16 @@ async fn look_at_workspaces(model: &Model) {
 async fn look_at_sessions(model: &Model) {
     let reading = Reading::new(sessions::list().await);
     model.write().await.sessions = Some(Arc::new(reading));
+}
+
+/// The dearest look of the five — nine checks over ssh per machine — and the
+/// reason it is a look rather than a handler: `doctor` costs a browser poll far
+/// more than a session list does, and the rule about ssh on the request path is
+/// this module's whole subject. The `term` is [`crate::write::term`]'s, because
+/// nobody is sitting at this one either (I-36).
+async fn look_at_readiness(model: &Model) {
+    let reading = Reading::new(doctor::fleet(crate::write::term()).await);
+    model.write().await.readiness = Some(Arc::new(reading));
 }
 
 /// The reading lands in the model before anything is sent, so a browser never

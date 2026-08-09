@@ -79,6 +79,39 @@ R-22 is unchanged as a boundary and larger as a blast radius — anything that r
 now write, and the tailnet holds a phone and a tablet. What stops that mattering is that a heartbeat
 is data for a score and never a path, name or command, so nothing in it reaches ADR-0006.
 
+## The one check it can answer and the library cannot
+
+`GET /api/readiness` and `GET /api/machines/{name}/readiness` (Y-168) serve
+[`yantra_core::doctor`](../yantra-core/src/doctor.rs) — [D2](../../docs/design/02-setup.md) §3.1's
+checks per machine. **`heartbeat` is why the routes exist.** The library answers it *unknown* from
+every caller it has, and that is the architecture rather than a gap: the beats are in this process
+and nothing persists them (Y-044), while ADR-0012 keeps the CLI out of the daemon. So `api.rs`
+substitutes the check rather than the library changing its answer — *present* with its age where a
+beat has arrived, *absent* where none has since this process started, and *unknown* where the tailnet
+list holds no node of that name, because the beats are keyed on the node id (I-5) and a report names
+a machine the way a workspace does (ADR-0009).
+
+**No age threshold, deliberately — and it is not free.** Any beat that arrived is *present* carrying
+how long ago. Which ages mean a dead agent is ADR-0013 §7's, and this daemon names none of those
+states, the same rule that keeps `/api/machines` serving an age and `online` rather than a verdict.
+**What differs here is that a check is already a verdict**: `/api/machines` hands the page a number
+and `State::Present` hands it a green tick, so a machine whose agent died an hour ago reads *ready*
+on this route while the machines table beside it reads *asleep or off*. The detail carries the age,
+so nothing is hidden, but a card that draws only the state will be confidently wrong. Fixing it means
+naming the 30 s threshold a third time — the agent's `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`
+being the first two, with no constant either can share — which is why it is recorded here rather than
+patched.
+
+**It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
+machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
+It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
+handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
+their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
+to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
+--json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine route
+reads that same sweep, so a machine no workspace names is a **404** — `doctor::fleet` asks the
+machines workspaces name, and asking a machine per request is the thing this shape refuses.
+
 ## The one thing it sends, and the two rules that keep it useful
 
 `notify.rs` runs off the **agents** loop in `refresh.rs` and adds no poll, no ssh and no timer: two
