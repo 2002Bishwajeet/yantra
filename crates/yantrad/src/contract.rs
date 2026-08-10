@@ -260,6 +260,9 @@ async fn fleet() -> Fleet {
         // `/api/attention` joins this fixture when the dashboard reads it
         // (Y-174): an entry here needs a type in `web/src/api.ts` to satisfy.
         attention: None,
+        // `/readiness/github` has no entry below: the type it would satisfy is
+        // the card's, and the dashboard is parked (Y-174).
+        github: None,
     });
 
     let mut beats = fleet.beats.write().await;

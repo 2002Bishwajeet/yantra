@@ -97,6 +97,14 @@ pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'sta
             tokio::time::sleep(ATTENTION).await;
         }
     });
+
+    let github = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_github(&github).await;
+            tokio::time::sleep(EVERY).await;
+        }
+    });
 }
 
 async fn look_at_machines<I: Inventory>(model: &Model, inventory: &I) {
@@ -132,6 +140,16 @@ async fn look_at_readiness(model: &Model) {
 async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
     let reading = Reading::new(forge.attention().await);
     model.write().await.attention = Some(Arc::new(reading));
+}
+
+/// The one look that touches no machine in the fleet: `gh` runs here, so this is
+/// what the readiness sweep beside it cannot ask. Its own task rather than a
+/// line in that one because a local probe must not queue behind a `ConnectTimeout`
+/// per asleep machine, and it is on a task at all because `gh auth status` is a
+/// network call — the rule keeping ssh off the request path, for the same reason.
+async fn look_at_github(model: &Model) {
+    let reading = Reading::new(doctor::github().await);
+    model.write().await.github = Some(Arc::new(reading));
 }
 
 /// The reading lands in the model before anything is sent, so a browser never

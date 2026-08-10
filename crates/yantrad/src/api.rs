@@ -47,6 +47,7 @@ pub fn router() -> Router<Fleet> {
         .route("/readiness", get(readiness))
         .route("/machines/{name}/readiness", get(machine_readiness))
         .route("/attention", get(attention))
+        .route("/readiness/github", get(github))
 }
 
 /// The one route that joins two memories: the look Tailscale answered and what
@@ -180,6 +181,26 @@ async fn machine_readiness(
         )
             .into_response(),
     }
+}
+
+/// The readiness reading about **this** machine (Y-175). The sweep above asks
+/// the machines workspaces name over ssh; the GitHub credential the work inbox
+/// reads is the one where `yantrad` runs, because
+/// [`yantra_core::attention`] spawns `gh` here. **A route rather than a tenth
+/// check on every report**: a check copied onto each machine's card would claim
+/// something no ssh session asked, which is the answer R-23 forbids.
+///
+/// There is no `failed`: the check carries a look it could not take as
+/// *unknown*, so the only two answers are the reading and nobody having looked.
+async fn github(State(model): State<Model>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    Json(match snapshot.github.as_deref() {
+        Some(reading) => Answer::Ok {
+            age_seconds: reading.age().as_secs(),
+            data: reading.value().clone(),
+        },
+        None => Answer::Never,
+    })
 }
 
 /// The library answers `heartbeat` *unknown* from every caller it has, and that
@@ -742,6 +763,7 @@ mod tests {
             "/readiness",
             "/machines/cachyos-g14/readiness",
             "/attention",
+            "/readiness/github",
         ] {
             let body = get_json(holding(Snapshot::default()), path).await;
             assert_eq!(body, json!({"looked": "never"}), "{path}");
@@ -1241,6 +1263,37 @@ mod tests {
                 .as_str()
                 .is_some_and(|e| e.contains("gh auth login")),
             "{body}"
+        );
+    }
+
+    /// The check that is about this host, served under its own name and its own
+    /// age — it is nowhere in the per-machine reports, because no ssh session
+    /// asked it.
+    #[tokio::test]
+    async fn the_daemons_own_github_credential_is_answered_apart_from_the_fleet() {
+        let fleet = holding(Snapshot {
+            github: Some(Arc::new(Reading::new(doctor::Check {
+                check: doctor::GITHUB,
+                state: doctor::State::Absent,
+                detail: "`gh` here holds no credential".into(),
+            }))),
+            readiness: Some(Arc::new(Reading::new(Ok(vec![checked("cachyos-g14")])))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(fleet.clone(), "/readiness/github").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"]["check"], "github", "{body}");
+        assert_eq!(body["data"]["state"], "absent", "{body}");
+        assert!(body["age_seconds"].as_u64().is_some(), "{body}");
+
+        let fleet_body = get_json(fleet, "/readiness").await;
+        let checks = fleet_body["data"][0]["checks"]
+            .as_array()
+            .expect("a report carries its checks");
+        assert!(
+            checks.iter().all(|check| check["check"] != "github"),
+            "a fact about this host is not a fact about that machine: {fleet_body}"
         );
     }
 

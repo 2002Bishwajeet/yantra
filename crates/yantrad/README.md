@@ -22,6 +22,7 @@ API the CLI cannot reach.
 | `GET /api/readiness` | `yantra doctor` |
 | `GET /api/machines/{name}/readiness` | `yantra doctor <machine>` |
 | `GET /api/attention` | `yantra ls attention` |
+| `GET /api/readiness/github` | — (`yantra` runs where you are, not where the daemon does) |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
@@ -105,6 +106,19 @@ departs from the fleet's interval. The fleet poll pays for itself by keeping the
 this one warms nothing and spends a quota that is not Yantra's — the owner's own `gh` and `git`
 draw on the same token. GitHub asks for it directly: `/notifications` answers `X-Poll-Interval: 60`,
 so the fleet's interval would poll it at twice the rate its own server requests.
+`GET /api/readiness/github` is the check about **this** host (Y-175): whether `gh` is installed and
+logged in where the daemon runs, which is the credential the work inbox reads because `gh` is spawned
+here. It is a route of its own rather than a tenth check on every report, since an answer about this
+machine copied onto each machine's card claims something no ssh session asked. Two of its answers are
+earned — no `gh` on the daemon's `PATH`, and a `gh` that names no credential — and every other
+failure is *unknown*, because `gh auth status` says the same thing about a token GitHub refused as
+about a GitHub it could not reach.
+
+```json
+{"looked": "ok", "age_seconds": 3,
+ "data": {"check": "github", "state": "present",
+          "detail": "`gh` reports a stored credential here — that it works is not asked"}}
+```
 
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:
 

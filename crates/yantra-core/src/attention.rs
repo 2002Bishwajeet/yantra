@@ -108,6 +108,14 @@ impl Forge for Gh {
     }
 }
 
+/// Whether this machine holds a credential `gh` will use, and nothing about
+/// whose it is. `gh auth status` names the account on stdout and repeats it on
+/// stderr when it fails, so the stdout is dropped here and [`Error::Command`]'s
+/// stderr is the caller's to keep out of whatever it renders (§B4).
+pub async fn credential() -> Result<(), Error> {
+    run(&["auth", "status"]).await.map(drop)
+}
+
 async fn search(kind: &str, filter: &str) -> Result<Vec<Item>, Error> {
     let args = [
         "search",
