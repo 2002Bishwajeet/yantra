@@ -131,7 +131,7 @@ yantra attach yantra             # hand this terminal to the session
 yantra resume yantra             # start the agent again on the conversation it left off
 yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
-yantra tokens yantra             # what that session has spent, in tokens
+yantra tokens yantra             # what that session has spent, in tokens and dollars
 yantra down yantra               # stop it, giving the agent a chance to shut down
 yantra rm yantra [--force]       # delete the workspace file, refusing while a session is open
 yantra kill mac scratch          # stop a session by machine and name, workspace or not

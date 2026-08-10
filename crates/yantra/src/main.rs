@@ -17,6 +17,7 @@ use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
+use yantra_core::price;
 use yantra_core::probe;
 use yantra_core::remove;
 use yantra_core::resume;
@@ -478,14 +479,19 @@ async fn show_tokens(name: &str) -> ExitCode {
     }
 }
 
-/// No total line: the four are not the same unit of anything, and Yantra prints
-/// no money — every figure here is one Claude Code wrote down.
+/// The four counts do not add up to a fifth — they are not the same unit of
+/// anything — so the only figure that adds them is money, and it is the last
+/// line because it is what the question was. **The date it was priced at is on
+/// that line with it** (Y-182): a table written down in a binary reports wrong
+/// money the day a price changes and says nothing while it does, and a visible
+/// date is what the owner chose instead of silence.
 fn render_tokens(spend: &tokens::Spend) -> String {
+    let total = spend.total();
     let rows = [
-        ("input", spend.input),
-        ("output", spend.output),
-        ("cache write", spend.cache_write),
-        ("cache read", spend.cache_read),
+        ("input", total.input),
+        ("output", total.output),
+        ("cache write", total.cache_write),
+        ("cache read", total.cache_read),
     ];
     let counts: Vec<String> = rows.iter().map(|(_, count)| thousands(*count)).collect();
     let width = counts.iter().map(String::len).max().unwrap_or(0);
@@ -494,16 +500,65 @@ fn render_tokens(spend: &tokens::Spend) -> String {
     for ((label, _), count) in rows.iter().zip(&counts) {
         out.push_str(&format!("  {label:<12}  {count:>width$}\n"));
     }
-    if spend.responses == 0 {
+    if total.responses == 0 {
         out.push_str("\nthis session has spent nothing yet\n");
-    } else {
+        return out;
+    }
+
+    // Fast mode is billed at twice base input and twice output, and the table
+    // carries neither — so nothing here is priced, per model or in total.
+    let priced = spend.fast == 0;
+    let name = spend.by_model.keys().map(String::len).max().unwrap_or(0);
+    let mut charged = 0.0;
+    let mut unpriced = Vec::new();
+    out.push('\n');
+    for (model, counts) in &spend.by_model {
+        let cost = priced
+            .then(|| price::rate(model))
+            .flatten()
+            .map(|rate| rate.charge(counts));
+        match cost {
+            Some(cost) => charged += cost,
+            None => unpriced.push(model.as_str()),
+        }
         out.push_str(&format!(
-            "\n{} response{}\n",
-            spend.responses,
-            if spend.responses == 1 { "" } else { "s" }
+            "  {model:<name$}  {responses:>4} response{plural}  {cost:>7}\n",
+            responses = counts.responses,
+            plural = if counts.responses == 1 { " " } else { "s" },
+            cost = cost.map_or_else(|| "—".to_owned(), money),
+        ));
+    }
+
+    if !priced {
+        out.push_str(&format!(
+            "\nno cost: {} response{} ran in fast mode, which is billed at a rate\n\
+             this price table does not carry\n",
+            spend.fast,
+            if spend.fast == 1 { "" } else { "s" }
+        ));
+        return out;
+    }
+
+    out.push_str(&format!(
+        "\n{} at prices of {}\n",
+        money(charged),
+        price::AS_OF
+    ));
+    for model in unpriced {
+        out.push_str(&format!(
+            "{model} is not in that table, so its tokens are not in that figure\n"
         ));
     }
     out
+}
+
+/// Under a cent is not nothing, and `$0.00` would say it was.
+fn money(amount: f64) -> String {
+    if amount > 0.0 && amount < 0.005 {
+        "<$0.01".to_owned()
+    } else {
+        format!("${amount:.2}")
+    }
 }
 
 /// Every figure here runs to six or seven digits, and unseparated they cannot
@@ -1601,30 +1656,134 @@ mod tests {
         );
     }
 
-    /// The four counts, each as Claude Code recorded it, and no fifth number:
-    /// no total, and nothing in money — that is Y-182 and a rate this file does
-    /// not carry.
-    #[test]
-    fn the_four_counts_are_reported_and_nothing_is_derived_from_them() {
-        let rendered = render_tokens(&tokens::Spend {
+    fn one_model(model: &str, counts: tokens::Counts) -> tokens::Spend {
+        tokens::Spend {
             path: "/h/.claude/projects/-srv-repo/s.jsonl".to_owned(),
-            responses: 66,
-            input: 1_434,
-            output: 49_118,
-            cache_write: 239_765,
-            cache_read: 7_492_711,
-        });
+            by_model: [(model.to_owned(), counts)].into_iter().collect(),
+            fast: 0,
+        }
+    }
+
+    /// The four counts as Claude Code recorded them, and the one figure that is
+    /// derived — which never appears without the day it was priced at (Y-182).
+    #[test]
+    fn the_counts_are_reported_and_the_cost_carries_the_date_it_was_priced_at() {
+        let rendered = render_tokens(&one_model(
+            "claude-opus-5",
+            tokens::Counts {
+                responses: 66,
+                input: 1_434,
+                output: 49_118,
+                cache_write: 239_765,
+                cache_write_1h: 0,
+                cache_read: 7_492_711,
+            },
+        ));
         assert!(rendered.contains("transcript: /h/.claude"), "{rendered}");
         assert!(rendered.contains("input             1,434"), "{rendered}");
         assert!(rendered.contains("cache read    7,492,711"), "{rendered}");
-        assert!(rendered.ends_with("66 responses\n"), "{rendered}");
         assert!(
-            !rendered.contains('$'),
-            "the transcript records no cost, so nothing here may print one: {rendered}"
+            rendered.contains("claude-opus-5    66 responses"),
+            "{rendered}"
+        );
+        // 1,434 * $5 + 49,118 * $25 + 239,765 * $6.25 + 7,492,711 * $0.50, all
+        // per million.
+        assert!(rendered.contains("$6.48"), "{rendered}");
+        assert!(
+            rendered.ends_with(&format!("$6.48 at prices of {}\n", price::AS_OF)),
+            "a figure with no date beside it is the failure this row exists to \
+             prevent: {rendered}"
         );
         for line in rendered.lines() {
             assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
         }
+    }
+
+    /// Models do not share a rate, so a transcript with two of them is priced
+    /// twice and added — never at whichever rate came first.
+    #[test]
+    fn two_models_are_priced_separately_and_summed() {
+        let spend = tokens::Spend {
+            path: "/x".to_owned(),
+            by_model: [
+                (
+                    "claude-opus-5".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+                (
+                    "claude-haiku-4-5-20251001".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            fast: 0,
+        };
+        let rendered = render_tokens(&spend);
+        assert!(rendered.contains("$25.00"), "opus output: {rendered}");
+        assert!(rendered.contains("$5.00"), "haiku output: {rendered}");
+        assert!(rendered.contains("$30.00 at prices of"), "{rendered}");
+    }
+
+    /// A model the table does not carry is shown as unpriced and left out of
+    /// the figure, with a line saying so — the difference between *we do not
+    /// know what this cost* and *this cost nothing*.
+    #[test]
+    fn an_unpriced_model_is_named_rather_than_counted_as_free() {
+        let rendered = render_tokens(&one_model(
+            "claude-opus-9",
+            tokens::Counts {
+                responses: 2,
+                output: 1_000_000,
+                ..tokens::Counts::default()
+            },
+        ));
+        assert!(rendered.contains('—'), "{rendered}");
+        assert!(
+            rendered.contains("claude-opus-9 is not in that table"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("$0.00 at prices of"), "{rendered}");
+    }
+
+    /// Fast mode doubles both prices, and the table carries neither — so the
+    /// tokens stand and the money is withheld rather than under-reported.
+    #[test]
+    fn a_fast_mode_session_reports_tokens_and_no_money() {
+        let mut spend = one_model(
+            "claude-opus-5",
+            tokens::Counts {
+                responses: 3,
+                output: 1_000_000,
+                ..tokens::Counts::default()
+            },
+        );
+        spend.fast = 1;
+        let rendered = render_tokens(&spend);
+        assert!(rendered.contains("output        1,000,000"), "{rendered}");
+        assert!(rendered.contains("ran in fast mode"), "{rendered}");
+        assert!(
+            !rendered.contains('$'),
+            "a rate this table does not carry must not produce a figure, per \
+             model or in total: {rendered}"
+        );
+    }
+
+    /// A tenth of a cent is not nothing, and `$0.00` would say it was.
+    #[test]
+    fn a_charge_under_a_cent_is_not_rounded_to_nothing() {
+        assert_eq!(money(0.0), "$0.00");
+        assert_eq!(money(0.001), "<$0.01");
+        assert_eq!(money(0.006), "$0.01");
+        assert_eq!(money(11.234), "$11.23");
     }
 
     /// A session that has said nothing has spent nothing, and that is a reading
@@ -1637,6 +1796,10 @@ mod tests {
         });
         assert!(rendered.contains("spent nothing yet"), "{rendered}");
         assert!(rendered.contains("input         0"), "{rendered}");
+        assert!(
+            !rendered.contains('$'),
+            "nothing spent is not a price: {rendered}"
+        );
     }
 
     #[test]

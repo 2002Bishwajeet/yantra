@@ -37,6 +37,15 @@ const THE_REST: &[&str] = &[
     r#"{"type":"file-history-snapshot","messageId":"m","snapshot":{},"isSnapshotUpdate":false}"#,
 ];
 
+/// **A subagent's response, on a different model and carrying a `model`
+/// argument of its own** (Y-182). Two things have to survive a real `grep`
+/// here: the response is priced at Haiku's rate rather than Opus's, and the
+/// `Agent` tool's `"model":"sonnet"` further along the same line does not
+/// become the model that is priced.
+const A_SUBAGENT: &[&str] = &[
+    r#"{"parentUuid":"u3","isSidechain":true,"message":{"id":"msg_3","model":"claude-haiku-4-5-20251001","role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Agent","input":{"subagent_type":"general-purpose","model":"sonnet","prompt":"look it up"}}],"usage":{"input_tokens":11,"cache_creation_input_tokens":300,"cache_read_input_tokens":0,"output_tokens":7,"service_tier":"standard","speed":"standard","cache_creation":{"ephemeral_5m_input_tokens":300,"ephemeral_1h_input_tokens":0}}},"requestId":"req_011CdjzTHIRD","type":"assistant","uuid":"u4","timestamp":"2026-08-05T17:19:50.000Z"}"#,
+];
+
 struct Lab {
     _fixture: SshFixture,
     ssh: Ssh,
@@ -103,11 +112,50 @@ async fn a_response_written_as_two_records_is_counted_once() -> Result<()> {
         "{}",
         spend.path
     );
-    assert_eq!(spend.responses, 2, "{spend:?}");
-    assert_eq!(spend.input, 4, "{spend:?}");
-    assert_eq!(spend.output, 275, "{spend:?}");
-    assert_eq!(spend.cache_write, 40_818, "{spend:?}");
-    assert_eq!(spend.cache_read, 40_353, "{spend:?}");
+    let opus = spend
+        .by_model
+        .get("claude-opus-5")
+        .expect("the model each record named");
+    assert_eq!(opus.responses, 2, "{spend:?}");
+    assert_eq!(opus.input, 4, "{spend:?}");
+    assert_eq!(opus.output, 275, "{spend:?}");
+    assert_eq!(opus.cache_write, 40_818, "{spend:?}");
+    assert_eq!(opus.cache_write_1h, 40_818, "{spend:?}");
+    assert_eq!(opus.cache_read, 40_353, "{spend:?}");
+    assert_eq!(spend.fast, 0, "{spend:?}");
+    Ok(())
+}
+
+/// Two models in one transcript are two rates, and a real `grep` has to keep
+/// them apart — including from the `model` a tool call carries in its own
+/// arguments, which sits on the same line as the response's (Y-182).
+#[tokio::test]
+async fn a_second_model_is_counted_apart_from_the_first() -> Result<()> {
+    let Some(lab) = Lab::start("tokens-models").await? else {
+        return Ok(());
+    };
+    let id = "44444444-4444-4444-8444-444444444444";
+    lab.write_transcript(id, ONE_RESPONSE).await?;
+    lab.write_transcript(id, A_SUBAGENT).await?;
+
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
+    assert_eq!(
+        spend.by_model.keys().collect::<Vec<_>>(),
+        vec!["claude-haiku-4-5-20251001", "claude-opus-5"],
+        "the Agent tool's own `model` argument must not become a third: {spend:?}"
+    );
+    let haiku = spend
+        .by_model
+        .get("claude-haiku-4-5-20251001")
+        .expect("the subagent's model");
+    assert_eq!(haiku.responses, 1, "{spend:?}");
+    assert_eq!(haiku.input, 11, "{spend:?}");
+    assert_eq!(haiku.cache_write, 300, "{spend:?}");
+    assert_eq!(
+        haiku.cache_write_1h, 0,
+        "a five-minute write is billed at 1.25x, not 2x: {spend:?}"
+    );
+    assert_eq!(spend.total().responses, 2, "{spend:?}");
     Ok(())
 }
 
@@ -129,8 +177,8 @@ async fn a_transcript_with_no_assistant_record_is_zero_and_not_an_error() -> Res
     .await?;
 
     let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
-    assert_eq!(spend.responses, 0, "{spend:?}");
-    assert_eq!(spend.input, 0, "{spend:?}");
+    assert!(spend.by_model.is_empty(), "{spend:?}");
+    assert_eq!(spend.total().responses, 0, "{spend:?}");
     Ok(())
 }
 
@@ -145,12 +193,16 @@ async fn no_conversation_crosses_the_wire() -> Result<()> {
     let id = "33333333-3333-4333-8333-333333333333";
     lab.write_transcript(id, ONE_RESPONSE).await?;
     lab.write_transcript(id, THE_REST).await?;
+    lab.write_transcript(id, A_SUBAGENT).await?;
 
     let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
     let answer = format!("{spend:?}");
     assert!(!answer.contains("Fixed it."), "{answer}");
     assert!(!answer.contains("fix the failing test"), "{answer}");
     assert!(!answer.contains("req_"), "{answer}");
+    // Y-182 added a field that a tool call also carries, so what sits beside
+    // one in a tool's arguments is worth asserting on too.
+    assert!(!answer.contains("look it up"), "{answer}");
     Ok(())
 }
 
