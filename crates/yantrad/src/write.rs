@@ -29,7 +29,9 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
-use yantra_core::{agent, down, edit, remove, resume, status, terminfo, tmux, up, workspace};
+use yantra_core::{
+    agent, down, edit, remove, resume, sessions, status, terminfo, tmux, up, workspace,
+};
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -99,6 +101,10 @@ where
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
+        .route(
+            "/machines/{machine}/sessions/{session}",
+            axum::routing::delete(end::<I>),
+        )
         .with_state(authoriser)
 }
 
@@ -354,6 +360,36 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
+/// Stops a session by machine and name — the sessions `ls sessions` finds that
+/// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
+///
+/// A **write**, and it awaits ssh for the reason the exception exists: a person
+/// tapped a button once. Nothing polls this.
+async fn end<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((machine, session)): Path<(String, String)>,
+) -> Result<Json<Ended>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("kill {session} on {machine} for {}", caller.node);
+
+    let report = sessions::kill(&machine, &session)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_sessions(&error),
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Ended {
+        machine: report.machine,
+        session: report.session,
+        // False is "nothing was there", which is the state asked for and never
+        // a failure (I-30).
+        killed: report.killed,
+    }))
+}
+
 /// `DELETE` rather than a `POST /delete`, because the verb HTTP already has
 /// means this and nothing here needs a body. `?force=true` is the CLI's
 /// `--force`: it skips asking the machine rather than ignoring its answer.
@@ -501,6 +537,17 @@ fn from_remove(error: &remove::Error) -> StatusCode {
     }
 }
 
+/// No wildcard, per Y-135.
+fn from_sessions(error: &sessions::Error) -> StatusCode {
+    match error {
+        sessions::Error::Workspace(workspace) => from_workspace(workspace),
+        sessions::Error::Ssh(_) | sessions::Error::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
+        sessions::Error::NoStateDir | sessions::Error::Interrupted { .. } => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
 fn from_resume(error: &resume::Error) -> StatusCode {
     match error {
         resume::Error::Workspace(workspace) => from_workspace(workspace),
@@ -587,6 +634,13 @@ struct Stopped {
     machine: String,
     stopped: bool,
     ending: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Ended {
+    machine: String,
+    session: String,
+    killed: bool,
 }
 
 #[derive(Debug, serde::Serialize)]

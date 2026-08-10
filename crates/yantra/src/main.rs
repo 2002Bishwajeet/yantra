@@ -108,6 +108,13 @@ enum Command {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Stop a tmux session by machine and name, for one no workspace claims
+    Kill {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// tmux session name, as `yantra ls sessions` prints it
+        session: String,
+    },
     /// Delete a workspace, refusing while its session is still open
     Rm {
         /// Workspace name, without the `.toml`
@@ -201,6 +208,7 @@ async fn main() -> ExitCode {
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
+        Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
@@ -851,6 +859,26 @@ fn ls_workspaces() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Stopping something already stopped exits **0** — `down`'s rule again, and
+/// the reason this prints which of the two happened rather than one sentence
+/// that would be true either way.
+async fn kill(machine: &str, session: &str) -> ExitCode {
+    match sessions::kill(machine, session).await {
+        Ok(report) if report.killed => {
+            println!("killed `{}` on {}", report.session, report.machine);
+            ExitCode::SUCCESS
+        }
+        Ok(report) => {
+            println!("no session `{}` on {}", report.session, report.machine);
+            ExitCode::SUCCESS
         }
         Err(err) => {
             report_error(&err);
@@ -1916,6 +1944,20 @@ mod tests {
     fn an_unrecognised_os_reaches_the_table_verbatim() {
         let odd = machine("nas", Os::Other("freebsd".to_string()), true, false, None);
         assert!(render_machines(&[odd]).contains("freebsd"));
+    }
+
+    #[test]
+    fn kill_takes_a_machine_and_a_session() {
+        let cli = Cli::try_parse_from(["yantra", "kill", "mac", "work"])
+            .expect("`kill <machine> <session>` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Kill { ref machine, ref session }) if machine == "mac" && session == "work"
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "kill", "mac"]).is_err(),
+            "a session name is required: killing every session on a machine is not this verb"
+        );
     }
 
     /// `--force` is the difference between refusing and stranding a session, so

@@ -101,6 +101,56 @@ pub async fn list_from<I: Inventory>(inventory: &I) -> Result<Vec<MachineSession
     Ok(answers)
 }
 
+/// What [`kill`] did, so a caller can say *killed* or *already gone* rather
+/// than guessing which happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Killed {
+    pub machine: String,
+    pub session: String,
+    /// `false` when nothing was there. Absence is the state asked for (I-30),
+    /// so this is a fact to report and never a failure.
+    pub killed: bool,
+}
+
+/// Stops a session by machine and name, for the sessions [`list`] finds that no
+/// workspace claims.
+///
+/// **This is not `down`.** `down` reads how the agent ended before destroying
+/// the pane that holds it, because a workspace's session was started by Yantra
+/// and its ending means something. A session Yantra did not start has no agent
+/// to report on, so this only stops it.
+pub async fn kill(machine: &str, session: &str) -> Result<Killed, Error> {
+    let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    kill_on(&ssh, &tmux, machine, session).await
+}
+
+/// The testable half, driven by the container fixture.
+pub async fn kill_on<E: ssh::Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    machine: &str,
+    session: &str,
+) -> Result<Killed, Error> {
+    // Asked before killing, because `tmux kill-session` cannot tell the caller
+    // whether it destroyed anything — absence is success there, which is right
+    // for the verb and useless for the sentence a person reads afterwards.
+    let present = tmux
+        .list(exec)
+        .await?
+        .iter()
+        .any(|summary| summary.name == session);
+
+    if present {
+        tmux.kill(exec, session).await?;
+    }
+    Ok(Killed {
+        machine: machine.to_owned(),
+        session: session.to_owned(),
+        killed: present,
+    })
+}
+
 /// Which tailnet peers are worth a `ConnectTimeout` every 30 s.
 ///
 /// **Both tests are about cost, not about permission.** A phone runs no sshd

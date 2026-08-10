@@ -15,6 +15,7 @@
 - `yantra status <workspace>`: running, finished, stopped, crashed, killed — or unclear, with the reason.
 - `yantra down <workspace>`: stop the session, reporting how the agent ended.
 - `yantra rm <workspace> [--force]`: delete the workspace file. Refuses while its machine still holds the session, and refuses when the machine cannot be asked (R-23) — deleting the file would leave the session where nothing looks for it, and `down`/`resume`/`status`/`logs` would each report it absent (I-30). `--force` skips asking rather than ignoring the answer. Deleting what is already gone exits **0**.
+- `yantra kill <machine> <session>`: stop a tmux session by machine and name — the sessions `ls sessions` finds that no workspace claims, which `down` cannot reach. Not `down`: there is no agent ending to read, so it only stops it. Prints *killed* or *no session*, and exits **0** for both (I-30).
 - `yantra ls machines`: the tailnet, advisory only.
 - `yantra ls sessions`: tmux sessions on every machine a workspace names or the tailnet offers (Y-176). Exit 1 if any machine was unreachable — the table still prints, so a caller can tell the answer is partial.
 - `yantra ls attention`: issues assigned to you, pull requests waiting on your review, and the unread notification count — read through `gh`, so Yantra holds no GitHub token ([R13](../../docs/research/13-dashboard-revamp-and-github.md) §2.2). Exit 1 when `gh` is absent, logged out or cannot reach GitHub, each said by name; an empty inbox is exit 0, because nothing waiting is an answer.
