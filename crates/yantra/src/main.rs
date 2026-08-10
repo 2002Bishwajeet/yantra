@@ -17,6 +17,7 @@ use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
+use yantra_core::probe;
 use yantra_core::remove;
 use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
@@ -107,6 +108,13 @@ enum Command {
     Down {
         /// Workspace name, without the `.toml`
         workspace: String,
+    },
+    /// Ask a machine whether a directory is there, and what git origin it holds
+    Probe {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// Absolute path **on that machine**, not on this one
+        path: String,
     },
     /// Stop a tmux session by machine and name, for one no workspace claims
     Kill {
@@ -208,6 +216,7 @@ async fn main() -> ExitCode {
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
+        Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
         Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
@@ -859,6 +868,30 @@ fn ls_workspaces() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Exit **0** only when the directory is there, so `yantra probe m /p && yantra
+/// new …` reads the way it looks — `status`'s rule. A machine that could not be
+/// asked exits 1 as well, and the difference is on stderr: the shell gets one
+/// bit and the operator gets the reason (R-23).
+async fn probe(machine: &str, path: &str) -> ExitCode {
+    match probe::probe(machine, path).await {
+        Ok(found) if found.exists => {
+            match &found.origin {
+                Some(origin) => println!("{} exists on {machine}, origin {origin}", found.path),
+                None => println!("{} exists on {machine}, no git origin", found.path),
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(found) => {
+            println!("{} is not a directory on {machine}", found.path);
+            ExitCode::FAILURE
         }
         Err(err) => {
             report_error(&err);

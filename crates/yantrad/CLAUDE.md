@@ -373,11 +373,18 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Two things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Three things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
-rather than to a request. Neither licenses a **read** that awaits ssh, which is still the bug this
-module exists to prevent.
+rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
+([ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): the answer depends on a
+path nobody has typed yet, so no snapshot can hold it, and it is reached over a `POST` rather than
+given a `GET` that would await ssh.
+
+None of the three licenses a **read handler** that awaits ssh, which is still the bug this module
+exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
+one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
+second half however it is spelled, and choosing `POST` does not rescue it.
 
 The interval is a constant for the same reason the port is. `ControlPersist=300` means anything under
 five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the

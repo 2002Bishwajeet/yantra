@@ -21,6 +21,7 @@ pub mod identity;
 pub mod inventory;
 pub mod logs;
 pub mod notify;
+pub mod probe;
 pub mod pty;
 pub mod remove;
 pub mod resume;

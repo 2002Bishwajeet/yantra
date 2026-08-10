@@ -14,6 +14,7 @@ yantra status yantra             # running? finished? crashed?
 yantra down yantra               # stop it, cleanly
 yantra rm yantra [--force]       # delete the workspace, refusing while its session is open
 yantra kill mac scratch          # stop any session by machine and name
+yantra probe mac /code/site      # is it there, and what origin does it hold?
 
 yantra ls machines               # the tailnet
 yantra ls workspaces             # what you have defined

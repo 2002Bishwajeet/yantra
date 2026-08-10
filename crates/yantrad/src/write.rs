@@ -30,7 +30,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::{
-    agent, down, edit, remove, resume, sessions, status, terminfo, tmux, up, workspace,
+    agent, down, edit, probe, remove, resume, sessions, status, terminfo, tmux, up, workspace,
 };
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
@@ -105,6 +105,7 @@ where
             "/machines/{machine}/sessions/{session}",
             axum::routing::delete(end::<I>),
         )
+        .route("/machines/{machine}/probe", post(ask::<I>))
         .with_state(authoriser)
 }
 
@@ -357,6 +358,46 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
         // Y-099: a session opened as a shell never had an ending, and saying it
         // was "killed" says something untrue about a shell.
         ending: report.ending.map(|verdict| format!("{verdict:?}")),
+    }))
+}
+
+/// Asks a machine whether a directory is there and what git origin it holds,
+/// so a form can offer a choice instead of a blank field.
+///
+/// **A read reached over a `POST`, and that is [ADR-0019]** rather than a
+/// mislabelled verb: the answer depends on a path nobody has typed yet, so no
+/// snapshot can hold it, and a `GET` awaiting ssh is the bug the rule above
+/// exists to prevent. It qualifies because a person typed it and nothing polls
+/// it — both halves, which is the test the ADR sets for the next candidate.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    Json(asked): Json<Asked>,
+) -> Result<Json<Found>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("probe {machine} for {}", caller.node);
+
+    let found = probe::probe(&machine, &asked.path)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: match error {
+                probe::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+                probe::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+            },
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Found {
+        machine: found.machine,
+        path: found.path,
+        exists: found.exists,
+        // Absent for three different reasons, which `exists` separates. The
+        // route does not flatten them into one.
+        origin: found.origin,
     }))
 }
 
@@ -634,6 +675,19 @@ struct Stopped {
     machine: String,
     stopped: bool,
     ending: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct Asked {
+    path: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Found {
+    machine: String,
+    path: String,
+    exists: bool,
+    origin: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]

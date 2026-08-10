@@ -27,6 +27,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/down` | `yantra down` |
 | `DELETE /api/workspaces/{name}` | `yantra rm` |
 | `DELETE /api/machines/{machine}/sessions/{session}` | `yantra kill` |
+| `POST /api/machines/{machine}/probe` | `yantra probe` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 
