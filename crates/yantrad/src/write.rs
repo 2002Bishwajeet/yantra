@@ -25,11 +25,11 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
-use yantra_core::{agent, down, edit, resume, status, terminfo, tmux, up, workspace};
+use yantra_core::{agent, down, edit, remove, resume, status, terminfo, tmux, up, workspace};
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -95,7 +95,7 @@ where
 {
     Router::new()
         .route("/workspaces", post(make::<I>))
-        .route("/workspaces/{name}", patch(change::<I>))
+        .route("/workspaces/{name}", patch(change::<I>).delete(erase::<I>))
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
@@ -354,6 +354,41 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
+/// `DELETE` rather than a `POST /delete`, because the verb HTTP already has
+/// means this and nothing here needs a body. `?force=true` is the CLI's
+/// `--force`: it skips asking the machine rather than ignoring its answer.
+async fn erase<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    uri: Uri,
+) -> Result<Json<Removed>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("rm {name} for {}", caller.node);
+
+    match remove::remove(&name, forced(&uri)).await {
+        Ok(report) => Ok(Json(Removed {
+            // `None` is a file that was deleted without ever parsing, so there
+            // is nothing true to say about where it pointed.
+            machine: report.workspace.map(|workspace| workspace.machine),
+            removed: true,
+        })),
+        // Absence is the state asked for, so a second delete succeeds — the
+        // shape `down` already uses for a session that was not running. A `404`
+        // here would make two tabs deleting one workspace show a failure for
+        // something that worked.
+        Err(remove::Error::Workspace(workspace::Error::NotFound { .. })) => Ok(Json(Removed {
+            machine: None,
+            removed: false,
+        })),
+        Err(error) => Err(Refused::Verb {
+            status: from_remove(&error),
+            said: chain(&error),
+        }),
+    }
+}
+
 async fn again<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
@@ -382,6 +417,14 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
 /// daemon's to explain — and everything else here really is this daemon reading
 /// its own files, which is what the mappers below took an `Option` away to keep
 /// true (Y-135).
+/// Read from the URI rather than through `Query`, whose axum feature this
+/// workspace does not enable — one flag is a real cost on a binary this repo
+/// measures, and the whole requirement is a single boolean.
+fn forced(uri: &Uri) -> bool {
+    uri.query()
+        .is_some_and(|query| query.split('&').any(|pair| pair == "force=true"))
+}
+
 fn from_workspace(error: &workspace::Error) -> StatusCode {
     match error {
         workspace::Error::NotFound { .. } => StatusCode::NOT_FOUND,
@@ -442,6 +485,19 @@ fn from_down(error: &down::Error) -> StatusCode {
         down::Error::Ssh(_) | down::Error::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
         down::Error::Status(status) => from_status(status),
         down::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// No wildcard, for Y-135's reason: a variant added later must be given a
+/// status rather than defaulting into a 500 nobody can act on.
+fn from_remove(error: &remove::Error) -> StatusCode {
+    match error {
+        remove::Error::Workspace(workspace) => from_workspace(workspace),
+        // The session is still open, so the request conflicts with the state of
+        // the thing it names. `force` is how a caller means it anyway.
+        remove::Error::SessionOpen { .. } => StatusCode::CONFLICT,
+        remove::Error::CannotTell { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        remove::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -531,6 +587,12 @@ struct Stopped {
     machine: String,
     stopped: bool,
     ending: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Removed {
+    machine: Option<String>,
+    removed: bool,
 }
 
 #[derive(Debug, serde::Serialize)]

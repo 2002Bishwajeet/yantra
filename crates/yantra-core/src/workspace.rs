@@ -319,6 +319,45 @@ pub fn load(name: &str) -> Result<Workspace, Error> {
     load_from(&workspaces_dir()?, name)
 }
 
+/// Deletes a workspace file and returns what was in it, so a caller can say
+/// what it removed rather than only that it removed something.
+///
+/// **It loads first, and that is the point.** A file that will not parse is
+/// still deletable — `remove_from` reads before it unlinks only so the caller
+/// has something to print, and a `Malformed` file is exactly the one an
+/// operator most wants gone. So a load failure other than `NotFound` does not
+/// stop the delete; it costs the description.
+///
+/// Whether a session is stranded by this is [`crate::remove`]'s question, not
+/// this function's: this half is a file, and that half is a machine.
+pub fn remove(name: &str) -> Result<Option<Workspace>, Error> {
+    remove_from(&workspaces_dir()?, name)
+}
+
+fn remove_from(dir: &Path, name: &str) -> Result<Option<Workspace>, Error> {
+    validate_name(dir, name)?;
+    let path = dir.join(format!("{name}.toml"));
+    let described = load_from(dir, name);
+
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::NotFound {
+                name: name.to_owned(),
+                path,
+            });
+        }
+        Err(source) => {
+            return Err(Error::Unwritable {
+                name: name.to_owned(),
+                path,
+                source,
+            });
+        }
+    }
+    Ok(described.ok())
+}
+
 /// A file the listing refused, under the name it would have had. The shape
 /// [`crate::sessions::MachineSessions`] already has: something that did not
 /// answer is reported by name rather than dropped (Y-054).
@@ -480,6 +519,54 @@ fn parse(name: &str, path: &Path, text: &str) -> Result<Workspace, Error> {
 mod tests {
     use super::*;
     use std::error::Error as _;
+
+    const GOOD: &str = "machine = \"box\"\nrepo = \"/srv/app\"\n";
+
+    #[test]
+    fn removing_returns_what_the_file_held() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("remove-good", &[("gone.toml", GOOD)])?;
+        let removed = remove_from(&dir, "gone")?.expect("a readable file describes itself");
+        assert_eq!(removed.machine, "box");
+        assert!(!dir.join("gone.toml").exists(), "the file is unlinked");
+        Ok(())
+    }
+
+    /// The file an operator most wants gone is the one that will not parse, so
+    /// the delete does not depend on the read succeeding — only the description
+    /// does.
+    #[test]
+    fn a_file_that_will_not_parse_is_still_deleted() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("remove-broken", &[("broken.toml", "machine = 1\n")])?;
+        assert!(
+            remove_from(&dir, "broken")?.is_none(),
+            "nothing true can be said about where it pointed"
+        );
+        assert!(!dir.join("broken.toml").exists(), "it is gone regardless");
+        Ok(())
+    }
+
+    /// Distinguishable from a delete that happened, because the caller decides
+    /// whether absence is success and this function must not decide for it.
+    #[test]
+    fn removing_what_is_not_there_says_so() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("remove-absent", &[])?;
+        assert!(matches!(
+            remove_from(&dir, "ghost"),
+            Err(Error::NotFound { .. })
+        ));
+        Ok(())
+    }
+
+    /// I-57: the path in an `InvalidName` is built rather than read, so a name
+    /// that could escape the directory is refused before any filesystem call.
+    #[test]
+    fn a_name_that_is_not_a_name_never_reaches_the_filesystem() {
+        let dir = std::env::temp_dir().join("yantra-workspace-test-remove-escape");
+        assert!(matches!(
+            remove_from(&dir, "../../etc/passwd"),
+            Err(Error::InvalidName { .. })
+        ));
+    }
 
     fn dir_with(label: &str, files: &[(&str, &str)]) -> std::io::Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!("yantra-workspace-test-{label}"));

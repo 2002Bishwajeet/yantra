@@ -17,6 +17,7 @@ use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
+use yantra_core::remove;
 use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
@@ -107,6 +108,15 @@ enum Command {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Delete a workspace, refusing while its session is still open
+    Rm {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// Delete without asking the machine. Use when it cannot be reached, or
+        /// when stranding the session is what you want
+        #[arg(long)]
+        force: bool,
+    },
     /// List what Yantra can see
     Ls {
         #[command(subcommand)]
@@ -191,6 +201,7 @@ async fn main() -> ExitCode {
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
+        Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -840,6 +851,36 @@ fn ls_workspaces() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Deleting something already gone exits **0**, which is `down`'s rule (I-30,
+/// root §B4): absence is the state asked for. It costs a typo going unreported,
+/// and that is the same price `down` already pays.
+async fn rm(name: &str, force: bool) -> ExitCode {
+    match remove::remove(name, force).await {
+        Ok(removed) => {
+            match removed.workspace {
+                Some(workspace) => println!(
+                    "removed `{}` ({} on {})",
+                    removed.name,
+                    workspace.repo.display(),
+                    workspace.machine
+                ),
+                // The file was deleted but never parsed, so there is nothing
+                // true to say about where it pointed.
+                None => println!("removed `{}`, which did not parse", removed.name),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(remove::Error::Workspace(workspace::Error::NotFound { name, .. })) => {
+            println!("`{name}` is already gone");
+            ExitCode::SUCCESS
         }
         Err(err) => {
             report_error(&err);
@@ -1875,6 +1916,24 @@ mod tests {
     fn an_unrecognised_os_reaches_the_table_verbatim() {
         let odd = machine("nas", Os::Other("freebsd".to_string()), true, false, None);
         assert!(render_machines(&[odd]).contains("freebsd"));
+    }
+
+    /// `--force` is the difference between refusing and stranding a session, so
+    /// its spelling and its default are both part of the contract.
+    #[test]
+    fn rm_takes_a_workspace_and_force_defaults_off() {
+        let bare = Cli::try_parse_from(["yantra", "rm", "demo"]).expect("`rm demo` parses");
+        assert!(matches!(
+            bare.command,
+            Some(Command::Rm { force: false, .. })
+        ));
+
+        let forced =
+            Cli::try_parse_from(["yantra", "rm", "demo", "--force"]).expect("`--force` parses");
+        assert!(matches!(
+            forced.command,
+            Some(Command::Rm { force: true, .. })
+        ));
     }
 
     #[test]

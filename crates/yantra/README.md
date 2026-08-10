@@ -12,6 +12,7 @@ yantra resume yantra             # start it again where the last conversation st
 yantra logs yantra               # what the agent has been saying
 yantra status yantra             # running? finished? crashed?
 yantra down yantra               # stop it, cleanly
+yantra rm yantra [--force]       # delete the workspace, refusing while its session is open
 
 yantra ls machines               # the tailnet
 yantra ls workspaces             # what you have defined

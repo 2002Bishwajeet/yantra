@@ -132,6 +132,7 @@ yantra resume yantra             # start the agent again on the conversation it 
 yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
 yantra down yantra               # stop it, giving the agent a chance to shut down
+yantra rm yantra [--force]       # delete the workspace file, refusing while a session is open
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine
