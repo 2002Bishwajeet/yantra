@@ -329,6 +329,10 @@ literal is written. The write answers are serialised from their DTOs rather than
 handlers authorise a live tailnet caller and then await ssh; what that leaves unchecked is status
 codes, headers and every refusal body, none of which is JSON.
 
+**`/api/attention` is deliberately not in it yet.** An entry here has to `satisfies` a type in
+`web/src/api.ts`, and the dashboard does not read this route until Y-174 — so the fixture holds
+`attention: None` and the entry lands with the types that check it, in one change rather than two.
+
 **`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
 one message identically; that the daemon then accepts it is `terminal.rs`'s own test.
@@ -382,6 +386,23 @@ module exists to prevent.
 The interval is a constant for the same reason the port is. `ControlPersist=300` means anything under
 five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the
 `ControlPath` is per-user, a running daemon speeds the CLI up too.
+
+**`ssh` is not the only thing this rule is about, and `gh` is the proof** (Y-172). `GET /api/attention`
+reads a `Forge` reading the sweep took; a handler that ran `gh` would spawn three subprocesses and
+make three round trips to GitHub per browser poll, which is the ssh storm with a different binary in
+it. **What is different is the interval, and it is the one class that does not run at `EVERY`.**
+The fleet poll pays for itself — `ControlPersist` again — while a `gh` poll warms nothing and is
+spent from the owner's own GitHub quota, which their `gh` and their `git push` draw on too. GitHub
+asks for the slower poll itself: `/notifications` answered **`X-Poll-Interval: 60`** on 2026-08-10, so
+`EVERY` would poll it at twice the rate its server requests. `ATTENTION` is five minutes, and the
+freshness that costs is a field rather than a lie — the reading carries its own age like every other.
+
+Two measurements from that day worth keeping, because both invert what the obvious worry would be.
+`gh search` spends the **GraphQL** budget (5000 points/hour) and **not** the REST search budget —
+which is 30 per *minute* and would have been the tight one, and is untouched. `/notifications` is
+`core`, and `/rate_limit`'s own `core.used` field does not move for it; the response header does.
+**Read `X-Ratelimit-Used` off the call, not the `/rate_limit` endpoint**, if this is ever measured
+again.
 
 **Four states, not three**, and folding any two together is the bug this module exists to avoid:
 nobody has looked (`None`), a look succeeded, a look succeeded and a machine within it did not answer,

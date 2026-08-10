@@ -257,6 +257,9 @@ async fn fleet() -> Fleet {
             swept("cachyos-g14"),
             swept("bishwajeets-macbook-pro"),
         ])))),
+        // `/api/attention` joins this fixture when the dashboard reads it
+        // (Y-174): an entry here needs a type in `web/src/api.ts` to satisfy.
+        attention: None,
     });
 
     let mut beats = fleet.beats.write().await;
