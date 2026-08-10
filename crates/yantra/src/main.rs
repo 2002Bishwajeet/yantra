@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
+use yantra_core::attention::{self, Attention, Forge as _, Gh};
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
@@ -154,6 +155,8 @@ enum LsTarget {
     Sessions,
     /// Workspaces defined in ~/.config/yantra/workspaces
     Workspaces,
+    /// Issues, reviews and notifications waiting for you on GitHub
+    Attention,
 }
 
 #[tokio::main]
@@ -197,6 +200,9 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Workspaces,
         }) => ls_workspaces(),
+        Some(Command::Ls {
+            target: LsTarget::Attention,
+        }) => ls_attention().await,
         Some(Command::Notify {
             message,
             title,
@@ -840,6 +846,82 @@ fn ls_workspaces() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// An empty inbox exits 0. Nothing waiting is the answer, not a partial one —
+/// the same reading that makes `down` succeed on something already stopped.
+async fn ls_attention() -> ExitCode {
+    match Gh.attention().await {
+        Ok(attention) => {
+            print!("{}", render_attention(&attention));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            // Each of these is one person's action away, so name it (the
+            // crate's *name the fix, not just the fault*). `LoggedOut` needs no
+            // note: its own message already carries `gh auth login`.
+            if matches!(err, attention::Error::NotInstalled) {
+                eprintln!("  install it from https://cli.github.com, then run `gh auth login`");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// An issue title runs to any length, and `table` sizes a column to its widest
+/// cell — so one long title pushes `UPDATED` off an 80-column terminal for
+/// every row. This is the width that keeps the table readable, not a claim
+/// about the terminal, which nothing here measures.
+const TITLE_WIDTH: usize = 60;
+
+/// Truncation counts **characters**, not bytes: these titles carry em dashes
+/// and arrows, and slicing a `String` mid-codepoint panics.
+fn ellipsise(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    text.chars().take(width - 1).collect::<String>() + "…"
+}
+
+/// Reviews and issues share one table because they are one queue to a reader —
+/// `KIND` is what separates them, and sorting by anything else would break the
+/// order GitHub already returned them in.
+fn render_attention(attention: &Attention) -> String {
+    let row = |kind: &str, item: &attention::Item| {
+        vec![
+            kind.to_string(),
+            item.repo.clone(),
+            item.number.to_string(),
+            ellipsise(&item.title, TITLE_WIDTH),
+            item.updated_at.clone(),
+        ]
+    };
+    let rows: Vec<Vec<String>> = attention
+        .reviews
+        .iter()
+        .map(|item| row("review", item))
+        .chain(attention.issues.iter().map(|item| row("issue", item)))
+        .collect();
+
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(&["KIND", "REPO", "#", "TITLE", "UPDATED"], &rows)
+    };
+
+    // Under the table rather than in it: a count is not something to open, and
+    // every column above is. Always printed, because zero unread is a reading.
+    out.push_str(&format!(
+        "\n{} unread notification{}\n",
+        attention.notifications,
+        if attention.notifications == 1 {
+            ""
+        } else {
+            "s"
+        }
+    ));
+    out
 }
 
 /// A file that did not load is named **under** the table rather than given a
@@ -1793,5 +1875,70 @@ mod tests {
     fn an_unrecognised_os_reaches_the_table_verbatim() {
         let odd = machine("nas", Os::Other("freebsd".to_string()), true, false, None);
         assert!(render_machines(&[odd]).contains("freebsd"));
+    }
+
+    #[test]
+    fn ls_attention_is_a_spelling_users_type() {
+        let cli =
+            Cli::try_parse_from(["yantra", "ls", "attention"]).expect("`ls attention` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Ls {
+                target: LsTarget::Attention
+            })
+        ));
+    }
+
+    fn item(repo: &str, number: u64, title: &str) -> attention::Item {
+        attention::Item {
+            repo: repo.to_string(),
+            number,
+            title: title.to_string(),
+            url: format!("https://github.com/{repo}/issues/{number}"),
+            updated_at: "2026-08-09T18:46:24Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn both_kinds_share_one_table_and_the_count_sits_under_it() {
+        let out = render_attention(&Attention {
+            reviews: vec![item("o/a", 7, "a review")],
+            issues: vec![item("o/b", 9, "an issue")],
+            notifications: 27,
+        });
+        assert!(out.contains("review"), "{out}");
+        assert!(out.contains("issue"), "{out}");
+        // Under the table: the count is the last line, never a row.
+        assert!(out.trim_end().ends_with("27 unread notifications"), "{out}");
+    }
+
+    /// An empty inbox is a reading, so the count still prints with no table
+    /// above it — and it is singular at one.
+    #[test]
+    fn nothing_waiting_still_says_so() {
+        let out = render_attention(&Attention::default());
+        assert!(!out.contains("KIND"), "no table without rows: {out}");
+        assert_eq!(out.trim(), "0 unread notifications");
+
+        let one = render_attention(&Attention {
+            notifications: 1,
+            ..Attention::default()
+        });
+        assert!(one.contains("1 unread notification\n"), "{one}");
+    }
+
+    /// The titles this reads carry em dashes and arrows, so truncation that
+    /// counted bytes would panic on a boundary rather than shorten a string.
+    #[test]
+    fn a_title_is_cut_by_character_and_never_mid_codepoint() {
+        let wide = "→ ".repeat(80);
+        let cut = ellipsise(&wide, 10);
+        assert_eq!(cut.chars().count(), 10);
+        assert!(cut.ends_with('…'));
+        assert_eq!(
+            ellipsise("short", 10),
+            "short",
+            "under the width is untouched"
+        );
     }
 }

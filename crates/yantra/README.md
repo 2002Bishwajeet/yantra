@@ -16,6 +16,7 @@ yantra down yantra               # stop it, cleanly
 yantra ls machines               # the tailnet
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what is running, everywhere
+yantra ls attention              # issues, reviews and notifications waiting on GitHub
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
