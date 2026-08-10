@@ -21,6 +21,7 @@ API the CLI cannot reach.
 | `GET /api/workspaces/{name}/status` | `yantra status <name>` |
 | `GET /api/readiness` | `yantra doctor` |
 | `GET /api/machines/{name}/readiness` | `yantra doctor <machine>` |
+| `GET /api/attention` | `yantra ls attention` |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
@@ -92,6 +93,18 @@ though `yantra doctor <machine>` would go and ask it.
 here a beat that arrived is *present* with its age, a machine that has never beaten is *absent*, and
 one the tailnet list does not hold stays *unknown* — the beats are keyed on the node id, and a report
 names a machine the way a workspace does.
+
+`GET /api/attention` is what is waiting for the owner on GitHub: pull requests wanting their review,
+issues assigned to them, and the number of unread notifications. The daemon holds no GitHub
+credential — it reads the `gh` on the machine it runs on, which keeps its own token in that machine's
+keyring. **A `gh` that is absent or logged out is `looked: "failed"` carrying the remedy**, never an
+empty inbox: nothing waiting is something a person acts on, and the two must not read alike.
+
+**It is polled every five minutes rather than every thirty seconds**, which is the one read that
+departs from the fleet's interval. The fleet poll pays for itself by keeping the ssh masters warm;
+this one warms nothing and spends a quota that is not Yantra's — the owner's own `gh` and `git`
+draw on the same token. GitHub asks for it directly: `/notifications` answers `X-Poll-Interval: 60`,
+so the fleet's interval would poll it at twice the rate its own server requests.
 
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:
 
