@@ -35,6 +35,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `rm` on a workspace already gone | **0** | the same rule. `DELETE /api/workspaces/{name}` answers `200 {"removed": false}` for it rather than a `404`, so two tabs deleting one workspace do not show a failure for something that worked |
 | `rm` while the session is open, or while the machine cannot be asked | 1 | deleting the file strands the session where nothing looks for it, and a check that cannot know must refuse (R-23). `--force` is how a caller means it anyway |
 | `doctor`, unless every check is `present` | 1 | *ready* is the only 0, so an installer can loop on it — and an `unknown` is not a yes (R-23). An empty fleet is 1 too: nothing was asked, so nothing is known |
+| `tokens` on a session that has spent nothing | **0** | it reports a measurement rather than a state, and zero is one — the transcript was read |
 | `edit --machine` when that machine cannot be reached | 1 | it cannot be *known* that no session is being stranded, and a check that cannot know must refuse rather than allow (R-23) |
 | `attach`, once it has something to attach to | **none** | see below |
 

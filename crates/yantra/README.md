@@ -11,6 +11,7 @@ yantra up yantra --agent claude  # open it, and start Claude Code in it
 yantra resume yantra             # start it again where the last conversation stopped
 yantra logs yantra               # what the agent has been saying
 yantra status yantra             # running? finished? crashed?
+yantra tokens yantra             # what the session has spent, in tokens
 yantra down yantra               # stop it, cleanly
 yantra rm yantra [--force]       # delete the workspace, refusing while its session is open
 yantra kill mac scratch          # stop any session by machine and name
