@@ -257,6 +257,9 @@ async fn fleet() -> Fleet {
             swept("cachyos-g14"),
             swept("bishwajeets-macbook-pro"),
         ])))),
+        // `/readiness/github` has no entry below: the type it would satisfy is
+        // the card's, and the dashboard is parked (Y-174).
+        github: None,
     });
 
     let mut beats = fleet.beats.write().await;

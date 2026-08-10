@@ -73,6 +73,10 @@ pub type Agents = Reading<Result<Fleet, status::Error>>;
 /// Every [`crate::doctor`] check per machine. The dearest class to look at, and
 /// the only one whose answer a person changes by installing something.
 pub type Readiness = Reading<Result<Vec<doctor::Report>, doctor::Error>>;
+/// The one check that is about the host this process runs on rather than about
+/// the fleet ([`crate::doctor::github`]). No [`Result`]: the check carries a look
+/// it could not take as [`doctor::State::Unknown`], which is the whole of R-23.
+pub type Github = Reading<doctor::Check>;
 
 /// Each class costs something different to look at, so each is looked at on its
 /// own and carries its own age. Behind an [`Arc`] so a handler can take the
@@ -84,6 +88,7 @@ pub struct Snapshot {
     pub sessions: Option<Arc<Sessions>>,
     pub agents: Option<Arc<Agents>>,
     pub readiness: Option<Arc<Readiness>>,
+    pub github: Option<Arc<Github>>,
 }
 
 #[cfg(test)]
@@ -109,6 +114,7 @@ mod tests {
         assert!(snapshot.sessions.is_none());
         assert!(snapshot.agents.is_none());
         assert!(snapshot.readiness.is_none());
+        assert!(snapshot.github.is_none());
     }
 
     /// The clone a handler serves is the same reading, not a re-taken one.

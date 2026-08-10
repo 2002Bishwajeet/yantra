@@ -103,6 +103,16 @@ heartbeat state is named, and nothing here parses a detail or writes 30 s down a
 `yantra-agent`'s `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`. A second consumer of this route
 inherits the same obligation, and a test in `dashboard.test.tsx` is what says so out loud.
 
+**`GET /api/readiness/github` is the other check the library answers from nobody useful** (Y-175),
+and it is the same argument pointed at a different fact: `yantra_core::attention` spawns `gh` on the
+host it runs on, so the credential the work inbox reads is the daemon's and never the terminal's. It
+is a route rather than a tenth check on every report, because an answer about this machine drawn on
+each machine's card claims something no ssh session asked. Two answers are *absent* and both are
+earned — no `gh` on `PATH`, and a `gh` that names no credential — and **everything else is
+*unknown*, including an unreachable GitHub**, because `gh auth status` reports a token it could not
+validate exactly as it reports one that was refused. It has no `failed`: a look it could not take is
+already *unknown* inside the check.
+
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
