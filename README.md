@@ -135,7 +135,7 @@ yantra down yantra               # stop it, giving the agent a chance to shut do
 yantra rm yantra [--force]       # delete the workspace file, refusing while a session is open
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
-yantra ls sessions               # what tmux is holding, across every machine
+yantra ls sessions               # what tmux is holding, across every machine it can reach
 yantra ls attention              # what GitHub is waiting on you for
 yantra notify 'needs you'        # publish a message to the relay you configured
 yantra doctor [machine] [--json] # what each machine can and cannot do — a read, it changes nothing
