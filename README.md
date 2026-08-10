@@ -131,6 +131,7 @@ yantra attach yantra             # hand this terminal to the session
 yantra resume yantra             # start the agent again on the conversation it left off
 yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
+yantra tokens yantra             # what that session has spent, in tokens
 yantra down yantra               # stop it, giving the agent a chance to shut down
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined

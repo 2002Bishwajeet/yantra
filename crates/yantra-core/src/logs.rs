@@ -21,7 +21,7 @@ use crate::workspace;
 
 /// Exit status the probe uses for "there is no transcript here". Distinct from
 /// a failure, because a workspace whose agent has never run is not an error.
-const NO_TRANSCRIPT: i32 = 3;
+pub(crate) const NO_TRANSCRIPT: i32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Who {
@@ -187,6 +187,21 @@ pub async fn read<E: Exec>(
 /// The file is `<session id>.jsonl`, measured on both fleet machines and across
 /// a `resume` fork, which is what makes naming one possible at all.
 fn probe(repo: &str, session: Option<&str>, lines: usize) -> String {
+    format!(
+        "{locate}\
+         printf '%s\\n' \"$f\"\n\
+         stat -c %Y \"$f\" 2>/dev/null || stat -f %m \"$f\"\n\
+         date +%s\n\
+         grep -E '\"type\":\"(user|assistant)\"' \"$f\" \
+         | grep -v '\"toolUseResult\"' | tail -n {lines}\n",
+        locate = locate(repo, session),
+    )
+}
+
+/// The lines that put the session's transcript in `$f`, or exit
+/// [`NO_TRANSCRIPT`]. [`crate::tokens`] asks a different question of the same
+/// file and has to find it by the same rules.
+pub(crate) fn locate(repo: &str, session: Option<&str>) -> String {
     // Quoted, unlike the slug: a workspace's own `startup` decides what follows
     // `--session-id`, and that file is a code-execution boundary.
     let find = match session {
@@ -200,16 +215,7 @@ fn probe(repo: &str, session: Option<&str>, lines: usize) -> String {
              [ -n \"$f\" ] || exit {NO_TRANSCRIPT}\n"
         ),
     };
-    format!(
-        "d=$HOME/.claude/projects/{slug}\n\
-         {find}\
-         printf '%s\\n' \"$f\"\n\
-         stat -c %Y \"$f\" 2>/dev/null || stat -f %m \"$f\"\n\
-         date +%s\n\
-         grep -E '\"type\":\"(user|assistant)\"' \"$f\" \
-         | grep -v '\"toolUseResult\"' | tail -n {lines}\n",
-        slug = slug(repo),
-    )
+    format!("d=$HOME/.claude/projects/{slug}\n{find}", slug = slug(repo),)
 }
 
 /// Claude Code's own mapping from a working directory to a project directory:

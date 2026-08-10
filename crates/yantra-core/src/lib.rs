@@ -28,5 +28,6 @@ pub mod ssh;
 pub mod status;
 pub mod terminfo;
 pub mod tmux;
+pub mod tokens;
 pub mod up;
 pub mod workspace;
