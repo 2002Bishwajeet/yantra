@@ -22,6 +22,7 @@ import type {
   WorkspaceStatus,
 } from './api'
 import App from './App'
+import { Footer } from './components/Footer'
 import { BANDS, work } from './work'
 
 afterEach(() => {
@@ -271,5 +272,74 @@ describe('the order is held; the rows are not', () => {
       expect(screen.getByRole('heading', { name: /Needs you/ })).toBeTruthy(),
     )
     expect(screen.queryByRole('heading', { name: /Running/ })).toBeNull()
+  })
+})
+
+/** D3 §4.3: one line at the foot of the page, where §2 finding 4 counted seven
+ *  freshness stamps and D1 §2 had asked for one. */
+describe('the footer', () => {
+  const read = (name: string, age: number) => ({
+    name,
+    reading: { looked: 'ok', age_seconds: age, data: null } as const,
+  })
+
+  it('counts machines, unreachable machines and unclaimed sessions', async () => {
+    fleet([on('api'), on('gone', 'pi')], { api: { state: 'running' } }, {
+      '/api/workspaces/gone/status': {
+        looked: 'ok',
+        age_seconds: 1,
+        data: missed('gone', 'pi'),
+      },
+      '/api/sessions': {
+        looked: 'ok',
+        age_seconds: 1,
+        data: [
+          {
+            machine: 'cachyos-g14',
+            reached: 'yes',
+            sessions: [
+              { name: 'stray', windows: 1, attached: 0, created: 'today' },
+            ],
+          },
+        ],
+      },
+    })
+    render(<App />)
+
+    // Scoped to the line, not to the word: `machines` is also a nav item.
+    const foot = (await screen.findByText(/session unclaimed/)).closest('p')!
+    expect(foot.textContent).toContain('1 machine')
+    expect(foot.textContent).toContain('1 unreachable')
+    expect(foot.textContent).toContain('1 session unclaimed')
+  })
+
+  /** The age is the **oldest** read and never an average, because an average
+   *  hides the one stale answer — and a read a whole refresh period behind the
+   *  rest is named beside the figure rather than folded into it. */
+  it('takes the oldest age, and names a read that is further behind than that', () => {
+    const { container } = render(
+      <Footer
+        machines={3}
+        reads={[read('machines', 4), read('workspaces', 9), read('readiness', 51)]}
+        unclaimed={0}
+        unreachable={0}
+      />,
+    )
+
+    expect(container.textContent).toContain('as of 9s')
+    expect(container.textContent).toContain('readiness 51s')
+    expect(container.textContent).not.toContain('as of 51s')
+  })
+
+  it('says nothing at all while every read is still in flight', () => {
+    const { container } = render(
+      <Footer
+        machines={null}
+        reads={[{ name: 'machines', reading: { looked: 'pending' } }]}
+        unclaimed={null}
+        unreachable={0}
+      />,
+    )
+    expect(container.textContent).toBe('')
   })
 })

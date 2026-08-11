@@ -13,6 +13,7 @@ import { Section } from '@/components/Section'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { loaded, sessionsWaiting, useLooked } from '@/useLooked'
+import { unclaimed } from '@/work'
 import type { Reading } from '@/useLooked'
 
 /** The three groups D3 §3.1 takes off the work page. This page answers *which
@@ -104,18 +105,7 @@ export function Unclaimed({
   answers: MachineSessions[]
   workspaces: Reading<Workspace[]>
 }) {
-  const claimed = new Set(
-    workspaces.looked === 'ok'
-      ? workspaces.data.map((one) => `${one.machine} ${one.name}`)
-      : [],
-  )
-  const rows = answers.flatMap((answer) =>
-    answer.reached === 'yes'
-      ? answer.sessions
-          .map((session) => ({ machine: answer.machine, session }))
-          .filter((row) => !claimed.has(`${row.machine} ${row.session.name}`))
-      : [],
-  )
+  const rows = unclaimed(answers, workspaces)
   const unreachable = answers.filter((answer) => answer.reached === 'no')
 
   return (

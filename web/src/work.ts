@@ -1,4 +1,10 @@
-import type { Listed, Workspace, WorkspaceStatus } from '@/api'
+import type {
+  Listed,
+  MachineSessions,
+  Session,
+  Workspace,
+  WorkspaceStatus,
+} from '@/api'
 import type { Reading } from '@/useLooked'
 import type { AgentRow } from '@/columns'
 
@@ -120,4 +126,25 @@ export function work(
   }
 
   return rows
+}
+
+/** A session no workspace claims, which D3 §4.3 counts in the fleet footer and
+ *  §3.1 lists on `/machines`. One definition, because a count that disagrees
+ *  with the list under it is worse than neither. */
+export function unclaimed(
+  answers: MachineSessions[],
+  workspaces: Reading<Workspace[]>,
+): { machine: string; session: Session }[] {
+  const claimed = new Set(
+    workspaces.looked === 'ok'
+      ? workspaces.data.map((one) => `${one.machine} ${one.name}`)
+      : [],
+  )
+  return answers.flatMap((answer) =>
+    answer.reached === 'yes'
+      ? answer.sessions
+          .map((session) => ({ machine: answer.machine, session }))
+          .filter((row) => !claimed.has(`${row.machine} ${row.session.name}`))
+      : [],
+  )
 }

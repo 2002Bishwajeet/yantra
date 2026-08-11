@@ -12,6 +12,7 @@ import {
 } from '@/columns'
 import { Actions } from '@/components/Act'
 import { DataTable } from '@/components/DataTable'
+import { Footer } from '@/components/Footer'
 import { Section } from '@/components/Section'
 import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
@@ -19,7 +20,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { loaded, useAgents, useLooked } from '@/useLooked'
 import type { Reading } from '@/useLooked'
-import { agentOf, BANDS, type Band, work, type WorkRow } from '@/work'
+import {
+  agentOf,
+  BANDS,
+  type Band,
+  unclaimed,
+  work,
+  type WorkRow,
+} from '@/work'
 
 // Both hold Base UI's `field`, and neither is on screen until a row's overflow
 // asks for it — the same reason `Overflow` is split (Y-167, Y-194).
@@ -162,6 +170,22 @@ export function Fleet() {
           </div>
         </>
       )}
+
+      <Footer
+        machines={machines.looked === 'ok' ? machines.data.length : null}
+        reads={[
+          { name: 'machines', reading: machines },
+          { name: 'workspaces', reading: listed },
+          { name: 'sessions', reading: sessions },
+          { name: 'agents', reading: agents },
+        ]}
+        unclaimed={
+          sessions.looked === 'ok'
+            ? unclaimed(sessions.data, workspaces).length
+            : null
+        }
+        unreachable={placed.filter((row) => row.kind === 'machine').length}
+      />
 
       {/* Beside the create form rather than inside the row it was opened from:
           the fields are the same fields, and a phone gives them the width. */}
