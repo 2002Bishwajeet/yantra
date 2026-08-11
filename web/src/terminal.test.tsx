@@ -211,6 +211,42 @@ describe('the terminal in the dashboard', () => {
     expect(screen.queryByText(/The terminal ended/)).toBeNull()
   })
 
+  /** **D3 §7.3.** The box is black either way, so the socket has to say which
+   *  of the two it is doing. */
+  it('says it is connecting until the socket opens', async () => {
+    render(<Terminal name="yantra" onClose={() => {}} />)
+
+    // A handshake cannot have finished in the same turn as the render, so this
+    // is the state a slow network holds for as long as it takes.
+    expect(screen.getByRole('status').textContent).toBe('Connecting…')
+
+    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('names which attempt of how many it is on while it reconnects', async () => {
+    render(<Terminal name="yantra" onClose={() => {}} />)
+    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+
+    daemonised.keepHangingUp()
+    daemonised.hangUp()
+
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        `Reconnecting, attempt 1 of ${ATTEMPTS}.`,
+      ),
+    )
+    // The number moves, which is the whole point of printing it: two seconds of
+    // silence and two seconds of counting are different things to sit through.
+    await waitFor(
+      () =>
+        expect(screen.getByRole('status').textContent).toBe(
+          `Reconnecting, attempt 2 of ${ATTEMPTS}.`,
+        ),
+      { timeout: PAUSE * 4 },
+    )
+  }, 10000)
+
   /** A reason from the daemon is a refusal — the workspace has no session, the
    *  machine is asleep — and reopening a refused socket only refuses again. */
   it('does not reopen a socket the daemon gave a reason for', async () => {
@@ -243,6 +279,12 @@ describe('the terminal in the dashboard', () => {
       { timeout: PAUSE * (ATTEMPTS + 4) },
     )
     expect(screen.queryByRole('alert')).toBeNull()
+    // A spent budget is an end state rather than a pane that went quiet: it
+    // counts what it tried, and it does not claim to know which side failed.
+    const said = screen.getByText(/The terminal ended/).textContent ?? ''
+    expect(said).toContain(`${ATTEMPTS} attempts`)
+    expect(said).toContain('not something this page can tell')
+    expect(screen.queryByRole('status')).toBeNull()
     // The first socket, then the five it is worth reopening.
     expect(daemonised.asked.length).toBe(ATTEMPTS + 1)
   }, 10000)
