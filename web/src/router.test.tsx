@@ -13,6 +13,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import type { Listed, Looked, Machine, Workspace } from './api'
 import App from './App'
@@ -127,15 +128,17 @@ describe('a URL typed into the bar', () => {
   })
 
   /** The daemon falls every unknown path back to `index.html`, so this arrives
-   *  as a page and drawing the fleet for it would make the address bar a lie. */
+   *  as a page and drawing the fleet for it would make the address bar a lie.
+   *  `/settings` used to be the path here; D3 §3 routes it, so this asks for one
+   *  that never will be. */
   it('says nothing is at a path nothing routes', async () => {
     fleet()
-    history.pushState(null, '', '/settings')
+    history.pushState(null, '', '/no-such-page')
 
     render(<App />)
 
     expect(await screen.findByText(/Nothing is at/)).toBeTruthy()
-    expect(screen.queryByText('Machines')).toBeNull()
+    expect(screen.queryByText('Workspaces')).toBeNull()
   })
 
   it('says a workspace it has read the list for is not there, and opens no socket', async () => {
@@ -150,12 +153,77 @@ describe('a URL typed into the bar', () => {
   })
 })
 
+/** D3 §3 and §5.2: three nav items, one `h1` per route, `h2` for a group, and a
+ *  `<title>` that names where you are rather than what the app is. */
+describe('the outline', () => {
+  const outline = () =>
+    [...document.querySelectorAll('h1, h2')].map(
+      (heading) => `${heading.tagName} ${heading.textContent}`,
+    )
+
+  it('gives every route one h1, and groups an h2 under it', async () => {
+    fleet()
+    render(<App />)
+
+    await screen.findByText('New workspace')
+    const headings = outline()
+    expect(headings.filter((one) => one.startsWith('H1 '))).toEqual(['H1 Fleet'])
+    expect(headings.filter((one) => one.startsWith('H2 ')).length).toBeGreaterThan(0)
+    // The wordmark was the page's only heading before Y-187.
+    expect(headings).not.toContain('H1 Yantra')
+  })
+
+  it('names the route in the title, front first', async () => {
+    fleet()
+    history.pushState(null, '', '/m/cachyos-g14')
+
+    render(<App />)
+
+    await screen.findByText('linux')
+    expect(document.title).toBe('cachyos-g14 · Yantra')
+  })
+
+  it('reaches fleet, machines and usage from anywhere', async () => {
+    fleet()
+    history.pushState(null, '', '/m/cachyos-g14')
+    render(<App />)
+
+    const nav = within(await screen.findByRole('navigation'))
+    for (const label of ['fleet', 'machines', 'usage']) {
+      expect(nav.getByRole('link', { name: label })).toBeTruthy()
+    }
+
+    fireEvent.click(nav.getByRole('link', { name: 'machines' }))
+    await waitFor(() => expect(location.pathname).toBe('/machines'))
+    expect(await screen.findByText('Unclaimed sessions')).toBeTruthy()
+    expect(document.title).toBe('Machines · Yantra')
+
+    fireEvent.click(nav.getByRole('link', { name: 'usage' }))
+    await waitFor(() => expect(location.pathname).toBe('/usage'))
+    expect(outline().filter((one) => one.startsWith('H1 '))).toEqual([
+      'H1 Usage',
+    ])
+  })
+
+  /** D3 §3.1: `/machines` compares and `/m/{name}` is a subject, so the three
+   *  groups that moved must not still be drawn where they were. */
+  it('takes machines, readiness and sessions off the work page', async () => {
+    fleet()
+    render(<App />)
+
+    await screen.findByText('New workspace')
+    for (const gone of ['Machines', 'Readiness', 'Unclaimed sessions']) {
+      expect(screen.queryByRole('heading', { name: gone })).toBeNull()
+    }
+  })
+})
+
 describe('moving between them', () => {
   it('follows a machine name and comes back with the browser', async () => {
     fleet()
     render(<App />)
 
-    // Named twice on the fleet: its own row, and the workspace that runs there.
+    // The workspace row names it. Its own row moved to `/machines` in Y-189.
     fireEvent.click((await screen.findAllByText('cachyos-g14'))[0]!)
 
     await waitFor(() => expect(location.pathname).toBe('/m/cachyos-g14'))

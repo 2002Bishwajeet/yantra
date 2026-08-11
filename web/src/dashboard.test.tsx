@@ -38,7 +38,7 @@ import { renderHookQueried } from './test/inQuery'
 import { renderRouted } from './test/inRouter'
 import { Command } from './components/Command'
 import { Readiness as ReadinessCard } from './components/Readiness'
-import { Ready } from './routes/Fleet'
+import { Ready } from './routes/Machines'
 import { DataTable } from './components/DataTable'
 import { Section } from './components/Section'
 import { useLooked } from './useLooked'
@@ -47,6 +47,8 @@ import App from './App'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  // Y-189 sends two of these to `/machines`, and the path outlives the render.
+  history.pushState(null, '', '/')
 })
 
 /** jsdom implements no `matchMedia` at all, so a width has to be supplied — and
@@ -507,16 +509,18 @@ describe('the sessions section', () => {
     { machine: 'pi', reached: 'no', error: 'connection timed out' },
   ]
 
+  // Y-189 moved this group to `/machines`, where D3 §3.1 compares machines.
   it('renders an unanswered machine as unreachable and not as zero sessions', async () => {
     stubFetch({
       '/api/machines': { looked: 'never' },
       '/api/workspaces': { looked: 'never' },
       '/api/sessions': { looked: 'ok', age_seconds: 6, data: answers },
     })
+    history.pushState(null, '', '/machines')
     render(<App />)
 
     expect(await screen.findByText('pi unreachable: connection timed out')).toBeTruthy()
-    expect(screen.getByText('1 session on 1 of 2 machines')).toBeTruthy()
+    expect(screen.getByText('1 unclaimed on 1 of 2 machines')).toBeTruthy()
     expect(screen.queryByText('pi')).toBeNull()
   })
 
@@ -526,6 +530,7 @@ describe('the sessions section', () => {
       '/api/workspaces': { looked: 'never' },
       '/api/sessions': { looked: 'ok', age_seconds: 44, data: answers },
     })
+    history.pushState(null, '', '/machines')
     render(<App />)
 
     expect(await screen.findByText('waiting on pi')).toBeTruthy()
@@ -1587,11 +1592,12 @@ describe('acting on a workspace', () => {
     return posted
   }
 
-  /** Scoped to the workspaces card: since Y-167 both it and the agents section
+  /** Scoped to the workspaces group: since Y-167 both it and the agents section
    *  compute a verb from the same reading, so the fleet names it twice. Awaited
-   *  rather than read, because the router resolves its first match after this. */
+   *  rather than read, because the router resolves its first match after this.
+   *  A group was a card until Y-187 made it a `section` with a heading. */
   const card = async () =>
-    within((await screen.findByText('Workspaces')).closest('[data-slot="card"]')!)
+    within((await screen.findByText('Workspaces')).closest('section')!)
 
   const tap = async (name: string) =>
     fireEvent.click(await (await card()).findByRole('button', { name }))
@@ -1700,8 +1706,8 @@ describe('acting on a workspace', () => {
     })
     render(<App />)
 
-    // Once in the machines table, once beside the workspace it will act on.
-    expect((await screen.findAllByText('asleep or off')).length).toBe(2)
+    // Beside the workspace it will act on. The machines table moved in Y-189.
+    expect((await screen.findAllByText('asleep or off')).length).toBe(1)
     const start = await (await card()).findByRole('button', {
       name: 'Start claude',
     })

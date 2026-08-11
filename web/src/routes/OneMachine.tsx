@@ -11,6 +11,7 @@ import { machineColumns, sessionColumns } from '@/columns'
 import { DataTable } from '@/components/DataTable'
 import { Readiness } from '@/components/Readiness'
 import { Section } from '@/components/Section'
+import { Title } from '@/components/Title'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Workspaces } from '@/routes/Fleet'
 import { loaded, sessionsWaiting, useAgents, useLooked } from '@/useLooked'
@@ -47,7 +48,9 @@ export function OneMachine() {
 
   return (
     <>
-      <Section title={machine} query={machines}>
+      <Title>{machine}</Title>
+
+      <Section title="Machine" query={machines}>
         {(rows) => {
           const one = rows.find((each) => each.name === machine)
           // A name that is not in the netmap is the URL being wrong or the

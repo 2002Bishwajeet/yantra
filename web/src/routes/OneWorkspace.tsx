@@ -2,6 +2,7 @@ import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import type { Listed } from '@/api'
 import { Section } from '@/components/Section'
 import { Terminal } from '@/components/Terminal'
+import { Title } from '@/components/Title'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useLooked } from '@/useLooked'
 
@@ -20,13 +21,20 @@ export function OneWorkspace() {
   const listed = useLooked<Listed[]>('/api/workspaces')
   const navigate = useNavigate()
 
+  // The `h1` is the route's, so it is drawn before the list decides whether
+  // there is anything under it — D3 §5.2 wants one on every branch.
+  const heading = <Title>{name}</Title>
+
   // `children` is called only in the `ok` branch, so this draws the two states
   // that are not a workspace in the same words every other section uses.
   if (listed.looked !== 'ok') {
     return (
-      <Section title={name} query={listed}>
-        {() => null}
-      </Section>
+      <>
+        {heading}
+        <Section title="Workspace" query={listed}>
+          {() => null}
+        </Section>
+      </>
     )
   }
 
@@ -34,28 +42,35 @@ export function OneWorkspace() {
 
   if (!entry) {
     return (
-      <Alert variant="destructive">
-        <AlertTitle>No workspace is called {name}.</AlertTitle>
-        <AlertDescription>
-          <Link to="/">The fleet</Link> lists the ones there are.
-        </AlertDescription>
-      </Alert>
+      <>
+        {heading}
+        <Alert variant="destructive">
+          <AlertTitle>No workspace is called {name}.</AlertTitle>
+          <AlertDescription>
+            <Link to="/">The fleet</Link> lists the ones there are.
+          </AlertDescription>
+        </Alert>
+      </>
     )
   }
 
   if (entry.loaded === 'no') {
     return (
-      <Alert variant="destructive">
-        <AlertTitle>{name} is not usable.</AlertTitle>
-        <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-          {entry.error}
-        </AlertDescription>
-      </Alert>
+      <>
+        {heading}
+        <Alert variant="destructive">
+          <AlertTitle>{name} is not usable.</AlertTitle>
+          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
+            {entry.error}
+          </AlertDescription>
+        </Alert>
+      </>
     )
   }
 
   return (
     <>
+      {heading}
       <p className="text-muted-foreground text-sm">
         on{' '}
         <Link to="/m/$machine" params={{ machine: entry.machine }}>

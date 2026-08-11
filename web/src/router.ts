@@ -6,15 +6,40 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router'
 import { Fleet } from '@/routes/Fleet'
+import { Machines } from '@/routes/Machines'
 import { OneMachine } from '@/routes/OneMachine'
 import { Nowhere, Shell } from '@/routes/Shell'
+import { Usage } from '@/routes/Usage'
 
-const root = createRootRoute({ component: Shell, notFoundComponent: Nowhere })
+/** A phone's app switcher shows the front of the title, so the route's own name
+ *  goes first — every route was `Yantra` before Y-187. */
+const titled = (name: string) => ({ meta: [{ title: `${name} · Yantra` }] })
+
+const root = createRootRoute({
+  component: Shell,
+  notFoundComponent: Nowhere,
+  head: () => titled('Nowhere'),
+})
 
 const fleet = createRoute({
   getParentRoute: () => root,
   path: '/',
   component: Fleet,
+  head: () => titled('Fleet'),
+})
+
+const machines = createRoute({
+  getParentRoute: () => root,
+  path: '/machines',
+  component: Machines,
+  head: () => titled('Machines'),
+})
+
+const usage = createRoute({
+  getParentRoute: () => root,
+  path: '/usage',
+  component: Usage,
+  head: () => titled('Usage'),
 })
 
 // `$machine` and `$name` are what make `<Link to="/m/$machine" params>` refuse a
@@ -23,6 +48,7 @@ const machine = createRoute({
   getParentRoute: () => root,
   path: '/m/$machine',
   component: OneMachine,
+  head: ({ params }) => titled(params.machine),
 })
 
 // The only split route, and it is split for one reason: xterm.js and its CSS
@@ -34,9 +60,16 @@ const workspace = createRoute({
     () => import('@/routes/OneWorkspace'),
     'OneWorkspace',
   ),
+  head: ({ params }) => titled(params.name),
 })
 
-export const routeTree = root.addChildren([fleet, machine, workspace])
+export const routeTree = root.addChildren([
+  fleet,
+  machines,
+  usage,
+  machine,
+  workspace,
+])
 
 /** The history is a parameter rather than a default, which is
  *  [T3 Code](https://github.com/pingdotgg/t3code)'s `getRouter` shape: it is
