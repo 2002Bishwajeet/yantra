@@ -108,6 +108,14 @@ impl Forge for Gh {
     }
 }
 
+/// Whether this machine holds a credential `gh` will use, and nothing about
+/// whose it is. `gh auth status` names the account on stdout and repeats it on
+/// stderr when it fails, so the stdout is dropped here and [`Error::Command`]'s
+/// stderr is the caller's to keep out of whatever it renders (§B4).
+pub async fn credential() -> Result<(), Error> {
+    run(&["auth", "status"]).await.map(drop)
+}
+
 async fn search(kind: &str, filter: &str) -> Result<Vec<Item>, Error> {
     let args = [
         "search",
@@ -156,16 +164,22 @@ async fn run(args: &[&str]) -> Result<String, Error> {
     ))
 }
 
-/// Measured against `gh` 2.96.0 on 2026-08-10, because none of this is
-/// documented as an interface: logged out exits **4**; an unreachable host and
-/// a rejected token both exit 1 and are told apart by the first line of stderr.
-/// A 401 is folded into `LoggedOut` — the token exists and GitHub refused it,
-/// and the remedy is the same `gh auth login` either way.
+/// **`gh` says *unreachable* in two unrelated ways, and Y-170 knew only one**
+/// (Y-186). A host that does not resolve gets `gh`'s own sentence; a host that
+/// resolves and will not connect gets Go's `url.Error` straight through —
+/// `Post "https://api.github.com/graphql": … dial tcp …: connect: connection
+/// refused`. Missing the second read a network outage as *`gh` did something
+/// unrecognised*, which sends an operator to the wrong problem.
+///
+/// Measured against `gh` 2.96.0 on 2026-08-10 and 2026-08-11: logged out exits
+/// **4**; every other failure exits 1 and is told apart by stderr. A 401 folds
+/// into `LoggedOut` — the token exists and GitHub refused it, and the remedy is
+/// the same `gh auth login` either way.
 fn classify(code: Option<i32>, stderr: &str, args: &[&str]) -> Error {
     let stderr = stderr.trim();
     if code == Some(4) || stderr.contains("gh auth login") || stderr.contains("401") {
         Error::LoggedOut
-    } else if stderr.contains("error connecting to") {
+    } else if unreachable(stderr) {
         Error::Unreachable
     } else {
         Error::Command {
@@ -173,6 +187,17 @@ fn classify(code: Option<i32>, stderr: &str, args: &[&str]) -> Error {
             stderr: stderr.to_string(),
         }
     }
+}
+
+/// `error connecting to` is `gh`'s own wording and both others are Go's, from
+/// the `net` package under it. **The first two are measured; `TLS handshake
+/// timeout` is read off Go's transport and has not been reproduced here** — it
+/// is listed because leaving it out costs an operator the same wrong answer,
+/// and matching it costs nothing.
+fn unreachable(stderr: &str) -> bool {
+    ["error connecting to", "dial tcp", "TLS handshake timeout"]
+        .iter()
+        .any(|marker| stderr.contains(marker))
 }
 
 fn parse_items(stdout: &str) -> Result<Vec<Item>, serde_json::Error> {
@@ -275,6 +300,25 @@ mod tests {
         ));
         assert!(matches!(
             classify(Some(1), "error connecting to nonexistent.invalid", &a),
+            Error::Unreachable
+        ));
+        // Y-186: measured 2026-08-11, and the shape Y-170 missed entirely.
+        assert!(matches!(
+            classify(
+                Some(1),
+                "Post \"https://api.github.com/graphql\": proxyconnect tcp: dial tcp \
+                 127.0.0.1:1: connect: connection refused",
+                &a
+            ),
+            Error::Unreachable
+        ));
+        assert!(matches!(
+            classify(
+                Some(1),
+                "Get \"https://api.github.com/notifications\": dial tcp: lookup \
+                 api.github.com: no such host",
+                &a
+            ),
             Error::Unreachable
         ));
     }
