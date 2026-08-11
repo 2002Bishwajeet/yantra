@@ -23,8 +23,8 @@ import type {
 } from './api'
 import App from './App'
 import { Footer } from './components/Footer'
-import { Unreachable, unreachable } from './components/Unreachable'
-import { BANDS, work } from './work'
+import { Unreachable } from './components/Unreachable'
+import { BANDS, unreachable, work } from './work'
 
 afterEach(() => {
   cleanup()

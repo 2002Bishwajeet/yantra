@@ -1,30 +1,30 @@
-import { Link } from "@tanstack/react-router";
+import { Link } from '@tanstack/react-router'
 import type {
   Listed,
   Machine,
   MachineSessions,
   Readiness as Report,
   Workspace,
-} from "@/api";
-import { machineColumns, sessionColumns } from "@/columns";
-import { DataTable } from "@/components/DataTable";
-import { Readiness } from "@/components/Readiness";
-import { Section } from "@/components/Section";
-import { Title } from "@/components/Title";
-import { Unreachable, unreachable } from "@/components/Unreachable";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { loaded, sessionsWaiting, useLooked } from "@/useLooked";
-import { unclaimed } from "@/work";
-import type { Reading } from "@/useLooked";
+} from '@/api'
+import { machineColumns, sessionColumns } from '@/columns'
+import { DataTable } from '@/components/DataTable'
+import { Readiness } from '@/components/Readiness'
+import { Section } from '@/components/Section'
+import { Title } from '@/components/Title'
+import { Unreachable } from '@/components/Unreachable'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { loaded, sessionsWaiting, useLooked } from '@/useLooked'
+import { unclaimed, unreachable } from '@/work'
+import type { Reading } from '@/useLooked'
 
 /** The three groups D3 §3.1 takes off the work page. This page answers *which
  *  machine*; [`/m/{name}`](./OneMachine.tsx) answers *what about this one*. */
 export function Machines() {
-  const machines = useLooked<Machine[]>("/api/machines");
-  const listed = useLooked<Listed[]>("/api/workspaces");
-  const sessions = useLooked<MachineSessions[]>("/api/sessions");
-  const readiness = useLooked<Report[]>("/api/readiness");
-  const nothing = unreachable([machines, listed, sessions, readiness]);
+  const machines = useLooked<Machine[]>('/api/machines')
+  const listed = useLooked<Listed[]>('/api/workspaces')
+  const sessions = useLooked<MachineSessions[]>('/api/sessions')
+  const readiness = useLooked<Report[]>('/api/readiness')
+  const nothing = unreachable([machines, listed, sessions, readiness])
 
   return (
     <>
@@ -60,7 +60,7 @@ export function Machines() {
         </>
       )}
     </>
-  );
+  )
 }
 
 /** One card per machine the sweep covered, which is the machines a workspace
@@ -71,10 +71,10 @@ export function Ready({
   reports,
   machines,
 }: {
-  reports: Report[];
-  machines: Reading<Machine[]>;
+  reports: Report[]
+  machines: Reading<Machine[]>
 }) {
-  const listed = machines.looked === "ok" ? machines.data : [];
+  const listed = machines.looked === 'ok' ? machines.data : []
 
   return (
     <div className="flex flex-col gap-4">
@@ -99,7 +99,7 @@ export function Ready({
         </div>
       ))}
     </div>
-  );
+  )
 }
 
 /** D3 §14: a session a workspace claims **is** that workspace's row on the work
@@ -109,11 +109,11 @@ export function Unclaimed({
   answers,
   workspaces,
 }: {
-  answers: MachineSessions[];
-  workspaces: Reading<Workspace[]>;
+  answers: MachineSessions[]
+  workspaces: Reading<Workspace[]>
 }) {
-  const rows = unclaimed(answers, workspaces);
-  const unreachable = answers.filter((answer) => answer.reached === "no");
+  const rows = unclaimed(answers, workspaces)
+  const unreachable = answers.filter((answer) => answer.reached === 'no')
 
   return (
     <div className="flex flex-col gap-2">
@@ -124,16 +124,16 @@ export function Unclaimed({
         empty={
           // A look that failed never reaches here, so the workspaces reading is
           // the only thing that can leave *claimed* unknown.
-          workspaces.looked === "ok"
-            ? "every tmux session on the machines that answered belongs to a workspace"
-            : "no workspace list to check these against, so none can be called unclaimed"
+          workspaces.looked === 'ok'
+            ? 'every tmux session on the machines that answered belongs to a workspace'
+            : 'no workspace list to check these against, so none can be called unclaimed'
         }
       />
       {/* The machines that did not answer are named, and the count says how many
           did — without which an unreachable machine reads as a machine with no
           sessions. */}
       <p className="text-muted-foreground text-sm">
-        {rows.length} unclaimed on {answers.length - unreachable.length} of{" "}
+        {rows.length} unclaimed on {answers.length - unreachable.length} of{' '}
         {answers.length} machines
       </p>
       {unreachable.map((answer) => (
@@ -144,5 +144,5 @@ export function Unclaimed({
         </Alert>
       ))}
     </div>
-  );
+  )
 }
