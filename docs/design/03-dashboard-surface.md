@@ -29,10 +29,12 @@ semantic roles, which is identity-neutral; it fixes none of their values.
 Chosen 2026-08-11 over Tailscale's admin, k9s and Grafana. It is a reference for *register*, not for
 appearance: it sets how much chrome is allowed and how loud state may be.
 
-> **[Q6](../../tracker.md#6-open-questions) binds this.** Personal-first: single-tenant, no auth
-> beyond Tailscale, no theming, no settings screen. So no theme switcher and no preferences. D1 §6
-> still wants the ntfy relay set from the UI, which reads as the owner's own configuration rather
-> than a second user's — but Q6 says *no settings screen* in those words. **Flagged, not resolved.**
+> **[Q6](../../tracker.md#6-open-questions) binds this, and the owner amended it on 2026-08-11.**
+> Q6 closed personal-first: single-tenant, no auth beyond Tailscale, *no theming, no settings
+> screen*. **What it refused is preferences, not configuration.** So there is no theme switcher, no
+> density control and no layout choice — and `/settings` exists for the things a person must set
+> before the product works: the ntfy relay's URL and token (D1 §6), which are environment variables
+> nothing in the product can write today.
 
 ---
 
@@ -97,10 +99,12 @@ chunk. Deleting them buys clarity, not weight. §9.1 says so rather than claimin
 | `/w/{name}` | the workspace: terminal · transcript · spend | §11 |
 | `/usage` | spend, one machine at a time, on request | **Y-183**, §11.4 |
 | `/new` | the create-workspace form | **Y-185**; takes a fourth card off `/` |
+| `/settings` | the ntfy relay's URL and token | §0's Q6 amendment; D1 §6 |
 | `/w/{name}/repair` | the raw file, for a workspace that will not parse | §7.5 |
 
-Nav is `fleet · machines · usage`. Three items. `/new` is a verb reached from the page that shows you
-there is nothing to open, and `/repair` is reached only from the failure that needs it.
+Nav is `fleet · machines · usage`. Three items. The other three are reached from the thing that needs
+them: `/new` from the page that shows you there is nothing to open, `/repair` from the failure it
+fixes, and `/settings` from the readiness check that reports notifications cannot be sent.
 
 **Every route names itself in `<title>`.** A PWA shows the title in the phone's app switcher, and
 today every route is `Yantra`.
@@ -430,12 +434,22 @@ the founding UI principle broken in exactly one place.
 
 **`/w/{name}/repair` shows the file's bytes with the parse error beside them.** You edit and save.
 
-**It opens only on a file that will not load.** A workspace that parses is edited through the
-validated form, as today. That keeps the widening as narrow as it can be while still closing the gap:
-the raw path exists for repair and for nothing else, so the checks Y-137 deliberately put on both
-sides of `create` and `update` still bind every file that works.
+Two bounds, both decided by the owner on 2026-08-11:
 
-§12 records what this costs.
+1. **It opens only on a file that will not load.** A workspace that parses is edited through the
+   validated form, as today.
+2. **The save re-validates.** The daemon parses the bytes and refuses to write a file that still
+   will not load, naming the next error.
+
+Together they mean the raw path can only ever move a file from *broken* to *valid*. It cannot create
+a broken one, and it cannot bypass the refusals Y-137 deliberately put on both sides of `create` and
+`update`.
+
+**The cost is real and worth naming.** You cannot save a partial fix and come back to it. On a phone,
+half-way through a file with two errors, that is a genuine loss — and it is the price of the daemon
+never holding a write that skips `workspace::parse`.
+
+§12 records the decision this needs.
 
 ---
 
@@ -596,20 +610,39 @@ expressible in `yantra` first.* Four things here are new daemon surface.
 
 | Need | § | CLI first | Decision needed |
 | --- | --- | --- | --- |
-| read and write a workspace file's bytes | 7.5 | **see below** | **an ADR** — the daemon writes bytes it did not validate |
+| read and repair a workspace file's bytes | 7.5 | **see below** | **an ADR**, whose decision §12.1 already states |
+| write the ntfy relay's URL and token | 0, 3 | `yantra notify` reads them; nothing writes them | where they are written — see §12.2 |
 | re-check readiness now | 4.8 | `yantra doctor <machine>` exists | none — a POST, on [ADR-0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md)'s precedent |
 | the transcript as records rather than printed text | 11.3 | `yantra logs --json` | none, beyond §11.3's blockquote |
 | a viewer-presence beacon | 13 | none — the browser is its only caller | none |
 
-**The raw repair route and the CLI-first rule.** The CLI is not missing this capability: on the
-machine that holds the file, repairing it is `$EDITOR ~/.config/yantra/workspaces/x.toml`. The rule
-exists so the CLI is never second-class, and here it is not. **That is a reading, not a ruling** — the
-rule is the owner's. If it should be a verb instead, `yantra put <workspace>` reading the file from
-stdin is the smallest one that matches.
+### 12.1 The repair ADR, and what it decides
 
-The ADR is needed either way, because the *daemon* gains a write that skips `workspace::parse`. §7.5
-bounds it to files that already fail to load; the ADR should say whether that bound is the rule or
-just the first caller.
+**The owner decided the scope on 2026-08-11, so the ADR records rather than explores it:**
+
+> The daemon may write bytes to a workspace file it did not compose **only when the file currently on
+> disk does not parse, and only when the bytes it is given do**. Every other raw write is refused.
+
+That is the bound, and it is the rule rather than the first caller. **The refusals are the tests**,
+which is this crate's own convention: a raw write against a file that loads is refused, and a raw
+write of bytes that still will not load is refused with the next error named.
+
+**The CLI-first rule.** The CLI is not missing this capability: on the machine holding the file,
+repairing it is `$EDITOR ~/.config/yantra/workspaces/x.toml`. The rule exists so the CLI is never
+second-class, and here it is not. **That is a reading, not a ruling** — the rule is the owner's. If it
+should be a verb, `yantra put <workspace>` reading bytes from stdin is the smallest one that matches,
+and it inherits both refusals unchanged.
+
+### 12.2 Where the relay settings live
+
+`YANTRA_NTFY_URL` and `YANTRA_NTFY_TOKEN` are read from the environment and from nowhere else
+(Y-147, §B4). `/settings` has to write them somewhere the daemon reads on the next send.
+
+**This is the one part of §0's Q6 amendment that is not yet designed**, and it is not a UI question:
+it is where a daemon that persists nothing keeps a value that must survive a restart. An environment
+file the unit reads, a config file beside `~/.config/yantra/workspaces/`, or a token the browser holds
+and sends per-notification are three different answers with three different §B4 consequences.
+**Named, not decided.**
 
 ---
 
@@ -693,13 +726,19 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 | **D3.23** | The transcript view (§11.3) | turns with tool calls collapsed, read live from the far machine, nothing cached |
 | **D3.24** | `/usage`, one machine at a time (§11.4) | no fan-out on open, `AS_OF` beside the figure, unpriced shown as unpriced |
 | **D3.25** | The trust prompt is answered in place (§4.5) | the pane renders inline at twelve rows and one keystroke reaches it |
-| **D3.26** | `/w/{name}/repair` (§7.5) | a file that will not parse is fixed from the browser — **after the ADR in §12** |
+| **D3.26** | `/w/{name}/repair` (§7.5) | both refusals hold — a file that loads is refused, and bytes that still will not load are refused with the next error. **After §12.1's ADR** |
 | **D3.27** | The presence beacon suppresses ntfy (§13) | one event produces one notification while a tab is visible, and none of it survives a restart |
 | **D3.28** | Assertions gate, screenshots advise (§15) | every number in this document is asserted somewhere, and no image comparison fails CI |
+| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. **After §12.2 is decided** |
 
 **D3.1 and D3.2 come first.** Every other unit is cheaper once the page has an outline and a subject.
 
-**D3.26 is blocked** on the ADR in §12. Nothing else is blocked.
+**Two are blocked**: D3.26 on §12.1's ADR, and D3.29 on §12.2. Nothing else is.
+
+> **These twenty-nine units are thirteen rows.** The owner opened **M13** on 2026-08-11 and grouped
+> them, because `tracker.md` reserves Y-200 upward for the landing page and Y-187–Y-199 is what was
+> left. Grouping was the better answer regardless: §B5 says that file is already too large to open
+> without line offsets. **The rows are the work; this table is the detail each row links to.**
 
 ---
 
