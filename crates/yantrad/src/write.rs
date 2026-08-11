@@ -30,8 +30,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::{
-    agent, down, edit, probe, remove, resume, sessions, status, terminfo, tmux, up, workspace,
+    agent, doctor, down, edit, logs, price, probe, remove, resume, sessions, status, terminfo,
+    tmux, tokens, up, workspace,
 };
+
+use crate::api::Answer;
+use crate::heartbeat::Fleet;
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -90,23 +94,44 @@ impl<I: Inventory> Authoriser<I> {
 /// Generic in `S` so it merges into a router whose own state is something
 /// else: `with_state` decides the *resulting* state type, and a concrete
 /// `Router<()>` here would pin the whole tree to `()`.
-pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
+///
+/// The re-check is a second sub-router because it is the one authorised route
+/// that also reads this daemon's own memory, and a handler takes one state.
+pub fn router<I, S>(authoriser: Authoriser<I>, fleet: Fleet) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
-    Router::new()
+    let acts: Router<S> = Router::new()
         .route("/workspaces", post(make::<I>))
         .route("/workspaces/{name}", patch(change::<I>).delete(erase::<I>))
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
+        .route("/workspaces/{name}/tokens", post(spent::<I>))
         .route(
             "/machines/{machine}/sessions/{session}",
             axum::routing::delete(end::<I>),
         )
         .route("/machines/{machine}/probe", post(ask::<I>))
-        .with_state(authoriser)
+        .with_state(authoriser.clone());
+
+    // `{name}` rather than `{machine}`, which the routes above prefer: the `GET`
+    // on this path spells it `{name}`, and two spellings of one route are a
+    // matchit conflict rather than two routes (measured — it panics at startup).
+    let rechecks: Router<S> = Router::new()
+        .route("/machines/{name}/readiness", post(recheck::<I>))
+        .with_state(Recheck { authoriser, fleet });
+
+    acts.merge(rechecks)
+}
+
+/// The state the re-check needs: who the caller is, and what this daemon
+/// already knows about the machine they named.
+#[derive(Clone)]
+struct Recheck<I> {
+    authoriser: Authoriser<I>,
+    fleet: Fleet,
 }
 
 /// ADR-0016 §2, on the address ADR-0017 §1 picks. Every branch that cannot
@@ -401,6 +426,74 @@ async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
+/// `yantra doctor <machine>`, asked now rather than read off the sweep.
+///
+/// **A read reached over a `POST`, for [`ask`]'s reason** ([ADR-0019]): the
+/// `GET` beside it serves a reading up to 30 s old, and someone who has just
+/// installed `tmux` by hand needs to know it took before the next sweep. A
+/// person taps it and nothing polls it, which is both halves of the ADR's test.
+///
+/// **It costs an ssh round trip, and an asleep machine costs all ten seconds of
+/// `ConnectTimeout` before it answers.** What it answers then is nine
+/// *unknown* checks and never a 500: [`doctor::machine`] cannot fail, because a
+/// machine that could not be asked is not a machine that failed (R-23). A name
+/// nothing answers to reads the same way, and deliberately — ADR-0009 leaves
+/// this daemon no register of ssh destinations to refuse one against, which is
+/// why [`ask`] takes any machine too.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Recheck<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Answer<doctor::Report>>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    tracing::info!("doctor {name} for {}", caller.node);
+
+    let report = doctor::machine(&name, term()).await;
+    let snapshot = state.fleet.model.read().await.clone();
+    let beats = state.fleet.beats.read().await;
+    Ok(Json(Answer::Ok {
+        // Asked on this request, so there is no staleness to report — and the
+        // envelope is the sweep's so the browser needs no second type.
+        age_seconds: 0,
+        data: crate::api::answered(&report, &snapshot, &beats),
+    }))
+}
+
+/// What the agent in this workspace has spent — `yantra tokens <workspace>` on
+/// the wire.
+///
+/// **On request only, and a `POST` for [`recheck`]'s reason** ([ADR-0019]). It
+/// opens a transcript over ssh and reads a file that grows all session, which
+/// makes it the dearest read this crate has. Nothing may sweep it and nothing
+/// may poll it: a `$` on a row the fleet page refreshes every few seconds would
+/// put that read back into the loop, which is why D3 §11.4 keeps money on a tab
+/// somebody opens.
+///
+/// **Numbers, never records.** [`tokens::spent`] sums on the far machine and
+/// ships back counts, so no conversation crosses the wire (Y-181), and [`Spend`]
+/// has nowhere to put one.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn spent<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Spend>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("tokens {name} for {}", caller.node);
+
+    let spend = tokens::tokens(&name).await.map_err(|error| Refused::Verb {
+        status: from_logs(&error),
+        said: chain(&error),
+    })?;
+
+    Ok(Json(Spend::of(&spend)))
+}
+
 /// Stops a session by machine and name — the sessions `ls sessions` finds that
 /// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
 ///
@@ -578,6 +671,23 @@ fn from_remove(error: &remove::Error) -> StatusCode {
     }
 }
 
+/// No wildcard, per Y-135. **A transcript that is not there yet is a 409**: the
+/// machine answered clearly and what it said is that this agent has written no
+/// turn, which its first message changes and nothing here can (I-46, I-49).
+fn from_logs(error: &logs::Error) -> StatusCode {
+    match error {
+        logs::Error::Workspace(workspace) => from_workspace(workspace),
+        logs::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+        logs::Error::NoTranscript { .. } | logs::Error::NoTurnYet { .. } => StatusCode::CONFLICT,
+        // The far side's shell answered, and what it said was that it could not
+        // look — so nothing was decided and the caller is not to blame (R-23).
+        logs::Error::Probe { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        // An answer this build cannot parse is this build's problem, and so is
+        // having nowhere to keep a control socket.
+        logs::Error::Unreadable | logs::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 /// No wildcard, per Y-135.
 fn from_sessions(error: &sessions::Error) -> StatusCode {
     match error {
@@ -710,9 +820,101 @@ struct Resumed {
     term: String,
 }
 
-/// What these four routes put on the wire, for the seam check in
+/// What a session spent, and the day the prices it was charged at were true.
+///
+/// Counts and dollars and nothing else. [`tokens::Spend`] is summed on the far
+/// machine (Y-181), and this shape has no field a conversation could arrive in.
+#[derive(Debug, serde::Serialize)]
+struct Spend {
+    /// The transcript that was read, on the machine that wrote it.
+    path: String,
+    total: Counts,
+    /// One entry per model the transcript named, because models do not share a
+    /// rate.
+    models: Vec<ModelSpend>,
+    /// Responses Claude Code recorded as fast mode, billed at twice base input
+    /// and twice output. One is enough to withhold every figure below rather
+    /// than understate it.
+    fast: usize,
+    /// Dollars for the models the table prices. `null` is *no figure to give* —
+    /// fast mode, or a session that has spent nothing yet — and never zero
+    /// dollars.
+    cost: Option<f64>,
+    /// [`price::AS_OF`], beside the figure rather than in a release note: a
+    /// table written into a binary reports wrong money the day a rate changes,
+    /// and this date is the only thing that says so.
+    as_of: &'static str,
+}
+
+/// Deliberately no total across the four: they are not the same unit of
+/// anything, and money is the one figure that adds them.
+#[derive(Debug, serde::Serialize)]
+struct Counts {
+    /// API responses rather than transcript records, which are not the same
+    /// number (I-61).
+    responses: usize,
+    input: u64,
+    output: u64,
+    cache_write: u64,
+    cache_read: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ModelSpend {
+    model: String,
+    responses: usize,
+    /// `null` is a model the price table does not carry — **unpriced**, which
+    /// is a different thing from free. Its tokens are still in `total`, and its
+    /// dollars are in nobody's figure.
+    cost: Option<f64>,
+}
+
+impl Spend {
+    /// The CLI's `render_tokens`, as JSON: the same three refusals to price, so
+    /// the browser can draw neither more nor less than the terminal does.
+    fn of(spend: &tokens::Spend) -> Self {
+        let total = spend.total();
+        // Fast mode is billed at a premium the table does not carry, so nothing
+        // is priced — per model or in total.
+        let priced = spend.fast == 0;
+        let models: Vec<ModelSpend> = spend
+            .by_model
+            .iter()
+            .map(|(model, counts)| ModelSpend {
+                model: model.clone(),
+                responses: counts.responses,
+                cost: priced
+                    .then(|| price::rate(model))
+                    .flatten()
+                    .map(|rate| rate.charge(counts)),
+            })
+            .collect();
+        let charged = (priced && total.responses > 0)
+            .then(|| models.iter().filter_map(|model| model.cost).sum());
+
+        Self {
+            path: spend.path.clone(),
+            total: Counts {
+                responses: total.responses,
+                input: total.input,
+                output: total.output,
+                cache_write: total.cache_write,
+                cache_read: total.cache_read,
+            },
+            models,
+            fast: spend.fast,
+            cost: charged,
+            as_of: price::AS_OF,
+        }
+    }
+}
+
+/// What these routes put on the wire, for the seam check in
 /// [`crate::contract`] — built rather than fetched, because every handler here
 /// authorises a real tailnet caller and then awaits ssh.
+///
+/// Spend appears twice because the nulls are the interesting half: a state
+/// nothing generates is a state nothing checks.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
@@ -758,7 +960,35 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 term: terminfo::FALLBACK.to_owned(),
             }),
         ),
+        ("spend", "Spend", of(&Spend::of(&transcript(0)))),
+        ("spendFast", "Spend", of(&Spend::of(&transcript(3)))),
     ]
+}
+
+/// A session on two models, one of which the price table does not carry, so the
+/// fixture holds a `cost` of both kinds. `fast` above zero withholds all three.
+#[cfg(test)]
+fn transcript(fast: usize) -> tokens::Spend {
+    let counts = |responses, input, output| tokens::Counts {
+        responses,
+        input,
+        output,
+        cache_write: 120_400,
+        cache_write_1h: 40_000,
+        cache_read: 4_812_003,
+    };
+    tokens::Spend {
+        path: "/home/<user>/.claude/projects/-home-<user>-Github-site/1f0c1a2e.jsonl".to_owned(),
+        by_model: [
+            (
+                "claude-opus-5-20260115".to_owned(),
+                counts(66, 9_412, 84_310),
+            ),
+            (tokens::UNKNOWN_MODEL.to_owned(), counts(2, 118, 640)),
+        ]
+        .into(),
+        fast,
+    }
 }
 
 #[derive(Debug)]
@@ -1385,7 +1615,7 @@ mod tests {
 
         let app = crate::api::router()
             .with_state(crate::heartbeat::Fleet::default())
-            .merge(router(direct(tailnet(vec![]))));
+            .merge(router(direct(tailnet(vec![])), Fleet::default()));
 
         let read = app
             .clone()
@@ -1441,7 +1671,7 @@ mod tests {
 
         let app = crate::api::router()
             .with_state(crate::heartbeat::Fleet::default())
-            .merge(router(direct(tailnet(vec![]))));
+            .merge(router(direct(tailnet(vec![])), Fleet::default()));
 
         let mut edit = Request::patch("/workspaces/site")
             .header(header::CONTENT_TYPE, "application/json")
@@ -1473,6 +1703,169 @@ mod tests {
             status.status(),
             StatusCode::OK,
             "the read one segment below still answers for itself"
+        );
+    }
+
+    /// **The refusal that proves both new routes are gated**, and it proves it
+    /// twice over: a 403 is also the only outcome that could arrive quickly,
+    /// since a handler reached without one would ssh to `pi` and wait out
+    /// `ConnectTimeout`. `GET /machines/{name}/readiness` answers beside the
+    /// `POST` on the same path, which is the merge worth asserting: axum joins
+    /// the method routers, and matchit would panic on a second spelling of the
+    /// segment.
+    #[tokio::test]
+    async fn asking_a_machine_and_reading_a_spend_are_authorised_like_every_other_write() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let app = crate::api::router()
+            .with_state(Fleet::default())
+            .merge(router(direct(tailnet(vec![])), Fleet::default()));
+
+        for path in ["/machines/pi/readiness", "/workspaces/site/tokens"] {
+            let mut asked = Request::post(path).body(Body::empty()).expect("a POST");
+            asked
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+
+            let refused = app
+                .clone()
+                .oneshot(asked)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(
+                refused.status(),
+                StatusCode::FORBIDDEN,
+                "{path} reached authorisation rather than a 405, and this tailnet holds nobody"
+            );
+        }
+
+        let swept = app
+            .oneshot(
+                Request::get("/machines/pi/readiness")
+                    .body(Body::empty())
+                    .expect("a GET"),
+            )
+            .await
+            .expect("the router is infallible");
+        assert_eq!(
+            swept.status(),
+            StatusCode::OK,
+            "the sweep's own answer still reaches the same path"
+        );
+    }
+
+    /// A workspace that is not there is the caller's mistake; a transcript that
+    /// is not there yet is the world's answer and a person's first message
+    /// changes it; a machine that could not be asked decided nothing.
+    #[tokio::test]
+    async fn a_spend_fails_the_way_the_verbs_beside_it_do() {
+        assert_eq!(
+            from_logs(&logs::Error::Workspace(workspace::Error::NotFound {
+                name: "nosuch".to_string(),
+                path: "/nowhere".into(),
+            })),
+            StatusCode::NOT_FOUND
+        );
+
+        let waiting = logs::Error::NoTurnYet {
+            repo: "/home/<user>/Github/site".to_string(),
+            session: "1f0c1a2e".to_string(),
+        };
+        let (status, said) = answered(from_logs(&waiting), &waiting).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("written no turn yet"), "{said}");
+
+        let asleep = logs::Error::Ssh(yantra_core::ssh::Error::Transport {
+            host: "pi".to_string(),
+            diagnosis: "connect to host pi port 22: Connection refused".to_string(),
+        });
+        let (status, said) = answered(from_logs(&asleep), &asleep).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(said.contains("Connection refused"), "{said}");
+
+        assert_eq!(
+            from_logs(&logs::Error::Unreadable),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_logs(&logs::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// The property Y-181 was built for, asserted on the shape rather than on a
+    /// promise: every key the browser can read is a name, a number or a date,
+    /// so there is nowhere for a conversation to arrive. Serialised keys come
+    /// back sorted, which is why these lists are.
+    #[test]
+    fn a_spend_puts_counts_and_dollars_on_the_wire_and_nothing_else() {
+        let answered = serde_json::to_value(Spend::of(&transcript(0))).expect("a DTO of numbers");
+        let keys = |value: &serde_json::Value| {
+            value
+                .as_object()
+                .expect("an object")
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            keys(&answered),
+            ["as_of", "cost", "fast", "models", "path", "total"]
+        );
+        assert_eq!(
+            keys(&answered["total"]),
+            ["cache_read", "cache_write", "input", "output", "responses"]
+        );
+        assert_eq!(keys(&answered["models"][0]), ["cost", "model", "responses"]);
+    }
+
+    /// **The three the price table refuses to price**, each a different thing
+    /// from free, and the date that says when the table was true. Losing any of
+    /// them would make the dashboard claim what the terminal declines to.
+    #[test]
+    fn an_unpriced_model_a_fast_session_and_an_idle_one_are_each_not_free() {
+        let priced = Spend::of(&transcript(0));
+        let opus = &priced.models[0];
+        let unknown = &priced.models[1];
+        assert_eq!(opus.model, "claude-opus-5-20260115");
+        assert!(opus.cost.is_some(), "the table carries opus 5");
+        assert_eq!(
+            unknown.cost, None,
+            "a model the table does not carry is unpriced, not free"
+        );
+        assert_eq!(
+            priced.cost, opus.cost,
+            "the total is what was priced, and the unpriced model's tokens are in nobody's figure"
+        );
+        assert_eq!(priced.as_of, price::AS_OF);
+        assert_eq!(
+            priced.total.responses, 68,
+            "tokens add across models even though dollars do not"
+        );
+
+        let fast = Spend::of(&transcript(3));
+        assert_eq!(fast.fast, 3);
+        assert_eq!(fast.cost, None, "fast mode is billed at a rate not carried");
+        assert!(
+            fast.models.iter().all(|model| model.cost.is_none()),
+            "and not per model either"
+        );
+        assert_eq!(
+            fast.total.input, priced.total.input,
+            "the tokens are still reported"
+        );
+
+        let idle = Spend::of(&tokens::Spend {
+            path: "/home/<user>/.claude/projects/site/1f0c1a2e.jsonl".to_string(),
+            ..tokens::Spend::default()
+        });
+        assert_eq!(idle.total.responses, 0);
+        assert_eq!(
+            idle.cost, None,
+            "a session that has spent nothing has no figure, which is not $0.00"
         );
     }
 }

@@ -119,9 +119,20 @@ It runs at the same `EVERY` as the other four, and **not** because a slower loop
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
 their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
 to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
---json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine route
+--json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine `GET`
 reads that same sweep, so a machine no workspace names is a **404** — `doctor::fleet` asks the
-machines workspaces name, and asking a machine per request is the thing this shape refuses.
+machines workspaces name, and asking a machine per *polled* request is the thing this shape refuses.
+
+**`POST /api/machines/{name}/readiness` is where a person may ask anyway** (Y-197,
+[ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): someone who has just
+installed `tmux` by hand needs the answer before the next sweep, and the `GET` beside it can only
+serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
+authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
+type. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
+ssh destinations to refuse one against, and a name nothing answers to is nine *unknown* checks like
+any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
+`ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
+of itself, and debounce belongs in the browser.
 
 ## The one thing it sends, and the two rules that keep it useful
 
@@ -218,8 +229,8 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}` and
-`POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
-nothing more**, being `yantra new`, `edit`, `up`, `down` and `resume`. The daemon
+`POST /api/workspaces/{name}/{up,down,resume,tokens}` — **the CLI's own verbs and
+nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume` and `tokens`. The daemon
 may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
 reach. A new verb here starts in the CLI.
 
@@ -271,6 +282,15 @@ one of the three**, which is the whole point of the shape.
 `GET /api/workspaces` keeps answering without it for up to that long — measured at 15 s on the first
 try. The `201` and the `PATCH`'s `200` carry the whole workspace back for exactly this reason: a
 client that re-reads the list to find what it just wrote will draw what was there before.
+
+**`tokens` is the one that writes nothing** (Y-199). It is here because it asks a machine on demand
+and nowhere else fits — ADR-0019 again. Two properties of the answer are the library's and must not
+be flattened here: [`tokens.rs`](../yantra-core/src/tokens.rs) sums on the far machine and ships
+**numbers rather than records**, so `Spend` has no field a conversation could arrive in (Y-181); and
+[`price.rs`](../yantra-core/src/price.rs)'s `AS_OF` travels beside the figure, because a table
+written into a binary reports wrong money the day a rate changes. **An unpriced model is `null` and
+never `0`**, a fast-mode session withholds every dollar and keeps every token, and a session that
+has spent nothing has no figure at all. `render_tokens` in the CLI is the list to check against.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
@@ -387,7 +407,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Three things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Five things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -395,7 +415,14 @@ rather than to a request. **`write.rs`'s probe route is the third, and it is a r
 path nobody has typed yet, so no snapshot can hold it, and it is reached over a `POST` rather than
 given a `GET` that would await ssh.
 
-None of the three licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-197 and Y-199 add two more reads on that same licence, and both are `POST`s in `write.rs`.**
+The readiness re-check asks a machine a person named; `POST /api/workspaces/{name}/tokens` opens the
+agent's transcript, which is the **dearest** read this crate has — a file that grows all session, on
+a machine over ssh. Neither may be swept and neither may be polled. D3 §11.4 is the same rule stated
+as a design: money lives on a tab somebody opens, because a `$` on a fleet row would put that read
+into the 5 s loop.
+
+None of the five licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

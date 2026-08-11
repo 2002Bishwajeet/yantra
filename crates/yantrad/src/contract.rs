@@ -58,6 +58,7 @@ import type {
   Opened,
   Readiness,
   Resumed,
+  Spend,
   Stopped,
   TerminalSize,
   Workspace,
