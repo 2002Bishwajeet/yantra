@@ -726,6 +726,22 @@ its age.
 already requires of the CLI. An unknown model shows unpriced rather than free; a fast-mode session
 shows tokens and no money.
 
+> **2026-08-11, [Y-199](../../tracker.md#3-task-board): the picker is a workspace, not a machine.**
+> Spend is counted per workspace and there is no per-machine verb to publish. `yantra tokens
+> <workspace>` loads a workspace and finds *its* transcript, and
+> [`tokens.rs`](../../crates/yantra-core/src/tokens.rs) has no other entry point. A per-machine
+> figure would need either the fan-out this section itself forbids — one read per workspace on that
+> machine, on open — or new CLI surface that nothing has asked for.
+>
+> So the daemon publishes `POST /api/workspaces/{name}/tokens` and `/usage` opens holding a
+> **workspace** picker. Everything else in this section stands unchanged: on request rather than on
+> open, `AS_OF` beside the figure, unpriced shown as unpriced, and a fast-mode session showing tokens
+> and no money.
+>
+> **What is still unknown:** whether a per-machine total is worth having at all. Nobody has asked for
+> one, and the honest way to get it is a verb in the CLI first — this repo's own rule — rather than a
+> loop in the browser.
+
 ---
 
 ## 12. What this needs that does not exist
