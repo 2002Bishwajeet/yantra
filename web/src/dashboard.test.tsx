@@ -1335,11 +1335,8 @@ describe('creating a workspace', () => {
   // tables, and D3 §2 finding 3 is that it never moved.
   beforeEach(() => history.pushState(null, '', '/new'))
 
-  /** D4: choose a machine, walk to a directory, take the derived name. The
-   *  `Repo` field is gone — there is nothing left to type. */
-  /** D4: choose a machine, type where you are going, use it. Choosing an entry
-   *  *goes there*; the button *takes where you are*. The `Repo` field is gone —
-   *  there is nothing left to type into it. */
+  /** D4: choose a machine, then say where in one box — what it holds is where
+   *  you are. The `Repo` field is gone; there is nothing left to type into. */
   async function fill({
     machine = 'cachyos-g14',
     use = '/code/site',
@@ -1348,10 +1345,12 @@ describe('creating a workspace', () => {
     fireEvent.change(await screen.findByLabelText('Machine'), {
       target: { value: machine },
     })
-    fireEvent.change(await screen.findByLabelText('Path'), {
+    fireEvent.change(await screen.findByLabelText('Directory'), {
       target: { value: use },
     })
-    fireEvent.click(await screen.findByRole('button', { name: `Use ${use}` }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Use this directory' }),
+    )
     await screen.findByText(new RegExp(`Using ${use}\\.`))
     if (name !== undefined) {
       fireEvent.change(screen.getByLabelText('Name'), {

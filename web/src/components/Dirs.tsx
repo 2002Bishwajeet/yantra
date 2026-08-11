@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Dir, Listing, Probed } from '@/api'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,10 +9,10 @@ import {
   ComboboxItem,
   ComboboxList,
   ComboboxPopup,
+  ComboboxStatus,
 } from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
+import { dirOf, tailOf, trimSlash } from '@/lib/path'
 
 /** What the form may write. `checked` is D4 §5's three answers rather than two:
  *  *absent* and *could not ask* are different, and only one of them blocks. */
@@ -57,20 +57,17 @@ const at = (machine: string) =>
 const probeAt = (machine: string) =>
   `/api/machines/${encodeURIComponent(machine)}/probe`
 
-/** The parent of an absolute path, or `null` at the root. */
-function up(path: string): string | null {
-  const cut = path.replace(/\/+$/, '').lastIndexOf('/')
-  return cut > 0 ? path.slice(0, cut) : cut === 0 ? '/' : null
-}
-
-/** D4 §4.2. **Each step is one request and about 0.3 s**, which is what `probe`
- *  already costs and what [ADR-0019](../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)
- *  ruled a person may wait for. It walks rather than searching because D4 §2
- *  measured a whole-home sweep at 8.5 s on this fleet's Mac.
+/** D4 §4.2, amended 2026-08-11 (Y-304). **One box, holding the path**, the way
+ *  a file dialog does it: what you type is where you are, the list under it is
+ *  that directory filtered by the last segment, and `/` walks in.
  *
- *  **Two gestures, and the split is what the combobox buys.** Choosing an entry
- *  *goes there*; the button *takes where you are*. One list that meant both
- *  needed two controls per row and left a reader deciding which was which.
+ *  **Only crossing a `/` costs a round trip.** The listing is keyed by the
+ *  *directory* the box names, so `Do`, `Dow` and `Downl` are one request and
+ *  three filters. D4 §2 measured a level at 0.23 s — a probe's price, which
+ *  [ADR-0019](../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)
+ *  ruled a person may wait for — and this spends it once per level rather than
+ *  once per keystroke. Walking back up costs nothing at all: every level stays
+ *  in the query cache, which is why nothing here debounces.
  *
  *  **Taking a directory always probes it**, even one just listed. The listing
  *  says a directory is there; it does not say what origin it holds, and the
@@ -87,14 +84,11 @@ export function Dirs({
 }) {
   // `null` is the machine's own `$HOME`, which only the far side can name.
   const [where, setWhere] = useState<string | null>(null)
-  const [typed, setTyped] = useState('')
-  const [probing, setProbing] = useState<Asked<Probed>>({ asked: 'no' })
-  // **The ported `ui/combobox` Omits `onOpenChange`**, so a caller may say when
-  // the list is open and can never be told when the primitive wants it shut.
-  // Focus and Escape are therefore ours; a click outside is nobody's. Reported
-  // rather than worked around, because the fix is three characters in a file
-  // ADR-0014 forbids editing.
+  const [text, setText] = useState('')
+  const [seeded, setSeeded] = useState(false)
   const [open, setOpen] = useState(false)
+  const [high, setHigh] = useState<Dir | undefined>(undefined)
+  const [probing, setProbing] = useState<Asked<Probed>>({ asked: 'no' })
 
   // A path is a fact about one machine, so a new machine starts again. React's
   // own answer to adjusting state when an input changes — set it during the
@@ -105,41 +99,83 @@ export function Dirs({
   if (seen !== machine) {
     setSeen(machine)
     setWhere(null)
-    setTyped('')
-    setProbing({ asked: 'no' })
+    setText('')
+    setSeeded(false)
     setOpen(false)
+    setHigh(undefined)
+    setProbing({ asked: 'no' })
   }
 
-  /** **Nothing polls.** Each step is one ask and the answer is kept until you
-   *  move: a listing is a POST because it asks a machine (ADR-0019), not
+  /** **Nothing polls.** Each level is one ask and the answer is kept until you
+   *  leave: a listing is a POST because it asks a machine (ADR-0019), not
    *  because it changes anything, and re-asking on a window focus would spend
    *  an ssh round trip nobody asked for. */
-  const { data: listing = { asked: 'no' } as Asked<Listing> } = useQuery({
-    queryKey: ['dirs', machine, where],
-    queryFn: () =>
-      post<Listing>(at(machine), where === null ? {} : { path: where }),
-    enabled: machine !== '',
-    // A failed listing has already spent a ConnectTimeout, and Query's default
-    // is three more. D4 §2 is about not making a person wait; retrying is the
-    // same mistake with nobody to see it.
-    retry: false,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-  })
+  const client = useQueryClient()
+  const { data: listing = { asked: 'no' } as Asked<Listing>, isFetching } =
+    useQuery({
+      queryKey: ['dirs', machine, where],
+      queryFn: async () => {
+        const answer = await post<Listing>(
+          at(machine),
+          where === null ? {} : { path: where },
+        )
+        // `$HOME` is asked for by naming nothing, so its answer lands under a
+        // key no typed path can ever produce. Mirroring it under the path it
+        // turned out to be is what makes walking back up to it free.
+        if (where === null && answer.asked === 'read')
+          client.setQueryData(
+            ['dirs', machine, trimSlash(answer.data.path)],
+            answer,
+          )
+        return answer
+      },
+      enabled: machine !== '',
+      // A failed listing has already spent a ConnectTimeout, and Query's default
+      // is three more. D4 §2 is about not making a person wait; retrying is the
+      // same mistake with nobody to see it.
+      retry: false,
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+    })
 
-  const asking = machine !== '' && listing.asked === 'no'
+  const here = listing.asked === 'read' ? trimSlash(listing.data.path) : null
   const entries = listing.asked === 'read' ? listing.data.entries : []
-  const here = listing.asked === 'read' ? listing.data.path : null
-  const parent = here && up(here)
-  // A path typed in full is a place to go, not a filter over this one.
-  const elsewhere = typed.trim().startsWith('/') ? typed.trim() : null
-  const target = elsewhere ?? here
+  const parent = here !== null && here !== '/' ? dirOf(here) : null
+
+  // The box holds a path, so it cannot start empty — and the machine's own
+  // `$HOME` is a fact only the far side has. This is the render it arrives in.
+  if (!seeded && here !== null) {
+    setSeeded(true)
+    setText(here === '/' ? '/' : `${here}/`)
+  }
+
+  // `..` first, as every file dialog puts it, and it is the whole up gesture:
+  // a separate button would be a second control saying what one row says.
+  const items: Dir[] =
+    parent === null
+      ? entries
+      : [{ path: parent, name: '..', repo: false, origin: null }, ...entries]
+
+  const typed = text.trim()
+  const target = typed.startsWith('/') ? trimSlash(typed) : here
 
   const go = (path: string) => {
     setWhere(path)
-    setTyped('')
-    setOpen(false)
+    setText(path === '/' ? '/' : `${path}/`)
+    setHigh(undefined)
+  }
+
+  const typing = (value: string) => {
+    setText(value)
+    // A person who started before `$HOME` arrived has said where they are
+    // going, and the answer to a question they stopped asking must not land
+    // on top of it.
+    setSeeded(true)
+    const dir = dirOf(value)
+    // The one line that spends a round trip. Everything else the box does is
+    // arithmetic over a listing that already arrived.
+    if (dir !== null && dir !== here) setWhere(dir)
   }
 
   const take = async (path: string) => {
@@ -160,121 +196,125 @@ export function Dirs({
   }
 
   return (
-    <>
-      <Field>
-        <FieldLabel htmlFor="new-dirs">Directory</FieldLabel>
+    <Field>
+      <FieldLabel htmlFor="new-dirs">Directory</FieldLabel>
 
-        <Combobox<Dir>
-          items={entries}
-          itemToStringLabel={(entry) => entry.name}
-          onValueChange={(entry) => entry && go(entry.path)}
-          open={open}
-          value={null}
-        >
-          {/* No trigger: Base UI's own names it from this `Field`'s one label,
-            so the box and the chevron would both be called *Directory*. The
-            list opens on focus and on typing, which is what the box is for. */}
-          <ComboboxInput
-            id="new-dirs"
-            onFocus={() => setOpen(true)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setOpen(false)
-            }}
-            placeholder="go somewhere, or type a full path"
-            showTrigger={false}
-          />
-          <ComboboxPopup>
-            <ComboboxEmpty>
-              {/* The shell's own glob skips dotfiles, so a directory that looks
-                empty may hold only hidden ones — and a full path is how you
-                reach one (D4 §3.1). */}
-              {entries.length === 0
+      <Combobox<Dir>
+        // Filtered against the box's own value rather than the primitive's
+        // `query` argument. They part company the moment an entry is taken:
+        // the primitive keeps the name it matched, so the list would filter
+        // the level you just walked into by the name of the way in.
+        filter={(entry) => {
+          const tail = tailOf(text).toLowerCase()
+          return tail === '' || (entry as Dir).name.toLowerCase().includes(tail)
+        }}
+        inputValue={text}
+        items={items}
+        itemToStringLabel={(entry) => entry.name}
+        onInputValueChange={(value, details) => {
+          // `input-change` is a person typing, and it is the only reason worth
+          // acting on. The port fixes `fillInputOnItemPress`, so taking an
+          // entry **clears** the box and reports that as `input-clear` — which
+          // would wipe the path `go` had just written into it.
+          if (details.reason === 'input-change') typing(value)
+        }}
+        onItemHighlighted={(entry) => setHigh(entry)}
+        onOpenChange={(next, details) => {
+          // Taking an entry walks a level in, and the primitive reads that as a
+          // choice and wants to close. **Going in is browsing, not deciding**,
+          // so the list stays up and shows where you landed.
+          if (!next && details.reason === 'item-press') return
+          setOpen(next)
+        }}
+        onValueChange={(entry) => entry && go(entry.path)}
+        open={open}
+        value={null}
+      >
+        {/* No trigger: Base UI's own is named from this `Field`'s one label, so
+            the box and the chevron would both be called *Directory*. The list
+            opens on focus and on typing, which is what the box is for. */}
+        <ComboboxInput
+          id="new-dirs"
+          // Focus is enough: the box exists to be walked, and a list that waits
+          // for a keystroke hides the one thing a person came to read.
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            // With an entry highlighted, Enter is the primitive's and goes a
+            // level in. With none, the box holds a whole path and Enter is the
+            // confirm — never a form submit that would create a workspace
+            // nobody has finished describing.
+            if (event.key !== 'Enter' || high) return
+            event.preventDefault()
+            if (target !== null) void take(target)
+          }}
+          placeholder="/"
+          showTrigger={false}
+        />
+        <ComboboxPopup>
+          {isFetching && <ComboboxStatus>listing…</ComboboxStatus>}
+          <ComboboxEmpty>
+            {/* The shell's own glob skips dotfiles, so a directory that looks
+                empty may hold only hidden ones — and typing one is how you
+                reach it (D4 §3.1). */}
+            {isFetching
+              ? ''
+              : entries.length === 0
                 ? 'nothing here but files or hidden directories'
                 : 'nothing here matches'}
-            </ComboboxEmpty>
-            <ComboboxList>
-              {(entry: Dir) => (
-                <ComboboxItem key={entry.path} value={entry}>
-                  <span className="font-mono">{entry.name}</span>
-                  {/* D4 §5: a directory with no origin is legitimate and blocks
+          </ComboboxEmpty>
+          <ComboboxList>
+            {(entry: Dir) => (
+              <ComboboxItem key={entry.path} value={entry}>
+                <span className="font-mono">
+                  {entry.name === '..' ? '..' : `${entry.name}/`}
+                </span>
+                {/* D4 §5: a directory with no origin is legitimate and blocks
                     nothing. It is usually a typo, so it is named. */}
+                {entry.name !== '..' && (
                   <span className="text-muted-foreground ms-2 text-xs">
                     {entry.origin ??
                       (entry.repo ? 'no origin' : 'not a repository')}
                   </span>
-                </ComboboxItem>
-              )}
-            </ComboboxList>
-          </ComboboxPopup>
-        </Combobox>
+                )}
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxPopup>
+      </Combobox>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground font-mono text-xs">
-            {here ?? '…'}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          disabled={probing.asked === 'asking' || target === null}
+          onClick={() => target !== null && void take(target)}
+          size="sm"
+          variant="outline"
+        >
+          {probing.asked === 'asking' ? 'checking…' : 'Use this directory'}
+        </Button>
+      </div>
+
+      {/* The route tells *not there* from *could not ask* with its status, and
+          so must this: D4 §5's whole rule is that they differ. A 409 while you
+          are still typing a name is ordinary, so it says what is missing and
+          nothing more. */}
+      {listing.asked === 'failed' && (
+        <p className="text-sm">
+          {listing.status === 409
+            ? `${machine} has no directory there.`
+            : `${machine} could not be asked what is there.`}{' '}
+          Type a whole path and use it anyway, or choose a machine that answers.
+          <span className="text-muted-foreground mt-1 block font-mono text-xs whitespace-pre-wrap">
+            {listing.said}
           </span>
-          {parent && (
-            <Button onClick={() => go(parent)} size="sm" variant="ghost">
-              ↑ up
-            </Button>
-          )}
-          <Button
-            disabled={probing.asked === 'asking' || target === null}
-            onClick={() => target && void take(target)}
-            size="sm"
-            variant="outline"
-          >
-            {probing.asked === 'asking'
-              ? 'checking…'
-              : elsewhere
-                ? `Use ${elsewhere}`
-                : 'Use this directory'}
-          </Button>
-        </div>
+        </p>
+      )}
 
-        {asking && (
-          <div className="flex flex-col gap-2" data-slot="reading">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-4 w-64" />
-          </div>
-        )}
-
-        {/* The route tells *not there* from *could not ask* with its status,
-            and so must this: D4 §5's whole rule is that they differ. */}
-        {listing.asked === 'failed' && (
-          <p className="text-sm">
-            {listing.status === 409
-              ? `${machine} has no directory there.`
-              : `${machine} could not be asked what is there.`}{' '}
-            Type a full path and use it anyway, or choose a machine that
-            answers.
-            <span className="text-muted-foreground mt-1 block font-mono text-xs whitespace-pre-wrap">
-              {listing.said}
-            </span>
-          </p>
-        )}
-
-        <FieldDescription>
-          One level at a time, because a machine takes about as long to list a
-          directory as to answer whether one is there.
-          {chosen && ` Using ${chosen.path}.`}
-        </FieldDescription>
-      </Field>
-
-      {/* Its own field, twice over. Base UI names every control in one from
-          that one's label — and **a `Combobox` with nothing in `items` stops
-          reporting what is typed into it**, which is exactly the state a
-          machine that could not be listed leaves you in, and the one state
-          this escape hatch exists for. */}
-      <Field>
-        <FieldLabel htmlFor="new-path">Path</FieldLabel>
-        <Input
-          autoComplete="off"
-          id="new-path"
-          onChange={(event) => setTyped(event.target.value)}
-          placeholder="or type a full one"
-          value={typed}
-        />
-      </Field>
-    </>
+      <FieldDescription>
+        Type to filter and <kbd>/</kbd> to go in;{' '}
+        <span className="font-mono">..</span> goes up. Only crossing a{' '}
+        <kbd>/</kbd> asks the machine.
+        {chosen && ` Using ${chosen.path}.`}
+      </FieldDescription>
+    </Field>
   )
 }

@@ -188,6 +188,37 @@ is worse than typing four characters. This is `ui/combobox`'s job and is why D3 
 **Where it starts.** `$HOME`, because that is the only directory Yantra can name without asking. Any
 memory of where you were last would be daemon state, and the daemon persists nothing.
 
+> **2026-08-11, [Y-304](../../tracker.md#3-task-board): one box, holding the path.** The owner's
+> instruction of the same day — *"do like what vscode does properly"* — and it is the shape above
+> with the controls taken out rather than a different design. Everything §4.2 decides survives: one
+> level per ask, `$HOME` to start, and typing as a first-class way in.
+>
+> **What shipped first was five controls for one question**: a list to pick from, a chevron, an
+> `↑ up` button, a second text field for a whole path, and the button that takes it. Two of those
+> existed only because the list could not hold a path. **Now the box *is* the path** — what it says
+> is where you are — and the list under it is that directory, filtered by the last segment. The
+> reference is VS Code's remote folder picker, which is the same problem with the same constraint:
+> the far side is one round trip away, so the list is a level and the filter is local.
+>
+> **The trailing slash is the whole grammar.** `/code/` names what is inside `/code`; `/code` names
+> what is inside `/`. So typing one character walks in, deleting it walks out, and neither needs a
+> button. `..` is the first row, where every file dialog puts it.
+>
+> **It is also cheaper than what it replaces.** The listing is keyed by the *directory* the box
+> names, so `Do`, `Dow` and `Downl` are one request and three filters — the round trip is spent per
+> level, not per keystroke. Walking back up spends nothing: every level stays in the query cache,
+> which is why nothing debounces. `$HOME` is the one answer that arrives under a key no typed path
+> can produce — it is asked for by naming nothing — so it is mirrored under the path it turned out
+> to be, and going home is free too.
+>
+> **Enter is the confirm only when no row is highlighted.** With one, Enter is the primitive's and
+> goes in. That also stops the box submitting a form nobody has finished filling.
+>
+> **One thing this makes worse, and it is worth naming.** Typing a `/` after a name that does not
+> exist asks for a level that is not there, and the answer is a 409 you did not ask a question to
+> get. It reads as *"no directory there"*, which is true, and the next keystroke clears it. The
+> alternative was a debounce, which buys a quieter error by making every real walk slower.
+
 ### 4.3 The name is derived
 
 From the chosen directory's basename, or from the repository name in `origin` where the probe found
@@ -319,6 +350,35 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 > **Taking a directory always probes it**, even one just listed. A listing says a directory is there
 > and does not say what origin it holds, and §4.3's name is derived from that — so the one round trip
 > buys the origin and §5's answer together, which is `probe`'s own reason for asking both at once.
+
+> **2026-08-11, [Y-304](../../tracker.md#3-task-board): the two constraints above are not real, and
+> the paragraph that reported them is wrong.** Both were misreadings of the same declaration, and
+> both were load-bearing — §4.2's second text field existed because of them.
+>
+> `ComboboxRoot.Props` opens with an `Omit<…>` naming fifteen props, `onOpenChange` and
+> `onInputValueChange` among them. **They are removed there to be re-declared below with a different
+> signature**, three lines further down in the same type. Reading the `Omit` and stopping is what
+> produced *"`ui/combobox` Omits `onOpenChange`"*. It is passed straight through, and so is
+> `inputValue`, `filter` and `items`. The second claim followed from the first: **a `Combobox` does
+> not stop reporting what is typed when `items` is empty** — an *uncontrolled* one keeps that value
+> to itself, and `inputValue` + `onInputValueChange` is how a caller sees it. Nothing in the file
+> needed fixing and nothing was three characters away.
+>
+> **Four things about the primitive are real**, and each cost a failing test to find:
+>
+> 1. The port fixes `fillInputOnItemPress`, so taking an entry **clears the box** and reports that
+>    as `input-clear`. A handler that acts on every reason erases the path it just wrote.
+> 2. It **closes on `item-press`**, after the value change. Going a level in is browsing rather than
+>    deciding, so that one close is ignored and every other is obeyed.
+> 3. `filter`'s `query` argument is **the primitive's own**, and it parts company with a controlled
+>    `inputValue` the moment an entry is taken — it keeps the name it matched, so the level you just
+>    walked into gets filtered by the name of the way in, and the list comes up empty. Filter against
+>    your own value.
+> 4. A trigger inside a `Field` **takes that field's one label**, so the box and the chevron are both
+>    called *Directory*. That one stands: it is why there is no chevron.
+>
+> A fifth was ours. **The box filled itself in with `$HOME` on top of what a person had already
+> typed**, because the answer to that first question arrives about 0.3 s after the field does.
 
 **One thing is worth doing before any of it:** run §2's measurements against `cachyos-g14` once it
 answers ssh. Every number here is from one macOS laptop and one Linux desktop, and the design turns
