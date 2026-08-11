@@ -114,6 +114,25 @@ is structurally unable to hold it; and `crates/yantrad/CLAUDE.md`'s *never `awai
 handler* is not being softened, it is the write exception that already exists being used a fourth
 time. **The ADR needs no amendment** — it classified the case, and this is the case.
 
+> **2026-08-11, [Y-300](../../tracker.md#3-task-board): the snippet above is wrong in five ways,
+> and each one is a bug it would have shipped.** The shape survives; the bytes did not.
+>
+> 1. **`"$PATH"` is the shell's executable search path.** Pasted as written, the loop lists `/usr/bin`
+>    and its neighbours. The base is a variable of the command's own.
+> 2. **Tab-separated, newline-terminated records cannot carry the paths §8's own done-criterion
+>    names.** A directory called `two\nlines` arrives as two half rows. Records are **NUL-separated**
+>    — the one byte a path cannot hold — and `printf '\0'` was checked to emit a real NUL on busybox
+>    `ash` as well as on `bash`.
+> 3. **`*/` leaves a trailing slash on every entry**, so `%s` reports `/home/you/yantra/` and a
+>    picker's *last segment* is empty. It is stripped, and the base is given exactly one trailing
+>    slash so that listing `/` yields `/bin` rather than `//bin`.
+> 4. **It does not say what an absent path answers, and the loop alone answers *empty*.** That
+>    collapses §5's *not there* into *nothing here*, and a typo would draw an empty picker. The
+>    command prints `no` with the base, which the route turns into a **409** — so the browser must
+>    read a status rather than treat every failure as *could not ask*.
+> 5. **The browser has no way to learn where `$HOME` is**, though `Listing.path` requires it. The
+>    resolved base is the first record.
+
 ### 3.1 What it does not do
 
 - **It does not recurse.** §2 is the whole reason.
@@ -277,6 +296,29 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 | **D4.7** | The machine picker becomes `ui/select` (§4.1) | no hand-rolled control left in the form, and an asleep machine is still offered |
 
 **D4.1 and D4.2 come first**, and the page is worth nothing without them.
+
+> **2026-08-11: built as Y-300..Y-303**, and §4.4 lost a third of itself on contact with the schema.
+>
+> **A workspace holds a startup *command*, not an agent choice.** `startup: null` means it runs
+> nothing of its own, and it is the dashboard's Start button that then passes `agent: 'claude'`
+> ([`Act.tsx`](../../web/src/components/Act.tsx)). So *claude* and *a plain shell* are **the same
+> file**, told apart at `up` time rather than in it — and writing the string `"claude"` would have
+> made it a workspace that starts its own thing: no Resume under
+> [ADR-0015](../adr/0015-resume-forks-the-conversation.md), and `—` in the agent column. The form
+> offers two: claude, which sends no `startup` at all, and a command.
+>
+> **§4.2's combobox arrived with two constraints of its own**, both in the ported primitive that
+> [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md) forbids editing. `ui/combobox`
+> **Omits `onOpenChange`**, so a caller may say when the list is open and can never be told when the
+> primitive wants it shut — focus and Escape are the call site's, and a click outside is nobody's.
+> And **a `Combobox` with nothing in `items` stops reporting what is typed into it**, which is
+> exactly the state a machine that could not be listed leaves you in. So the typed path is its own
+> control beside the picker rather than the picker's own box. Both are three characters to fix in a
+> file nobody may touch.
+>
+> **Taking a directory always probes it**, even one just listed. A listing says a directory is there
+> and does not say what origin it holds, and §4.3's name is derived from that — so the one round trip
+> buys the origin and §5's answer together, which is `probe`'s own reason for asking both at once.
 
 **One thing is worth doing before any of it:** run §2's measurements against `cachyos-g14` once it
 answers ssh. Every number here is from one macOS laptop and one Linux desktop, and the design turns

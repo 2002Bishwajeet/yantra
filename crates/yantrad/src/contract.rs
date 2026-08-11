@@ -52,6 +52,7 @@ const HEADER: &str = "\
 // writes this file, and fails here once it is regenerated.
 import type {
   Listed,
+  Listing,
   Looked,
   Machine,
   MachineSessions,

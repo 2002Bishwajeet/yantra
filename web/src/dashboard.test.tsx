@@ -1298,6 +1298,21 @@ describe('creating a workspace', () => {
             json: () => Promise.resolve(listing),
           })
         }
+        // D4: taking a directory always probes it, for the origin as much as
+        // for whether it is there.
+        if (path.endsWith('/probe')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () =>
+              Promise.resolve({
+                machine: 'cachyos-g14',
+                path: '/code/site',
+                exists: true,
+                origin: null,
+              }),
+          })
+        }
         if (init?.method === 'POST') {
           posted(JSON.parse(String(init.body)))
           return Promise.resolve({
@@ -1322,22 +1337,30 @@ describe('creating a workspace', () => {
 
   /** D4: choose a machine, walk to a directory, take the derived name. The
    *  `Repo` field is gone — there is nothing left to type. */
+  /** D4: choose a machine, type where you are going, use it. Choosing an entry
+   *  *goes there*; the button *takes where you are*. The `Repo` field is gone —
+   *  there is nothing left to type into it. */
   async function fill({
     machine = 'cachyos-g14',
-    use = 'site',
+    use = '/code/site',
     name,
   }: { machine?: string; use?: string; name?: string } = {}) {
     fireEvent.change(await screen.findByLabelText('Machine'), {
       target: { value: machine },
     })
-    const row = (await screen.findByText(use)).closest('div')!
-    fireEvent.click(within(row).getByRole('button', { name: 'Use' }))
+    fireEvent.change(await screen.findByLabelText('Path'), {
+      target: { value: use },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: `Use ${use}` }))
+    await screen.findByText(new RegExp(`Using ${use}\\.`))
     if (name !== undefined) {
       fireEvent.change(screen.getByLabelText('Name'), {
         target: { value: name },
       })
     }
-    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Create workspace' }),
+    )
   }
 
   it('renders the workspace the 201 carried, not the list it is not in yet', async () => {

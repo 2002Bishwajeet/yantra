@@ -25,6 +25,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -38,6 +39,9 @@ const HOST: &str = "127.0.0.1";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BUILD_ATTEMPTS: u32 = 2;
 const BUILD_RETRY_PAUSE: Duration = Duration::from_secs(2);
+
+/// Tells two fixtures apart when the clock cannot.
+static STARTED: AtomicU32 = AtomicU32::new(0);
 
 /// A running container with sshd and tmux inside, removed on drop.
 #[derive(Debug)]
@@ -70,8 +74,12 @@ impl SshFixture {
         }
         ensure_image()?;
 
+        // The stamp alone is not unique: tests in one binary start on separate
+        // threads and the clock is coarser than a nanosecond on some hosts, so
+        // two fixtures claimed one directory and the second failed to create it.
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let name = format!("yantra-fixture-{}-{stamp}", std::process::id());
+        let seq = STARTED.fetch_add(1, Ordering::Relaxed);
+        let name = format!("yantra-fixture-{}-{stamp}-{seq}", std::process::id());
         let dir = std::env::temp_dir().join(&name);
         fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;

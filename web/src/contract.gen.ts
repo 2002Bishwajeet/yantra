@@ -7,6 +7,7 @@
 // writes this file, and fails here once it is regenerated.
 import type {
   Listed,
+  Listing,
   Looked,
   Machine,
   MachineSessions,
@@ -425,6 +426,25 @@ export const spendFast = {
     "responses": 68
   }
 } satisfies Spend
+
+export const listing = {
+  "entries": [
+    {
+      "name": "yantra",
+      "origin": "https://github.com/2002Bishwajeet/yantra.git",
+      "path": "/home/<user>/Github/yantra",
+      "repo": true
+    },
+    {
+      "name": "scratch",
+      "origin": null,
+      "path": "/home/<user>/Github/scratch",
+      "repo": false
+    }
+  ],
+  "machine": "cachyos-g14",
+  "path": "/home/<user>/Github"
+} satisfies Listing
 
 export const terminalSize = {
   "cols": 120,

@@ -10,7 +10,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from '@testing-library/react'
 import type { Listing, Looked, Machine } from './api'
 import App from './App'
@@ -64,10 +63,18 @@ const inside = at('/code/site', [
   { path: '/code/site/docs', name: 'docs', repo: false, origin: null },
 ])
 
+const empty = at('/code/scratch', [])
+
 /** `dirs` is keyed by the path asked for; `probe` by the path in the body. */
 function stub({
-  dirs = { '': code, '/code/site': inside } as Record<string, Listing | number>,
-  probe = {} as Record<string, { exists: boolean; origin: string | null } | number>,
+  dirs = { '': code, '/code/site': inside, '/code/scratch': empty } as Record<
+    string,
+    Listing | number
+  >,
+  probe = {
+    '/code/site': { exists: true, origin: 'git@github.com:you/my-site.git' },
+    '/code/scratch': { exists: true, origin: null },
+  } as Record<string, { exists: boolean; origin: string | null } | number>,
 } = {}) {
   const asked: { path: string; body: unknown }[] = []
   vi.stubGlobal(
@@ -137,8 +144,19 @@ const pick = async () =>
     target: { value: 'cachyos-g14' },
   })
 
-const rowFor = async (name: string) =>
-  within((await screen.findByText(name)).closest('div')!)
+/** Choosing an entry *goes there*; the button *takes where you are*. */
+const goTo = async (name: string, path?: string) => {
+  const box = await screen.findByLabelText('Directory')
+  fireEvent.focus(box)
+  fireEvent.change(box, { target: { value: name } })
+  fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }))
+  // The listing for the new level has to land before *here* is that level,
+  // and the button takes where you are.
+  if (path) await screen.findByText(path)
+}
+
+const use = async () =>
+  fireEvent.click(await screen.findByRole('button', { name: /^Use/ }))
 
 describe('walking to a directory', () => {
   it('asks for nothing until a machine is chosen, then asks once', async () => {
@@ -149,10 +167,15 @@ describe('walking to a directory', () => {
 
     await pick()
 
-    expect(await screen.findByText('site')).toBeTruthy()
-    expect(asked.filter((one) => one.path.endsWith('/dirs'))).toHaveLength(1)
-    // No path in the body: only the far side can name its own `$HOME`.
-    expect(asked[0]!.body).toEqual({})
+    expect(await screen.findByText('/code')).toBeTruthy()
+    // Distinct levels, not calls: what matters is that it asks about one place
+    // rather than fanning out, and a re-render must not turn into a sweep.
+    const levels = new Set(
+      asked
+        .filter((one) => one.path.endsWith('/dirs'))
+        .map((one) => JSON.stringify(one.body)),
+    )
+    expect([...levels]).toEqual(['{}'])
   })
 
   /** D4 §2: a whole-home sweep measured 8.5 s on this fleet's Mac, so each step
@@ -162,9 +185,9 @@ describe('walking to a directory', () => {
     render(<App />)
     await pick()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'site' }))
+    await goTo('site')
 
-    expect(await screen.findByText('docs')).toBeTruthy()
+    expect(await screen.findByText('/code/site')).toBeTruthy()
     const dirs = asked.filter((one) => one.path.endsWith('/dirs'))
     expect(dirs).toHaveLength(2)
     expect(dirs[1]!.body).toEqual({ path: '/code/site' })
@@ -174,14 +197,14 @@ describe('walking to a directory', () => {
     const asked = stub()
     render(<App />)
     await pick()
-    await screen.findByText('site')
+    await screen.findByText('/code')
 
-    fireEvent.change(screen.getByLabelText('Directory'), {
-      target: { value: 'scr' },
-    })
+    const box = screen.getByLabelText('Directory')
+    fireEvent.focus(box)
+    fireEvent.change(box, { target: { value: 'scr' } })
 
-    expect(screen.queryByText('site')).toBeNull()
-    expect(screen.getByText('scratch')).toBeTruthy()
+    expect(await screen.findByRole('option', { name: /scratch/ })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: /site/ })).toBeNull()
     expect(asked.filter((one) => one.path.endsWith('/dirs'))).toHaveLength(1)
   })
 
@@ -190,12 +213,15 @@ describe('walking to a directory', () => {
     stub()
     render(<App />)
     await pick()
-    fireEvent.click((await rowFor('site')).getByRole('button', { name: 'Use' }))
-    expect(await screen.findByText('/code/site')).toBeTruthy()
+    await goTo('site', '/code/site')
+    await use()
+    expect(await screen.findByText(/Using \/code\/site\./)).toBeTruthy()
 
     fireEvent.change(screen.getByLabelText('Machine'), { target: { value: '' } })
 
-    await waitFor(() => expect(screen.queryByText('/code/site')).toBeNull())
+    await waitFor(() =>
+      expect(screen.queryByText(/Using \/code\/site\./)).toBeNull(),
+    )
   })
 
   it('says a machine that could not be asked cannot be listed, and still takes a path', async () => {
@@ -203,12 +229,14 @@ describe('walking to a directory', () => {
     render(<App />)
     await pick()
 
-    expect(await screen.findByText(/could not be asked what is there/)).toBeTruthy()
+    expect(
+      await screen.findByText(/could not be asked what is there/),
+    ).toBeTruthy()
     fireEvent.change(screen.getByLabelText('Path'), {
       target: { value: '/code/site' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }))
-    expect(await screen.findByText('/code/site')).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: 'Use /code/site' }))
+    expect(await screen.findByText(/Using \/code\/site\./)).toBeTruthy()
   })
 })
 
@@ -222,12 +250,12 @@ describe('what blocks the create', () => {
     stub({ probe: { '/code/gone': { exists: false, origin: null } } })
     render(<App />)
     await pick()
-    await screen.findByText('site')
+    await screen.findByText('/code')
 
     fireEvent.change(screen.getByLabelText('Path'), {
       target: { value: '/code/gone' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }))
+    await use()
 
     expect(
       await screen.findByText('cachyos-g14 has no directory at /code/gone.'),
@@ -240,12 +268,12 @@ describe('what blocks the create', () => {
     stub({ probe: {} })
     render(<App />)
     await pick()
-    await screen.findByText('site')
+    await screen.findByText('/code')
 
     fireEvent.change(screen.getByLabelText('Path'), {
       target: { value: '/code/maybe' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }))
+    await use()
 
     expect(await screen.findByText(/so this path is unchecked/)).toBeTruthy()
     expect(create().hasAttribute('disabled')).toBe(false)
@@ -255,9 +283,8 @@ describe('what blocks the create', () => {
     stub()
     render(<App />)
     await pick()
-    fireEvent.click(
-      (await rowFor('scratch')).getByRole('button', { name: 'Use' }),
-    )
+    await goTo('scratch', '/code/scratch')
+    await use()
 
     expect(
       await screen.findByText(/Not a git repository — fine, if that is what/),
@@ -269,7 +296,7 @@ describe('what blocks the create', () => {
     stub()
     render(<App />)
     await pick()
-    await screen.findByText('site')
+    await screen.findByText('/code')
     expect(create().hasAttribute('disabled')).toBe(true)
   })
 })
@@ -289,15 +316,20 @@ describe('the name', () => {
     stub()
     render(<App />)
     await pick()
-    fireEvent.click((await rowFor('site')).getByRole('button', { name: 'Use' }))
+    await goTo('site', '/code/site')
+    await use()
 
-    const name = screen.getByLabelText('Name') as HTMLInputElement
-    expect(name.value).toBe('my-site')
-
-    fireEvent.change(name, { target: { value: 'mine' } })
-    fireEvent.click(
-      (await rowFor('scratch')).getByRole('button', { name: 'Use' }),
+    await waitFor(() =>
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
+        'my-site',
+      ),
     )
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mine' } })
+    fireEvent.change(screen.getByLabelText('Path'), {
+      target: { value: '/code/scratch' },
+    })
+    await use()
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('mine')
   })
 
@@ -305,7 +337,9 @@ describe('the name', () => {
     stub()
     render(<App />)
     await pick()
-    fireEvent.click((await rowFor('site')).getByRole('button', { name: 'Use' }))
+    await goTo('site', '/code/site')
+    await use()
+    await screen.findByText(/Using \/code\/site\./)
 
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'not a name' },
@@ -327,7 +361,9 @@ describe('what it opens with', () => {
     const asked = stub()
     render(<App />)
     await pick()
-    fireEvent.click((await rowFor('site')).getByRole('button', { name: 'Use' }))
+    await goTo('site', '/code/site')
+    await use()
+    await screen.findByText(/Using \/code\/site\./)
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
 
     await waitFor(() =>
