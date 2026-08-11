@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from 'react'
 import type { Machine, Workspace } from '@/api'
 import { Confirm } from '@/components/Act'
-import { field } from '@/components/NewWorkspace'
+import { nativeSelect } from '@/lib/control'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
@@ -203,7 +203,7 @@ export function EditWorkspace({
           id="edit-machine"
           name="machine"
           defaultValue={workspace.machine}
-          className={field}
+          className={nativeSelect}
         >
           {targets.map((one) => (
             <option key={one.name} value={one.name}>

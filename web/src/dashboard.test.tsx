@@ -472,8 +472,12 @@ describe('a workspace row on a phone', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'More for personal-website' }),
     )
+    // `Overflow` is a lazy chunk (Y-167, and Y-194 split three more), so this
+    // waits on a dynamic import rather than a render — R-24's species.
     for (const name of ['Start claude', 'Stop', 'Resume']) {
-      expect(await screen.findByText(name)).toBeTruthy()
+      expect(
+        await screen.findByText(name, undefined, { timeout: 10_000 }),
+      ).toBeTruthy()
     }
     expect(container.querySelector('table')).toBeNull()
     expect(container.querySelector('[data-slot="table-container"]')).toBeNull()
@@ -1258,6 +1262,25 @@ describe('creating a workspace', () => {
   // The create answers a status and a *plain-text* body rather than a `Looked`
   // envelope, so the POST is stubbed apart from the polls. It returns what the
   // form actually sent.
+  /** One level of `cachyos-g14`, as D4 §3's route answers it. */
+  const listing = {
+    machine: 'cachyos-g14',
+    path: '/code',
+    entries: [
+      {
+        path: '/code/site',
+        name: 'site',
+        repo: true,
+        origin: 'git@github.com:you/site.git',
+      },
+      { path: '/code/scratch', name: 'scratch', repo: false, origin: null },
+    ],
+  }
+
+  // The create answers a status and a *plain-text* body rather than a `Looked`
+  // envelope, so the POST is stubbed apart from the polls. It returns what the
+  // form actually sent. Since D4 the directory is a POST too, so the create is
+  // told apart by its path rather than by its method.
   function stubCreate(status: number, body: unknown) {
     const posted = vi.fn()
     const looks: Record<string, Looked<unknown>> = {
@@ -1268,6 +1291,13 @@ describe('creating a workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
+        if (path.endsWith('/dirs')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(listing),
+          })
+        }
         if (init?.method === 'POST') {
           posted(JSON.parse(String(init.body)))
           return Promise.resolve({
@@ -1290,22 +1320,36 @@ describe('creating a workspace', () => {
   // tables, and D3 §2 finding 3 is that it never moved.
   beforeEach(() => history.pushState(null, '', '/new'))
 
-  async function fill(fields: Record<string, string>) {
-    for (const [label, value] of Object.entries(fields)) {
-      fireEvent.change(await screen.findByLabelText(label), {
-        target: { value },
+  /** D4: choose a machine, walk to a directory, take the derived name. The
+   *  `Repo` field is gone — there is nothing left to type. */
+  async function fill({
+    machine = 'cachyos-g14',
+    use = 'site',
+    name,
+  }: { machine?: string; use?: string; name?: string } = {}) {
+    fireEvent.change(await screen.findByLabelText('Machine'), {
+      target: { value: machine },
+    })
+    const row = (await screen.findByText(use)).closest('div')!
+    fireEvent.click(within(row).getByRole('button', { name: 'Use' }))
+    if (name !== undefined) {
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: name },
       })
     }
-    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace' }))
   }
 
   it('renders the workspace the 201 carried, not the list it is not in yet', async () => {
     const posted = stubCreate(201, made)
     render(<App />)
-    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+    await fill()
 
-    expect(await screen.findByText('Created site on cachyos-g14.')).toBeTruthy()
-    expect(screen.getByText('/code/site')).toBeTruthy()
+    const made201 = await screen.findByText('Created site on cachyos-g14.')
+    // Scoped: since D4 the chosen directory is also on screen, above the form.
+    expect(
+      within(made201.closest('[data-slot="alert"]')!).getByText('/code/site'),
+    ).toBeTruthy()
 
     // The read model is 30 s behind a create, so the work page still says there
     // is nothing — which is exactly what confirming by re-reading would draw.
@@ -1326,7 +1370,7 @@ describe('creating a workspace', () => {
       'a workspace named site already exists at /home/<user>/.config/yantra/workspaces/site.toml'
     stubCreate(409, said)
     render(<App />)
-    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+    await fill()
 
     expect(await screen.findByText('That name is already a workspace.')).toBeTruthy()
     expect(screen.getByText(said)).toBeTruthy()
@@ -1339,7 +1383,7 @@ describe('creating a workspace', () => {
       'could not establish who is calling: whois failed: failed to connect to local tailscaled'
     stubCreate(503, said)
     render(<App />)
-    await fill({ Name: 'site', Machine: 'cachyos-g14', Repo: '/code/site' })
+    await fill()
 
     expect(
       await screen.findByText(/could not ask Tailscale who is calling/),
@@ -1361,7 +1405,7 @@ describe('creating a workspace', () => {
     })
     expect((asleep as HTMLOptionElement).disabled).toBe(false)
 
-    await fill({ Name: 'site', Machine: mac.name, Repo: '/code/site' })
+    await fill({ machine: mac.name })
     expect(await screen.findByText(`Created site on ${mac.name}.`)).toBeTruthy()
     expect(posted).toHaveBeenCalledWith(
       expect.objectContaining({ machine: mac.name }),
@@ -1371,9 +1415,13 @@ describe('creating a workspace', () => {
   it('has nowhere to type a secret, and says startup carries a reference', async () => {
     stubCreate(201, made)
     render(<App />)
-    await screen.findByLabelText('Startup')
+    // D4 §4.4 makes it a choice, so the field is named for what it does.
+    await screen.findByText('Opens with')
 
     expect(screen.queryByLabelText(/secret/i)).toBeNull()
+    // The sentence lives on the command, which is the only branch that takes
+    // one — `claude` is the absence of a startup command, not a string.
+    fireEvent.click(screen.getByRole('button', { name: 'a command…' }))
     expect(
       screen.getByText(/a secret stays a reference the shell resolves/),
     ).toBeTruthy()
