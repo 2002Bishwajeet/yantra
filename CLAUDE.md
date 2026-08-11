@@ -85,6 +85,29 @@ clarification. In this project, "verify" means what §B3 says it means.
 
 If a block needs a paragraph to explain it, the block is wrong. Fix the code, not the comment.
 
+## 6. Write plainly
+
+**Simplified Technical English (ASD-STE100) for the prose. Zinsser's four principles for the
+judgement.** Owner's instruction, 2026-08-10.
+
+This binds documentation, ADRs, research notes, `tracker.md` rows, commit messages, PR bodies and
+replies in the session. It does not bind code, quoted material, or prose you are not changing (§A3).
+
+- One idea per sentence. Keep instructions under 20 words and description under 25.
+- Use the active voice. Name who does the thing.
+- One word, one meaning. Do not vary a term for variety — a *workspace* is never a *project*.
+- Use simple tenses. Keep the articles and the relative pronouns; do not stack nouns to save space.
+- Delete the words that carry nothing: *simply*, *just*, *of course*, *very*, *in order to*.
+
+Then apply Zinsser: **simplicity, brevity, clarity, humanity**. The fourth one is why the list above
+is not enough on its own — STE alone produces correct prose that no one wants to read. Write for a
+person. Give the reason. Say what you do not know.
+
+> **What is not binding: STE's approved vocabulary.** ASD-STE100 was written for aircraft
+> maintenance manuals and its dictionary has no entry for most of what this repo talks about.
+> The sentence discipline above is the part that transfers. Do not use the word list to argue that
+> *orchestrate* or *idempotent* is banned.
+
 ---
 
 # Part B — Yantra
