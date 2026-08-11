@@ -23,6 +23,7 @@ import type {
 } from './api'
 import App from './App'
 import { Footer } from './components/Footer'
+import { Unreachable, unreachable } from './components/Unreachable'
 import { BANDS, work } from './work'
 
 afterEach(() => {
@@ -342,4 +343,56 @@ describe('the footer', () => {
     )
     expect(container.textContent).toBe('')
   })
+})
+
+/** D3 §7.2: off the tailnet the service worker serves the shell and every fetch
+ *  fails, and the page drew that as one failure per section. */
+describe('when nothing can be reached', () => {
+  const dead = (error: string) =>
+    ({ looked: 'failed', age_seconds: 0, error }) as const
+
+  it('says it once, and says what it cannot tell apart', () => {
+    const off = 'TypeError: fetch failed'
+    expect(unreachable([dead(off), dead(off), dead(off)])).toBe(off)
+
+    render(<Unreachable error={off} />)
+    expect(screen.getByText('Nothing here can be reached.')).toBeTruthy()
+    expect(
+      screen.getByText(/not something this page can tell/),
+    ).toBeTruthy()
+  })
+
+  /** Identical text, not merely all-failed: the daemon's own envelopes differ
+   *  per class, so two classes failing for two reasons stays two problems. */
+  it('keeps two different failures as two', () => {
+    expect(
+      unreachable([dead('tailscaled is down'), dead('TypeError: fetch failed')]),
+    ).toBeNull()
+  })
+
+  it('says nothing while one read is still answering', () => {
+    expect(unreachable([dead('gone'), { looked: 'pending' }])).toBeNull()
+    expect(
+      unreachable([dead('gone'), { looked: 'ok', age_seconds: 1, data: null }]),
+    ).toBeNull()
+  })
+
+  it('draws no stale data under it', async () => {
+    fleet([on('api')], { api: { state: 'running' } })
+    render(<App />)
+    await screen.findByRole('heading', { name: /Running/ })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('fetch failed'))),
+    )
+
+    expect(
+      await screen.findByText('Nothing here can be reached.', undefined, {
+        timeout: 8_000,
+      }),
+    ).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /Running/ })).toBeNull()
+    expect(screen.queryByText('api')).toBeNull()
+  }, 15_000)
 })

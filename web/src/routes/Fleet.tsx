@@ -14,6 +14,7 @@ import { Actions } from '@/components/Act'
 import { DataTable } from '@/components/DataTable'
 import { Footer } from '@/components/Footer'
 import { Section } from '@/components/Section'
+import { Unreachable, unreachable } from '@/components/Unreachable'
 import { Setup } from '@/components/Setup'
 import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
@@ -121,6 +122,16 @@ export function Fleet() {
       ? work(listed.data, agents)
       : [],
   )
+  const nothing = unreachable([machines, listed, sessions])
+
+  if (nothing) {
+    return (
+      <>
+        <Title>Fleet</Title>
+        <Unreachable error={nothing} />
+      </>
+    )
+  }
 
   return (
     <>
