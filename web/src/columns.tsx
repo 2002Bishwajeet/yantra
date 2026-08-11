@@ -9,6 +9,7 @@ import type {
   WorkspaceStatus,
 } from '@/api'
 import { Act, Actions, type Verb } from '@/components/Act'
+import { Ago, Stamp } from '@/components/Age'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -89,9 +90,9 @@ export const machineColumns: Column<Machine>[] = [
       <span className="inline-flex items-center gap-2">
         <Status {...reporting(machine)} />
         {machine.heartbeat && (
-          <time dateTime={`PT${machine.heartbeat.age_seconds}S`}>
-            beat {machine.heartbeat.age_seconds}s ago
-          </time>
+          <span>
+            beat <Ago seconds={machine.heartbeat.age_seconds} />
+          </span>
         )}
       </span>
     ),
@@ -99,7 +100,12 @@ export const machineColumns: Column<Machine>[] = [
   {
     header: 'LAST SEEN',
     // I-39: on an online peer this is noise, and the API does not blank it.
-    cell: (machine) => (machine.online ? '' : (machine.last_seen ?? '')),
+    cell: (machine) =>
+      machine.online || !machine.last_seen ? (
+        ''
+      ) : (
+        <Stamp stamp={machine.last_seen} />
+      ),
   },
 ]
 
@@ -263,9 +269,15 @@ export function sessionColumns(
   return [
     { header: 'MACHINE', cell: (row) => row.machine },
     { header: 'SESSION', cell: (row) => row.session.name },
-    { header: 'WINDOWS', cell: (row) => row.session.windows },
-    { header: 'ATTACHED', cell: (row) => row.session.attached },
-    { header: 'CREATED', cell: (row) => row.session.created },
+    {
+      header: 'WINDOWS',
+      cell: (row) => <span className="font-mono">{row.session.windows}</span>,
+    },
+    {
+      header: 'ATTACHED',
+      cell: (row) => <span className="font-mono">{row.session.attached}</span>,
+    },
+    { header: 'CREATED', cell: (row) => <Stamp stamp={row.session.created} /> },
     {
       header: 'COMMAND',
       cell: (row) => {
@@ -300,14 +312,16 @@ export function agentState(status: WorkspaceStatus | null): {
 
   const agent = status.status
   switch (agent.state) {
+    // D3 §6.1 splits what `ok` held: a live session gets the running mark, and
+    // the three endings get the hollow one, because they wait on nobody.
     case 'no_session':
-      return { tone: 'ok', label: 'no session' }
+      return { tone: 'idle', label: 'no session' }
     case 'running':
       return { tone: 'ok', label: 'running' }
     case 'finished':
-      return { tone: 'ok', label: 'finished' }
+      return { tone: 'idle', label: 'finished' }
     case 'stopped':
-      return { tone: 'ok', label: 'stopped' }
+      return { tone: 'idle', label: 'stopped' }
     case 'no_agent':
       return { tone: 'ok', label: 'no agent — opened as a shell' }
     case 'awaiting_trust':
@@ -316,8 +330,10 @@ export function agentState(status: WorkspaceStatus | null): {
       return { tone: 'bad', label: `crashed — exit ${agent.exit_status}` }
     case 'killed':
       return { tone: 'bad', label: `killed — ${agent.signal}` }
+    // D3 §6.2: colouring uncertainty makes it look like a decision, so the
+    // dashed hollow mark is the whole treatment.
     case 'unclear':
-      return { tone: 'bad', label: 'unclear' }
+      return { tone: 'unknown', label: 'unclear' }
   }
 }
 
