@@ -87,6 +87,20 @@ Measured 2026-08-11 on `y-182-price-table`, against the daemon's own contract fi
 bytes: Rollup drops them, and `Autocomplete`, `Combobox`, `ScrollArea` and `ToggleGroup` appear in no
 chunk. Deleting them buys clarity, not weight. §9.1 says so rather than claiming a saving.
 
+> **Finding 10 reaches one word too far, and its substance is unchanged. Recorded 2026-08-11
+> (Y-194).** One `prefers-reduced-motion` rule already shipped, inside a sheet the page imports:
+> `shadcn/tailwind.css` stops `.shimmer`'s animation under `reduce` and restores the text colour it
+> was painting over. So *nothing anywhere* is too strong. Read the finding as **nothing in app code
+> honours it**, which is what it was counting and what §9.3 answers.
+>
+> The correction costs the finding nothing, because the page uses no `.shimmer` — the rule protects a
+> utility this interface never draws. The two animations the finding names, the skeleton and the
+> spinner, were both unguarded exactly as it says.
+>
+> One detail is worth carrying for whoever greps next: the rule is in `shadcn/tailwind.css`, **not**
+> in `tw-animate-css`, which ships no `prefers-reduced-motion` at all at 1.4.0. §9.3 repeats the
+> claim in its own words and takes the same correction; its ruling is untouched.
+
 ---
 
 ## 3. Routes and navigation
@@ -177,6 +191,22 @@ name the same cause. The machine is the problem; the workspaces are downstream o
 next*, so `no_agent` sits in Running because its session is live, not because an agent works in it.
 Collapsing nine verdicts into three words would throw away the vocabulary R-23 protects.
 
+> **A workspace the agent class answered 404 for has no state, and this table has no row for it.
+> Recorded 2026-08-11 (Y-188).** `useAgents` collapses that 404 to `null` (Y-084), and `chosen()`
+> reads `null` as *nothing has been looked at yet*. Filing it under *needs you*, *running* or *idle*
+> would be a guess painted as knowledge, which is what R-23 forbids.
+>
+> So there is a quiet fourth group, **Not read yet**, drawn last and empty in normal operation.
+> [`web/src/work.ts`](../../web/src/work.ts) carries it as the `unknown` band. It adds no data and no
+> round trip, exactly as the three above it do not.
+>
+> **It forced a consequence in §4.4, and the consequence is §7.1's mistake in a second place.** Every
+> row starts unread. Held order therefore pinned all of them in this group, and the first read never
+> moved them, so the page kept saying *unread* about something it had read. **Held order never holds
+> a row in this band**: a row leaves it the moment its first read arrives. A row nobody has seen
+> before takes its live band at once for the same reason — appearing is not moving, and no thumb is
+> over a row that was not there.
+
 ### 4.2 The agent has a column, and there is one agent
 
 Each row names its agent. Today every value is `claude`, and a plain shell reads `—`.
@@ -258,6 +288,22 @@ The reason is that the alternative sends a fresh install to a form whose `up` wi
 `claude` is not installed on the target and nothing said so. R13 §6 named this gap: *the interface
 has never been given a way to say what is still missing.*
 
+> **On the install this section exists for, the checklist has nothing to draw. Found while planning
+> Y-197, recorded 2026-08-11.** Readiness is swept only for **the machines a workspace names** —
+> `doctor::fleet`, and `/api/readiness/{machine}` says so in the words of its own 404: *"no workspace
+> names a machine called `x`, so none was asked"*. A fresh install has no workspace, so no machine is
+> asked and D2 §3.1's nine checks would draw blank. The page would say nothing at the one moment it
+> is the whole page.
+>
+> **So the page lists the tailnet's machines and asks each one on request**, through §12's re-check
+> `POST`. Nothing fans out on open: one machine is asked per tap, which is §11.4's rule applied to a
+> second page.
+>
+> The re-check is therefore not an extra affordance beside the checklist. **It is what gives the
+> checklist anything to show**, and this section depends on the row §12's table calls *"re-check
+> readiness now"* — **D3.21 before D3.20**. That is an order, not a block, so §16's count of two
+> blocked units stands.
+
 ---
 
 ## 5. Hierarchy, density and type
@@ -336,6 +382,24 @@ tmux formats it on the remote machine's clock, in that machine's timezone. Parse
 it parses; show it verbatim where it does not. Guessing a remote clock's timezone would be a lie in
 a page whose whole discipline is refusing to guess.
 
+> **Those two sentences cannot both hold, and parsing is the guess. Recorded 2026-08-11 (Y-192).**
+> `created` arrives as `Thu Jul 30 13:02:31 2026`, and that string names **no zone**. V8 reads it
+> happily, on the *browser's* clock, so a machine in another zone yields an age wrong by the offset
+> with nothing on screen to reveal it. *Where it parses* is not the safe half of the rule — it is the
+> half that lies. The parse is also implementation-defined, so another engine can fail where Chromium
+> succeeds.
+>
+> **So a stamp is read only where it names its zone** — a trailing `Z` or `±HH:MM`. `last_seen` is
+> ISO and zoned, so it still reads `7 Jul`; tmux's `created` shows verbatim.
+> [`web/src/lib/time.ts`](../../web/src/lib/time.ts) holds the one test, and returns `null` where no
+> instant can be read out of a string, which is the caller's cue to print it as it arrived.
+>
+> What changed sits upstream of the sentence above: the string was taken to carry an instant, and it
+> carries a wall-clock reading. **The fix that would give this page a real age is in the daemon, and
+> nobody has proposed it.** [`tmux.rs`](../../crates/yantra-core/src/tmux.rs) asks tmux for
+> `#{t:session_created}`, which is tmux's own formatting; `#{session_created}` is a Unix epoch, which
+> needs no zone because it is not a wall clock. No row asks for that change today.
+
 ---
 
 ## 6. State without colour
@@ -374,6 +438,21 @@ is the whole treatment, and it is the one that must survive a greyscale screensh
 
 **The accent never means a state.** `design-system.md` §7's warning, verbatim in effect: otherwise *a
 crashed agent and a hyperlink end up the same colour*.
+
+> **Two of the three roles have no value to take, so today they take the foreground. Recorded
+> 2026-08-11 (Y-193).** §0 fixes the **number** of roles and none of their values, and the owner
+> holds the visual direction. The shadcn sheet the page ships carries one semantic colour,
+> `--destructive`. So `--tone-critical` takes `--destructive`, and `--tone-warn` and `--tone-good`
+> take `currentColor` until the design system grounds them.
+>
+> **`warn` and `good` are therefore visually identical to the page's own foreground.** The separation
+> a reader sees is carried entirely by §6.1's four marks — which is what this section already
+> requires of them, so nothing promised is lost. No pigment was invented, which is §0 holding rather
+> than bending.
+>
+> Say it plainly: the roles exist and two are unpainted. Grounding them is one line each in
+> `index.css`, which is the diff ADR-0014 already expects. What those two values should be is the
+> owner's to decide and is not decided.
 
 ---
 
@@ -502,6 +581,35 @@ question: they are a ported set at a pinned commit, and deleting half makes the 
 reconcile. Keep them, and say in
 [`THIRD-PARTY.md`](../../web/src/components/ui/THIRD-PARTY.md) that the set is complete on purpose.
 
+> **The saving is right and the file named does not exist. Recorded 2026-08-11 (Y-194).**
+> `@fontsource-variable/geist@5.3.0` publishes **no per-subset stylesheet**. It ships `index.css`,
+> `wght.css` and `wght-italic.css`; `index.css` and `wght.css` are byte-identical, and each declares
+> all five subsets. There is no `latin.css` to import.
+>
+> **The 47 kB was measured and holds: 76,420 B to 29,400 B, a saving of 47,020 B.** What works is a
+> local `@font-face` in `index.css`, copied from the package's own latin block:
+>
+> ```css
+> @font-face {
+>   font-family: 'Geist Variable';
+>   font-style: normal;
+>   font-display: swap;
+>   font-weight: 100 900;
+>   src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format('woff2-variations');
+>   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+> }
+> ```
+>
+> Two details are worth carrying. **Vite resolves a bare package specifier inside `url()`**, so no
+> relative path into `node_modules` is needed and no build step copies the file by hand. And the
+> `unicode-range` and the `format()` are the package's own, so **no glyph changes** — which is the
+> half of D3.12 that a hand-written `@font-face` could quietly break.
+>
+> Two figures elsewhere were checked and left alone. Sources' *"five Geist woff2 totalling 76,420 B"*
+> is correct: it measures the branch this document was written on. §16's D3.12 asks for fonts under
+> 30 kB, and 29,400 B meets it. The table above still reads **76 kB** under *Now*, which is what
+> *now* meant on 2026-08-11 before this landed.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
@@ -513,6 +621,23 @@ to animate. Nothing loops except the skeleton.
 Motion is not used as signal. A row entering *Needs you* is marked by the pill and by its position,
 not by a flash: a page you glance at from across a room should not depend on having been watched at
 the right moment.
+
+> **Two tokens cannot reach the things that animate, so they ground Tailwind's defaults instead.
+> Recorded 2026-08-11 (Y-194).** The overlays and disclosures named above live in
+> `web/src/components/ui/`, and ADR-0014 forbids editing that directory. A rule written as two
+> classes those files would have to spend has no way in.
+>
+> So `--motion-duration` and `--motion-ease` ground Tailwind's own `--default-transition-duration`
+> and `--default-transition-timing-function`. Every `transition-colors` and `transition-all` that
+> names no duration of its own then takes them, which is most of the ported set — `popover`,
+> `button`, `input`, `select`, `badge` and the rest. Verified in the built CSS. **The rule holds, and
+> it is reached indirectly.**
+>
+> **Four primitives name a duration on the base class and keep it**: `sheet`, `collapsible`, `switch`
+> and `menu`, all at 200 ms, and `sheet` names `ease-in-out` as well. Two of those four are the
+> overlay fade and the disclosure slide this section names, so the timing a reader sees there is the
+> port's rather than D3's. A utility class cannot be overruled from a token, and editing the file is
+> what ADR-0014 refuses. **Named, not solved.**
 
 ### 9.3 The reduced-motion floor
 
