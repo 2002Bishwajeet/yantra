@@ -135,6 +135,17 @@ server a login session started*, asked with `list-sessions` so none is created, 
 inside it — on Linux the same question asked directly, since the credential is a file that ssh
 session can read.
 
+**2026-08-11, [Y-175](../../tracker.md#3-task-board): a tenth check, and this table stays at nine.**
+`github` asks whether `gh` is installed and logged in on the host the daemon runs on, because that is
+where `attention.rs` spawns it — so it is a fact about the asker rather than about any machine in the
+list above, and `yantrad` serves it at `GET /api/readiness/github` rather than adding a row to every
+report. `yantra doctor` is not the caller that can answer it, for `heartbeat`'s reason turned around:
+the CLI runs where a person is sitting and the credential that matters is the daemon's. **Only the
+two failures `gh` names outright are *absent*** — nothing on `PATH`, and a `gh` that reports no
+credential. Everything else is *unknown*, because `gh auth status` 2.96.0 says *the token in keyring
+is invalid* both for a token GitHub refused and for a GitHub it could not reach `[V]`, and an
+*absent* there would send someone to log in on a box that already is (R-23).
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor
