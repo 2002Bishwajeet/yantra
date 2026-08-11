@@ -139,3 +139,43 @@ export type Check = {
 }
 
 export type Readiness = { machine: string; checks: Check[] }
+
+/** `POST /api/machines/{name}/readiness` re-asks the machine now and answers
+ *  `Looked<Readiness>` — the same envelope the `GET` serves, at `age_seconds: 0`.
+ *  A machine that does not answer is a report of `unknown` checks, not an error
+ *  (R-23), and it costs a full ssh round trip. Debounce it: nothing in the
+ *  daemon stops a client polling a POST ([ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)). */
+
+/** `POST /api/workspaces/{name}/tokens`. Read on request only — it opens the
+ *  agent's transcript over ssh, which is why money is on a tab somebody opens
+ *  rather than on a row the fleet page refreshes. Counts and dollars only: the
+ *  far machine sums them and no conversation crosses the wire (Y-181). */
+export type Spend = {
+  // The transcript that was read, on the machine that wrote it.
+  path: string
+  total: Counts
+  models: ModelSpend[]
+  // Responses billed at fast mode's premium. Above zero, every `cost` is null.
+  fast: number
+  // null is "no figure to give" — fast mode, or nothing spent yet. Never zero.
+  cost: number | null
+  // The day the prices were true, beside the figure they priced.
+  as_of: string
+}
+
+/** No total across the four: they are not the same unit of anything. */
+export type Counts = {
+  // API responses, which is not the number of transcript records (I-61).
+  responses: number
+  input: number
+  output: number
+  cache_write: number
+  cache_read: number
+}
+
+export type ModelSpend = {
+  model: string
+  responses: number
+  // null is a model the price table does not carry — unpriced, never free.
+  cost: number | null
+}

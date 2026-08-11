@@ -117,7 +117,7 @@ describe('opening it', () => {
   it('opens on the shortcut, on either modifier', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     fireEvent.keyDown(document, { key: 'k', metaKey: true })
     expect(await screen.findByRole('dialog')).toBeTruthy()
@@ -143,7 +143,7 @@ describe('opening it', () => {
   it('closes on Escape', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     shortcut()
     fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' })
@@ -153,10 +153,10 @@ describe('opening it', () => {
 })
 
 describe('what it finds', () => {
-  it('offers the workspaces, the machines and the three routes', async () => {
+  it('offers the workspaces, the machines and every route', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     await opened()
     expect(entries()).toEqual([
@@ -164,6 +164,7 @@ describe('what it finds', () => {
       'cachyos-g14',
       'Fleet',
       'Machines',
+      'New workspace',
       'Usage',
     ])
   })
@@ -171,7 +172,7 @@ describe('what it finds', () => {
   it('goes to the workspace', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     const palette = await opened()
     fireEvent.click(palette.getByRole('option', { name: 'yantra' }))
@@ -182,7 +183,7 @@ describe('what it finds', () => {
   it('goes to the machine', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     const palette = await opened()
     fireEvent.click(palette.getByRole('option', { name: 'cachyos-g14' }))
@@ -193,7 +194,7 @@ describe('what it finds', () => {
   it('goes to the route', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     const palette = await opened()
     fireEvent.click(palette.getByRole('option', { name: 'Machines' }))
@@ -207,7 +208,7 @@ describe('what it finds', () => {
   it('narrows to what was typed', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     const palette = await opened()
     fireEvent.change(palette.getByRole('combobox'), {
@@ -224,7 +225,7 @@ describe('the verbs it does not run', () => {
   it('writes nothing, whichever entry is chosen', async () => {
     const wrote = fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     for (const name of ['yantra', 'cachyos-g14', 'Fleet', 'Machines', 'Usage']) {
       const palette = await opened()
@@ -238,7 +239,7 @@ describe('the verbs it does not run', () => {
   it('offers no entry that is a verb', async () => {
     fleet()
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     await opened()
     const offered = entries().join(' ')
@@ -268,6 +269,7 @@ describe('a reading it does not have', () => {
       'cachyos-g14',
       'Fleet',
       'Machines',
+      'New workspace',
       'Usage',
     ])
   })
@@ -275,7 +277,7 @@ describe('a reading it does not have', () => {
   it('says a class it has not read yet is unread', async () => {
     fleet({ '/api/machines': { looked: 'never' } })
     render(<App />)
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
     const palette = await opened()
     expect(palette.getByText(/Machines have not been read yet\./)).toBeTruthy()

@@ -1286,6 +1286,10 @@ describe('creating a workspace', () => {
     return posted
   }
 
+  // Y-185 gives the form its own route. It was parked on `/` between two
+  // tables, and D3 §2 finding 3 is that it never moved.
+  beforeEach(() => history.pushState(null, '', '/new'))
+
   async function fill(fields: Record<string, string>) {
     for (const [label, value] of Object.entries(fields)) {
       fireEvent.change(await screen.findByLabelText(label), {
@@ -1302,9 +1306,12 @@ describe('creating a workspace', () => {
 
     expect(await screen.findByText('Created site on cachyos-g14.')).toBeTruthy()
     expect(screen.getByText('/code/site')).toBeTruthy()
-    // The read model is 30 s behind a create, so the list still says there is
-    // nothing — which is exactly what confirming by re-reading would draw.
-    expect(screen.getByText(/^no workspaces yet/)).toBeTruthy()
+
+    // The read model is 30 s behind a create, so the work page still says there
+    // is nothing — which is exactly what confirming by re-reading would draw.
+    // Asked for on `/` since Y-185 moved the form off it.
+    fireEvent.click(screen.getByRole('link', { name: 'fleet' }))
+    expect(await screen.findByText(/^no workspaces yet/)).toBeTruthy()
     // Three keys and no fourth: §B4 holds because there is nowhere to put one.
     expect(posted).toHaveBeenCalledWith({
       name: 'site',

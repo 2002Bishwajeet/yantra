@@ -35,6 +35,16 @@ const machines = createRoute({
   head: () => titled('Machines'),
 })
 
+// Split with `/w/$name` rather than eager with the fleet: the two forms carry
+// Base UI's `field` between them, and D3 §9.1's budget has no room for a form
+// nobody has opened (Y-194).
+const made = createRoute({
+  getParentRoute: () => root,
+  path: '/new',
+  component: lazyRouteComponent(() => import('@/routes/New'), 'New'),
+  head: () => titled('New workspace'),
+})
+
 const usage = createRoute({
   getParentRoute: () => root,
   path: '/usage',
@@ -66,6 +76,7 @@ const workspace = createRoute({
 export const routeTree = root.addChildren([
   fleet,
   machines,
+  made,
   usage,
   machine,
   workspace,

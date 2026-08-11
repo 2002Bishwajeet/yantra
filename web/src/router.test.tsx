@@ -165,7 +165,7 @@ describe('the outline', () => {
     fleet()
     render(<App />)
 
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
     const headings = outline()
     expect(headings.filter((one) => one.startsWith('H1 '))).toEqual(['H1 Fleet'])
     expect(headings.filter((one) => one.startsWith('H2 ')).length).toBeGreaterThan(0)
@@ -211,7 +211,7 @@ describe('the outline', () => {
     fleet()
     render(<App />)
 
-    await screen.findByText('New workspace')
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
     for (const gone of ['Machines', 'Readiness', 'Unclaimed sessions']) {
       expect(screen.queryByRole('heading', { name: gone })).toBeNull()
     }
@@ -234,7 +234,7 @@ describe('moving between them', () => {
     history.back()
 
     await waitFor(() => expect(location.pathname).toBe('/'))
-    expect(await screen.findByText('New workspace')).toBeTruthy()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Fleet' })).toBeTruthy()
   })
 
   it('opens the terminal route from the overflow in a workspace row', async () => {

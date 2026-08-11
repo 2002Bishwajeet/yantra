@@ -21,13 +21,18 @@ import {
 type Entry =
   | { kind: 'workspace'; value: string; label: string }
   | { kind: 'machine'; value: string; label: string }
-  | { kind: 'route'; value: '/' | '/machines' | '/usage'; label: string }
+  | {
+      kind: 'route'
+      value: '/' | '/machines' | '/new' | '/usage'
+      label: string
+    }
 
 type Group = { label: string; items: Entry[] }
 
 const ROUTES: Entry[] = [
   { kind: 'route', value: '/', label: 'Fleet' },
   { kind: 'route', value: '/machines', label: 'Machines' },
+  { kind: 'route', value: '/new', label: 'New workspace' },
   { kind: 'route', value: '/usage', label: 'Usage' },
 ]
 

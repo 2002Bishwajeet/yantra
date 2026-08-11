@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import type { Listed, Machine, MachineSessions } from '@/api'
 import {
@@ -12,21 +12,25 @@ import {
 } from '@/columns'
 import { Actions } from '@/components/Act'
 import { DataTable } from '@/components/DataTable'
-import { EditWorkspace } from '@/components/EditWorkspace'
-import { NewWorkspace } from '@/components/NewWorkspace'
 import { Section } from '@/components/Section'
 import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 import { loaded, useAgents, useLooked } from '@/useLooked'
 import type { Reading } from '@/useLooked'
 import { agentOf, BANDS, type Band, work, type WorkRow } from '@/work'
+
+// Both hold Base UI's `field`, and neither is on screen until a row's overflow
+// asks for it — the same reason `Overflow` is split (Y-167, Y-194).
+const EditWorkspace = lazy(() =>
+  import('@/components/EditWorkspace').then((it) => ({
+    default: it.EditWorkspace,
+  })),
+)
+const Reveal = lazy(() =>
+  import('@/components/Reveal').then((it) => ({ default: it.Reveal })),
+)
 
 // §4.6: thirty idle workspaces would be the longest thing on the page and the
 // least urgent. `⌘K` is how you reach a specific one.
@@ -143,10 +147,19 @@ export function Fleet() {
           })}
           {placed.length === 0 && (
             <p className="text-muted-foreground text-sm">
-              no workspaces yet — make one below, or at
+              no workspaces yet — <Link to="/new">make one</Link>, or write
               ~/.config/yantra/workspaces/&lt;name&gt;.toml
             </p>
           )}
+          <div>
+            <Button
+              render={<Link to="/new" />}
+              size="sm"
+              variant="outline"
+            >
+              ＋ New workspace
+            </Button>
+          </div>
         </>
       )}
 
@@ -155,21 +168,17 @@ export function Fleet() {
       {chosenToEdit && (
         <Section title={`Edit ${chosenToEdit.name}`} query={machines}>
           {(rows) => (
-            <EditWorkspace
-              key={chosenToEdit.name}
-              workspace={chosenToEdit}
-              machines={rows}
-              onClose={() => setEditing(null)}
-            />
+            <Suspense fallback={null}>
+              <EditWorkspace
+                key={chosenToEdit.name}
+                workspace={chosenToEdit}
+                machines={rows}
+                onClose={() => setEditing(null)}
+              />
+            </Suspense>
           )}
         </Section>
       )}
-
-      {/* The machines reading is the picker, so the form draws only where there
-          is really something to choose from. Y-185 gives it `/new`. */}
-      <Section title="New workspace" query={machines}>
-        {(rows) => <NewWorkspace machines={rows} />}
-      </Section>
     </>
   )
 }
@@ -191,6 +200,7 @@ function Group({
   edit: (name: string) => void
   machines: Reading<Machine[]>
 }) {
+  const [open, setOpen] = useState(false)
   const collapses = band === 'idle' && rows.length > IDLE_SHOWN
   const shown = collapses ? rows.slice(0, IDLE_SHOWN) : rows
   const rest = collapses ? rows.slice(IDLE_SHOWN) : []
@@ -215,28 +225,33 @@ function Group({
         ))}
       </ul>
       {rest.length > 0 && (
-        <Collapsible>
-          <CollapsibleTrigger
-            render={
-              <Button size="sm" variant="ghost">
-                {rest.length} more
-              </Button>
-            }
-          />
-          <CollapsibleContent>
-            <ul>
-              {rest.map((row) => (
-                <Row
-                  edit={edit}
-                  key={row.id}
-                  machines={machines}
-                  row={row}
-                  sessions={sessions}
-                />
-              ))}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
+        <div>
+          <Button
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+            size="sm"
+            variant="ghost"
+          >
+            {open ? 'fewer' : `${rest.length} more`}
+          </Button>
+          {open && (
+            <Suspense fallback={null}>
+              <Reveal>
+                <ul>
+                  {rest.map((row) => (
+                    <Row
+                      edit={edit}
+                      key={row.id}
+                      machines={machines}
+                      row={row}
+                      sessions={sessions}
+                    />
+                  ))}
+                </ul>
+              </Reveal>
+            </Suspense>
+          )}
+        </div>
       )}
     </section>
   )
