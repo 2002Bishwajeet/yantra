@@ -15,6 +15,7 @@
 //! [D2 §3.2]: ../../../docs/design/02-setup.md
 
 use crate::agent::{self, Claude};
+use crate::attention;
 use crate::ssh::{self, Exec, Os, Ssh};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Tmux, sq};
@@ -33,6 +34,9 @@ const LOGIN_SESSION: &str = "login-session";
 /// Public because the one caller that can answer this check finds it by name —
 /// see [`heartbeat`].
 pub const HEARTBEAT: &str = "heartbeat";
+/// Not one of the checks above: it names a fact about the host this process runs
+/// on rather than about a machine being asked — see [`github`].
+pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
@@ -437,6 +441,53 @@ fn heartbeat() -> Check {
     )
 }
 
+/// Whether GitHub can be reached from **this** host, which is a different
+/// question from every check above and is why it is not one of them.
+/// [`crate::attention`] spawns `gh` locally, so the credential the work inbox
+/// needs is the one where the daemon runs, and copying an answer about it onto
+/// each machine's report would claim something no ssh session asked (R-23).
+/// [R13] §2.6a is the manual step it makes visible.
+///
+/// [R13]: ../../../docs/research/13-dashboard-revamp-and-github.md
+pub async fn github() -> Check {
+    from_gh(attention::credential().await)
+}
+
+/// **`gh auth status` says the same thing about a token GitHub refused as about
+/// a GitHub it could not reach** — 2.96.0, measured 2026-08-11: with the API
+/// unreachable it prints *the token in keyring is invalid* and exits 1. So only
+/// the two failures `gh` names outright are *absent*, and everything else is
+/// R-23's *unknown*; an *absent* here would send someone to log in on a box that
+/// is already logged in.
+///
+/// **Nothing `gh` wrote reaches the detail.** Its stderr repeats the whole
+/// status report on any failure, account name included, and
+/// [`attention::Error::Command`] carries that stderr.
+fn from_gh(asked: Result<(), attention::Error>) -> Check {
+    match asked {
+        Ok(()) => present(
+            GITHUB,
+            "`gh` reports a stored credential here — that it works is not asked",
+        ),
+        Err(attention::Error::NotInstalled) => absent(
+            GITHUB,
+            "no `gh` on this daemon's PATH, and GitHub is read by spawning it here",
+        ),
+        Err(attention::Error::LoggedOut) => absent(
+            GITHUB,
+            "`gh` here holds no credential — run `gh auth login` on the machine this daemon runs on",
+        ),
+        Err(attention::Error::Unreachable) => unknown(
+            GITHUB,
+            "`gh` could not reach GitHub from here, so what it holds is not known",
+        ),
+        Err(attention::Error::Command { .. } | attention::Error::Parse { .. }) => unknown(
+            GITHUB,
+            "`gh auth status` failed and named no reason this recognises",
+        ),
+    }
+}
+
 /// Every check as [`State::Unknown`], for a machine nothing could be asked of.
 fn nothing_asked(because: &str) -> Vec<Check> {
     let mut checks = vec![unknown(REACHABLE, because), unknown(SSHD, because)];
@@ -533,5 +584,49 @@ mod tests {
             .ready(),
             "an answer nobody has is not a yes"
         );
+    }
+
+    /// R-23 on the one check that is about this host: `gh` names two failures
+    /// outright and those are earned, and a GitHub it could not reach is not one
+    /// of them — an *absent* there would send someone to log in on a box that
+    /// already is.
+    #[test]
+    fn only_the_failures_gh_names_are_absent() {
+        assert_eq!(
+            from_gh(Err(attention::Error::NotInstalled)).state,
+            State::Absent
+        );
+        assert_eq!(
+            from_gh(Err(attention::Error::LoggedOut)).state,
+            State::Absent
+        );
+        assert_eq!(
+            from_gh(Err(attention::Error::Unreachable)).state,
+            State::Unknown
+        );
+        assert_eq!(from_gh(Ok(())).state, State::Present);
+    }
+
+    /// The two *absent* branches send a reader to different places, and only the
+    /// detail can say which — the state is the same word for both.
+    #[test]
+    fn a_missing_gh_and_a_logged_out_gh_are_told_apart_in_the_detail() {
+        let missing = from_gh(Err(attention::Error::NotInstalled)).detail;
+        let out = from_gh(Err(attention::Error::LoggedOut)).detail;
+        assert!(missing.contains("PATH"), "{missing}");
+        assert!(out.contains("gh auth login"), "{out}");
+    }
+
+    /// `gh auth status` repeats its whole report on stderr when it fails, and
+    /// that report names the account — so the detail is written here rather than
+    /// quoted from what `gh` said (§B4).
+    #[test]
+    fn nothing_gh_wrote_reaches_the_detail() {
+        let check = from_gh(Err(attention::Error::Command {
+            argv: "auth status".to_owned(),
+            stderr: "✓ Logged in to github.com account octocat (keyring)".to_owned(),
+        }));
+        assert_eq!(check.state, State::Unknown);
+        assert!(!check.detail.contains("octocat"), "{}", check.detail);
     }
 }

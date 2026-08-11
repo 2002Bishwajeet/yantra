@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::RwLock;
+use yantra_core::attention::Forge;
 use yantra_core::inventory::Inventory;
 use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Reading, Snapshot};
@@ -18,6 +19,13 @@ use crate::notify::Notifier;
 /// every ssh master warm — the poll is what makes the fleet fast rather than a
 /// tax on it. Q6 is why it is a constant: one owner, one fleet, nothing to tune.
 const EVERY: Duration = Duration::from_secs(30);
+
+/// The one look that leaves the tailnet, and the one where the sentence above
+/// inverts: a `gh` poll warms nothing and is spent from the owner's own GitHub
+/// quota, which their `gh` and their `git push` draw on too. GitHub asks for
+/// this directly — `/notifications` answered `X-Poll-Interval: 60` on
+/// 2026-08-10, so `EVERY` would poll it at twice the rate its server requests.
+const ATTENTION: Duration = Duration::from_secs(300);
 
 pub type Model = Arc<RwLock<Snapshot>>;
 
@@ -32,9 +40,13 @@ pub type Model = Arc<RwLock<Snapshot>>;
 /// It is also the one the notifier reads: two consecutive agent readings are
 /// the whole of its input, so `relay` adds a send to a loop that already exists
 /// rather than a loop of its own.
-pub fn spawn<I: Inventory + Send + Sync + 'static>(
+///
+/// The class the `forge` answers is the one that reaches off the tailnet, and
+/// the only one not on `EVERY` — see [`ATTENTION`] for why.
+pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'static>(
     model: &Model,
     inventory: I,
+    forge: F,
     relay: Option<Relay>,
 ) {
     let machines = model.clone();
@@ -77,6 +89,22 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
             tokio::time::sleep(EVERY).await;
         }
     });
+
+    let attention = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_attention(&attention, &forge).await;
+            tokio::time::sleep(ATTENTION).await;
+        }
+    });
+
+    let github = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_github(&github).await;
+            tokio::time::sleep(EVERY).await;
+        }
+    });
 }
 
 async fn look_at_machines<I: Inventory>(model: &Model, inventory: &I) {
@@ -104,6 +132,26 @@ async fn look_at_readiness(model: &Model) {
     model.write().await.readiness = Some(Arc::new(reading));
 }
 
+/// Three subprocesses and three round trips to GitHub, which is why it is here
+/// and not in a handler: `gh` is a network call, and a browser polls whether or
+/// not anyone is looking. An absent or logged-out `gh` is a failed reading
+/// carrying why, never an empty inbox — nothing waiting and nothing asked are
+/// the two answers this daemon must never fold together (R-23).
+async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
+    let reading = Reading::new(forge.attention().await);
+    model.write().await.attention = Some(Arc::new(reading));
+}
+
+/// The one look that touches no machine in the fleet: `gh` runs here, so this is
+/// what the readiness sweep beside it cannot ask. Its own task rather than a
+/// line in that one because a local probe must not queue behind a `ConnectTimeout`
+/// per asleep machine, and it is on a task at all because `gh auth status` is a
+/// network call — the rule keeping ssh off the request path, for the same reason.
+async fn look_at_github(model: &Model) {
+    let reading = Reading::new(doctor::github().await);
+    model.write().await.github = Some(Arc::new(reading));
+}
+
 /// The reading lands in the model before anything is sent, so a browser never
 /// waits on a relay — and a look that *failed* tells nobody anything, because
 /// an unknown fleet is not a changed one (I-47).
@@ -122,6 +170,7 @@ async fn look_at_agents(model: &Model, notifier: Option<&mut Notifier>) {
 mod tests {
     use super::*;
     use std::net::IpAddr;
+    use yantra_core::attention::{self, Attention};
     use yantra_core::inventory::{Fake, MachineInfo, Os};
     use yantra_core::sessions::MachineSessions;
 
@@ -244,5 +293,61 @@ mod tests {
     fn the_interval_is_a_constant_not_configuration() {
         assert_eq!(EVERY, Duration::from_secs(30));
         assert!(EVERY < Duration::from_secs(300));
+    }
+
+    /// GitHub's own floor, measured rather than chosen: `/notifications`
+    /// answers `X-Poll-Interval: 60`, so the fleet's interval is one this
+    /// daemon is asked not to use against that server.
+    #[test]
+    fn the_feed_is_polled_slower_than_the_fleet_because_the_quota_is_not_ours() {
+        assert!(ATTENTION >= Duration::from_secs(60));
+        assert!(ATTENTION > EVERY);
+    }
+
+    /// [`attention::Error`] carries a `serde_json::Error` and is not `Clone`,
+    /// so the absent half is a `None` the fake turns into one.
+    struct Inbox(Option<Attention>);
+
+    impl Forge for Inbox {
+        async fn attention(&self) -> Result<Attention, attention::Error> {
+            self.0.clone().ok_or(attention::Error::NotInstalled)
+        }
+    }
+
+    #[tokio::test]
+    async fn the_feed_is_a_reading_of_its_own_that_ages_from_when_it_was_taken() {
+        let model = Model::default();
+        assert!(model.read().await.attention.is_none());
+
+        look_at_attention(
+            &model,
+            &Inbox(Some(Attention {
+                notifications: 27,
+                ..Attention::default()
+            })),
+        )
+        .await;
+
+        let reading = model.read().await.attention.clone().expect("looked");
+        let first = reading.age();
+        assert_eq!(
+            reading.value().as_ref().expect("gh answered").notifications,
+            27
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(reading.age() >= first + Duration::from_millis(20));
+    }
+
+    /// A machine with no `gh`, or one nobody has logged in, is the commonest
+    /// state this class has — and an empty inbox is what it must never look
+    /// like, because nothing waiting is an answer a person acts on.
+    #[tokio::test]
+    async fn a_gh_that_could_not_be_asked_is_a_failed_reading_and_not_an_empty_inbox() {
+        let model = Model::default();
+        look_at_attention(&model, &Inbox(None)).await;
+
+        let reading = model.read().await.attention.clone().expect("looked");
+        let failure = reading.value().as_ref().expect_err("the look failed");
+        assert!(failure.to_string().contains("GitHub CLI"), "{failure}");
     }
 }
