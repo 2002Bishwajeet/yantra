@@ -1,4 +1,5 @@
 import { HeadContent, Link, Outlet } from '@tanstack/react-router'
+import { Palette } from '@/components/Palette'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 /** D3 §3: three items, and the other routes are reached from the thing that
@@ -35,6 +36,11 @@ export function Shell() {
             ))}
           </ul>
         </nav>
+        {/* Every route shares this header, and D3 §3.2 makes the palette the way
+            to reach the idle ninety per cent that no page lists. */}
+        <div className="ms-auto">
+          <Palette />
+        </div>
       </header>
       <main className="flex flex-col gap-6 md:gap-8">
         <Outlet />
