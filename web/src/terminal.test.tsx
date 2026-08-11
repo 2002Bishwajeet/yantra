@@ -90,6 +90,12 @@ function browser() {
   vi.stubGlobal('WebSocket', Ws)
 }
 
+/** A real handshake against a real `ws` server, so the wait is I/O and not a
+ *  render. One second is testing-library's default and it is not enough on a
+ *  loaded machine: R-24 is this file failing about two runs in three while
+ *  twelve suites and a build ran beside it. */
+const settled = <T,>(check: () => T) => waitFor(check, { timeout: 10_000 })
+
 const screenText = () =>
   document.querySelector('.xterm-rows')?.textContent ?? ''
 
@@ -113,7 +119,7 @@ describe('the terminal in the dashboard', () => {
   it('says how big it is and what it is before anything else', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
 
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
     expect(daemonised.asked).toEqual(['/api/workspaces/yantra/terminal'])
     // A pty is opened with a window and a terminal, so this frame is what
     // starts the session rather than what adjusts it.
@@ -126,15 +132,15 @@ describe('the terminal in the dashboard', () => {
 
   it('draws what the session printed, and never what the daemon said about it', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.print('claude is thinking')
-    await waitFor(() => expect(screenText()).toContain('claude is thinking'))
+    await settled(() => expect(screenText()).toContain('claude is thinking'))
 
     // Text from the daemon is why a terminal could not be opened, so it is
     // said beside the screen and never printed onto it.
     daemonised.say('ssh: connect to host cachyos-g14 port 22: No route to host')
-    await waitFor(() =>
+    await settled(() =>
       expect(screen.getByRole('alert').textContent).toContain(
         'No route to host',
       ),
@@ -144,7 +150,7 @@ describe('the terminal in the dashboard', () => {
 
   it('sends what is typed as bytes, ^C included', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     document.querySelector('.xterm-helper-textarea')?.dispatchEvent(
       new KeyboardEvent('keydown', {
@@ -157,17 +163,17 @@ describe('the terminal in the dashboard', () => {
       }),
     )
 
-    await waitFor(() => expect(daemonised.heard.length).toBe(2))
+    await settled(() => expect(daemonised.heard.length).toBe(2))
     expect(daemonised.heard[1]).toEqual({ bytes: [0x03] })
   })
 
   it('says the window changed rather than letting the far side guess', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     window.dispatchEvent(new Event('resize'))
 
-    await waitFor(() => expect(daemonised.heard.length).toBe(2))
+    await settled(() => expect(daemonised.heard.length).toBe(2))
     expect(daemonised.heard[1]).toEqual(daemonised.heard[0])
   })
 
@@ -175,10 +181,10 @@ describe('the terminal in the dashboard', () => {
    *  nothing is reopened. */
   it('ends the socket when it is closed, and does not reopen it', async () => {
     const { unmount } = render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     unmount()
-    await waitFor(() => expect(daemonised.ended()).toBe(true))
+    await settled(() => expect(daemonised.ended()).toBe(true))
 
     await new Promise((done) => setTimeout(done, PAUSE * 3))
     expect(daemonised.asked.length).toBe(1)
@@ -191,21 +197,19 @@ describe('the terminal in the dashboard', () => {
    *  because a pty is opened with one. */
   it('reopens a socket that dropped, and says how big it is on the new one', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
     daemonised.print('claude is thinking')
-    await waitFor(() => expect(screenText()).toContain('claude is thinking'))
+    await settled(() => expect(screenText()).toContain('claude is thinking'))
 
     daemonised.hangUp()
 
-    await waitFor(() => expect(daemonised.asked.length).toBe(2), {
-      timeout: 3000,
-    })
+    await settled(() => expect(daemonised.asked.length).toBe(2))
     expect(daemonised.asked[1]).toBe('/api/workspaces/yantra/terminal')
-    await waitFor(() => expect(daemonised.heard.length).toBe(2))
+    await settled(() => expect(daemonised.heard.length).toBe(2))
     expect(daemonised.heard[1]).toEqual(daemonised.heard[0])
 
     daemonised.print('and it is still thinking')
-    await waitFor(() =>
+    await settled(() =>
       expect(screenText()).toContain('and it is still thinking'),
     )
     expect(screen.queryByText(/The terminal ended/)).toBeNull()
@@ -220,18 +224,18 @@ describe('the terminal in the dashboard', () => {
     // is the state a slow network holds for as long as it takes.
     expect(screen.getByRole('status').textContent).toBe('Connecting…')
 
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
     expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('names which attempt of how many it is on while it reconnects', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.keepHangingUp()
     daemonised.hangUp()
 
-    await waitFor(() =>
+    await settled(() =>
       expect(screen.getByRole('status').textContent).toBe(
         `Reconnecting, attempt 1 of ${ATTEMPTS}.`,
       ),
@@ -251,10 +255,10 @@ describe('the terminal in the dashboard', () => {
    *  machine is asleep — and reopening a refused socket only refuses again. */
   it('does not reopen a socket the daemon gave a reason for', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.say('ssh: connect to host cachyos-g14 port 22: No route to host')
-    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    await settled(() => expect(screen.getByRole('alert')).toBeTruthy())
     daemonised.hangUp()
 
     // Proving a thing does not happen needs a window: this is the whole of the
@@ -269,7 +273,7 @@ describe('the terminal in the dashboard', () => {
    *  asking — and say so differently from a terminal that was refused. */
   it('gives up after a bounded number of attempts rather than reopening forever', async () => {
     render(<Terminal name="yantra" onClose={() => {}} />)
-    await waitFor(() => expect(daemonised.heard.length).toBe(1))
+    await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.keepHangingUp()
     daemonised.hangUp()
