@@ -742,6 +742,25 @@ shows tokens and no money.
 > one, and the honest way to get it is a verb in the CLI first — this repo's own rule — rather than a
 > loop in the browser.
 
+> **2026-08-11, [Y-199](../../tracker.md#3-task-board): this section says the figure is stamped and
+> does not say by whom, and the answer turned out to be the page.** `POST /api/workspaces/{name}/
+> tokens` answers a bare `Spend` rather than the `Looked<T>` envelope every other read carries, so it
+> is the only reading on the dashboard with no `age_seconds`. The page stamps its own arrival instead,
+> and because nothing here polls, it keeps a one-second clock to move the figure — a clock that
+> fetches nothing. A stamp that never moves is the lie the stamp exists to prevent.
+>
+> `AS_OF` is a **day**, not an instant. [`lib/time.ts`](../../web/src/lib/time.ts) refuses to read a
+> stamp that names no zone (§5.7's amendment) and so prints it verbatim, which is correct — this
+> document nowhere says a date is not a time, and now it does.
+>
+> **Building this found a bug in shipped code, and it is worth recording here because it is this
+> document's own rule broken one layer in.** A session carrying only models the price table does not
+> know published `cost: 0.0`: summing an empty list of prices gives zero, and zero beside a date reads
+> as a session that cost nothing. `price.rs` already refused to price an unknown model *per model*;
+> the total then added them up as free. Both the daemon and `yantra tokens` now report no figure at
+> all, and the CLI's own test had been asserting `$0.00` under the name
+> *an_unpriced_model_is_named_rather_than_counted_as_free*.
+
 ---
 
 ## 12. What this needs that does not exist
