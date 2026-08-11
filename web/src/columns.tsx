@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router'
 import type {
-  Looked,
   Machine,
   MachineSessions,
   Power,
@@ -8,6 +7,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
+import type { Reading } from '@/useLooked'
 import { Act, Actions, type Verb } from '@/components/Act'
 import { Ago, Stamp } from '@/components/Age'
 import { Command } from '@/components/Command'
@@ -116,7 +116,7 @@ export const machineColumns: Column<Machine>[] = [
  *  `USABLE_NAME` guards the two commands below and not this. */
 export function attachable(
   workspace: Workspace,
-  sessions: Looked<MachineSessions[]>,
+  sessions: Reading<MachineSessions[]>,
 ): boolean {
   const answer =
     sessions.looked === 'ok'
@@ -134,7 +134,7 @@ export function attachable(
  *  machine the tailnet does not list gets no state, because none was looked up. */
 function target(
   workspace: Workspace,
-  machines: Looked<Machine[]>,
+  machines: Reading<Machine[]>,
 ): Machine | undefined {
   return machines.looked === 'ok'
     ? machines.data.find((one) => one.name === workspace.machine)
@@ -192,7 +192,7 @@ export function chosen(
  *  reads as *nothing has been looked at yet* rather than as a state. */
 function reportOn(
   workspace: Workspace,
-  agents: Looked<AgentRow[]>,
+  agents: Reading<AgentRow[]>,
 ): WorkspaceStatus | null {
   if (agents.looked !== 'ok') return null
   return (
@@ -202,9 +202,9 @@ function reportOn(
 }
 
 export function workspaceColumns(
-  sessions: Looked<MachineSessions[]>,
-  machines: Looked<Machine[]>,
-  agents: Looked<AgentRow[]>,
+  sessions: Reading<MachineSessions[]>,
+  machines: Reading<Machine[]>,
+  agents: Reading<AgentRow[]>,
   // Null on a machine's own page: a workspace is edited where it is listed.
   edit: ((name: string) => void) | null,
 ): Column<Workspace>[] {
@@ -251,7 +251,7 @@ export type SessionRow = { machine: string; session: Session }
  *  command — and the name comes from the workspace, never from tmux's output. */
 export function sessionCommand(
   row: SessionRow,
-  workspaces: Looked<Workspace[]>,
+  workspaces: Reading<Workspace[]>,
 ): string | null {
   if (workspaces.looked !== 'ok') return null
 
@@ -264,7 +264,7 @@ export function sessionCommand(
 }
 
 export function sessionColumns(
-  workspaces: Looked<Workspace[]>,
+  workspaces: Reading<Workspace[]>,
 ): Column<SessionRow>[] {
   return [
     { header: 'MACHINE', cell: (row) => row.machine },
@@ -338,7 +338,7 @@ export function agentState(status: WorkspaceStatus | null): {
 }
 
 /** What told this state apart from the one next to it. */
-function agentDetail(status: WorkspaceStatus | null): string {
+export function agentDetail(status: WorkspaceStatus | null): string {
   if (!status) {
     return 'the workspace list names it and the last agent look does not'
   }

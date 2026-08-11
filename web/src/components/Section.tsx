@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import type { Looked } from '@/api'
+import { Skeleton } from '@/components/ui/skeleton'
+import type { Reading } from '@/useLooked'
 import { Age } from '@/components/Age'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -16,7 +17,7 @@ export function Section<T>({
   children,
 }: {
   title: string
-  query: Looked<T>
+  query: Reading<T>
   waiting?: string[]
   children: (data: T) => ReactNode
 }) {
@@ -26,13 +27,22 @@ export function Section<T>({
         <h2 className="font-heading text-lg leading-snug font-medium">
           {title}
         </h2>
-        {query.looked !== 'never' && (
+        {(query.looked === 'ok' || query.looked === 'failed') && (
           <span className="text-muted-foreground text-xs">
             <Age seconds={query.age_seconds} waiting={waiting} />
           </span>
         )}
       </div>
       <div aria-live="polite">
+        {/* D3 §7.1: a read still in flight is not a daemon that never looked.
+            React Query already separates the two; before Y-190 this drew both
+            with the same sentence, so a first paint claimed nobody had looked. */}
+        {query.looked === 'pending' && (
+          <div className="flex flex-col gap-2" data-slot="reading">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-64" />
+          </div>
+        )}
         {query.looked === 'never' && (
           <Empty>
             <EmptyHeader>

@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import type { Listed, Looked, Machine, MachineSessions } from '@/api'
+import type { Listed, Machine, MachineSessions } from '@/api'
 import {
   type AgentRow,
+  agentDetail,
   agentState,
   attachable,
   chosen,
+  reporting,
   workspaceColumns,
 } from '@/columns'
 import { Actions } from '@/components/Act'
@@ -23,6 +25,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { loaded, useAgents, useLooked } from '@/useLooked'
+import type { Reading } from '@/useLooked'
 import { agentOf, BANDS, type Band, work, type WorkRow } from '@/work'
 
 // §4.6: thirty idle workspaces would be the longest thing on the page and the
@@ -92,16 +95,26 @@ export function Fleet() {
       ? workspaces.data.find((one) => one.name === editing)
       : undefined
 
+  // §7.1: the bands wait for the read that decides them. Drawing rows before it
+  // lands would put every one of them in *Not read yet* and then move them all
+  // when it arrives — which is the reordering §4.4 exists to prevent, and it
+  // closed an open menu under the thumb that opened it.
+  const reading =
+    listed.looked === 'pending' || agents.looked === 'pending'
+      ? ({ looked: 'pending' } as const)
+      : listed
   const { placed, changed, reorder } = useHeldBands(
-    listed.looked === 'ok' ? work(listed.data, agents) : [],
+    listed.looked === 'ok' && reading.looked === 'ok'
+      ? work(listed.data, agents)
+      : [],
   )
 
   return (
     <>
       <Title>Fleet</Title>
 
-      {listed.looked !== 'ok' ? (
-        <Section title="Work" query={listed}>
+      {reading.looked !== 'ok' ? (
+        <Section title="Work" query={reading}>
           {() => null}
         </Section>
       ) : (
@@ -119,7 +132,9 @@ export function Fleet() {
             return (
               <Group
                 band={band}
+                edit={setEditing}
                 key={band}
+                machines={machines}
                 rows={rows}
                 sessions={sessions}
                 title={title}
@@ -166,11 +181,15 @@ function Group({
   title,
   rows,
   sessions,
+  edit,
+  machines,
 }: {
   band: Band
   title: string
   rows: WorkRow[]
-  sessions: Looked<MachineSessions[]>
+  sessions: Reading<MachineSessions[]>
+  edit: (name: string) => void
+  machines: Reading<Machine[]>
 }) {
   const collapses = band === 'idle' && rows.length > IDLE_SHOWN
   const shown = collapses ? rows.slice(0, IDLE_SHOWN) : rows
@@ -186,7 +205,13 @@ function Group({
       </h2>
       <ul>
         {shown.map((row) => (
-          <Row key={row.id} row={row} sessions={sessions} />
+          <Row
+            edit={edit}
+            key={row.id}
+            machines={machines}
+            row={row}
+            sessions={sessions}
+          />
         ))}
       </ul>
       {rest.length > 0 && (
@@ -201,7 +226,13 @@ function Group({
           <CollapsibleContent>
             <ul>
               {rest.map((row) => (
-                <Row key={row.id} row={row} sessions={sessions} />
+                <Row
+                  edit={edit}
+                  key={row.id}
+                  machines={machines}
+                  row={row}
+                  sessions={sessions}
+                />
               ))}
             </ul>
           </CollapsibleContent>
@@ -218,9 +249,13 @@ const ROW = 'flex min-h-14 flex-wrap items-center gap-x-3 gap-y-1 py-1 md:min-h-
 function Row({
   row,
   sessions,
+  edit,
+  machines,
 }: {
   row: WorkRow
-  sessions: Looked<MachineSessions[]>
+  sessions: Reading<MachineSessions[]>
+  edit: (name: string) => void
+  machines: Reading<Machine[]>
 }) {
   if (row.kind === 'machine') {
     return (
@@ -259,6 +294,16 @@ function Row({
   }
 
   const { workspace, status } = row
+  const host =
+    machines.looked === 'ok'
+      ? machines.data.find((one) => one.name === workspace.machine)
+      : undefined
+  // Only where it is worth a reader's attention: `reporting` says *ready* for
+  // most rows most of the time, and a badge on every one of them would cost the
+  // density §5.3 buys. What must survive is `target()`'s reason for existing —
+  // saying what a button is about to touch, before it is tapped.
+  const beat = host && reporting(host)
+
   return (
     <li className={ROW}>
       <Link
@@ -278,13 +323,15 @@ function Row({
       >
         {workspace.machine}
       </Link>
+      {beat && beat.tone !== 'ok' && <Status {...beat} />}
       {/* A group heading is not a state: `finished` still says *finished*
-          inside Idle, and `no_agent` says it is a shell inside Running. */}
-      <Status {...agentState(status)} />
+          inside Idle, and `no_agent` says it is a shell inside Running — and
+          §4.1 gives `unclear` no verb, so its `because` is the whole row. */}
+      <Status {...agentState(status)} detail={agentDetail(status)} />
       <div className="ml-auto">
         <Actions
           chosen={chosen(workspace, status)}
-          edit={null}
+          edit={edit}
           terminal={attachable(workspace, sessions)}
           workspace={workspace}
         />
@@ -305,9 +352,9 @@ export function Workspaces({
   edit,
 }: {
   entries: Listed[]
-  sessions: Looked<MachineSessions[]>
-  machines: Looked<Machine[]>
-  agents: Looked<AgentRow[]>
+  sessions: Reading<MachineSessions[]>
+  machines: Reading<Machine[]>
+  agents: Reading<AgentRow[]>
   edit: ((name: string) => void) | null
 }) {
   const rows = entries.flatMap((one) => (one.loaded === 'yes' ? [one] : []))

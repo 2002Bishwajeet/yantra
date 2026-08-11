@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import type {
   Listed,
-  Looked,
   Machine,
   MachineSessions,
   Readiness as Report,
@@ -14,6 +13,7 @@ import { Section } from '@/components/Section'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { loaded, sessionsWaiting, useLooked } from '@/useLooked'
+import type { Reading } from '@/useLooked'
 
 /** The three groups D3 §3.1 takes off the work page. This page answers *which
  *  machine*; [`/m/{name}`](./OneMachine.tsx) answers *what about this one*. */
@@ -64,7 +64,7 @@ export function Ready({
   machines,
 }: {
   reports: Report[]
-  machines: Looked<Machine[]>
+  machines: Reading<Machine[]>
 }) {
   const listed = machines.looked === 'ok' ? machines.data : []
 
@@ -102,7 +102,7 @@ export function Unclaimed({
   workspaces,
 }: {
   answers: MachineSessions[]
-  workspaces: Looked<Workspace[]>
+  workspaces: Reading<Workspace[]>
 }) {
   const claimed = new Set(
     workspaces.looked === 'ok'

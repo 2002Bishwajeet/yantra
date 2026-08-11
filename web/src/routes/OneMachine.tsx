@@ -1,7 +1,6 @@
 import { getRouteApi } from '@tanstack/react-router'
 import type {
   Listed,
-  Looked,
   Machine,
   MachineSessions,
   Readiness as Report,
@@ -15,6 +14,7 @@ import { Title } from '@/components/Title'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Workspaces } from '@/routes/Fleet'
 import { loaded, sessionsWaiting, useAgents, useLooked } from '@/useLooked'
+import type { Reading } from '@/useLooked'
 
 const route = getRouteApi('/m/$machine')
 
@@ -31,7 +31,7 @@ export function OneMachine() {
   // Filtered before it is asked, not after: the agent class costs one ssh round
   // trip per workspace, and this page draws none of the others.
   const all = loaded(listed)
-  const mine: Looked<Workspace[]> =
+  const mine: Reading<Workspace[]> =
     all.looked === 'ok'
       ? { ...all, data: all.data.filter((one) => one.machine === machine) }
       : all

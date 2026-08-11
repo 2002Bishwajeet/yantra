@@ -1,4 +1,5 @@
-import type { Listed, Looked, Workspace, WorkspaceStatus } from '@/api'
+import type { Listed, Workspace, WorkspaceStatus } from '@/api'
+import type { Reading } from '@/useLooked'
 import type { AgentRow } from '@/columns'
 
 /** D3 §4: who must act next — you, the agent, nobody. `unknown` is the fourth
@@ -61,7 +62,10 @@ export function agentOf(
  *  dead Pi holding four workspaces would otherwise push four rows into the group
  *  that means *act now*, all naming the same cause. The machine is the problem;
  *  the workspaces are downstream of it. */
-export function work(entries: Listed[], agents: Looked<AgentRow[]>): WorkRow[] {
+export function work(
+  entries: Listed[],
+  agents: Reading<AgentRow[]>,
+): WorkRow[] {
   const rows: WorkRow[] = entries.flatMap((one) =>
     one.loaded === 'no'
       ? [

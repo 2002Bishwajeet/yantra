@@ -223,8 +223,10 @@ describe('moving between them', () => {
     fleet()
     render(<App />)
 
-    // The workspace row names it. Its own row moved to `/machines` in Y-189.
-    fireEvent.click((await screen.findAllByText('cachyos-g14'))[0]!)
+    // By role, not by position. Y-190 makes the work rows wait for the read
+    // that bands them, so the machine picker's `option` of the same name now
+    // paints first and `findAllByText(...)[0]` picked it.
+    fireEvent.click(await screen.findByRole('link', { name: 'cachyos-g14' }))
 
     await waitFor(() => expect(location.pathname).toBe('/m/cachyos-g14'))
     expect(screen.queryByText('New workspace')).toBeNull()
