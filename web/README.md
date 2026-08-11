@@ -1,9 +1,17 @@
 # yantra web — the dashboard
 
-Three routes over the API `yantrad` serves at `/api` — the fleet at `/`, one
-machine at `/m/$machine`, a workspace and its terminal at `/w/$name`, on
-TanStack Router. The readings poll on TanStack Query; the forms and every
-workspace row write.
+Six routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+work at `/`, every machine compared at `/machines`, one machine at
+`/m/$machine`, a workspace and its terminal at `/w/$name`, the create form at
+`/new` and spend at `/usage`. `⌘K` reaches any of them and runs no verb.
+The readings poll on TanStack Query; the forms and every workspace row write.
+
+**`/` opens on work, not on an inventory.** Three groups ordered by who must act
+next — you, the agent, nobody — and the order recomputes only when you ask, so
+nothing moves under a thumb.
+[D3](../docs/design/03-dashboard-surface.md) settles the surface: what the page
+is about, how dense it is, what words it uses, what every surface owes a reader
+and what it may weigh.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
