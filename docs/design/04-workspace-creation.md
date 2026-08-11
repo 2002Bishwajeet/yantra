@@ -380,6 +380,33 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 > A fifth was ours. **The box filled itself in with `$HOME` on top of what a person had already
 > typed**, because the answer to that first question arrives about 0.3 s after the field does.
 
+> **2026-08-11, [Y-304](../../tracker.md#3-task-board): the owner drove it and it broke, so it was
+> driven by a real browser.** 238 jsdom tests were green and the page was unusable. Both faults are
+> ones jsdom is structurally unable to see, and neither is subtle once a pointer is involved.
+>
+> **The page hung on the first hover** — React #185, maximum update depth, thrown out of
+> `onItemHighlighted`. The highlight was held in state; setting it re-rendered; the render handed
+> the primitive a fresh `items`; that re-decided the highlight. **jsdom never hovers anything**, so
+> the loop had no way to start there. The highlight is a ref now: the only thing that reads it is a
+> keydown, so nothing needs re-rendering when it moves.
+>
+> **An open list made the rest of the page unreachable.** Base UI marks everything outside the popup
+> while a typeable combobox is open, and the confirm sat directly under it — so *type a path, press
+> Use* did nothing at all, and pressing Escape first made the same click work. `modal` is already
+> `false` and does not govern this. **The confirm sits beside the box now**, which is where a file
+> dialog has always put it and which no anchored list can cover.
+>
+> **The lesson is §B3's, one layer out.** *"Mocked SSH proves nothing; it tests your mock"* — a
+> component tested only in jsdom is tested against a document that has no pointer, no layer order and
+> no focus management. §8 proposes a row for making that repeatable.
+
+| **D4.8** | A browser drives `/new` against a real machine (§4.2 amendments) | the walk, the filter, `..`, and the confirm are all exercised by a real pointer against a machine that answers ssh, and the run fails on a console error |
+
+**D4.8 is proposed, not built.** Y-304 found two page-killing faults with a throwaway Playwright
+script that 238 jsdom tests could not see, and threw the script away. Landing it means a declared
+dev dependency and a machine that answers ssh — the shape `just test-mac` already has, and the
+owner's call rather than a session's.
+
 **One thing is worth doing before any of it:** run §2's measurements against `cachyos-g14` once it
 answers ssh. Every number here is from one macOS laptop and one Linux desktop, and the design turns
 on a ratio between them.

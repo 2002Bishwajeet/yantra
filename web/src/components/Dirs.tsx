@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Dir, Listing, Probed } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -87,7 +87,12 @@ export function Dirs({
   const [text, setText] = useState('')
   const [seeded, setSeeded] = useState(false)
   const [open, setOpen] = useState(false)
-  const [high, setHigh] = useState<Dir | undefined>(undefined)
+  // **A ref, never state.** The highlight moves with the pointer, and the only
+  // thing that reads it is a keydown — so nothing needs re-rendering when it
+  // changes. Holding it in state hung the page: a render gave the primitive a
+  // fresh `items`, which re-decided the highlight, which set state again
+  // (React #185, found in a browser — jsdom never hovers anything).
+  const high = useRef<Dir | undefined>(undefined)
   const [probing, setProbing] = useState<Asked<Probed>>({ asked: 'no' })
 
   // A path is a fact about one machine, so a new machine starts again. React's
@@ -102,7 +107,6 @@ export function Dirs({
     setText('')
     setSeeded(false)
     setOpen(false)
-    setHigh(undefined)
     setProbing({ asked: 'no' })
   }
 
@@ -163,7 +167,7 @@ export function Dirs({
   const go = (path: string) => {
     setWhere(path)
     setText(path === '/' ? '/' : `${path}/`)
-    setHigh(undefined)
+    high.current = undefined
   }
 
   const typing = (value: string) => {
@@ -199,94 +203,104 @@ export function Dirs({
     <Field>
       <FieldLabel htmlFor="new-dirs">Directory</FieldLabel>
 
-      <Combobox<Dir>
-        // Filtered against the box's own value rather than the primitive's
-        // `query` argument. They part company the moment an entry is taken:
-        // the primitive keeps the name it matched, so the list would filter
-        // the level you just walked into by the name of the way in.
-        filter={(entry) => {
-          const tail = tailOf(text).toLowerCase()
-          return tail === '' || (entry as Dir).name.toLowerCase().includes(tail)
-        }}
-        inputValue={text}
-        items={items}
-        itemToStringLabel={(entry) => entry.name}
-        onInputValueChange={(value, details) => {
-          // `input-change` is a person typing, and it is the only reason worth
-          // acting on. The port fixes `fillInputOnItemPress`, so taking an
-          // entry **clears** the box and reports that as `input-clear` — which
-          // would wipe the path `go` had just written into it.
-          if (details.reason === 'input-change') typing(value)
-        }}
-        onItemHighlighted={(entry) => setHigh(entry)}
-        onOpenChange={(next, details) => {
-          // Taking an entry walks a level in, and the primitive reads that as a
-          // choice and wants to close. **Going in is browsing, not deciding**,
-          // so the list stays up and shows where you landed.
-          if (!next && details.reason === 'item-press') return
-          setOpen(next)
-        }}
-        onValueChange={(entry) => entry && go(entry.path)}
-        open={open}
-        value={null}
-      >
-        {/* No trigger: Base UI's own is named from this `Field`'s one label, so
+      {/* **The confirm sits beside the box, never under it**, which is where a
+          file dialog has always put it. An open list is anchored below the
+          input and its width, and it covers whatever is there — so a button
+          below it swallowed the first click every time, and *type a path,
+          press Use* looked like it did nothing. */}
+      <div className="flex w-full items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <Combobox<Dir>
+            // Filtered against the box's own value rather than the primitive's
+            // `query` argument. They part company the moment an entry is taken:
+            // the primitive keeps the name it matched, so the list would filter
+            // the level you just walked into by the name of the way in.
+            filter={(entry) => {
+              const tail = tailOf(text).toLowerCase()
+              return (
+                tail === '' || (entry as Dir).name.toLowerCase().includes(tail)
+              )
+            }}
+            inputValue={text}
+            items={items}
+            itemToStringLabel={(entry) => entry.name}
+            onInputValueChange={(value, details) => {
+              // `input-change` is a person typing, and it is the only reason worth
+              // acting on. The port fixes `fillInputOnItemPress`, so taking an
+              // entry **clears** the box and reports that as `input-clear` — which
+              // would wipe the path `go` had just written into it.
+              if (details.reason === 'input-change') typing(value)
+            }}
+            onItemHighlighted={(entry) => {
+              high.current = entry
+            }}
+            onOpenChange={(next, details) => {
+              // Taking an entry walks a level in, and the primitive reads that as a
+              // choice and wants to close. **Going in is browsing, not deciding**,
+              // so the list stays up and shows where you landed.
+              if (!next && details.reason === 'item-press') return
+              setOpen(next)
+            }}
+            onValueChange={(entry) => entry && go(entry.path)}
+            open={open}
+            value={null}
+          >
+            {/* No trigger: Base UI's own is named from this `Field`'s one label, so
             the box and the chevron would both be called *Directory*. The list
             opens on focus and on typing, which is what the box is for. */}
-        <ComboboxInput
-          id="new-dirs"
-          // Focus is enough: the box exists to be walked, and a list that waits
-          // for a keystroke hides the one thing a person came to read.
-          onFocus={() => setOpen(true)}
-          onKeyDown={(event) => {
-            // With an entry highlighted, Enter is the primitive's and goes a
-            // level in. With none, the box holds a whole path and Enter is the
-            // confirm — never a form submit that would create a workspace
-            // nobody has finished describing.
-            if (event.key !== 'Enter' || high) return
-            event.preventDefault()
-            if (target !== null) void take(target)
-          }}
-          placeholder="/"
-          showTrigger={false}
-        />
-        <ComboboxPopup>
-          {isFetching && <ComboboxStatus>listing…</ComboboxStatus>}
-          <ComboboxEmpty>
-            {/* The shell's own glob skips dotfiles, so a directory that looks
+            <ComboboxInput
+              id="new-dirs"
+              // Focus is enough: the box exists to be walked, and a list that waits
+              // for a keystroke hides the one thing a person came to read.
+              onFocus={() => setOpen(true)}
+              onKeyDown={(event) => {
+                // With an entry highlighted, Enter is the primitive's and goes a
+                // level in. With none, the box holds a whole path and Enter is the
+                // confirm — never a form submit that would create a workspace
+                // nobody has finished describing.
+                if (event.key !== 'Enter' || high.current) return
+                event.preventDefault()
+                if (target !== null) void take(target)
+              }}
+              placeholder="/"
+              showTrigger={false}
+            />
+            <ComboboxPopup>
+              {isFetching && <ComboboxStatus>listing…</ComboboxStatus>}
+              <ComboboxEmpty>
+                {/* The shell's own glob skips dotfiles, so a directory that looks
                 empty may hold only hidden ones — and typing one is how you
                 reach it (D4 §3.1). */}
-            {isFetching
-              ? ''
-              : entries.length === 0
-                ? 'nothing here but files or hidden directories'
-                : 'nothing here matches'}
-          </ComboboxEmpty>
-          <ComboboxList>
-            {(entry: Dir) => (
-              <ComboboxItem key={entry.path} value={entry}>
-                <span className="font-mono">
-                  {entry.name === '..' ? '..' : `${entry.name}/`}
-                </span>
-                {/* D4 §5: a directory with no origin is legitimate and blocks
+                {isFetching
+                  ? ''
+                  : entries.length === 0
+                    ? 'nothing here but files or hidden directories'
+                    : 'nothing here matches'}
+              </ComboboxEmpty>
+              <ComboboxList>
+                {(entry: Dir) => (
+                  <ComboboxItem key={entry.path} value={entry}>
+                    <span className="font-mono">
+                      {entry.name === '..' ? '..' : `${entry.name}/`}
+                    </span>
+                    {/* D4 §5: a directory with no origin is legitimate and blocks
                     nothing. It is usually a typo, so it is named. */}
-                {entry.name !== '..' && (
-                  <span className="text-muted-foreground ms-2 text-xs">
-                    {entry.origin ??
-                      (entry.repo ? 'no origin' : 'not a repository')}
-                  </span>
+                    {entry.name !== '..' && (
+                      <span className="text-muted-foreground ms-2 text-xs">
+                        {entry.origin ??
+                          (entry.repo ? 'no origin' : 'not a repository')}
+                      </span>
+                    )}
+                  </ComboboxItem>
                 )}
-              </ComboboxItem>
-            )}
-          </ComboboxList>
-        </ComboboxPopup>
-      </Combobox>
-
-      <div className="flex flex-wrap items-center gap-2">
+              </ComboboxList>
+            </ComboboxPopup>
+          </Combobox>
+        </div>
         <Button
+          className="shrink-0"
           disabled={probing.asked === 'asking' || target === null}
           onClick={() => target !== null && void take(target)}
-          size="sm"
           variant="outline"
         >
           {probing.asked === 'asking' ? 'checking…' : 'Use this directory'}
