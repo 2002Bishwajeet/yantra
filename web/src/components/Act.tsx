@@ -5,19 +5,15 @@ import type { Opened, Resumed, Stopped, Workspace } from '@/api'
 import type { Chosen } from '@/columns'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
 
 const Overflow = lazy(() =>
   import('@/components/Overflow').then((it) => ({ default: it.Overflow })),
+)
+
+const ConfirmPopup = lazy(() =>
+  import('@/components/ConfirmPopup').then((it) => ({
+    default: it.ConfirmPopup,
+  })),
 )
 
 export type Verb = 'up' | 'down' | 'resume'
@@ -226,35 +222,43 @@ export function Confirm({
   onConfirm: () => void
   disabled: boolean
 }) {
+  // The same two flags the overflow uses, and for the same reason: `armed`
+  // fetches the question's chunk and never unsets, `open` is what it is doing.
+  const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger
+    <>
+      {/* The button says what it opens itself, since `DialogTrigger` lives in
+          the chunk it opens. It can only ever arm and open — nothing here can
+          reach `onConfirm` before the question is drawn. */}
+      <Button
+        aria-expanded={open}
+        aria-haspopup="dialog"
         disabled={disabled}
-        render={<Button size="sm" variant="destructive-outline" />}
+        onClick={() => {
+          setArmed(true)
+          setOpen(true)
+        }}
+        size="sm"
+        variant="destructive-outline"
       >
         {label}
-      </DialogTrigger>
-      <DialogPopup>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{body}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-          <Button
-            onClick={() => {
-              setOpen(false)
-              onConfirm()
-            }}
-            variant="destructive"
-          >
-            {confirm}
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+      </Button>
+
+      {armed && (
+        <Suspense fallback={null}>
+          <ConfirmPopup
+            body={body}
+            confirm={confirm}
+            onConfirm={onConfirm}
+            onOpenChange={setOpen}
+            open={open}
+            title={title}
+          />
+        </Suspense>
+      )}
+    </>
   )
 }
 
