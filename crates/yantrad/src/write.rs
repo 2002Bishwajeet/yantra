@@ -889,8 +889,15 @@ impl Spend {
                     .map(|rate| rate.charge(counts)),
             })
             .collect();
+        // R-23: a sum over an empty list is `0.0`, and `$0.00` for a session the
+        // table priced none of is a figure a reader would act on. Found while
+        // building `/usage` (Y-199); `render_tokens` had the same arithmetic.
         let charged = (priced && total.responses > 0)
-            .then(|| models.iter().filter_map(|model| model.cost).sum());
+            .then(|| {
+                let costs: Vec<f64> = models.iter().filter_map(|model| model.cost).collect();
+                (!costs.is_empty()).then(|| costs.iter().sum())
+            })
+            .flatten();
 
         Self {
             path: spend.path.clone(),
@@ -1857,6 +1864,29 @@ mod tests {
             fast.total.input, priced.total.input,
             "the tokens are still reported"
         );
+
+        // Y-199: `.sum()` over an empty list is `0.0`, so a session the table
+        // priced none of published `$0.00` — the exact thing every line above
+        // is written to prevent, one layer further in.
+        let nothing_priced = Spend::of(&tokens::Spend {
+            path: "/home/<user>/.claude/projects/site/1f0c1a2e.jsonl".to_string(),
+            by_model: [(
+                "claude-opus-9".to_owned(),
+                tokens::Counts {
+                    responses: 2,
+                    output: 1_000_000,
+                    ..tokens::Counts::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            fast: 0,
+        });
+        assert_eq!(
+            nothing_priced.cost, None,
+            "no model was priced, so there is no figure — and never $0.00"
+        );
+        assert_eq!(nothing_priced.total.responses, 2, "the tokens still report");
 
         let idle = Spend::of(&tokens::Spend {
             path: "/home/<user>/.claude/projects/site/1f0c1a2e.jsonl".to_string(),

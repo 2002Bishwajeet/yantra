@@ -509,7 +509,10 @@ fn render_tokens(spend: &tokens::Spend) -> String {
     // carries neither — so nothing here is priced, per model or in total.
     let priced = spend.fast == 0;
     let name = spend.by_model.keys().map(String::len).max().unwrap_or(0);
-    let mut charged = 0.0;
+    // `None` until something is priced: a sum over nothing is `0.0`, and
+    // `$0.00` for a session this table priced none of is a figure a reader
+    // would act on (R-23). Found by Y-199, which publishes the same numbers.
+    let mut charged: Option<f64> = None;
     let mut unpriced = Vec::new();
     out.push('\n');
     for (model, counts) in &spend.by_model {
@@ -518,7 +521,7 @@ fn render_tokens(spend: &tokens::Spend) -> String {
             .flatten()
             .map(|rate| rate.charge(counts));
         match cost {
-            Some(cost) => charged += cost,
+            Some(cost) => charged = Some(charged.unwrap_or(0.0) + cost),
             None => unpriced.push(model.as_str()),
         }
         out.push_str(&format!(
@@ -538,6 +541,14 @@ fn render_tokens(spend: &tokens::Spend) -> String {
         ));
         return out;
     }
+
+    let Some(charged) = charged else {
+        out.push_str(
+            "\nno cost: the price table carries none of the models above, so there\n\
+             is no figure to give\n",
+        );
+        return out;
+    };
 
     out.push_str(&format!(
         "\n{} at prices of {}\n",
@@ -1747,11 +1758,55 @@ mod tests {
             },
         ));
         assert!(rendered.contains('—'), "{rendered}");
+        // Y-199: this asserted `$0.00 at prices of`, which is what the test's
+        // own name says it must not do. A sum over nothing is zero, and a zero
+        // beside a date reads as a session that cost nothing.
+        assert!(
+            rendered.contains("carries none of the models above"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("$0.00"), "{rendered}");
+    }
+
+    /// One priced model beside one that is not: the figure is real, it is the
+    /// priced model's alone, and the line beneath says what is missing from it.
+    #[test]
+    fn a_partly_priced_session_gives_the_figure_and_names_what_is_outside_it() {
+        let spend = tokens::Spend {
+            path: "/x".to_owned(),
+            by_model: [
+                (
+                    "claude-opus-5".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+                (
+                    "claude-opus-9".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            fast: 0,
+        };
+        let rendered = render_tokens(&spend);
+
+        assert!(rendered.contains("at prices of"), "{rendered}");
         assert!(
             rendered.contains("claude-opus-9 is not in that table"),
             "{rendered}"
         );
-        assert!(rendered.contains("$0.00 at prices of"), "{rendered}");
+        assert!(
+            !rendered.contains("carries none of the models above"),
+            "{rendered}"
+        );
     }
 
     /// Fast mode doubles both prices, and the table carries neither — so the
