@@ -17,10 +17,13 @@ use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
+use yantra_core::probe;
+use yantra_core::remove;
 use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
+use yantra_core::tokens;
 use yantra_core::up;
 use yantra_core::workspace::{self, Listing};
 
@@ -102,10 +105,38 @@ enum Command {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Add up the tokens the workspace's session has spent
+    Tokens {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// Stop the workspace's session, giving the agent a chance to shut down
     Down {
         /// Workspace name, without the `.toml`
         workspace: String,
+    },
+    /// Ask a machine whether a directory is there, and what git origin it holds
+    Probe {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// Absolute path **on that machine**, not on this one
+        path: String,
+    },
+    /// Stop a tmux session by machine and name, for one no workspace claims
+    Kill {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// tmux session name, as `yantra ls sessions` prints it
+        session: String,
+    },
+    /// Delete a workspace, refusing while its session is still open
+    Rm {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// Delete without asking the machine. Use when it cannot be reached, or
+        /// when stranding the session is what you want
+        #[arg(long)]
+        force: bool,
     },
     /// List what Yantra can see
     Ls {
@@ -190,7 +221,11 @@ async fn main() -> ExitCode {
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
+        Some(Command::Tokens { workspace }) => show_tokens(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
+        Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
+        Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
+        Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -419,6 +454,70 @@ fn ago(seconds: i64) -> String {
         s if s < 86_400 => format!("{}h ago", s / 3600),
         s => format!("{}d ago", s / 86_400),
     }
+}
+
+/// Exit 0 whenever the transcript was read, including for a session that has
+/// spent nothing — unlike `status`, this reports a measurement rather than a
+/// state, and zero is one.
+async fn show_tokens(name: &str) -> ExitCode {
+    match tokens::tokens(name).await {
+        Ok(spend) => {
+            print!("{}", render_tokens(&spend));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(
+                err,
+                logs::Error::NoTranscript { .. } | logs::Error::NoTurnYet { .. }
+            ) {
+                eprintln!("{}", transcript_note(name));
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// No total line: the four are not the same unit of anything, and Yantra prints
+/// no money — every figure here is one Claude Code wrote down.
+fn render_tokens(spend: &tokens::Spend) -> String {
+    let rows = [
+        ("input", spend.input),
+        ("output", spend.output),
+        ("cache write", spend.cache_write),
+        ("cache read", spend.cache_read),
+    ];
+    let counts: Vec<String> = rows.iter().map(|(_, count)| thousands(*count)).collect();
+    let width = counts.iter().map(String::len).max().unwrap_or(0);
+
+    let mut out = format!("transcript: {}\n\n", spend.path);
+    for ((label, _), count) in rows.iter().zip(&counts) {
+        out.push_str(&format!("  {label:<12}  {count:>width$}\n"));
+    }
+    if spend.responses == 0 {
+        out.push_str("\nthis session has spent nothing yet\n");
+    } else {
+        out.push_str(&format!(
+            "\n{} response{}\n",
+            spend.responses,
+            if spend.responses == 1 { "" } else { "s" }
+        ));
+    }
+    out
+}
+
+/// Every figure here runs to six or seven digits, and unseparated they cannot
+/// be compared at a glance — which is the only thing anyone does with them.
+fn thousands(count: u64) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (at, digit) in digits.chars().enumerate() {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 async fn show_status(name: &str) -> ExitCode {
@@ -840,6 +939,80 @@ fn ls_workspaces() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Exit **0** only when the directory is there, so `yantra probe m /p && yantra
+/// new …` reads the way it looks — `status`'s rule. A machine that could not be
+/// asked exits 1 as well, and the difference is on stderr: the shell gets one
+/// bit and the operator gets the reason (R-23).
+async fn probe(machine: &str, path: &str) -> ExitCode {
+    match probe::probe(machine, path).await {
+        Ok(found) if found.exists => {
+            match &found.origin {
+                Some(origin) => println!("{} exists on {machine}, origin {origin}", found.path),
+                None => println!("{} exists on {machine}, no git origin", found.path),
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(found) => {
+            println!("{} is not a directory on {machine}", found.path);
+            ExitCode::FAILURE
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Stopping something already stopped exits **0** — `down`'s rule again, and
+/// the reason this prints which of the two happened rather than one sentence
+/// that would be true either way.
+async fn kill(machine: &str, session: &str) -> ExitCode {
+    match sessions::kill(machine, session).await {
+        Ok(report) if report.killed => {
+            println!("killed `{}` on {}", report.session, report.machine);
+            ExitCode::SUCCESS
+        }
+        Ok(report) => {
+            println!("no session `{}` on {}", report.session, report.machine);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Deleting something already gone exits **0**, which is `down`'s rule (I-30,
+/// root §B4): absence is the state asked for. It costs a typo going unreported,
+/// and that is the same price `down` already pays.
+async fn rm(name: &str, force: bool) -> ExitCode {
+    match remove::remove(name, force).await {
+        Ok(removed) => {
+            match removed.workspace {
+                Some(workspace) => println!(
+                    "removed `{}` ({} on {})",
+                    removed.name,
+                    workspace.repo.display(),
+                    workspace.machine
+                ),
+                // The file was deleted but never parsed, so there is nothing
+                // true to say about where it pointed.
+                None => println!("removed `{}`, which did not parse", removed.name),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(remove::Error::Workspace(workspace::Error::NotFound { name, .. })) => {
+            println!("`{name}` is already gone");
+            ExitCode::SUCCESS
         }
         Err(err) => {
             report_error(&err);
@@ -1413,6 +1586,66 @@ mod tests {
         assert!(rendered.contains("nothing has been said"), "{rendered}");
     }
 
+    /// A workspace and nothing else: which session is the pane's business, and
+    /// there is no window to choose because the answer is the whole session.
+    #[test]
+    fn tokens_takes_a_workspace_and_no_window() {
+        let parsed = Cli::try_parse_from(["yantra", "tokens", "demo"]).expect("`tokens` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Tokens { workspace }) if workspace == "demo"
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "tokens", "demo", "-n", "5"]).is_err(),
+            "a window would be a different question from what the session spent"
+        );
+    }
+
+    /// The four counts, each as Claude Code recorded it, and no fifth number:
+    /// no total, and nothing in money — that is Y-182 and a rate this file does
+    /// not carry.
+    #[test]
+    fn the_four_counts_are_reported_and_nothing_is_derived_from_them() {
+        let rendered = render_tokens(&tokens::Spend {
+            path: "/h/.claude/projects/-srv-repo/s.jsonl".to_owned(),
+            responses: 66,
+            input: 1_434,
+            output: 49_118,
+            cache_write: 239_765,
+            cache_read: 7_492_711,
+        });
+        assert!(rendered.contains("transcript: /h/.claude"), "{rendered}");
+        assert!(rendered.contains("input             1,434"), "{rendered}");
+        assert!(rendered.contains("cache read    7,492,711"), "{rendered}");
+        assert!(rendered.ends_with("66 responses\n"), "{rendered}");
+        assert!(
+            !rendered.contains('$'),
+            "the transcript records no cost, so nothing here may print one: {rendered}"
+        );
+        for line in rendered.lines() {
+            assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
+        }
+    }
+
+    /// A session that has said nothing has spent nothing, and that is a reading
+    /// rather than a failure — the state right after `up --agent claude`.
+    #[test]
+    fn a_session_that_has_spent_nothing_says_so() {
+        let rendered = render_tokens(&tokens::Spend {
+            path: "/h/x.jsonl".to_owned(),
+            ..tokens::Spend::default()
+        });
+        assert!(rendered.contains("spent nothing yet"), "{rendered}");
+        assert!(rendered.contains("input         0"), "{rendered}");
+    }
+
+    #[test]
+    fn a_seven_digit_count_is_grouped_and_a_small_one_is_left_alone() {
+        assert_eq!(thousands(7_492_711), "7,492,711");
+        assert_eq!(thousands(1_434), "1,434");
+        assert_eq!(thousands(0), "0");
+    }
+
     /// Every verdict must read as a sentence a person can act on — and the two
     /// that are not plain exits must say *why*, since those are the ones nobody
     /// can guess from a number.
@@ -1875,6 +2108,38 @@ mod tests {
     fn an_unrecognised_os_reaches_the_table_verbatim() {
         let odd = machine("nas", Os::Other("freebsd".to_string()), true, false, None);
         assert!(render_machines(&[odd]).contains("freebsd"));
+    }
+
+    #[test]
+    fn kill_takes_a_machine_and_a_session() {
+        let cli = Cli::try_parse_from(["yantra", "kill", "mac", "work"])
+            .expect("`kill <machine> <session>` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Kill { ref machine, ref session }) if machine == "mac" && session == "work"
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "kill", "mac"]).is_err(),
+            "a session name is required: killing every session on a machine is not this verb"
+        );
+    }
+
+    /// `--force` is the difference between refusing and stranding a session, so
+    /// its spelling and its default are both part of the contract.
+    #[test]
+    fn rm_takes_a_workspace_and_force_defaults_off() {
+        let bare = Cli::try_parse_from(["yantra", "rm", "demo"]).expect("`rm demo` parses");
+        assert!(matches!(
+            bare.command,
+            Some(Command::Rm { force: false, .. })
+        ));
+
+        let forced =
+            Cli::try_parse_from(["yantra", "rm", "demo", "--force"]).expect("`--force` parses");
+        assert!(matches!(
+            forced.command,
+            Some(Command::Rm { force: true, .. })
+        ));
     }
 
     #[test]

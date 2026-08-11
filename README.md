@@ -131,10 +131,14 @@ yantra attach yantra             # hand this terminal to the session
 yantra resume yantra             # start the agent again on the conversation it left off
 yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
+yantra tokens yantra             # what that session has spent, in tokens
 yantra down yantra               # stop it, giving the agent a chance to shut down
+yantra rm yantra [--force]       # delete the workspace file, refusing while a session is open
+yantra kill mac scratch          # stop a session by machine and name, workspace or not
+yantra probe mac /code/site      # is that directory there, and what git origin does it hold?
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
-yantra ls sessions               # what tmux is holding, across every machine
+yantra ls sessions               # what tmux is holding, across every machine it can reach
 yantra ls attention              # what GitHub is waiting on you for
 yantra notify 'needs you'        # publish a message to the relay you configured
 yantra doctor [machine] [--json] # what each machine can and cannot do — a read, it changes nothing

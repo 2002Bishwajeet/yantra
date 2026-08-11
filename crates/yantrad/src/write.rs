@@ -25,11 +25,13 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
-use yantra_core::{agent, down, edit, resume, status, terminfo, tmux, up, workspace};
+use yantra_core::{
+    agent, down, edit, probe, remove, resume, sessions, status, terminfo, tmux, up, workspace,
+};
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -95,10 +97,15 @@ where
 {
     Router::new()
         .route("/workspaces", post(make::<I>))
-        .route("/workspaces/{name}", patch(change::<I>))
+        .route("/workspaces/{name}", patch(change::<I>).delete(erase::<I>))
         .route("/workspaces/{name}/up", post(open::<I>))
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
+        .route(
+            "/machines/{machine}/sessions/{session}",
+            axum::routing::delete(end::<I>),
+        )
+        .route("/machines/{machine}/probe", post(ask::<I>))
         .with_state(authoriser)
 }
 
@@ -354,6 +361,111 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
+/// Asks a machine whether a directory is there and what git origin it holds,
+/// so a form can offer a choice instead of a blank field.
+///
+/// **A read reached over a `POST`, and that is [ADR-0019]** rather than a
+/// mislabelled verb: the answer depends on a path nobody has typed yet, so no
+/// snapshot can hold it, and a `GET` awaiting ssh is the bug the rule above
+/// exists to prevent. It qualifies because a person typed it and nothing polls
+/// it — both halves, which is the test the ADR sets for the next candidate.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    Json(asked): Json<Asked>,
+) -> Result<Json<Found>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("probe {machine} for {}", caller.node);
+
+    let found = probe::probe(&machine, &asked.path)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: match error {
+                probe::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+                probe::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+            },
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Found {
+        machine: found.machine,
+        path: found.path,
+        exists: found.exists,
+        // Absent for three different reasons, which `exists` separates. The
+        // route does not flatten them into one.
+        origin: found.origin,
+    }))
+}
+
+/// Stops a session by machine and name — the sessions `ls sessions` finds that
+/// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
+///
+/// A **write**, and it awaits ssh for the reason the exception exists: a person
+/// tapped a button once. Nothing polls this.
+async fn end<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((machine, session)): Path<(String, String)>,
+) -> Result<Json<Ended>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("kill {session} on {machine} for {}", caller.node);
+
+    let report = sessions::kill(&machine, &session)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_sessions(&error),
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Ended {
+        machine: report.machine,
+        session: report.session,
+        // False is "nothing was there", which is the state asked for and never
+        // a failure (I-30).
+        killed: report.killed,
+    }))
+}
+
+/// `DELETE` rather than a `POST /delete`, because the verb HTTP already has
+/// means this and nothing here needs a body. `?force=true` is the CLI's
+/// `--force`: it skips asking the machine rather than ignoring its answer.
+async fn erase<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    uri: Uri,
+) -> Result<Json<Removed>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("rm {name} for {}", caller.node);
+
+    match remove::remove(&name, forced(&uri)).await {
+        Ok(report) => Ok(Json(Removed {
+            // `None` is a file that was deleted without ever parsing, so there
+            // is nothing true to say about where it pointed.
+            machine: report.workspace.map(|workspace| workspace.machine),
+            removed: true,
+        })),
+        // Absence is the state asked for, so a second delete succeeds — the
+        // shape `down` already uses for a session that was not running. A `404`
+        // here would make two tabs deleting one workspace show a failure for
+        // something that worked.
+        Err(remove::Error::Workspace(workspace::Error::NotFound { .. })) => Ok(Json(Removed {
+            machine: None,
+            removed: false,
+        })),
+        Err(error) => Err(Refused::Verb {
+            status: from_remove(&error),
+            said: chain(&error),
+        }),
+    }
+}
+
 async fn again<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
@@ -382,6 +494,14 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
 /// daemon's to explain — and everything else here really is this daemon reading
 /// its own files, which is what the mappers below took an `Option` away to keep
 /// true (Y-135).
+/// Read from the URI rather than through `Query`, whose axum feature this
+/// workspace does not enable — one flag is a real cost on a binary this repo
+/// measures, and the whole requirement is a single boolean.
+fn forced(uri: &Uri) -> bool {
+    uri.query()
+        .is_some_and(|query| query.split('&').any(|pair| pair == "force=true"))
+}
+
 fn from_workspace(error: &workspace::Error) -> StatusCode {
     match error {
         workspace::Error::NotFound { .. } => StatusCode::NOT_FOUND,
@@ -442,6 +562,30 @@ fn from_down(error: &down::Error) -> StatusCode {
         down::Error::Ssh(_) | down::Error::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
         down::Error::Status(status) => from_status(status),
         down::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// No wildcard, for Y-135's reason: a variant added later must be given a
+/// status rather than defaulting into a 500 nobody can act on.
+fn from_remove(error: &remove::Error) -> StatusCode {
+    match error {
+        remove::Error::Workspace(workspace) => from_workspace(workspace),
+        // The session is still open, so the request conflicts with the state of
+        // the thing it names. `force` is how a caller means it anyway.
+        remove::Error::SessionOpen { .. } => StatusCode::CONFLICT,
+        remove::Error::CannotTell { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        remove::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// No wildcard, per Y-135.
+fn from_sessions(error: &sessions::Error) -> StatusCode {
+    match error {
+        sessions::Error::Workspace(workspace) => from_workspace(workspace),
+        sessions::Error::Ssh(_) | sessions::Error::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
+        sessions::Error::NoStateDir | sessions::Error::Interrupted { .. } => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -531,6 +675,32 @@ struct Stopped {
     machine: String,
     stopped: bool,
     ending: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct Asked {
+    path: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Found {
+    machine: String,
+    path: String,
+    exists: bool,
+    origin: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Ended {
+    machine: String,
+    session: String,
+    killed: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Removed {
+    machine: Option<String>,
+    removed: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
