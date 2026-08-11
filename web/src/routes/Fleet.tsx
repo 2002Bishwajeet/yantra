@@ -14,6 +14,7 @@ import { Actions } from '@/components/Act'
 import { DataTable } from '@/components/DataTable'
 import { Footer } from '@/components/Footer'
 import { Section } from '@/components/Section'
+import { Setup } from '@/components/Setup'
 import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -129,6 +130,13 @@ export function Fleet() {
         <Section title="Work" query={reading}>
           {() => null}
         </Section>
+      ) : listed.looked === 'ok' && listed.data.length === 0 ? (
+        // D3 §4.8: a fresh install has no work to draw, and a form it can only
+        // fail at. The checklist is the page until the first workspace exists.
+        // Eager, and it was measured both ways: splitting it costs 1.56 kB gzip
+        // *more* than it saves, because Rollup then hoists `link`, `button` and
+        // `alert` into preloaded chunks of their own (Y-197).
+        <Setup machines={machines} />
       ) : (
         <>
           {changed > 0 && (
@@ -153,12 +161,6 @@ export function Fleet() {
               />
             )
           })}
-          {placed.length === 0 && (
-            <p className="text-muted-foreground text-sm">
-              no workspaces yet — <Link to="/new">make one</Link>, or write
-              ~/.config/yantra/workspaces/&lt;name&gt;.toml
-            </p>
-          )}
           <div>
             <Button
               render={<Link to="/new" />}

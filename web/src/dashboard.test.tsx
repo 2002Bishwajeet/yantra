@@ -1309,9 +1309,10 @@ describe('creating a workspace', () => {
 
     // The read model is 30 s behind a create, so the work page still says there
     // is nothing — which is exactly what confirming by re-reading would draw.
-    // Asked for on `/` since Y-185 moved the form off it.
+    // Asked for on `/` since Y-185 moved the form off it, and the sentence is
+    // Y-197's checklist, which is what `/` becomes when nothing is there.
     fireEvent.click(screen.getByRole('link', { name: 'fleet' }))
-    expect(await screen.findByText(/^no workspaces yet/)).toBeTruthy()
+    expect(await screen.findByText('No workspace exists yet.')).toBeTruthy()
     // Three keys and no fourth: §B4 holds because there is nowhere to put one.
     expect(posted).toHaveBeenCalledWith({
       name: 'site',
