@@ -610,6 +610,44 @@ reconcile. Keep them, and say in
 > 30 kB, and 29,400 B meets it. The table above still reads **76 kB** under *Now*, which is what
 > *now* meant on 2026-08-11 before this landed.
 
+> **The budget is met at 144.38 kB, and the unimported primitives were a weight problem after all.
+> Recorded 2026-08-22 (Y-194).** First load is the entry script and every `modulepreload` and
+> stylesheet `dist/index.html` names, gzip -9, decimal kB. It was **149.73 kB**; it is **144.38 kB**,
+> against the 145 kB ceiling. **Fonts are unchanged and are not in that figure.**
+>
+> | | before | after |
+> | --- | --- | --- |
+> | entry JS | 116.82 | 106.16 |
+> | Base UI core, preloaded | 13.63 | 13.63 |
+> | TanStack Query, preloaded | — | 8.31 |
+> | `button`, preloaded | — | 1.64 |
+> | react-dom, preloaded | 1.36 | 1.36 |
+> | CSS | 17.91 | 13.28 |
+> | **total** | **149.73** | **144.38** |
+>
+> **The paragraph above says the twenty-two unimported primitives are not a weight problem. For the
+> JS that is right, and for the CSS it is wrong.** Tailwind reads a file whether or not a route
+> imports it, so eleven primitives nothing can reach were worth **3.74 kB gzip** — a fifth of the
+> stylesheet — in rules for markup the browser never draws. **The files stay**, which is what this
+> section actually settles; `index.css` skips them in the scan and `motion.test.ts` recomputes the
+> list from the import graph, so importing one is enough to get its CSS back. A further **0.57 kB**
+> was the automatic scan reading `README.md`, `package.json` and the tests and taking an English word
+> for a class name — `.container`, `.hidden`, `.transition`, `.tabular-nums`. `source(none)` and two
+> `@source` lines end that.
+>
+> **`tailwind-merge` at 8.9 kB was the obvious cut and it is load-bearing.** Logging every `cn` call
+> across the suite found 22 distinct class strings where the merge drops a class, all in the ported
+> set: the table head keeps `text-muted-foreground` over `text-foreground`, the autocomplete input
+> keeps `h-9.5` over `h-8.5`, a badge keeps `border-border` over `border-transparent`, and
+> `text-body` beats `text-sm` — which is the extension D3 §5.4 needed. A `clsx`-only `cn` changes all
+> of them and no test sees it. It stays (§B1).
+>
+> **`/usage` is split and no other route pays to be.** It is worth 0.72 kB on its own. Splitting
+> `/machines` and `/m/$machine` beside it lands **1.34 kB above the unsplit build**, so those two
+> cost more than `/usage` saves — Y-197's reason, which the setup checklist already found: Rollup
+> hoists what they share with the fleet into preloaded chunks of their own, and many small gzip
+> streams lose the dictionary one large one shares.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
