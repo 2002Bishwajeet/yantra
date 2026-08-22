@@ -9,6 +9,7 @@
 
 - `yantra new <workspace> --machine M --repo P [--startup CMD]`: write a workspace file. Refuses to overwrite one that exists.
 - `yantra edit <workspace> [--machine M] [--repo P] [--startup CMD | --no-startup]`: change one that already does. **Refuses to change `machine` while a session is open on the one it would leave** — that session would stay where nothing looks for it (I-30). Needs at least one field.
+- `yantra repair <workspace>`: replace a workspace file that will not load, with bytes read from stdin. The one write that composes nothing ([ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)), and bounded on both sides: it refuses a file that already loads, and it refuses bytes that still will not, naming the next error. So it can move a file from broken to valid and nowhere else — `edit` cannot reach one at all, since `update` loads before it writes. The read half is `cat`: every refusal already prints the path, and `ls workspaces` prints it under the table. It exists because `$EDITOR` writes the file too and says nothing about whether the repair worked.
 - `yantra up <workspace> [--agent claude]`: open the workspace's tmux session, optionally launching Claude Code in it. Running it twice attaches rather than duplicating.
 - `yantra resume <workspace>`: put the agent back on the conversation it left off, in the pane it died in. Refuses when the pane holds something it did not start.
 - `yantra logs <workspace> [-n N]`: the last N turns of the agent's transcript, plus how long since anything was written.

@@ -28,6 +28,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | unknown command / bad args | 2 | clap's own |
 | `status`, and nothing is running | 1 | so `yantra status x && …` reads the way it looks |
 | `ls sessions` with a machine unreachable | 1 | the table still prints — a caller must be able to tell the answer is **partial** |
+| `repair`, when the bytes still will not load | 1 | so `yantra repair x < fixed.toml && yantra up x` reads the way it looks. Exit 0 means the file loads now, which is the only thing this verb promises (ADR-0020) |
 | `ls workspaces` with a file that did not load | 1 | the same rule, one class down: the workspaces that loaded still print, and the file that did not is named under the table with its reason (Y-141) |
 | `down` on something not running | **0** | absence is the state asked for (I-30, root §B4) |
 | `probe`, when the directory is not there | 1 | so `probe && new` reads the way it looks — `status`'s rule. A machine that could not be asked is 1 too, and the difference is on stderr: the shell gets one bit, the operator gets the reason (R-23) |

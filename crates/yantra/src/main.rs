@@ -83,6 +83,11 @@ enum Command {
         #[arg(long)]
         no_startup: bool,
     },
+    /// Replace a workspace file that will not load, with bytes read from stdin
+    Repair {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// Attach this terminal to a workspace's session
     Attach {
         /// Workspace name, without the `.toml`
@@ -218,6 +223,7 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Some(Command::Repair { workspace }) => repair(&workspace),
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
@@ -649,6 +655,38 @@ async fn edit(name: &str, changes: &workspace::Changes) -> ExitCode {
                     workspace.name, workspace.machine
                 );
             }
+            println!("  repo:   {}", workspace.repo.display());
+            match &workspace.startup {
+                Some(startup) => println!("  startup: {startup}"),
+                None => println!("  startup: none, so the session opens a shell"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The one write that does not compose the file
+/// ([ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
+/// It exists so the terminal is not second-class: `$EDITOR` repairs the file
+/// too and says nothing about whether the repair worked, while this refuses
+/// bytes that still will not load and names the next error.
+///
+/// The read half is `cat`. Every refusal already prints the path, and `yantra
+/// ls workspaces` prints it under the table for the file that did not load.
+fn repair(name: &str) -> ExitCode {
+    let mut text = String::new();
+    if let Err(err) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+
+    match workspace::repair(name, &text) {
+        Ok(workspace) => {
+            println!("repaired {} on {}", workspace.name, workspace.machine);
             println!("  repo:   {}", workspace.repo.display());
             match &workspace.startup {
                 Some(startup) => println!("  startup: {startup}"),
@@ -1167,7 +1205,8 @@ fn render_attention(attention: &Attention) -> String {
 /// row in it, which is `render_sessions`'s shape for an unreachable machine.
 /// Every column here is something to act on and a broken file has none of them:
 /// no machine, nothing to attach to, and nothing `yantra edit` can repair, since
-/// `update` loads before it writes and the file is the fix.
+/// `update` loads before it writes. `yantra repair` is the verb for that
+/// (ADR-0020), and the reason printed here already names the file it reads.
 fn render_workspaces(listing: &Listing) -> String {
     let workspaces = &listing.workspaces;
     if workspaces.is_empty() && listing.unusable.is_empty() {
@@ -1580,6 +1619,23 @@ mod tests {
         assert!(
             Cli::try_parse_from(["yantra", "resume", "demo", "--agent", "claude"]).is_err(),
             "there is no agent to choose when continuing one that already ran"
+        );
+    }
+
+    /// The bytes come from stdin and from nowhere else. A `--file` or an
+    /// inline argument would be a second way to say the same thing, and a
+    /// workspace file with a newline in it is not an argument.
+    #[test]
+    fn repair_takes_a_workspace_and_reads_the_file_from_stdin() {
+        let parsed = Cli::try_parse_from(["yantra", "repair", "demo"]).expect("`repair` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Repair { workspace }) if workspace == "demo"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "repair"]).is_err());
+        assert!(
+            Cli::try_parse_from(["yantra", "repair", "demo", "--file", "x.toml"]).is_err(),
+            "there is one way to hand it bytes"
         );
     }
 

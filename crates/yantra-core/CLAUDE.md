@@ -74,8 +74,17 @@ Quote it with `tmux::sq`, or send it as a value the shell never parses. A worksp
 **A file gets the same refusals a request gets.** `workspace::parse` asks `blank_field`, which is the
 one predicate `create` and `update` ask, so a workspace `create` would not write is one `load` will
 not read (Y-137, after Y-119 closed the writing half alone). The consequence to know before changing
-it: `yantra edit` cannot repair such a file, because `update` loads before it writes — the file is
-the fix, as it is for a mistyped key.
+it: `yantra edit` cannot repair such a file, because `update` loads before it writes — which is true
+of a mistyped key too.
+
+**`repair` is the one write that skips the field checks, and
+[ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it is
+safe to have.** Two bounds, and they are the whole of it: it refuses a file that parses
+(`Error::Loads`), and it refuses bytes that do not, with the next error named. Together they mean it
+can move a file from broken to valid and nowhere else. **It asks `broken`, which asks `parse`** — so
+the raw path and the reading path share one predicate, exactly as `create` and `load` do, and a
+third answer to *is this file usable* cannot appear. Nothing else may be written raw, and `create`
+is still the only way a workspace comes into being: a file that is not there is `NotFound`.
 
 **A file that does not load costs only itself** (Y-141). `list` returns a `Listing`: the workspaces
 that loaded, and every file that did not under its name with its reason. The outer `Result` is still
