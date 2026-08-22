@@ -294,6 +294,7 @@ fn holding(snapshot: Snapshot) -> Fleet {
     Fleet {
         model: Arc::new(tokio::sync::RwLock::new(snapshot)),
         beats: Beats::default(),
+        ..Fleet::default()
     }
 }
 

@@ -841,6 +841,15 @@ file the unit reads, a config file beside `~/.config/yantra/workspaces/`, or a t
 and sends per-notification are three different answers with three different §B4 consequences.
 **Named, not decided.**
 
+> **Decided 2026-08-22 by the owner, and it is the first of the three: an environment file the unit
+> reads** — [ADR-0021](../adr/0021-the-relay-is-written-to-an-environment-file.md), built as
+> [Y-199](../../tracker.md#3-task-board). `/settings` and `yantra relay` write
+> `/etc/yantra/daemon.env` at mode `0600`, owned by the account `yantrad` runs as, and the unit hands
+> it back with `EnvironmentFile=`. **The daemon's read path does not change**, so a relay set here
+> reaches it at the next start, and the write sends a test message so the box says whether the topic
+> works. The ADR names both rules this bends — §B4's *never store secrets*, and Y-044's *the daemon
+> persists nothing* — and what the exposure is.
+
 ---
 
 ## 13. Notifications and the open page
@@ -926,11 +935,11 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 | **D3.26** | `/w/{name}/repair` (§7.5) | both refusals hold — a file that loads is refused, and bytes that still will not load are refused with the next error. **After §12.1's ADR** |
 | **D3.27** | The presence beacon suppresses ntfy (§13) | one event produces one notification while a tab is visible, and none of it survives a restart |
 | **D3.28** | Assertions gate, screenshots advise (§15) | every number in this document is asserted somewhere, and no image comparison fails CI |
-| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. **After §12.2 is decided** |
+| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. §12.2 is decided — [ADR-0021](../adr/0021-the-relay-is-written-to-an-environment-file.md) |
 
 **D3.1 and D3.2 come first.** Every other unit is cheaper once the page has an outline and a subject.
 
-**Two are blocked**: D3.26 on §12.1's ADR, and D3.29 on §12.2. Nothing else is.
+**One is blocked**: D3.26, on §12.1's ADR. D3.29 was, until §12.2 was decided above. Nothing else is.
 
 > **These twenty-nine units are thirteen rows.** The owner opened **M13** on 2026-08-11 and grouped
 > them, because `tracker.md` reserves Y-200 upward for the landing page and Y-187–Y-199 is what was

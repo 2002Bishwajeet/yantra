@@ -160,6 +160,14 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
         priority: Option<u8>,
     },
+    /// Write the relay down where yantrad reads it, and publish a test message
+    Relay {
+        /// The ntfy topic URL. On a public server the topic is the password
+        url: String,
+        /// Only a protected topic needs one
+        #[arg(long)]
+        token: Option<String>,
+    },
     /// Say what each machine can and cannot do — a read, it changes nothing
     Doctor {
         /// ssh destination to check. Every machine a workspace names, if omitted
@@ -257,6 +265,7 @@ async fn main() -> ExitCode {
             })
             .await
         }
+        Some(Command::Relay { url, token }) => relay(&url, token.as_deref()).await,
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity) => ssh_identity(),
@@ -803,6 +812,48 @@ async fn publish(message: notify::Message) -> ExitCode {
                 && std::env::var_os(notify::RELAY_TOKEN).is_none()
             {
                 eprintln!("{}", token_note());
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The write half of the relay, and the dashboard's `/settings` on a keyboard
+/// ([ADR-0021](../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md)).
+///
+/// **It sends after it writes**, because a relay written down and never reached
+/// is the failure this box has no screen to show. Both halves are reported: a
+/// message that did not arrive does not un-write the file.
+///
+/// The URL and the token are arguments, so `ps` and the shell's history see
+/// them — ADR-0021 names that as the cost of a verb, and the browser's form is
+/// the way that avoids it.
+async fn relay(url: &str, token: Option<&str>) -> ExitCode {
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    if let Err(err) = notify::write_to(path, url, token) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+    println!("wrote the relay to {}", notify::RELAY_FILE);
+    println!("  note: yantrad reads that file when systemd starts it —");
+    println!("        `sudo systemctl restart yantrad` for this to reach the daemon.");
+
+    match notify::post(
+        &notify::Relay::new(url.to_owned(), token.map(str::to_owned)),
+        notify::test_message(),
+    )
+    .await
+    {
+        Ok(()) => {
+            println!("published a test message");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, notify::Error::Refused { status: 401 | 403 }) && token.is_none() {
+                eprintln!(
+                    "\x20 note: that topic wants credentials — pass --token to write one down."
+                );
             }
             ExitCode::FAILURE
         }

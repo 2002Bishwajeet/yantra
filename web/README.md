@@ -3,10 +3,16 @@
 Seven routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every machine compared at `/machines`, one machine at
 `/m/$machine`, a workspace and its terminal at `/w/$name`, its file at
-`/w/$name/repair`, the create form at `/new` and spend at `/usage`. `⌘K` reaches
-the six a working workspace has and runs no verb; the palette lists only
-workspaces that loaded, so a broken one is reached from its own page.
+`/w/$name/repair`, the create form at `/new`, spend at `/usage` and the ntfy
+relay at `/settings`. `⌘K` reaches the seven a working workspace has and runs no
+verb; the palette lists only workspaces that loaded, so a broken one is reached
+from its own page.
 The readings poll on TanStack Query; the forms and every workspace row write.
+
+**While a tab is visible the page says so**, and the daemon stops pushing what
+the page is already showing (D3 §13). It is an explicit beacon rather than a
+read counted as presence: a background tab polls every five seconds and is not a
+person watching.
 
 **`/` opens on work, not on an inventory.** Three groups ordered by who must act
 next — you, the agent, nobody — and the order recomputes only when you ask, so

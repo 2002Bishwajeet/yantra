@@ -44,6 +44,15 @@ const made = createRoute({
   head: () => titled('New workspace'),
 })
 
+// Split for `/new`'s reason and no other: it is the third form, and `ui/field`
+// has no business on the first paint of a page nobody opens twice a year.
+const settings = createRoute({
+  getParentRoute: () => root,
+  path: '/settings',
+  component: lazyRouteComponent(() => import('@/routes/Settings'), 'Settings'),
+  head: () => titled('Settings'),
+})
+
 // Split, and it is the only one of the four eager routes that pays: measured at
 // 2.18 kB gzip off the first load, against `/machines` and `/m/$name`, which
 // cost more than they save for Y-197's reason (Y-194).
@@ -63,8 +72,8 @@ const machine = createRoute({
   head: ({ params }) => titled(params.machine),
 })
 
-// The only split route, and it is split for one reason: xterm.js and its CSS
-// are a third of the bundle, and the fleet does not use them.
+// Split for the heaviest reason of any of them: xterm.js and its CSS are a
+// third of the bundle, and the fleet does not use them.
 const workspace = createRoute({
   getParentRoute: () => root,
   path: '/w/$name',
@@ -88,6 +97,7 @@ export const routeTree = root.addChildren([
   fleet,
   machines,
   made,
+  settings,
   usage,
   machine,
   workspace,
