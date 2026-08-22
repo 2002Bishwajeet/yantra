@@ -5,7 +5,15 @@
  * runs no verb. The last test in this file is that rule: every entry the palette
  * offers is clicked, and the daemon is asked for nothing but readings.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import {
   cleanup,
   fireEvent,
@@ -98,6 +106,11 @@ function fleet(overrides: Record<string, Looked<unknown> | number> = {}) {
   )
   return wrote
 }
+
+/** The overlay is a lazy chunk (Y-194), so the first summon resolved that
+ *  import inside its wait — 450 ms of the 1000 ms Testing Library allows, and
+ *  more than that beside twelve other suites. R-24's species. */
+beforeAll(() => import('@/components/PalettePopup'))
 
 const shortcut = () => fireEvent.keyDown(document, { key: 'k', metaKey: true })
 
