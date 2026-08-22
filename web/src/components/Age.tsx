@@ -1,4 +1,28 @@
 import { Status, type Tone } from '@/components/Status'
+import { ago, at } from '@/lib/time'
+
+/** D3 §5.5: a figure Geist cannot line up, so every one of them is monospaced,
+ *  and D3 §5.7 puts the exact instant in `title`. */
+export function Ago({ seconds }: { seconds: number }) {
+  const clock = ago(seconds)
+  return (
+    <time className="font-mono" dateTime={clock.iso} title={clock.title}>
+      {clock.text}
+    </time>
+  )
+}
+
+/** A timestamp another program wrote. Shown verbatim where no instant can be
+ *  read out of it, because D3 §5.7 refuses to guess a remote clock's zone. */
+export function Stamp({ stamp }: { stamp: string }) {
+  const clock = at(stamp)
+  if (!clock) return <span className="font-mono">{stamp}</span>
+  return (
+    <time className="font-mono" dateTime={clock.iso} title={clock.title}>
+      {clock.text}
+    </time>
+  )
+}
 
 // A reading is stamped when its look finishes and the daemon then sleeps
 // EVERY=30 s, so an age is 30 plus whatever the look in flight is spending.
@@ -51,7 +75,12 @@ export function Age({
 
   return (
     <span className="inline-flex items-center gap-2">
-      <time dateTime={`PT${seconds}S`}>looked {seconds}s ago</time>
+      {/* D3 §5.7's clock reads as a date past 24 h, so the phrase carries no
+          *ago* it would then have to take back — and *as of* is §4.3's own
+          wording for the same figure. */}
+      <span>
+        as of <Ago seconds={seconds} />
+      </span>
       {reading && <Status {...reading} />}
     </span>
   )

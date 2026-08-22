@@ -1,14 +1,56 @@
-import { Link, Outlet } from '@tanstack/react-router'
+import { HeadContent, Link, Outlet } from '@tanstack/react-router'
+import { Palette } from '@/components/Palette'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { useViewing } from '@/useViewing'
+
+/** D3 §3: three items, and the other routes are reached from the thing that
+ *  needs them. */
+const NAV = [
+  { to: '/', label: 'fleet' },
+  { to: '/machines', label: 'machines' },
+  { to: '/usage', label: 'usage' },
+] as const
 
 export function Shell() {
+  // Here rather than on a page: every route is the dashboard being open, and
+  // D3 §13 suppresses the push for as long as one is.
+  useViewing()
+
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
-      <h1 className="font-heading text-2xl font-semibold">
-        <Link to="/">Yantra</Link>
-      </h1>
-      <Outlet />
-    </main>
+    <div className="mx-auto flex w-full max-w-[72rem] flex-col gap-6 px-4 py-6 md:gap-8 md:px-8">
+      <HeadContent />
+      {/* The wordmark is not the page's heading — D3 §5.2 gives the `h1` to the
+          route, so an outline says where you are rather than what the app is. */}
+      <header className="flex items-baseline gap-6">
+        <Link className="font-heading text-base font-semibold" to="/">
+          Yantra
+        </Link>
+        <nav aria-label="Sections">
+          <ul className="flex gap-4 text-sm">
+            {NAV.map((item) => (
+              <li key={item.to}>
+                <Link
+                  activeOptions={{ exact: item.to === '/' }}
+                  activeProps={{ 'aria-current': 'page' }}
+                  className="text-muted-foreground aria-[current]:text-foreground"
+                  to={item.to}
+                >
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        {/* Every route shares this header, and D3 §3.2 makes the palette the way
+            to reach the idle ninety per cent that no page lists. */}
+        <div className="ms-auto">
+          <Palette />
+        </div>
+      </header>
+      <main className="flex flex-col gap-6 md:gap-8">
+        <Outlet />
+      </main>
+    </div>
   )
 }
 
@@ -18,7 +60,9 @@ export function Shell() {
 export function Nowhere() {
   return (
     <Alert variant="destructive">
-      <AlertTitle>Nothing is at {location.pathname}.</AlertTitle>
+      <AlertTitle>
+        <h1>Nothing is at {location.pathname}.</h1>
+      </AlertTitle>
       <AlertDescription>
         <Link to="/">The fleet</Link> is where the machines and workspaces are.
       </AlertDescription>

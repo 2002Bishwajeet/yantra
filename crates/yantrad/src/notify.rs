@@ -9,9 +9,16 @@
 //! retry, no replay, and no buffer that could grow while a relay is unreachable.
 //! The one thing this side adds is a budget, because the sends are sequential
 //! and the loop waits for them.
+//!
+//! **And nothing is pushed while someone is watching the page** (D3 §13). The
+//! dashboard says so itself, on [`crate::write`]'s beacon; here that is one
+//! bool, and the diff still runs under it — a change seen while a tab was open
+//! is a change already told, not one owed later.
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use tokio::sync::RwLock;
 use yantra_core::notify::{Notification, Relay, Watch, post};
 use yantra_core::status::Fleet;
 
@@ -20,6 +27,22 @@ use yantra_core::status::Fleet;
 /// against a relay that accepts connections and never answers, would push the
 /// next look out by a multiple of the per-send timeout.
 const BUDGET: Duration = Duration::from_secs(5);
+
+/// When a browser last said it was looking. Beside the snapshot and the beats,
+/// **in memory** — a restart forgets it, which is correct: a restart forgets
+/// the snapshot too, and the first look after a start already says nothing.
+pub type Viewers = Arc<RwLock<Option<Instant>>>;
+
+/// How long one beacon speaks for. Longer than the page's own interval, which
+/// is `BEACON_MS` in [`web/src/useViewing.ts`](../../../web/src/useViewing.ts),
+/// so a tab that misses a beat does not start pushing to a phone somebody is
+/// holding — and short enough that a closed laptop is heard from again inside a
+/// refresh period.
+pub const WATCHED: Duration = Duration::from_secs(60);
+
+pub async fn watched(viewers: &Viewers) -> bool {
+    matches!(*viewers.read().await, Some(seen) if seen.elapsed() < WATCHED)
+}
 
 #[derive(Debug)]
 pub struct Notifier {
@@ -39,9 +62,21 @@ impl Notifier {
 
     /// Called once the reading is already in the model, so nothing a browser
     /// reads is waiting on a relay.
-    pub async fn tell(&mut self, fleet: &Fleet) {
+    ///
+    /// **The diff runs whether or not anyone is watching**, and that is the
+    /// whole of D3 §13: the notifications a watched look produced are dropped
+    /// here rather than held, so closing the tab does not deliver a backlog of
+    /// things the page already showed.
+    pub async fn tell(&mut self, fleet: &Fleet, watched: bool) {
         let notifications = self.watch.look(fleet);
         if notifications.is_empty() {
+            return;
+        }
+        if watched {
+            tracing::debug!(
+                "{} notification(s) not pushed: the dashboard is open",
+                notifications.len()
+            );
             return;
         }
         let outcome = tokio::time::timeout(BUDGET, send(&self.relay, &notifications))
@@ -135,7 +170,7 @@ mod tests {
         let address = listener.local_addr().expect("the port it got");
         let mut notifier = Notifier::new(relay(address));
 
-        notifier.tell(&fleet("api", Verdict::Running)).await;
+        notifier.tell(&fleet("api", Verdict::Running), false).await;
 
         listener.set_nonblocking(true).expect("a nonblocking check");
         assert!(
@@ -146,7 +181,9 @@ mod tests {
 
         let served = thread::spawn(move || answer(&listener, "200 OK"));
 
-        notifier.tell(&fleet("api", Verdict::AwaitingTrust)).await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), false)
+            .await;
 
         assert_eq!(
             served.join().expect("the listener thread"),
@@ -168,11 +205,13 @@ mod tests {
         });
         let mut notifier = Notifier::new(relay(address));
 
-        notifier.tell(&fleet("api", Verdict::Running)).await;
-        notifier.tell(&fleet("api", Verdict::AwaitingTrust)).await;
-        notifier.tell(&fleet("api", Verdict::Running)).await;
+        notifier.tell(&fleet("api", Verdict::Running), false).await;
         notifier
-            .tell(&fleet("api", Verdict::Crashed { status: 1 }))
+            .tell(&fleet("api", Verdict::AwaitingTrust), false)
+            .await;
+        notifier.tell(&fleet("api", Verdict::Running), false).await;
+        notifier
+            .tell(&fleet("api", Verdict::Crashed { status: 1 }), false)
             .await;
 
         let seen = served.join().expect("the listener thread");
@@ -184,6 +223,46 @@ mod tests {
             ],
             "the refused notification must not be replayed behind the next one"
         );
+    }
+
+    /// D3 §13 in one test: while a tab is visible the event is on the page, so
+    /// nothing reaches the relay — and it does not arrive late either, because
+    /// the look that produced it already ran.
+    #[tokio::test]
+    async fn a_change_seen_while_the_page_was_open_is_never_pushed() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let mut notifier = Notifier::new(relay(address));
+
+        notifier.tell(&fleet("api", Verdict::Running), true).await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), true)
+            .await;
+        // The tab is closed now, and the fleet has not changed since.
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), false)
+            .await;
+
+        listener.set_nonblocking(true).expect("a nonblocking check");
+        assert!(
+            listener.accept().is_err(),
+            "a watched change must be dropped, not held for the next look"
+        );
+    }
+
+    /// The window is what makes the beacon a *last seen* rather than a switch
+    /// somebody has to turn off: a page that stopped saying anything is a page
+    /// nobody is watching, within a minute.
+    #[tokio::test]
+    async fn a_beacon_older_than_the_window_is_no_longer_a_viewer() {
+        let viewers = Viewers::default();
+        assert!(!watched(&viewers).await, "nobody has said anything yet");
+
+        *viewers.write().await = Some(Instant::now());
+        assert!(watched(&viewers).await);
+
+        *viewers.write().await = Instant::now().checked_sub(WATCHED);
+        assert!(!watched(&viewers).await);
     }
 
     #[test]

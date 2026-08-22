@@ -6,6 +6,7 @@ the tmux session, resumes the agent.
 ```sh
 yantra new site --machine mac --repo /Users/you/code/site   # write a workspace
 yantra edit site --repo /Users/you/code/website             # change one that exists
+yantra repair site < fixed.toml  # replace a file that will not load, if the bytes do
 
 yantra up yantra --agent claude  # open it, and start Claude Code in it
 yantra resume yantra             # start it again where the last conversation stopped
@@ -22,6 +23,7 @@ yantra ls workspaces             # what you have defined
 yantra ls sessions               # what is running, everywhere
 yantra ls attention              # issues, reviews and notifications waiting on GitHub
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
+yantra relay <url> [--token T]   # write that relay down for yantrad, and test it
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place

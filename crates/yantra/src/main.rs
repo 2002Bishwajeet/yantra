@@ -83,6 +83,11 @@ enum Command {
         #[arg(long)]
         no_startup: bool,
     },
+    /// Replace a workspace file that will not load, with bytes read from stdin
+    Repair {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// Attach this terminal to a workspace's session
     Attach {
         /// Workspace name, without the `.toml`
@@ -155,6 +160,14 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
         priority: Option<u8>,
     },
+    /// Write the relay down where yantrad reads it, and publish a test message
+    Relay {
+        /// The ntfy topic URL. On a public server the topic is the password
+        url: String,
+        /// Only a protected topic needs one
+        #[arg(long)]
+        token: Option<String>,
+    },
     /// Say what each machine can and cannot do — a read, it changes nothing
     Doctor {
         /// ssh destination to check. Every machine a workspace names, if omitted
@@ -218,6 +231,7 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Some(Command::Repair { workspace }) => repair(&workspace),
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
@@ -251,6 +265,7 @@ async fn main() -> ExitCode {
             })
             .await
         }
+        Some(Command::Relay { url, token }) => relay(&url, token.as_deref()).await,
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity) => ssh_identity(),
@@ -509,7 +524,10 @@ fn render_tokens(spend: &tokens::Spend) -> String {
     // carries neither — so nothing here is priced, per model or in total.
     let priced = spend.fast == 0;
     let name = spend.by_model.keys().map(String::len).max().unwrap_or(0);
-    let mut charged = 0.0;
+    // `None` until something is priced: a sum over nothing is `0.0`, and
+    // `$0.00` for a session this table priced none of is a figure a reader
+    // would act on (R-23). Found by Y-199, which publishes the same numbers.
+    let mut charged: Option<f64> = None;
     let mut unpriced = Vec::new();
     out.push('\n');
     for (model, counts) in &spend.by_model {
@@ -518,7 +536,7 @@ fn render_tokens(spend: &tokens::Spend) -> String {
             .flatten()
             .map(|rate| rate.charge(counts));
         match cost {
-            Some(cost) => charged += cost,
+            Some(cost) => charged = Some(charged.unwrap_or(0.0) + cost),
             None => unpriced.push(model.as_str()),
         }
         out.push_str(&format!(
@@ -538,6 +556,14 @@ fn render_tokens(spend: &tokens::Spend) -> String {
         ));
         return out;
     }
+
+    let Some(charged) = charged else {
+        out.push_str(
+            "\nno cost: the price table carries none of the models above, so there\n\
+             is no figure to give\n",
+        );
+        return out;
+    };
 
     out.push_str(&format!(
         "\n{} at prices of {}\n",
@@ -638,6 +664,38 @@ async fn edit(name: &str, changes: &workspace::Changes) -> ExitCode {
                     workspace.name, workspace.machine
                 );
             }
+            println!("  repo:   {}", workspace.repo.display());
+            match &workspace.startup {
+                Some(startup) => println!("  startup: {startup}"),
+                None => println!("  startup: none, so the session opens a shell"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The one write that does not compose the file
+/// ([ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
+/// It exists so the terminal is not second-class: `$EDITOR` repairs the file
+/// too and says nothing about whether the repair worked, while this refuses
+/// bytes that still will not load and names the next error.
+///
+/// The read half is `cat`. Every refusal already prints the path, and `yantra
+/// ls workspaces` prints it under the table for the file that did not load.
+fn repair(name: &str) -> ExitCode {
+    let mut text = String::new();
+    if let Err(err) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+
+    match workspace::repair(name, &text) {
+        Ok(workspace) => {
+            println!("repaired {} on {}", workspace.name, workspace.machine);
             println!("  repo:   {}", workspace.repo.display());
             match &workspace.startup {
                 Some(startup) => println!("  startup: {startup}"),
@@ -754,6 +812,48 @@ async fn publish(message: notify::Message) -> ExitCode {
                 && std::env::var_os(notify::RELAY_TOKEN).is_none()
             {
                 eprintln!("{}", token_note());
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The write half of the relay, and the dashboard's `/settings` on a keyboard
+/// ([ADR-0021](../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md)).
+///
+/// **It sends after it writes**, because a relay written down and never reached
+/// is the failure this box has no screen to show. Both halves are reported: a
+/// message that did not arrive does not un-write the file.
+///
+/// The URL and the token are arguments, so `ps` and the shell's history see
+/// them — ADR-0021 names that as the cost of a verb, and the browser's form is
+/// the way that avoids it.
+async fn relay(url: &str, token: Option<&str>) -> ExitCode {
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    if let Err(err) = notify::write_to(path, url, token) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+    println!("wrote the relay to {}", notify::RELAY_FILE);
+    println!("  note: yantrad reads that file when systemd starts it —");
+    println!("        `sudo systemctl restart yantrad` for this to reach the daemon.");
+
+    match notify::post(
+        &notify::Relay::new(url.to_owned(), token.map(str::to_owned)),
+        notify::test_message(),
+    )
+    .await
+    {
+        Ok(()) => {
+            println!("published a test message");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, notify::Error::Refused { status: 401 | 403 }) && token.is_none() {
+                eprintln!(
+                    "\x20 note: that topic wants credentials — pass --token to write one down."
+                );
             }
             ExitCode::FAILURE
         }
@@ -1156,7 +1256,8 @@ fn render_attention(attention: &Attention) -> String {
 /// row in it, which is `render_sessions`'s shape for an unreachable machine.
 /// Every column here is something to act on and a broken file has none of them:
 /// no machine, nothing to attach to, and nothing `yantra edit` can repair, since
-/// `update` loads before it writes and the file is the fix.
+/// `update` loads before it writes. `yantra repair` is the verb for that
+/// (ADR-0020), and the reason printed here already names the file it reads.
 fn render_workspaces(listing: &Listing) -> String {
     let workspaces = &listing.workspaces;
     if workspaces.is_empty() && listing.unusable.is_empty() {
@@ -1572,6 +1673,23 @@ mod tests {
         );
     }
 
+    /// The bytes come from stdin and from nowhere else. A `--file` or an
+    /// inline argument would be a second way to say the same thing, and a
+    /// workspace file with a newline in it is not an argument.
+    #[test]
+    fn repair_takes_a_workspace_and_reads_the_file_from_stdin() {
+        let parsed = Cli::try_parse_from(["yantra", "repair", "demo"]).expect("`repair` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Repair { workspace }) if workspace == "demo"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "repair"]).is_err());
+        assert!(
+            Cli::try_parse_from(["yantra", "repair", "demo", "--file", "x.toml"]).is_err(),
+            "there is one way to hand it bytes"
+        );
+    }
+
     #[test]
     fn logs_defaults_to_a_window_rather_than_the_whole_transcript() {
         let default = Cli::try_parse_from(["yantra", "logs", "demo"]).expect("a bare logs parses");
@@ -1747,11 +1865,55 @@ mod tests {
             },
         ));
         assert!(rendered.contains('—'), "{rendered}");
+        // Y-199: this asserted `$0.00 at prices of`, which is what the test's
+        // own name says it must not do. A sum over nothing is zero, and a zero
+        // beside a date reads as a session that cost nothing.
+        assert!(
+            rendered.contains("carries none of the models above"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("$0.00"), "{rendered}");
+    }
+
+    /// One priced model beside one that is not: the figure is real, it is the
+    /// priced model's alone, and the line beneath says what is missing from it.
+    #[test]
+    fn a_partly_priced_session_gives_the_figure_and_names_what_is_outside_it() {
+        let spend = tokens::Spend {
+            path: "/x".to_owned(),
+            by_model: [
+                (
+                    "claude-opus-5".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+                (
+                    "claude-opus-9".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            fast: 0,
+        };
+        let rendered = render_tokens(&spend);
+
+        assert!(rendered.contains("at prices of"), "{rendered}");
         assert!(
             rendered.contains("claude-opus-9 is not in that table"),
             "{rendered}"
         );
-        assert!(rendered.contains("$0.00 at prices of"), "{rendered}");
+        assert!(
+            !rendered.contains("carries none of the models above"),
+            "{rendered}"
+        );
     }
 
     /// Fast mode doubles both prices, and the table carries neither — so the
