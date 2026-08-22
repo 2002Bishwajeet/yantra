@@ -147,10 +147,13 @@ function stub({
   return asked
 }
 
+/** The wait is longer than the default because `/new` is a lazy route:
+ *  whichever test runs first loads it inside this call, and CI has missed the
+ *  1000 ms Testing Library allows (Y-304). */
+const picker = () => screen.findByLabelText('Machine', {}, { timeout: 3000 })
+
 const pick = async () =>
-  fireEvent.change(await screen.findByLabelText('Machine'), {
-    target: { value: 'cachyos-g14' },
-  })
+  fireEvent.change(await picker(), { target: { value: 'cachyos-g14' } })
 
 /** The box holds the path: what it says is where you are. */
 const box = () => screen.getByLabelText('Directory') as HTMLInputElement
@@ -217,7 +220,7 @@ describe('the path box', () => {
   it('asks for nothing until a machine is chosen, then asks once and fills itself in', async () => {
     const asked = stub()
     render(<App />)
-    await screen.findByLabelText('Machine')
+    await picker()
     expect(asked.filter((one) => one.path.endsWith('/dirs'))).toHaveLength(0)
 
     await pick()
