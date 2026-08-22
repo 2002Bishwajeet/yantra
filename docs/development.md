@@ -244,6 +244,10 @@ its own throwaway keypair and publishes sshd on an ephemeral loopback port —
 your `~/.ssh` is never read — and the container is removed in `Drop`, so it goes
 away even when a test panics.
 
+`podman` picks that port, and it releases the number between choosing it and
+binding it, so a parallel run can lose the race. The fixture then asks again, up
+to five times, and a failure names every attempt.
+
 ```bash
 just test                                   # the fixture runs as part of the suite
 podman ps -a --filter label=yantra-fixture  # must be empty afterwards
