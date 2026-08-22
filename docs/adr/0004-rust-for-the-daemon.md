@@ -92,3 +92,20 @@ serves one user. Throughput was never the constraint, and no benchmark motivated
 > no datastore at all, so a comparison between datastore bindings no longer decides anything here.
 > The decision stands on the rest of the record — the static musl binary, one toolchain for three
 > binaries, `tokio::process` around `ssh`, `tmux` and `tailscale`, and `axum` for HTTP and WebSocket.
+
+> **2026-08-22 (Y-199): the daemon writes one file, and it is configuration rather than state.**
+>
+> [ADR-0021](0021-the-relay-is-written-to-an-environment-file.md) has `/settings` and `yantra relay`
+> write `/etc/yantra/daemon.env`, which `yantrad.service` reads back with `EnvironmentFile=`. So
+> *persists nothing* — the amendment above, and the sentence §B1 of [`CLAUDE.md`](../../CLAUDE.md)
+> repeats — is no longer true to the letter.
+>
+> **What changed sits upstream of the audit, not inside it.** Y-044 asked whether the daemon needs a
+> **store**: a place to keep what it observes about the fleet, so that a later look can read what an
+> earlier one saw. Five candidate consumers were audited and none needed one, and none does now. This
+> file holds no session, no verdict, no beat and no history; the daemon still starts knowing nothing
+> about the fleet, and the first look after a start still says nothing. What it holds is one of the
+> daemon's own **inputs**, which had no way in but a keyboard on the appliance.
+>
+> The rest of the amendment stands unchanged: `rusqlite` is in no `Cargo.toml`, I-12, I-13 and I-14
+> stay parked, and what would bring a store back is still the Y-044 row's list.

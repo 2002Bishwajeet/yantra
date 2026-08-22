@@ -23,7 +23,7 @@ type Entry =
   | { kind: 'machine'; value: string; label: string }
   | {
       kind: 'route'
-      value: '/' | '/machines' | '/new' | '/usage'
+      value: '/' | '/machines' | '/new' | '/settings' | '/usage'
       label: string
     }
 
@@ -33,6 +33,7 @@ const ROUTES: Entry[] = [
   { kind: 'route', value: '/', label: 'Fleet' },
   { kind: 'route', value: '/machines', label: 'Machines' },
   { kind: 'route', value: '/new', label: 'New workspace' },
+  { kind: 'route', value: '/settings', label: 'Settings' },
   { kind: 'route', value: '/usage', label: 'Usage' },
 ]
 

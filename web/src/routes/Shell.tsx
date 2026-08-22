@@ -1,6 +1,7 @@
 import { HeadContent, Link, Outlet } from '@tanstack/react-router'
 import { Palette } from '@/components/Palette'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { useViewing } from '@/useViewing'
 
 /** D3 §3: three items, and the other routes are reached from the thing that
  *  needs them. */
@@ -11,6 +12,10 @@ const NAV = [
 ] as const
 
 export function Shell() {
+  // Here rather than on a page: every route is the dashboard being open, and
+  // D3 §13 suppresses the push for as long as one is.
+  useViewing()
+
   return (
     <div className="mx-auto flex w-full max-w-[72rem] flex-col gap-6 px-4 py-6 md:gap-8 md:px-8">
       <HeadContent />

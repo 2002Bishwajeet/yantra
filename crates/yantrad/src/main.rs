@@ -141,6 +141,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         inventory.clone(),
         yantra_core::attention::Gh,
         relay,
+        fleet.viewers.clone(),
     );
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))

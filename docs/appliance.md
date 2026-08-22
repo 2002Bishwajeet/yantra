@@ -146,15 +146,17 @@ What it does:
 5. renames each binary into `/usr/local/bin`, for the reason [below](#why-the-rename);
 6. installs both units and reloads systemd, **enabling neither**;
 7. writes `/etc/yantra/agent.env` **only if it is absent**, and with no address in it;
-8. reports whether Tailscale is installed and up, and **never enrols it** — the auth key is the
+8. writes `/etc/yantra/daemon.env` **only if it is absent** — `0600`, owned by `yantra`, and with no
+   relay in it ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md));
+9. reports whether Tailscale is installed and up, and **never enrols it** — the auth key is the
    owner's ([`CLAUDE.md`](../CLAUDE.md) §B4) and [Q17](../tracker.md#6-open-questions) is not a
    script's to answer.
 
-**Steps 2 and 5–7 are the ones a second run has to get right, and
+**Steps 2 and 5–8 are the ones a second run has to get right, and
 [`crates/yantrad/tests/installer.rs`](../crates/yantrad/tests/installer.rs) runs it twice against a
-real systemd to say that it does** ([Y-158](../tracker.md#3-task-board)): an edited `agent.env`
-survives, the binaries replace while one of them is executing, and a corrupted archive installs
-nothing.
+real systemd to say that it does** ([Y-158](../tracker.md#3-task-board)): an edited `agent.env` and
+an edited `daemon.env` both survive, `daemon.env` is `600 yantra`, the binaries replace while one of
+them is executing, and a corrupted archive installs nothing.
 
 It ends by printing what is left, which is each thing above it deliberately did not do, plus
 [Y-144](../tracker.md#3-task-board): the box has no ssh identity any fleet machine authorises, so the
@@ -279,5 +281,10 @@ decided, and this document gets shorter.
 
 `tailscale serve` still has to be set on the appliance for the dashboard to have an HTTPS door
 (`just https` is written for a machine someone is logged into — [the M7 plan](plans/m7-appliance.md)
-§3.9), and `YANTRA_NTFY_TOKEN` belongs in a `systemctl edit yantrad` drop-in rather than in the unit
-this repo ships ([`development.md`](development.md)).
+§3.9), and the ntfy relay is written by `/settings` or by `sudo yantra relay <url> [--token T]`
+into `/etc/yantra/daemon.env`, which the unit reads with `EnvironmentFile=`
+([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The installer creates that
+file empty, `0600` and owned by `yantra`; **leave the owner alone** — the daemon rewrites the file
+in place, so one created by hand as root leaves `/settings` refusing with a 500. `yantrad` reads it
+when systemd starts the unit, so a relay set from the browser needs
+`sudo systemctl restart yantrad` ([`development.md`](development.md)).

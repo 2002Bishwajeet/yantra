@@ -153,9 +153,16 @@ keeps the refusal rather than being quietly papered over by a stale dashboard.
 `YANTRA_NTFY_URL` points it at a relay to publish session changes to, and `YANTRA_NTFY_TOKEN`
 authenticates against one that is protected. Unset the first and the daemon sends nothing, which is
 not an error; the token is read from the environment and from nowhere else — never a workspace field,
-never a file, never a log line, never the API. `yantra notify` publishes to the same channel by hand,
-which is how a box with no screen proves the topic works. See
+never a log line, never the API. `yantra notify` publishes to the same channel by hand, which is how
+a box with no screen proves the topic works. See
 [`docs/development.md`](../../docs/development.md).
+
+**One file holds them on the appliance**, and it is the exception
+[ADR-0021](../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md) records rather than a
+change to the sentence above: `/settings` and `yantra relay` write `/etc/yantra/daemon.env` — `0600`,
+owned by the account this daemon runs as — and [`yantrad.service`](yantrad.service) hands it back
+through `EnvironmentFile=`. The token is in plain text there, whoever can read that file has it, and
+nothing reads it back over the API. The daemon takes a new relay **at its next start**.
 
 It speaks **plain HTTP and always will**. TLS belongs to `tailscale serve`, which already holds and
 renews a certificate for the machine's `*.ts.net` name — `just https` puts the dashboard on

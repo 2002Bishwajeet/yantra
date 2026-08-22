@@ -45,6 +45,15 @@ const made = createRoute({
   head: () => titled('New workspace'),
 })
 
+// Split for `/new`'s reason and no other: it is the third form, and `ui/field`
+// has no business on the first paint of a page nobody opens twice a year.
+const settings = createRoute({
+  getParentRoute: () => root,
+  path: '/settings',
+  component: lazyRouteComponent(() => import('@/routes/Settings'), 'Settings'),
+  head: () => titled('Settings'),
+})
+
 const usage = createRoute({
   getParentRoute: () => root,
   path: '/usage',
@@ -77,6 +86,7 @@ export const routeTree = root.addChildren([
   fleet,
   machines,
   made,
+  settings,
   usage,
   machine,
   workspace,

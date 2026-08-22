@@ -29,6 +29,7 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
+use yantra_core::notify;
 use yantra_core::{
     agent, doctor, down, edit, logs, price, probe, remove, resume, sessions, status, terminfo,
     tmux, tokens, up, workspace,
@@ -114,22 +115,25 @@ where
             axum::routing::delete(end::<I>),
         )
         .route("/machines/{machine}/probe", post(ask::<I>))
+        .route("/relay", post(relay::<I>))
         .with_state(authoriser.clone());
 
     // `{name}` rather than `{machine}`, which the routes above prefer: the `GET`
     // on this path spells it `{name}`, and two spellings of one route are a
     // matchit conflict rather than two routes (measured — it panics at startup).
-    let rechecks: Router<S> = Router::new()
+    let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
-        .with_state(Recheck { authoriser, fleet });
+        .route("/viewing", post(viewing::<I>))
+        .with_state(Remembered { authoriser, fleet });
 
-    acts.merge(rechecks)
+    acts.merge(remembered)
 }
 
-/// The state the re-check needs: who the caller is, and what this daemon
-/// already knows about the machine they named.
+/// The state these two need: who the caller is, and what this daemon holds in
+/// memory — the re-check reads it, the beacon writes to it, and a handler takes
+/// one state.
 #[derive(Clone)]
-struct Recheck<I> {
+struct Remembered<I> {
     authoriser: Authoriser<I>,
     fleet: Fleet,
 }
@@ -443,7 +447,7 @@ async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
 ///
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
-    State(state): State<Recheck<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
@@ -460,6 +464,88 @@ async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
         age_seconds: 0,
         data: crate::api::answered(&report, &snapshot, &beats),
     }))
+}
+
+/// `/settings`' whole surface, and `yantra relay` on the wire.
+///
+/// **The token is written to disk in plain text**, which §B4 forbids for a
+/// workspace and [ADR-0021] permits for this one file. The read path is
+/// untouched: `yantrad` still takes both values out of its environment, and
+/// `systemd` is what puts them there at the next start — so what this route
+/// changes is the *next* daemon and never the running one.
+///
+/// **It sends after it writes**, and reports both. A relay written down and
+/// never reached is the failure a headless box has no other way to show, so the
+/// test message is the answer rather than a second button — and a send that
+/// fails does not un-write the file, which is what the 502 has to say.
+///
+/// Nothing is logged but the caller: the topic is a password on a public relay,
+/// and the token is one everywhere.
+///
+/// [ADR-0021]: ../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Publish {
+    url: String,
+    /// Absent is an open topic, which is one of the two states ntfy has.
+    #[serde(default)]
+    token: Option<String>,
+}
+
+async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(publish): Json<Publish>,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("relay written for {}", caller.node);
+
+    let file = std::path::Path::new(notify::RELAY_FILE);
+    notify::write_to(file, &publish.url, publish.token.as_deref()).map_err(|error| {
+        Refused::Verb {
+            status: match error {
+                notify::NotWritten::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+                _ => StatusCode::BAD_REQUEST,
+            },
+            said: chain(&error),
+        }
+    })?;
+
+    let relay = notify::Relay::new(publish.url, publish.token);
+    notify::post(&relay, notify::test_message())
+        .await
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::BAD_GATEWAY,
+            said: format!(
+                "the relay is written down in {}, and the test message did not arrive: {}",
+                notify::RELAY_FILE,
+                chain(&error)
+            ),
+        })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The dashboard saying it is on screen (D3 §13), so the notifier stops pushing
+/// what the page is already showing.
+///
+/// **It is a write and it is authorised like one**: silencing someone's phone
+/// is an act, and `whois` costs one subprocess per beacon — the page beacons
+/// once every `BEACON_MS` and only while the tab is visible, which is the same
+/// order as the sweep this daemon already runs.
+///
+/// **The state is one timestamp in memory** and a restart forgets it, which is
+/// what Y-044 means here. It is not the exception ADR-0021 carved: nothing
+/// about a viewer needs to survive anything.
+async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Refused> {
+    allowed(&state.authoriser, from.ip(), &headers).await?;
+    *state.fleet.viewers.write().await = Some(std::time::Instant::now());
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// What the agent in this workspace has spent — `yantra tokens <workspace>` on
@@ -1651,6 +1737,99 @@ mod tests {
             StatusCode::FORBIDDEN,
             "the POST reached authorisation rather than a 405, and this tailnet holds nobody"
         );
+    }
+
+    /// D3 §13's beacon reaching the one timestamp the notifier reads, and
+    /// nothing else: the daemon knows a viewer is there and knows nothing about
+    /// who or where.
+    #[tokio::test]
+    async fn a_beacon_from_this_owner_is_what_the_notifier_reads() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app = router::<_, ()>(
+            direct(tailnet(vec![(address(2), caller(ME, &[]))])),
+            fleet.clone(),
+        );
+        let mut beacon = Request::post("/viewing")
+            .body(Body::empty())
+            .expect("a POST");
+        beacon
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+
+        let answered = app.oneshot(beacon).await.expect("the router is infallible");
+
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        assert!(crate::notify::watched(&fleet.viewers).await);
+    }
+
+    /// ADR-0016 covers it like every other write, and the reason is what it
+    /// does: a beacon stops this daemon pushing to somebody's phone.
+    #[tokio::test]
+    async fn a_beacon_from_a_node_that_is_not_this_owners_silences_nothing() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app = router::<_, ()>(
+            direct(tailnet(vec![(address(3), caller(ME + 1, &[]))])),
+            fleet.clone(),
+        );
+        let mut beacon = Request::post("/viewing")
+            .body(Body::empty())
+            .expect("a POST");
+        beacon
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(3), 61620)));
+
+        let answered = app.oneshot(beacon).await.expect("the router is infallible");
+
+        assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        assert!(!crate::notify::watched(&fleet.viewers).await);
+    }
+
+    /// The route that writes a secret to disk is behind the same gate as the
+    /// rest, and refuses before it opens the file: this tailnet holds nobody,
+    /// and `/etc/yantra/daemon.env` is not something a test may touch.
+    #[tokio::test]
+    async fn writing_the_relay_is_authorised_before_anything_is_written() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let app = router::<_, ()>(direct(tailnet(vec![])), Fleet::default());
+        let mut set = Request::post("/relay")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"url":"https://ntfy.sh/a-topic"}"#))
+            .expect("a POST with a JSON body");
+        set.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+
+        let answered = app.oneshot(set).await.expect("the router is infallible");
+
+        assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// A token nobody meant to send is worse here than anywhere: it would be
+    /// written to disk. So the body denies what it does not name, and an open
+    /// topic is an absent field rather than an empty string.
+    #[test]
+    fn the_relay_body_takes_a_topic_with_or_without_a_token_and_refuses_a_typo() {
+        let open: Publish =
+            serde_json::from_str(r#"{"url":"https://ntfy.sh/a-topic"}"#).expect("an open topic");
+        assert!(open.token.is_none());
+
+        let protected: Publish =
+            serde_json::from_str(r#"{"url":"https://ntfy.sh/a-topic","token":"tk_x"}"#)
+                .expect("a protected topic");
+        assert_eq!(protected.token.as_deref(), Some("tk_x"));
+
+        serde_json::from_str::<Publish>(r#"{"url":"https://ntfy.sh/a","tokken":"tk_x"}"#)
+            .expect_err("a typo is refused");
     }
 
     /// A body is optional, and an unknown field is a typo the caller should

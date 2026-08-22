@@ -24,6 +24,7 @@ COMMIT="${YANTRA_COMMIT:-1c5056b63b1b5c835d3a07976fea88151b9e9372}"
 REPO=2002Bishwajeet/yantra
 BIN_DIR=/usr/local/bin
 AGENT_ENV=/etc/yantra/agent.env
+DAEMON_ENV=/etc/yantra/daemon.env
 
 fail() {
     echo "install: $*" >&2
@@ -110,6 +111,22 @@ else
 ENV
     as_root chmod 644 "$AGENT_ENV"
     env_step="Set YANTRA_DAEMON in $AGENT_ENV — what is there now is a placeholder."
+fi
+
+# ADR-0021: the daemon's own environment file, holding the ntfy relay. It is
+# created empty and never with a value, and it is the one file here the daemon's
+# account may rewrite — `/settings` in the browser writes through this account,
+# while systemd reads the file as root. 0600 because the token is in plain text.
+if [ ! -e "$DAEMON_ENV" ]; then
+    as_root install -d /etc/yantra
+    as_root tee "$DAEMON_ENV" >/dev/null <<'ENV'
+# The ntfy relay yantrad publishes to (ADR-0021). `yantra relay <url>` writes
+# this file, and so does /settings in the dashboard.
+#YANTRA_NTFY_URL=https://ntfy.sh/<a-topic-nobody-guesses>
+#YANTRA_NTFY_TOKEN=
+ENV
+    as_root chown yantra:yantra "$DAEMON_ENV"
+    as_root chmod 600 "$DAEMON_ENV"
 fi
 
 # Reported, never enrolled: the auth key is the owner's, and whether this node is

@@ -83,7 +83,11 @@ function fleet(overrides: Record<string, Looked<unknown> | number> = {}) {
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
-      if (method !== 'GET') wrote.push(`${method} ${path}`)
+      // The shell's presence beacon is not the palette's doing (D3 §13), and
+      // every route under test carries it.
+      if (method !== 'GET' && path !== '/api/viewing') {
+        wrote.push(`${method} ${path}`)
+      }
       // The palette navigates, so pages this file never asserts on are drawn
       // anyway — and a reading nobody stubbed is one that has not happened.
       const answer = answers[path] ?? { looked: 'never' }
@@ -165,6 +169,7 @@ describe('what it finds', () => {
       'Fleet',
       'Machines',
       'New workspace',
+      'Settings',
       'Usage',
     ])
   })
@@ -270,6 +275,7 @@ describe('a reading it does not have', () => {
       'Fleet',
       'Machines',
       'New workspace',
+      'Settings',
       'Usage',
     ])
   })

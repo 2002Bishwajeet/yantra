@@ -1268,6 +1268,10 @@ describe('creating a workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
+        // The shell's presence beacon is not this file's subject (D3 §13).
+        if (path === '/api/viewing') {
+          return Promise.resolve({ ok: true, status: 204 })
+        }
         if (init?.method === 'POST') {
           posted(JSON.parse(String(init.body)))
           return Promise.resolve({
@@ -1592,6 +1596,10 @@ describe('acting on a workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
+        // The shell's presence beacon is not this file's subject (D3 §13).
+        if (path === '/api/viewing') {
+          return Promise.resolve({ ok: true, status: 204 })
+        }
         if (init?.method === 'POST') {
           posted(
             path,

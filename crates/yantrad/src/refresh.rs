@@ -13,7 +13,7 @@ use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::{doctor, sessions, status, workspace};
 
-use crate::notify::Notifier;
+use crate::notify::{Notifier, Viewers};
 
 /// `ssh.rs` sets `ControlPersist=300`, so anything under five minutes keeps
 /// every ssh master warm — the poll is what makes the fleet fast rather than a
@@ -48,6 +48,7 @@ pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'sta
     inventory: I,
     forge: F,
     relay: Option<Relay>,
+    viewers: Viewers,
 ) {
     let machines = model.clone();
     tokio::spawn(async move {
@@ -77,7 +78,7 @@ pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'sta
     tokio::spawn(async move {
         let mut notifier = relay.map(Notifier::new);
         loop {
-            look_at_agents(&agents, notifier.as_mut()).await;
+            look_at_agents(&agents, notifier.as_mut(), &viewers).await;
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -155,11 +156,13 @@ async fn look_at_github(model: &Model) {
 /// The reading lands in the model before anything is sent, so a browser never
 /// waits on a relay — and a look that *failed* tells nobody anything, because
 /// an unknown fleet is not a changed one (I-47).
-async fn look_at_agents(model: &Model, notifier: Option<&mut Notifier>) {
+async fn look_at_agents(model: &Model, notifier: Option<&mut Notifier>, viewers: &Viewers) {
     let reading = Arc::new(Reading::new(status::fleet().await));
     model.write().await.agents = Some(reading.clone());
     if let (Some(notifier), Ok(fleet)) = (notifier, reading.value()) {
-        notifier.tell(fleet).await;
+        notifier
+            .tell(fleet, crate::notify::watched(viewers).await)
+            .await;
     }
 }
 

@@ -141,6 +141,7 @@ yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine it can reach
 yantra ls attention              # what GitHub is waiting on you for
 yantra notify 'needs you'        # publish a message to the relay you configured
+yantra relay <url> [--token T]   # configure that relay, and send one test message
 yantra doctor [machine] [--json] # what each machine can and cannot do — a read, it changes nothing
 yantra fix-terminfo <machine>    # teach a machine about your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
