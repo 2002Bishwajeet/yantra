@@ -507,8 +507,7 @@ that loses its focus ring when the tokens change — the failure ADR-0014's seco
 
 ### 7.5 A workspace file that will not parse
 
-`yantra edit` cannot repair one: `update` loads before it writes, so the file is the fix (I-30,
-Y-137). Today the dashboard names the error and offers nothing, and you go to a terminal — which is
+`yantra edit` cannot repair one: `update` loads before it writes, so the file is the fix (Y-137). Today the dashboard names the error and offers nothing, and you go to a terminal — which is
 the founding UI principle broken in exactly one place.
 
 **`/w/{name}/repair` shows the file's bytes with the parse error beside them.** You edit and save.
@@ -967,4 +966,5 @@ asked for"; [`docs/brainstorm.md:394`](../brainstorm.md); ADRs
 [0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),
 [0015](../adr/0015-resume-forks-the-conversation.md),
 [0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md); Q6; R-2, R-23; I-30, I-47, I-49.
+[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md),
+[0020](../adr/0020-a-raw-write-only-from-broken-to-valid.md); Q6; R-2, R-23; I-47, I-49.
