@@ -172,3 +172,18 @@ describe('the stylesheet covers what a route can reach', () => {
     expect(skipped.toSorted()).toEqual(unreached.toSorted())
   })
 })
+
+/** D3 §9.2: overlays fade and disclosures slide, and both of those live in the
+ *  ported set. So a page of ours that names a duration or an easing is the rule
+ *  breaking — rows never animate, and motion is never the signal. */
+describe('nothing the app writes moves', () => {
+  it.each(sources.filter((one) => !ported(one)))(
+    '%s spends no motion utility',
+    (file) => {
+      const code = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '')
+      expect(code).not.toMatch(/\b(transition-|animate-|duration-|ease-)/)
+    },
+  )
+})
