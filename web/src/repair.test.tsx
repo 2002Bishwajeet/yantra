@@ -48,7 +48,11 @@ function daemon(
   const sent: string[] = []
   vi.stubGlobal(
     'fetch',
-    vi.fn((_path: string, init?: RequestInit) => {
+    vi.fn((path: string, init?: RequestInit) => {
+      // The shell's presence beacon is not this file's subject (D3 §13).
+      if (path === '/api/viewing') {
+        return Promise.resolve({ ok: true, status: 204 })
+      }
       const answer = init?.method === 'POST' ? posted! : opened
       if (init?.body) sent.push(String(init.body))
       return Promise.resolve({
