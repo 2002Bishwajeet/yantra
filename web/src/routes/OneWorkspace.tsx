@@ -60,8 +60,16 @@ export function OneWorkspace() {
         {heading}
         <Alert variant="destructive">
           <AlertTitle>{name} is not usable.</AlertTitle>
-          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-            {entry.error}
+          <AlertDescription className="flex flex-col gap-2">
+            <span className="font-mono text-xs whitespace-pre-wrap">
+              {entry.error}
+            </span>
+            {/* D3 §7.5: naming the error and offering nothing is what sent
+                people to a terminal. `edit` cannot repair this file, so the
+                bytes are the only fix (ADR-0020). */}
+            <Link params={{ name }} to="/w/$name/repair">
+              Repair the file
+            </Link>
           </AlertDescription>
         </Alert>
       </>
