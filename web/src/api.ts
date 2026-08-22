@@ -179,3 +179,33 @@ export type ModelSpend = {
   // null is a model the price table does not carry — unpriced, never free.
   cost: number | null
 }
+
+/** `POST /api/machines/{machine}/probe` (Y-184, [ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)).
+ *  Asks whether one directory is there and what origin it holds, in one round
+ *  trip. Shipped with the route and unused until D4 called it. */
+export type Probed = {
+  machine: string
+  path: string
+  /** `test -d`, which is the question `up` asks — a path that is a *file*
+   *  answers `false`. */
+  exists: boolean
+  origin: string | null
+}
+
+/** [D4](../../docs/design/04-workspace-creation.md) §3: one level of a machine's
+ *  filesystem, with the repositories marked. **One level and no recursion** —
+ *  a whole-home sweep measured 8.5 s on this fleet's Mac against 0.026 s on its
+ *  Linux box, and D4 §2 is that measurement. */
+export type Dir = {
+  /** Absolute, as the far side wrote it. */
+  path: string
+  /** The last segment, which is what a picker draws. */
+  name: string
+  repo: boolean
+  /** `origin`'s URL where this is a repository that has one. `null` covers both
+   *  *not a repository* and *a repository with no origin*, exactly as
+   *  [`probe`](../../crates/yantra-core/src/probe.rs) does. */
+  origin: string | null
+}
+
+export type Listing = { machine: string; path: string; entries: Dir[] }

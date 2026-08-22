@@ -13,6 +13,7 @@
 pub mod agent;
 pub mod attach;
 pub mod attention;
+pub mod dirs;
 pub mod doctor;
 pub mod down;
 pub mod edit;
