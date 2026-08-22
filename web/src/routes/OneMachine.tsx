@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
 import type {
   Listed,
@@ -6,10 +7,12 @@ import type {
   Readiness as Report,
   Workspace,
 } from '@/api'
-import { machineColumns, sessionColumns } from '@/columns'
+import { reachability, reporting, sessionColumns } from '@/columns'
+import { Ago, Stamp } from '@/components/Age'
 import { DataTable } from '@/components/DataTable'
 import { Readiness } from '@/components/Readiness'
 import { Section } from '@/components/Section'
+import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Workspaces } from '@/routes/Fleet'
@@ -17,6 +20,49 @@ import { loaded, sessionsWaiting, useAgents, useLooked } from '@/useLooked'
 import type { Reading } from '@/useLooked'
 
 const route = getRouteApi('/m/$machine')
+
+/** What the machines table says about one machine, as a subject rather than a
+ *  row: D3 §3.1 leaves the comparison on `/machines`, and the MACHINE column is
+ *  a link to the page you are already on. The name is the `h1`. */
+function About({ machine }: { machine: Machine }) {
+  return (
+    <dl className="text-body grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2">
+      <Fact label="OS">{machine.os}</Fact>
+      <Fact label="STATUS">
+        <Status {...reachability(machine)} />
+      </Fact>
+      <Fact label="HEARTBEAT">
+        <span className="inline-flex items-center gap-2">
+          <Status {...reporting(machine)} />
+          {machine.heartbeat && (
+            <span>
+              beat <Ago seconds={machine.heartbeat.age_seconds} />
+            </span>
+          )}
+        </span>
+      </Fact>
+      {/* I-39: on an online peer this is noise, and a term with nothing under
+          it reads as a fact the page failed to find. */}
+      {!machine.online && machine.last_seen && (
+        <Fact label="LAST SEEN">
+          <Stamp stamp={machine.last_seen} />
+        </Fact>
+      )}
+    </dl>
+  )
+}
+
+// D3 §5.6: the same uppercase, tracked, muted label the columns carry.
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-meta text-muted-foreground tracking-wider">
+        {label}
+      </dt>
+      <dd className="min-w-0 break-words">{children}</dd>
+    </>
+  )
+}
 
 /** One machine, out of the fleet's own readings filtered to it, plus D2.3's
  *  readiness — the one thing on this page the fleet does not already draw.
@@ -55,14 +101,9 @@ export function OneMachine() {
           const one = rows.find((each) => each.name === machine)
           // A name that is not in the netmap is the URL being wrong or the
           // machine being gone, and both are worth saying rather than drawing
-          // an empty table under a title that looks like a machine.
+          // empty facts under a title that looks like a machine.
           return one ? (
-            <DataTable
-              columns={machineColumns}
-              rows={[one]}
-              rowKey={(each) => each.name}
-              empty=""
-            />
+            <About machine={one} />
           ) : (
             <Alert variant="destructive">
               <AlertTitle>
