@@ -31,6 +31,8 @@ API the CLI cannot reach.
 | `DELETE /api/machines/{machine}/sessions/{session}` | `yantra kill` |
 | `POST /api/machines/{machine}/probe` | `yantra probe` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
+| `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
+| `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 
 The `/api/…` routes that write are authorised by Tailscale identity

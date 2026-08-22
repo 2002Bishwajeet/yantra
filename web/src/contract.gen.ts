@@ -6,6 +6,7 @@
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Broken,
   Listed,
   Looked,
   Machine,
@@ -373,6 +374,13 @@ export const resumed = {
   "resumed": false,
   "term": "xterm-256color"
 } satisfies Resumed
+
+export const broken = {
+  "error": "workspace `site` at /home/<user>/.config/yantra/workspaces/site.toml is not valid TOML: TOML parse error at line 2, column 7",
+  "name": "site",
+  "path": "/home/<user>/.config/yantra/workspaces/site.toml",
+  "text": "machine = \"cachyos-g14\"\nrepo =\n"
+} satisfies Broken
 
 export const spend = {
   "as_of": "2026-08-11",
