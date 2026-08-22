@@ -24,6 +24,10 @@ first and `command.tsx`/`dialog.tsx` the second.
 The only edit is the import alias — T3 Code's is `~/`, Yantra's is `@/`. Everything else, including
 T3's own class strings and `data-slot` names, is upstream's.
 
+The set is complete on purpose, and Tailwind does not read the members no route imports:
+[`index.css`](../../index.css) names them, and `motion.test.ts` fails when that list and the import
+graph disagree. Importing one gets its CSS back.
+
 Three of T3's CSS classes came with them, into
 [`web/src/index.css`](../../index.css) rather than here: `.dialog-glass`, `.dialog-backdrop` and
 `.dropdown-glass`. A popup with no rule behind those names has no background at all.
