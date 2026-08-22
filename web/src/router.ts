@@ -9,7 +9,6 @@ import { Fleet } from '@/routes/Fleet'
 import { Machines } from '@/routes/Machines'
 import { OneMachine } from '@/routes/OneMachine'
 import { Nowhere, Shell } from '@/routes/Shell'
-import { Usage } from '@/routes/Usage'
 
 /** A phone's app switcher shows the front of the title, so the route's own name
  *  goes first — every route was `Yantra` before Y-187. */
@@ -45,10 +44,13 @@ const made = createRoute({
   head: () => titled('New workspace'),
 })
 
+// Split, and it is the only one of the four eager routes that pays: measured at
+// 2.18 kB gzip off the first load, against `/machines` and `/m/$name`, which
+// cost more than they save for Y-197's reason (Y-194).
 const usage = createRoute({
   getParentRoute: () => root,
   path: '/usage',
-  component: Usage,
+  component: lazyRouteComponent(() => import('@/routes/Usage'), 'Usage'),
   head: () => titled('Usage'),
 })
 

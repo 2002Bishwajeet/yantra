@@ -284,8 +284,11 @@ describe('the outline', () => {
     expect(await screen.findByText('Unclaimed sessions')).toBeTruthy()
     expect(document.title).toBe('Machines · Yantra')
 
+    // `/usage` is split (Y-194), so the heading arrives with the chunk rather
+    // than with the path.
     fireEvent.click(nav.getByRole('link', { name: 'usage' }))
     await waitFor(() => expect(location.pathname).toBe('/usage'))
+    await screen.findByRole('heading', { level: 1, name: 'Usage' })
     expect(outline().filter((one) => one.startsWith('H1 '))).toEqual([
       'H1 Usage',
     ])
