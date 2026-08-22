@@ -4,7 +4,7 @@
  * else. So this reads the stylesheet rather than a rendered page: jsdom applies
  * no Tailwind, and a token that stopped existing is otherwise silent.
  */
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -126,5 +126,49 @@ describe('the marks carry the state in form', () => {
     expect(css).toContain('--tone-good: currentColor')
     expect(css).not.toMatch(/\.tone-(idle|unknown) \{[^}]*color:/)
     expect(css).not.toMatch(/--tone-[a-z]+: var\(--accent/)
+  })
+})
+
+const src = resolve(process.cwd(), 'src')
+
+const sources = readdirSync(src, { recursive: true })
+  .map(String)
+  .filter((one) => /\.tsx?$/.test(one) && !one.includes('.test.'))
+
+const read = (file: string) => readFileSync(resolve(src, file), 'utf8')
+
+const ported = (file: string) => file.startsWith('components/ui/')
+
+/** D3 §9.1 keeps the ported set complete on purpose, and Tailwind reads every
+ *  file in it whether or not a route does. `index.css` skips the ones nothing
+ *  imports; this is what stops that list drifting from the import graph. One
+ *  name too many and a primitive renders with no CSS; one too few and the
+ *  stylesheet carries rules the browser cannot use. */
+describe('the stylesheet covers what a route can reach', () => {
+  const named = (file: string) =>
+    [...read(file).matchAll(/@\/components\/ui\/([\w-]+)/g)].map((hit) => hit[1])
+
+  // `dialog-styles` is the one member of the set with no JSX in it, so the file
+  // a name points at is not always the `.tsx` one.
+  const file = (one: string) =>
+    sources.find((each) => each.replace(/\.tsx?$/, '') === `components/ui/${one}`)
+
+  const reached = new Set(sources.filter((one) => !ported(one)).flatMap(named))
+  for (let more = [...reached]; more.length; ) {
+    more = more
+      .flatMap((one) => named(file(one)!))
+      .filter((one) => !reached.has(one))
+    for (const one of more) reached.add(one)
+  }
+
+  it('skips every primitive no route imports, and only those', () => {
+    const skipped = [
+      ...css.matchAll(/@source not "\.\/components\/ui\/([\w-]+)\.tsx"/g),
+    ].map((hit) => hit[1])
+    const unreached = sources
+      .filter((one) => ported(one) && one.endsWith('.tsx'))
+      .map((one) => one.replace('components/ui/', '').replace('.tsx', ''))
+      .filter((one) => !reached.has(one))
+    expect(skipped.toSorted()).toEqual(unreached.toSorted())
   })
 })
