@@ -4,24 +4,26 @@
  * and what the screen shows is what xterm.js drew. A hand-written socket would
  * only ever prove that the stub matches the code driving it.
  *
- * The URL is fixed because the page builds its own from `location`, and the
- * server has to be where the component will look.
- *
- * @vitest-environment-options { "url": "http://127.0.0.1:57130/" }
+ * The page builds its own URL from `location`, so the server has to be where
+ * the component will look. The OS says where that is, and the page is moved to
+ * it — a port named here is one this machine may already be using.
  */
+import { once } from 'node:events'
+import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { type WebSocket as Client, WebSocket as Ws, WebSocketServer } from 'ws'
 import { ATTEMPTS, PAUSE, Terminal } from './components/Terminal'
 
-const PORT = 57130
-
 type Frame = { text: string } | { bytes: number[] }
 
 /** Enough of the daemon to hold up its end: it takes the frames the page
  *  sends, and says whatever a test tells it to. */
-function daemon() {
-  const server = new WebSocketServer({ port: PORT })
+async function daemon() {
+  // Port 0 is the kernel's choice, and it is already bound by the time the
+  // number can be read — nothing can take it in between.
+  const server = new WebSocketServer({ port: 0 })
+  await once(server, 'listening')
   const heard: Frame[] = []
   const asked: string[] = []
   let live: Client | undefined
@@ -44,6 +46,7 @@ function daemon() {
   })
 
   return {
+    port: (server.address() as AddressInfo).port,
     heard,
     asked,
     ended: () => closed,
@@ -102,11 +105,12 @@ const screenText = () =>
 const first = (heard: Frame[]) =>
   'text' in heard[0] ? (JSON.parse(heard[0].text) as unknown) : heard[0]
 
-let daemonised: ReturnType<typeof daemon>
+let daemonised: Awaited<ReturnType<typeof daemon>>
 
-beforeEach(() => {
+beforeEach(async () => {
   browser()
-  daemonised = daemon()
+  daemonised = await daemon()
+  vi.stubGlobal('location', new URL(`http://127.0.0.1:${daemonised.port}/`))
 })
 
 afterEach(async () => {
