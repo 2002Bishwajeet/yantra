@@ -51,6 +51,7 @@ const HEADER: &str = "\
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Broken,
   Listed,
   Looked,
   Machine,

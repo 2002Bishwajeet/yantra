@@ -229,8 +229,8 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}` and
-`POST /api/workspaces/{name}/{up,down,resume,tokens}` — **the CLI's own verbs and
-nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume` and `tokens`. The daemon
+`POST /api/workspaces/{name}/{up,down,resume,tokens,repair}` — **the CLI's own verbs and
+nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens` and `repair`. The daemon
 may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
 reach. A new verb here starts in the CLI.
 
@@ -291,6 +291,18 @@ be flattened here: [`tokens.rs`](../yantra-core/src/tokens.rs) sums on the far m
 written into a binary reports wrong money the day a rate changes. **An unpriced model is `null` and
 never `0`**, a fast-mode session withholds every dollar and keeps every token, and a session that
 has spent nothing has no figure at all. `render_tokens` in the CLI is the list to check against.
+
+**`repair` is the one that writes bytes this daemon did not compose**, and
+[ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
+Every other write here renders a `Workspace` the library has already checked; this one takes a whole
+file, because `update` loads before it writes and so no verb could reach a workspace file that will
+not parse. Two refusals hold it: a file that **already loads** is `409`, and bytes that **still will
+not** are `400` carrying the next error rather than a summary — the caller is answering the one it
+was shown. `from_repair` exists for that second one, because `from_workspace` sends `Malformed` and
+`Blank` to `500` and is right to: there they are this daemon reading its own files, here they are the
+bytes the caller sent. **The `GET` beside it is in `write.rs` too, on the same authoriser**: a file's
+raw bytes are the one thing `GET /api/workspaces` does not publish, and it answers the same `409`, so
+asking for the file *is* the question whether it is broken.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not

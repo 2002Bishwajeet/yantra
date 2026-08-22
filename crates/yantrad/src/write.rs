@@ -27,7 +27,7 @@ use axum::Router;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{patch, post};
+use axum::routing::{get, patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::{
     agent, doctor, down, edit, logs, price, probe, remove, resume, sessions, status, terminfo,
@@ -109,6 +109,13 @@ where
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/workspaces/{name}/tokens", post(spent::<I>))
+        // The `GET` is here rather than in `api.rs` on purpose (ADR-0020): it
+        // serves a file's bytes, which is the one thing the read model does not
+        // publish, and it asks the same question the `POST` answers.
+        .route(
+            "/workspaces/{name}/repair",
+            get(unusable::<I>).post(mend::<I>),
+        )
         .route(
             "/machines/{machine}/sessions/{session}",
             axum::routing::delete(end::<I>),
@@ -244,6 +251,83 @@ fn from_create(error: &workspace::Error) -> StatusCode {
             StatusCode::BAD_REQUEST
         }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// The bytes of a workspace file that will not load, and the reason it will not
+/// — what `/w/{name}/repair` draws (D3 §7.5).
+///
+/// **A file that loads is a 409**, which is [ADR-0020]'s first bound answered on
+/// the read as well as the write: a caller may not be shown a file it may not
+/// send back. That makes opening this the whole question *is this broken*.
+///
+/// **Authorised like a write, though it reads** ([ADR-0016]). A file's raw bytes
+/// are the one thing `GET /api/workspaces` does not publish, and the page that
+/// asks for them already needs the gate for the `POST` beside it.
+///
+/// [ADR-0016]: ../../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md
+/// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
+async fn unusable<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Broken>, Refused> {
+    allowed(&authoriser, from.ip(), &headers).await?;
+
+    let broken = workspace::broken(&name).map_err(|error| Refused::Verb {
+        status: from_repair(&error),
+        said: chain(&error),
+    })?;
+
+    Ok(Json(Broken {
+        name: broken.name,
+        path: broken.path.display().to_string(),
+        text: broken.text,
+        error: chain(&broken.error),
+    }))
+}
+
+/// `yantra repair` on the wire, and the only route that writes a workspace file
+/// this daemon did not compose ([ADR-0020]).
+///
+/// Two refusals and nothing else between the bytes and the disk: **409** for a
+/// file that already loads, **400** for bytes that still will not, naming the
+/// next error. Together they mean this can move a file from broken to valid and
+/// nowhere else.
+///
+/// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
+async fn mend<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(sent): Json<Repair>,
+) -> Result<Json<Made>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("repair {name} for {}", caller.node);
+
+    let repaired = workspace::repair(&name, &sent.text).map_err(|error| Refused::Verb {
+        status: from_repair(&error),
+        said: chain(&error),
+    })?;
+
+    Ok(Json(Made::from(repaired)))
+}
+
+/// **Where this differs from [`from_workspace`], and why it is a separate
+/// mapper**: there, `Malformed` and `Blank` are this daemon reading its own
+/// files and so a 500. Here they are the bytes the caller sent, so the caller is
+/// who can fix them.
+fn from_repair(error: &workspace::Error) -> StatusCode {
+    match error {
+        // The request is reasonable and the world already answers: the file
+        // works, and `PATCH /api/workspaces/{name}` is what changes one.
+        workspace::Error::Loads { .. } => StatusCode::CONFLICT,
+        workspace::Error::Malformed { .. } | workspace::Error::Blank { .. } => {
+            StatusCode::BAD_REQUEST
+        }
+        error => from_workspace(error),
     }
 }
 
@@ -813,6 +897,28 @@ struct Removed {
     removed: bool,
 }
 
+/// A workspace file that will not load. `error` is the whole `source()` chain,
+/// because the sentence the page draws beside the bytes is what a repair
+/// answers.
+#[derive(Debug, serde::Serialize)]
+struct Broken {
+    name: String,
+    /// On the machine running this daemon, which is the other way to fix it.
+    path: String,
+    text: String,
+    error: String,
+}
+
+/// The whole file, never a patch: [ADR-0020] refuses bytes that do not parse,
+/// and a fragment of TOML never does.
+///
+/// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Repair {
+    text: String,
+}
+
 #[derive(Debug, serde::Serialize)]
 struct Resumed {
     machine: String,
@@ -965,6 +1071,18 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 machine: "cachyos-g14".to_owned(),
                 resumed: false,
                 term: terminfo::FALLBACK.to_owned(),
+            }),
+        ),
+        (
+            "broken",
+            "Broken",
+            of(&Broken {
+                name: "site".to_owned(),
+                path: "/home/<user>/.config/yantra/workspaces/site.toml".to_owned(),
+                text: "machine = \"cachyos-g14\"\nrepo =\n".to_owned(),
+                error: "workspace `site` at /home/<user>/.config/yantra/workspaces/site.toml is \
+                        not valid TOML: TOML parse error at line 2, column 7"
+                    .to_owned(),
             }),
         ),
         ("spend", "Spend", of(&Spend::of(&transcript(0)))),

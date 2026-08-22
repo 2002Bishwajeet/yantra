@@ -73,6 +73,15 @@ const workspace = createRoute({
   head: ({ params }) => titled(params.name),
 })
 
+// Split for `made`'s reason and one of its own: it draws the file as text,
+// which is the one surface no workspace that works ever opens (D3 §7.5).
+const repair = createRoute({
+  getParentRoute: () => root,
+  path: '/w/$name/repair',
+  component: lazyRouteComponent(() => import('@/routes/Repair'), 'Repair'),
+  head: ({ params }) => titled(`Repair ${params.name}`),
+})
+
 export const routeTree = root.addChildren([
   fleet,
   machines,
@@ -80,6 +89,7 @@ export const routeTree = root.addChildren([
   usage,
   machine,
   workspace,
+  repair,
 ])
 
 /** The history is a parameter rather than a default, which is

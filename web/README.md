@@ -1,9 +1,11 @@
 # yantra web — the dashboard
 
-Six routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+Seven routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every machine compared at `/machines`, one machine at
-`/m/$machine`, a workspace and its terminal at `/w/$name`, the create form at
-`/new` and spend at `/usage`. `⌘K` reaches any of them and runs no verb.
+`/m/$machine`, a workspace and its terminal at `/w/$name`, its file at
+`/w/$name/repair`, the create form at `/new` and spend at `/usage`. `⌘K` reaches
+the six a working workspace has and runs no verb; the palette lists only
+workspaces that loaded, so a broken one is reached from its own page.
 The readings poll on TanStack Query; the forms and every workspace row write.
 
 **`/` opens on work, not on an inventory.** Three groups ordered by who must act
@@ -145,8 +147,10 @@ operator has.
 **The failure is named below the table, never drawn as a row in it.** That is the
 row's real decision and it is about the columns: a file that did not load has no
 machine to show a `<Status>` for, nothing for `ACT` or `TERMINAL` to target, and
-`EDIT` cannot repair it — the daemon's `update` loads before it writes, so the
-file is the fix. A table of things you can act on must not carry a row you
+`EDIT` cannot repair it — the daemon's `update` loads before it writes, and
+[`/w/{name}/repair`](src/routes/Repair.tsx) is where the file itself is edited
+([ADR-0020](../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)). A table
+of things you can act on must not carry a row you
 cannot, and R-23 is met by naming the file loudly with its whole reason, in the
 same `<Alert variant="destructive">` an unreachable machine gets in Sessions.
 

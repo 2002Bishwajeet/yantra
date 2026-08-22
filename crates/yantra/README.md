@@ -6,6 +6,7 @@ the tmux session, resumes the agent.
 ```sh
 yantra new site --machine mac --repo /Users/you/code/site   # write a workspace
 yantra edit site --repo /Users/you/code/website             # change one that exists
+yantra repair site < fixed.toml  # replace a file that will not load, if the bytes do
 
 yantra up yantra --agent claude  # open it, and start Claude Code in it
 yantra resume yantra             # start it again where the last conversation stopped
