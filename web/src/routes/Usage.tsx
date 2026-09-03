@@ -4,10 +4,10 @@ import { Answer } from '@/components/Spend'
 import { Section } from '@/components/Section'
 import { Title } from '@/components/Title'
 import { nativeSelect } from '@/lib/control'
-import { type Asked, read } from '@/lib/spend'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { loaded, useLooked } from '@/useLooked'
+import { useSpend } from '@/useSpend'
 
 /** D3 §11.4, with one correction the daemon made first: spend is per
  *  **workspace**, not per machine. `yantra tokens` loads a workspace and finds
@@ -26,12 +26,7 @@ export function Usage() {
   const workspaces = loaded(useLooked<Listed[]>('/api/workspaces'))
   // Above the `Section` rather than inside it: a workspaces poll that fails
   // once would otherwise take the answer you asked for off the screen with it.
-  const [asked, setAsked] = useState<Asked>({ asked: 'no' })
-
-  const ask = async (workspace: Workspace) => {
-    setAsked({ asked: 'asking', workspace })
-    setAsked(await read(workspace))
-  }
+  const { asked, ask } = useSpend()
 
   return (
     <>

@@ -16,7 +16,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
-import type { Listed, Looked, Machine, Workspace } from './api'
+import type { Listed, Looked, Machine, Spend, Workspace } from './api'
 import App from './App'
 // Aliased: this file already calls the daemon's own reply `Answer`.
 import { Answer as SpendAnswer } from './components/Spend'
@@ -48,6 +48,15 @@ const yantra: Workspace = {
 }
 
 const TOKENS = '/api/workspaces/yantra/tokens'
+
+/** The fixture with its one unpriced model dropped, which is the only session
+ *  shape that still draws a dollar headline: D5 §6.2 withholds one wherever a
+ *  model is unpriced, and `spend` carries `unknown`. Derived rather than
+ *  written out, so the priced model stays the daemon's own. */
+const priced: Spend = {
+  ...spend,
+  models: spend.models.filter((model) => model.cost !== null),
+}
 
 type Answer = { status: number; body: unknown }
 
@@ -117,7 +126,7 @@ describe('the page opens holding a picker', () => {
     render(<App />)
     await ask()
 
-    await screen.findByText(/at prices of/)
+    await screen.findByText(/tokens, unpriced/)
     expect(asked(fetched)).toHaveLength(1)
     expect(asked(fetched)[0]![1]).toMatchObject({ method: 'POST' })
   })
@@ -133,7 +142,7 @@ describe('the two subjects of one answer', () => {
     render(<App />)
     await ask()
 
-    await screen.findByText(/at prices of/)
+    await screen.findByText(/tokens, unpriced/)
     expect(
       screen.getByRole('heading', { level: 2, name: 'yantra' }),
     ).toBeTruthy()
@@ -147,7 +156,7 @@ describe('the two subjects of one answer', () => {
     render(<App />)
     await ask()
 
-    await screen.findByText(/at prices of/)
+    await screen.findByText(/tokens, unpriced/)
     for (const label of [
       'responses',
       'input',
@@ -163,7 +172,7 @@ describe('the two subjects of one answer', () => {
    *  one ssh transcript read per workspace, on open. The page must not have
    *  one, and must offer no way to ask for one. */
   it('adds nothing up across workspaces', async () => {
-    const fetched = daemon(() => Promise.resolve({ status: 200, body: spend }))
+    const fetched = daemon(() => Promise.resolve({ status: 200, body: priced }))
     render(<App />)
     await ask()
 
@@ -189,22 +198,22 @@ describe('the two subjects of one answer', () => {
  *  figure is the only thing that says so. */
 describe('the figure', () => {
   it('prints AS_OF beside the money, in the same line', async () => {
-    daemon(() => Promise.resolve({ status: 200, body: spend }))
+    daemon(() => Promise.resolve({ status: 200, body: priced }))
     render(<App />)
     await ask()
 
     const line = (await screen.findByText(/at prices of/)).closest('p')!
     expect(line.textContent).toContain('$5.46')
-    expect(line.textContent).toContain(spend.as_of)
+    expect(line.textContent).toContain(priced.as_of)
   })
 
   it('monospaces every figure, since Geist has no tabular digits', async () => {
-    daemon(() => Promise.resolve({ status: 200, body: spend }))
+    daemon(() => Promise.resolve({ status: 200, body: priced }))
     render(<App />)
     await ask()
 
     await screen.findByText(/at prices of/)
-    for (const figure of ['$5.46', (9_530).toLocaleString(), spend.as_of]) {
+    for (const figure of ['$5.46', (9_530).toLocaleString(), priced.as_of]) {
       for (const drawn of screen.getAllByText(figure)) {
         expect(drawn.className).toContain('font-mono')
       }
@@ -230,10 +239,16 @@ describe('the figure', () => {
     const { container } = render(<App />)
     await ask()
 
-    // The headline, not one of the two cost cells beneath it.
-    expect((await screen.findAllByText('unpriced'))[0]!.className).toContain(
-      'text-lg',
-    )
+    // D5 §6.2: the headline is the token count, not a word standing in for a
+    // figure — the four token fields, and never `responses`.
+    const counted =
+      spendFast.total.input +
+      spendFast.total.output +
+      spendFast.total.cache_write +
+      spendFast.total.cache_read
+    expect(
+      (await screen.findByText(counted.toLocaleString())).className,
+    ).toContain('text-lg')
     expect(screen.getByText(/fast mode/).textContent).toContain(
       'this price table does not carry',
     )
@@ -252,13 +267,13 @@ describe('what /w/{name} will reuse', () => {
         asked={{
           asked: 'read',
           at: new Date().toISOString(),
-          spend,
+          spend: priced,
           workspace: yantra,
         }}
       />,
     )
 
-    expect(screen.getByText(/at prices of/).textContent).toContain(spend.as_of)
+    expect(screen.getByText(/at prices of/).textContent).toContain(priced.as_of)
     expect(
       screen.getByRole('heading', { level: 2, name: 'yantra' }),
     ).toBeTruthy()
@@ -277,10 +292,10 @@ describe('what a reader is owed while and after the ask', () => {
     expect(screen.getByText(/reading the transcript/).textContent).toContain(
       'cachyos-g14',
     )
-    expect(screen.queryByText(/at prices of/)).toBeNull()
+    expect(screen.queryByText(/tokens, unpriced/)).toBeNull()
 
     answer({ status: 200, body: spend })
-    expect(await screen.findByText(/at prices of/)).toBeTruthy()
+    expect(await screen.findByText(/tokens, unpriced/)).toBeTruthy()
   })
 
   /** The daemon's 409: no transcript, or one with no turn in it yet. Neither is

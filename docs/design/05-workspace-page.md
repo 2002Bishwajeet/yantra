@@ -409,6 +409,24 @@ The cost: two sessions that cost very different amounts of money can show the sa
 the headline is tokens. That is the honest answer, and the model name underneath is what makes it
 actionable.
 
+> **2026-09-04, [Y-311](../../tracker.md#3-task-board): the premise is false and the rule still
+> stands.** *This is what the daemon already does* is wrong.
+> [`write.rs`](../../crates/yantrad/src/write.rs)'s `Spend::of` nulls `cost` when **every** model is
+> unpriced, in fast mode, and for a session that spent nothing — not when **any** model is. It sums
+> the models the price table carries and leaves the rest `null`, so `contract.gen.ts`'s own `spend`
+> fixture arrives as `cost: 5.4633115` beside a `model: "unknown"` with `cost: null`.
+>
+> **So the browser withholds a figure the wire carries.** The rule this section states is the one
+> built: wherever a model is unpriced, the headline is the token count and no dollar line is drawn.
+> A partial sum under *this session* understates what the session spent, which is R-23's refusal one
+> level up from the `$0.00` it already refuses per model.
+>
+> **The model table is untouched.** One model's cost understates nothing, so the `COST` column still
+> prices what the table prices and still calls the rest `unpriced`.
+>
+> The headline is a number rather than the word *unpriced*, which is what *the headline is tokens*
+> asks for. It counts the four token fields and never `responses` — a response is not a token.
+
 ---
 
 ## 7. When the machine cannot be reached

@@ -3,13 +3,41 @@
    of a label and one figure, a hairline strip of counts, and the model
    breakdown under both. The code is this repo's, on this repo's tokens.
    See `ui/THIRD-PARTY.md`. */
-import type { ModelSpend, Spend } from '@/api'
+import { useEffect } from 'react'
+import type { Counts, ModelSpend, Spend } from '@/api'
 import { Stamp } from '@/components/Age'
 import { DataTable } from '@/components/DataTable'
 import { type Asked, refusal, session } from '@/lib/spend'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTick } from '@/useTick'
+
+/** `/w/{name}`'s spend tab: `/usage`'s answer with the picker removed (D5
+ *  §6.1). The workspace is the URL, so there is nothing to pick.
+ *
+ *  **Mounting it is the request.** Only the open tab is mounted (§3.5), so this
+ *  component exists exactly when a person pressed `spend` — which is the press
+ *  the picker's own button was. The answer is held above the tab, so coming
+ *  back from the terminal spends no second ssh. */
+export function SpendTab({ asked, onAsk }: { asked: Asked; onAsk: () => void }) {
+  useEffect(() => {
+    if (asked.asked === 'no') onAsk()
+  }, [asked.asked, onAsk])
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex justify-end">
+        {asked.asked !== 'asking' && asked.asked !== 'no' && (
+          <Button onClick={onAsk} size="xs" variant="outline">
+            Refresh
+          </Button>
+        )}
+      </div>
+      <Answer asked={asked} />
+    </section>
+  )
+}
 
 /** One workspace's answer, whatever state that ask is in. Shared with
  *  `/w/{name}`'s spend tab ([D5](../../../docs/design/05-workspace-page.md)
@@ -97,6 +125,11 @@ function money(amount: number): string {
 const count = (of: number) => of.toLocaleString()
 
 const responses = (of: number) => `${count(of)} response${of === 1 ? '' : 's'}`
+
+// The four token fields, and never `responses` — a response is not a token, and
+// the strip below refuses the same total for the same reason.
+const tokens = (of: Counts) =>
+  of.input + of.output + of.cache_write + of.cache_read
 
 const columns = [
   { header: 'MODEL', cell: (row: ModelSpend) => <Mono>{row.model}</Mono> },
@@ -188,24 +221,39 @@ export function Figure({ spend }: { spend: Spend }) {
   )
 }
 
-/** The three refusals to price that `render_tokens` already makes, so the
- *  browser draws neither more nor less than the terminal does. */
+/** The refusals to price that `render_tokens` already makes, and one it does
+ *  not: **where any model is unpriced the headline is the token count and there
+ *  is no dollar line at all** (D5 §6.2).
+ *
+ *  The daemon still sends a `cost` there — it sums the models the table prices
+ *  and names the rest as `null`, so a partly-priced session arrives with a
+ *  figure that is short of what it spent. Drawing that figure under *this
+ *  session* is the understatement R-23 refuses, one level up from the `$0.00`
+ *  it already refuses per model. */
 function Money({ spend }: { spend: Spend }) {
-  const priced = spend.models.some((model) => model.cost !== null)
+  const unpriced = spend.models.some((model) => model.cost === null)
 
   if (spend.total.responses === 0) {
     return <p className="text-sm">This session has spent nothing yet.</p>
   }
 
-  if (spend.cost === null || !priced) {
+  if (spend.cost === null || unpriced) {
     return (
       <div className="flex flex-col gap-1">
         <Meta>this session</Meta>
-        <p className="font-mono text-lg">unpriced</p>
+        {/* Tokens, in the slot the money would have had. The cost, named: two
+            sessions that spent very different amounts show the same headline,
+            and the model named underneath is what makes it actionable. */}
+        <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="font-mono text-lg">{count(tokens(spend.total))}</span>
+          <span className="text-muted-foreground text-xs">
+            tokens, unpriced
+          </span>
+        </p>
         <p className="text-muted-foreground max-w-prose text-sm">
           {spend.fast > 0
             ? `${responses(spend.fast)} ran in fast mode, which is billed at a rate this price table does not carry. So this session shows tokens and no money.`
-            : 'The price table carries none of the models below, so there is no figure to give.'}
+            : 'Not every model below is priced, so there is no figure to give.'}
         </p>
       </div>
     )

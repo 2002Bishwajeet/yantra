@@ -320,6 +320,24 @@ Three decisions:
   without an ssh. A session is known only to its machine, so this attaches and
   lets the daemon refuse a name that is not there (ADR-0022 §5).
 
+## The spend tab (Y-311)
+
+`/w/$name?view=spend` is `/usage`'s answer with the picker removed
+([D5](../docs/design/05-workspace-page.md) §6.1): the workspace is the URL, so
+there is nothing to pick. `Answer` and `Figure` are
+[`Spend.tsx`](src/components/Spend.tsx)'s and both routes import them; `useSpend`
+holds the answer in `OneWorkspace`, for the transcript's reason. Mounting the tab
+is the request, and `Refresh` is the only way to ask again.
+
+**Any unpriced model makes the headline a token count, with no dollar line.**
+That is D5 §6.2, and it changed `/usage` too, because the component is shared.
+The daemon does not help here: it sums the models the price table carries and
+nulls only the rest, so a partly-priced session arrives with a figure that is
+short of what it spent. Drawing it under *this session* is the understatement
+R-23 refuses per model. **The `COST` column keeps its per-model figures** — one
+model's cost understates nothing. See the 2026-09-04 amendments in D5 §6.2 and
+[D6](../docs/design/06-sessions-attention-spend.md) §5.2.
+
 ## Reconnect (Y-132)
 
 **A socket that went away with nothing to say is reopened, and nothing here replays

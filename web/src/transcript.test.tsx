@@ -190,11 +190,11 @@ describe('the transcript is read on request', () => {
     file.append(...logs.turns)
     const fetched = open(
       (window) => ({ status: 200, body: file.read(window) }),
-      '/w/yantra?view=spend',
+      '/w/yantra?view=terminal',
     )
 
     // Another tab is open, so nothing has asked for the transcript.
-    await screen.findByText('Spend is not built yet.')
+    await pane()
     expect(reads(fetched)).toHaveLength(0)
 
     fireEvent.click(screen.getByRole('link', { name: 'transcript' }))
