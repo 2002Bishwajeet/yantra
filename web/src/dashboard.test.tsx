@@ -562,8 +562,32 @@ describe('the sessions section', () => {
       '0',
       'Thu Jul 30 13:02:31 2026',
       '',
-      'Kill',
+      'TerminalKill',
     ])
+  })
+
+  /** Y-320. ADR-0022 made the socket's address a machine and a session, so a
+   *  typo lands in a live shell; D6 §6.3 answers that by having the verb name
+   *  what it will open before anything opens. */
+  it('names the session and the machine the terminal would attach to', () => {
+    render(
+      <DataTable
+        columns={sessionColumns({ looked: 'never' })}
+        rows={[
+          { machine: 'cachyos-g14', session },
+          { machine: 'pi', session: { ...session, name: 'scratch' } },
+        ]}
+        rowKey={(row) => `${row.machine} ${row.session.name}`}
+        empty="no tmux sessions"
+      />,
+    )
+
+    expect(
+      screen.getByRole('button', { name: 'Terminal for scratch on pi' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Terminal for yantra on cachyos-g14' }),
+    ).toBeTruthy()
   })
 
   /** Y-317. That the control asks first and reports an already-gone session as

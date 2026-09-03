@@ -1,5 +1,13 @@
-//! `GET /api/workspaces/{name}/terminal` — [`yantra_core::pty::Terminal`] on a
-//! WebSocket.
+//! `GET /api/workspaces/{name}/terminal` and
+//! `GET /api/machines/{machine}/sessions/{session}/terminal` —
+//! [`yantra_core::pty::Terminal`] on a WebSocket.
+//!
+//! **Two addresses, one bridge.** A workspace is read for the machine and the
+//! session it names, so a caller that has both needs no workspace
+//! ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
+//! The second route is the first one's `allowed()`, protocol and ping,
+//! unchanged — what differs is the [`Target`] a socket carries and the name a
+//! refusal says.
 //!
 //! **An upgrade is a `GET`, so it does not inherit the write check, and this is
 //! the route that most needs one.** [`crate::write::allowed`] is called by name
@@ -74,6 +82,10 @@ where
 {
     Router::new()
         .route("/workspaces/{name}/terminal", get(attach::<I>))
+        .route(
+            "/machines/{machine}/sessions/{session}/terminal",
+            get(tap::<I>),
+        )
         .with_state(authoriser)
 }
 
@@ -85,9 +97,56 @@ async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
     let caller = allowed(&authoriser, from.ip(), &headers).await?;
-    tracing::info!("terminal {name} for {}", caller.node);
+    let target = Target::Workspace(name);
+    tracing::info!("terminal {target} for {}", caller.node);
 
-    Ok(upgrade.on_upgrade(move |socket| bridge(socket, name)))
+    Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+}
+
+/// The same socket, addressed the way the kill route already is (ADR-0022 §4).
+/// It attaches and never creates, so a session that went away between the list
+/// and the tap is refused by name rather than opened.
+async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((machine, session)): Path<(String, String)>,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let target = Target::Session { machine, session };
+    tracing::info!("terminal {target} for {}", caller.node);
+
+    Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+}
+
+/// What a socket attaches to: a workspace this daemon looks up, or a machine and
+/// a session it is handed.
+enum Target {
+    Workspace(String),
+    Session { machine: String, session: String },
+}
+
+impl Target {
+    async fn open(&self, term: &str, size: pty::Size) -> Result<pty::Terminal, pty::Error> {
+        match self {
+            Self::Workspace(name) => pty::open(name, term, size).await,
+            Self::Session { machine, session } => {
+                pty::open_session(machine, session, term, size).await
+            }
+        }
+    }
+}
+
+/// What every log line on this route says, and the whole of what Q5 lets it
+/// say about a stream.
+impl std::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Workspace(name) => write!(f, "{name}"),
+            Self::Session { machine, session } => write!(f, "{session} on {machine}"),
+        }
+    }
 }
 
 /// The browser's window and the terminal it is, which are the facts about the
@@ -113,7 +172,7 @@ impl From<&Size> for pty::Size {
     }
 }
 
-async fn bridge(mut socket: WebSocket, name: String) {
+async fn bridge(mut socket: WebSocket, target: Target) {
     // The pty arrives with the first control frame, so the socket outlives the
     // terminal at both ends and the ping has to cover the whole of it.
     let mut terminal: Option<pty::Terminal> = None;
@@ -142,12 +201,12 @@ async fn bridge(mut socket: WebSocket, name: String) {
                 if let Some(open) = terminal.as_mut()
                     && let Err(error) = open.write(bytes.into()).await
                 {
-                    tracing::warn!("terminal {name} stopped accepting input: {error}");
+                    tracing::warn!("terminal {target} stopped accepting input: {error}");
                     break;
                 }
             }
             Either::Typed(Some(Ok(Message::Text(text)))) => {
-                if !control(&mut socket, &mut terminal, &name, &text).await {
+                if !control(&mut socket, &mut terminal, &target, &text).await {
                     break;
                 }
             }
@@ -156,7 +215,7 @@ async fn bridge(mut socket: WebSocket, name: String) {
             Either::Typed(Some(Ok(_))) => {}
             Either::Quiet => {
                 if unanswered >= MISSES {
-                    tracing::info!("terminal {name} answered no ping");
+                    tracing::info!("terminal {target} answered no ping");
                     break;
                 }
                 unanswered += 1;
@@ -167,7 +226,7 @@ async fn bridge(mut socket: WebSocket, name: String) {
             Either::Printed(None) | Either::Typed(None | Some(Err(_))) => break,
         }
     }
-    tracing::info!("terminal {name} ended");
+    tracing::info!("terminal {target} ended");
 }
 
 enum Either {
@@ -190,11 +249,11 @@ async fn printed(terminal: &mut Option<pty::Terminal>) -> Option<Vec<u8>> {
 async fn control(
     socket: &mut WebSocket,
     terminal: &mut Option<pty::Terminal>,
-    name: &str,
+    target: &Target,
     text: &str,
 ) -> bool {
     if let Some(open) = terminal.as_ref() {
-        resize(open, name, text);
+        resize(open, target, text);
         return true;
     }
 
@@ -207,14 +266,14 @@ async fn control(
         return false;
     };
 
-    match pty::open(name, &size.term, (&size).into()).await {
+    match target.open(&size.term, (&size).into()).await {
         Ok(open) => {
             *terminal = Some(open);
             true
         }
         Err(error) => {
             let said = chain(&error);
-            tracing::warn!("no terminal for {name}: {said}");
+            tracing::warn!("no terminal for {target}: {said}");
             let _ = socket.send(Message::Text(said.into())).await;
             false
         }
@@ -226,14 +285,14 @@ async fn control(
 ///
 /// One message does both jobs, so `term` arrives again here and is not read: a
 /// caller cannot become a different terminal without opening another socket.
-fn resize(terminal: &pty::Terminal, name: &str, text: &str) {
+fn resize(terminal: &pty::Terminal, target: &Target, text: &str) {
     match serde_json::from_str::<Size>(text) {
         Ok(size) => {
             if let Err(error) = terminal.resize((&size).into()) {
-                tracing::warn!("terminal {name}: {error}");
+                tracing::warn!("terminal {target}: {error}");
             }
         }
-        Err(_) => tracing::warn!("terminal {name} was sent a control frame that is not a size"),
+        Err(_) => tracing::warn!("terminal {target} was sent a control frame that is not a size"),
     }
 }
 
@@ -271,6 +330,10 @@ mod tests {
 
     const PING: u8 = 0x9;
 
+    /// The two addresses one bridge serves (ADR-0022).
+    const WORKSPACE: &str = "/api/workspaces/api/terminal";
+    const SESSION: &str = "/api/machines/fixture/sessions/scratch/terminal";
+
     fn tailnet(callers: Vec<(IpAddr, Caller)>) -> Fake {
         Fake {
             machines: Vec::new(),
@@ -293,7 +356,11 @@ mod tests {
     /// A real listener, because `oneshot` never gives axum the upgrade it
     /// extracts: the peer address a refusal turns on is the one the kernel
     /// reports, so the tailnet is faked at loopback rather than at 100.64/10.
-    async fn connect(authoriser: Authoriser<Fake>, forwarded: &str) -> BufReader<TcpStream> {
+    async fn connect(
+        authoriser: Authoriser<Fake>,
+        path: &str,
+        forwarded: &str,
+    ) -> BufReader<TcpStream> {
         let app = Router::new().nest("/api", router(authoriser));
 
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
@@ -310,7 +377,7 @@ mod tests {
         stream
             .write_all(
                 format!(
-                    "GET /api/workspaces/api/terminal HTTP/1.1\r\n\
+                    "GET {path} HTTP/1.1\r\n\
                      Host: yantra\r\n\
                      Connection: Upgrade\r\n\
                      Upgrade: websocket\r\n\
@@ -326,9 +393,9 @@ mod tests {
         BufReader::new(stream)
     }
 
-    async fn handshake(authoriser: Authoriser<Fake>, forwarded: &str) -> String {
+    async fn handshake(authoriser: Authoriser<Fake>, path: &str, forwarded: &str) -> String {
         let mut status = String::new();
-        connect(authoriser, forwarded)
+        connect(authoriser, path, forwarded)
             .await
             .read_line(&mut status)
             .await
@@ -338,7 +405,7 @@ mod tests {
 
     /// Past the handshake and onto the frames, which is where a ping is.
     async fn upgraded(authoriser: Authoriser<Fake>) -> BufReader<TcpStream> {
-        let mut socket = connect(authoriser, "").await;
+        let mut socket = connect(authoriser, WORKSPACE, "").await;
         let mut line = String::new();
         loop {
             line.clear();
@@ -385,10 +452,10 @@ mod tests {
     #[tokio::test]
     async fn a_caller_who_is_not_the_owner_is_not_upgraded() {
         for refused in [caller(ME + 1, &[]), caller(ME, &["tag:ci"])] {
-            let status = handshake(direct(Some(refused)), "").await;
+            let status = handshake(direct(Some(refused)), WORKSPACE, "").await;
             assert!(status.starts_with("HTTP/1.1 403"), "{status}");
         }
-        let stranger = handshake(direct(None), "").await;
+        let stranger = handshake(direct(None), WORKSPACE, "").await;
         assert!(stranger.starts_with("HTTP/1.1 403"), "{stranger}");
     }
 
@@ -396,8 +463,24 @@ mod tests {
     /// Nothing opens here — the pty waits for a size that never arrives.
     #[tokio::test]
     async fn this_owners_untagged_node_is_upgraded() {
-        let status = handshake(direct(Some(caller(ME, &[]))), "").await;
+        let status = handshake(direct(Some(caller(ME, &[]))), WORKSPACE, "").await;
         assert!(status.starts_with("HTTP/1.1 101"), "{status}");
+    }
+
+    /// **ADR-0022's route is the same route.** A socket that names a machine and
+    /// a session upgrades for the owner's untagged node and refuses everything
+    /// else, because it calls the one `allowed()` above it — the whole of the
+    /// protection, and deliberately the only check either address gets.
+    #[tokio::test]
+    async fn a_session_addressed_socket_sits_on_the_same_authoriser() {
+        let tagged = handshake(direct(Some(caller(ME, &["tag:ci"]))), SESSION, "").await;
+        assert!(tagged.starts_with("HTTP/1.1 403"), "{tagged}");
+
+        let stranger = handshake(direct(None), SESSION, "").await;
+        assert!(stranger.starts_with("HTTP/1.1 403"), "{stranger}");
+
+        let owner = handshake(direct(Some(caller(ME, &[]))), SESSION, "").await;
+        assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
     }
 
     /// **ADR-0017 on the route that hands over a shell.** Loopback is declared
@@ -417,12 +500,12 @@ mod tests {
             )
         };
 
-        let refused = handshake(ours(), "X-Forwarded-For: 100.64.0.4\r\n").await;
+        let refused = handshake(ours(), WORKSPACE, "X-Forwarded-For: 100.64.0.4\r\n").await;
         assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
 
         // The proxy's own node still opens one, so the refusal above is the
         // forwarded address being read rather than the hop being distrusted.
-        let unproxied = handshake(ours(), "").await;
+        let unproxied = handshake(ours(), WORKSPACE, "").await;
         assert!(unproxied.starts_with("HTTP/1.1 101"), "{unproxied}");
     }
 
