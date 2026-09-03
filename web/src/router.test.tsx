@@ -26,12 +26,17 @@ afterEach(() => {
 
 /** `DataTable` asks for a width and xterm.js asks for the device pixel ratio,
  *  and jsdom has no `matchMedia` for either — `dashboard.test.tsx` and
- *  `terminal.test.tsx` each record their half. */
+ *  `terminal.test.tsx` each record their half.
+ *
+ *  Two query shapes now: `DataTable`'s `(width < 48rem)` and the workspace
+ *  tabs' `(min-width: 768px)`, both answered against a 1280 px window. */
 beforeEach(() => {
   // TanStack Router scrolls on navigation and jsdom implements no `scrollTo`.
   vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: 1280 < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16,
+    matches: /rem/.test(query)
+      ? 1280 < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16
+      : Number(/([\d.]+)px/.exec(query)?.[1]) <= 1280,
     addEventListener: () => {},
     removeEventListener: () => {},
     addListener: () => {},
