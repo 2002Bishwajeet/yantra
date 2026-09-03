@@ -1778,6 +1778,7 @@ mod tests {
             path: "/h/.claude/projects/-srv-repo/an-id.jsonl".to_owned(),
             modified: 1_000,
             now: 1_004,
+            total: 8,
             entries: vec![
                 logs::Entry {
                     who: logs::Who::User,
@@ -1836,6 +1837,7 @@ mod tests {
             path: "/h/x.jsonl".to_owned(),
             modified: 1_000,
             now: 1_000,
+            total: 0,
             entries: Vec::new(),
         });
         assert!(rendered.contains("nothing has been said"), "{rendered}");

@@ -83,6 +83,11 @@ pub struct Transcript {
     /// than a measure of how far two machines' clocks have drifted apart.
     pub modified: i64,
     pub now: i64,
+    /// Every record the far side would have selected, counted before the
+    /// window cut it down. **Records, not turns** — the same unit `lines` and
+    /// `before` are in, so a caller can say *the last 50 of 1,944 records* and
+    /// never mix the two (D5 §4.4).
+    pub total: usize,
     pub entries: Vec<Entry>,
 }
 
@@ -138,6 +143,7 @@ pub async fn logs(name: &str, lines: usize) -> Result<Transcript, Error> {
         &workspace.repo.to_string_lossy(),
         session.as_deref(),
         lines,
+        0,
     )
     .await
 }
@@ -165,13 +171,19 @@ pub async fn session_of<E: Exec>(exec: &E, name: &str) -> Option<String> {
 /// A named session with no file yet is [`Error::NoTurnYet`] and never a fall
 /// back to the newest file — a launch writes no transcript (I-49), and the
 /// state that produces this is an agent that has only just started.
+///
+/// `before` skips that many newer records, so `Older` is the next window back
+/// rather than a re-read of a longer one. The far side counts from the end of
+/// the file, and a running agent appends while a reader pages backwards — which
+/// is what [`Transcript::total`] is for.
 pub async fn read<E: Exec>(
     exec: &E,
     repo: &str,
     session: Option<&str>,
     lines: usize,
+    before: usize,
 ) -> Result<Transcript, Error> {
-    let out = exec.exec(&probe(repo, session, lines)).await?;
+    let out = exec.exec(&probe(repo, session, lines, before)).await?;
     if out.status == NO_TRANSCRIPT {
         return Err(match session {
             Some(session) => Error::NoTurnYet {
@@ -200,33 +212,50 @@ pub async fn read<E: Exec>(
         .next()
         .and_then(|n| n.trim().parse().ok())
         .ok_or(Error::Unreadable)?;
+    let total = header
+        .next()
+        .and_then(|n| n.trim().parse().ok())
+        .ok_or(Error::Unreadable)?;
 
     Ok(Transcript {
         path,
         modified,
         now,
+        total,
         entries: header.filter_map(entry).collect(),
     })
 }
 
-/// Three header lines, then the selected records.
+/// Everything the far side would show, before the window cuts it down.
 ///
 /// The selection is `grep`, not `jq`: the fleet is not guaranteed to have `jq`,
 /// and a byte-level filter over a 14 MB file costs nothing next to shipping it.
 /// It over-matches slightly — `"type":"user"` also occurs inside message text —
 /// and that is safe, because the parse on this side is what decides.
+const SELECT: &str = "grep -E '\"type\":\"(user|assistant)\"' \"$f\" | grep -v '\"toolUseResult\"'";
+
+/// Four header lines — the path, its mtime, the far side's clock and how many
+/// records the selection found — then the window.
+///
+/// The window costs nothing and **the count is a second pass, which is not
+/// free where `grep` is busybox's**: 17.8 MB in the Alpine fixture reads in
+/// 277 ms either way and pays 245 ms more for the count. D5 §2.2 measured
+/// 0.01 s for it on GNU grep, so that figure does not travel. Both still sit
+/// under one ssh round trip to a real machine, which is why `Older` is another
+/// read rather than a bigger first one.
 ///
 /// The file is `<session id>.jsonl`, measured on both fleet machines and across
 /// a `resume` fork, which is what makes naming one possible at all.
-fn probe(repo: &str, session: Option<&str>, lines: usize) -> String {
+fn probe(repo: &str, session: Option<&str>, lines: usize, before: usize) -> String {
     format!(
         "{locate}\
          printf '%s\\n' \"$f\"\n\
          stat -c %Y \"$f\" 2>/dev/null || stat -f %m \"$f\"\n\
          date +%s\n\
-         grep -E '\"type\":\"(user|assistant)\"' \"$f\" \
-         | grep -v '\"toolUseResult\"' | tail -n {lines}\n",
+         {SELECT} | grep -c ''\n\
+         {SELECT} | tail -n {end} | head -n {lines}\n",
         locate = locate(repo, session),
+        end = lines.saturating_add(before),
     )
 }
 
@@ -375,7 +404,7 @@ mod tests {
     /// tries to leave it is the test that matters.
     #[test]
     fn a_hostile_repo_path_cannot_reach_the_remote_shell() {
-        let probe = probe("/tmp/x'; touch /tmp/pwned; '", None, 5);
+        let probe = probe("/tmp/x'; touch /tmp/pwned; '", None, 5, 0);
         assert!(probe.contains("-tmp-x---touch--tmp-pwned---"), "{probe}");
         assert!(!probe.contains("touch /tmp/pwned"), "{probe}");
     }
@@ -385,7 +414,12 @@ mod tests {
     /// script entirely.
     #[test]
     fn a_named_session_is_asked_for_by_name_rather_than_by_age() {
-        let probe = probe("/srv/repo", Some("34d9a1ab-0000-4000-8000-000000000000"), 5);
+        let probe = probe(
+            "/srv/repo",
+            Some("34d9a1ab-0000-4000-8000-000000000000"),
+            5,
+            0,
+        );
         assert!(
             probe.contains("f=$d/'34d9a1ab-0000-4000-8000-000000000000'.jsonl"),
             "{probe}"
@@ -399,13 +433,28 @@ mod tests {
     /// still *contains* the payload, so searching for it proves nothing.
     #[test]
     fn a_hostile_session_id_cannot_reach_the_remote_shell() {
-        let probe = probe("/srv/repo", Some("x'; touch /tmp/pwned; '"), 5);
+        let probe = probe("/srv/repo", Some("x'; touch /tmp/pwned; '"), 5, 0);
         assert!(
             probe.contains(&format!(
                 "f=$d/{}.jsonl\n",
                 r"'x'\''; touch /tmp/pwned; '\'''"
             )),
             "{probe}"
+        );
+    }
+
+    /// `before` skips newer records, so the window walks back rather than
+    /// growing. The count is asked of the same selection.
+    #[test]
+    fn a_window_asks_for_more_of_the_file_than_it_returns() {
+        let first = probe("/srv/repo", None, 50, 0);
+        assert!(first.contains("| tail -n 50 | head -n 50\n"), "{first}");
+
+        let older = probe("/srv/repo", None, 50, 50);
+        assert!(older.contains("| tail -n 100 | head -n 50\n"), "{older}");
+        assert!(
+            older.contains(&format!("{SELECT} | grep -c ''\n")),
+            "{older}"
         );
     }
 
@@ -541,6 +590,7 @@ mod tests {
             path: "/x".to_owned(),
             modified: 1_000,
             now: 1_042,
+            total: 0,
             entries: Vec::new(),
         };
         assert_eq!(transcript.idle_for(), 42);

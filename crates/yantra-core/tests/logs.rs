@@ -99,7 +99,7 @@ async fn a_repo_with_no_transcript_says_so_instead_of_failing() -> Result<()> {
         return Ok(());
     };
 
-    let err = logs::read(&lab.ssh, REPO, None, 20)
+    let err = logs::read(&lab.ssh, REPO, None, 20, 0)
         .await
         .expect_err("there is no transcript there");
     assert!(matches!(err, logs::Error::NoTranscript { .. }), "{err:?}");
@@ -115,7 +115,7 @@ async fn only_the_turns_survive_the_trip() -> Result<()> {
     lab.write_transcript("11111111-1111-4111-8111-111111111111", REAL_RECORDS, false)
         .await?;
 
-    let transcript = logs::read(&lab.ssh, REPO, None, 20).await?;
+    let transcript = logs::read(&lab.ssh, REPO, None, 20, 0).await?;
     assert!(
         transcript.path.ends_with(&format!(
             "/.claude/projects/{PROJECT}/11111111-1111-4111-8111-111111111111.jsonl"
@@ -125,6 +125,10 @@ async fn only_the_turns_survive_the_trip() -> Result<()> {
     );
 
     assert_eq!(transcript.entries.len(), 2, "{:#?}", transcript.entries);
+    assert_eq!(
+        transcript.total, 2,
+        "the count is of the same selection: eight records in, two selectable"
+    );
     assert_eq!(transcript.entries[0].who, Who::User);
     assert_eq!(transcript.entries[0].text, "fix the failing test");
     assert_eq!(transcript.entries[1].who, Who::Assistant);
@@ -154,7 +158,7 @@ async fn a_transcript_that_is_still_being_written_reports_a_moving_mtime() -> Re
     let id = "22222222-2222-4222-8222-222222222222";
     lab.write_transcript(id, REAL_RECORDS, false).await?;
 
-    let before = logs::read(&lab.ssh, REPO, None, 20).await?;
+    let before = logs::read(&lab.ssh, REPO, None, 20, 0).await?;
     // A whole second, because the mtime this reads has one-second resolution.
     lab.ssh.exec("sleep 2").await?;
     lab.write_transcript(
@@ -165,7 +169,7 @@ async fn a_transcript_that_is_still_being_written_reports_a_moving_mtime() -> Re
         true,
     )
     .await?;
-    let after = logs::read(&lab.ssh, REPO, None, 20).await?;
+    let after = logs::read(&lab.ssh, REPO, None, 20, 0).await?;
 
     assert!(
         after.modified > before.modified,
@@ -208,7 +212,7 @@ async fn the_newest_transcript_is_the_one_read() -> Result<()> {
     )
     .await?;
 
-    let transcript = logs::read(&lab.ssh, REPO, None, 20).await?;
+    let transcript = logs::read(&lab.ssh, REPO, None, 20, 0).await?;
     assert!(transcript.path.contains("44444444"), "{}", transcript.path);
     assert_eq!(transcript.entries[0].text, "the newer conversation");
     Ok(())
@@ -242,7 +246,7 @@ async fn the_named_session_is_read_even_when_another_wrote_more_recently() -> Re
     )
     .await?;
 
-    let transcript = logs::read(&lab.ssh, REPO, Some(running), 20).await?;
+    let transcript = logs::read(&lab.ssh, REPO, Some(running), 20, 0).await?;
     assert!(
         transcript.path.ends_with(&format!("/{running}.jsonl")),
         "{}",
@@ -274,6 +278,7 @@ async fn a_named_session_that_has_written_nothing_borrows_no_other_transcript() 
         REPO,
         Some("34d9a1ab-0000-4000-8000-000000000000"),
         20,
+        0,
     )
     .await
     .expect_err("the forked session has written nothing yet");
@@ -343,7 +348,7 @@ async fn the_window_counts_turns_and_not_records() -> Result<()> {
     lab.write_transcript("55555555-5555-4555-8555-555555555555", &records, false)
         .await?;
 
-    let transcript = logs::read(&lab.ssh, REPO, None, 3).await?;
+    let transcript = logs::read(&lab.ssh, REPO, None, 3, 0).await?;
     assert!(
         !transcript.entries.is_empty(),
         "a small window over a file that is mostly bookkeeping must still show turns"
@@ -352,6 +357,144 @@ async fn the_window_counts_turns_and_not_records() -> Result<()> {
         transcript.entries.iter().all(|e| !e.text.is_empty()),
         "{:#?}",
         transcript.entries
+    );
+    Ok(())
+}
+
+/// **Y-306.** `Older` is the next window back, and the windows are disjoint —
+/// the page prepends and stitches nothing. `total` counts records, so it is
+/// bigger than either window and is what tells a reader the ground moved.
+#[tokio::test]
+async fn a_window_walks_back_and_the_count_covers_the_whole_selection() -> Result<()> {
+    let Some(lab) = Lab::start("logs-window-back").await? else {
+        return Ok(());
+    };
+    let records: Vec<String> = (0..10)
+        .map(|n| {
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"turn {n}"}},"timestamp":"2026-07-28T18:2{n}:00.000Z"}}"#
+            )
+        })
+        .collect();
+    let borrowed: Vec<&str> = records.iter().map(String::as_str).collect();
+    lab.write_transcript("99999999-9999-4999-8999-999999999999", &borrowed, false)
+        .await?;
+
+    let newest = logs::read(&lab.ssh, REPO, None, 3, 0).await?;
+    assert_eq!(said(&newest), ["turn 7", "turn 8", "turn 9"]);
+    assert_eq!(newest.total, 10);
+
+    let older = logs::read(&lab.ssh, REPO, None, 3, 3).await?;
+    assert_eq!(said(&older), ["turn 4", "turn 5", "turn 6"]);
+    assert_eq!(older.total, 10, "the count does not move with the window");
+
+    // Past the start of the file the window stops moving rather than emptying:
+    // `tail` has nothing left to skip. `total` is what tells a caller to stop
+    // asking, which is why the read returns it.
+    let oldest = logs::read(&lab.ssh, REPO, None, 3, 9).await?;
+    assert_eq!(said(&oldest), ["turn 0", "turn 1", "turn 2"]);
+    Ok(())
+}
+
+fn said(transcript: &logs::Transcript) -> Vec<String> {
+    transcript
+        .entries
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect()
+}
+
+/// **The security half of Y-306, on a real shell.** Both strings this module
+/// interpolates come from a file on disk — a workspace's `repo`, and a session
+/// id its `startup` chose — so both are a code-execution boundary (I-26).
+///
+/// The unit tests assert the script; this asserts the *machine*. Nothing was
+/// created, so nothing ran.
+#[tokio::test]
+async fn a_quote_in_the_repo_or_the_session_runs_nothing_on_the_far_side() -> Result<()> {
+    let Some(lab) = Lab::start("logs-hostile").await? else {
+        return Ok(());
+    };
+    let flag = "/tmp/ya-logs-pwned";
+    lab.ssh.exec(&format!("rm -f {flag}")).await?;
+
+    for (repo, session) in [
+        (format!("/tmp/x'; touch {flag}; '"), None),
+        (format!("/tmp/x$(touch {flag})"), None),
+        (format!("/tmp/x`touch {flag}`"), None),
+        (REPO.to_owned(), Some(format!("s'; touch {flag}; '"))),
+        (REPO.to_owned(), Some(format!("s$(touch {flag})"))),
+        (REPO.to_owned(), Some(format!("s`touch {flag}`"))),
+    ] {
+        // Every one of these is an ordinary "no transcript there"; what matters
+        // is the assertion after the loop.
+        let _ = logs::read(&lab.ssh, &repo, session.as_deref(), 20, 0).await;
+    }
+
+    let out = lab
+        .ssh
+        .exec(&format!("[ -e {flag} ] && echo ran || echo nothing"))
+        .await?;
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "nothing",
+        "a quote in a repo path or a session id reached the remote shell"
+    );
+    Ok(())
+}
+
+/// **D5 §2.2's claim, re-measured rather than restated** (I-31). The count
+/// reads the file a second time and the window reads more of it than it
+/// returns, so both far-side lines were priced against a transcript the size of
+/// the largest real one: 15 MB, 60,000 selectable records.
+///
+/// The ceiling is loose on purpose — this asserts that reading 15 MB still
+/// costs about what reading eight records costs, not a number a busy CI box has
+/// to hit. What a regression here would look like is the whole file crossing
+/// the wire.
+#[tokio::test]
+async fn a_fifteen_megabyte_transcript_costs_about_what_a_small_one_costs() -> Result<()> {
+    let Some(lab) = Lab::start("logs-big").await? else {
+        return Ok(());
+    };
+    let padding = "x".repeat(180);
+    let record = format!(
+        r#"{{"type":"user","message":{{"role":"user","content":"{padding}"}},"timestamp":"2026-07-28T18:20:30.543Z","cwd":"/tmp/logsrepo"}}"#
+    );
+    let path = format!("~/.claude/projects/{PROJECT}/aaaaaaaa-0000-4000-8000-000000000000.jsonl");
+    // `yes` rather than 60,000 lines over ssh: the file is the subject here.
+    let written = lab
+        .ssh
+        .exec(&format!(
+            "mkdir -p ~/.claude/projects/{PROJECT} && yes '{record}' | head -n 60000 > {path} \
+             && wc -c < {path}"
+        ))
+        .await?;
+    let bytes: u64 = String::from_utf8_lossy(&written.stdout).trim().parse()?;
+    assert!(
+        bytes > 15_000_000,
+        "{bytes} bytes is not the size in D5 §2.2"
+    );
+
+    // The round trip on its own, so the number below is a comparison rather
+    // than a number. D4 measured one at 0.33 s.
+    let started = std::time::Instant::now();
+    lab.ssh.exec("true").await?;
+    let round_trip = started.elapsed();
+
+    let started = std::time::Instant::now();
+    let transcript = logs::read(&lab.ssh, REPO, None, 50, 0).await?;
+    let elapsed = started.elapsed();
+    eprintln!(
+        "read 50 of {} records from {bytes} bytes in {elapsed:?}; a bare round trip is {round_trip:?}",
+        transcript.total
+    );
+
+    assert_eq!(transcript.total, 60_000, "the far side counted the file");
+    assert_eq!(transcript.entries.len(), 50, "and returned only the window");
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "a 15 MB transcript took {elapsed:?}, which is the file crossing the wire"
     );
     Ok(())
 }
