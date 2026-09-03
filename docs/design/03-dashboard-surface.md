@@ -647,6 +647,25 @@ reconcile. Keep them, and say in
 > hoists what they share with the fleet into preloaded chunks of their own, and many small gzip
 > streams lose the dictionary one large one shares.
 
+> **2026-09-03: the `kB` in this table is `KiB`, and the ambiguity had started to cost decisions.**
+> Found while merging [D4](04-workspace-creation.md) (PR #223), where a needed 1,800-byte stylesheet
+> growth was under the ceiling on one reading of the unit and over it on the other.
+>
+> **The evidence is the table's own first number.** Measured on `main` at 144,910 bytes gzip, which is
+> **141.5 KiB** — the *141 kB* this section reported when it was written. Read as decimal kB the same
+> build is 144.9, which that sentence could not have been. So the budget is **≤ 145 KiB = 148,480
+> bytes**, and every figure in the table is binary.
+>
+> **Now, on the same measurement: 146,802 bytes — 143.4 KiB.** D4 took it there from 141.5 KiB, and
+> 1,800 of the 1,892 bytes are CSS rather than script: D4 imports `combobox` and `toggle-group`, so
+> four of the `@source not` lines this section's saving rests on had to go. `motion.test.ts` is what
+> refused to let that drift silently.
+>
+> **The split has moved even where the total has not.** *124 kB JS, 17 kB CSS* was true on the branch
+> this was written on; `main` now measures 128.5 KiB of script against 13.1 KiB of stylesheet. The
+> skip list took the CSS down and the surfaces that shipped since put the script up. **Hold the total
+> and stop quoting the split** — it describes a bundle that no longer exists.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
