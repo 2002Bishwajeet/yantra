@@ -8,7 +8,7 @@ import type {
   WorkspaceStatus,
 } from '@/api'
 import type { Reading } from '@/useLooked'
-import { Act, Actions, type Verb } from '@/components/Act'
+import { Act, Actions, Kill, type Verb } from '@/components/Act'
 import { Ago, Stamp } from '@/components/Age'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
@@ -284,6 +284,12 @@ export function sessionColumns(
         const command = sessionCommand(row, workspaces)
         return command && <Command command={command} />
       },
+    },
+    // D6 §4.4: kill is the only verb this row gets. Adopting the session into a
+    // workspace would have to guess the repo, which `tmux::Summary` has not got.
+    {
+      header: 'ACT',
+      cell: (row) => <Kill machine={row.machine} session={row.session.name} />,
     },
   ]
 }
