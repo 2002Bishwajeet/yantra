@@ -26,6 +26,7 @@ export type Said =
       at: string
       /** An `Older` read in flight. */
       paging: boolean
+      moved: boolean
     }
   | Failed
 
@@ -92,8 +93,14 @@ function merge(
       turns: read.turns,
       at,
       paging: false,
+      moved: false,
     }
   }
+
+  // D5 §4.4: the ground moved. The window is counted from the end of a file
+  // that has grown, so it no longer lines up with what is drawn — and a reader
+  // could never detect the overlap or the gap that stitching would produce.
+  if (read.total > held.total) return { ...held, paging: false, moved: true }
 
   return {
     ...held,

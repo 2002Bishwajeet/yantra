@@ -69,7 +69,11 @@ export function Transcript({
           <Link params={{ name }} replace search={{ view: 'terminal' }} to="/w/$name">
             Take control
           </Link>
-          {said.said !== 'no' && said.said !== 'reading' && (
+          {/* While the ground has moved the offer belongs beside the sentence
+              that explains it, so only one `Refresh` is ever on screen. */}
+          {(said.said === 'nothing' ||
+            said.said === 'refused' ||
+            (said.said === 'held' && !said.moved)) && (
             <Button onClick={refresh} size="xs" variant="outline">
               Refresh
             </Button>
@@ -120,7 +124,9 @@ export function Transcript({
 
         {said.said === 'held' && (
           <div className="flex flex-col gap-3">
-            {said.asked < said.total && (
+            {said.moved && <Moved onRefresh={refresh} />}
+
+            {!said.moved && said.asked < said.total && (
               <Button
                 disabled={said.paging}
                 onClick={() =>
@@ -146,6 +152,25 @@ export function Transcript({
         )}
       </div>
     </section>
+  )
+}
+
+/** D5 §4.4. The windows are counted from the end, so a file that grew between
+ *  two reads gives one that does not line up with what is above it. */
+function Moved({ onRefresh }: { onRefresh: () => void }) {
+  return (
+    <Alert>
+      <AlertTitle>The conversation moved on.</AlertTitle>
+      <AlertDescription className="flex flex-col items-start gap-2">
+        <span>
+          The agent has written more since this page read the transcript, so an
+          older window no longer lines up with the turns below.
+        </span>
+        <Button onClick={onRefresh} size="xs" variant="outline">
+          Refresh
+        </Button>
+      </AlertDescription>
+    </Alert>
   )
 }
 

@@ -1,9 +1,11 @@
 /**
- * The transcript tab of `/w/{name}` — D5 §4, Y-309.
+ * The transcript tab of `/w/{name}` — D5 §4, Y-309 and Y-310.
  *
  * **The far side is a real file.** `farSide` writes one record per line and
  * answers a read by the daemon's own arithmetic, `tail -n {lines + before} |
- * head -n {lines}` over what is on disk.
+ * head -n {lines}` over what is on disk. So a record appended between two reads
+ * moves `total` because the file grew, which is what Y-310 is about — a test
+ * that typed a bigger number in would prove nothing.
  *
  * The records are turns the daemon already projected, so the file stands in for
  * the far side's selection and not for Claude Code's format.
@@ -19,6 +21,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import type { Listed, Looked, Transcript, Turn } from './api'
 import App from './App'
@@ -479,5 +482,49 @@ describe('what the transcript says when it has nothing', () => {
     expect(alert.textContent).toContain('cachyos-g14')
     expect(alert.textContent).toContain('No route to host')
     expect(alert.className).toContain('destructive')
+  })
+})
+
+/** Y-310, D5 §4.4. The window is counted from the end of a file a running agent
+ *  appends to, so a second read of a grown file does not line up with the
+ *  first. Silently drawing it is the failure a reader could never detect. */
+describe('a conversation that moved while you paged back', () => {
+  it('refuses to stitch a shifted window, and offers a re-read', async () => {
+    const file = farSide()
+    file.append(...conversation(120))
+    open((window) => ({ status: 200, body: file.read(window) }))
+
+    await screen.findByText('turn 120')
+    expect(turns()).toHaveLength(50)
+
+    // The agent writes while the page is open, which is what moves the ground.
+    file.append(said('turn 121'))
+    fireEvent.click(older()!)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('The conversation moved on.')
+    expect(alert.className).not.toContain('destructive')
+    // Nothing was stitched on: the older window is not drawn at all.
+    expect(turns()).toHaveLength(50)
+    expect(screen.queryByText('turn 21')).toBeNull()
+    expect(older()).toBeNull()
+  })
+
+  it('reads again from the newest turn when you ask', async () => {
+    const file = farSide()
+    file.append(...conversation(120))
+    open((window) => ({ status: 200, body: file.read(window) }))
+
+    await screen.findByText('turn 120')
+    file.append(said('turn 121'))
+    fireEvent.click(older()!)
+
+    const alert = await screen.findByRole('alert')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Refresh' }))
+
+    expect(await screen.findByText('turn 121')).toBeTruthy()
+    expect(screen.queryByText('The conversation moved on.')).toBeNull()
+    expect(screen.getByText('the last 50 of 121 records')).toBeTruthy()
+    expect(older()).toBeTruthy()
   })
 })

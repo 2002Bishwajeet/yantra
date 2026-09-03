@@ -271,7 +271,7 @@ would make it indistinguishable from something the session printed, so it is dra
 as an alert beside the terminal. A close with nothing said is not an error at all,
 and is what reconnect turns on.
 
-## The transcript (Y-309)
+## The transcript (Y-309, Y-310)
 
 `Transcript.tsx` draws `POST /api/workspaces/{name}/logs` — what the agent said,
 as turns of `you` and `claude` with the tool calls between them.
@@ -288,6 +288,11 @@ code are not obvious from it:
 - **`Older` asks for what is left.** Windows are `tail -n {lines + before} | head
   -n {lines}`, so past the start of the file `tail` stops skipping and a full
   window would repeat what is drawn. The last one asks for `total - asked`.
+- **A grown `total` is refused, not stitched.** The window is counted from the
+  end of a file a running agent appends to, so a second read of a longer file
+  does not line up with the first. The page says the conversation moved on and
+  offers a `Refresh` (Y-310). `transcript.test.tsx` proves it against a real file
+  that gained a record between two reads.
 
 ## Reconnect (Y-132)
 
