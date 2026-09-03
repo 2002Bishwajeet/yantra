@@ -123,7 +123,7 @@ between those two facts is the same gap D4 filled.
 > **Two corrections this document owes.** The read above is called `yantra logs --json`; **there is
 > no such flag** — `Logs` takes a workspace and a line count and prints text, and `doctor` is the
 > verb with `--json`. And *"nothing is cached"* understates the position: **nothing serves the
-> transcript at all**, so the daemon's 23 routes gain one.
+> transcript at all**, so the daemon gains a route rather than a cache.
 >
 > **What it costs to fetch has an answer now.** The far-side filter costs 0.02 s over a 15 MB
 > transcript and the ssh round trip costs 0.33 s, so reading *more* is free and asking *at all* is
@@ -150,6 +150,22 @@ three smaller than they were, and each is small enough that three documents woul
 - What Y-179's missing ADR has to decide before the terminal may open on an arbitrary session.
 
 **Gate:** Y-179's part waits on that ADR. The rest does not.
+
+> **2026-09-03: written, as [D6](06-sessions-attention-spend.md), and the split above was kept.**
+> All four questions are settled in it, and Y-179's is settled as far as a design document can settle
+> it: the owner gave the ADR its direction — any session on their own fleet is reachable — and D6 §6.1
+> writes the reasoning down for whoever drafts it.
+>
+> **What the measurement found is not what this section expected.** Three of the four readings are
+> **complete in the daemon and absent from the browser**: `/api/attention` has been served since
+> Y-173 and no file asks for it, `/api/readiness/github` likewise, and the kill verb exists at every
+> layer including a React control that nothing renders. So D6's rows are wiring rather than
+> architecture, and only the terminal-on-any-session half needs anything built.
+>
+> **One question answered itself.** *Whether an unclaimed session can be adopted* turns on
+> `tmux::Summary`, which carries `name`, `windows`, `attached` and `created` and **no repo** — so
+> adoption would have to guess the one field a workspace cannot do without. Refused rather than
+> deferred.
 
 **This document could be folded into D5.** The cost of folding is one larger interview and one
 larger file; the cost of splitting is a cross-reference. Splitting is proposed. Say so if you want
