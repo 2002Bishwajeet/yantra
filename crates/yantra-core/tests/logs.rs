@@ -443,17 +443,17 @@ async fn a_quote_in_the_repo_or_the_session_runs_nothing_on_the_far_side() -> Re
     Ok(())
 }
 
-/// **D5 §2.2's claim, re-measured rather than restated** (I-31). The count
-/// reads the file a second time and the window reads more of it than it
-/// returns, so both far-side lines were priced against a transcript the size of
-/// the largest real one: 15 MB, 60,000 selectable records.
+/// **D5 §2.2's claim, re-measured rather than restated** (I-31), against a
+/// transcript the size of the largest real one: 15 MB, 60,000 selectable
+/// records. Half of it holds. The window is free; the count is a second pass
+/// and busybox `grep` charges for it — 0.52 s here, where D5 measured 0.03 s
+/// for both lines on GNU grep. Under one ssh hop to a real machine either way,
+/// which is the part the design rests on.
 ///
-/// The ceiling is loose on purpose — this asserts that reading 15 MB still
-/// costs about what reading eight records costs, not a number a busy CI box has
-/// to hit. What a regression here would look like is the whole file crossing
-/// the wire.
+/// The ceiling is loose on purpose: it is not a number a busy CI box has to
+/// hit. What it catches is the whole file crossing the wire.
 #[tokio::test]
-async fn a_fifteen_megabyte_transcript_costs_about_what_a_small_one_costs() -> Result<()> {
+async fn a_fifteen_megabyte_transcript_stays_under_one_ssh_round_trip() -> Result<()> {
     let Some(lab) = Lab::start("logs-big").await? else {
         return Ok(());
     };
