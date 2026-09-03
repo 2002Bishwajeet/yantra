@@ -113,6 +113,20 @@ the daemon picks one string per call rather than forwarding the object**, and §
 sleeping machine costs whatever it costs to wake it.** That ratio is the whole reason §4.3 reads on
 request and never polls.
 
+> **2026-09-03, [Y-306](../../tracker.md#3-task-board): measured against a real machine, half of this
+> table holds and the header does not.** [`tests/logs.rs`](../../crates/yantra-core/tests/logs.rs)
+> built a 17.8 MB transcript of 60,000 selectable records in the container fixture and timed the read
+> against a bare ssh round trip: **0.52 s against 0.017 s**. Broken down, the shipped pipeline costs
+> 277 ms and **the windowed one costs 278 ms — the window is free, exactly as this section says**.
+> The count is not. `grep -c` is a **second full pass** over the file, and it costs another 279 ms
+> rather than the 0.01 s above, because that figure was GNU grep on a warm cache and the far side
+> here is busybox.
+>
+> **The decision this section supports is unchanged**: both lines together still finish inside
+> [D4](04-workspace-creation.md)'s 0.33 s ssh round trip, so §4.3 still reads on request and still
+> never polls. What stops holding is the wording — *the far-side filter is free* is true of the
+> window and false of the count, and a later reader pricing a second count at zero would be wrong.
+
 **Two hops carry different amounts.** The last 50 records leave the machine as 121,267 bytes and
 reach the browser as 25,703 bytes of JSON — 9,525 gzipped. §4.2's targets take that to 29,314 and
 10,234. **The projection is where the saving is, and the projection already exists**: `logs.rs` has

@@ -451,11 +451,14 @@ fn render_logs(transcript: &logs::Transcript) -> String {
         // clock, so a wrapped paragraph still reads as one turn.
         out.push_str(&entry.text.replace('\n', "\n                   "));
         out.push('\n');
-        if !entry.tools.is_empty() {
-            out.push_str(&format!(
-                "                   tools: {}\n",
-                entry.tools.join(", ")
-            ));
+        // One line per call, because a target is a sentence and a comma-joined
+        // list of them reads as neither.
+        for call in &entry.tools {
+            out.push_str(&format!("                   tool: {}", call.name));
+            if let Some(target) = &call.target {
+                out.push_str(&format!(" {}", target.replace('\n', " ")));
+            }
+            out.push('\n');
         }
     }
     out
@@ -1767,7 +1770,7 @@ mod tests {
         ));
     }
 
-    /// A turn with no tool call must not print an empty `tools:` line, and a
+    /// A turn with no tool call must not print an empty `tool:` line, and a
     /// multi-line answer must stay one turn.
     #[test]
     fn a_turn_renders_as_one_block_whether_or_not_it_used_tools() {
@@ -1775,6 +1778,7 @@ mod tests {
             path: "/h/.claude/projects/-srv-repo/an-id.jsonl".to_owned(),
             modified: 1_000,
             now: 1_004,
+            total: 8,
             entries: vec![
                 logs::Entry {
                     who: logs::Who::User,
@@ -1786,7 +1790,16 @@ mod tests {
                     who: logs::Who::Assistant,
                     at: Some("2026-07-28T18:20:34.000Z".to_owned()),
                     text: "Looking at it.\nTwo lines.".to_owned(),
-                    tools: vec!["Read".to_owned(), "Bash".to_owned()],
+                    tools: vec![
+                        logs::Call {
+                            name: "Read".to_owned(),
+                            target: Some("/srv/repo/src/api.ts".to_owned()),
+                        },
+                        logs::Call {
+                            name: "SendUserFile".to_owned(),
+                            target: None,
+                        },
+                    ],
                 },
             ],
         });
@@ -1797,11 +1810,18 @@ mod tests {
             rendered.contains("18:20:30Z  you     fix the test"),
             "{rendered}"
         );
-        assert!(rendered.contains("tools: Read, Bash"), "{rendered}");
+        assert!(
+            rendered.contains("tool: Read /srv/repo/src/api.ts\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("tool: SendUserFile\n"),
+            "a call with no target is its name alone: {rendered}"
+        );
         assert_eq!(
-            rendered.matches("tools:").count(),
-            1,
-            "a turn with no tools gets no tools line: {rendered}"
+            rendered.matches("tool:").count(),
+            2,
+            "a turn with no tools gets no tool line: {rendered}"
         );
         assert!(
             rendered.contains("\n                   Two lines."),
@@ -1817,6 +1837,7 @@ mod tests {
             path: "/h/x.jsonl".to_owned(),
             modified: 1_000,
             now: 1_000,
+            total: 0,
             entries: Vec::new(),
         });
         assert!(rendered.contains("nothing has been said"), "{rendered}");
