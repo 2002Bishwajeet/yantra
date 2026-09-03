@@ -593,6 +593,9 @@ src/
                      first paint
     Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
                      drops. Key it on the name
+    Spend.tsx        `Answer` and `Figure` — one workspace's one session, in
+                     T3 Code's usage-page shape. `/usage` and the spend tab
+                     draw the same figure; only `/usage` has a picker
     DataTable.tsx    a table, or a block per row on a phone; owns "we looked
                      and there is nothing"
     Readiness.tsx    D2 §3.1's checks as three tones, and the one place the

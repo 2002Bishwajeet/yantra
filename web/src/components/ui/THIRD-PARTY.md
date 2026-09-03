@@ -28,6 +28,13 @@ The set is complete on purpose, and Tailwind does not read the members no route 
 [`index.css`](../../index.css) names them, and `motion.test.ts` fails when that list and the import
 graph disagree. Importing one gets its CSS back.
 
+[`components/Spend.tsx`](../Spend.tsx) is a **layout** take rather than a copy, and the notice covers
+it too. Its page shape — a headline of a label and one figure, a hairline strip of counts, the model
+breakdown under both — is [T3 Code](https://github.com/pingdotgg/t3code)'s
+`apps/web/src/components/usage/UsagePage.tsx` at the same commit `963ebf5b`, rebuilt on this repo's
+tokens by [Y-183](../../../../tracker.md#3-task-board) on 2026-09-04. No line of T3's code is in it,
+and the file's own header says where it came from.
+
 Three of T3's CSS classes came with them, into
 [`web/src/index.css`](../../index.css) rather than here: `.dialog-glass`, `.dialog-backdrop` and
 `.dropdown-glass`. A popup with no rule behind those names has no background at all.
