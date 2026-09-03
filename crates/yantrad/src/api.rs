@@ -48,6 +48,19 @@ pub fn router() -> Router<Fleet> {
         .route("/machines/{name}/readiness", get(machine_readiness))
         .route("/attention", get(attention))
         .route("/readiness/github", get(github))
+        .fallback(no_such_route)
+}
+
+/// The `/api` nest answers its own misses (Y-169). Without this the miss falls
+/// through to the dashboard's SPA fallback and returns `200 text/html`, so a
+/// route the daemon does not have reads exactly like a route it does.
+async fn no_such_route() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Json(Missing {
+            error: "this daemon serves no such route under /api".to_string(),
+        }),
+    )
 }
 
 /// The one route that joins two memories: the look Tailscale answered and what

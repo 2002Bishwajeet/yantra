@@ -199,6 +199,12 @@ ADR-0021 carved.
 so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
 `index.html` rather than a 404, which is what makes a deep link work.
 
+**A miss under `/api` is the one path that does not reach it** (Y-169, I-64). A nested router with no
+fallback of its own hands the miss to the outer one, so an absent API route used to answer
+`200 text/html` — indistinguishable from a served page. `api::router` therefore carries a fallback of
+its own: a **JSON 404** in the `{"error": …}` shape every other error on this seam uses. The whole
+tree is composed in `main.rs`'s `app`, apart from `serve`, so a test can drive both halves at once.
+
 **The default build embeds nothing, and R-24 is why**: a build that wants `web/dist` unconditionally
 makes every `fmt`, `clippy`, `test` and musl cross-build job depend on npm. Y-140 added the other
 half for the appliance that wanted one file to copy, and every part of its shape exists to keep that
