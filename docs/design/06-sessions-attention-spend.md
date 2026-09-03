@@ -168,6 +168,16 @@ one sentence and it stays exactly as it is.
 **Nothing about where these live changes.** They are not on `/`, and D3 §14 settled that: a claimed
 session **is** its workspace row.
 
+> **2026-09-03, [Y-317](../../tracker.md#3-task-board): `sessionColumns` has two call sites, and this
+> section reasoned about one.** `Machines.tsx` passes `unclaimed(answers, workspaces)`, so the ACT
+> column §4.2 adds reaches only unclaimed rows there. `OneMachine.tsx` passes every session the
+> machine reported, claimed ones included, so `/m/{machine}` draws `Kill` on a session a workspace
+> owns. The owner accepted this on the day it was found. The cost is one verb: `kill` stops a session
+> and `down` reads how the agent ended, so a person who kills a workspace's session from
+> `/m/{machine}` loses that reading. The confirm dialog names what it destroys, and the alternative
+> — gating the cell on a workspace lookup — adds a third state for a list that has not loaded, which
+> D3 §7.1 refuses to draw as an empty cell.
+
 ### 4.2 Kill, wired at last
 
 > **Owner, 2026-09-03:** attach and kill, and no adoption.
