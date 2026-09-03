@@ -1552,13 +1552,13 @@ async fn attach(name: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let machine = &plan.workspace.machine;
+    let machine = &plan.machine;
     if let Chosen::Substituted { wanted } = &plan.term {
         println!("{}", downgrade_notice(machine, wanted));
     }
     hand_over(
         machine,
-        &attach::remote_command(plan.tmux.path(), &plan.workspace.name, plan.term.term()),
+        &attach::remote_command(plan.tmux.path(), &plan.session, plan.term.term()),
     )
 }
 

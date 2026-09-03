@@ -17,12 +17,13 @@
 use crate::ssh::{self, Exec, Ssh};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Tmux};
-use crate::workspace::{self, Workspace};
+use crate::workspace;
 
 /// What the caller needs to become the session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
-    pub workspace: Workspace,
+    pub machine: String,
+    pub session: String,
     pub tmux: Tmux,
     pub term: Chosen,
 }
@@ -41,25 +42,36 @@ pub enum Error {
     #[error(transparent)]
     Terminfo(#[from] terminfo::Error),
 
-    /// Names the machine as well as the workspace: with no session, the
+    /// Names the machine as well as the session: with no session, the
     /// interesting question is usually *which machine was looked at*.
-    #[error("`{workspace}` has no session on {machine}")]
-    NoSession { workspace: String, machine: String },
+    #[error("no session `{session}` on {machine}")]
+    NoSession { session: String, machine: String },
 
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
 }
 
 /// Resolves everything needed to attach to `name`, for a caller sitting at `term`.
+///
+/// The workspace is read for two facts and no more, which is why the function
+/// below can be handed them directly.
 pub async fn plan(name: &str, term: &str) -> Result<Plan, Error> {
     let workspace = workspace::load(name)?;
-    let ssh = Ssh::new(ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?)?;
+    plan_on(&workspace.machine, &workspace.name, term).await
+}
+
+/// The same, for a session named rather than claimed
+/// ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
+/// It attaches and never creates, exactly as [`plan`] does.
+pub async fn plan_on(machine: &str, session: &str, term: &str) -> Result<Plan, Error> {
+    let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
     let tmux = Tmux::resolve(&ssh).await?;
-    ensure_session(&ssh, &tmux, &workspace).await?;
+    ensure_session(&ssh, &tmux, machine, session).await?;
     let term = terminfo::choose(&ssh, term).await?;
 
     Ok(Plan {
-        workspace,
+        machine: machine.to_owned(),
+        session: session.to_owned(),
         tmux,
         term,
     })
@@ -68,18 +80,19 @@ pub async fn plan(name: &str, term: &str) -> Result<Plan, Error> {
 /// The testable half.
 ///
 /// Asked before `TERM` is chosen, because `choose` can install a terminfo entry
-/// on the far side and a workspace with nothing to attach to should not leave
-/// anything behind.
+/// on the far side and a session that is not there should not leave anything
+/// behind.
 pub async fn ensure_session<E: Exec>(
     exec: &E,
     tmux: &Tmux,
-    workspace: &Workspace,
+    machine: &str,
+    session: &str,
 ) -> Result<(), Error> {
-    match tmux.pane(exec, &workspace.name).await? {
+    match tmux.pane(exec, session).await? {
         Some(_) => Ok(()),
         None => Err(Error::NoSession {
-            workspace: workspace.name.clone(),
-            machine: workspace.machine.clone(),
+            session: session.to_owned(),
+            machine: machine.to_owned(),
         }),
     }
 }
