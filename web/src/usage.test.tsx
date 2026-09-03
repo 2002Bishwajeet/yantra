@@ -3,6 +3,9 @@
  * D3 §11.4 — with the daemon's correction to it: spend is per workspace, since
  * `yantra tokens` loads a workspace and finds its transcript. Y-183.
  *
+ * `Answer` and `Figure` are drawn through this route, since that is where a
+ * person meets them; `/w/{name}`'s spend tab imports the same two (Y-311).
+ *
  * The fixtures are `contract.gen.ts`'s, which are responses yantrad rendered.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,6 +18,8 @@ import {
 } from '@testing-library/react'
 import type { Listed, Looked, Machine, Workspace } from './api'
 import App from './App'
+// Aliased: this file already calls the daemon's own reply `Answer`.
+import { Answer as SpendAnswer } from './components/Spend'
 import { spend, spendFast } from './contract.gen'
 
 afterEach(() => {
@@ -118,6 +123,67 @@ describe('the page opens holding a picker', () => {
   })
 })
 
+/** The row's own words: spend per session and per workspace. One `tokens` read
+ *  is one workspace's one session, so the answer has to name both. */
+describe('the two subjects of one answer', () => {
+  const session = spend.path.split('/').pop()!.replace('.jsonl', '')
+
+  it('names the workspace and the session it counted', async () => {
+    daemon(() => Promise.resolve({ status: 200, body: spend }))
+    render(<App />)
+    await ask()
+
+    await screen.findByText(/at prices of/)
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'yantra' }),
+    ).toBeTruthy()
+    const line = screen.getByText(/^session/)
+    expect(line.textContent).toContain(session)
+    expect(line.textContent).toContain('cachyos-g14')
+  })
+
+  it('labels each of the five counts in the strip', async () => {
+    daemon(() => Promise.resolve({ status: 200, body: spend }))
+    render(<App />)
+    await ask()
+
+    await screen.findByText(/at prices of/)
+    for (const label of [
+      'responses',
+      'input',
+      'output',
+      'cache write',
+      'cache read',
+    ]) {
+      expect(screen.getByText(label)).toBeTruthy()
+    }
+  })
+
+  /** D6 §5.1, which settles this page partly as a refusal: a fleet total costs
+   *  one ssh transcript read per workspace, on open. The page must not have
+   *  one, and must offer no way to ask for one. */
+  it('adds nothing up across workspaces', async () => {
+    const fetched = daemon(() => Promise.resolve({ status: 200, body: spend }))
+    render(<App />)
+    await ask()
+
+    await screen.findByText(/at prices of/)
+    expect(asked(fetched)).toHaveLength(1)
+    // One headline, under one workspace's name, and no band above either.
+    expect(screen.getAllByText(/at prices of/)).toHaveLength(1)
+    expect(
+      screen
+        .getAllByRole('heading', { level: 2 })
+        .map((one) => one.textContent),
+    ).toEqual(['Which workspace', 'yantra'])
+    // And nothing offers to go and read the rest of them: the shell's palette
+    // trigger and one ask are every button on the page.
+    expect(screen.getAllByRole('button').map((one) => one.textContent)).toEqual(
+      ['SearchCtrl K', 'Read spend'],
+    )
+  })
+})
+
 /** The measurement `price.rs` exists to make visible: a table written into a
  *  binary reports wrong money the day a rate changes, and the date beside the
  *  figure is the only thing that says so. */
@@ -174,6 +240,29 @@ describe('the figure', () => {
     // The counts are still the answer to what it used.
     expect(screen.getByText((84_950).toLocaleString())).toBeTruthy()
     expect(container.textContent).not.toContain('$')
+  })
+})
+
+/** D5 §6.1: the spend tab is this answer with the picker removed, so the two
+ *  have to be separable. Rendered on its own — no route, no picker, no read. */
+describe('what /w/{name} will reuse', () => {
+  it('draws the whole answer from an `Asked` alone', () => {
+    render(
+      <SpendAnswer
+        asked={{
+          asked: 'read',
+          at: new Date().toISOString(),
+          spend,
+          workspace: yantra,
+        }}
+      />,
+    )
+
+    expect(screen.getByText(/at prices of/).textContent).toContain(spend.as_of)
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'yantra' }),
+    ).toBeTruthy()
+    expect(screen.queryByLabelText('Workspace')).toBeNull()
   })
 })
 
