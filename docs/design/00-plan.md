@@ -166,6 +166,10 @@ three smaller than they were, and each is small enough that three documents woul
 > `tmux::Summary`, which carries `name`, `windows`, `attached` and `created` and **no repo** — so
 > adoption would have to guess the one field a workspace cannot do without. Refused rather than
 > deferred.
+>
+> **Its eight units are open**, minted the same day as **Y-314**…**Y-321**. Three of the four rows
+> this section pointed at gained children; Y-183 gained none, because a fleet total was refused
+> rather than designed.
 
 **This document could be folded into D5.** The cost of folding is one larger interview and one
 larger file; the cost of splitting is a cross-reference. Splitting is proposed. Say so if you want

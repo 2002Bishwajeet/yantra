@@ -341,6 +341,11 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 
 **D6.1 through D6.4 are unblocked and independent of each other.** D6.5 gates D6.6 and D6.7.
 
+> **2026-09-03: the owner minted all eight**, as **Y-314**…**Y-321** in the order above.
+> [Y-174](../../tracker.md#3-task-board) is D6.1–D6.3's parent, [Y-180](../../tracker.md#3-task-board)
+> is D6.4's, and [Y-179](../../tracker.md#3-task-board) is D6.5–D6.7's. [Y-183](../../tracker.md#3-task-board)
+> mints nothing, because §5 settled it as a refusal.
+
 **One thing worth doing that is not a row.** Re-measure §5.1's fan-out once a workspace exists on
 this machine again. The refusal does not depend on the number, but the number is what anyone
 reopening the question will ask for.
