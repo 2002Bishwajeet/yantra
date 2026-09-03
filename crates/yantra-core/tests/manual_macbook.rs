@@ -400,7 +400,7 @@ async fn the_transcript_advances_while_the_session_stays_detached() -> anyhow::R
             None => anyhow::bail!("{Q12} is gone from that tmux server; nothing left to read"),
         }
 
-        match logs::read(&ssh, Q12_REPO, Some(&session_id), 6).await {
+        match logs::read(&ssh, Q12_REPO, Some(&session_id), 6, 0).await {
             Ok(transcript) => {
                 println!(
                     "t+{:>3}s  mtime {}  idle {}s  turns {}",
