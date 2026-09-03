@@ -164,6 +164,13 @@ function fleet(
       data: workspaces.map((one) => ({ loaded: 'yes', ...one }) satisfies Listed),
     },
     '/api/sessions': { looked: 'never' },
+    // The band inside `Needs you` (Y-314). An empty queue keeps that group the
+    // workspace rows' alone, which is what these assertions are about.
+    '/api/attention': {
+      looked: 'ok',
+      age_seconds: 120,
+      data: { reviews: [], issues: [], notifications: 0 },
+    },
     ...Object.fromEntries(
       workspaces.map((one) => [
         `/api/workspaces/${one.name}/status`,

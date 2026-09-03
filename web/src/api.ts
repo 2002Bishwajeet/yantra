@@ -226,3 +226,29 @@ export type Dir = {
 }
 
 export type Listing = { machine: string; path: string; entries: Dir[] }
+
+/** `GET /api/attention` — what GitHub is waiting on, read through the `gh` CLI
+ *  where the daemon runs (Y-173). `refresh.rs` polls it every 300 s rather than
+ *  on the fleet's 30 s sweep, so this envelope's age is a different clock and
+ *  the band that draws it stamps itself
+ *  ([D6](../../docs/design/06-sessions-attention-spend.md) §2). */
+export type Attention = {
+  reviews: Item[]
+  issues: Item[]
+  /** A count and never a list: the titles are the part that would land in a
+   *  journal. That is a privacy property, not a layout choice. */
+  notifications: number
+}
+
+/** Which list an item is in *is* its kind, so it carries no field for one. */
+export type Item = {
+  // `owner/name`, the only spelling that is unique across GitHub.
+  repo: string
+  number: number
+  title: string
+  // GitHub's own web URL, carried rather than rebuilt from the parts — that is
+  // how a client gets `/issues` against `/pull` wrong.
+  url: string
+  // RFC 3339 as GitHub sent it. Aged against now, not against the look.
+  updated_at: string
+}
