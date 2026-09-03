@@ -6,6 +6,7 @@
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Attention,
   Broken,
   Listed,
   Listing,
@@ -340,6 +341,32 @@ export const oneReadiness = {
   },
   "looked": "ok"
 } satisfies Looked<Readiness>
+
+export const attention = {
+  "age_seconds": 0,
+  "data": {
+    "issues": [
+      {
+        "number": 118,
+        "repo": "2002Bishwajeet/yantra",
+        "title": "the fleet page draws an empty table while nobody has looked",
+        "updated_at": "2026-08-11T18:09:33Z",
+        "url": "https://github.com/2002Bishwajeet/yantra/issues/118"
+      }
+    ],
+    "notifications": 7,
+    "reviews": [
+      {
+        "number": 54,
+        "repo": "utopia-php/messaging",
+        "title": "feat: add the APNs adapter",
+        "updated_at": "2026-08-10T09:12:44Z",
+        "url": "https://github.com/utopia-php/messaging/pull/54"
+      }
+    ]
+  },
+  "looked": "ok"
+} satisfies Looked<Attention>
 
 export const notLooked = {
   "looked": "never"

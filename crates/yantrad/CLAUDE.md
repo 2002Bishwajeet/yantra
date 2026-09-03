@@ -403,9 +403,14 @@ literal is written. The write answers are serialised from their DTOs rather than
 handlers authorise a live tailnet caller and then await ssh; what that leaves unchecked is status
 codes, headers and every refusal body, none of which is JSON.
 
-**`/api/attention` is deliberately not in it yet.** An entry here has to `satisfies` a type in
-`web/src/api.ts`, and the dashboard does not read this route until Y-174 — so the fixture holds
-`attention: None` and the entry lands with the types that check it, in one change rather than two.
+**`/api/attention` is in it since Y-322**, and what it cost is the lesson. Y-173 shipped the route
+with `attention: None` because an entry has to `satisfies` a type in `web/src/api.ts` and no file
+read the route yet. Y-314 wrote those types by hand nine rows later, and Y-322 was a whole row to
+join them up. **Land a DTO and the type that checks it in one change**, which is why Y-307's
+`Transcript` arrived with its own entry rather than with a comment deferring one.
+
+**`/readiness/github` still holds `github: None`**, and that deferral has not expired: nothing in
+`web/src` reads that route, so there is no type for an entry to satisfy.
 
 **`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
