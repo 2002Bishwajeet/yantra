@@ -115,6 +115,20 @@ between those two facts is the same gap D4 filled.
 
 **Gate:** none. It can be written today.
 
+> **2026-09-03: written, as [D5](05-workspace-page.md).** All six questions above are settled in it,
+> and one of them turned out to be already answered — D3 §4.5 had ruled that the trust prompt is the
+> pane itself rather than a picture of one, so D5 §5.2 records that and asks only for the height prop
+> the component lacks.
+>
+> **Two corrections this document owes.** The read above is called `yantra logs --json`; **there is
+> no such flag** — `Logs` takes a workspace and a line count and prints text, and `doctor` is the
+> verb with `--json`. And *"nothing is cached"* understates the position: **nothing serves the
+> transcript at all**, so the daemon's 23 routes gain one.
+>
+> **What it costs to fetch has an answer now.** The far-side filter costs 0.02 s over a 15 MB
+> transcript and the ssh round trip costs 0.33 s, so reading *more* is free and asking *at all* is
+> not — which is why D5 reads on request and never polls.
+
 ---
 
 ## 6. D6 — sessions, attention and spend

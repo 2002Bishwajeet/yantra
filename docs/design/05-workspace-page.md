@@ -483,6 +483,9 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 
 **D5.1, D5.2 and D5.3 come first**, and the page is worth nothing without them.
 
+> **2026-09-03: the owner minted all nine**, as **Y-305**…**Y-313** in the order above.
+> [Y-198](../../tracker.md#3-task-board) stays as their parent and closes when they do.
+
 **Two things are worth doing that this document does not propose as rows.** Check whether
 `Usage.tsx`'s header comment or `router.ts` is the stale one (§9). And reconsider rendering the
 agent's Markdown (§4.1) **after** the page exists — the loss is real, the cost is a parser and a
