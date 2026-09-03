@@ -562,7 +562,56 @@ describe('the sessions section', () => {
       '0',
       'Thu Jul 30 13:02:31 2026',
       '',
+      'Kill',
     ])
+  })
+
+  /** Y-317. That the control asks first and reports an already-gone session as
+   *  a fact is `forms.test.tsx`'s; what the column owes is carrying both, and
+   *  naming the row it sits in rather than the first one on the page. */
+  it('kills the session its own row names, and says one that was already gone', async () => {
+    const asked = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        asked(init?.method, path)
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              machine: 'pi',
+              session: 'scratch',
+              killed: false,
+            }),
+        })
+      }),
+    )
+    render(
+      <DataTable
+        columns={sessionColumns({ looked: 'never' })}
+        rows={[
+          { machine: 'cachyos-g14', session },
+          { machine: 'pi', session: { ...session, name: 'scratch' } },
+        ]}
+        rowKey={(row) => `${row.machine} ${row.session.name}`}
+        empty="no tmux sessions"
+      />,
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kill' })[1]!)
+    expect(await screen.findByText('Kill scratch on pi?')).toBeTruthy()
+    expect(asked).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kill it' }))
+
+    expect(
+      await screen.findByText(/No session named scratch was running on pi/),
+    ).toBeTruthy()
+    expect(asked).toHaveBeenCalledWith(
+      'DELETE',
+      '/api/machines/pi/sessions/scratch',
+    )
   })
 })
 
