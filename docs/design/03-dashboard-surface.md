@@ -507,8 +507,7 @@ that loses its focus ring when the tokens change — the failure ADR-0014's seco
 
 ### 7.5 A workspace file that will not parse
 
-`yantra edit` cannot repair one: `update` loads before it writes, so the file is the fix (I-30,
-Y-137). Today the dashboard names the error and offers nothing, and you go to a terminal — which is
+`yantra edit` cannot repair one: `update` loads before it writes, so the file is the fix (Y-137). Today the dashboard names the error and offers nothing, and you go to a terminal — which is
 the founding UI principle broken in exactly one place.
 
 **`/w/{name}/repair` shows the file's bytes with the parse error beside them.** You edit and save.
@@ -609,6 +608,44 @@ reconcile. Keep them, and say in
 > is correct: it measures the branch this document was written on. §16's D3.12 asks for fonts under
 > 30 kB, and 29,400 B meets it. The table above still reads **76 kB** under *Now*, which is what
 > *now* meant on 2026-08-11 before this landed.
+
+> **The budget is met at 144.38 kB, and the unimported primitives were a weight problem after all.
+> Recorded 2026-08-22 (Y-194).** First load is the entry script and every `modulepreload` and
+> stylesheet `dist/index.html` names, gzip -9, decimal kB. It was **149.73 kB**; it is **144.38 kB**,
+> against the 145 kB ceiling. **Fonts are unchanged and are not in that figure.**
+>
+> | | before | after |
+> | --- | --- | --- |
+> | entry JS | 116.82 | 106.16 |
+> | Base UI core, preloaded | 13.63 | 13.63 |
+> | TanStack Query, preloaded | — | 8.31 |
+> | `button`, preloaded | — | 1.64 |
+> | react-dom, preloaded | 1.36 | 1.36 |
+> | CSS | 17.91 | 13.28 |
+> | **total** | **149.73** | **144.38** |
+>
+> **The paragraph above says the twenty-two unimported primitives are not a weight problem. For the
+> JS that is right, and for the CSS it is wrong.** Tailwind reads a file whether or not a route
+> imports it, so eleven primitives nothing can reach were worth **3.74 kB gzip** — a fifth of the
+> stylesheet — in rules for markup the browser never draws. **The files stay**, which is what this
+> section actually settles; `index.css` skips them in the scan and `motion.test.ts` recomputes the
+> list from the import graph, so importing one is enough to get its CSS back. A further **0.57 kB**
+> was the automatic scan reading `README.md`, `package.json` and the tests and taking an English word
+> for a class name — `.container`, `.hidden`, `.transition`, `.tabular-nums`. `source(none)` and two
+> `@source` lines end that.
+>
+> **`tailwind-merge` at 8.9 kB was the obvious cut and it is load-bearing.** Logging every `cn` call
+> across the suite found 22 distinct class strings where the merge drops a class, all in the ported
+> set: the table head keeps `text-muted-foreground` over `text-foreground`, the autocomplete input
+> keeps `h-9.5` over `h-8.5`, a badge keeps `border-border` over `border-transparent`, and
+> `text-body` beats `text-sm` — which is the extension D3 §5.4 needed. A `clsx`-only `cn` changes all
+> of them and no test sees it. It stays (§B1).
+>
+> **`/usage` is split and no other route pays to be.** It is worth 0.72 kB on its own. Splitting
+> `/machines` and `/m/$machine` beside it lands **1.34 kB above the unsplit build**, so those two
+> cost more than `/usage` saves — Y-197's reason, which the setup checklist already found: Rollup
+> hoists what they share with the fleet into preloaded chunks of their own, and many small gzip
+> streams lose the dictionary one large one shares.
 
 ### 9.2 What moves
 
@@ -804,6 +841,15 @@ file the unit reads, a config file beside `~/.config/yantra/workspaces/`, or a t
 and sends per-notification are three different answers with three different §B4 consequences.
 **Named, not decided.**
 
+> **Decided 2026-08-22 by the owner, and it is the first of the three: an environment file the unit
+> reads** — [ADR-0021](../adr/0021-the-relay-is-written-to-an-environment-file.md), built as
+> [Y-199](../../tracker.md#3-task-board). `/settings` and `yantra relay` write
+> `/etc/yantra/daemon.env` at mode `0600`, owned by the account `yantrad` runs as, and the unit hands
+> it back with `EnvironmentFile=`. **The daemon's read path does not change**, so a relay set here
+> reaches it at the next start, and the write sends a test message so the box says whether the topic
+> works. The ADR names both rules this bends — §B4's *never store secrets*, and Y-044's *the daemon
+> persists nothing* — and what the exposure is.
+
 ---
 
 ## 13. Notifications and the open page
@@ -889,11 +935,11 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 | **D3.26** | `/w/{name}/repair` (§7.5) | both refusals hold — a file that loads is refused, and bytes that still will not load are refused with the next error. **After §12.1's ADR** |
 | **D3.27** | The presence beacon suppresses ntfy (§13) | one event produces one notification while a tab is visible, and none of it survives a restart |
 | **D3.28** | Assertions gate, screenshots advise (§15) | every number in this document is asserted somewhere, and no image comparison fails CI |
-| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. **After §12.2 is decided** |
+| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. §12.2 is decided — [ADR-0021](../adr/0021-the-relay-is-written-to-an-environment-file.md) |
 
 **D3.1 and D3.2 come first.** Every other unit is cheaper once the page has an outline and a subject.
 
-**Two are blocked**: D3.26 on §12.1's ADR, and D3.29 on §12.2. Nothing else is.
+**One is blocked**: D3.26, on §12.1's ADR. D3.29 was, until §12.2 was decided above. Nothing else is.
 
 > **These twenty-nine units are thirteen rows.** The owner opened **M13** on 2026-08-11 and grouped
 > them, because `tracker.md` reserves Y-200 upward for the landing page and Y-187–Y-199 is what was
@@ -929,4 +975,5 @@ asked for"; [`docs/brainstorm.md:394`](../brainstorm.md); ADRs
 [0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),
 [0015](../adr/0015-resume-forks-the-conversation.md),
 [0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md); Q6; R-2, R-23; I-30, I-47, I-49.
+[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md),
+[0020](../adr/0020-a-raw-write-only-from-broken-to-valid.md); Q6; R-2, R-23; I-47, I-49.

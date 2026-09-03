@@ -5,7 +5,15 @@
  * runs no verb. The last test in this file is that rule: every entry the palette
  * offers is clicked, and the daemon is asked for nothing but readings.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import {
   cleanup,
   fireEvent,
@@ -83,7 +91,11 @@ function fleet(overrides: Record<string, Looked<unknown> | number> = {}) {
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
-      if (method !== 'GET') wrote.push(`${method} ${path}`)
+      // The shell's presence beacon is not the palette's doing (D3 §13), and
+      // every route under test carries it.
+      if (method !== 'GET' && path !== '/api/viewing') {
+        wrote.push(`${method} ${path}`)
+      }
       // The palette navigates, so pages this file never asserts on are drawn
       // anyway — and a reading nobody stubbed is one that has not happened.
       const answer = answers[path] ?? { looked: 'never' }
@@ -98,6 +110,11 @@ function fleet(overrides: Record<string, Looked<unknown> | number> = {}) {
   )
   return wrote
 }
+
+/** The overlay is a lazy chunk (Y-194), so the first summon resolved that
+ *  import inside its wait — 450 ms of the 1000 ms Testing Library allows, and
+ *  more than that beside twelve other suites. R-24's species. */
+beforeAll(() => import('@/components/PalettePopup'))
 
 const shortcut = () => fireEvent.keyDown(document, { key: 'k', metaKey: true })
 
@@ -171,6 +188,7 @@ describe('what it finds', () => {
       'Fleet',
       'Machines',
       'New workspace',
+      'Settings',
       'Usage',
     ])
   })
@@ -282,6 +300,7 @@ describe('a reading it does not have', () => {
       'Fleet',
       'Machines',
       'New workspace',
+      'Settings',
       'Usage',
     ])
   })

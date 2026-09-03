@@ -9,7 +9,6 @@ import { Fleet } from '@/routes/Fleet'
 import { Machines } from '@/routes/Machines'
 import { OneMachine } from '@/routes/OneMachine'
 import { Nowhere, Shell } from '@/routes/Shell'
-import { Usage } from '@/routes/Usage'
 
 /** A phone's app switcher shows the front of the title, so the route's own name
  *  goes first — every route was `Yantra` before Y-187. */
@@ -45,10 +44,22 @@ const made = createRoute({
   head: () => titled('New workspace'),
 })
 
+// Split for `/new`'s reason and no other: it is the third form, and `ui/field`
+// has no business on the first paint of a page nobody opens twice a year.
+const settings = createRoute({
+  getParentRoute: () => root,
+  path: '/settings',
+  component: lazyRouteComponent(() => import('@/routes/Settings'), 'Settings'),
+  head: () => titled('Settings'),
+})
+
+// Split, and it is the only one of the four eager routes that pays: measured at
+// 2.18 kB gzip off the first load, against `/machines` and `/m/$name`, which
+// cost more than they save for Y-197's reason (Y-194).
 const usage = createRoute({
   getParentRoute: () => root,
   path: '/usage',
-  component: Usage,
+  component: lazyRouteComponent(() => import('@/routes/Usage'), 'Usage'),
   head: () => titled('Usage'),
 })
 
@@ -61,8 +72,8 @@ const machine = createRoute({
   head: ({ params }) => titled(params.machine),
 })
 
-// The only split route, and it is split for one reason: xterm.js and its CSS
-// are a third of the bundle, and the fleet does not use them.
+// Split for the heaviest reason of any of them: xterm.js and its CSS are a
+// third of the bundle, and the fleet does not use them.
 const workspace = createRoute({
   getParentRoute: () => root,
   path: '/w/$name',
@@ -73,13 +84,24 @@ const workspace = createRoute({
   head: ({ params }) => titled(params.name),
 })
 
+// Split for `made`'s reason and one of its own: it draws the file as text,
+// which is the one surface no workspace that works ever opens (D3 §7.5).
+const repair = createRoute({
+  getParentRoute: () => root,
+  path: '/w/$name/repair',
+  component: lazyRouteComponent(() => import('@/routes/Repair'), 'Repair'),
+  head: ({ params }) => titled(`Repair ${params.name}`),
+})
+
 export const routeTree = root.addChildren([
   fleet,
   machines,
   made,
+  settings,
   usage,
   machine,
   workspace,
+  repair,
 ])
 
 /** The history is a parameter rather than a default, which is

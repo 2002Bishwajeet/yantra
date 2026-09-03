@@ -4,6 +4,10 @@ Documentation=https://github.com/2002Bishwajeet/yantra
 After=tailscaled.service
 
 [Service]
+# ADR-0021: the ntfy relay, which `yantra relay` and the dashboard's /settings
+# write. Optional with `-`, because a box with no relay is every deployment but
+# the appliance. systemd reads it as root, before the drop to User= below.
+EnvironmentFile=-/etc/yantra/daemon.env
 ExecStart=/usr/local/bin/yantrad
 User=yantra
 Restart=on-failure

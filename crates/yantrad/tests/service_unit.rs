@@ -136,6 +136,64 @@ fn systemds_default_restart_delay_would_leave_the_same_unit_failed() -> Result<(
     );
 }
 
+/// The synthetic relay of the test convention, so what is read back could have
+/// come from nowhere but the file this test wrote.
+const TOPIC: &str = "https://ntfy.example/a-topic-nobody-guesses";
+const TOKEN: &str = "tk_notarealtoken";
+
+/// [ADR-0021]'s claim about the unit, proved by the `systemd` that enforces it:
+/// the bytes `yantra_core::notify::write_to` produces, at the path
+/// `EnvironmentFile=` names, arrive in the daemon's environment — quoting and
+/// all.
+///
+/// **Only `ExecStart` is replaced**, because `yantrad` itself cannot start in
+/// here (nothing answers as `tailscale`), and the subject is the unit's own
+/// line rather than the binary. `Type=oneshot` so the start waits for it.
+///
+/// **The file is `0600` and owned by root here, and the value still arrives.**
+/// That is the mode's whole argument: `systemd` reads it before it drops to
+/// `User=yantra`, so nothing the daemon's account can read has to carry the
+/// token. On a real box the installer gives the file to that account anyway —
+/// [`installer.rs`](installer.rs) is where that is asserted — because the
+/// daemon must be able to *write* it.
+///
+/// [ADR-0021]: ../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md
+#[test]
+fn the_unit_hands_the_daemon_the_relay_that_was_written_to_its_environment_file() -> Result<()> {
+    let Some(fixture) = daemon_installed()? else {
+        return Ok(());
+    };
+
+    let written = std::env::temp_dir().join("yantra-service-unit-daemon.env");
+    yantra_core::notify::write_to(&written, TOPIC, Some(TOKEN))?;
+    fixture.run(&["mkdir", "-p", "/etc/yantra"])?;
+    fixture.copy_in(&written, "/etc/yantra/daemon.env")?;
+    assert_eq!(
+        fixture
+            .run(&["stat", "-c", "%a %U", "/etc/yantra/daemon.env"])?
+            .trim(),
+        "600 root"
+    );
+
+    fixture.run(&["mkdir", "-p", "/etc/systemd/system/yantrad.service.d"])?;
+    fixture.run(&[
+        "sh",
+        "-c",
+        "printf '[Service]\\nType=oneshot\\nRestart=no\\nExecStart=\\nExecStart=/bin/sh -c \
+         \"echo read $YANTRA_NTFY_URL $YANTRA_NTFY_TOKEN\"\\n' \
+         > /etc/systemd/system/yantrad.service.d/echo.conf",
+    ])?;
+    fixture.run(&["systemctl", "daemon-reload"])?;
+    fixture.run(&["systemctl", "start", "yantrad.service"])?;
+
+    let journal = fixture.journal("yantrad.service");
+    assert!(
+        journal.contains(&format!("read {TOPIC} {TOKEN}")),
+        "the unit did not hand the daemon what the file holds:\n{journal}"
+    );
+    Ok(())
+}
+
 /// R-12's install story for the agent, which has never had one. The binary is
 /// not built by this crate's test run, so what is asserted is the unit: it
 /// parses, it enables, and without the one file that carries `YANTRA_DAEMON` it

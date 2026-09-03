@@ -153,6 +153,92 @@ describe('a URL typed into the bar', () => {
   })
 })
 
+/** D3 §3.1: `/machines` compares, so the page about one machine draws none —
+ *  and drops no fact the comparison carried on its way to being a subject. */
+describe('one machine, as a subject', () => {
+  const asleep: Machine = {
+    ...laptop,
+    online: false,
+    expired: true,
+    // No zone, so `Stamp` prints it as it arrived — D3 §5.7.
+    last_seen: '4d ago',
+    heartbeat: {
+      age_seconds: 4000,
+      arch: 'x86_64',
+      labels: [],
+      free_ram_mb: 9000,
+      free_disk_mb: 100,
+      cpu_busy_pct: 15,
+      power: 'ac',
+    },
+  }
+
+  async function open(one: Machine) {
+    fleet({ '/api/machines': { looked: 'ok', age_seconds: 1, data: [one] } })
+    history.pushState(null, '', '/m/cachyos-g14')
+    render(<App />)
+    await screen.findByText('linux')
+  }
+
+  /** The machine's own block, which is the first `dl` on the page. Scoped
+   *  rather than searched for: the workspaces table repeats the same beat in
+   *  its MACHINE column, so a page-wide match proves nothing about this block. */
+  const about = () => document.querySelector('dl') as HTMLElement
+
+  const terms = () =>
+    [...about().querySelectorAll('dt')].map((one) => one.textContent)
+
+  it('keeps every fact the machines table carried', async () => {
+    await open(asleep)
+
+    // The name was the MACHINE column, linking to the page you are on; here it
+    // is the heading.
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'cachyos-g14' }),
+    ).toBeTruthy()
+    for (const fact of [
+      'linux',
+      'offline, key expired',
+      'asleep or off',
+      'beat 1h',
+      '4d ago',
+    ]) {
+      expect(about().textContent).toContain(fact)
+    }
+  })
+
+  it('draws them as terms rather than as a row in a table', async () => {
+    await open(asleep)
+
+    expect(terms()).toEqual(
+      expect.arrayContaining(['OS', 'STATUS', 'HEARTBEAT', 'LAST SEEN']),
+    )
+    // These three headers are `machineColumns` and nothing else on the page, so
+    // one of them is the comparison table still being drawn here.
+    for (const header of ['OS', 'HEARTBEAT', 'LAST SEEN']) {
+      expect(screen.queryByRole('columnheader', { name: header })).toBeNull()
+    }
+  })
+
+  it('says nothing about last seen while the machine is online, as the blank cell did', async () => {
+    await open(laptop)
+
+    expect(terms()).not.toContain('LAST SEEN')
+    expect(about().textContent).toContain('never heard from')
+  })
+
+  it('still says the tailnet has no machine of that name', async () => {
+    fleet({ '/api/machines': { looked: 'ok', age_seconds: 1, data: [] } })
+    history.pushState(null, '', '/m/cachyos-g14')
+
+    render(<App />)
+
+    expect(
+      await screen.findByText('This tailnet has no machine called cachyos-g14.'),
+    ).toBeTruthy()
+  })
+})
+
 /** D3 §3 and §5.2: three nav items, one `h1` per route, `h2` for a group, and a
  *  `<title>` that names where you are rather than what the app is. */
 describe('the outline', () => {
@@ -198,8 +284,11 @@ describe('the outline', () => {
     expect(await screen.findByText('Unclaimed sessions')).toBeTruthy()
     expect(document.title).toBe('Machines · Yantra')
 
+    // `/usage` is split (Y-194), so the heading arrives with the chunk rather
+    // than with the path.
     fireEvent.click(nav.getByRole('link', { name: 'usage' }))
     await waitFor(() => expect(location.pathname).toBe('/usage'))
+    await screen.findByRole('heading', { level: 1, name: 'Usage' })
     expect(outline().filter((one) => one.startsWith('H1 '))).toEqual([
       'H1 Usage',
     ])
