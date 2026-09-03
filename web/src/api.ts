@@ -96,9 +96,10 @@ export type Resumed = {
   term: string
 }
 
-/** The text frame a browser sends on `GET /api/workspaces/{name}/terminal`,
- *  first and on every resize. Binary frames either way are terminal bytes, and
- *  a text frame coming back is why the terminal could not be opened. */
+/** The text frame a browser sends on either terminal socket — one addressed by
+ *  workspace name, one by machine and session (ADR-0022) — first and on every
+ *  resize. Binary frames either way are terminal bytes, and a text frame coming
+ *  back is why the terminal could not be opened. */
 export type TerminalSize = {
   rows: number
   cols: number

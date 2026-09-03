@@ -37,7 +37,6 @@ use yantra_core::pty::{self, Terminal};
 use yantra_core::ssh::{Exec, Machine, Ssh};
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
-use yantra_core::workspace::Workspace;
 
 const SESSION: &str = "ptyspike";
 /// Long enough that only a signal can end it inside the test's lifetime, and
@@ -164,12 +163,8 @@ impl Lab {
     /// machine — the tmux path (I-34) — resolved against the real one.
     fn plan(&self) -> attach::Plan {
         attach::Plan {
-            workspace: Workspace {
-                name: SESSION.to_owned(),
-                machine: self.fixture.host().to_owned(),
-                repo: std::path::PathBuf::from("/tmp"),
-                startup: None,
-            },
+            machine: self.fixture.host().to_owned(),
+            session: SESSION.to_owned(),
             tmux: self.tmux.clone(),
             term: Chosen::Known(terminfo::FALLBACK.to_owned()),
         }
