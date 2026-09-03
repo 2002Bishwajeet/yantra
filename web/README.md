@@ -82,7 +82,9 @@ wired in. **Most of the other T3 copies hit it too** (Y-164, Y-166) —
 `scroll-area`, `select`, `sheet`, `toggle-group`, `tooltip` — but no route
 imports them, so they are absent from the bundle and only `npm test` compiles
 them, which is where their warnings appear. It is upstream's pattern, not a
-regression here.
+regression here — **and it is not only theirs**: the same default bails out
+wherever it is written, so `Terminal`'s `height` defaults at the use site rather
+than in the signature (Y-313), measured both ways.
 
 **A chunk reporting `0` is not a bail-out.** `npm run compiled` counts the
 sentinel per chunk, and the constant is emitted once and hoisted, so a lazily
@@ -596,6 +598,8 @@ src/
     Readiness.tsx    D2 §3.1's checks as three tones, and the one place the
                      daemon's `heartbeat` answer is reconciled with the
                      machines reading
+    Attention.tsx    the GitHub queue as a block inside `Needs you`, on the
+                     daemon's own 300 s clock; owns why `Age` is wrong here
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              vendored primitives. NEVER EDITED. Five are shadcn's CLI

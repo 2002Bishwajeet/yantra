@@ -9,6 +9,7 @@ import { Fleet } from '@/routes/Fleet'
 import { Machines } from '@/routes/Machines'
 import { OneMachine } from '@/routes/OneMachine'
 import { Nowhere, Shell } from '@/routes/Shell'
+import { asView, type View } from '@/views'
 
 /** A phone's app switcher shows the front of the title, so the route's own name
  *  goes first — every route was `Yantra` before Y-187. */
@@ -77,6 +78,12 @@ const machine = createRoute({
 const workspace = createRoute({
   getParentRoute: () => root,
   path: '/w/$name',
+  // D5 §3.3. The key is always written, because the root validates nothing and
+  // an unknown `?view=` would otherwise reach the page by inheritance; the type
+  // stays optional, so every existing link here still needs no search.
+  validateSearch: (search: Record<string, unknown>): { view?: View } => ({
+    view: asView(search.view),
+  }),
   component: lazyRouteComponent(
     () => import('@/routes/OneWorkspace'),
     'OneWorkspace',
