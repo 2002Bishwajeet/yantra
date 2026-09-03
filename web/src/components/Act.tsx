@@ -262,6 +262,34 @@ export function Confirm({
   )
 }
 
+/** The second verb a session row gets (D6 §4.3), now that
+ *  [ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)
+ *  has made `GET /api/machines/{machine}/sessions/{session}/terminal` reachable.
+ *
+ *  **It names what it will open and opens nothing yet.** D6 §6.3 asks the link
+ *  to say which shell it is about to attach to, because the address is now a
+ *  machine and a session and a typo lands in a live one; the row's own CREATED
+ *  cell carries the age. The page that draws the socket is Y-179's. */
+export function Terminal({
+  machine,
+  session,
+}: {
+  machine: string
+  session: string
+}) {
+  return (
+    <Button
+      aria-label={`Terminal for ${session} on ${machine}`}
+      className="w-fit"
+      disabled
+      size="sm"
+      variant="outline"
+    >
+      Terminal
+    </Button>
+  )
+}
+
 /** A session no workspace claims, which `down` cannot reach: every workspace
  *  verb takes a workspace name and this one has none (D3 §4.3). */
 export function Kill({

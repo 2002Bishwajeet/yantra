@@ -76,7 +76,7 @@ pub enum Error {
     Unusable,
 }
 
-/// A live attachment to a workspace's session.
+/// A live attachment to a session.
 ///
 /// Dropping it ends the local `ssh` and waits for it, which detaches the far
 /// side. The session itself outlives this — ending one is `down`'s.
@@ -98,14 +98,27 @@ impl std::fmt::Debug for Terminal {
 /// Attaches to `name`'s session for a caller sitting at `term`, in a window of
 /// `size`. Fails rather than creating anything when there is no session.
 pub async fn open(name: &str, term: &str, size: Size) -> Result<Terminal, Error> {
-    let plan = attach::plan(name, term).await?;
-    let machine = ssh::machine_at(&plan.workspace.machine).ok_or(attach::Error::NoStateDir)?;
+    started(attach::plan(name, term).await?, size)
+}
+
+/// The same for a session no workspace need name (ADR-0022).
+pub async fn open_session(
+    machine: &str,
+    session: &str,
+    term: &str,
+    size: Size,
+) -> Result<Terminal, Error> {
+    started(attach::plan_on(machine, session, term).await?, size)
+}
+
+fn started(plan: Plan, size: Size) -> Result<Terminal, Error> {
+    let machine = ssh::machine_at(&plan.machine).ok_or(attach::Error::NoStateDir)?;
     on(&Ssh::new(machine)?, &plan, size)
 }
 
 /// The testable half — everything after the plan is resolved.
 pub fn on(ssh: &Ssh, plan: &Plan, size: Size) -> Result<Terminal, Error> {
-    let remote = attach::remote_command(plan.tmux.path(), &plan.workspace.name, plan.term.term());
+    let remote = attach::remote_command(plan.tmux.path(), &plan.session, plan.term.term());
     let argv = ssh.tty_argv(&remote)?;
 
     let pair = native_pty_system()

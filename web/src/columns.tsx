@@ -8,7 +8,7 @@ import type {
   WorkspaceStatus,
 } from '@/api'
 import type { Reading } from '@/useLooked'
-import { Act, Actions, Kill, type Verb } from '@/components/Act'
+import { Act, Actions, Kill, Terminal, type Verb } from '@/components/Act'
 import { Ago, Stamp } from '@/components/Age'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
@@ -285,11 +285,16 @@ export function sessionColumns(
         return command && <Command command={command} />
       },
     },
-    // D6 §4.4: kill is the only verb this row gets. Adopting the session into a
-    // workspace would have to guess the repo, which `tmux::Summary` has not got.
+    // D6 §4.3: attach and kill, and no adoption — adopting would have to guess
+    // the repo, which `tmux::Summary` has not got (§4.4).
     {
       header: 'ACT',
-      cell: (row) => <Kill machine={row.machine} session={row.session.name} />,
+      cell: (row) => (
+        <div className="flex max-w-xs flex-col gap-2">
+          <Terminal machine={row.machine} session={row.session.name} />
+          <Kill machine={row.machine} session={row.session.name} />
+        </div>
+      ),
     },
   ]
 }

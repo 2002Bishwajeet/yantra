@@ -121,6 +121,29 @@ fn dashboard(configured: Option<PathBuf>) -> Result<Router, Error> {
     }
 }
 
+/// Apart from `serve` so a test can drive the whole tree without binding a
+/// port. What only the whole tree shows is the dashboard's reach: it is the
+/// fallback, so a path no route above it claims is answered by the app —
+/// which is what a miss under `/api` used to get (Y-169).
+fn app<I: Inventory + Clone + Send + Sync + 'static>(
+    fleet: heartbeat::Fleet,
+    authoriser: write::Authoriser<I>,
+    dashboard: Router,
+) -> Router {
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .nest(
+            "/api",
+            api::router()
+                .with_state(fleet.clone())
+                .merge(write::router(authoriser.clone(), fleet.clone()))
+                .merge(terminal::router(authoriser)),
+        )
+        .merge(heartbeat::router())
+        .with_state(fleet)
+        .fallback_service(dashboard)
+}
+
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
     // ADR-0017 §2: the set bound here is exactly the set a forwarded address may
@@ -143,18 +166,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         relay,
         fleet.viewers.clone(),
     );
-    let app = Router::new()
-        .route("/healthz", get(|| async { "ok" }))
-        .nest(
-            "/api",
-            api::router()
-                .with_state(fleet.clone())
-                .merge(write::router(authoriser.clone(), fleet.clone()))
-                .merge(terminal::router(authoriser)),
-        )
-        .merge(heartbeat::router())
-        .with_state(fleet)
-        .fallback_service(dashboard(web::from_env())?);
+    let app = app(fleet, authoriser, dashboard(web::from_env())?);
 
     let mut servers = tokio::task::JoinSet::new();
     for address in addresses {
@@ -290,6 +302,65 @@ mod tests {
     #[test]
     fn the_port_is_a_constant_not_configuration() {
         assert_eq!(PORT, 7717);
+    }
+
+    /// Y-169: the dashboard is the whole tree's fallback, so before this an
+    /// `/api` path no route claimed was answered by `index.html` with a 200 —
+    /// a client could not tell an absent route from a served page. Both halves
+    /// are asserted together because the fix has to keep the deep link working.
+    #[tokio::test]
+    async fn an_unknown_api_path_is_a_json_404_and_a_deep_link_is_still_the_app() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let dir = std::env::temp_dir().join("yantra-web-y169");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        std::fs::write(dir.join("index.html"), "<title>Yantra</title>").expect("index");
+        let app = app(
+            heartbeat::Fleet::default(),
+            write::Authoriser::new(Fake::default(), &[]),
+            dashboard(Some(dir)).expect("a directory with an index"),
+        );
+
+        let answer = |path: &'static str| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(
+                        Request::get(path)
+                            .body(Body::empty())
+                            .expect("a GET with no body is a valid request"),
+                    )
+                    .await
+                    .expect("the router is infallible");
+                let status = response.status();
+                let kind = response
+                    .headers()
+                    .get(axum::http::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+                    .await
+                    .expect("the body is in memory");
+                (status, kind, String::from_utf8_lossy(&body).into_owned())
+            }
+        };
+
+        for path in ["/api/readiness/nosuch", "/api/nosuch", "/api"] {
+            let (status, kind, body) = answer(path).await;
+            assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{path}: {body}");
+            assert!(kind.starts_with("application/json"), "{path}: {kind}");
+            assert!(body.contains("\"error\""), "{path}: {body}");
+        }
+
+        for path in ["/", "/m/cachyos-g14", "/w/yantra"] {
+            let (status, _, body) = answer(path).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
+            assert!(body.contains("Yantra"), "{path}: {body}");
+        }
     }
 
     fn nowhere() -> PathBuf {

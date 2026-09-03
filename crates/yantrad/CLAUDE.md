@@ -199,6 +199,12 @@ ADR-0021 carved.
 so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
 `index.html` rather than a 404, which is what makes a deep link work.
 
+**A miss under `/api` is the one path that does not reach it** (Y-169, I-64). A nested router with no
+fallback of its own hands the miss to the outer one, so an absent API route used to answer
+`200 text/html` — indistinguishable from a served page. `api::router` therefore carries a fallback of
+its own: a **JSON 404** in the `{"error": …}` shape every other error on this seam uses. The whole
+tree is composed in `main.rs`'s `app`, apart from `serve`, so a test can drive both halves at once.
+
 **The default build embeds nothing, and R-24 is why**: a build that wants `web/dist` unconditionally
 makes every `fmt`, `clippy`, `test` and musl cross-build job depend on npm. Y-140 added the other
 half for the appliance that wanted one file to copy, and every part of its shape exists to keep that
@@ -342,11 +348,21 @@ generalise the exception — a *read* that awaits ssh is still the bug that rule
 
 ## The route that hands a terminal over
 
-`GET /api/workspaces/{name}/terminal` upgrades to a WebSocket carrying
+`GET /api/workspaces/{name}/terminal` and, since
+[ADR-0022](../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md),
+`GET /api/machines/{machine}/sessions/{session}/terminal` upgrade to a WebSocket carrying
 [`pty::Terminal`](../yantra-core/src/pty.rs) (Y-129). **An upgrade is a `GET`, so it does not inherit
 the check above — and it is the route that most needs one.** `terminal.rs` calls `allowed()` by name
 before the upgrade rather than leaving a reader to notice: `up` starts a process Yantra chose, and a
 terminal runs whatever the person on the other end types.
+
+**Two addresses, one bridge, and the second is not a second terminal.** A workspace was only ever
+read for the machine and the session it names, so a caller holding both needs no workspace: the
+routes share `allowed()`, the protocol, the ping and `pty::Terminal`, and what differs is the
+`Target` a socket carries and the name a log line says. **It attaches and never creates**, so a
+session that went away between the list and the tap is refused by name. Read that ADR before
+narrowing it — a check on whether a workspace claims the session is the alternative it refuses, and
+`allowed()` is deliberately the whole of the protection.
 
 **The frames carry no envelope, because the protocol already carries two kinds.** Binary is terminal
 bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…,"term":…}`,
