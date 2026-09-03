@@ -288,6 +288,7 @@ Y-120 deleted everywhere else; the table is the count.
 | Y-319 | A session-addressed `plan` | ⬜ todo | — | Y-318 | **Done** when it takes a machine and a session, `remote_command` and `Tmux::pane` are unchanged, and a missing pane names the session rather than a workspace. `attach::plan` reads a workspace for two facts only. [D6](docs/design/06-sessions-attention-spend.md) §6.2. |
 | Y-320 | `GET /api/machines/{machine}/sessions/{session}/terminal` | ⬜ todo | — | Y-319 | **Done** when it bridges on the same `allowed()` as the workspace socket, and §4.2's ACT column gains a Terminal verb naming what it will open. [D6](docs/design/06-sessions-attention-spend.md) §6.2. |
 | Y-321 | The first load is still under budget | ⬜ todo | — | Y-314, Y-317 | **Done** when it is measured after the band and the ACT column land, against [D3](docs/design/03-dashboard-surface.md) §9.1's 145 KiB, and recorded. [D6](docs/design/06-sessions-attention-spend.md) §8. |
+| Y-324 | §5's ADR index is two rows behind `docs/adr/` | ⬜ todo | — | — | **Done** when ADR-0020 and ADR-0021 have rows carrying their decision, date and status. Both are accepted and cited elsewhere — [ADR-0020](docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) by Y-190, [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) by `CLAUDE.md` §B4. §5's own closing paragraph records it drifting four rows once before. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
