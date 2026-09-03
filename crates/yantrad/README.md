@@ -32,6 +32,7 @@ API the CLI cannot reach.
 | `POST /api/machines/{machine}/probe` | `yantra probe` |
 | `POST /api/machines/{machine}/dirs` | `yantra ls dirs` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
+| `POST /api/workspaces/{name}/logs` | `yantra logs` |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |

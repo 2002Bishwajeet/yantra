@@ -63,6 +63,7 @@ import type {
   Spend,
   Stopped,
   TerminalSize,
+  Transcript,
   Workspace,
   WorkspaceStatus,
 } from './api'

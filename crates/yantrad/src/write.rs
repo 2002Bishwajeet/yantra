@@ -110,6 +110,7 @@ where
         .route("/workspaces/{name}/down", post(stop::<I>))
         .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/workspaces/{name}/tokens", post(spent::<I>))
+        .route("/workspaces/{name}/logs", post(said::<I>))
         // The `GET` is here rather than in `api.rs` on purpose (ADR-0020): it
         // serves a file's bytes, which is the one thing the read model does not
         // publish, and it asks the same question the `POST` answers.
@@ -716,6 +717,40 @@ async fn spent<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(Spend::of(&spend)))
 }
 
+/// What the agent in this workspace has been saying — `yantra logs
+/// <workspace>` on the wire, a window at a time.
+///
+/// **A `POST` for [`spent`]'s reason** ([ADR-0019]), and it opens the same file:
+/// a transcript grows all session, so nothing may sweep this and nothing may
+/// poll it. Landing on the transcript tab is the request (D5 §4.3).
+///
+/// **The two empty cases are 409 rather than 404** — a workspace whose agent
+/// has written no turn is the world's answer and not a mistake, and its first
+/// message changes it (I-49). [`from_logs`] is the mapper [`spent`] already
+/// uses, because both routes read one file and fail in one set of ways.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn said<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    body: Option<Json<Window>>,
+) -> Result<Json<Transcript>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let Json(window) = body.unwrap_or_default();
+    tracing::info!("logs {name} for {}", caller.node);
+
+    let read = logs::logs(&name, window.lines, window.before)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_logs(&error),
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Transcript::of(&read)))
+}
+
 /// Stops a session by machine and name — the sessions `ls sessions` finds that
 /// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
 ///
@@ -1210,6 +1245,107 @@ impl Spend {
     }
 }
 
+/// Which records to read. A caller that sends no body gets the first window,
+/// which is what landing on the transcript tab asks for.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Window {
+    /// **Records, not turns** — the far side counts what it selected, and nine
+    /// of the last fifty measured as tool results the parse drops (D5 §2.3).
+    #[serde(default = "records")]
+    lines: usize,
+    /// How many newer records to skip, which is what `Older` asks for.
+    #[serde(default)]
+    before: usize,
+}
+
+/// D5 §4.4's window: fifty records, measured as forty-one turns.
+const fn records() -> usize {
+    50
+}
+
+impl Default for Window {
+    fn default() -> Self {
+        Self {
+            lines: records(),
+            before: 0,
+        }
+    }
+}
+
+/// One window of the conversation, projected to who spoke and what they said.
+///
+/// **The tool *results* are not here and never cross the wire** — they are the
+/// bulk of the file and the agent's input rather than its output (I-46).
+#[derive(Debug, serde::Serialize)]
+struct Transcript {
+    /// The file that was read, on the machine that wrote it — [`Spend`]'s field
+    /// of the same name, for the same reason.
+    path: String,
+    /// Every record the far side selected, counted before the window cut it
+    /// down. A caller that pages backwards compares this against its first read
+    /// to see that the conversation moved on (D5 §4.4).
+    total: usize,
+    turns: Vec<Turn>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Turn {
+    who: Speaker,
+    /// The record's own ISO-8601 instant. `null` on the few records that carry
+    /// none, which a reader draws as no time rather than as *unknown*.
+    at: Option<String>,
+    text: String,
+    tools: Vec<ToolCall>,
+}
+
+/// `you` and `claude`, which are `render_logs`'s own two words — there is no
+/// reason for the browser to invent two more (D5 §4.1).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Speaker {
+    You,
+    Claude,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ToolCall {
+    name: String,
+    /// The one string the call acted on, capped on the far side. `null` for a
+    /// tool whose input names none of the eight keys, which renders as the
+    /// name alone (D5 §4.2).
+    target: Option<String>,
+}
+
+impl Transcript {
+    fn of(read: &logs::Transcript) -> Self {
+        Self {
+            path: read.path.clone(),
+            total: read.total,
+            turns: read
+                .entries
+                .iter()
+                .map(|entry| Turn {
+                    who: match entry.who {
+                        logs::Who::User => Speaker::You,
+                        logs::Who::Assistant => Speaker::Claude,
+                    },
+                    at: entry.at.clone(),
+                    text: entry.text.clone(),
+                    tools: entry
+                        .tools
+                        .iter()
+                        .map(|call| ToolCall {
+                            name: call.name.clone(),
+                            target: call.target.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
 /// What these routes put on the wire, for the seam check in
 /// [`crate::contract`] — built rather than fetched, because every handler here
 /// authorises a real tailnet caller and then awaits ssh.
@@ -1275,6 +1411,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         ),
         ("spend", "Spend", of(&Spend::of(&transcript(0)))),
         ("spendFast", "Spend", of(&Spend::of(&transcript(3)))),
+        ("logs", "Transcript", of(&Transcript::of(&conversation()))),
         (
             "listing",
             "Listing",
@@ -1300,6 +1437,41 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             })),
         ),
     ]
+}
+
+/// Both turns a reader can meet, and every `null` under them: a stamp the
+/// record did not carry, and a call whose input names none of the eight keys.
+#[cfg(test)]
+fn conversation() -> logs::Transcript {
+    logs::Transcript {
+        path: "/home/<user>/.claude/projects/-home-<user>-Github-site/1f0c1a2e.jsonl".to_owned(),
+        modified: 1_785_522_600,
+        now: 1_785_522_642,
+        total: 1_944,
+        entries: vec![
+            logs::Entry {
+                who: logs::Who::User,
+                at: Some("2026-08-11T18:09:33.178Z".to_owned()),
+                text: "run the tests".to_owned(),
+                tools: Vec::new(),
+            },
+            logs::Entry {
+                who: logs::Who::Assistant,
+                at: None,
+                text: "Running them now.".to_owned(),
+                tools: vec![
+                    logs::Call {
+                        name: "Bash".to_owned(),
+                        target: Some("cargo nextest run --workspace".to_owned()),
+                    },
+                    logs::Call {
+                        name: "SendUserFile".to_owned(),
+                        target: None,
+                    },
+                ],
+            },
+        ],
+    }
 }
 
 /// A session on two models, one of which the price table does not carry, so the
@@ -2157,6 +2329,7 @@ mod tests {
             "/machines/pi/readiness",
             "/machines/pi/dirs",
             "/workspaces/site/tokens",
+            "/workspaces/site/logs",
         ] {
             let mut asked = Request::post(path).body(Body::empty()).expect("a POST");
             asked
@@ -2226,6 +2399,90 @@ mod tests {
         assert_eq!(
             from_logs(&logs::Error::NoStateDir),
             StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// **The row's real content is the 503**, so it is asserted whole rather
+    /// than by a substring: a machine that could not be asked must reach the
+    /// page naming the machine, the command it never reported on, and what ssh
+    /// itself said. A body that says *error* tells a reader nothing to act on.
+    ///
+    /// The two 409s beside it are the states D5 §4.5 draws as sentences rather
+    /// than as failures, and each carries the library's own words.
+    #[tokio::test]
+    async fn a_transcript_read_says_which_machine_could_not_be_asked() {
+        let absent = logs::Error::NoTranscript {
+            repo: "/home/<user>/Github/site".to_owned(),
+        };
+        let (status, said) = answered(from_logs(&absent), &absent).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("no agent transcript"), "{said}");
+
+        let turnless = logs::Error::NoTurnYet {
+            repo: "/home/<user>/Github/site".to_owned(),
+            session: "1f0c1a2e".to_owned(),
+        };
+        let (status, said) = answered(from_logs(&turnless), &turnless).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("session 1f0c1a2e"), "{said}");
+
+        let asleep = logs::Error::Ssh(yantra_core::ssh::Error::Transport {
+            host: "bishwajeets-macbook-pro".to_owned(),
+            diagnosis: "ssh: connect to host bishwajeets-macbook-pro port 22: No route to host"
+                .to_owned(),
+        });
+        let (status, said) = answered(from_logs(&asleep), &asleep).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            said,
+            "ssh to bishwajeets-macbook-pro failed before the command reported a status: \
+             ssh: connect to host bishwajeets-macbook-pro port 22: No route to host"
+        );
+    }
+
+    /// Landing on the transcript tab sends no body, and that is the first
+    /// window rather than a 400. A typo is refused, because a `lines` the
+    /// daemon silently ignored would draw the wrong window with no way to tell.
+    #[test]
+    fn a_transcript_read_with_no_body_asks_for_the_first_window() {
+        let landed = Window::default();
+        assert_eq!(landed.lines, 50);
+        assert_eq!(landed.before, 0);
+
+        let older: Window =
+            serde_json::from_str(r#"{"before":50}"#).expect("Older names only what it moves");
+        assert_eq!(older.lines, 50);
+        assert_eq!(older.before, 50);
+
+        serde_json::from_str::<Window>(r#"{"lnies":50}"#).expect_err("a typo is refused");
+    }
+
+    /// `you` and `claude` are the CLI's words and the browser reads the same
+    /// two. The nulls are the half worth pinning: a record with no stamp, and a
+    /// call whose input names none of the eight keys.
+    #[test]
+    fn the_projection_names_who_spoke_in_the_words_the_terminal_uses() {
+        let json = serde_json::to_value(Transcript::of(&conversation()))
+            .expect("a DTO of owned strings and numbers");
+
+        assert_eq!(json["total"], 1944, "records, and never turns");
+        assert_eq!(json["turns"][0]["who"], "you");
+        assert_eq!(json["turns"][1]["who"], "claude");
+        assert!(
+            json["turns"][1]["at"].is_null(),
+            "a record with no stamp draws no time"
+        );
+        assert_eq!(
+            json["turns"][1]["tools"][0]["target"],
+            "cargo nextest run --workspace"
+        );
+        assert!(
+            json["turns"][1]["tools"][1]["target"].is_null(),
+            "a call with no target renders as its name alone"
+        );
+        assert!(
+            !json.to_string().contains("toolUseResult"),
+            "the results are the bulk of the file and never cross the wire (I-46)"
         );
     }
 

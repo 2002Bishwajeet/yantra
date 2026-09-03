@@ -18,6 +18,7 @@ import type {
   Spend,
   Stopped,
   TerminalSize,
+  Transcript,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -434,6 +435,34 @@ export const spendFast = {
     "responses": 68
   }
 } satisfies Spend
+
+export const logs = {
+  "path": "/home/<user>/.claude/projects/-home-<user>-Github-site/1f0c1a2e.jsonl",
+  "total": 1944,
+  "turns": [
+    {
+      "at": "2026-08-11T18:09:33.178Z",
+      "text": "run the tests",
+      "tools": [],
+      "who": "you"
+    },
+    {
+      "at": null,
+      "text": "Running them now.",
+      "tools": [
+        {
+          "name": "Bash",
+          "target": "cargo nextest run --workspace"
+        },
+        {
+          "name": "SendUserFile",
+          "target": null
+        }
+      ],
+      "who": "claude"
+    }
+  ]
+} satisfies Transcript
 
 export const listing = {
   "entries": [

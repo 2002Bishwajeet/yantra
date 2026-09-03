@@ -245,9 +245,9 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,repair}` and `POST /api/relay` — **the CLI's own
-verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `repair` and
-`relay`. The daemon may do what `yantra` can already do, which is what stops it growing a richer API
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}` and `POST /api/relay` — **the CLI's
+own verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
+`repair` and `relay`. The daemon may do what `yantra` can already do, which is what stops it growing a richer API
 the CLI cannot reach. A new verb here starts in the CLI, and `yantra relay` was written before this
 route was.
 
@@ -313,6 +313,16 @@ be flattened here: [`tokens.rs`](../yantra-core/src/tokens.rs) sums on the far m
 written into a binary reports wrong money the day a rate changes. **An unpriced model is `null` and
 never `0`**, a fast-mode session withholds every dollar and keeps every token, and a session that
 has spent nothing has no figure at all. `render_tokens` in the CLI is the list to check against.
+
+**`logs` opens the same file and writes nothing either** (Y-307,
+[D5](../../docs/design/05-workspace-page.md) §9). It is a `POST` for the reason `tokens` is, it sits
+on the same authoriser and it shares `from_logs` — so the **two empty cases are `409`** and a machine
+that could not be asked is `503` carrying the ssh chain, which names the machine and what ssh said.
+The body is `{lines, before}` and both are optional; no body is the first fifty **records**, which
+measured as forty-one turns. The projection is the library's: who spoke, when, the text, and one
+`Call { name, target }` per tool. **The tool results never cross the wire** (I-46), and the target is
+capped on the far side, so widening either is an edit to
+[`logs.rs`](../yantra-core/src/logs.rs) rather than to this route.
 
 **`repair` is the one that writes bytes this daemon did not compose**, and
 [ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
@@ -441,7 +451,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Six things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Seven things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -464,7 +474,14 @@ probe beside it already costs. **A sweep would have needed an ADR** — eight se
 is a different decision from a probe's — so the shape is the licence, and widening it to recurse
 would spend a ruling that was never given.
 
-None of the six licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-307 is the seventh, and it reads the file `tokens` reads.** `POST /api/workspaces/{name}/logs`
+carries a window of the transcript to the page, and D5 §4.3 spends the licence the same way: landing
+on the transcript tab is the request, `Older` and `Refresh` are the only other reads, and nothing
+polls. §2.2 measured the far-side filter free over 15 MB and the ssh round trip at 0.33 s, so **the
+round trip is the whole cost** — which is the argument for reading a window on request and against
+reading one on a timer.
+
+None of the seven licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.
