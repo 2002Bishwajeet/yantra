@@ -31,9 +31,9 @@ pub enum Who {
 
 /// One turn, reduced to what a reader wants.
 ///
-/// `tools` names the tools an assistant turn invoked; the *results* never
-/// arrive, because they are the bulk of the file and are the agent's input
-/// rather than its output.
+/// `tools` names the tools an assistant turn invoked and what each acted on;
+/// the *results* never arrive, because they are the bulk of the file and are
+/// the agent's input rather than its output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub who: Who,
@@ -41,8 +41,40 @@ pub struct Entry {
     /// no timestamp.
     pub at: Option<String>,
     pub text: String,
-    pub tools: Vec<String>,
+    pub tools: Vec<Call>,
 }
+
+/// One tool call: the tool's name, and the one string it acted on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    pub name: String,
+    /// [`TARGET_KEYS`]'s first match in the call's input, capped by [`CAP`].
+    /// `None` for a tool whose input names none of them — `SendUserFile`, the
+    /// one miss measured over 200 records, whose `files` is a list.
+    pub target: Option<String>,
+}
+
+/// The keys a tool call's target is read from, in the order they are tried.
+/// Measured: this finds a target for 126 of 127 calls (D5 §4.2).
+const TARGET_KEYS: [&str; 8] = [
+    "command",
+    "file_path",
+    "path",
+    "pattern",
+    "url",
+    "query",
+    "description",
+    "prompt",
+];
+
+/// How much of a target survives. The median is 107 characters and the longest
+/// measured is 3,383, so this keeps the typical one whole (D5 §4.2). A cut one
+/// ends in [`CUT`] and the reader is not promised the rest.
+const CAP: usize = 120;
+
+/// What a cut target ends with. The whole command is in the terminal and in the
+/// file, and this projection never claims to be either.
+const CUT: char = '…';
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transcript {
@@ -248,7 +280,10 @@ fn entry(line: &str) -> Option<Entry> {
             for block in blocks {
                 match block {
                     Block::Text { text: said } => text.push(said),
-                    Block::ToolUse { name } => tools.push(name),
+                    Block::ToolUse { name, input } => tools.push(Call {
+                        name,
+                        target: target_in(&input),
+                    }),
                     Block::Other => {}
                 }
             }
@@ -266,6 +301,21 @@ fn entry(line: &str) -> Option<Entry> {
         text: text.join("\n").trim().to_owned(),
         tools,
     })
+}
+
+/// What one call acted on: the first of [`TARGET_KEYS`] the input spells with a
+/// string, capped. Forwarding the whole object instead would carry a `Write`'s
+/// file contents to a phone (D5 §4.2).
+fn target_in(input: &serde_json::Value) -> Option<String> {
+    let found = TARGET_KEYS
+        .iter()
+        .find_map(|key| input.get(key)?.as_str())?
+        .trim();
+    let mut target: String = found.chars().take(CAP).collect();
+    if found.chars().nth(CAP).is_some() {
+        target.push(CUT);
+    }
+    (!target.is_empty()).then_some(target)
 }
 
 /// Someone else's format, so unknown fields are tolerated as in
@@ -299,7 +349,13 @@ enum Block {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "tool_use")]
-    ToolUse { name: String },
+    ToolUse {
+        name: String,
+        /// Already on the wire — the far side drops tool *results*, not the
+        /// calls that asked for them (D5 §2.1).
+        #[serde(default)]
+        input: serde_json::Value,
+    },
     #[serde(other)]
     Other,
 }
@@ -365,7 +421,7 @@ mod tests {
         assert_eq!(said.at.as_deref(), Some("2026-07-28T18:20:30.543Z"));
 
         let replied = entry(
-            r#"{"type":"assistant","message":{"model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"I'll start by looking at the current repo state."},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},"timestamp":"2026-07-28T18:20:34.000Z"}"#,
+            r#"{"type":"assistant","message":{"model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"I'll start by looking at the current repo state."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test","description":"Run the test suite"}}]},"timestamp":"2026-07-28T18:20:34.000Z"}"#,
         )
         .expect("an assistant turn is a turn");
         assert_eq!(replied.who, Who::Assistant);
@@ -373,7 +429,84 @@ mod tests {
             replied.text,
             "I'll start by looking at the current repo state."
         );
-        assert_eq!(replied.tools, ["Bash"]);
+        assert_eq!(replied.tools, [call("Bash", Some("cargo test"))]);
+    }
+
+    fn call(name: &str, target: Option<&str>) -> Call {
+        Call {
+            name: name.to_owned(),
+            target: target.map(str::to_owned),
+        }
+    }
+
+    fn target_of(input: &str) -> Option<String> {
+        target_in(&serde_json::from_str(input).expect("the input is JSON"))
+    }
+
+    /// The list is ordered, so a `Grep` naming both is read by its `path` —
+    /// `path` comes before `pattern` in D5 §4.2's list.
+    #[test]
+    fn a_call_is_named_by_the_first_key_the_list_finds() {
+        assert_eq!(
+            target_of(r#"{"pattern":"Vec<Call>","path":"crates","output_mode":"content"}"#)
+                .as_deref(),
+            Some("crates")
+        );
+        assert_eq!(
+            target_of(r#"{"pattern":"Vec<Call>","output_mode":"content"}"#).as_deref(),
+            Some("Vec<Call>")
+        );
+        assert_eq!(
+            target_of(r#"{"file_path":"/srv/repo/src/api.ts","limit":40}"#).as_deref(),
+            Some("/srv/repo/src/api.ts")
+        );
+        assert_eq!(
+            target_of(r#"{"command":"cargo test","description":"Run the tests"}"#).as_deref(),
+            Some("cargo test")
+        );
+    }
+
+    /// `SendUserFile`'s `files` is a list, and it is the one call in 127 that
+    /// this list misses. It renders as its name alone.
+    #[test]
+    fn a_call_the_list_misses_carries_no_target() {
+        assert_eq!(target_of(r#"{"files":["a.png"],"notify":true}"#), None);
+        assert_eq!(target_of("{}"), None);
+        assert_eq!(
+            entry(
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"SendUserFile","input":{"files":["a.png"]}}]}}"#
+            )
+            .expect("a tool call is a turn")
+            .tools,
+            [call("SendUserFile", None)]
+        );
+    }
+
+    /// The cap is what keeps a `Write`'s file out of a phone's payload, so a
+    /// target that hits it has to say it was cut.
+    #[test]
+    fn a_target_longer_than_the_cap_is_cut_and_says_so() {
+        let whole = "x".repeat(CAP);
+        assert_eq!(
+            target_of(&format!(r#"{{"command":"{whole}"}}"#)).as_deref(),
+            Some(whole.as_str()),
+            "a target that exactly fills the cap is not cut"
+        );
+
+        let cut =
+            target_of(&format!(r#"{{"command":"{whole}y"}}"#)).expect("a command is a target");
+        assert_eq!(cut.chars().count(), CAP + 1);
+        assert!(cut.ends_with(CUT), "{cut}");
+        assert!(cut.starts_with(&whole), "{cut}");
+    }
+
+    /// The cap counts characters, and a command a person typed may hold none of
+    /// them in one byte. Cutting bytes would panic on the boundary.
+    #[test]
+    fn the_cap_counts_characters_rather_than_bytes() {
+        let wide = "漢".repeat(CAP + 10);
+        let cut = target_of(&format!(r#"{{"command":"{wide}"}}"#)).expect("a command is a target");
+        assert_eq!(cut.chars().count(), CAP + 1);
     }
 
     /// The other eleven types are the bulk of the file. Dropping them is the

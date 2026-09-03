@@ -29,7 +29,7 @@ const REAL_RECORDS: &[&str] = &[
     r#"{"type":"bridge-session","sessionId":"s","bridgeSessionId":"b","lastSequenceNum":0}"#,
     r#"{"parentUuid":"a","isSidechain":false,"promptId":"p","type":"user","message":{"role":"user","content":"fix the failing test"},"timestamp":"2026-07-28T18:20:30.543Z","cwd":"/tmp/logsrepo"}"#,
     r#"{"type":"ai-title","aiTitle":"Fix the failing test","sessionId":"s"}"#,
-    r#"{"type":"assistant","message":{"model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"Looking at the test first."},{"type":"tool_use","id":"t1","name":"Read","input":{}}]},"timestamp":"2026-07-28T18:20:34.000Z"}"#,
+    r#"{"type":"assistant","message":{"model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"Looking at the test first."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/tmp/logsrepo/tests/api.rs","limit":40}}]},"timestamp":"2026-07-28T18:20:34.000Z"}"#,
     r#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"a very large file"}]},"toolUseResult":{"stdout":"a very large file"}}"#,
     r#"{"type":"file-history-snapshot","messageId":"m","snapshot":{},"isSnapshotUpdate":false}"#,
     r#"{"type":"pr-link","sessionId":"s","prNumber":1,"prUrl":"u","prRepository":"r"}"#,
@@ -129,7 +129,14 @@ async fn only_the_turns_survive_the_trip() -> Result<()> {
     assert_eq!(transcript.entries[0].text, "fix the failing test");
     assert_eq!(transcript.entries[1].who, Who::Assistant);
     assert_eq!(transcript.entries[1].text, "Looking at the test first.");
-    assert_eq!(transcript.entries[1].tools, ["Read"]);
+    assert_eq!(
+        transcript.entries[1].tools,
+        [logs::Call {
+            name: "Read".to_owned(),
+            target: Some("/tmp/logsrepo/tests/api.rs".to_owned()),
+        }],
+        "the call's input crossed the wire inside the record that holds it"
+    );
     Ok(())
 }
 
