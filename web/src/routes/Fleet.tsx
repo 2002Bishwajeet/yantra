@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import type { Listed, Machine, MachineSessions } from '@/api'
+import type { Attention, Listed, Machine, MachineSessions } from '@/api'
 import {
   type AgentRow,
   agentDetail,
@@ -11,6 +11,7 @@ import {
   workspaceColumns,
 } from '@/columns'
 import { Actions } from '@/components/Act'
+import { AttentionBand } from '@/components/Attention'
 import { DataTable } from '@/components/DataTable'
 import { Footer } from '@/components/Footer'
 import { Section } from '@/components/Section'
@@ -26,6 +27,7 @@ import {
   agentOf,
   BANDS,
   type Band,
+  speaks,
   unclaimed,
   unreachable,
   work,
@@ -102,6 +104,9 @@ export function Fleet() {
   const workspaces = loaded(listed)
   const sessions = useLooked<MachineSessions[]>('/api/sessions')
   const agents = useAgents(workspaces)
+  // A fifth, and it is on the daemon's 300 s clock rather than the 30 s sweep
+  // — which is why it stamps itself rather than joining the footer's figure.
+  const attention = useLooked<Attention>('/api/attention')
   // The name, not the row: the workspace the form edits comes from the reading
   // every 30 s, so holding the row would edit against a copy of it.
   const [editing, setEditing] = useState<string | null>(null)
@@ -160,9 +165,13 @@ export function Fleet() {
           )}
           {BANDS.map(({ band, title }) => {
             const rows = placed.filter((row) => row.band === band)
-            if (rows.length === 0) return null
+            const queue = band === 'needs' ? attention : null
+            // D6 §3.1: both empty leaves `Needs you` empty, but a queue that
+            // could not be read is not empty and still has to be drawn.
+            if (rows.length === 0 && !(queue && speaks(queue))) return null
             return (
               <Group
+                attention={queue}
                 band={band}
                 edit={setEditing}
                 key={band}
@@ -230,6 +239,7 @@ function Group({
   sessions,
   edit,
   machines,
+  attention,
 }: {
   band: Band
   title: string
@@ -237,6 +247,7 @@ function Group({
   sessions: Reading<MachineSessions[]>
   edit: (name: string) => void
   machines: Reading<Machine[]>
+  attention: Reading<Attention> | null
 }) {
   const [open, setOpen] = useState(false)
   const collapses = band === 'idle' && rows.length > IDLE_SHOWN
@@ -247,9 +258,13 @@ function Group({
     <section className="flex flex-col gap-1">
       <h2 className="flex items-baseline gap-2 border-t pt-3 font-heading text-lg leading-snug font-medium">
         {title}
-        <span className="text-muted-foreground font-mono text-xs">
-          {rows.length}
-        </span>
+        {/* The count is of the rows below it, so a band holding only the
+            attention block does not claim a nought. */}
+        {rows.length > 0 && (
+          <span className="text-muted-foreground font-mono text-xs">
+            {rows.length}
+          </span>
+        )}
       </h2>
       <ul>
         {shown.map((row) => (
@@ -291,6 +306,7 @@ function Group({
           )}
         </div>
       )}
+      {attention && <AttentionBand reading={attention} />}
     </section>
   )
 }
