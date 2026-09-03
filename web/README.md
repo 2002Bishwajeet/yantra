@@ -2,10 +2,10 @@
 
 Seven routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every machine compared at `/machines`, one machine at
-`/m/$machine`, a workspace and its terminal at `/w/$name`, its file at
-`/w/$name/repair`, the create form at `/new`, spend at `/usage` and the ntfy
-relay at `/settings`. `⌘K` reaches the seven a working workspace has and runs no
-verb; the palette lists only workspaces that loaded, so a broken one is reached
+`/m/$machine`, a workspace's terminal, transcript and spend at `/w/$name`, its
+file at `/w/$name/repair`, the create form at `/new`, spend at `/usage` and the
+ntfy relay at `/settings`. `⌘K` reaches the seven a working workspace has and
+runs no verb; the palette lists only workspaces that loaded, so a broken one is reached
 from its own page.
 The readings poll on TanStack Query; the forms and every workspace row write.
 
@@ -85,6 +85,14 @@ them, which is where their warnings appear. It is upstream's pattern, not a
 regression here — **and it is not only theirs**: the same default bails out
 wherever it is written, so `Terminal`'s `height` defaults at the use site rather
 than in the signature (Y-313), measured both ways.
+
+**A component the compiler kept can still stop redrawing.** Memoised JSX is
+reused where its props did not move, and a clock that only bumped a counter
+therefore ticked while the stamp beside it stayed at `0s` — measured on `/usage`,
+which had shipped that way since Y-199. So [`useTick`](src/useTick.ts) returns the
+instant it last ticked and [`Stamp`](src/components/Age.tsx) takes it as a prop:
+the clock is a value the compiler can see change, not a re-render it cannot. The
+answer it stamps is `Spend.tsx`'s, so both `/usage` and the spend tab tick.
 
 **A chunk reporting `0` is not a bail-out.** `npm run compiled` counts the
 sentinel per chunk, and the constant is emitted once and hoisted, so a lazily
@@ -262,6 +270,24 @@ decisions, each of which could reasonably have gone the other way:
 would make it indistinguishable from something the session printed, so it is drawn
 as an alert beside the terminal. A close with nothing said is not an error at all,
 and is what reconnect turns on.
+
+## The transcript (Y-309)
+
+`Transcript.tsx` draws `POST /api/workspaces/{name}/logs` — what the agent said,
+as turns of `you` and `claude` with the tool calls between them.
+[D5](../docs/design/05-workspace-page.md) §4 settles it; four things about the
+code are not obvious from it:
+
+- **The state lives in `OneWorkspace`, not in the tab.** Only the open tab is
+  mounted, so a component holding its own answer would re-read on every return
+  from the terminal — and a read is an ssh. `useTranscript` is the page's, and
+  the tab that mounts is what asks it to read.
+- **Text is rendered as text.** No Markdown parser, so a bulleted plan reads as
+  asterisks. That is D5 §4.1's decision and its cost: a parser inside a held
+  budget, an XSS surface on text a machine wrote, and a highlighter after it.
+- **`Older` asks for what is left.** Windows are `tail -n {lines + before} | head
+  -n {lines}`, so past the start of the file `tail` stops skipping and a full
+  window would repeat what is drawn. The last one asks for `total - asked`.
 
 ## Reconnect (Y-132)
 
@@ -566,6 +592,11 @@ src/
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
   useLooked.ts       the readings — every class and every agent, on TanStack
                      Query — and the three derivations the routes share
+  useTranscript.ts   one workspace's transcript, read on request and held by
+                     the page rather than by the tab that draws it
+  useTick.ts         the one-second clock two read-on-request pages stamp
+                     against. It returns the instant rather than re-rendering,
+                     which is the compiler note above
   router.ts          TanStack Router: three routes, `notFoundComponent`, and
                      `getRouter(history)` so a test can drive a memory history
   columns.tsx        four Column<T>[] arrays: the four tables, as data, plus
@@ -574,8 +605,9 @@ src/
     Shell.tsx        the heading and the `<Outlet/>`, plus `Nowhere`
     Fleet.tsx        `/` — the five sections and the edit form
     OneMachine.tsx   `/m/$machine` — the same readings, filtered to one
-    OneWorkspace.tsx `/w/$name` — the workspace, which is its terminal. The one
-                     code-split route: xterm.js is a third of the bundle
+    OneWorkspace.tsx `/w/$name` — one workspace as three tabs the URL carries,
+                     and the transcript's answer, held across a tab switch. The
+                     one code-split route: xterm.js is a third of the bundle
   test/
     inQuery.tsx      `renderHookQueried` — a client per call, for a hook that
                      reads one out of context
@@ -593,6 +625,8 @@ src/
                      first paint
     Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
                      drops. Key it on the name
+    Transcript.tsx   the turns of one window of the agent's transcript, its
+                     tool calls, `Older`, and what it says when there are none
     Spend.tsx        `Answer` and `Figure` — one workspace's one session, in
                      T3 Code's usage-page shape. `/usage` and the spend tab
                      draw the same figure; only `/usage` has a picker

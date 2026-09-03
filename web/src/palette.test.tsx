@@ -33,11 +33,15 @@ afterEach(() => {
 
 // The same three stubs `router.test.tsx` needs, and for the same reasons:
 // jsdom implements no `scrollTo`, and `DataTable` and xterm.js both ask
-// `matchMedia`.
+// `matchMedia`. Two query shapes, both answered against a 1280 px window —
+// `DataTable`'s `(width < 48rem)` and the workspace tabs' `(min-width: 768px)`,
+// which is what lands a palette navigation on the terminal (D5 §3.3).
 beforeEach(() => {
   vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: 1280 < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16,
+    matches: /rem/.test(query)
+      ? 1280 < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16
+      : Number(/([\d.]+)px/.exec(query)?.[1]) <= 1280,
     addEventListener: () => {},
     removeEventListener: () => {},
     addListener: () => {},

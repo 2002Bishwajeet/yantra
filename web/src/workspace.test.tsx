@@ -17,6 +17,7 @@ import {
 import type { Listed } from './api'
 import App from './App'
 import { Terminal } from './components/Terminal'
+import { logs } from './contract.gen'
 
 afterEach(() => {
   cleanup()
@@ -32,9 +33,10 @@ const yantra: Listed = {
   startup: null,
 }
 
-/** The workspace list, which this page reads before it opens anything. Every
- *  other path answers `never`, so a reading added to the page later cannot make
- *  this file fail for a reason that is not its subject. */
+/** The workspace list, which this page reads before it opens anything, and one
+ *  window of the transcript for the tab that reads on open. Every other path
+ *  answers `never`, so a reading added to the page later cannot make this file
+ *  fail for a reason that is not its subject. */
 function daemon() {
   vi.stubGlobal(
     'fetch',
@@ -49,7 +51,9 @@ function daemon() {
           Promise.resolve(
             path === '/api/workspaces'
               ? { looked: 'ok', age_seconds: 1, data: [yantra] }
-              : { looked: 'never' },
+              : path === '/api/workspaces/yantra/logs'
+                ? logs
+                : { looked: 'never' },
           ),
       })
     }),
@@ -145,9 +149,9 @@ describe('the three tabs of one workspace', () => {
   it('lands a narrow window in the transcript, and opens no socket', async () => {
     const { asked } = open('/w/yantra', PHONE)
 
-    expect(
-      await screen.findByText('The transcript is not built yet.'),
-    ).toBeTruthy()
+    // The transcript's own reads are `transcript.test.tsx`'s subject; what
+    // matters here is that the tab drew and the pane did not.
+    expect(await screen.findByText('run the tests')).toBeTruthy()
     expect(openTab()).toBe('transcript')
     expect(screen.queryByText('Terminal — yantra')).toBeNull()
     expect(asked).toEqual([])
@@ -188,7 +192,7 @@ describe('the three tabs of one workspace', () => {
 
     expect(watched).not.toContain('(min-width: 768px)')
     expect(screen.getByText('Terminal — yantra')).toBeTruthy()
-    expect(screen.queryByText('The transcript is not built yet.')).toBeNull()
+    expect(screen.queryByText('run the tests')).toBeNull()
   })
 
   /** D5 §3.4: three tabs of one page are one place. Back walking them is how a
