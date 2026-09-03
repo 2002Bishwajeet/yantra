@@ -596,6 +596,8 @@ src/
     Readiness.tsx    D2 §3.1's checks as three tones, and the one place the
                      daemon's `heartbeat` answer is reconciled with the
                      machines reading
+    Attention.tsx    the GitHub queue as a block inside `Needs you`, on the
+                     daemon's own 300 s clock; owns why `Age` is wrong here
     Status.tsx       tone -> appearance; the only file that knows about colour
     Age.tsx          age_seconds -> <time>; owns the staleness threshold
     ui/              vendored primitives. NEVER EDITED. Five are shadcn's CLI

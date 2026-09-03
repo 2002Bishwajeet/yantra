@@ -1,4 +1,5 @@
 import type {
+  Attention,
   Listed,
   MachineSessions,
   Session,
@@ -147,6 +148,17 @@ export function unclaimed(
           .filter((row) => !claimed.has(`${row.machine} ${row.session.name}`))
       : [],
   )
+}
+
+/** Whether the attention band has anything to say, which is what decides
+ *  whether `Needs you` draws at all with no workspace row in it. D6 §3.1: an
+ *  empty queue adds no second sentence about GitHub having nothing. A look that
+ *  failed or has not landed is not empty, and D3 §7.1 refuses to draw either as
+ *  nothing to do. */
+export function speaks(attention: Reading<Attention>): boolean {
+  if (attention.looked !== 'ok') return true
+  const { reviews, issues, notifications } = attention.data
+  return reviews.length + issues.length + notifications > 0
 }
 
 /** D3 §7.2. Off the tailnet the service worker serves the shell and every fetch
