@@ -233,7 +233,7 @@ describe('the height of the terminal', () => {
     viewport(LAPTOP)
     quietSocket()
 
-    render(<Terminal name="yantra" height="12rem" onClose={() => {}} />)
+    render(<Terminal target={{ workspace: 'yantra' }} height="12rem" onClose={() => {}} />)
 
     expect(pane()?.style.height).toBe('12rem')
   })

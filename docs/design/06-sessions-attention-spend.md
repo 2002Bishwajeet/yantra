@@ -194,6 +194,14 @@ to kill* rather than reporting a failure.
 
 The same column holds a **Terminal** link once §6's ADR lands. Until then the column holds one verb.
 
+> **2026-09-04, [Y-179](../../tracker.md#3-task-board): the link goes to a route, which §8's table
+> did not list.** §8 named a `plan`, a daemon route and the ADR, and it read the browser's half as
+> one column. The link needs somewhere to land: `/m/{machine}/s/{session}`, split, drawing
+> `Terminal.tsx` on the session address. **`/machines` is eager**, so a terminal in its own column
+> would put xterm.js on the first load of a page that attaches to nothing. Nothing else was added —
+> `Terminal.tsx` takes the two addresses as one `Target`, which is §6.2's refusal of a second
+> terminal, held.
+
 ### 4.4 Adoption is refused, and the reason is a guess nobody should make
 
 > **Owner, 2026-09-03:** no adoption.

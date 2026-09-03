@@ -269,7 +269,9 @@ export function Confirm({
  *  **It names what it will open and opens nothing yet.** D6 §6.3 asks the link
  *  to say which shell it is about to attach to, because the address is now a
  *  machine and a session and a typo lands in a live one; the row's own CREATED
- *  cell carries the age. The page that draws the socket is Y-179's. */
+ *  cell carries the age. Nothing connects here: `/m/{machine}/s/{session}` is
+ *  where the socket is, and it is a link so that a middle-click and a copied
+ *  address work as they do everywhere else (D5 §3.2). */
 export function Terminal({
   machine,
   session,
@@ -281,7 +283,9 @@ export function Terminal({
     <Button
       aria-label={`Terminal for ${session} on ${machine}`}
       className="w-fit"
-      disabled
+      render={
+        <Link params={{ machine, session }} to="/m/$machine/s/$session" />
+      }
       size="sm"
       variant="outline"
     >

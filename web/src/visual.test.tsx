@@ -124,8 +124,8 @@ describe('numeric cells take the monospace stack', () => {
     expect(figures.every((one) => one.getAttribute('title'))).toBe(true)
   })
 
-  it('monospaces the session counts and shows tmux verbatim', () => {
-    const { container } = render(
+  it('monospaces the session counts and shows tmux verbatim', async () => {
+    const { container } = await renderRouted(
       <DataTable
         columns={sessionColumns({ looked: 'never' })}
         rows={[{ machine: 'cachyos-g14', session }]}
@@ -187,8 +187,8 @@ describe('four marks', () => {
 
 /** D3 §5.4 and §5.6, as the classes the tokens are reached through. */
 describe('type and density at the call sites', () => {
-  it('labels columns small, tracked and muted, and keeps them uppercase', () => {
-    const { container } = render(
+  it('labels columns small, tracked and muted, and keeps them uppercase', async () => {
+    const { container } = await renderRouted(
       <DataTable
         columns={sessionColumns({ looked: 'never' })}
         rows={[{ machine: 'cachyos-g14', session }]}
@@ -204,8 +204,8 @@ describe('type and density at the call sites', () => {
     expect(label?.className).toContain('text-muted-foreground')
   })
 
-  it('sets a row to the height token rather than to a number', () => {
-    const { container } = render(
+  it('sets a row to the height token rather than to a number', async () => {
+    const { container } = await renderRouted(
       <DataTable
         columns={sessionColumns({ looked: 'never' })}
         rows={[{ machine: 'cachyos-g14', session }]}

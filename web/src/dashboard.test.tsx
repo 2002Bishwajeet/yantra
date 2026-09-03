@@ -545,8 +545,8 @@ describe('the sessions section', () => {
     expect(screen.queryByText('refresh stuck')).toBeNull()
   })
 
-  it('renders attached as the client count rather than a yes or no', () => {
-    const { container } = render(
+  it('renders attached as the client count rather than a yes or no', async () => {
+    const { container } = await renderRouted(
       <DataTable
         columns={sessionColumns({ looked: 'never' })}
         rows={[{ machine: 'cachyos-g14', session }]}
@@ -568,9 +568,12 @@ describe('the sessions section', () => {
 
   /** Y-320. ADR-0022 made the socket's address a machine and a session, so a
    *  typo lands in a live shell; D6 §6.3 answers that by having the verb name
-   *  what it will open before anything opens. */
-  it('names the session and the machine the terminal would attach to', () => {
-    render(
+   *  what it will open before anything opens.
+   *
+   *  **Y-179 made it a link**, which is D6 §4.3's own word for it: the name is
+   *  the one the row shipped with, and the role is what changed. */
+  it('names the session and the machine the terminal would attach to', async () => {
+    await renderRouted(
       <DataTable
         columns={sessionColumns({ looked: 'never' })}
         rows={[
@@ -583,11 +586,13 @@ describe('the sessions section', () => {
     )
 
     expect(
-      screen.getByRole('button', { name: 'Terminal for scratch on pi' }),
+      screen.getByRole('link', { name: 'Terminal for scratch on pi' }),
     ).toBeTruthy()
     expect(
-      screen.getByRole('button', { name: 'Terminal for yantra on cachyos-g14' }),
-    ).toBeTruthy()
+      screen
+        .getByRole('link', { name: 'Terminal for yantra on cachyos-g14' })
+        .getAttribute('href'),
+    ).toBe('/m/cachyos-g14/s/yantra')
   })
 
   /** Y-317. That the control asks first and reports an already-gone session as
@@ -611,7 +616,7 @@ describe('the sessions section', () => {
         })
       }),
     )
-    render(
+    await renderRouted(
       <DataTable
         columns={sessionColumns({ looked: 'never' })}
         rows={[

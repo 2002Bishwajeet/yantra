@@ -132,6 +132,27 @@ describe('a URL typed into the bar', () => {
     expect(asked).toEqual(['ws://localhost:3000/api/workspaces/yantra/terminal'])
   })
 
+  /** **Y-179**, and the address ADR-0022 widened: no workspace is read, and
+   *  nothing on the path is looked up before the socket. */
+  it('opens a session terminal on the machine and the session the path names', async () => {
+    fleet()
+    const asked = quietSocket()
+    history.pushState(null, '', '/m/cachyos-g14/s/scratch')
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', {
+        level: 1,
+        name: 'scratch on cachyos-g14',
+      }),
+    ).toBeTruthy()
+    expect(asked).toEqual([
+      'ws://localhost:3000/api/machines/cachyos-g14/sessions/scratch/terminal',
+    ])
+    expect(document.title).toBe('scratch on cachyos-g14 · Yantra')
+  })
+
   /** The daemon falls every unknown path back to `index.html`, so this arrives
    *  as a page and drawing the fleet for it would make the address bar a lie.
    *  `/settings` used to be the path here; D3 §3 routes it, so this asks for one
@@ -241,6 +262,50 @@ describe('one machine, as a subject', () => {
     expect(
       await screen.findByText('This tailnet has no machine called cachyos-g14.'),
     ).toBeTruthy()
+  })
+
+  /** **Y-179.** The verb Y-320 drew disabled now goes somewhere, and it opens
+   *  nothing on the way: a machine's session list holds one ssh per row and D5
+   *  §3.5's rule is that nothing attaches until a person asks. */
+  it('reaches a session terminal from the row, and opens no socket before the tap', async () => {
+    fleet({
+      '/api/sessions': {
+        looked: 'ok',
+        age_seconds: 1,
+        data: [
+          {
+            machine: 'cachyos-g14',
+            reached: 'yes',
+            sessions: [
+              {
+                name: 'scratch',
+                windows: 2,
+                attached: 0,
+                created: 'Thu Jul 30 13:02:31 2026',
+              },
+            ],
+          },
+        ],
+      },
+    })
+    const asked = quietSocket()
+    history.pushState(null, '', '/m/cachyos-g14')
+    render(<App />)
+
+    const open = await screen.findByRole('link', {
+      name: 'Terminal for scratch on cachyos-g14',
+    })
+    expect(asked).toEqual([])
+
+    fireEvent.click(open)
+
+    await waitFor(() =>
+      expect(location.pathname).toBe('/m/cachyos-g14/s/scratch'),
+    )
+    expect(await screen.findByText('Terminal — scratch on cachyos-g14')).toBeTruthy()
+    expect(asked).toEqual([
+      'ws://localhost:3000/api/machines/cachyos-g14/sessions/scratch/terminal',
+    ])
   })
 })
 
