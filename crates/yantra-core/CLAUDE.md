@@ -27,9 +27,11 @@ bind where:
 | `identity.rs` | ADR-0009 (the config is the only authority on a name, so a block the owner wrote is never rewritten), and `ssh.rs`'s known-hosts half — which is why nothing here writes one |
 | `terminfo.rs` | I-36, I-43 (two terminfo databases on one machine) |
 | `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain — and since Y-151 the reason the gate runs *inside* the tmux server there, ADR-0018 §5), I-49 (an agent at the trust prompt is inert), **I-53** (`auth status` reports the credential it found, never that it works), I-51 (tmux's own quotes around a start command) |
-| `doctor.rs` | **R-23 above all** — every branch answers *unknown* where it could not ask, and an *absent* it did not earn sends someone to install software on a box that already has it. Then, through what it calls: I-34 (`agent::locate`), I-36/I-43 (terminfo, whose *absent* is bounded by the second), I-44/I-53 and ADR-0018 §1 **and** §5 (the login-session gate, which asks whether a server exists rather than starting one) |
+| `doctor.rs` | **R-23 above all** — every branch answers *unknown* where it could not ask, and an *absent* it did not earn sends someone to install software on a box that already has it. Then, through what it calls: I-34 (`agent::locate`), I-36/I-43 (terminfo, whose *absent* is bounded by the second), I-44/I-53 and ADR-0018 §1 **and** §5 (the login-session gate, which asks whether a server exists rather than starting one), and `attention::credential` — the one check about **this** host, where R-23 binds hardest because `gh auth status` cannot tell a refused token from a GitHub it could not reach |
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
+| `tokens.rs` | I-46 through `logs.rs`, whose `locate` finds the same file — then the journal's own two arithmetic traps: **I-61**, one API response written once per content block, so a sum per record double-counts and each record names the counts twice (its totals, then `iterations`); and **I-62**, which is what the three fields read for `price.rs` are guarding — `model` occurs again as a tool call's argument, and a cache write cannot be priced without knowing whether it was bought for five minutes or an hour |
+| `price.rs` | **I-62**'s second half, and one rule of its own: `AS_OF` moves in the same edit as a rate. A table written into a binary is wrong the day a price changes, and the printed date is the only thing that says so |
 | `workspace.rs` | ADR-0007 `deny_unknown_fields`, ADR-0009, ADR-0010, **I-57** (`InvalidName`'s path is built, not read) |
 | `up.rs` / `resume.rs` | I-1 through `tmux.rs`, and **I-44** — on macOS `up` refuses when no tmux server is running rather than starting one (ADR-0018 §1), and **I-56**, the window between that check and `tmux.ensure`. The far side's OS is a *parameter* of the generic half, so the branch is drivable from a Linux container |
 | `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
@@ -72,8 +74,17 @@ Quote it with `tmux::sq`, or send it as a value the shell never parses. A worksp
 **A file gets the same refusals a request gets.** `workspace::parse` asks `blank_field`, which is the
 one predicate `create` and `update` ask, so a workspace `create` would not write is one `load` will
 not read (Y-137, after Y-119 closed the writing half alone). The consequence to know before changing
-it: `yantra edit` cannot repair such a file, because `update` loads before it writes — the file is
-the fix, as it is for a mistyped key.
+it: `yantra edit` cannot repair such a file, because `update` loads before it writes — which is true
+of a mistyped key too.
+
+**`repair` is the one write that skips the field checks, and
+[ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it is
+safe to have.** Two bounds, and they are the whole of it: it refuses a file that parses
+(`Error::Loads`), and it refuses bytes that do not, with the next error named. Together they mean it
+can move a file from broken to valid and nowhere else. **It asks `broken`, which asks `parse`** — so
+the raw path and the reading path share one predicate, exactly as `create` and `load` do, and a
+third answer to *is this file usable* cannot appear. Nothing else may be written raw, and `create`
+is still the only way a workspace comes into being: a file that is not there is `NotFound`.
 
 **A file that does not load costs only itself** (Y-141). `list` returns a `Listing`: the workspaces
 that loaded, and every file that did not under its name with its reason. The outer `Result` is still

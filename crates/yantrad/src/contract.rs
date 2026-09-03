@@ -51,6 +51,7 @@ const HEADER: &str = "\
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Broken,
   Listed,
   Looked,
   Machine,
@@ -58,6 +59,7 @@ import type {
   Opened,
   Readiness,
   Resumed,
+  Spend,
   Stopped,
   TerminalSize,
   Workspace,
@@ -257,6 +259,12 @@ async fn fleet() -> Fleet {
             swept("cachyos-g14"),
             swept("bishwajeets-macbook-pro"),
         ])))),
+        // `/api/attention` joins this fixture when the dashboard reads it
+        // (Y-174): an entry here needs a type in `web/src/api.ts` to satisfy.
+        attention: None,
+        // `/readiness/github` has no entry below: the type it would satisfy is
+        // the card's, and the dashboard is parked (Y-174).
+        github: None,
     });
 
     let mut beats = fleet.beats.write().await;
@@ -286,6 +294,7 @@ fn holding(snapshot: Snapshot) -> Fleet {
     Fleet {
         model: Arc::new(tokio::sync::RwLock::new(snapshot)),
         beats: Beats::default(),
+        ..Fleet::default()
     }
 }
 

@@ -12,6 +12,7 @@
 
 pub mod agent;
 pub mod attach;
+pub mod attention;
 pub mod doctor;
 pub mod down;
 pub mod edit;
@@ -20,7 +21,10 @@ pub mod identity;
 pub mod inventory;
 pub mod logs;
 pub mod notify;
+pub mod price;
+pub mod probe;
 pub mod pty;
+pub mod remove;
 pub mod resume;
 pub mod sessions;
 pub mod snapshot;
@@ -28,5 +32,6 @@ pub mod ssh;
 pub mod status;
 pub mod terminfo;
 pub mod tmux;
+pub mod tokens;
 pub mod up;
 pub mod workspace;

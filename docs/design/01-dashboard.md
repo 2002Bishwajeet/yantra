@@ -402,7 +402,7 @@ before it starts and what makes it done.
 
 | # | Work | Blocked on |
 | --- | --- | --- |
-| **D1.9** | `yantra shell <machine>` and `GET /api/machines/{m}/shell` | **ADR-0019** — what a free shell may reach (§4.4) |
+| **D1.9** | `yantra shell <machine>` and `GET /api/machines/{m}/shell` | **an unwritten ADR** — what a free shell may reach (§4.4). It said *ADR-0019*; that number went to [the probe decision](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md) on 2026-08-11, because numbers are assigned when an ADR is written and never reserved |
 | **D1.10** | The reconcile endpoint and `/launch` (§3) | the read-awaits-ssh question (§3.3) |
 | **D1.11** | `yantra clone` and `POST …/clone` | decision **C**, and **B** if a workspace gains an origin |
 | **D1.12** | `yantra ls repos --machine` and `/m/{m}/repos` | §3.3, and a provider CLI authenticated on that machine (see [D2](02-setup.md)) |

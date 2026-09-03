@@ -1,9 +1,25 @@
 # yantra web — the dashboard
 
-Three routes over the API `yantrad` serves at `/api` — the fleet at `/`, one
-machine at `/m/$machine`, a workspace and its terminal at `/w/$name`, on
-TanStack Router. The readings poll on TanStack Query; the forms and every
-workspace row write.
+Seven routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+work at `/`, every machine compared at `/machines`, one machine at
+`/m/$machine`, a workspace and its terminal at `/w/$name`, its file at
+`/w/$name/repair`, the create form at `/new`, spend at `/usage` and the ntfy
+relay at `/settings`. `⌘K` reaches the seven a working workspace has and runs no
+verb; the palette lists only workspaces that loaded, so a broken one is reached
+from its own page.
+The readings poll on TanStack Query; the forms and every workspace row write.
+
+**While a tab is visible the page says so**, and the daemon stops pushing what
+the page is already showing (D3 §13). It is an explicit beacon rather than a
+read counted as presence: a background tab polls every five seconds and is not a
+person watching.
+
+**`/` opens on work, not on an inventory.** Three groups ordered by who must act
+next — you, the agent, nobody — and the order recomputes only when you ask, so
+nothing moves under a thumb.
+[D3](../docs/design/03-dashboard-surface.md) settles the surface: what the page
+is about, how dense it is, what words it uses, what every surface owes a reader
+and what it may weigh.
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
@@ -137,8 +153,10 @@ operator has.
 **The failure is named below the table, never drawn as a row in it.** That is the
 row's real decision and it is about the columns: a file that did not load has no
 machine to show a `<Status>` for, nothing for `ACT` or `TERMINAL` to target, and
-`EDIT` cannot repair it — the daemon's `update` loads before it writes, so the
-file is the fix. A table of things you can act on must not carry a row you
+`EDIT` cannot repair it — the daemon's `update` loads before it writes, and
+[`/w/{name}/repair`](src/routes/Repair.tsx) is where the file itself is edited
+([ADR-0020](../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)). A table
+of things you can act on must not carry a row you
 cannot, and R-23 is met by naming the file loudly with its whole reason, in the
 same `<Alert variant="destructive">` an unreachable machine gets in Sessions.
 

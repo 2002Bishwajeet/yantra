@@ -21,11 +21,18 @@ API the CLI cannot reach.
 | `GET /api/workspaces/{name}/status` | `yantra status <name>` |
 | `GET /api/readiness` | `yantra doctor` |
 | `GET /api/machines/{name}/readiness` | `yantra doctor <machine>` |
+| `GET /api/attention` | `yantra ls attention` |
+| `GET /api/readiness/github` | — (`yantra` runs where you are, not where the daemon does) |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
 | `POST /api/workspaces/{name}/down` | `yantra down` |
+| `DELETE /api/workspaces/{name}` | `yantra rm` |
+| `DELETE /api/machines/{machine}/sessions/{session}` | `yantra kill` |
+| `POST /api/machines/{machine}/probe` | `yantra probe` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
+| `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
+| `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 
 The `/api/…` routes that write are authorised by Tailscale identity
@@ -93,6 +100,31 @@ here a beat that arrived is *present* with its age, a machine that has never bea
 one the tailnet list does not hold stays *unknown* — the beats are keyed on the node id, and a report
 names a machine the way a workspace does.
 
+`GET /api/attention` is what is waiting for the owner on GitHub: pull requests wanting their review,
+issues assigned to them, and the number of unread notifications. The daemon holds no GitHub
+credential — it reads the `gh` on the machine it runs on, which keeps its own token in that machine's
+keyring. **A `gh` that is absent or logged out is `looked: "failed"` carrying the remedy**, never an
+empty inbox: nothing waiting is something a person acts on, and the two must not read alike.
+
+**It is polled every five minutes rather than every thirty seconds**, which is the one read that
+departs from the fleet's interval. The fleet poll pays for itself by keeping the ssh masters warm;
+this one warms nothing and spends a quota that is not Yantra's — the owner's own `gh` and `git`
+draw on the same token. GitHub asks for it directly: `/notifications` answers `X-Poll-Interval: 60`,
+so the fleet's interval would poll it at twice the rate its own server requests.
+`GET /api/readiness/github` is the check about **this** host (Y-175): whether `gh` is installed and
+logged in where the daemon runs, which is the credential the work inbox reads because `gh` is spawned
+here. It is a route of its own rather than a tenth check on every report, since an answer about this
+machine copied onto each machine's card claims something no ssh session asked. Two of its answers are
+earned — no `gh` on the daemon's `PATH`, and a `gh` that names no credential — and every other
+failure is *unknown*, because `gh auth status` says the same thing about a token GitHub refused as
+about a GitHub it could not reach.
+
+```json
+{"looked": "ok", "age_seconds": 3,
+ "data": {"check": "github", "state": "present",
+          "detail": "`gh` reports a stored credential here — that it works is not asked"}}
+```
+
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:
 
 ```json
@@ -123,9 +155,16 @@ keeps the refusal rather than being quietly papered over by a stale dashboard.
 `YANTRA_NTFY_URL` points it at a relay to publish session changes to, and `YANTRA_NTFY_TOKEN`
 authenticates against one that is protected. Unset the first and the daemon sends nothing, which is
 not an error; the token is read from the environment and from nowhere else — never a workspace field,
-never a file, never a log line, never the API. `yantra notify` publishes to the same channel by hand,
-which is how a box with no screen proves the topic works. See
+never a log line, never the API. `yantra notify` publishes to the same channel by hand, which is how
+a box with no screen proves the topic works. See
 [`docs/development.md`](../../docs/development.md).
+
+**One file holds them on the appliance**, and it is the exception
+[ADR-0021](../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md) records rather than a
+change to the sentence above: `/settings` and `yantra relay` write `/etc/yantra/daemon.env` — `0600`,
+owned by the account this daemon runs as — and [`yantrad.service`](yantrad.service) hands it back
+through `EnvironmentFile=`. The token is in plain text there, whoever can read that file has it, and
+nothing reads it back over the API. The daemon takes a new relay **at its next start**.
 
 It speaks **plain HTTP and always will**. TLS belongs to `tailscale serve`, which already holds and
 renews a certificate for the machine's `*.ts.net` name — `just https` puts the dashboard on

@@ -85,6 +85,29 @@ clarification. In this project, "verify" means what §B3 says it means.
 
 If a block needs a paragraph to explain it, the block is wrong. Fix the code, not the comment.
 
+## 6. Write plainly
+
+**Simplified Technical English (ASD-STE100) for the prose. Zinsser's four principles for the
+judgement.** Owner's instruction, 2026-08-10.
+
+This binds documentation, ADRs, research notes, `tracker.md` rows, commit messages, PR bodies and
+replies in the session. It does not bind code, quoted material, or prose you are not changing (§A3).
+
+- One idea per sentence. Keep instructions under 20 words and description under 25.
+- Use the active voice. Name who does the thing.
+- One word, one meaning. Do not vary a term for variety — a *workspace* is never a *project*.
+- Use simple tenses. Keep the articles and the relative pronouns; do not stack nouns to save space.
+- Delete the words that carry nothing: *simply*, *just*, *of course*, *very*, *in order to*.
+
+Then apply Zinsser: **simplicity, brevity, clarity, humanity**. The fourth one is why the list above
+is not enough on its own — STE alone produces correct prose that no one wants to read. Write for a
+person. Give the reason. Say what you do not know.
+
+> **What is not binding: STE's approved vocabulary.** ASD-STE100 was written for aircraft
+> maintenance manuals and its dictionary has no entry for most of what this repo talks about.
+> The sentence discipline above is the part that transfers. Do not use the word list to argue that
+> *orchestrate* or *idempotent* is banned.
+
 ---
 
 # Part B — Yantra
@@ -115,8 +138,11 @@ If a block needs a paragraph to explain it, the block is wrong. Fix the code, no
 
 Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`, `tmux`, `tailscale`) ·
 `portable-pty` · `serde`. Appliance target `aarch64-unknown-linux-musl` via `cargo-zigbuild`.
-**The daemon persists nothing.** The `rusqlite` row in that ADR's stack table was never built (Y-044);
-see its 2026-08-02 amendment.
+**The daemon persists nothing about the fleet.** The `rusqlite` row in that ADR's stack table was
+never built (Y-044); see its 2026-08-02 amendment. It writes exactly one file, and that file is
+configuration rather than state —
+[ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) and the 2026-08-22 amendment
+beside the first.
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
 the daemon, the CLI or the agent. TypeScript's only home is the browser.
@@ -158,6 +184,13 @@ traits' own implementations must be tested against the real thing.
 
 - **Idempotency.** `yantra up X` twice must attach, not duplicate. Design it in; don't bolt it on.
 - **Never store secrets.** Workspaces hold *references* (1Password/pass/sops), never values.
+  **One exception, and it is written down rather than implied:** the ntfy token, which
+  [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) puts in
+  `/etc/yantra/daemon.env` in plain text, `0600` and owned by the account the daemon runs as. The
+  owner took that decision on 2026-08-22 with the cost stated — whoever can read that file has the
+  token. It covers one file holding one credential; a second secret is a reason to reread that ADR
+  and not a licence it grants. **Workspaces are untouched**: the schema still has no field for a
+  value, and a reference is still resolved at launch on the machine that runs the agent.
 - **Start small.** Prefer the smallest thing that runs end to end. This project's failure mode is a
   beautiful architecture that never boots — see the walking-skeleton milestone in `tracker.md`.
 

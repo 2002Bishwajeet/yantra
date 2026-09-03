@@ -210,6 +210,106 @@ fn configured(url: Option<String>, token: Option<String>) -> Option<Relay> {
     Some(Relay::new(url?, token))
 }
 
+/// The file `yantrad.service` names in `EnvironmentFile=`, and the only file
+/// Yantra writes either variable to
+/// ([ADR-0021](../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md)).
+///
+/// **The reading above is unchanged**: the daemon still takes both from its
+/// environment, and systemd is what puts them there.
+pub const RELAY_FILE: &str = "/etc/yantra/daemon.env";
+
+/// Why a relay could not be written down. The URL is never quoted back: on a
+/// public server the topic in it is the only password there is, which is the
+/// same reason [`reason`] reports a kind rather than a message.
+#[derive(Debug, thiserror::Error)]
+pub enum NotWritten {
+    #[error("a relay URL is an ntfy topic, so it starts with https:// or http://")]
+    NotAUrl,
+
+    #[error(
+        "the {field} carries a space, a quote or a control character, which an environment file cannot hold"
+    )]
+    Unholdable { field: &'static str },
+
+    #[error("{path} could not be written: {source}")]
+    Write {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+}
+
+/// Writes the two variables where the unit will read them at its next start.
+///
+/// **This puts a secret on disk**, which §B4 forbids for a workspace and
+/// ADR-0021 permits here and nowhere else. `0600` applies when this creates the
+/// file; an existing one keeps the mode and the owner the installer gave it,
+/// which is what lets the daemon's own account rewrite a file `systemd` reads
+/// as root.
+///
+/// It truncates rather than renaming a temporary over: `/etc/yantra` belongs to
+/// root, so the account this runs as cannot create a sibling to rename.
+pub fn write_to(path: &std::path::Path, url: &str, token: Option<&str>) -> Result<(), NotWritten> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(NotWritten::NotAUrl);
+    }
+    holdable("URL", url)?;
+    if let Some(token) = token {
+        holdable("token", token)?;
+    }
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|source| NotWritten::Write {
+            path: path.to_owned(),
+            source,
+        })?;
+
+    let mut body = format!(
+        "# Written by `yantra relay` and by the dashboard's /settings (ADR-0021).\n\
+         # yantrad reads this through the unit's `EnvironmentFile=`, so a change\n\
+         # here reaches the daemon when systemd next starts it.\n\
+         {RELAY_URL}='{url}'\n"
+    );
+    if let Some(token) = token {
+        body.push_str(&format!("{RELAY_TOKEN}='{token}'\n"));
+    }
+
+    file.write_all(body.as_bytes())
+        .map_err(|source| NotWritten::Write {
+            path: path.to_owned(),
+            source,
+        })
+}
+
+/// What a single-quoted value in an environment file may hold. Refusing is the
+/// whole of the escaping: systemd's parser treats a quote and a backslash as
+/// syntax, and neither an ntfy topic nor an ntfy token has any use for one.
+fn holdable(field: &'static str, value: &str) -> Result<(), NotWritten> {
+    let unholdable = |c: char| c.is_whitespace() || c.is_control() || c == '\'' || c == '\\';
+    if value.is_empty() || value.contains(unholdable) {
+        return Err(NotWritten::Unholdable { field });
+    }
+    Ok(())
+}
+
+/// What a test send says, so the CLI and the dashboard send one message rather
+/// than two. **It names nothing about the fleet** — a topic is a password and
+/// the relay may be a public one, which is Y-147's posture unchanged.
+pub fn test_message() -> Message {
+    Message {
+        body: "yantra can reach this topic".to_owned(),
+        title: Some("yantra".to_owned()),
+        priority: None,
+    }
+}
+
 impl fmt::Debug for Relay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Relay")
@@ -745,5 +845,103 @@ mod tests {
             "{said}"
         );
         served.join().expect("the listener thread");
+    }
+
+    fn scratch(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("yantra-relay-{label}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        dir.join("daemon.env")
+    }
+
+    /// The whole of ADR-0021's write: the two names the daemon already reads,
+    /// quoted, in the file the unit's `EnvironmentFile=` hands back as an
+    /// environment. `service_unit.rs` is where a real systemd parses it.
+    #[test]
+    fn the_relay_is_written_under_the_two_names_the_daemon_reads() {
+        let path = scratch("both");
+
+        write_to(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("written");
+
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(
+            written.contains("YANTRA_NTFY_URL='https://ntfy.sh/a-topic'"),
+            "{written}"
+        );
+        assert!(
+            written.contains("YANTRA_NTFY_TOKEN='tk_notarealtoken'"),
+            "{written}"
+        );
+    }
+
+    /// A protected topic and an open one are two states, and an empty token
+    /// line would be a third that means neither.
+    #[test]
+    fn a_topic_that_needs_no_token_gets_no_token_line() {
+        let path = scratch("open");
+
+        write_to(&path, "https://ntfy.sh/a-topic", None).expect("written");
+
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(!written.contains(RELAY_TOKEN), "{written}");
+    }
+
+    /// The one mitigation this shape has (ADR-0021), so it is asserted rather
+    /// than commented. A file that already exists keeps what the installer gave
+    /// it, which is why nothing here sets the mode of one it did not create.
+    #[test]
+    fn a_file_this_creates_is_readable_by_nobody_else() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = scratch("mode");
+
+        write_to(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("written");
+
+        let mode = std::fs::metadata(&path)
+            .expect("it is there")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    /// Refusing is the escaping: a quote or a newline in either value is syntax
+    /// to systemd's parser, and the daemon would start with a relay nobody
+    /// wrote.
+    #[test]
+    fn a_value_an_environment_file_cannot_hold_is_refused_rather_than_escaped() {
+        let path = scratch("quoting");
+
+        let quoted = write_to(&path, "https://ntfy.sh/it's", None).expect_err("a quote");
+        assert!(
+            matches!(quoted, NotWritten::Unholdable { field: "URL" }),
+            "{quoted}"
+        );
+
+        let split = write_to(
+            &path,
+            "https://ntfy.sh/a-topic",
+            Some("tk\nYANTRA_NTFY_URL=x"),
+        )
+        .expect_err("a newline");
+        assert!(
+            matches!(split, NotWritten::Unholdable { field: "token" }),
+            "{split}"
+        );
+
+        assert!(
+            !path.exists(),
+            "nothing may be written before both values are checked"
+        );
+    }
+
+    /// The commonest paste is a topic with no scheme, and a relay written from
+    /// one fails at the next send with a message about the wire instead.
+    #[test]
+    fn something_that_is_not_a_url_is_refused_and_is_not_quoted_back() {
+        let path = scratch("not-a-url");
+
+        let refused = write_to(&path, "ntfy.sh/a-topic", None).expect_err("no scheme");
+
+        assert!(matches!(refused, NotWritten::NotAUrl), "{refused}");
+        assert!(!refused.to_string().contains("a-topic"), "{refused}");
     }
 }

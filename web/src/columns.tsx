@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router'
 import type {
-  Looked,
   Machine,
   MachineSessions,
   Power,
@@ -8,7 +7,9 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
+import type { Reading } from '@/useLooked'
 import { Act, Actions, type Verb } from '@/components/Act'
+import { Ago, Stamp } from '@/components/Age'
 import { Command } from '@/components/Command'
 import type { Column } from '@/components/DataTable'
 import { Status, type Tone } from '@/components/Status'
@@ -19,7 +20,7 @@ const USABLE_NAME = /^[A-Za-z0-9_-]+$/
 
 // I-39: an expired key is a third state, and it is the one a person can act
 // on, so it must not read as a shade of offline.
-function reachability(machine: Machine): { tone: Tone; label: string } {
+export function reachability(machine: Machine): { tone: Tone; label: string } {
   const reachable = machine.online ? 'online' : 'offline'
   if (machine.expired) {
     return { tone: 'warn', label: `${reachable}, key expired` }
@@ -89,9 +90,9 @@ export const machineColumns: Column<Machine>[] = [
       <span className="inline-flex items-center gap-2">
         <Status {...reporting(machine)} />
         {machine.heartbeat && (
-          <time dateTime={`PT${machine.heartbeat.age_seconds}S`}>
-            beat {machine.heartbeat.age_seconds}s ago
-          </time>
+          <span>
+            beat <Ago seconds={machine.heartbeat.age_seconds} />
+          </span>
         )}
       </span>
     ),
@@ -99,7 +100,12 @@ export const machineColumns: Column<Machine>[] = [
   {
     header: 'LAST SEEN',
     // I-39: on an online peer this is noise, and the API does not blank it.
-    cell: (machine) => (machine.online ? '' : (machine.last_seen ?? '')),
+    cell: (machine) =>
+      machine.online || !machine.last_seen ? (
+        ''
+      ) : (
+        <Stamp stamp={machine.last_seen} />
+      ),
   },
 ]
 
@@ -110,7 +116,7 @@ export const machineColumns: Column<Machine>[] = [
  *  `USABLE_NAME` guards the two commands below and not this. */
 export function attachable(
   workspace: Workspace,
-  sessions: Looked<MachineSessions[]>,
+  sessions: Reading<MachineSessions[]>,
 ): boolean {
   const answer =
     sessions.looked === 'ok'
@@ -128,7 +134,7 @@ export function attachable(
  *  machine the tailnet does not list gets no state, because none was looked up. */
 function target(
   workspace: Workspace,
-  machines: Looked<Machine[]>,
+  machines: Reading<Machine[]>,
 ): Machine | undefined {
   return machines.looked === 'ok'
     ? machines.data.find((one) => one.name === workspace.machine)
@@ -186,7 +192,7 @@ export function chosen(
  *  reads as *nothing has been looked at yet* rather than as a state. */
 function reportOn(
   workspace: Workspace,
-  agents: Looked<AgentRow[]>,
+  agents: Reading<AgentRow[]>,
 ): WorkspaceStatus | null {
   if (agents.looked !== 'ok') return null
   return (
@@ -196,9 +202,9 @@ function reportOn(
 }
 
 export function workspaceColumns(
-  sessions: Looked<MachineSessions[]>,
-  machines: Looked<Machine[]>,
-  agents: Looked<AgentRow[]>,
+  sessions: Reading<MachineSessions[]>,
+  machines: Reading<Machine[]>,
+  agents: Reading<AgentRow[]>,
   // Null on a machine's own page: a workspace is edited where it is listed.
   edit: ((name: string) => void) | null,
 ): Column<Workspace>[] {
@@ -245,7 +251,7 @@ export type SessionRow = { machine: string; session: Session }
  *  command — and the name comes from the workspace, never from tmux's output. */
 export function sessionCommand(
   row: SessionRow,
-  workspaces: Looked<Workspace[]>,
+  workspaces: Reading<Workspace[]>,
 ): string | null {
   if (workspaces.looked !== 'ok') return null
 
@@ -258,14 +264,20 @@ export function sessionCommand(
 }
 
 export function sessionColumns(
-  workspaces: Looked<Workspace[]>,
+  workspaces: Reading<Workspace[]>,
 ): Column<SessionRow>[] {
   return [
     { header: 'MACHINE', cell: (row) => row.machine },
     { header: 'SESSION', cell: (row) => row.session.name },
-    { header: 'WINDOWS', cell: (row) => row.session.windows },
-    { header: 'ATTACHED', cell: (row) => row.session.attached },
-    { header: 'CREATED', cell: (row) => row.session.created },
+    {
+      header: 'WINDOWS',
+      cell: (row) => <span className="font-mono">{row.session.windows}</span>,
+    },
+    {
+      header: 'ATTACHED',
+      cell: (row) => <span className="font-mono">{row.session.attached}</span>,
+    },
+    { header: 'CREATED', cell: (row) => <Stamp stamp={row.session.created} /> },
     {
       header: 'COMMAND',
       cell: (row) => {
@@ -300,14 +312,16 @@ export function agentState(status: WorkspaceStatus | null): {
 
   const agent = status.status
   switch (agent.state) {
+    // D3 §6.1 splits what `ok` held: a live session gets the running mark, and
+    // the three endings get the hollow one, because they wait on nobody.
     case 'no_session':
-      return { tone: 'ok', label: 'no session' }
+      return { tone: 'idle', label: 'no session' }
     case 'running':
       return { tone: 'ok', label: 'running' }
     case 'finished':
-      return { tone: 'ok', label: 'finished' }
+      return { tone: 'idle', label: 'finished' }
     case 'stopped':
-      return { tone: 'ok', label: 'stopped' }
+      return { tone: 'idle', label: 'stopped' }
     case 'no_agent':
       return { tone: 'ok', label: 'no agent — opened as a shell' }
     case 'awaiting_trust':
@@ -316,13 +330,15 @@ export function agentState(status: WorkspaceStatus | null): {
       return { tone: 'bad', label: `crashed — exit ${agent.exit_status}` }
     case 'killed':
       return { tone: 'bad', label: `killed — ${agent.signal}` }
+    // D3 §6.2: colouring uncertainty makes it look like a decision, so the
+    // dashed hollow mark is the whole treatment.
     case 'unclear':
-      return { tone: 'bad', label: 'unclear' }
+      return { tone: 'unknown', label: 'unclear' }
   }
 }
 
 /** What told this state apart from the one next to it. */
-function agentDetail(status: WorkspaceStatus | null): string {
+export function agentDetail(status: WorkspaceStatus | null): string {
   if (!status) {
     return 'the workspace list names it and the last agent look does not'
   }

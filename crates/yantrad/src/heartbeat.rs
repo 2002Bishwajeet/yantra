@@ -54,6 +54,9 @@ pub type Beats = Arc<RwLock<BTreeMap<String, Reading<Heartbeat>>>>;
 pub struct Fleet {
     pub model: Model,
     pub beats: Beats,
+    /// D3 §13's one piece of viewer state, here for the same reason the beats
+    /// are: it is neither a look this daemon took nor a beat a machine sent.
+    pub viewers: crate::notify::Viewers,
 }
 
 /// So a handler asks for the half it reads: `/api/machines` joins the two, and
@@ -202,6 +205,7 @@ mod tests {
                 ..Snapshot::default()
             })),
             beats: Beats::default(),
+            ..Fleet::default()
         }
     }
 

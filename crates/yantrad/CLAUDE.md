@@ -103,15 +103,36 @@ heartbeat state is named, and nothing here parses a detail or writes 30 s down a
 `yantra-agent`'s `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`. A second consumer of this route
 inherits the same obligation, and a test in `dashboard.test.tsx` is what says so out loud.
 
+**`GET /api/readiness/github` is the other check the library answers from nobody useful** (Y-175),
+and it is the same argument pointed at a different fact: `yantra_core::attention` spawns `gh` on the
+host it runs on, so the credential the work inbox reads is the daemon's and never the terminal's. It
+is a route rather than a tenth check on every report, because an answer about this machine drawn on
+each machine's card claims something no ssh session asked. Two answers are *absent* and both are
+earned — no `gh` on `PATH`, and a `gh` that names no credential — and **everything else is
+*unknown*, including an unreachable GitHub**, because `gh auth status` reports a token it could not
+validate exactly as it reports one that was refused. It has no `failed`: a look it could not take is
+already *unknown* inside the check.
+
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
 their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
 to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
---json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine route
+--json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine `GET`
 reads that same sweep, so a machine no workspace names is a **404** — `doctor::fleet` asks the
-machines workspaces name, and asking a machine per request is the thing this shape refuses.
+machines workspaces name, and asking a machine per *polled* request is the thing this shape refuses.
+
+**`POST /api/machines/{name}/readiness` is where a person may ask anyway** (Y-197,
+[ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): someone who has just
+installed `tmux` by hand needs the answer before the next sweep, and the `GET` beside it can only
+serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
+authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
+type. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
+ssh destinations to refuse one against, and a name nothing answers to is nine *unknown* checks like
+any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
+`ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
+of itself, and debounce belongs in the browser.
 
 ## The one thing it sends, and the two rules that keep it useful
 
@@ -155,6 +176,22 @@ run. The token is never a workspace field, never written to disk, never logged a
 which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that leaves the tailnet.
 The startup line saying which of the two it got is there because a unit's environment is not the
 shell's, and a headless box has only the journal to say so.
+
+**The relay is settable now, and the read above is unchanged** —
+[ADR-0021](../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md), Y-199. `/settings`
+and `yantra relay` write `/etc/yantra/daemon.env`; the unit reads it with `EnvironmentFile=`; this
+process still takes both values out of its environment once, in `main.rs`. So a relay written now
+reaches the daemon at its **next start**, and both surfaces say so rather than implying it is live.
+That ADR bends §B4 and Y-044 on purpose and says what the exposure is; read it before moving either
+value anywhere else. **The token is still never logged and never served** — no route reads the file
+back, and `tracing` names the caller and never the topic.
+
+**Nothing is pushed while a dashboard is open** (D3 §13). `notify::Viewers` is a last-seen-a-viewer
+timestamp beside the snapshot, `POST /api/viewing` writes it, and `refresh` hands the notifier a
+bool. **The diff still runs when it is suppressed**: what a watched look produced is dropped rather
+than held, so closing the tab does not deliver a backlog of things the page already showed. It is in
+memory and a restart forgets it, which is Y-044 exactly as written — that state is not the exception
+ADR-0021 carved.
 
 ## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
@@ -207,11 +244,17 @@ directory to walk.
 
 ## The routes that act
 
-`POST /api/workspaces`, `PATCH /api/workspaces/{name}` and
-`POST /api/workspaces/{name}/{up,down,resume}` — **the CLI's own verbs and
-nothing more**, being `yantra new`, `edit`, `up`, `down` and `resume`. The daemon
-may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
-reach. A new verb here starts in the CLI.
+`POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
+`POST /api/workspaces/{name}/{up,down,resume,tokens,repair}` and `POST /api/relay` — **the CLI's own
+verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `repair` and
+`relay`. The daemon may do what `yantra` can already do, which is what stops it growing a richer API
+the CLI cannot reach. A new verb here starts in the CLI, and `yantra relay` was written before this
+route was.
+
+**`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
+rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
+§13), which no CLI can say truthfully. It is authorised like the rest because it silences
+notifications.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
@@ -261,6 +304,27 @@ one of the three**, which is the whole point of the shape.
 `GET /api/workspaces` keeps answering without it for up to that long — measured at 15 s on the first
 try. The `201` and the `PATCH`'s `200` carry the whole workspace back for exactly this reason: a
 client that re-reads the list to find what it just wrote will draw what was there before.
+
+**`tokens` is the one that writes nothing** (Y-199). It is here because it asks a machine on demand
+and nowhere else fits — ADR-0019 again. Two properties of the answer are the library's and must not
+be flattened here: [`tokens.rs`](../yantra-core/src/tokens.rs) sums on the far machine and ships
+**numbers rather than records**, so `Spend` has no field a conversation could arrive in (Y-181); and
+[`price.rs`](../yantra-core/src/price.rs)'s `AS_OF` travels beside the figure, because a table
+written into a binary reports wrong money the day a rate changes. **An unpriced model is `null` and
+never `0`**, a fast-mode session withholds every dollar and keeps every token, and a session that
+has spent nothing has no figure at all. `render_tokens` in the CLI is the list to check against.
+
+**`repair` is the one that writes bytes this daemon did not compose**, and
+[ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
+Every other write here renders a `Workspace` the library has already checked; this one takes a whole
+file, because `update` loads before it writes and so no verb could reach a workspace file that will
+not parse. Two refusals hold it: a file that **already loads** is `409`, and bytes that **still will
+not** are `400` carrying the next error rather than a summary — the caller is answering the one it
+was shown. `from_repair` exists for that second one, because `from_workspace` sends `Malformed` and
+`Blank` to `500` and is right to: there they are this daemon reading its own files, here they are the
+bytes the caller sent. **The `GET` beside it is in `write.rs` too, on the same authoriser**: a file's
+raw bytes are the one thing `GET /api/workspaces` does not publish, and it answers the same `409`, so
+asking for the file *is* the question whether it is broken.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not
@@ -329,6 +393,10 @@ literal is written. The write answers are serialised from their DTOs rather than
 handlers authorise a live tailnet caller and then await ssh; what that leaves unchecked is status
 codes, headers and every refusal body, none of which is JSON.
 
+**`/api/attention` is deliberately not in it yet.** An entry here has to `satisfies` a type in
+`web/src/api.ts`, and the dashboard does not read this route until Y-174 — so the fixture holds
+`attention: None` and the entry lands with the types that check it, in one change rather than two.
+
 **`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
 one message identically; that the daemon then accepts it is `terminal.rs`'s own test.
@@ -373,15 +441,46 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Two things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Five things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
-rather than to a request. Neither licenses a **read** that awaits ssh, which is still the bug this
-module exists to prevent.
+rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
+([ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): the answer depends on a
+path nobody has typed yet, so no snapshot can hold it, and it is reached over a `POST` rather than
+given a `GET` that would await ssh.
+
+**Y-197 and Y-199 add two more reads on that same licence, and both are `POST`s in `write.rs`.**
+The readiness re-check asks a machine a person named; `POST /api/workspaces/{name}/tokens` opens the
+agent's transcript, which is the **dearest** read this crate has — a file that grows all session, on
+a machine over ssh. Neither may be swept and neither may be polled. D3 §11.4 is the same rule stated
+as a design: money lives on a tab somebody opens, because a `$` on a fleet row would put that read
+into the 5 s loop.
+
+None of the five licenses a **read handler** that awaits ssh, which is still the bug this module
+exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
+one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
+second half however it is spelled, and choosing `POST` does not rescue it.
 
 The interval is a constant for the same reason the port is. `ControlPersist=300` means anything under
 five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the
 `ControlPath` is per-user, a running daemon speeds the CLI up too.
+
+**`ssh` is not the only thing this rule is about, and `gh` is the proof** (Y-172). `GET /api/attention`
+reads a `Forge` reading the sweep took; a handler that ran `gh` would spawn three subprocesses and
+make three round trips to GitHub per browser poll, which is the ssh storm with a different binary in
+it. **What is different is the interval, and it is the one class that does not run at `EVERY`.**
+The fleet poll pays for itself — `ControlPersist` again — while a `gh` poll warms nothing and is
+spent from the owner's own GitHub quota, which their `gh` and their `git push` draw on too. GitHub
+asks for the slower poll itself: `/notifications` answered **`X-Poll-Interval: 60`** on 2026-08-10, so
+`EVERY` would poll it at twice the rate its server requests. `ATTENTION` is five minutes, and the
+freshness that costs is a field rather than a lie — the reading carries its own age like every other.
+
+Two measurements from that day worth keeping, because both invert what the obvious worry would be.
+`gh search` spends the **GraphQL** budget (5000 points/hour) and **not** the REST search budget —
+which is 30 per *minute* and would have been the tight one, and is untouched. `/notifications` is
+`core`, and `/rate_limit`'s own `core.used` field does not move for it; the response header does.
+**Read `X-Ratelimit-Used` off the call, not the `/rate_limit` endpoint**, if this is ever measured
+again.
 
 **Four states, not three**, and folding any two together is the bug this module exists to avoid:
 nobody has looked (`None`), a look succeeded, a look succeeded and a machine within it did not answer,

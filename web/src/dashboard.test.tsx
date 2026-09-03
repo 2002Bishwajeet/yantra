@@ -38,7 +38,7 @@ import { renderHookQueried } from './test/inQuery'
 import { renderRouted } from './test/inRouter'
 import { Command } from './components/Command'
 import { Readiness as ReadinessCard } from './components/Readiness'
-import { Ready } from './routes/Fleet'
+import { Ready } from './routes/Machines'
 import { DataTable } from './components/DataTable'
 import { Section } from './components/Section'
 import { useLooked } from './useLooked'
@@ -47,6 +47,8 @@ import App from './App'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  // Y-189 sends two of these to `/machines`, and the path outlives the render.
+  history.pushState(null, '', '/')
 })
 
 /** jsdom implements no `matchMedia` at all, so a width has to be supplied — and
@@ -163,7 +165,7 @@ describe('the machines table', () => {
       />,
     )
     const cells = [...container.querySelectorAll('td')].map((cell) => cell.textContent)
-    expect(cells).toEqual(['cachyos-g14', 'linux', 'online', 'readybeat 3s ago', ''])
+    expect(cells).toEqual(['cachyos-g14', 'linux', 'online', 'readybeat 3s', ''])
   })
 
   it('composes the status sentence and does not fold an expired key into offline', async () => {
@@ -196,20 +198,24 @@ describe('the four heartbeat states', () => {
   }
 
   it('says never heard from, and never asleep, for a machine that has not beaten', async () => {
-    await draw(machine({ online: false, heartbeat: null }))
+    const { container } = await draw(machine({ online: false, heartbeat: null }))
 
     expect(screen.getByText('never heard from')).toBeTruthy()
     expect(screen.queryByText('asleep or off')).toBeNull()
     // Not a zeroed reading either: there is no age to show, so none is shown.
-    expect(screen.queryByText(/beat .* ago/)).toBeNull()
+    expect(container.textContent).not.toContain('beat')
   })
 
+  // Y-192 puts the figure in its own `time`, so a matcher that reads only an
+  // element's own text nodes sees `beat ` and never the age beside it.
   it('says up, but not reporting — and never ready — when only Tailscale sees it', async () => {
-    await draw(machine({ online: true, heartbeat: beat({ age_seconds: 92 }) }))
+    const { container } = await draw(
+      machine({ online: true, heartbeat: beat({ age_seconds: 92 }) }),
+    )
 
     expect(screen.getByText('up, but not reporting')).toBeTruthy()
     expect(screen.queryByText('ready')).toBeNull()
-    expect(screen.getByText('beat 92s ago')).toBeTruthy()
+    expect(container.textContent).toContain('beat 1m')
   })
 
   it('says asleep or off when the beats stopped and Tailscale lost it too', async () => {
@@ -227,7 +233,7 @@ describe('the four heartbeat states', () => {
     )
 
     expect(screen.getByText('ready')).toBeTruthy()
-    expect(screen.getByText('beat 30s ago')).toBeTruthy()
+    expect(container.textContent).toContain('beat 30s')
     expect(container.querySelector('[title*="battery, 42%"]')).toBeTruthy()
   })
 })
@@ -507,16 +513,18 @@ describe('the sessions section', () => {
     { machine: 'pi', reached: 'no', error: 'connection timed out' },
   ]
 
+  // Y-189 moved this group to `/machines`, where D3 §3.1 compares machines.
   it('renders an unanswered machine as unreachable and not as zero sessions', async () => {
     stubFetch({
       '/api/machines': { looked: 'never' },
       '/api/workspaces': { looked: 'never' },
       '/api/sessions': { looked: 'ok', age_seconds: 6, data: answers },
     })
+    history.pushState(null, '', '/machines')
     render(<App />)
 
     expect(await screen.findByText('pi unreachable: connection timed out')).toBeTruthy()
-    expect(screen.getByText('1 session on 1 of 2 machines')).toBeTruthy()
+    expect(screen.getByText('1 unclaimed on 1 of 2 machines')).toBeTruthy()
     expect(screen.queryByText('pi')).toBeNull()
   })
 
@@ -526,6 +534,7 @@ describe('the sessions section', () => {
       '/api/workspaces': { looked: 'never' },
       '/api/sessions': { looked: 'ok', age_seconds: 44, data: answers },
     })
+    history.pushState(null, '', '/machines')
     render(<App />)
 
     expect(await screen.findByText('waiting on pi')).toBeTruthy()
@@ -579,10 +588,13 @@ describe('useLooked', () => {
     expect(result.current).toMatchObject({ error: expect.stringContaining('404') })
   })
 
-  it('answers never before the first response', () => {
+  /** D3 §7.1. This asserted the bug: a question not yet asked is not a question
+   *  answered *never*, and `never` is the daemon's word for having looked at
+   *  nothing — not the browser's for not having asked. Y-190. */
+  it('answers pending before the first response, and never says never', () => {
     stubFetch({ '/api/machines': { looked: 'ok', age_seconds: 0, data: [] } })
     const { result } = renderHookQueried(() => useLooked('/api/machines'))
-    expect(result.current).toEqual({ looked: 'never' })
+    expect(result.current).toEqual({ looked: 'pending' })
   })
 })
 
@@ -599,21 +611,23 @@ describe('the age reading', () => {
     )
 
   it('says how old a fresh reading is and claims nothing else', () => {
-    aged(6)
-    expect(screen.getByText('looked 6s ago')).toBeTruthy()
+    const { container } = aged(6)
+    expect(container.textContent).toContain('as of 6s')
     expect(screen.queryByText('refresh stuck')).toBeNull()
   })
 
   // 30 s of sleep plus the one ConnectTimeout a concurrent sweep can pay.
   it('reads a sweep that waited out an unreachable machine as normal', () => {
-    aged(40)
-    expect(screen.getByText('looked 40s ago')).toBeTruthy()
+    const { container } = aged(40)
+    expect(container.textContent).toContain('as of 40s')
     expect(screen.queryByText('refresh stuck')).toBeNull()
   })
 
   it('says the refresh did not finish rather than that the data is old', () => {
-    aged(73)
-    expect(screen.getByText('looked 73s ago')).toBeTruthy()
+    // Y-192's clock spells a minute as a minute, so the badge carries the
+    // precision the figure stops carrying past 60 s.
+    const { container } = aged(73)
+    expect(container.textContent).toContain('as of 1m')
     expect(screen.getByText('refresh stuck')).toBeTruthy()
   })
 
@@ -642,7 +656,7 @@ describe('the age reading', () => {
         {() => <p>a table</p>}
       </Section>,
     )
-    expect(screen.queryByText(/looked \d+s ago/)).toBeNull()
+    expect(screen.queryByText(/as of/)).toBeNull()
     expect(screen.queryByText('refresh stuck')).toBeNull()
   })
 })
@@ -946,10 +960,12 @@ describe('the agents section', () => {
     expect(shell.tone).not.toBe('bad')
     expect(shell.label).toContain('shell')
 
+    // Y-193: a contradiction is no longer *wrong*, it is *we do not know*.
+    // D3 §6.2 gives `unclear` no colour at all, so the dashed mark carries it.
     const ghost = agentState(
       reported({ state: 'unclear', because: 'the pane is alive' }).status,
     )
-    expect(ghost.tone).toBe('bad')
+    expect(ghost.tone).toBe('unknown')
   })
 
   it('renders what told an ending apart rather than flattening it to a label', () => {
@@ -1168,13 +1184,15 @@ describe('the agents section', () => {
     })
     render(<App />)
 
+    // Y-188 files it under *Needs you* with one verb. The sentence beside it
+    // and the paste-this command were the agents table's, and D3 §4.5 replaces
+    // both with the pane itself, inline, in Y-198.
     expect(
       await screen.findByText("waiting for you at claude's trust prompt"),
     ).toBeTruthy()
-    expect(
-      screen.getByText(/is holding at claude's trust prompt on cachyos-g14/),
-    ).toBeTruthy()
-    expect(screen.getAllByText('yantra attach yantra').length).toBe(2)
+    const needs = screen.getByRole('heading', { name: /Needs you/ })
+    expect(within(needs.parentElement!).getByText('Answer')).toBeTruthy()
+    expect(screen.queryByText('yantra attach yantra')).toBeNull()
   })
 
   // The two readings are taken on their own clocks, so a workspace added since
@@ -1215,9 +1233,11 @@ describe('the agents section', () => {
     })
     render(<App />)
 
+    // Once, not twice: Y-188 draws one group for the work rather than a
+    // workspaces table and an agents table that repeat the same failure.
     expect(
       (await screen.findAllByText('invalid workspace file')).length,
-    ).toBe(2)
+    ).toBe(1)
   })
 })
 
@@ -1248,6 +1268,10 @@ describe('creating a workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
+        // The shell's presence beacon is not this file's subject (D3 §13).
+        if (path === '/api/viewing') {
+          return Promise.resolve({ ok: true, status: 204 })
+        }
         if (init?.method === 'POST') {
           posted(JSON.parse(String(init.body)))
           return Promise.resolve({
@@ -1266,6 +1290,10 @@ describe('creating a workspace', () => {
     return posted
   }
 
+  // Y-185 gives the form its own route. It was parked on `/` between two
+  // tables, and D3 §2 finding 3 is that it never moved.
+  beforeEach(() => history.pushState(null, '', '/new'))
+
   async function fill(fields: Record<string, string>) {
     for (const [label, value] of Object.entries(fields)) {
       fireEvent.change(await screen.findByLabelText(label), {
@@ -1282,9 +1310,13 @@ describe('creating a workspace', () => {
 
     expect(await screen.findByText('Created site on cachyos-g14.')).toBeTruthy()
     expect(screen.getByText('/code/site')).toBeTruthy()
-    // The read model is 30 s behind a create, so the list still says there is
-    // nothing — which is exactly what confirming by re-reading would draw.
-    expect(screen.getByText(/^no workspaces yet/)).toBeTruthy()
+
+    // The read model is 30 s behind a create, so the work page still says there
+    // is nothing — which is exactly what confirming by re-reading would draw.
+    // Asked for on `/` since Y-185 moved the form off it, and the sentence is
+    // Y-197's checklist, which is what `/` becomes when nothing is there.
+    fireEvent.click(screen.getByRole('link', { name: 'fleet' }))
+    expect(await screen.findByText('No workspace exists yet.')).toBeTruthy()
     // Three keys and no fourth: §B4 holds because there is nowhere to put one.
     expect(posted).toHaveBeenCalledWith({
       name: 'site',
@@ -1437,9 +1469,9 @@ describe('editing a workspace', () => {
       '{"repo":"/code/fixed"}',
     )
     expect(screen.getByText('/code/fixed')).toBeTruthy()
-    // The read model is 30 s behind its own write, which is what re-reading to
-    // confirm would have drawn.
-    expect(screen.getByText('/code/site')).toBeTruthy()
+    // The read model is still 30 s behind its own write, and the work page no
+    // longer draws a repo to show it with: Y-188's row is the name, the agent,
+    // the machine and one verb, and `/m/{name}` is where a repo is read.
   })
 
   it('clears a startup command rather than leaving it alone', async () => {
@@ -1564,6 +1596,10 @@ describe('acting on a workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
+        // The shell's presence beacon is not this file's subject (D3 §13).
+        if (path === '/api/viewing') {
+          return Promise.resolve({ ok: true, status: 204 })
+        }
         if (init?.method === 'POST') {
           posted(
             path,
@@ -1587,11 +1623,14 @@ describe('acting on a workspace', () => {
     return posted
   }
 
-  /** Scoped to the workspaces card: since Y-167 both it and the agents section
-   *  compute a verb from the same reading, so the fleet names it twice. Awaited
-   *  rather than read, because the router resolves its first match after this. */
-  const card = async () =>
-    within((await screen.findByText('Workspaces')).closest('[data-slot="card"]')!)
+  /** The fleet named every verb twice until Y-188 — a workspaces table and an
+   *  agents table computed it from the same reading — so this scoped to the
+   *  first. One group draws the row now and there is nothing to disambiguate;
+   *  what is left is waiting for the router to resolve its first match. */
+  const card = async () => {
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
+    return screen
+  }
 
   const tap = async (name: string) =>
     fireEvent.click(await (await card()).findByRole('button', { name }))
@@ -1700,8 +1739,8 @@ describe('acting on a workspace', () => {
     })
     render(<App />)
 
-    // Once in the machines table, once beside the workspace it will act on.
-    expect((await screen.findAllByText('asleep or off')).length).toBe(2)
+    // Beside the workspace it will act on. The machines table moved in Y-189.
+    expect((await screen.findAllByText('asleep or off')).length).toBe(1)
     const start = await (await card()).findByRole('button', {
       name: 'Start claude',
     })
@@ -1717,7 +1756,9 @@ describe('acting on a workspace', () => {
     })
   })
 
-  it('reads nothing to stop, and an agent already working, as successes', async () => {
+  // Two renders in one `it` left both mounted, so every query saw the fleet
+  // twice. One idea per test is also what §A6 asks of the prose.
+  it('reads nothing to stop as a success', async () => {
     stubAct({
       status: 200,
       body: { machine: 'bishwajeets-macbook-pro', stopped: false, ending: null },
@@ -1728,8 +1769,9 @@ describe('acting on a workspace', () => {
 
     expect(await screen.findByText(/nothing to stop/)).toBeTruthy()
     expect(screen.getByRole('alert').className).not.toContain('destructive')
+  })
 
-    cleanup()
+  it('reads an agent already working as a success', async () => {
     stubAct(
       {
         status: 200,

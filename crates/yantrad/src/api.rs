@@ -46,6 +46,8 @@ pub fn router() -> Router<Fleet> {
         .route("/workspaces/{name}/status", get(workspace_status))
         .route("/readiness", get(readiness))
         .route("/machines/{name}/readiness", get(machine_readiness))
+        .route("/attention", get(attention))
+        .route("/readiness/github", get(github))
 }
 
 /// The one route that joins two memories: the look Tailscale answered and what
@@ -131,6 +133,14 @@ async fn readiness(State(model): State<Model>, State(beats): State<Beats>) -> im
     }))
 }
 
+/// `yantra ls attention` on the wire. The reading is `refresh.rs`'s, and it is
+/// polled slower than the fleet because the quota it spends is GitHub's — a
+/// handler that ran `gh` would spend it once per browser instead.
+async fn attention(State(model): State<Model>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    Json(Answer::of(snapshot.attention.as_deref(), Attention::of))
+}
+
 /// The second route naming a resource, so it has [`workspace_status`]'s fourth
 /// answer for the same reason: a machine the sweep did not cover is a **404**
 /// rather than a 200 whose absence a client has to notice. The sweep asks the
@@ -173,11 +183,35 @@ async fn machine_readiness(
     }
 }
 
+/// The readiness reading about **this** machine (Y-175). The sweep above asks
+/// the machines workspaces name over ssh; the GitHub credential the work inbox
+/// reads is the one where `yantrad` runs, because
+/// [`yantra_core::attention`] spawns `gh` here. **A route rather than a tenth
+/// check on every report**: a check copied onto each machine's card would claim
+/// something no ssh session asked, which is the answer R-23 forbids.
+///
+/// There is no `failed`: the check carries a look it could not take as
+/// *unknown*, so the only two answers are the reading and nobody having looked.
+async fn github(State(model): State<Model>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    Json(match snapshot.github.as_deref() {
+        Some(reading) => Answer::Ok {
+            age_seconds: reading.age().as_secs(),
+            data: reading.value().clone(),
+        },
+        None => Answer::Never,
+    })
+}
+
 /// The library answers `heartbeat` *unknown* from every caller it has, and that
 /// is the architecture rather than a gap: the beats are in this process and
 /// nothing persists them (Y-044), while ADR-0012 keeps the CLI out of it. This
 /// is the daemon filling in its own check.
-fn answered(
+///
+/// [`crate::write`]'s re-check calls it too, so a report a person asked for
+/// carries the same nine answers as the swept one and not eight plus an
+/// *unknown* the daemon could have filled in.
+pub(crate) fn answered(
     report: &doctor::Report,
     snapshot: &Snapshot,
     beats: &BTreeMap<String, Reading<Heartbeat>>,
@@ -255,7 +289,7 @@ fn absent(fleet: &yantra_core::status::Fleet, name: &str) -> String {
 /// I-47 one layer up: `never` is not an empty list, and neither is `failed`.
 #[derive(Debug, serde::Serialize)]
 #[serde(tag = "looked", rename_all = "lowercase")]
-enum Answer<T> {
+pub(crate) enum Answer<T> {
     Ok { age_seconds: u64, data: T },
     Failed { age_seconds: u64, error: String },
     Never,
@@ -462,6 +496,52 @@ impl Session {
     }
 }
 
+/// The two lists are kept apart because a review waiting on this account and an
+/// issue assigned to it are different obligations, even though a page may draw
+/// them as one queue. `notifications` is a count and not a list: the titles are
+/// the part that would land in a journal, and nothing draws them.
+#[derive(Debug, serde::Serialize)]
+struct Attention {
+    reviews: Vec<Item>,
+    issues: Vec<Item>,
+    notifications: u32,
+}
+
+impl Attention {
+    fn of(attention: &yantra_core::attention::Attention) -> Self {
+        Self {
+            reviews: attention.reviews.iter().map(Item::of).collect(),
+            issues: attention.issues.iter().map(Item::of).collect(),
+            notifications: attention.notifications,
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Item {
+    repo: String,
+    number: u64,
+    title: String,
+    /// GitHub's own web URL, carried rather than rebuilt from the parts —
+    /// `/issues` against `/pull` is the kind of thing a client gets wrong.
+    url: String,
+    /// RFC 3339 as GitHub sent it. The age a reader wants is against now rather
+    /// than against the look, so this is not the envelope's `age_seconds`.
+    updated_at: String,
+}
+
+impl Item {
+    fn of(item: &yantra_core::attention::Item) -> Self {
+        Self {
+            repo: item.repo.clone(),
+            number: item.number,
+            title: item.title.clone(),
+            url: item.url.clone(),
+            updated_at: item.updated_at.clone(),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 struct Missing {
     error: String,
@@ -632,6 +712,7 @@ mod tests {
         Fleet {
             model: Arc::new(tokio::sync::RwLock::new(snapshot)),
             beats: Beats::default(),
+            ..Fleet::default()
         }
     }
 
@@ -686,6 +767,8 @@ mod tests {
             "/sessions",
             "/readiness",
             "/machines/cachyos-g14/readiness",
+            "/attention",
+            "/readiness/github",
         ] {
             let body = get_json(holding(Snapshot::default()), path).await;
             assert_eq!(body, json!({"looked": "never"}), "{path}");
@@ -1125,6 +1208,97 @@ mod tests {
         assert!(
             body["error"].as_str().is_some_and(|e| e.contains("nosuch")),
             "{body}"
+        );
+    }
+
+    fn waiting(reading: yantra_core::snapshot::Attention) -> Fleet {
+        holding(Snapshot {
+            attention: Some(Arc::new(reading)),
+            ..Snapshot::default()
+        })
+    }
+
+    /// Two queues and a count, each under its own name. A page that had to tell
+    /// a review from an issue by which array it came out of would be reading a
+    /// position rather than a field.
+    #[tokio::test]
+    async fn the_two_queues_and_the_unread_count_each_reach_the_json_by_name() {
+        let fleet = waiting(Reading::new(Ok(yantra_core::attention::Attention {
+            reviews: vec![yantra_core::attention::Item {
+                repo: "utopia-php/messaging".into(),
+                number: 54,
+                title: "feat-6861-46elks-messaging-adapter".into(),
+                url: "https://github.com/utopia-php/messaging/pull/54".into(),
+                updated_at: "2024-04-19T15:49:30Z".into(),
+            }],
+            issues: Vec::new(),
+            notifications: 27,
+        })));
+
+        let body = get_json(fleet, "/attention").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"]["notifications"], 27, "{body}");
+        assert_eq!(body["data"]["issues"].as_array().map(Vec::len), Some(0));
+        let review = &body["data"]["reviews"][0];
+        assert_eq!(review["repo"], "utopia-php/messaging");
+        assert_eq!(review["number"], 54);
+        assert_eq!(
+            review["url"], "https://github.com/utopia-php/messaging/pull/54",
+            "the link is GitHub's own, so nothing here rebuilds it: {review}"
+        );
+        assert_eq!(
+            review["updated_at"], "2024-04-19T15:49:30Z",
+            "an item ages against now rather than against the look: {review}"
+        );
+    }
+
+    /// **The state this route is likeliest to be in, and the one it must not
+    /// draw as a quiet morning.** A `gh` nobody has logged in has an empty
+    /// inbox in exactly the way an unplugged sensor reads zero (R-23), and the
+    /// remedy is a command the reader has to be told.
+    #[tokio::test]
+    async fn a_gh_nobody_logged_in_is_a_failed_look_and_never_an_empty_inbox() {
+        let fleet = waiting(Reading::new(Err(yantra_core::attention::Error::LoggedOut)));
+
+        let body = get_json(fleet, "/attention").await;
+        assert_eq!(body["looked"], "failed", "{body}");
+        assert!(body.get("data").is_none(), "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("gh auth login")),
+            "{body}"
+        );
+    }
+
+    /// The check that is about this host, served under its own name and its own
+    /// age — it is nowhere in the per-machine reports, because no ssh session
+    /// asked it.
+    #[tokio::test]
+    async fn the_daemons_own_github_credential_is_answered_apart_from_the_fleet() {
+        let fleet = holding(Snapshot {
+            github: Some(Arc::new(Reading::new(doctor::Check {
+                check: doctor::GITHUB,
+                state: doctor::State::Absent,
+                detail: "`gh` here holds no credential".into(),
+            }))),
+            readiness: Some(Arc::new(Reading::new(Ok(vec![checked("cachyos-g14")])))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(fleet.clone(), "/readiness/github").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"]["check"], "github", "{body}");
+        assert_eq!(body["data"]["state"], "absent", "{body}");
+        assert!(body["age_seconds"].as_u64().is_some(), "{body}");
+
+        let fleet_body = get_json(fleet, "/readiness").await;
+        let checks = fleet_body["data"][0]["checks"]
+            .as_array()
+            .expect("a report carries its checks");
+        assert!(
+            checks.iter().all(|check| check["check"] != "github"),
+            "a fact about this host is not a fact about that machine: {fleet_body}"
         );
     }
 

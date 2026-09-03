@@ -136,14 +136,20 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         Some(_) => tracing::info!("notifying the relay {} names", RELAY_URL),
         None => tracing::info!("no {}, so nothing is notified", RELAY_URL),
     }
-    refresh::spawn(&fleet.model, inventory.clone(), relay);
+    refresh::spawn(
+        &fleet.model,
+        inventory.clone(),
+        yantra_core::attention::Gh,
+        relay,
+        fleet.viewers.clone(),
+    );
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .nest(
             "/api",
             api::router()
                 .with_state(fleet.clone())
-                .merge(write::router(authoriser.clone()))
+                .merge(write::router(authoriser.clone(), fleet.clone()))
                 .merge(terminal::router(authoriser)),
         )
         .merge(heartbeat::router())

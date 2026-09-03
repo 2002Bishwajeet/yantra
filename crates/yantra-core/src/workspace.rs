@@ -126,8 +126,8 @@ pub enum Error {
     /// [`Empty`](Error::Empty)'s counterpart on the reading side, and a separate
     /// variant because the two are different faults: that one is a request this
     /// refused to write, and this one is a file already on disk. So it names the
-    /// file, which is the fix — [`update`] loads before it writes, so no verb
-    /// can repair it (R-23).
+    /// file, because [`update`] loads before it writes and so cannot mend it
+    /// (R-23). [`repair`] is the verb that can.
     #[error(
         "workspace `{name}` at {} has an empty `{field}`, so nothing can open it — fill that \
          line in or move the file aside",
@@ -138,6 +138,18 @@ pub enum Error {
         path: PathBuf,
         field: &'static str,
     },
+
+    /// The first of [ADR-0020]'s two bounds. A file that parses is a workspace,
+    /// and a workspace is changed field by field through [`update`] — so the
+    /// raw path refuses it rather than offering a second way to write one.
+    ///
+    /// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
+    #[error(
+        "workspace `{name}` at {} loads, so its file may not be written whole — \
+         `yantra edit` is what changes a workspace that works",
+        path.display()
+    )]
+    Loads { name: String, path: PathBuf },
 }
 
 /// `~/.config/yantra/workspaces`, or the platform equivalent.
@@ -259,25 +271,29 @@ fn update_in(dir: &Path, name: &str, changes: &Changes) -> Result<Workspace, Err
     let after = changes.applied_to(&load_from(dir, name)?);
     non_empty(&after.machine, &after.repo, after.startup.as_deref())?;
 
+    write_over(
+        dir,
+        name,
+        &render(&after.machine, &after.repo, after.startup.as_deref()),
+    )?;
+
+    load_from(dir, name)
+}
+
+/// Renamed over the original rather than written in place: a half-written file
+/// is one `load` refuses, so a torn write would turn an edit into the very
+/// breakage [`repair`] exists to undo. `.tmp` is not `.toml`, so a leftover is
+/// invisible to [`list`].
+fn write_over(dir: &Path, name: &str, text: &str) -> Result<(), Error> {
     let path = dir.join(format!("{name}.toml"));
-    // Renamed over the original rather than written in place: `list` fails the
-    // whole listing on one malformed file, so a half-written one costs every
-    // workspace and not just this one. `.tmp` is not `.toml`, so a leftover is
-    // invisible to that listing.
     let temp = dir.join(format!("{name}.toml.tmp"));
     let unwritable = |source| Error::Unwritable {
         name: name.to_owned(),
         path: path.clone(),
         source,
     };
-    std::fs::write(
-        &temp,
-        render(&after.machine, &after.repo, after.startup.as_deref()),
-    )
-    .map_err(unwritable)?;
-    std::fs::rename(&temp, &path).map_err(unwritable)?;
-
-    load_from(dir, name)
+    std::fs::write(&temp, text).map_err(unwritable)?;
+    std::fs::rename(&temp, &path).map_err(unwritable)
 }
 
 /// Written by hand rather than serialised. The file is three keys and it is
@@ -317,6 +333,109 @@ fn quote(value: &str) -> String {
 
 pub fn load(name: &str) -> Result<Workspace, Error> {
     load_from(&workspaces_dir()?, name)
+}
+
+/// A workspace file that will not load, with the bytes somebody has to change.
+///
+/// The error is carried beside the text rather than returned in its place,
+/// because a repair is a person answering it.
+#[derive(Debug)]
+pub struct Broken {
+    pub name: String,
+    pub path: PathBuf,
+    pub text: String,
+    pub error: Error,
+}
+
+/// The bytes of a workspace file that does not parse, so something other than a
+/// text editor can repair it ([ADR-0020]).
+///
+/// **A file that loads is [`Error::Loads`]**, which is what makes this the same
+/// question [`repair`] asks: a caller cannot be shown a file it may not write.
+///
+/// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
+pub fn broken(name: &str) -> Result<Broken, Error> {
+    broken_in(&workspaces_dir()?, name)
+}
+
+fn broken_in(dir: &Path, name: &str) -> Result<Broken, Error> {
+    let (path, text) = read_file(dir, name)?;
+    match parse(name, &path, &text) {
+        Ok(_) => Err(Error::Loads {
+            name: name.to_owned(),
+            path,
+        }),
+        Err(error) => Ok(Broken {
+            name: name.to_owned(),
+            path,
+            text,
+            error,
+        }),
+    }
+}
+
+/// Writes bytes this crate did not compose — the one write that skips
+/// [`create`]'s and [`update`]'s field-by-field checks. [ADR-0020] bounds it on
+/// both sides: only over a file that does not parse, and only when the bytes do.
+///
+/// Together those mean it can move a file from broken to valid and nowhere
+/// else. **A partial fix is refused**, which is the cost: a file with two errors
+/// cannot be half saved and finished later.
+///
+/// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
+pub fn repair(name: &str, text: &str) -> Result<Workspace, Error> {
+    repair_in(&workspaces_dir()?, name, text)
+}
+
+fn repair_in(dir: &Path, name: &str, text: &str) -> Result<Workspace, Error> {
+    // The same call the reading half makes, so one predicate decides what is
+    // broken and the two cannot drift.
+    let path = broken_in(dir, name)?.path;
+    // Refused with the *next* error rather than a summary: the caller is
+    // answering the one it was shown, and needs the one it has left.
+    parse(name, &path, text)?;
+
+    write_over(dir, name, text)?;
+    load_from(dir, name)
+}
+
+/// Deletes a workspace file and returns what was in it, so a caller can say
+/// what it removed rather than only that it removed something.
+///
+/// **It loads first, and that is the point.** A file that will not parse is
+/// still deletable — `remove_from` reads before it unlinks only so the caller
+/// has something to print, and a `Malformed` file is exactly the one an
+/// operator most wants gone. So a load failure other than `NotFound` does not
+/// stop the delete; it costs the description.
+///
+/// Whether a session is stranded by this is [`crate::remove`]'s question, not
+/// this function's: this half is a file, and that half is a machine.
+pub fn remove(name: &str) -> Result<Option<Workspace>, Error> {
+    remove_from(&workspaces_dir()?, name)
+}
+
+fn remove_from(dir: &Path, name: &str) -> Result<Option<Workspace>, Error> {
+    validate_name(dir, name)?;
+    let path = dir.join(format!("{name}.toml"));
+    let described = load_from(dir, name);
+
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::NotFound {
+                name: name.to_owned(),
+                path,
+            });
+        }
+        Err(source) => {
+            return Err(Error::Unwritable {
+                name: name.to_owned(),
+                path,
+                source,
+            });
+        }
+    }
+    Ok(described.ok())
 }
 
 /// A file the listing refused, under the name it would have had. The shape
@@ -403,27 +522,26 @@ fn list_in(dir: &Path) -> Result<Listing, Error> {
 
 /// Private so the public surface stays one function (ADR-0005).
 fn load_from(dir: &Path, name: &str) -> Result<Workspace, Error> {
+    let (path, text) = read_file(dir, name)?;
+    parse(name, &path, &text)
+}
+
+fn read_file(dir: &Path, name: &str) -> Result<(PathBuf, String), Error> {
     validate_name(dir, name)?;
     let path = dir.join(format!("{name}.toml"));
 
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            return Err(Error::NotFound {
-                name: name.to_owned(),
-                path,
-            });
-        }
-        Err(source) => {
-            return Err(Error::Unreadable {
-                name: name.to_owned(),
-                path,
-                source,
-            });
-        }
-    };
-
-    parse(name, &path, &text)
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok((path, text)),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Err(Error::NotFound {
+            name: name.to_owned(),
+            path,
+        }),
+        Err(source) => Err(Error::Unreadable {
+            name: name.to_owned(),
+            path,
+            source,
+        }),
+    }
 }
 
 /// Names arrive from the command line and become both a filename and a tmux
@@ -480,6 +598,54 @@ fn parse(name: &str, path: &Path, text: &str) -> Result<Workspace, Error> {
 mod tests {
     use super::*;
     use std::error::Error as _;
+
+    const GOOD: &str = "machine = \"box\"\nrepo = \"/srv/app\"\n";
+
+    #[test]
+    fn removing_returns_what_the_file_held() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("remove-good", &[("gone.toml", GOOD)])?;
+        let removed = remove_from(&dir, "gone")?.expect("a readable file describes itself");
+        assert_eq!(removed.machine, "box");
+        assert!(!dir.join("gone.toml").exists(), "the file is unlinked");
+        Ok(())
+    }
+
+    /// The file an operator most wants gone is the one that will not parse, so
+    /// the delete does not depend on the read succeeding — only the description
+    /// does.
+    #[test]
+    fn a_file_that_will_not_parse_is_still_deleted() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("remove-broken", &[("broken.toml", "machine = 1\n")])?;
+        assert!(
+            remove_from(&dir, "broken")?.is_none(),
+            "nothing true can be said about where it pointed"
+        );
+        assert!(!dir.join("broken.toml").exists(), "it is gone regardless");
+        Ok(())
+    }
+
+    /// Distinguishable from a delete that happened, because the caller decides
+    /// whether absence is success and this function must not decide for it.
+    #[test]
+    fn removing_what_is_not_there_says_so() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("remove-absent", &[])?;
+        assert!(matches!(
+            remove_from(&dir, "ghost"),
+            Err(Error::NotFound { .. })
+        ));
+        Ok(())
+    }
+
+    /// I-57: the path in an `InvalidName` is built rather than read, so a name
+    /// that could escape the directory is refused before any filesystem call.
+    #[test]
+    fn a_name_that_is_not_a_name_never_reaches_the_filesystem() {
+        let dir = std::env::temp_dir().join("yantra-workspace-test-remove-escape");
+        assert!(matches!(
+            remove_from(&dir, "../../etc/passwd"),
+            Err(Error::InvalidName { .. })
+        ));
+    }
 
     fn dir_with(label: &str, files: &[(&str, &str)]) -> std::io::Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!("yantra-workspace-test-{label}"));
@@ -1107,5 +1273,81 @@ mod tests {
             list_in(&dir).expect("listable").workspaces.is_empty(),
             "a refusal must leave no file behind"
         );
+    }
+
+    /// ADR-0020's first bound. A workspace that works has a form to edit it, and
+    /// a second way to write one whole is how a good file becomes a bad one.
+    #[test]
+    fn a_file_that_loads_may_not_be_written_whole() -> std::io::Result<()> {
+        let dir = dir_with("repair-loads", &[("fine.toml", GOOD)])?;
+
+        assert!(matches!(broken_in(&dir, "fine"), Err(Error::Loads { .. })));
+        assert!(matches!(
+            repair_in(&dir, "fine", "machine = \"other\"\nrepo = \"/srv/other\"\n"),
+            Err(Error::Loads { .. })
+        ));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("fine.toml"))?,
+            GOOD,
+            "the refusal leaves the file exactly as it was"
+        );
+        Ok(())
+    }
+
+    /// ADR-0020's second bound, and the half that has to *say* something: the
+    /// caller is answering the error it was shown, so a refusal that named no
+    /// error would send it back to the same screen with nothing new.
+    #[test]
+    fn bytes_that_still_will_not_load_are_refused_with_the_next_error()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("repair-still-broken", &[("site.toml", "machine = 1\n")])?;
+
+        let shown = broken_in(&dir, "site")?;
+        assert_eq!(shown.text, "machine = 1\n", "the bytes to fix, verbatim");
+        assert!(matches!(shown.error, Error::Malformed { .. }));
+
+        // The TOML is now valid and the workspace is not: the *next* error.
+        let error = repair_in(&dir, "site", "machine = \"box\"\nrepo = \"\"\n")
+            .expect_err("a blank required field is not a repair");
+        assert!(
+            matches!(error, Error::Blank { field: "repo", .. }),
+            "the refusal names the field that is still wrong, not the one that was"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("site.toml"))?,
+            "machine = 1\n",
+            "nothing is written until the bytes load"
+        );
+        Ok(())
+    }
+
+    /// The one thing it may do, and the whole of it.
+    #[test]
+    fn bytes_that_load_replace_a_file_that_does_not() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = dir_with("repair-good", &[("site.toml", "machine = \"box\"\n")])?;
+
+        let repaired = repair_in(&dir, "site", "machine = \"box\"\nrepo = \"/srv/app\"\n")?;
+
+        assert_eq!(repaired.machine, "box");
+        assert_eq!(repaired.repo, PathBuf::from("/srv/app"));
+        assert!(
+            list_in(&dir)?.unusable.is_empty(),
+            "the listing that named this file no longer does"
+        );
+        Ok(())
+    }
+
+    /// There is nothing to repair, and `create` is the verb that makes one — so
+    /// this may not be the way a workspace comes into being.
+    #[test]
+    fn repairing_a_file_that_is_not_there_is_not_a_create() -> std::io::Result<()> {
+        let dir = dir_with("repair-absent", &[])?;
+
+        assert!(matches!(
+            repair_in(&dir, "ghost", GOOD),
+            Err(Error::NotFound { .. })
+        ));
+        assert!(!dir.join("ghost.toml").exists());
+        Ok(())
     }
 }

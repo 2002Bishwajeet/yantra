@@ -112,7 +112,11 @@ That is the whole schema. An unknown key is an error rather than a line that is 
 `repo = ""` or `startup = ""` is refused when the file is *read*, naming the file, the field and the
 workspace. Such a file costs only itself: `yantra ls workspaces` and the dashboard's workspace table
 still show every workspace that loaded, and name the one that did not with its reason underneath —
-fix the line or move the file aside.
+fix the line or move the file aside. **`yantra edit` cannot do that fixing** — it loads the file
+before it writes one — so `yantra repair site < fixed.toml` is the verb that can, and the dashboard
+puts the same thing on a page at `/w/site/repair`. Both refuse bytes that still will not load, and
+both refuse a file that already does
+([ADR-0020](docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
 
 **The box you are sitting at is the awkward case.** If it is served by Tailscale SSH rather than its
 own `sshd`, it cannot ssh to *itself* — Tailscale SSH is peer-to-peer, and there is no listener behind
@@ -125,17 +129,24 @@ Then:
 ```bash
 yantra new site --machine mac --repo /Users/me/code/site   # write a workspace
 yantra edit site --repo /Users/me/code/website             # change one that exists
+yantra repair site < fixed.toml  # replace a file that will not load, if the bytes do
 yantra up yantra                 # open the session (run again to attach)
 yantra up yantra --agent claude  # ...and start Claude Code in it
 yantra attach yantra             # hand this terminal to the session
 yantra resume yantra             # start the agent again on the conversation it left off
 yantra status yantra             # running, finished, stopped, crashed or killed
 yantra logs yantra -n 40         # what the agent has been saying
+yantra tokens yantra             # what that session has spent, in tokens and dollars
 yantra down yantra               # stop it, giving the agent a chance to shut down
+yantra rm yantra [--force]       # delete the workspace file, refusing while a session is open
+yantra kill mac scratch          # stop a session by machine and name, workspace or not
+yantra probe mac /code/site      # is that directory there, and what git origin does it hold?
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
-yantra ls sessions               # what tmux is holding, across every machine
+yantra ls sessions               # what tmux is holding, across every machine it can reach
+yantra ls attention              # what GitHub is waiting on you for
 yantra notify 'needs you'        # publish a message to the relay you configured
+yantra relay <url> [--token T]   # configure that relay, and send one test message
 yantra doctor [machine] [--json] # what each machine can and cannot do — a read, it changes nothing
 yantra fix-terminfo <machine>    # teach a machine about your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place

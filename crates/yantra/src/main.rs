@@ -11,15 +11,20 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
+use yantra_core::attention::{self, Attention, Forge as _, Gh};
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
+use yantra_core::price;
+use yantra_core::probe;
+use yantra_core::remove;
 use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
+use yantra_core::tokens;
 use yantra_core::up;
 use yantra_core::workspace::{self, Listing};
 
@@ -78,6 +83,11 @@ enum Command {
         #[arg(long)]
         no_startup: bool,
     },
+    /// Replace a workspace file that will not load, with bytes read from stdin
+    Repair {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// Attach this terminal to a workspace's session
     Attach {
         /// Workspace name, without the `.toml`
@@ -101,10 +111,38 @@ enum Command {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Add up the tokens the workspace's session has spent
+    Tokens {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// Stop the workspace's session, giving the agent a chance to shut down
     Down {
         /// Workspace name, without the `.toml`
         workspace: String,
+    },
+    /// Ask a machine whether a directory is there, and what git origin it holds
+    Probe {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// Absolute path **on that machine**, not on this one
+        path: String,
+    },
+    /// Stop a tmux session by machine and name, for one no workspace claims
+    Kill {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// tmux session name, as `yantra ls sessions` prints it
+        session: String,
+    },
+    /// Delete a workspace, refusing while its session is still open
+    Rm {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// Delete without asking the machine. Use when it cannot be reached, or
+        /// when stranding the session is what you want
+        #[arg(long)]
+        force: bool,
     },
     /// List what Yantra can see
     Ls {
@@ -121,6 +159,14 @@ enum Command {
         /// Urgency, 1 (min) to 5 (max)
         #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
         priority: Option<u8>,
+    },
+    /// Write the relay down where yantrad reads it, and publish a test message
+    Relay {
+        /// The ntfy topic URL. On a public server the topic is the password
+        url: String,
+        /// Only a protected topic needs one
+        #[arg(long)]
+        token: Option<String>,
     },
     /// Say what each machine can and cannot do — a read, it changes nothing
     Doctor {
@@ -154,6 +200,8 @@ enum LsTarget {
     Sessions,
     /// Workspaces defined in ~/.config/yantra/workspaces
     Workspaces,
+    /// Issues, reviews and notifications waiting for you on GitHub
+    Attention,
 }
 
 #[tokio::main]
@@ -183,11 +231,16 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Some(Command::Repair { workspace }) => repair(&workspace),
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
         Some(Command::Status { workspace }) => show_status(&workspace).await,
+        Some(Command::Tokens { workspace }) => show_tokens(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
+        Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
+        Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
+        Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
@@ -197,6 +250,9 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Workspaces,
         }) => ls_workspaces(),
+        Some(Command::Ls {
+            target: LsTarget::Attention,
+        }) => ls_attention().await,
         Some(Command::Notify {
             message,
             title,
@@ -209,6 +265,7 @@ async fn main() -> ExitCode {
             })
             .await
         }
+        Some(Command::Relay { url, token }) => relay(&url, token.as_deref()).await,
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity) => ssh_identity(),
@@ -415,6 +472,135 @@ fn ago(seconds: i64) -> String {
     }
 }
 
+/// Exit 0 whenever the transcript was read, including for a session that has
+/// spent nothing — unlike `status`, this reports a measurement rather than a
+/// state, and zero is one.
+async fn show_tokens(name: &str) -> ExitCode {
+    match tokens::tokens(name).await {
+        Ok(spend) => {
+            print!("{}", render_tokens(&spend));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(
+                err,
+                logs::Error::NoTranscript { .. } | logs::Error::NoTurnYet { .. }
+            ) {
+                eprintln!("{}", transcript_note(name));
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The four counts do not add up to a fifth — they are not the same unit of
+/// anything — so the only figure that adds them is money, and it is the last
+/// line because it is what the question was. **The date it was priced at is on
+/// that line with it** (Y-182): a table written down in a binary reports wrong
+/// money the day a price changes and says nothing while it does, and a visible
+/// date is what the owner chose instead of silence.
+fn render_tokens(spend: &tokens::Spend) -> String {
+    let total = spend.total();
+    let rows = [
+        ("input", total.input),
+        ("output", total.output),
+        ("cache write", total.cache_write),
+        ("cache read", total.cache_read),
+    ];
+    let counts: Vec<String> = rows.iter().map(|(_, count)| thousands(*count)).collect();
+    let width = counts.iter().map(String::len).max().unwrap_or(0);
+
+    let mut out = format!("transcript: {}\n\n", spend.path);
+    for ((label, _), count) in rows.iter().zip(&counts) {
+        out.push_str(&format!("  {label:<12}  {count:>width$}\n"));
+    }
+    if total.responses == 0 {
+        out.push_str("\nthis session has spent nothing yet\n");
+        return out;
+    }
+
+    // Fast mode is billed at twice base input and twice output, and the table
+    // carries neither — so nothing here is priced, per model or in total.
+    let priced = spend.fast == 0;
+    let name = spend.by_model.keys().map(String::len).max().unwrap_or(0);
+    // `None` until something is priced: a sum over nothing is `0.0`, and
+    // `$0.00` for a session this table priced none of is a figure a reader
+    // would act on (R-23). Found by Y-199, which publishes the same numbers.
+    let mut charged: Option<f64> = None;
+    let mut unpriced = Vec::new();
+    out.push('\n');
+    for (model, counts) in &spend.by_model {
+        let cost = priced
+            .then(|| price::rate(model))
+            .flatten()
+            .map(|rate| rate.charge(counts));
+        match cost {
+            Some(cost) => charged = Some(charged.unwrap_or(0.0) + cost),
+            None => unpriced.push(model.as_str()),
+        }
+        out.push_str(&format!(
+            "  {model:<name$}  {responses:>4} response{plural}  {cost:>7}\n",
+            responses = counts.responses,
+            plural = if counts.responses == 1 { " " } else { "s" },
+            cost = cost.map_or_else(|| "—".to_owned(), money),
+        ));
+    }
+
+    if !priced {
+        out.push_str(&format!(
+            "\nno cost: {} response{} ran in fast mode, which is billed at a rate\n\
+             this price table does not carry\n",
+            spend.fast,
+            if spend.fast == 1 { "" } else { "s" }
+        ));
+        return out;
+    }
+
+    let Some(charged) = charged else {
+        out.push_str(
+            "\nno cost: the price table carries none of the models above, so there\n\
+             is no figure to give\n",
+        );
+        return out;
+    };
+
+    out.push_str(&format!(
+        "\n{} at prices of {}\n",
+        money(charged),
+        price::AS_OF
+    ));
+    for model in unpriced {
+        out.push_str(&format!(
+            "{model} is not in that table, so its tokens are not in that figure\n"
+        ));
+    }
+    out
+}
+
+/// Under a cent is not nothing, and `$0.00` would say it was.
+fn money(amount: f64) -> String {
+    if amount > 0.0 && amount < 0.005 {
+        "<$0.01".to_owned()
+    } else {
+        format!("${amount:.2}")
+    }
+}
+
+/// Every figure here runs to six or seven digits, and unseparated they cannot
+/// be compared at a glance — which is the only thing anyone does with them.
+fn thousands(count: u64) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (at, digit) in digits.chars().enumerate() {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 async fn show_status(name: &str) -> ExitCode {
     match yantra_core::status::status(name).await {
         Ok(report) => {
@@ -478,6 +664,38 @@ async fn edit(name: &str, changes: &workspace::Changes) -> ExitCode {
                     workspace.name, workspace.machine
                 );
             }
+            println!("  repo:   {}", workspace.repo.display());
+            match &workspace.startup {
+                Some(startup) => println!("  startup: {startup}"),
+                None => println!("  startup: none, so the session opens a shell"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The one write that does not compose the file
+/// ([ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
+/// It exists so the terminal is not second-class: `$EDITOR` repairs the file
+/// too and says nothing about whether the repair worked, while this refuses
+/// bytes that still will not load and names the next error.
+///
+/// The read half is `cat`. Every refusal already prints the path, and `yantra
+/// ls workspaces` prints it under the table for the file that did not load.
+fn repair(name: &str) -> ExitCode {
+    let mut text = String::new();
+    if let Err(err) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+
+    match workspace::repair(name, &text) {
+        Ok(workspace) => {
+            println!("repaired {} on {}", workspace.name, workspace.machine);
             println!("  repo:   {}", workspace.repo.display());
             match &workspace.startup {
                 Some(startup) => println!("  startup: {startup}"),
@@ -594,6 +812,48 @@ async fn publish(message: notify::Message) -> ExitCode {
                 && std::env::var_os(notify::RELAY_TOKEN).is_none()
             {
                 eprintln!("{}", token_note());
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The write half of the relay, and the dashboard's `/settings` on a keyboard
+/// ([ADR-0021](../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md)).
+///
+/// **It sends after it writes**, because a relay written down and never reached
+/// is the failure this box has no screen to show. Both halves are reported: a
+/// message that did not arrive does not un-write the file.
+///
+/// The URL and the token are arguments, so `ps` and the shell's history see
+/// them — ADR-0021 names that as the cost of a verb, and the browser's form is
+/// the way that avoids it.
+async fn relay(url: &str, token: Option<&str>) -> ExitCode {
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    if let Err(err) = notify::write_to(path, url, token) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+    println!("wrote the relay to {}", notify::RELAY_FILE);
+    println!("  note: yantrad reads that file when systemd starts it —");
+    println!("        `sudo systemctl restart yantrad` for this to reach the daemon.");
+
+    match notify::post(
+        &notify::Relay::new(url.to_owned(), token.map(str::to_owned)),
+        notify::test_message(),
+    )
+    .await
+    {
+        Ok(()) => {
+            println!("published a test message");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, notify::Error::Refused { status: 401 | 403 }) && token.is_none() {
+                eprintln!(
+                    "\x20 note: that topic wants credentials — pass --token to write one down."
+                );
             }
             ExitCode::FAILURE
         }
@@ -842,11 +1102,162 @@ fn ls_workspaces() -> ExitCode {
     }
 }
 
+/// Exit **0** only when the directory is there, so `yantra probe m /p && yantra
+/// new …` reads the way it looks — `status`'s rule. A machine that could not be
+/// asked exits 1 as well, and the difference is on stderr: the shell gets one
+/// bit and the operator gets the reason (R-23).
+async fn probe(machine: &str, path: &str) -> ExitCode {
+    match probe::probe(machine, path).await {
+        Ok(found) if found.exists => {
+            match &found.origin {
+                Some(origin) => println!("{} exists on {machine}, origin {origin}", found.path),
+                None => println!("{} exists on {machine}, no git origin", found.path),
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(found) => {
+            println!("{} is not a directory on {machine}", found.path);
+            ExitCode::FAILURE
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Stopping something already stopped exits **0** — `down`'s rule again, and
+/// the reason this prints which of the two happened rather than one sentence
+/// that would be true either way.
+async fn kill(machine: &str, session: &str) -> ExitCode {
+    match sessions::kill(machine, session).await {
+        Ok(report) if report.killed => {
+            println!("killed `{}` on {}", report.session, report.machine);
+            ExitCode::SUCCESS
+        }
+        Ok(report) => {
+            println!("no session `{}` on {}", report.session, report.machine);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Deleting something already gone exits **0**, which is `down`'s rule (I-30,
+/// root §B4): absence is the state asked for. It costs a typo going unreported,
+/// and that is the same price `down` already pays.
+async fn rm(name: &str, force: bool) -> ExitCode {
+    match remove::remove(name, force).await {
+        Ok(removed) => {
+            match removed.workspace {
+                Some(workspace) => println!(
+                    "removed `{}` ({} on {})",
+                    removed.name,
+                    workspace.repo.display(),
+                    workspace.machine
+                ),
+                // The file was deleted but never parsed, so there is nothing
+                // true to say about where it pointed.
+                None => println!("removed `{}`, which did not parse", removed.name),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(remove::Error::Workspace(workspace::Error::NotFound { name, .. })) => {
+            println!("`{name}` is already gone");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// An empty inbox exits 0. Nothing waiting is the answer, not a partial one —
+/// the same reading that makes `down` succeed on something already stopped.
+async fn ls_attention() -> ExitCode {
+    match Gh.attention().await {
+        Ok(attention) => {
+            print!("{}", render_attention(&attention));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            // Each of these is one person's action away, so name it (the
+            // crate's *name the fix, not just the fault*). `LoggedOut` needs no
+            // note: its own message already carries `gh auth login`.
+            if matches!(err, attention::Error::NotInstalled) {
+                eprintln!("  install it from https://cli.github.com, then run `gh auth login`");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// An issue title runs to any length, and `table` sizes a column to its widest
+/// cell — so one long title pushes `UPDATED` off an 80-column terminal for
+/// every row. This is the width that keeps the table readable, not a claim
+/// about the terminal, which nothing here measures.
+const TITLE_WIDTH: usize = 60;
+
+/// Truncation counts **characters**, not bytes: these titles carry em dashes
+/// and arrows, and slicing a `String` mid-codepoint panics.
+fn ellipsise(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    text.chars().take(width - 1).collect::<String>() + "…"
+}
+
+/// Reviews and issues share one table because they are one queue to a reader —
+/// `KIND` is what separates them, and sorting by anything else would break the
+/// order GitHub already returned them in.
+fn render_attention(attention: &Attention) -> String {
+    let row = |kind: &str, item: &attention::Item| {
+        vec![
+            kind.to_string(),
+            item.repo.clone(),
+            item.number.to_string(),
+            ellipsise(&item.title, TITLE_WIDTH),
+            item.updated_at.clone(),
+        ]
+    };
+    let rows: Vec<Vec<String>> = attention
+        .reviews
+        .iter()
+        .map(|item| row("review", item))
+        .chain(attention.issues.iter().map(|item| row("issue", item)))
+        .collect();
+
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(&["KIND", "REPO", "#", "TITLE", "UPDATED"], &rows)
+    };
+
+    // Under the table rather than in it: a count is not something to open, and
+    // every column above is. Always printed, because zero unread is a reading.
+    out.push_str(&format!(
+        "\n{} unread notification{}\n",
+        attention.notifications,
+        if attention.notifications == 1 {
+            ""
+        } else {
+            "s"
+        }
+    ));
+    out
+}
+
 /// A file that did not load is named **under** the table rather than given a
 /// row in it, which is `render_sessions`'s shape for an unreachable machine.
 /// Every column here is something to act on and a broken file has none of them:
 /// no machine, nothing to attach to, and nothing `yantra edit` can repair, since
-/// `update` loads before it writes and the file is the fix.
+/// `update` loads before it writes. `yantra repair` is the verb for that
+/// (ADR-0020), and the reason printed here already names the file it reads.
 fn render_workspaces(listing: &Listing) -> String {
     let workspaces = &listing.workspaces;
     if workspaces.is_empty() && listing.unusable.is_empty() {
@@ -1262,6 +1673,23 @@ mod tests {
         );
     }
 
+    /// The bytes come from stdin and from nowhere else. A `--file` or an
+    /// inline argument would be a second way to say the same thing, and a
+    /// workspace file with a newline in it is not an argument.
+    #[test]
+    fn repair_takes_a_workspace_and_reads_the_file_from_stdin() {
+        let parsed = Cli::try_parse_from(["yantra", "repair", "demo"]).expect("`repair` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Repair { workspace }) if workspace == "demo"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "repair"]).is_err());
+        assert!(
+            Cli::try_parse_from(["yantra", "repair", "demo", "--file", "x.toml"]).is_err(),
+            "there is one way to hand it bytes"
+        );
+    }
+
     #[test]
     fn logs_defaults_to_a_window_rather_than_the_whole_transcript() {
         let default = Cli::try_parse_from(["yantra", "logs", "demo"]).expect("a bare logs parses");
@@ -1329,6 +1757,218 @@ mod tests {
             entries: Vec::new(),
         });
         assert!(rendered.contains("nothing has been said"), "{rendered}");
+    }
+
+    /// A workspace and nothing else: which session is the pane's business, and
+    /// there is no window to choose because the answer is the whole session.
+    #[test]
+    fn tokens_takes_a_workspace_and_no_window() {
+        let parsed = Cli::try_parse_from(["yantra", "tokens", "demo"]).expect("`tokens` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Tokens { workspace }) if workspace == "demo"
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "tokens", "demo", "-n", "5"]).is_err(),
+            "a window would be a different question from what the session spent"
+        );
+    }
+
+    fn one_model(model: &str, counts: tokens::Counts) -> tokens::Spend {
+        tokens::Spend {
+            path: "/h/.claude/projects/-srv-repo/s.jsonl".to_owned(),
+            by_model: [(model.to_owned(), counts)].into_iter().collect(),
+            fast: 0,
+        }
+    }
+
+    /// The four counts as Claude Code recorded them, and the one figure that is
+    /// derived — which never appears without the day it was priced at (Y-182).
+    #[test]
+    fn the_counts_are_reported_and_the_cost_carries_the_date_it_was_priced_at() {
+        let rendered = render_tokens(&one_model(
+            "claude-opus-5",
+            tokens::Counts {
+                responses: 66,
+                input: 1_434,
+                output: 49_118,
+                cache_write: 239_765,
+                cache_write_1h: 0,
+                cache_read: 7_492_711,
+            },
+        ));
+        assert!(rendered.contains("transcript: /h/.claude"), "{rendered}");
+        assert!(rendered.contains("input             1,434"), "{rendered}");
+        assert!(rendered.contains("cache read    7,492,711"), "{rendered}");
+        assert!(
+            rendered.contains("claude-opus-5    66 responses"),
+            "{rendered}"
+        );
+        // 1,434 * $5 + 49,118 * $25 + 239,765 * $6.25 + 7,492,711 * $0.50, all
+        // per million.
+        assert!(rendered.contains("$6.48"), "{rendered}");
+        assert!(
+            rendered.ends_with(&format!("$6.48 at prices of {}\n", price::AS_OF)),
+            "a figure with no date beside it is the failure this row exists to \
+             prevent: {rendered}"
+        );
+        for line in rendered.lines() {
+            assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
+        }
+    }
+
+    /// Models do not share a rate, so a transcript with two of them is priced
+    /// twice and added — never at whichever rate came first.
+    #[test]
+    fn two_models_are_priced_separately_and_summed() {
+        let spend = tokens::Spend {
+            path: "/x".to_owned(),
+            by_model: [
+                (
+                    "claude-opus-5".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+                (
+                    "claude-haiku-4-5-20251001".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            fast: 0,
+        };
+        let rendered = render_tokens(&spend);
+        assert!(rendered.contains("$25.00"), "opus output: {rendered}");
+        assert!(rendered.contains("$5.00"), "haiku output: {rendered}");
+        assert!(rendered.contains("$30.00 at prices of"), "{rendered}");
+    }
+
+    /// A model the table does not carry is shown as unpriced and left out of
+    /// the figure, with a line saying so — the difference between *we do not
+    /// know what this cost* and *this cost nothing*.
+    #[test]
+    fn an_unpriced_model_is_named_rather_than_counted_as_free() {
+        let rendered = render_tokens(&one_model(
+            "claude-opus-9",
+            tokens::Counts {
+                responses: 2,
+                output: 1_000_000,
+                ..tokens::Counts::default()
+            },
+        ));
+        assert!(rendered.contains('—'), "{rendered}");
+        // Y-199: this asserted `$0.00 at prices of`, which is what the test's
+        // own name says it must not do. A sum over nothing is zero, and a zero
+        // beside a date reads as a session that cost nothing.
+        assert!(
+            rendered.contains("carries none of the models above"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("$0.00"), "{rendered}");
+    }
+
+    /// One priced model beside one that is not: the figure is real, it is the
+    /// priced model's alone, and the line beneath says what is missing from it.
+    #[test]
+    fn a_partly_priced_session_gives_the_figure_and_names_what_is_outside_it() {
+        let spend = tokens::Spend {
+            path: "/x".to_owned(),
+            by_model: [
+                (
+                    "claude-opus-5".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+                (
+                    "claude-opus-9".to_owned(),
+                    tokens::Counts {
+                        responses: 1,
+                        output: 1_000_000,
+                        ..tokens::Counts::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            fast: 0,
+        };
+        let rendered = render_tokens(&spend);
+
+        assert!(rendered.contains("at prices of"), "{rendered}");
+        assert!(
+            rendered.contains("claude-opus-9 is not in that table"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("carries none of the models above"),
+            "{rendered}"
+        );
+    }
+
+    /// Fast mode doubles both prices, and the table carries neither — so the
+    /// tokens stand and the money is withheld rather than under-reported.
+    #[test]
+    fn a_fast_mode_session_reports_tokens_and_no_money() {
+        let mut spend = one_model(
+            "claude-opus-5",
+            tokens::Counts {
+                responses: 3,
+                output: 1_000_000,
+                ..tokens::Counts::default()
+            },
+        );
+        spend.fast = 1;
+        let rendered = render_tokens(&spend);
+        assert!(rendered.contains("output        1,000,000"), "{rendered}");
+        assert!(rendered.contains("ran in fast mode"), "{rendered}");
+        assert!(
+            !rendered.contains('$'),
+            "a rate this table does not carry must not produce a figure, per \
+             model or in total: {rendered}"
+        );
+    }
+
+    /// A tenth of a cent is not nothing, and `$0.00` would say it was.
+    #[test]
+    fn a_charge_under_a_cent_is_not_rounded_to_nothing() {
+        assert_eq!(money(0.0), "$0.00");
+        assert_eq!(money(0.001), "<$0.01");
+        assert_eq!(money(0.006), "$0.01");
+        assert_eq!(money(11.234), "$11.23");
+    }
+
+    /// A session that has said nothing has spent nothing, and that is a reading
+    /// rather than a failure — the state right after `up --agent claude`.
+    #[test]
+    fn a_session_that_has_spent_nothing_says_so() {
+        let rendered = render_tokens(&tokens::Spend {
+            path: "/h/x.jsonl".to_owned(),
+            ..tokens::Spend::default()
+        });
+        assert!(rendered.contains("spent nothing yet"), "{rendered}");
+        assert!(rendered.contains("input         0"), "{rendered}");
+        assert!(
+            !rendered.contains('$'),
+            "nothing spent is not a price: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_seven_digit_count_is_grouped_and_a_small_one_is_left_alone() {
+        assert_eq!(thousands(7_492_711), "7,492,711");
+        assert_eq!(thousands(1_434), "1,434");
+        assert_eq!(thousands(0), "0");
     }
 
     /// Every verdict must read as a sentence a person can act on — and the two
@@ -1793,5 +2433,102 @@ mod tests {
     fn an_unrecognised_os_reaches_the_table_verbatim() {
         let odd = machine("nas", Os::Other("freebsd".to_string()), true, false, None);
         assert!(render_machines(&[odd]).contains("freebsd"));
+    }
+
+    #[test]
+    fn kill_takes_a_machine_and_a_session() {
+        let cli = Cli::try_parse_from(["yantra", "kill", "mac", "work"])
+            .expect("`kill <machine> <session>` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Kill { ref machine, ref session }) if machine == "mac" && session == "work"
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "kill", "mac"]).is_err(),
+            "a session name is required: killing every session on a machine is not this verb"
+        );
+    }
+
+    /// `--force` is the difference between refusing and stranding a session, so
+    /// its spelling and its default are both part of the contract.
+    #[test]
+    fn rm_takes_a_workspace_and_force_defaults_off() {
+        let bare = Cli::try_parse_from(["yantra", "rm", "demo"]).expect("`rm demo` parses");
+        assert!(matches!(
+            bare.command,
+            Some(Command::Rm { force: false, .. })
+        ));
+
+        let forced =
+            Cli::try_parse_from(["yantra", "rm", "demo", "--force"]).expect("`--force` parses");
+        assert!(matches!(
+            forced.command,
+            Some(Command::Rm { force: true, .. })
+        ));
+    }
+
+    #[test]
+    fn ls_attention_is_a_spelling_users_type() {
+        let cli =
+            Cli::try_parse_from(["yantra", "ls", "attention"]).expect("`ls attention` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Ls {
+                target: LsTarget::Attention
+            })
+        ));
+    }
+
+    fn item(repo: &str, number: u64, title: &str) -> attention::Item {
+        attention::Item {
+            repo: repo.to_string(),
+            number,
+            title: title.to_string(),
+            url: format!("https://github.com/{repo}/issues/{number}"),
+            updated_at: "2026-08-09T18:46:24Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn both_kinds_share_one_table_and_the_count_sits_under_it() {
+        let out = render_attention(&Attention {
+            reviews: vec![item("o/a", 7, "a review")],
+            issues: vec![item("o/b", 9, "an issue")],
+            notifications: 27,
+        });
+        assert!(out.contains("review"), "{out}");
+        assert!(out.contains("issue"), "{out}");
+        // Under the table: the count is the last line, never a row.
+        assert!(out.trim_end().ends_with("27 unread notifications"), "{out}");
+    }
+
+    /// An empty inbox is a reading, so the count still prints with no table
+    /// above it — and it is singular at one.
+    #[test]
+    fn nothing_waiting_still_says_so() {
+        let out = render_attention(&Attention::default());
+        assert!(!out.contains("KIND"), "no table without rows: {out}");
+        assert_eq!(out.trim(), "0 unread notifications");
+
+        let one = render_attention(&Attention {
+            notifications: 1,
+            ..Attention::default()
+        });
+        assert!(one.contains("1 unread notification\n"), "{one}");
+    }
+
+    /// The titles this reads carry em dashes and arrows, so truncation that
+    /// counted bytes would panic on a boundary rather than shorten a string.
+    #[test]
+    fn a_title_is_cut_by_character_and_never_mid_codepoint() {
+        let wide = "→ ".repeat(80);
+        let cut = ellipsise(&wide, 10);
+        assert_eq!(cut.chars().count(), 10);
+        assert!(cut.ends_with('…'));
+        assert_eq!(
+            ellipsise("short", 10),
+            "short",
+            "under the width is untouched"
+        );
     }
 }
