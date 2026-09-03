@@ -157,8 +157,13 @@ passed, and one channel per session is a second URL rather than a second feature
 anyone who knows a topic can read it and publish to it. So use a high-entropy topic, or run your own
 ntfy and keep the body on the tailnet. **The token is read from the environment and from nowhere
 else**: never a workspace field, never a file Yantra writes, never a log line and never the API
-(§B4). For the appliance it belongs in a systemd drop-in — `systemctl edit yantrad` — rather than in
-the unit this repo ships.
+(§B4) — **with one exception, and it is the appliance's**: `/settings` in the dashboard and
+`yantra relay <url> [--token T]` write `/etc/yantra/daemon.env`, which the unit reads with
+`EnvironmentFile=`, and the token is in plain text in that file
+([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md), Y-199). The file is `0600` and
+owned by the account the daemon runs as, and the daemon takes a new relay **at its next start** —
+`sudo systemctl restart yantrad`. On a development box neither surface applies: export the two
+variables in the shell you start `yantrad` from, as above.
 
 `yantra notify` is the diagnostic for a box with no screen: it proves the topic, the token and egress
 in one command, and every refusal names the variable that would change it without printing its value.
@@ -243,6 +248,10 @@ The fixture is `crates/yantra-core/tests/common/mod.rs`. Its image is built from
 its own throwaway keypair and publishes sshd on an ephemeral loopback port —
 your `~/.ssh` is never read — and the container is removed in `Drop`, so it goes
 away even when a test panics.
+
+`podman` picks that port, and it releases the number between choosing it and
+binding it, so a parallel run can lose the race. The fixture then asks again, up
+to five times, and a failure names every attempt.
 
 ```bash
 just test                                   # the fixture runs as part of the suite

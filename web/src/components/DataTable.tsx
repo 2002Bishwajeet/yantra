@@ -62,11 +62,12 @@ export function DataTable<T>({
         {rows.map((row) => (
           <dl
             key={rowKey(row)}
-            className="grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2 py-3 text-sm first:pt-0 last:pb-0"
+            className="text-body grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0"
           >
             {columns.map((column) => (
               <Fragment key={column.header}>
-                <dt className="text-muted-foreground text-xs">
+                {/* D3 §5.6: uppercase already, and small, tracked and muted. */}
+                <dt className="text-meta text-muted-foreground tracking-wider">
                   {column.header}
                 </dt>
                 <dd className="min-w-0 break-words">{column.cell(row)}</dd>
@@ -79,17 +80,23 @@ export function DataTable<T>({
   }
 
   return (
-    <Table>
+    <Table className="text-body">
       <TableHeader>
         <TableRow>
           {columns.map((column) => (
-            <TableHead key={column.header}>{column.header}</TableHead>
+            /* D3 §5.6: uppercase already, and small, tracked and muted. */
+            <TableHead
+              className="text-meta text-muted-foreground tracking-wider"
+              key={column.header}
+            >
+              {column.header}
+            </TableHead>
           ))}
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <TableRow key={rowKey(row)}>
+          <TableRow className="h-row" key={rowKey(row)}>
             {columns.map((column) => (
               <TableCell key={column.header}>{column.cell(row)}</TableCell>
             ))}
