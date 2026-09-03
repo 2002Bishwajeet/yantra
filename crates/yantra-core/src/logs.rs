@@ -132,8 +132,9 @@ pub enum Error {
     NoStateDir,
 }
 
-/// The last `lines` turns of the agent working in workspace `name`.
-pub async fn logs(name: &str, lines: usize) -> Result<Transcript, Error> {
+/// The last `lines` turns of the agent working in workspace `name`, skipping
+/// the newest `before` records ([`read`]).
+pub async fn logs(name: &str, lines: usize, before: usize) -> Result<Transcript, Error> {
     let workspace = workspace::load(name)?;
     let machine = ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?;
     let ssh = Ssh::new(machine)?;
@@ -143,7 +144,7 @@ pub async fn logs(name: &str, lines: usize) -> Result<Transcript, Error> {
         &workspace.repo.to_string_lossy(),
         session.as_deref(),
         lines,
-        0,
+        before,
     )
     .await
 }

@@ -398,7 +398,7 @@ const KEYCHAIN_NOTE: &str = "\
         one from a login session on that machine and try again.";
 
 async fn show_logs(name: &str, lines: usize) -> ExitCode {
-    match logs::logs(name, lines).await {
+    match logs::logs(name, lines, 0).await {
         Ok(transcript) => {
             print!("{}", render_logs(&transcript));
             ExitCode::SUCCESS

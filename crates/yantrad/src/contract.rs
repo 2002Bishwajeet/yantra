@@ -29,6 +29,7 @@ use axum::http::Request;
 use serde_json::Value;
 use tower::ServiceExt as _;
 use yantra_core::agent::Running;
+use yantra_core::attention::{Attention, Item};
 use yantra_core::doctor;
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::inventory::{MachineInfo, Os};
@@ -51,6 +52,7 @@ const HEADER: &str = "\
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Attention,
   Broken,
   Listed,
   Listing,
@@ -63,6 +65,7 @@ import type {
   Spend,
   Stopped,
   TerminalSize,
+  Transcript,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -121,6 +124,11 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             "oneReadiness",
             "Looked<Readiness>",
             read(&fleet, "/machines/cachyos-g14/readiness").await,
+        ),
+        (
+            "attention",
+            "Looked<Attention>",
+            read(&fleet, "/attention").await,
         ),
         (
             "notLooked",
@@ -260,9 +268,7 @@ async fn fleet() -> Fleet {
             swept("cachyos-g14"),
             swept("bishwajeets-macbook-pro"),
         ])))),
-        // `/api/attention` joins this fixture when the dashboard reads it
-        // (Y-174): an entry here needs a type in `web/src/api.ts` to satisfy.
-        attention: None,
+        attention: Some(Arc::new(Reading::new(Ok(attention())))),
         // `/readiness/github` has no entry below: the type it would satisfy is
         // the card's, and the dashboard is parked (Y-174).
         github: None,
@@ -340,6 +346,29 @@ fn swept(machine: &str) -> doctor::Report {
                 detail: "only the running daemon holds the beats".into(),
             },
         ],
+    }
+}
+
+/// One of each list, because which list an item is in *is* its kind and the
+/// band draws the two under separate headings. `notifications` is a count and
+/// never a list (D6 §3.1).
+fn attention() -> Attention {
+    Attention {
+        reviews: vec![Item {
+            repo: "utopia-php/messaging".into(),
+            number: 54,
+            title: "feat: add the APNs adapter".into(),
+            url: "https://github.com/utopia-php/messaging/pull/54".into(),
+            updated_at: "2026-08-10T09:12:44Z".into(),
+        }],
+        issues: vec![Item {
+            repo: "2002Bishwajeet/yantra".into(),
+            number: 118,
+            title: "the fleet page draws an empty table while nobody has looked".into(),
+            url: "https://github.com/2002Bishwajeet/yantra/issues/118".into(),
+            updated_at: "2026-08-11T18:09:33Z".into(),
+        }],
+        notifications: 7,
     }
 }
 

@@ -190,6 +190,42 @@ export type Counts = {
   cache_read: number
 }
 
+/** `POST /api/workspaces/{name}/logs` (Y-307) — one window of the agent's
+ *  transcript, read over ssh on request. A `POST` for the spend route's reason
+ *  ([ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)):
+ *  a person asked, and nothing polls it. The body is `{ lines, before }` and
+ *  both are optional; no body at all is the first fifty records.
+ *
+ *  **409 is not a failure.** A workspace whose agent has written no turn
+ *  answers 409 with the daemon's own sentence, which is what
+ *  [D5](../../docs/design/05-workspace-page.md) §4.5 draws. */
+export type Transcript = {
+  // The file that was read, on the machine that wrote it.
+  path: string
+  /** Every record the far side selected, before the window cut it down.
+   *  **Records, not turns** — the unit `lines` and `before` are in, and nine of
+   *  fifty measured as tool results the projection drops (D5 §4.4). */
+  total: number
+  turns: Turn[]
+}
+
+export type Turn = {
+  who: 'you' | 'claude'
+  // null on the few records carrying no stamp. Draw no time, not "unknown".
+  at: string | null
+  // The agent's own text. Rendered as text, never as Markdown (D5 §4.1).
+  text: string
+  tools: ToolCall[]
+}
+
+/** One line: the tool as a verb, and the one string it acted on. The tool
+ *  *results* never cross the wire — they are the bulk of the file (I-46). */
+export type ToolCall = {
+  name: string
+  // null for a tool whose input names none of the eight keys — the name alone.
+  target: string | null
+}
+
 export type ModelSpend = {
   model: string
   responses: number
