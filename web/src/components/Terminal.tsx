@@ -133,13 +133,19 @@ function attach(
  *
  *  **Key it on `name`.** A different workspace is a different socket and a
  *  different screen, and the React Compiler refuses the reset that would
- *  otherwise do it in the effect. */
+ *  otherwise do it in the effect.
+ *
+ *  `height` is a prop, defaulting to `60vh`, because a trust prompt on a fleet
+ *  row wants twelve rows of this same pane where `/w/{name}` wants the page
+ *  (D5 §5.1). */
 export function Terminal({
   name,
   onClose,
+  height,
 }: {
   name: string
   onClose: () => void
+  height?: string
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [end, setEnd] = useState<Ended>({ ended: 'no' })
@@ -181,7 +187,15 @@ export function Terminal({
               : `Reconnecting, attempt ${link.attempt} of ${ATTEMPTS}.`}
           </p>
         )}
-        <div ref={host} className="h-[60vh] w-full" />
+        {/* Inline rather than a class: Tailwind cannot generate `h-[…]` for a
+            value it does not see at build time. The default is here rather than
+            in the signature because the React Compiler declines a whole
+            component over a default in a destructured parameter. */}
+        <div
+          ref={host}
+          className="w-full"
+          style={{ height: height ?? '60vh' }}
+        />
         {end.ended === 'yes' &&
           (end.said === null ? (
             <p className="text-muted-foreground text-sm">

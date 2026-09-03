@@ -82,7 +82,9 @@ wired in. **Most of the other T3 copies hit it too** (Y-164, Y-166) —
 `scroll-area`, `select`, `sheet`, `toggle-group`, `tooltip` — but no route
 imports them, so they are absent from the bundle and only `npm test` compiles
 them, which is where their warnings appear. It is upstream's pattern, not a
-regression here.
+regression here — **and it is not only theirs**: the same default bails out
+wherever it is written, so `Terminal`'s `height` defaults at the use site rather
+than in the signature (Y-313), measured both ways.
 
 **A chunk reporting `0` is not a bail-out.** `npm run compiled` counts the
 sentinel per chunk, and the constant is emitted once and hoisted, so a lazily
