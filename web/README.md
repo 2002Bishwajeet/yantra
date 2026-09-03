@@ -338,6 +338,18 @@ R-23 refuses per model. **The `COST` column keeps its per-model figures** — on
 model's cost understates nothing. See the 2026-09-04 amendments in D5 §6.2 and
 [D6](../docs/design/06-sessions-attention-spend.md) §5.2.
 
+## A machine that cannot be reached (Y-312)
+
+**Each tab draws its own refusal and there is no page-level banner** (D5 §7).
+Only the open tab is mounted, so a reader sees one at a time — and each one names
+the machine, so the first one already says where the fault is. A banner would say
+it once instead of three times and would erase a figure the reader had read.
+
+**The machine's name is a link wherever it appears.**
+[`Machine.tsx`](src/components/Machine.tsx) is that link, in the page's own line
+above the tabs and inside all three refusals: an unreachable machine is still one
+you can go and look at, and `/m/{machine}` has its heartbeat.
+
 ## Reconnect (Y-132)
 
 **A socket that went away with nothing to say is reopened, and nothing here replays

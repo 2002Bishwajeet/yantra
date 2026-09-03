@@ -7,6 +7,7 @@ import { useEffect } from 'react'
 import type { Counts, ModelSpend, Spend } from '@/api'
 import { Stamp } from '@/components/Age'
 import { DataTable } from '@/components/DataTable'
+import { Machine } from '@/components/Machine'
 import { type Asked, refusal, session } from '@/lib/spend'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -100,10 +101,18 @@ export function Answer({ asked }: { asked: Asked }) {
         {asked.asked === 'refused' && (
           <Alert variant="destructive">
             <AlertTitle>{refusal(asked.status)}</AlertTitle>
-            {/* The daemon's whole chain: it names the machine, the command and
-                what ssh said, which is the actionable half. */}
-            <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-              {asked.said}
+            <AlertDescription className="flex flex-col gap-2">
+              {/* D5 §7: this tab draws its own refusal and names the machine, so
+                  the first one a reader opens already says where the fault is —
+                  and the name stays the link to where its heartbeat is. */}
+              <span>
+                on <Machine name={asked.workspace.machine} />
+              </span>
+              {/* The daemon's whole chain: it names the machine, the command and
+                  what ssh said, which is the actionable half. */}
+              <span className="font-mono text-xs whitespace-pre-wrap">
+                {asked.said}
+              </span>
             </AlertDescription>
           </Alert>
         )}

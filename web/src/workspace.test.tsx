@@ -18,6 +18,7 @@ import type { Listed } from './api'
 import App from './App'
 import { Terminal } from './components/Terminal'
 import { logs, spend } from './contract.gen'
+import { renderRouted } from './test/inRouter'
 
 afterEach(() => {
   cleanup()
@@ -231,11 +232,17 @@ describe('the height of the terminal', () => {
     expect(pane()?.style.height).toBe('60vh')
   })
 
-  it('is whatever a caller asks for', () => {
+  it('is whatever a caller asks for', async () => {
     viewport(LAPTOP)
     quietSocket()
 
-    render(<Terminal target={{ workspace: 'yantra' }} height="12rem" onClose={() => {}} />)
+    await renderRouted(
+      <Terminal
+        height="12rem"
+        onClose={() => {}}
+        target={{ machine: 'cachyos-g14', workspace: 'yantra' }}
+      />,
+    )
 
     expect(pane()?.style.height).toBe('12rem')
   })

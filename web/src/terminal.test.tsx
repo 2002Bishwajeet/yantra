@@ -12,9 +12,17 @@
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, screen, waitFor } from '@testing-library/react'
 import { type WebSocket as Client, WebSocket as Ws, WebSocketServer } from 'ws'
-import { ATTEMPTS, PAUSE, Terminal } from './components/Terminal'
+import { ATTEMPTS, PAUSE, type Target, Terminal } from './components/Terminal'
+import { renderRouted } from './test/inRouter'
+
+/** Every refusal names its machine and links to it (D5 §7), so the component
+ *  wants a router. One call site keeps the props in one place. */
+const MACHINE = 'cachyos-g14'
+
+const open = (target: Target = { machine: MACHINE, workspace: 'yantra' }) =>
+  renderRouted(<Terminal onClose={() => {}} target={target} />)
 
 type Frame = { text: string } | { bytes: number[] }
 
@@ -122,7 +130,7 @@ afterEach(async () => {
 
 describe('the terminal in the dashboard', () => {
   it('says how big it is and what it is before anything else', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
 
     await settled(() => expect(daemonised.heard.length).toBe(1))
     expect(daemonised.asked).toEqual(['/api/workspaces/yantra/terminal'])
@@ -136,7 +144,7 @@ describe('the terminal in the dashboard', () => {
   })
 
   it('draws what the session printed, and never what the daemon said about it', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.print('claude is thinking')
@@ -154,7 +162,7 @@ describe('the terminal in the dashboard', () => {
   })
 
   it('sends what is typed as bytes, ^C included', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     document.querySelector('.xterm-helper-textarea')?.dispatchEvent(
@@ -173,7 +181,7 @@ describe('the terminal in the dashboard', () => {
   })
 
   it('says the window changed rather than letting the far side guess', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     window.dispatchEvent(new Event('resize'))
@@ -185,7 +193,7 @@ describe('the terminal in the dashboard', () => {
   /** Closing is the one end that means it — nothing is left attached, and
    *  nothing is reopened. */
   it('ends the socket when it is closed, and does not reopen it', async () => {
-    const { unmount } = render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    const { unmount } = await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     unmount()
@@ -201,7 +209,7 @@ describe('the terminal in the dashboard', () => {
    *  went away with nothing to say is reopened, and told the window again,
    *  because a pty is opened with one. */
   it('reopens a socket that dropped, and says how big it is on the new one', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
     daemonised.print('claude is thinking')
     await settled(() => expect(screenText()).toContain('claude is thinking'))
@@ -217,13 +225,13 @@ describe('the terminal in the dashboard', () => {
     await settled(() =>
       expect(screenText()).toContain('and it is still thinking'),
     )
-    expect(screen.queryByText(/The terminal ended/)).toBeNull()
+    expect(screen.queryByText(/attempts to reopen/)).toBeNull()
   })
 
   /** **D3 §7.3.** The box is black either way, so the socket has to say which
    *  of the two it is doing. */
   it('says it is connecting until the socket opens', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
 
     // A handshake cannot have finished in the same turn as the render, so this
     // is the state a slow network holds for as long as it takes.
@@ -234,7 +242,7 @@ describe('the terminal in the dashboard', () => {
   })
 
   it('names which attempt of how many it is on while it reconnects', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.keepHangingUp()
@@ -259,11 +267,17 @@ describe('the terminal in the dashboard', () => {
   /** A reason from the daemon is a refusal — the workspace has no session, the
    *  machine is asleep — and reopening a refused socket only refuses again. */
   it('does not reopen a socket the daemon gave a reason for', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.say('ssh: connect to host cachyos-g14 port 22: No route to host')
     await settled(() => expect(screen.getByRole('alert')).toBeTruthy())
+    // D5 §7: this tab's own refusal names the machine, and the name is the link
+    // to where its heartbeat is.
+    expect(screen.getByRole('alert').textContent).toContain(MACHINE)
+    expect(
+      screen.getByRole('link', { name: MACHINE }).getAttribute('href'),
+    ).toBe(`/m/${MACHINE}`)
     daemonised.hangUp()
 
     // Proving a thing does not happen needs a window: this is the whole of the
@@ -277,22 +291,28 @@ describe('the terminal in the dashboard', () => {
    *  that may be asleep, so a terminal that cannot be got back has to stop
    *  asking — and say so differently from a terminal that was refused. */
   it('gives up after a bounded number of attempts rather than reopening forever', async () => {
-    render(<Terminal target={{ workspace: 'yantra' }} onClose={() => {}} />)
+    await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.keepHangingUp()
     daemonised.hangUp()
 
     await waitFor(
-      () => expect(screen.getByText(/The terminal ended/)).toBeTruthy(),
+      () => expect(screen.getByText(/attempts to reopen/)).toBeTruthy(),
       { timeout: PAUSE * (ATTEMPTS + 4) },
     )
     expect(screen.queryByRole('alert')).toBeNull()
     // A spent budget is an end state rather than a pane that went quiet: it
     // counts what it tried, and it does not claim to know which side failed.
-    const said = screen.getByText(/The terminal ended/).textContent ?? ''
+    const said = screen.getByText(/attempts to reopen/).textContent ?? ''
     expect(said).toContain(`${ATTEMPTS} attempts`)
     expect(said).toContain('not something this page can tell')
+    // D5 §7 again: a spent budget names the machine it could not get back to,
+    // and leaves it a link.
+    expect(said).toContain(MACHINE)
+    expect(
+      screen.getByRole('link', { name: MACHINE }).getAttribute('href'),
+    ).toBe(`/m/${MACHINE}`)
     expect(screen.queryByRole('status')).toBeNull()
     // The first socket, then the five it is worth reopening.
     expect(daemonised.asked.length).toBe(ATTEMPTS + 1)
@@ -306,7 +326,7 @@ describe('the same terminal on a session no workspace claims', () => {
   const scratch = { machine: 'pi', session: 'scratch' } as const
 
   it('asks for the machine and the session rather than for a workspace', async () => {
-    render(<Terminal target={scratch} onClose={() => {}} />)
+    await open(scratch)
 
     await settled(() => expect(daemonised.heard.length).toBe(1))
     expect(daemonised.asked).toEqual([
@@ -320,7 +340,7 @@ describe('the same terminal on a session no workspace claims', () => {
   })
 
   it('names the session and the machine above the screen', async () => {
-    render(<Terminal target={scratch} onClose={() => {}} />)
+    await open(scratch)
 
     expect(screen.getByText('Terminal — scratch on pi')).toBeTruthy()
     // `ws` throws on a socket torn down mid-handshake, so the connection is
@@ -333,7 +353,7 @@ describe('the same terminal on a session no workspace claims', () => {
    *  reach the screen — an empty black box, or a spinner that never resolves,
    *  reads as a terminal still connecting. */
   it('draws a session that is gone as a refusal naming it, not as an empty pane', async () => {
-    render(<Terminal target={scratch} onClose={() => {}} />)
+    await open(scratch)
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
     daemonised.say("tmux: can't find session: =scratch")

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import type { ToolCall, Turn } from '@/api'
 import { Stamp } from '@/components/Age'
+import { Machine } from '@/components/Machine'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -114,10 +115,18 @@ export function Transcript({
         {said.said === 'refused' && (
           <Alert variant="destructive">
             <AlertTitle>The transcript could not be read.</AlertTitle>
-            {/* The daemon's whole chain: it names the machine, the command and
-                what ssh said, which is the actionable half. */}
-            <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-              {said.because}
+            <AlertDescription className="flex flex-col gap-2">
+              {/* D5 §7: this tab draws its own refusal and names the machine, so
+                  the first one a reader opens already says where the fault is —
+                  and the name stays the link to where its heartbeat is. */}
+              <span>
+                on <Machine name={machine} />
+              </span>
+              {/* The daemon's whole chain: it names the machine, the command and
+                  what ssh said, which is the actionable half. */}
+              <span className="font-mono text-xs whitespace-pre-wrap">
+                {said.because}
+              </span>
             </AlertDescription>
           </Alert>
         )}

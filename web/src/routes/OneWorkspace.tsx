@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import type { Listed } from '@/api'
+import { Machine } from '@/components/Machine'
 import { Section } from '@/components/Section'
 import { SpendTab } from '@/components/Spend'
 import { Terminal } from '@/components/Terminal'
@@ -104,10 +105,7 @@ export function OneWorkspace() {
     <>
       {heading}
       <p className="text-muted-foreground text-sm">
-        on{' '}
-        <Link to="/m/$machine" params={{ machine: entry.machine }}>
-          {entry.machine}
-        </Link>
+        on <Machine name={entry.machine} />
       </p>
       {/* Links rather than a tab widget: a tab here changes the URL, and that
           is navigation — middle-click and copy-link come free (D5 §3.2). */}
@@ -134,7 +132,7 @@ export function OneWorkspace() {
       {tab === 'terminal' && (
         <Terminal
           onClose={() => void navigate({ to: '/' })}
-          target={{ workspace: name }}
+          target={{ machine: entry.machine, workspace: name }}
         />
       )}
       {tab === 'transcript' && (

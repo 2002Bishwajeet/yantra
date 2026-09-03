@@ -4,6 +4,7 @@ import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalSize } from '@/api'
 import { button } from '@/components/Act'
+import { Machine } from '@/components/Machine'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Card,
@@ -42,8 +43,15 @@ type Link = { up: boolean; attempt: number }
 /** What a socket attaches to: a workspace the daemon looks up, or a machine and
  *  a session it is handed
  *  ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
- *  It mirrors the daemon's own `Target`, addresses and all. */
-export type Target = { workspace: string } | { machine: string; session: string }
+ *  It mirrors the daemon's own `Target`, addresses and all.
+ *
+ *  **Both variants carry the machine**, which the daemon's does not need and a
+ *  refusal does: D5 §7 has every tab name the machine it could not reach, and a
+ *  workspace's is not in its address. `address()` is unaffected — the
+ *  discriminant is still `workspace`. */
+export type Target =
+  | { workspace: string; machine: string }
+  | { machine: string; session: string }
 
 function address(target: Target): string {
   const daemon = location.origin.replace(/^http/, 'ws')
@@ -222,22 +230,32 @@ export function Terminal({
         />
         {end.ended === 'yes' &&
           (end.said === null ? (
+            // D5 §7: this tab's own refusal names the machine, and the name
+            // stays the link to where its heartbeat is.
             <p className="text-muted-foreground text-sm">
-              The terminal ended, and {ATTEMPTS} attempts to reopen it all
-              failed. Whether you are off the tailnet or the daemon is down is
-              not something this page can tell. Detaching never stops a session,
-              and whether this one is still running is what {listed} says. Open
-              the terminal again once the connection is back.
+              The terminal on <Machine name={target.machine} /> ended, and{' '}
+              {ATTEMPTS} attempts to reopen it all failed. Whether you are off
+              the tailnet or the daemon is down is not something this page can
+              tell. Detaching never stops a session, and whether this one is
+              still running is what {listed} says. Open the terminal again once
+              the connection is back.
             </p>
           ) : (
             <Alert variant="destructive">
               <AlertTitle className="text-xs">
                 {name} has no terminal to attach to.
               </AlertTitle>
-              {/* The daemon's whole source() chain: it names the machine, the
-                  command and what ssh said, which is the actionable half. */}
-              <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-                {end.said}
+              <AlertDescription className="flex flex-col gap-2">
+                {/* D5 §7: the refusal names the machine, and the name stays the
+                    link to where its heartbeat is. */}
+                <span>
+                  on <Machine name={target.machine} />
+                </span>
+                {/* The daemon's whole source() chain: it names the machine, the
+                    command and what ssh said, which is the actionable half. */}
+                <span className="font-mono text-xs whitespace-pre-wrap">
+                  {end.said}
+                </span>
               </AlertDescription>
             </Alert>
           ))}
