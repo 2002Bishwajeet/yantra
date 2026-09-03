@@ -712,6 +712,7 @@ mod tests {
         Fleet {
             model: Arc::new(tokio::sync::RwLock::new(snapshot)),
             beats: Beats::default(),
+            ..Fleet::default()
         }
     }
 

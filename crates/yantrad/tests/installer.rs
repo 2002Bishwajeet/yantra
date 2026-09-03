@@ -35,6 +35,10 @@ const BINARIES: [&str; 3] = ["yantrad", "yantra", "yantra-agent"];
 /// not touch is a line only a person could have put there.
 const EDITED_ENV: &str = "YANTRA_DAEMON=100.64.0.5:7717";
 
+/// The same, for the file ADR-0021 added: a line only a person could have put
+/// there, so an update that rewrote it would be caught.
+const EDITED_RELAY: &str = "YANTRA_NTFY_URL=https://ntfy.example/a-topic";
+
 /// The agent has to be *executing* for a replacement to mean anything, and the
 /// real one exits without a daemon it can reach, so a long-running process runs
 /// the installed file instead. Its own unit takes no arguments and cannot.
@@ -244,6 +248,21 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
         scaffolded.contains("#YANTRA_DAEMON="),
         "the address is the one thing an install may not write (ADR-0013 §4):\n{scaffolded}"
     );
+
+    // ADR-0021's only mitigation, so it is asserted rather than commented. The
+    // token goes in this file in plain text: nobody but the account the daemon
+    // runs as may read it, and that account must be able to *write* it, which
+    // is why the owner is `yantra` where `agent.env` above is root's.
+    assert_eq!(
+        fixture.sh("stat -c '%a %U' /etc/yantra/daemon.env")?.trim(),
+        "600 yantra"
+    );
+    let relay = fixture.sh("cat /etc/yantra/daemon.env")?;
+    assert!(
+        relay.contains("#YANTRA_NTFY_URL="),
+        "an install writes the file and never a relay into it:\n{relay}"
+    );
+
     assert_eq!(
         fixture.scratch_dirs()?.trim(),
         "0",
@@ -255,6 +274,10 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
         "printf '%s\\n' '{EDITED_ENV}' > /etc/yantra/agent.env"
     ))?;
     let edited = fixture.sha("/etc/yantra/agent.env")?;
+    fixture.sh(&format!(
+        "printf '%s\\n' '{EDITED_RELAY}' > /etc/yantra/daemon.env"
+    ))?;
+    let relay_edited = fixture.sha("/etc/yantra/daemon.env")?;
     let before: Vec<String> = BINARIES
         .iter()
         .map(|binary| fixture.sha(&format!("/usr/local/bin/{binary}")))
@@ -310,6 +333,11 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
         fixture.sha("/etc/yantra/agent.env")?,
         edited,
         "the second run rewrote an address that was not its to know (ADR-0013 §4)"
+    );
+    assert_eq!(
+        fixture.sha("/etc/yantra/daemon.env")?,
+        relay_edited,
+        "an update rewrote the relay somebody had set (ADR-0021)"
     );
     assert_eq!(
         fixture

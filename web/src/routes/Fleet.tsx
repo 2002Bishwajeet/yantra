@@ -395,8 +395,9 @@ function Row({
 
 /** A file that did not load is named below the table rather than given a row in
  *  it: `MACHINE` and `ACT` have nothing to put in one, and the edit form could
- *  not repair it anyway — `update` loads before it writes, so the file is the
- *  fix. R-23 is met by naming it loudly with its reason. */
+ *  not repair it anyway — `update` loads before it writes. R-23 is met by naming
+ *  it loudly with its reason, and `/w/{name}/repair` is where the file itself is
+ *  edited (ADR-0020). */
 export function Workspaces({
   entries,
   sessions,

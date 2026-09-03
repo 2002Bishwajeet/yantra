@@ -50,6 +50,10 @@ function stubWrite(status: number, body: unknown) {
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
+      // The shell's presence beacon is not this file's subject (D3 §13).
+      if (path === '/api/viewing') {
+        return Promise.resolve({ ok: true, status: 204 })
+      }
       asked(init?.method, path)
       return Promise.resolve({
         ok: status < 400,

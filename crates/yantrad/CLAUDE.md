@@ -177,6 +177,22 @@ which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that 
 The startup line saying which of the two it got is there because a unit's environment is not the
 shell's, and a headless box has only the journal to say so.
 
+**The relay is settable now, and the read above is unchanged** —
+[ADR-0021](../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md), Y-199. `/settings`
+and `yantra relay` write `/etc/yantra/daemon.env`; the unit reads it with `EnvironmentFile=`; this
+process still takes both values out of its environment once, in `main.rs`. So a relay written now
+reaches the daemon at its **next start**, and both surfaces say so rather than implying it is live.
+That ADR bends §B4 and Y-044 on purpose and says what the exposure is; read it before moving either
+value anywhere else. **The token is still never logged and never served** — no route reads the file
+back, and `tracing` names the caller and never the topic.
+
+**Nothing is pushed while a dashboard is open** (D3 §13). `notify::Viewers` is a last-seen-a-viewer
+timestamp beside the snapshot, `POST /api/viewing` writes it, and `refresh` hands the notifier a
+bool. **The diff still runs when it is suppressed**: what a watched look produced is dropped rather
+than held, so closing the tab does not deliver a backlog of things the page already showed. It is in
+memory and a restart forgets it, which is Y-044 exactly as written — that state is not the exception
+ADR-0021 carved.
+
 ## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,
@@ -228,11 +244,17 @@ directory to walk.
 
 ## The routes that act
 
-`POST /api/workspaces`, `PATCH /api/workspaces/{name}` and
-`POST /api/workspaces/{name}/{up,down,resume,tokens}` — **the CLI's own verbs and
-nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume` and `tokens`. The daemon
-may do what `yantra` can already do, which is what stops it growing a richer API the CLI cannot
-reach. A new verb here starts in the CLI.
+`POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
+`POST /api/workspaces/{name}/{up,down,resume,tokens,repair}` and `POST /api/relay` — **the CLI's own
+verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `repair` and
+`relay`. The daemon may do what `yantra` can already do, which is what stops it growing a richer API
+the CLI cannot reach. A new verb here starts in the CLI, and `yantra relay` was written before this
+route was.
+
+**`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
+rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
+§13), which no CLI can say truthfully. It is authorised like the rest because it silences
+notifications.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
@@ -291,6 +313,18 @@ be flattened here: [`tokens.rs`](../yantra-core/src/tokens.rs) sums on the far m
 written into a binary reports wrong money the day a rate changes. **An unpriced model is `null` and
 never `0`**, a fast-mode session withholds every dollar and keeps every token, and a session that
 has spent nothing has no figure at all. `render_tokens` in the CLI is the list to check against.
+
+**`repair` is the one that writes bytes this daemon did not compose**, and
+[ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
+Every other write here renders a `Workspace` the library has already checked; this one takes a whole
+file, because `update` loads before it writes and so no verb could reach a workspace file that will
+not parse. Two refusals hold it: a file that **already loads** is `409`, and bytes that **still will
+not** are `400` carrying the next error rather than a summary — the caller is answering the one it
+was shown. `from_repair` exists for that second one, because `from_workspace` sends `Malformed` and
+`Blank` to `500` and is right to: there they are this daemon reading its own files, here they are the
+bytes the caller sent. **The `GET` beside it is in `write.rs` too, on the same authoriser**: a file's
+raw bytes are the one thing `GET /api/workspaces` does not publish, and it answers the same `409`, so
+asking for the file *is* the question whether it is broken.
 
 **These handlers await ssh, and that is deliberate.** The rule below is about a browser polling
 reads whether or not anyone is looking; a write happens when a person taps a button, once. Do not

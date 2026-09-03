@@ -20,7 +20,7 @@ const USABLE_NAME = /^[A-Za-z0-9_-]+$/
 
 // I-39: an expired key is a third state, and it is the one a person can act
 // on, so it must not read as a shade of offline.
-function reachability(machine: Machine): { tone: Tone; label: string } {
+export function reachability(machine: Machine): { tone: Tone; label: string } {
   const reachable = machine.online ? 'online' : 'offline'
   if (machine.expired) {
     return { tone: 'warn', label: `${reachable}, key expired` }

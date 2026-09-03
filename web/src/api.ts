@@ -48,11 +48,28 @@ export type Workspace = {
  *
  *  A failed entry is named *below* the table rather than drawn as a row in it —
  *  it has no machine to show a state for, nothing for `ACT` or `TERMINAL` to
- *  target, and `EDIT` cannot repair it, since `update` loads before it writes
- *  and the file is the fix. */
+ *  target, and `EDIT` cannot repair it, since `update` loads before it writes.
+ *  `/w/{name}/repair` is where the file itself is edited (ADR-0020). */
 export type Listed =
   | ({ loaded: 'yes' } & Workspace)
   | { loaded: 'no'; name: string; error: string }
+
+/** `GET /api/workspaces/{name}/repair`, which `/w/{name}/repair` draws — the
+ *  file's bytes and the reason they will not load.
+ *
+ *  **It answers 409 for a file that loads**, so opening it is itself the
+ *  question *is this broken*. The `POST` beside it sends `{ text }` back and
+ *  refuses bytes that still will not load, naming the next error
+ *  ([ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
+ *  Both are on the write authoriser: a file's raw bytes are the one thing
+ *  `GET /api/workspaces` does not publish. */
+export type Broken = {
+  name: string
+  // On the machine running the daemon, which is the other way to fix it.
+  path: string
+  text: string
+  error: string
+}
 
 /** `POST /api/workspaces/{name}/up`. `attached` beside `launched: false` is the
  *  idempotent success §B4 requires, and never a failure to report (I-30). */

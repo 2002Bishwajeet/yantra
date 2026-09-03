@@ -84,6 +84,11 @@ enum Command {
         #[arg(long)]
         no_startup: bool,
     },
+    /// Replace a workspace file that will not load, with bytes read from stdin
+    Repair {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+    },
     /// Attach this terminal to a workspace's session
     Attach {
         /// Workspace name, without the `.toml`
@@ -156,6 +161,14 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
         priority: Option<u8>,
     },
+    /// Write the relay down where yantrad reads it, and publish a test message
+    Relay {
+        /// The ntfy topic URL. On a public server the topic is the password
+        url: String,
+        /// Only a protected topic needs one
+        #[arg(long)]
+        token: Option<String>,
+    },
     /// Say what each machine can and cannot do — a read, it changes nothing
     Doctor {
         /// ssh destination to check. Every machine a workspace names, if omitted
@@ -227,6 +240,7 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Some(Command::Repair { workspace }) => repair(&workspace),
         Some(Command::Attach { workspace }) => attach(&workspace).await,
         Some(Command::Resume { workspace }) => resume(&workspace).await,
         Some(Command::Logs { workspace, lines }) => show_logs(&workspace, lines).await,
@@ -263,6 +277,7 @@ async fn main() -> ExitCode {
             })
             .await
         }
+        Some(Command::Relay { url, token }) => relay(&url, token.as_deref()).await,
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity) => ssh_identity(),
@@ -675,6 +690,38 @@ async fn edit(name: &str, changes: &workspace::Changes) -> ExitCode {
     }
 }
 
+/// The one write that does not compose the file
+/// ([ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
+/// It exists so the terminal is not second-class: `$EDITOR` repairs the file
+/// too and says nothing about whether the repair worked, while this refuses
+/// bytes that still will not load and names the next error.
+///
+/// The read half is `cat`. Every refusal already prints the path, and `yantra
+/// ls workspaces` prints it under the table for the file that did not load.
+fn repair(name: &str) -> ExitCode {
+    let mut text = String::new();
+    if let Err(err) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+
+    match workspace::repair(name, &text) {
+        Ok(workspace) => {
+            println!("repaired {} on {}", workspace.name, workspace.machine);
+            println!("  repo:   {}", workspace.repo.display());
+            match &workspace.startup {
+                Some(startup) => println!("  startup: {startup}"),
+                None => println!("  startup: none, so the session opens a shell"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
 async fn down(name: &str) -> ExitCode {
     match yantra_core::down::down(name).await {
         Ok(report) => {
@@ -777,6 +824,48 @@ async fn publish(message: notify::Message) -> ExitCode {
                 && std::env::var_os(notify::RELAY_TOKEN).is_none()
             {
                 eprintln!("{}", token_note());
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The write half of the relay, and the dashboard's `/settings` on a keyboard
+/// ([ADR-0021](../../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md)).
+///
+/// **It sends after it writes**, because a relay written down and never reached
+/// is the failure this box has no screen to show. Both halves are reported: a
+/// message that did not arrive does not un-write the file.
+///
+/// The URL and the token are arguments, so `ps` and the shell's history see
+/// them — ADR-0021 names that as the cost of a verb, and the browser's form is
+/// the way that avoids it.
+async fn relay(url: &str, token: Option<&str>) -> ExitCode {
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    if let Err(err) = notify::write_to(path, url, token) {
+        report_error(&err);
+        return ExitCode::FAILURE;
+    }
+    println!("wrote the relay to {}", notify::RELAY_FILE);
+    println!("  note: yantrad reads that file when systemd starts it —");
+    println!("        `sudo systemctl restart yantrad` for this to reach the daemon.");
+
+    match notify::post(
+        &notify::Relay::new(url.to_owned(), token.map(str::to_owned)),
+        notify::test_message(),
+    )
+    .await
+    {
+        Ok(()) => {
+            println!("published a test message");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, notify::Error::Refused { status: 401 | 403 }) && token.is_none() {
+                eprintln!(
+                    "\x20 note: that topic wants credentials — pass --token to write one down."
+                );
             }
             ExitCode::FAILURE
         }
@@ -1196,7 +1285,8 @@ fn render_attention(attention: &Attention) -> String {
 /// row in it, which is `render_sessions`'s shape for an unreachable machine.
 /// Every column here is something to act on and a broken file has none of them:
 /// no machine, nothing to attach to, and nothing `yantra edit` can repair, since
-/// `update` loads before it writes and the file is the fix.
+/// `update` loads before it writes. `yantra repair` is the verb for that
+/// (ADR-0020), and the reason printed here already names the file it reads.
 fn render_workspaces(listing: &Listing) -> String {
     let workspaces = &listing.workspaces;
     if workspaces.is_empty() && listing.unusable.is_empty() {
@@ -1643,6 +1733,23 @@ mod tests {
         assert!(
             Cli::try_parse_from(["yantra", "resume", "demo", "--agent", "claude"]).is_err(),
             "there is no agent to choose when continuing one that already ran"
+        );
+    }
+
+    /// The bytes come from stdin and from nowhere else. A `--file` or an
+    /// inline argument would be a second way to say the same thing, and a
+    /// workspace file with a newline in it is not an argument.
+    #[test]
+    fn repair_takes_a_workspace_and_reads_the_file_from_stdin() {
+        let parsed = Cli::try_parse_from(["yantra", "repair", "demo"]).expect("`repair` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Repair { workspace }) if workspace == "demo"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "repair"]).is_err());
+        assert!(
+            Cli::try_parse_from(["yantra", "repair", "demo", "--file", "x.toml"]).is_err(),
+            "there is one way to hand it bytes"
         );
     }
 

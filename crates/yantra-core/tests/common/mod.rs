@@ -39,6 +39,8 @@ const HOST: &str = "127.0.0.1";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BUILD_ATTEMPTS: u32 = 2;
 const BUILD_RETRY_PAUSE: Duration = Duration::from_secs(2);
+const RUN_ATTEMPTS: u32 = 5;
+const RUN_RETRY_PAUSE: Duration = Duration::from_millis(250);
 
 /// Tells two fixtures apart when the clock cannot.
 static STARTED: AtomicU32 = AtomicU32::new(0);
@@ -186,31 +188,52 @@ impl SshFixture {
         Ok(())
     }
 
+    /// Starts the container, asking again when it lost the race for its host
+    /// port.
+    ///
+    /// `podman` chooses the port by binding zero and closing the socket, then
+    /// its forwarder binds the number again — so a parallel run, or one of this
+    /// suite's own loopback `ssh` connections, can take it in between. The port
+    /// is not ours to reserve, so asking again is the only move we have, and a
+    /// new attempt draws a new number.
     fn run_container(&self) -> Result<()> {
         let pubkey = fs::read_to_string(self.dir.join("id_ed25519.pub"))?;
-        let out = podman(&[
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            &self.container,
-            // Lets a leaked container be found: `podman ps -a --filter label=yantra-fixture`.
-            "--label",
-            "yantra-fixture=1",
-            // Let the kernel pick the host port, so parallel tests cannot collide.
-            "-p",
-            "127.0.0.1::22",
-            "-e",
-            &format!("YANTRA_PUBKEY={}", pubkey.trim()),
-            IMAGE,
-        ])?;
-        if !out.status.success() {
-            bail!(
-                "podman run failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+        let mut failures = Vec::new();
+        for attempt in 1..=RUN_ATTEMPTS {
+            if attempt > 1 {
+                // A run that got far enough to fail may hold the name we reuse.
+                let _ = podman(&["rm", "-f", "-t", "0", &self.container]);
+                sleep(RUN_RETRY_PAUSE);
+            }
+            let out = podman(&[
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                &self.container,
+                // Lets a leaked container be found: `podman ps -a --filter label=yantra-fixture`.
+                "--label",
+                "yantra-fixture=1",
+                "-p",
+                "127.0.0.1::22",
+                "-e",
+                &format!("YANTRA_PUBKEY={}", pubkey.trim()),
+                IMAGE,
+            ])?;
+            if out.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let collided = lost_the_port_race(&stderr);
+            failures.push(format!(
+                "attempt {attempt}/{RUN_ATTEMPTS} ({}): {stderr}",
+                out.status
+            ));
+            if !collided {
+                break;
+            }
         }
-        Ok(())
+        bail!("podman run failed:\n{}", failures.join("\n"))
     }
 
     fn published_port(&self) -> Result<u16> {
@@ -248,6 +271,15 @@ impl Drop for SshFixture {
         let _ = podman(&["rm", "-f", "-t", "0", &self.container]);
         let _ = fs::remove_dir_all(&self.dir);
     }
+}
+
+/// Whether `podman run` failed because something else already held the host
+/// port it had picked. `rootlessport` and `pasta` word it differently, and
+/// which one reports it depends on the machine, so match the half they share.
+pub fn lost_the_port_race(stderr: &str) -> bool {
+    stderr
+        .to_ascii_lowercase()
+        .contains("address already in use")
 }
 
 fn podman(args: &[&str]) -> Result<std::process::Output> {

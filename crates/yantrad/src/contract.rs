@@ -51,6 +51,7 @@ const HEADER: &str = "\
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Broken,
   Listed,
   Listing,
   Looked,
@@ -294,6 +295,7 @@ fn holding(snapshot: Snapshot) -> Fleet {
     Fleet {
         model: Arc::new(tokio::sync::RwLock::new(snapshot)),
         beats: Beats::default(),
+        ..Fleet::default()
     }
 }
 
