@@ -31,8 +31,8 @@ use axum::routing::{get, patch, post};
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
-    agent, doctor, down, edit, logs, price, probe, remove, resume, sessions, status, terminfo,
-    tmux, tokens, up, workspace,
+    agent, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
+    terminfo, tmux, tokens, up, workspace,
 };
 
 use crate::api::Answer;
@@ -122,6 +122,7 @@ where
             axum::routing::delete(end::<I>),
         )
         .route("/machines/{machine}/probe", post(ask::<I>))
+        .route("/machines/{machine}/dirs", post(walk::<I>))
         .route("/relay", post(relay::<I>))
         .with_state(authoriser.clone());
 
@@ -512,6 +513,57 @@ async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
         // route does not flatten them into one.
         origin: found.origin,
     }))
+}
+
+/// Asks a machine what one directory holds, so a form can walk to a path
+/// instead of trusting one that was typed — `yantra ls dirs <machine> [path]`
+/// on the wire.
+///
+/// **The sixth thing in this crate that holds ssh, and the fourth read on
+/// [`ask`]'s licence** ([ADR-0019]): a person is walking a directory and
+/// nothing polls it. It is **one level** and stays that way — D4 §2 measured a
+/// whole-home `find` at 8.5 s against this listing's 0.23 s, and eight seconds
+/// inside a handler would be a different decision from a probe's.
+///
+/// **A body is optional and so is its `path`**, because the machine's own
+/// `$HOME` is the only directory this daemon can name without asking, and
+/// composing one here would be the placement decision ADR-0009 declined.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn walk<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    body: Option<Json<Walked>>,
+) -> Result<Json<Listing>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("dirs {machine} for {}", caller.node);
+
+    let listing = dirs::list(&machine, body.and_then(|Json(at)| at.path).as_deref())
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_dirs(&error),
+            said: chain(&error),
+        })?;
+
+    Ok(Json(Listing::from(listing)))
+}
+
+/// **A path that is not there is a 409**, which is `up::Error::NoRepo`'s own
+/// reading: the machine answered clearly, and a `mkdir` on that machine is what
+/// changes the answer. An empty directory is none of this — it is a `200` with
+/// no entries, and the two are different answers (R-23).
+fn from_dirs(error: &dirs::Error) -> StatusCode {
+    match error {
+        dirs::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+        dirs::Error::NotADirectory { .. } => StatusCode::CONFLICT,
+        // An answer this build cannot parse is this build's problem, and so is
+        // having nowhere to keep a control socket.
+        dirs::Error::Unreadable { .. } | dirs::Error::NoStateDir => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 /// `yantra doctor <machine>`, asked now rather than read off the sweep.
@@ -970,6 +1022,56 @@ struct Found {
     origin: Option<String>,
 }
 
+/// Absent, and an absent `path` inside it, both mean the machine's `$HOME`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Walked {
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// One level of a machine's filesystem. **No entry is a file and none begins
+/// with a dot** — the glob that lists directories skips both (D4 §3.1), so a
+/// browser that draws this list draws directories or nothing.
+#[derive(Debug, serde::Serialize)]
+struct Listing {
+    machine: String,
+    /// The directory that was listed, as the far side spells it: a caller that
+    /// sent no path reads its `$HOME` off this and nowhere else.
+    path: String,
+    entries: Vec<Dir>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Dir {
+    path: String,
+    name: String,
+    repo: bool,
+    /// Absent for two different reasons — not a repository, and a repository
+    /// with no origin — which the route leaves together exactly as [`ask`]
+    /// does.
+    origin: Option<String>,
+}
+
+impl From<dirs::Listing> for Listing {
+    fn from(listing: dirs::Listing) -> Self {
+        Self {
+            machine: listing.machine,
+            path: listing.path,
+            entries: listing
+                .entries
+                .into_iter()
+                .map(|entry| Dir {
+                    path: entry.path,
+                    name: entry.name,
+                    repo: entry.repo,
+                    origin: entry.origin,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 struct Ended {
     machine: String,
@@ -1173,6 +1275,30 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         ),
         ("spend", "Spend", of(&Spend::of(&transcript(0)))),
         ("spendFast", "Spend", of(&Spend::of(&transcript(3)))),
+        (
+            "listing",
+            "Listing",
+            of(&Listing::from(dirs::Listing {
+                machine: "cachyos-g14".to_owned(),
+                path: "/home/<user>/Github".to_owned(),
+                entries: vec![
+                    dirs::Dir {
+                        path: "/home/<user>/Github/yantra".to_owned(),
+                        name: "yantra".to_owned(),
+                        repo: true,
+                        origin: Some("https://github.com/2002Bishwajeet/yantra.git".to_owned()),
+                    },
+                    // Both `null`s the browser has to draw: a repository whose
+                    // origin nothing answered for, and a plain directory.
+                    dirs::Dir {
+                        path: "/home/<user>/Github/scratch".to_owned(),
+                        name: "scratch".to_owned(),
+                        repo: false,
+                        origin: None,
+                    },
+                ],
+            })),
+        ),
     ]
 }
 
@@ -2027,7 +2153,11 @@ mod tests {
             .with_state(Fleet::default())
             .merge(router(direct(tailnet(vec![])), Fleet::default()));
 
-        for path in ["/machines/pi/readiness", "/workspaces/site/tokens"] {
+        for path in [
+            "/machines/pi/readiness",
+            "/machines/pi/dirs",
+            "/workspaces/site/tokens",
+        ] {
             let mut asked = Request::post(path).body(Body::empty()).expect("a POST");
             asked
                 .extensions_mut()
@@ -2096,6 +2226,87 @@ mod tests {
         assert_eq!(
             from_logs(&logs::Error::NoStateDir),
             StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// D4 §3: the daemon composes no path, so a body that names none is how a
+    /// caller asks for the machine's own `$HOME` — and a typo is refused rather
+    /// than silently listing somewhere else.
+    #[test]
+    fn a_listing_may_name_no_path_at_all() {
+        let home: Walked = serde_json::from_str("{}").expect("an empty body is $HOME");
+        assert!(home.path.is_none());
+
+        let named: Walked = serde_json::from_str(r#"{"path":"/code"}"#).expect("a path");
+        assert_eq!(named.path.as_deref(), Some("/code"));
+
+        serde_json::from_str::<Walked>(r#"{"paht":"/code"}"#).expect_err("a typo is refused");
+    }
+
+    /// **A path that is not there and an empty directory are different
+    /// answers**, and the browser must be able to tell them apart: one is a
+    /// refusal a `mkdir` changes, and the other is a `200` with no entries.
+    /// A machine that could not be asked is neither (R-23).
+    #[tokio::test]
+    async fn a_listing_that_found_nothing_there_is_not_a_listing_of_nothing() {
+        let missing = dirs::Error::NotADirectory {
+            machine: "cachyos-g14".to_string(),
+            path: "/home/<user>/typo".to_string(),
+        };
+        let (status, said) = answered(from_dirs(&missing), &missing).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("cachyos-g14"), "{said}");
+        assert!(said.contains("/home/<user>/typo"), "{said}");
+
+        let asleep = dirs::Error::Ssh(yantra_core::ssh::Error::Transport {
+            host: "pi".to_string(),
+            diagnosis: "connect to host pi port 22: Connection refused".to_string(),
+        });
+        let (status, said) = answered(from_dirs(&asleep), &asleep).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(said.contains("Connection refused"), "{said}");
+
+        assert_eq!(
+            from_dirs(&dirs::Error::Unreadable {
+                machine: "pi".to_string()
+            }),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_dirs(&dirs::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// A listing carries paths and git origins and nothing else (§B4), and the
+    /// `null` origin is the one the picker has to draw for two different
+    /// reasons.
+    #[test]
+    fn a_listing_puts_paths_and_origins_on_the_wire_and_nothing_else() {
+        let answered = serde_json::to_value(Listing::from(dirs::Listing {
+            machine: "cachyos-g14".to_owned(),
+            path: "/home/<user>".to_owned(),
+            entries: vec![dirs::Dir {
+                path: "/home/<user>/scratch".to_owned(),
+                name: "scratch".to_owned(),
+                repo: false,
+                origin: None,
+            }],
+        }))
+        .expect("a DTO of owned strings and booleans");
+
+        assert_eq!(
+            answered,
+            serde_json::json!({
+                "machine": "cachyos-g14",
+                "path": "/home/<user>",
+                "entries": [{
+                    "path": "/home/<user>/scratch",
+                    "name": "scratch",
+                    "repo": false,
+                    "origin": null,
+                }],
+            })
         );
     }
 

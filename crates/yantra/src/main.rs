@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
 use yantra_core::attention::{self, Attention, Forge as _, Gh};
+use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
@@ -196,6 +197,14 @@ enum AgentArg {
 enum LsTarget {
     /// Machines in the tailnet
     Machines,
+    /// One level of a machine's filesystem, with the git repositories marked.
+    /// Names beginning with a dot are not listed; reach one by naming it
+    Dirs {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
+        /// Absolute path **on that machine**. Its `$HOME` if omitted
+        path: Option<String>,
+    },
     /// tmux sessions on the machines your workspaces name
     Sessions,
     /// Workspaces defined in ~/.config/yantra/workspaces
@@ -244,6 +253,9 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
+        Some(Command::Ls {
+            target: LsTarget::Dirs { machine, path },
+        }) => ls_dirs(&machine, path.as_deref()).await,
         Some(Command::Ls {
             target: LsTarget::Sessions,
         }) => ls_sessions().await,
@@ -1059,6 +1071,23 @@ async fn ls_machines() -> ExitCode {
     }
 }
 
+/// One level and no recursion — D4 §2 measured what a sweep costs. An empty
+/// directory exits **0**: the machine answered, and *nothing here* is what it
+/// said. A path that is not there exits 1, which is `probe`'s rule, since the
+/// two are different answers and only one of them is a reason to stop.
+async fn ls_dirs(machine: &str, path: Option<&str>) -> ExitCode {
+    match dirs::list(machine, path).await {
+        Ok(listing) => {
+            print!("{}", render_dirs(&listing));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
 async fn ls_sessions() -> ExitCode {
     match sessions::list().await {
         Ok(machines) => {
@@ -1311,6 +1340,40 @@ fn chain(err: &dyn std::error::Error) -> String {
         out.push_str(&format!(": {cause}"));
         source = cause.source();
     }
+    out
+}
+
+/// The count sits under the table and names the directory that was listed,
+/// because `$HOME` was resolved on the far side and this is where the operator
+/// reads which one it is.
+fn render_dirs(listing: &dirs::Listing) -> String {
+    let rows: Vec<Vec<String>> = listing
+        .entries
+        .iter()
+        .map(|entry| {
+            vec![
+                entry.name.clone(),
+                if entry.repo { "repo" } else { "" }.to_owned(),
+                // Empty for a directory that is not a repository *and* for one
+                // whose repository has no origin — the two the library leaves
+                // together, and neither is something to act on.
+                entry.origin.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(&["NAME", "REPO", "ORIGIN"], &rows)
+    };
+    out.push_str(&format!(
+        "\n{} director{} in {} on {}\n",
+        rows.len(),
+        if rows.len() == 1 { "y" } else { "ies" },
+        listing.path,
+        listing.machine
+    ));
     out
 }
 
@@ -2465,6 +2528,90 @@ mod tests {
             forced.command,
             Some(Command::Rm { force: true, .. })
         ));
+    }
+
+    /// `ls dirs` is the same question `ls machines` and `ls sessions` ask of a
+    /// third thing, and the path is optional because the daemon composes none.
+    #[test]
+    fn ls_dirs_takes_a_machine_and_an_optional_path() {
+        let walked = Cli::try_parse_from(["yantra", "ls", "dirs", "mac", "/code"])
+            .expect("`ls dirs mac /code` parses");
+        assert!(matches!(
+            walked.command,
+            Some(Command::Ls {
+                target: LsTarget::Dirs { ref machine, path: Some(ref path) }
+            }) if machine == "mac" && path == "/code"
+        ));
+
+        let home =
+            Cli::try_parse_from(["yantra", "ls", "dirs", "mac"]).expect("`$HOME` by default");
+        assert!(matches!(
+            home.command,
+            Some(Command::Ls {
+                target: LsTarget::Dirs { path: None, .. }
+            })
+        ));
+
+        assert!(
+            Cli::try_parse_from(["yantra", "ls", "dirs"]).is_err(),
+            "a path belongs to one machine, so there is no listing without one"
+        );
+    }
+
+    /// A repository with no origin and a plain directory both leave the column
+    /// empty, and the line under the table says which directory was listed —
+    /// which is the only place `$HOME` is resolved.
+    #[test]
+    fn a_listing_marks_the_repositories_and_names_where_it_looked() {
+        let entry = |name: &str, repo, origin: Option<&str>| dirs::Dir {
+            path: format!("/home/u/{name}"),
+            name: name.to_owned(),
+            repo,
+            origin: origin.map(str::to_owned),
+        };
+        let out = render_dirs(&dirs::Listing {
+            machine: "mac".to_owned(),
+            path: "/home/u".to_owned(),
+            entries: vec![
+                entry("yantra", true, Some("https://github.com/o/r.git")),
+                entry("local", true, None),
+                entry("scratch", false, None),
+            ],
+        });
+
+        assert!(out.contains("https://github.com/o/r.git"), "{out}");
+        assert_eq!(out.matches("repo").count(), 2, "{out}");
+        assert!(
+            out.trim_end().ends_with("3 directories in /home/u on mac"),
+            "{out}"
+        );
+    }
+
+    /// An empty directory is an answer, so the line still prints with no table
+    /// above it — and it is singular at one.
+    #[test]
+    fn an_empty_directory_says_so_without_a_table() {
+        let empty = render_dirs(&dirs::Listing {
+            machine: "mac".to_owned(),
+            path: "/home/u/nothing".to_owned(),
+            entries: Vec::new(),
+        });
+        assert_eq!(empty.trim(), "0 directories in /home/u/nothing on mac");
+
+        let one = render_dirs(&dirs::Listing {
+            machine: "mac".to_owned(),
+            path: "/home/u".to_owned(),
+            entries: vec![dirs::Dir {
+                path: "/home/u/only".to_owned(),
+                name: "only".to_owned(),
+                repo: false,
+                origin: None,
+            }],
+        });
+        assert!(
+            one.trim_end().ends_with("1 directory in /home/u on mac"),
+            "{one}"
+        );
     }
 
     #[test]

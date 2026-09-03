@@ -30,6 +30,7 @@ API the CLI cannot reach.
 | `DELETE /api/workspaces/{name}` | `yantra rm` |
 | `DELETE /api/machines/{machine}/sessions/{session}` | `yantra kill` |
 | `POST /api/machines/{machine}/probe` | `yantra probe` |
+| `POST /api/machines/{machine}/dirs` | `yantra ls dirs` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |

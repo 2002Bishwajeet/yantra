@@ -32,6 +32,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `ls workspaces` with a file that did not load | 1 | the same rule, one class down: the workspaces that loaded still print, and the file that did not is named under the table with its reason (Y-141) |
 | `down` on something not running | **0** | absence is the state asked for (I-30, root §B4) |
 | `probe`, when the directory is not there | 1 | so `probe && new` reads the way it looks — `status`'s rule. A machine that could not be asked is 1 too, and the difference is on stderr: the shell gets one bit, the operator gets the reason (R-23) |
+| `ls dirs` on an empty directory | **0** | the machine answered, and *nothing here* is what it said. A path that is not there exits 1, `probe`'s rule — the two are different answers and only one is a reason to stop |
 | `kill` on a session that is not there | **0** | absence again, and it prints which of the two happened rather than one sentence true either way |
 | `rm` on a workspace already gone | **0** | the same rule. `DELETE /api/workspaces/{name}` answers `200 {"removed": false}` for it rather than a `404`, so two tabs deleting one workspace do not show a failure for something that worked |
 | `rm` while the session is open, or while the machine cannot be asked | 1 | deleting the file strands the session where nothing looks for it, and a check that cannot know must refuse (R-23). `--force` is how a caller means it anyway |

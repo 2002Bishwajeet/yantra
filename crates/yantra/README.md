@@ -19,6 +19,7 @@ yantra kill mac scratch          # stop any session by machine and name
 yantra probe mac /code/site      # is it there, and what origin does it hold?
 
 yantra ls machines               # the tailnet
+yantra ls dirs mac [/code]       # one level of a machine, with the repositories marked
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what is running, everywhere
 yantra ls attention              # issues, reviews and notifications waiting on GitHub

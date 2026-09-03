@@ -53,6 +53,7 @@ const HEADER: &str = "\
 import type {
   Broken,
   Listed,
+  Listing,
   Looked,
   Machine,
   MachineSessions,

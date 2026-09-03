@@ -441,7 +441,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Five things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Six things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -456,7 +456,15 @@ a machine over ssh. Neither may be swept and neither may be polled. D3 §11.4 is
 as a design: money lives on a tab somebody opens, because a `$` on a fleet row would put that read
 into the 5 s loop.
 
-None of the five licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-300 is the sixth, and it is the cheapest of the three reads.** `POST /api/machines/{machine}/dirs`
+lists **one level** of a machine's filesystem so a form can walk to a directory rather than trust one
+that was typed. [D4](../../docs/design/04-workspace-creation.md) §2 is why it may sit here at all: a
+whole-home `find` measured 8.5 s on this fleet's Mac and one level measured 0.23 s, which is what the
+probe beside it already costs. **A sweep would have needed an ADR** — eight seconds inside a handler
+is a different decision from a probe's — so the shape is the licence, and widening it to recurse
+would spend a ruling that was never given.
+
+None of the six licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

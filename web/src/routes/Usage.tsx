@@ -4,6 +4,7 @@ import { Stamp } from '@/components/Age'
 import { DataTable } from '@/components/DataTable'
 import { Section } from '@/components/Section'
 import { Title } from '@/components/Title'
+import { nativeSelect } from '@/lib/control'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -113,11 +114,6 @@ export function Usage() {
   )
 }
 
-/** The same native `<select>` [`NewWorkspace.tsx`](../components/NewWorkspace.tsx)
- *  keeps, styled the same way: D3 §14 gives `ui/select` and `ui/combobox` to the
- *  row that adopts them, and this is not that row. */
-const picker =
-  'border-input bg-background focus-visible:ring-ring/50 w-full rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-[3px]'
 
 function Pick({
   workspaces,
@@ -160,7 +156,7 @@ function Pick({
           Workspace
         </label>
         <select
-          className={picker}
+          className={nativeSelect}
           id="usage-workspace"
           name="workspace"
           onChange={(event) => setChosen(event.target.value)}

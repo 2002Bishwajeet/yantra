@@ -14,16 +14,12 @@
    their class names anyway — 3.7 kB gzip of rules for markup nothing draws.
    The files stay; the scan skips them. `motion.test.ts` recomputes this list
    from the import graph, so importing one is enough to get its CSS back. */
-@source not "./components/ui/combobox.tsx";
 @source not "./components/ui/label.tsx";
 @source not "./components/ui/popover.tsx";
 @source not "./components/ui/select.tsx";
-@source not "./components/ui/separator.tsx";
 @source not "./components/ui/sheet.tsx";
 @source not "./components/ui/spinner.tsx";
 @source not "./components/ui/switch.tsx";
-@source not "./components/ui/toggle-group.tsx";
-@source not "./components/ui/toggle.tsx";
 @source not "./components/ui/tooltip.tsx";
 
 /* D3 §9.1: the package's own stylesheet ships five subsets — cyrillic,

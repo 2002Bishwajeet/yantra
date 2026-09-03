@@ -136,15 +136,21 @@ describe('opening it', () => {
     render(<App />)
     await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
+    // The overlay is a lazy chunk (Y-194), so the first summon waits on a
+    // dynamic import rather than on a render — R-24's species, and one second
+    // of testing-library default is not enough beside twelve other suites.
     fireEvent.keyDown(document, { key: 'k', metaKey: true })
-    expect(await screen.findByRole('dialog')).toBeTruthy()
+    expect(await opened()).toBeTruthy()
 
     fireEvent.keyDown(document, { key: 'k', metaKey: true })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
-    expect(await screen.findByRole('dialog')).toBeTruthy()
+    expect(await opened()).toBeTruthy()
   })
+
+  const opened = () =>
+    screen.findByRole('dialog', undefined, { timeout: 10_000 })
 
   /** D3 §10: the phone is the constraint and it has no ⌘K, so the header
    *  carries a control that can be tapped. */
@@ -245,7 +251,13 @@ describe('the verbs it does not run', () => {
     render(<App />)
     await screen.findByRole('heading', { level: 1, name: 'Fleet' })
 
-    for (const name of ['yantra', 'cachyos-g14', 'Fleet', 'Machines', 'Usage']) {
+    for (const name of [
+      'yantra',
+      'cachyos-g14',
+      'Fleet',
+      'Machines',
+      'Usage',
+    ]) {
       const palette = await opened()
       fireEvent.click(palette.getByRole('option', { name }))
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
