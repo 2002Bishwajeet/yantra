@@ -1,12 +1,12 @@
 # ADR-0022 — A socket may address a session rather than a workspace
 
 - **Date:** 2026-09-03
-- **Status:** proposed
+- **Status:** accepted (2026-09-03, by the owner — Y-318)
 - **Amends:** nothing. It widens what a terminal socket may reach and leaves
   [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)'s predicate and
   [ADR-0017](0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)'s address rule exactly
   as they are written.
-- **Unblocks, once accepted:** [Y-179](../../tracker.md#3-task-board). The work behind it is **Y-319**
+- **Unblocks:** [Y-179](../../tracker.md#3-task-board). The work behind it is **Y-319**
   and **Y-320**.
 - **Design:** [D6](../design/06-sessions-attention-spend.md) §6, which settles the page and hands this
   document the direction.
