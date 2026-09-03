@@ -666,6 +666,38 @@ reconcile. Keep them, and say in
 > skip list took the CSS down and the surfaces that shipped since put the script up. **Hold the total
 > and stop quoting the split** — it describes a bundle that no longer exists.
 
+> **2026-09-04: 148,096 bytes — 144.6 KiB, and 384 bytes under the ceiling. Recorded by
+> [Y-321](../../tracker.md#3-task-board).** Same measurement as the amendment above: the entry script,
+> every `modulepreload` and the stylesheet `dist/index.html` names, gzip -9, on `main` at `6f1ed42`.
+>
+> | | bytes |
+> | --- | --- |
+> | entry JS | 108,090 |
+> | Base UI core, preloaded | 13,634 |
+> | `skeleton`, preloaded | 8,215 |
+> | `button`, preloaded | 1,638 |
+> | react-dom, preloaded | 1,364 |
+> | CSS | 15,155 |
+> | **total** | **148,096** |
+> | ceiling | 148,480 |
+>
+> **The budget holds and it is nearly spent.** Six surfaces landed on 2026-09-04 — the attention band,
+> the ACT column, `/usage`, the transcript, the spend tab and the session terminal — for **1,294 bytes**
+> over the 146,802 this section recorded the day before. Most of that predates the last two: the first
+> load was 147,948 B before [Y-179](../../tracker.md#3-task-board), which cost 111 B, and
+> [Y-311](../../tracker.md#3-task-board), which cost 37 B. **The route split is why six surfaces cost
+> that little** — the transcript, the spend tab and the terminal all land in chunks nothing preloads.
+>
+> **Script is 129.8 KiB against the stylesheet's 14.8 KiB**, which is the split the amendment above says
+> to stop quoting, so treat it as a direction rather than a target: what grows is the script.
+> [Y-325](../../tracker.md#3-task-board) is the row that decides whether the 384 bytes are spent or won
+> back.
+>
+> **The fonts budget is met and this figure does not carry it.** §16's D3.12 asks under 30 kB and the
+> single Geist latin `woff2` is **29,400 B** — the exact number the 2026-08-22 amendment predicted for
+> the local `@font-face`. The table's *Now* column still reads **76 kB**, which has been wrong since
+> that change shipped.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
