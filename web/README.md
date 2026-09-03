@@ -1,10 +1,11 @@
 # yantra web — the dashboard
 
-Seven routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+Nine routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every machine compared at `/machines`, one machine at
-`/m/$machine`, a workspace's terminal, transcript and spend at `/w/$name`, its
-file at `/w/$name/repair`, the create form at `/new`, spend at `/usage` and the
-ntfy relay at `/settings`. `⌘K` reaches the seven a working workspace has and
+`/m/$machine`, one tmux session's terminal at `/m/$machine/s/$session`, a
+workspace's terminal, transcript and spend at `/w/$name`, its file at
+`/w/$name/repair`, the create form at `/new`, spend at `/usage` and the ntfy
+relay at `/settings`. `⌘K` reaches the seven a working workspace has and
 runs no verb; the palette lists only workspaces that loaded, so a broken one is reached
 from its own page.
 The readings poll on TanStack Query; the forms and every workspace row write.
@@ -246,8 +247,9 @@ Yantra did not open has no command at all, every verb taking a workspace name.
 ## The terminal (Y-130)
 
 `Terminal.tsx` is xterm.js on `GET /api/workspaces/{name}/terminal`, opened by the
-`Open terminal` button in a workspace row and closed by the one in its header. Four
-decisions, each of which could reasonably have gone the other way:
+`Open terminal` button in a workspace row and closed by the one in its header. It
+serves a second address since Y-179, below. Four decisions, each of which could
+reasonably have gone the other way:
 
 - **A sixth section, not a route and not an overlay** — until
   [Y-161](../tracker.md) made it `/w/{name}`. Y-130 left the URL alone because it
@@ -293,6 +295,30 @@ code are not obvious from it:
   does not line up with the first. The page says the conversation moved on and
   offers a `Refresh` (Y-310). `transcript.test.tsx` proves it against a real file
   that gained a record between two reads.
+
+## A terminal on any session (Y-179)
+
+`Terminal.tsx` takes a `Target`, which is the daemon's own enum in TypeScript: a
+workspace, or a machine and a session
+([ADR-0022](../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
+It picks the URL and the name a refusal says — `scratch on pi`, never a
+workspace — and nothing else in the file knows which address it is on. **There is
+no second terminal**, which is what D6 §6.2 refuses.
+
+Three decisions:
+
+- **The verb in the ACT column is a link, not a button.** D6 §4.3 asks for a
+  link, and `/m/{machine}/s/{session}` gets middle-click and copy-link for free
+  (D5 §3.2). It carries the accessible name Y-320 gave it, `Terminal for
+  {session} on {machine}`, because the address is now a machine and a session
+  and a typo lands in a live shell.
+- **The route is split.** `/machines` is eager, so a terminal drawn in its own
+  column would put xterm.js on the first load of a page that attaches to
+  nothing.
+- **Nothing is read before the socket.** `/w/{name}` reads the workspace list
+  first, because a workspace the daemon never heard of is a typo worth catching
+  without an ssh. A session is known only to its machine, so this attaches and
+  lets the daemon refuse a name that is not there (ADR-0022 §5).
 
 ## Reconnect (Y-132)
 
@@ -611,8 +637,11 @@ src/
     Fleet.tsx        `/` — the five sections and the edit form
     OneMachine.tsx   `/m/$machine` — the same readings, filtered to one
     OneWorkspace.tsx `/w/$name` — one workspace as three tabs the URL carries,
-                     and the transcript's answer, held across a tab switch. The
-                     one code-split route: xterm.js is a third of the bundle
+                     and the transcript's answer, held across a tab switch.
+                     Split for the heaviest reason: xterm.js is a third of the
+                     bundle
+    OneSession.tsx   `/m/$machine/s/$session` — the same terminal on a session
+                     no workspace claims (ADR-0022). Split for the same reason
   test/
     inQuery.tsx      `renderHookQueried` — a client per call, for a hook that
                      reads one out of context
@@ -664,12 +693,13 @@ a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1, and an amendment o
 - **The history is a parameter.** `getRouter(history)` is
   [T3 Code](https://github.com/pingdotgg/t3code)'s shape, copied: the entry point
   passes a browser history and a test passes a memory one, with no branch inside.
-- **`/w/$name` is the only split route, and the split is why the package pays for
-  itself.** xterm.js and its CSS are a third of the bundle and the fleet page
+- **`/w/$name` was the first split route, and the split is why the package pays
+  for itself.** xterm.js and its CSS are a third of the bundle and the fleet page
   never touches them. First load went **170 kB gzip to 111 kB**, and the
   terminal's 85 kB arrives when a terminal does. `lazyRouteComponent` does it;
   the component reads its own params through `getRouteApi('/w/$name')`, because
   importing the route back into the module the route loads would be a cycle.
+  `/m/$machine/s/$session` is split for the same reason and shares the chunk.
 - **Params are typed.** `<Link to="/m/$machine" params={{ machine }}>` fails to
   compile on a typo, which the string builders in Y-161 could not do.
 - **`notFoundComponent` is a state, not a redirect.** `web.rs` answers every

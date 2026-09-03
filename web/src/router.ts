@@ -73,6 +73,19 @@ const machine = createRoute({
   head: ({ params }) => titled(params.machine),
 })
 
+// Split for the same reason as `/w/$name`, and it is the reason this is a route
+// at all: `/machines` is eager, and a terminal drawn in its own ACT column would
+// put xterm.js on the first load of a page that attaches to nothing (ADR-0022).
+const session = createRoute({
+  getParentRoute: () => root,
+  path: '/m/$machine/s/$session',
+  component: lazyRouteComponent(
+    () => import('@/routes/OneSession'),
+    'OneSession',
+  ),
+  head: ({ params }) => titled(`${params.session} on ${params.machine}`),
+})
+
 // Split for the heaviest reason of any of them: xterm.js and its CSS are a
 // third of the bundle, and the fleet does not use them.
 const workspace = createRoute({
@@ -107,6 +120,7 @@ export const routeTree = root.addChildren([
   settings,
   usage,
   machine,
+  session,
   workspace,
   repair,
 ])

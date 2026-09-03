@@ -39,10 +39,31 @@ type Ended = { ended: 'no' } | { ended: 'yes'; said: string | null }
  *  attempt 0 being the first connection, which nobody chose to retry. */
 type Link = { up: boolean; attempt: number }
 
+/** What a socket attaches to: a workspace the daemon looks up, or a machine and
+ *  a session it is handed
+ *  ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
+ *  It mirrors the daemon's own `Target`, addresses and all. */
+export type Target = { workspace: string } | { machine: string; session: string }
+
+function address(target: Target): string {
+  const daemon = location.origin.replace(/^http/, 'ws')
+  return 'workspace' in target
+    ? `${daemon}/api/workspaces/${encodeURIComponent(target.workspace)}/terminal`
+    : `${daemon}/api/machines/${encodeURIComponent(target.machine)}/sessions/${encodeURIComponent(target.session)}/terminal`
+}
+
+/** What a refusal names, which is the daemon's `Display` for the same two
+ *  addresses — a session that went away is named, never a workspace (§4.3). */
+function names(target: Target): string {
+  return 'workspace' in target
+    ? target.workspace
+    : `${target.session} on ${target.machine}`
+}
+
 /** The socket and xterm.js, wired to each other and to nothing that renders.
  *  Returns the teardown, which is the whole of what closing a terminal is. */
 function attach(
-  name: string,
+  url: string,
   host: HTMLElement,
   over: (said: string | null) => void,
   linked: (link: Link) => void,
@@ -54,7 +75,6 @@ function attach(
   fit.fit()
   xterm.focus()
 
-  const url = `${location.origin.replace(/^http/, 'ws')}/api/workspaces/${encodeURIComponent(name)}/terminal`
   let socket: WebSocket | undefined
   let waiting: ReturnType<typeof setTimeout> | undefined
   let attempts = 0
@@ -131,7 +151,7 @@ function attach(
  *  paste was standing in for. Nothing here keeps the stream: xterm.js holds the
  *  scrollback and it goes with the element (Q5).
  *
- *  **Key it on `name`.** A different workspace is a different socket and a
+ *  **Key it on the URL.** A different target is a different socket and a
  *  different screen, and the React Compiler refuses the reset that would
  *  otherwise do it in the effect.
  *
@@ -139,24 +159,28 @@ function attach(
  *  row wants twelve rows of this same pane where `/w/{name}` wants the page
  *  (D5 §5.1). */
 export function Terminal({
-  name,
+  target,
   onClose,
   height,
 }: {
-  name: string
+  target: Target
   onClose: () => void
   height?: string
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [end, setEnd] = useState<Ended>({ ended: 'no' })
   const [link, setLink] = useState<Link>({ up: false, attempt: 0 })
+  const url = address(target)
+  const name = names(target)
+  const listed =
+    'workspace' in target ? 'the Workspaces row' : "the machine's Sessions table"
 
   // The daemon's reason arrives before the close that follows it, so the first
   // answer is the one that says anything.
   useEffect(
     () =>
       attach(
-        name,
+        url,
         host.current!,
         (said) =>
           setEnd((before) =>
@@ -164,7 +188,7 @@ export function Terminal({
           ),
         setLink,
       ),
-    [name],
+    [url],
   )
 
   return (
@@ -202,8 +226,8 @@ export function Terminal({
               The terminal ended, and {ATTEMPTS} attempts to reopen it all
               failed. Whether you are off the tailnet or the daemon is down is
               not something this page can tell. Detaching never stops a session,
-              and whether this one is still running is what the Workspaces row
-              says. Open the terminal again once the connection is back.
+              and whether this one is still running is what {listed} says. Open
+              the terminal again once the connection is back.
             </p>
           ) : (
             <Alert variant="destructive">

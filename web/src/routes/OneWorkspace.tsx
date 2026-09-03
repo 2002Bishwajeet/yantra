@@ -130,7 +130,10 @@ export function OneWorkspace() {
       {/* Only the open tab is mounted: mounting the terminal opens an ssh, and
           tmux redraws the pane for whoever attaches next (D5 §3.5). */}
       {tab === 'terminal' && (
-        <Terminal name={name} onClose={() => void navigate({ to: '/' })} />
+        <Terminal
+          onClose={() => void navigate({ to: '/' })}
+          target={{ workspace: name }}
+        />
       )}
       {tab === 'transcript' && (
         <Transcript
