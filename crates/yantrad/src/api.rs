@@ -207,7 +207,11 @@ async fn github(State(model): State<Model>) -> impl IntoResponse {
 /// is the architecture rather than a gap: the beats are in this process and
 /// nothing persists them (Y-044), while ADR-0012 keeps the CLI out of it. This
 /// is the daemon filling in its own check.
-fn answered(
+///
+/// [`crate::write`]'s re-check calls it too, so a report a person asked for
+/// carries the same nine answers as the swept one and not eight plus an
+/// *unknown* the daemon could have filled in.
+pub(crate) fn answered(
     report: &doctor::Report,
     snapshot: &Snapshot,
     beats: &BTreeMap<String, Reading<Heartbeat>>,
@@ -285,7 +289,7 @@ fn absent(fleet: &yantra_core::status::Fleet, name: &str) -> String {
 /// I-47 one layer up: `never` is not an empty list, and neither is `failed`.
 #[derive(Debug, serde::Serialize)]
 #[serde(tag = "looked", rename_all = "lowercase")]
-enum Answer<T> {
+pub(crate) enum Answer<T> {
     Ok { age_seconds: u64, data: T },
     Failed { age_seconds: u64, error: String },
     Never,
@@ -708,6 +712,7 @@ mod tests {
         Fleet {
             model: Arc::new(tokio::sync::RwLock::new(snapshot)),
             beats: Beats::default(),
+            ..Fleet::default()
         }
     }
 

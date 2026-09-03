@@ -1,6 +1,10 @@
 import { type FormEvent, useState } from 'react'
 import type { Machine, Workspace } from '@/api'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Form } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 
 type Sent =
   | { sent: 'no' }
@@ -53,8 +57,11 @@ async function create(body: Create): Promise<Sent> {
   }
 }
 
+/** What is left of the hand-rolled styling: a native `<select>`, which
+ *  [D3](../../../docs/design/03-dashboard-surface.md) §14 gives to Y-185 along
+ *  with `ui/select` and `ui/combobox`. Every other control here is ported. */
 export const field =
-  'border-input bg-background focus-visible:ring-ring/50 rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-[3px]'
+  'border-input bg-background focus-visible:ring-ring/50 w-full rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-[3px]'
 
 /** The `201` carries the whole workspace, and it is rendered from there: the
  *  read model refreshes every 30 s, so re-reading the list to confirm a create
@@ -82,22 +89,16 @@ export function NewWorkspace({ machines }: { machines: Machine[] }) {
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="new-name">Name</label>
-        <input
-          id="new-name"
-          name="name"
-          required
-          autoComplete="off"
-          className={field}
-        />
-      </div>
+    <Form onSubmit={(event) => void submit(event)}>
+      <Field>
+        <FieldLabel>Name</FieldLabel>
+        <Input autoComplete="off" id="new-name" name="name" required />
+      </Field>
 
       {/* ADR-0009: Yantra never resolves a machine, so an asleep one is a
           legitimate target and is offered like any other. */}
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="new-machine">Machine</label>
+      <Field>
+        <FieldLabel htmlFor="new-machine">Machine</FieldLabel>
         <select
           id="new-machine"
           name="machine"
@@ -114,47 +115,45 @@ export function NewWorkspace({ machines }: { machines: Machine[] }) {
             </option>
           ))}
         </select>
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="new-repo">Repo</label>
-        <input
+      <Field>
+        <FieldLabel>Repo</FieldLabel>
+        <Input
+          autoComplete="off"
           id="new-repo"
           name="repo"
-          required
-          autoComplete="off"
           placeholder="/home/you/Github/thing"
-          className={field}
+          required
         />
-        <span className="text-muted-foreground text-xs">
+        <FieldDescription>
           A path on that machine. Nothing here checks it, because the filesystem
           it names is the far side's.
-        </span>
-      </div>
+        </FieldDescription>
+      </Field>
 
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="new-startup">Startup</label>
-        <input
+      <Field>
+        <FieldLabel>Startup</FieldLabel>
+        <Input
+          autoComplete="off"
           id="new-startup"
           name="startup"
-          autoComplete="off"
           placeholder="claude"
-          className={field}
         />
-        <span className="text-muted-foreground text-xs">
+        <FieldDescription>
           Optional; blank opens a plain shell. It is a shell command, so a secret
           stays a reference the shell resolves — <code>op://…</code>,{' '}
           <code>pass show …</code> — and Yantra never holds the value.
-        </span>
-      </div>
+        </FieldDescription>
+      </Field>
 
-      <button
-        type="submit"
+      <Button
+        className="self-start"
         disabled={outcome.sent === 'sending'}
-        className="bg-primary text-primary-foreground self-start rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
+        type="submit"
       >
         {outcome.sent === 'sending' ? 'creating…' : 'Create workspace'}
-      </button>
+      </Button>
 
       {outcome.sent === 'made' && (
         <Alert>
@@ -186,6 +185,6 @@ export function NewWorkspace({ machines }: { machines: Machine[] }) {
           </AlertDescription>
         </Alert>
       )}
-    </form>
+    </Form>
   )
 }

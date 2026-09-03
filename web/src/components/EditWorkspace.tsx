@@ -1,8 +1,12 @@
 import { type FormEvent, useState } from 'react'
 import type { Machine, Workspace } from '@/api'
-import { button } from '@/components/Act'
+import { Confirm } from '@/components/Act'
 import { field } from '@/components/NewWorkspace'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Form } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 
 /** What `PATCH /api/workspaces/{name}` reads. A field left out is left alone,
  *  and `startup: null` is the one `null` that means something — it is
@@ -13,13 +17,25 @@ type Change = {
   startup?: string | null
 }
 
+/** `DELETE /api/workspaces/{name}`. `removed: false` is a workspace that was
+ *  already gone, which is the state asked for and never a failure (I-30), and a
+ *  `null` machine is a file that never parsed and so named none. */
+type Removed = { machine: string | null; removed: boolean }
+
 type Sent =
   | { sent: 'no' }
   | { sent: 'same' }
   | { sent: 'sending' }
+  | { sent: 'deleting' }
   | { sent: 'edited'; workspace: Workspace }
+  | { sent: 'deleted'; report: Removed }
   // `null` is a request that never got an answer, which is not a refusal.
-  | { sent: 'refused'; status: number | null; said: string }
+  | {
+      sent: 'refused'
+      of: 'edit' | 'delete'
+      status: number | null
+      said: string
+    }
 
 /** Each code the route answers means a different thing, and the `409` is the
  *  one this row exists for: nothing broke, the daemon declined to strand a live
@@ -34,8 +50,20 @@ const refusals: Record<number, string> = {
   503: 'Nothing could be asked, so nothing was decided and nothing was changed.',
 }
 
-function refusal(status: number | null): string {
+/** The same codes, and four of them mean something else on a delete: it is
+ *  refused while a session is open rather than while a *move* would strand one,
+ *  and a machine that cannot be asked is refused rather than guessed at. */
+const deletions: Record<number, string> = {
+  ...refusals,
+  400: 'That workspace name is not one the daemon accepts.',
+  409: 'A tmux session is still open on that machine, so the workspace file is still there.',
+  500: 'The delete ran and failed. What it says below is the whole chain.',
+  503: 'That machine could not be asked whether a session is still open, so nothing was deleted.',
+}
+
+function refusal(of: 'edit' | 'delete', status: number | null): string {
   if (status === null) return 'The daemon did not answer.'
+  if (of === 'delete') return deletions[status] ?? 'The daemon did not delete it.'
   return refusals[status] ?? 'The daemon did not change it.'
 }
 
@@ -66,14 +94,45 @@ async function edit(name: string, change: Change): Promise<Sent> {
     if (response.status !== 200) {
       return {
         sent: 'refused',
+        of: 'edit',
         status: response.status,
         said: await response.text(),
       }
     }
     return { sent: 'edited', workspace: (await response.json()) as Workspace }
   } catch (cause) {
-    return { sent: 'refused', status: null, said: String(cause) }
+    return { sent: 'refused', of: 'edit', status: null, said: String(cause) }
   }
+}
+
+/** No `?force=true`: the daemon refuses to strand a session and that refusal is
+ *  the thing worth reading, so the dashboard never sends the flag that skips it
+ *  (`yantra rm --force` is where a person means it anyway). */
+async function erase(name: string): Promise<Sent> {
+  const path = `/api/workspaces/${encodeURIComponent(name)}`
+  try {
+    const response = await fetch(path, { method: 'DELETE' })
+    if (response.status !== 200) {
+      return {
+        sent: 'refused',
+        of: 'delete',
+        status: response.status,
+        said: await response.text(),
+      }
+    }
+    return { sent: 'deleted', report: (await response.json()) as Removed }
+  } catch (cause) {
+    return { sent: 'refused', of: 'delete', status: null, said: String(cause) }
+  }
+}
+
+function deleted(name: string, report: Removed): string {
+  if (!report.removed) {
+    return `There was no workspace called ${name} left to delete, which is the state this asked for.`
+  }
+  return report.machine === null
+    ? `Deleted ${name}. Its file did not parse, so it named no machine.`
+    : `Deleted ${name}. Only the file went — nothing on ${report.machine} was touched.`
 }
 
 /** The `200` carries the workspace as it now reads, and the next edit is
@@ -112,13 +171,34 @@ export function EditWorkspace({
     setOutcome(await edit(current.name, change))
   }
 
+  const remove = async () => {
+    setOutcome({ sent: 'deleting' })
+    setOutcome(await erase(current.name))
+  }
+
+  // The form is gone once the workspace is: every field on it would edit a file
+  // that is not there, and the daemon would answer each one with a `404`.
+  if (outcome.sent === 'deleted') {
+    return (
+      <div className="flex flex-col gap-4">
+        <Alert>
+          <AlertTitle>{deleted(current.name, outcome.report)}</AlertTitle>
+          <AlertDescription>
+            The workspaces reading is taken every 30 s, so the table may still
+            list it.
+          </AlertDescription>
+        </Alert>
+        <Button className="self-start" onClick={onClose} variant="outline">
+          Close
+        </Button>
+      </div>
+    )
+  }
+
   return (
-    <form
-      onSubmit={(event) => void submit(event)}
-      className="flex flex-col gap-4"
-    >
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="edit-machine">Machine</label>
+    <Form onSubmit={(event) => void submit(event)}>
+      <Field>
+        <FieldLabel htmlFor="edit-machine">Machine</FieldLabel>
         <select
           id="edit-machine"
           name="machine"
@@ -131,51 +211,54 @@ export function EditWorkspace({
             </option>
           ))}
         </select>
-        <span className="text-muted-foreground text-xs">
+        <FieldDescription>
           A session still open on the machine this leaves refuses the move —
           stop it first, here or with <code>yantra down</code>.
-        </span>
-      </div>
+        </FieldDescription>
+      </Field>
 
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="edit-repo">Repo</label>
-        <input
+      <Field>
+        <FieldLabel>Repo</FieldLabel>
+        <Input
+          autoComplete="off"
+          defaultValue={workspace.repo}
           id="edit-repo"
           name="repo"
           required
-          autoComplete="off"
-          defaultValue={workspace.repo}
-          className={field}
         />
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="edit-startup">Startup</label>
-        <input
-          id="edit-startup"
-          name="startup"
+      <Field>
+        <FieldLabel>Startup</FieldLabel>
+        <Input
           autoComplete="off"
           defaultValue={workspace.startup ?? ''}
-          className={field}
+          id="edit-startup"
+          name="startup"
         />
-        <span className="text-muted-foreground text-xs">
+        <FieldDescription>
           Emptying this clears the command, and the session opens a plain shell.
           It is a shell command, so a secret stays a reference the shell resolves
           — <code>op://…</code>, <code>pass show …</code>.
-        </span>
-      </div>
+        </FieldDescription>
+      </Field>
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={outcome.sent === 'sending'}
-          className="bg-primary text-primary-foreground self-start rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
-        >
+        <Button disabled={outcome.sent === 'sending'} type="submit">
           {outcome.sent === 'sending' ? 'saving…' : 'Save changes'}
-        </button>
-        <button type="button" className={button} onClick={onClose}>
+        </Button>
+        <Button onClick={onClose} variant="outline">
           Close
-        </button>
+        </Button>
+        {/* §4.7: the one thing on this panel that cannot be undone. */}
+        <Confirm
+          body={`This deletes the workspace file and nothing else. The repo on ${current.machine} and everything in it stay as they are. Yantra keeps no copy, so writing it again is the only way back.`}
+          confirm="Delete it"
+          disabled={outcome.sent === 'deleting'}
+          label={outcome.sent === 'deleting' ? 'deleting…' : 'Delete workspace'}
+          onConfirm={() => void remove()}
+          title={`Delete ${current.name}?`}
+        />
       </div>
 
       {outcome.sent === 'same' && (
@@ -213,7 +296,7 @@ export function EditWorkspace({
         // A refusal the daemon reasoned about is not a crash, and the `409` is
         // the one that reads as one if it is painted like a failure.
         <Alert variant={outcome.status === 409 ? 'default' : 'destructive'}>
-          <AlertTitle>{refusal(outcome.status)}</AlertTitle>
+          <AlertTitle>{refusal(outcome.of, outcome.status)}</AlertTitle>
           {/* The daemon's own sentence, whole: it names the workspace, the
               machine it may not leave and the command that ends the refusal. */}
           <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
@@ -221,6 +304,6 @@ export function EditWorkspace({
           </AlertDescription>
         </Alert>
       )}
-    </form>
+    </Form>
   )
 }

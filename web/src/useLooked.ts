@@ -32,16 +32,27 @@ async function look<T>(path: string, signal: AbortSignal): Promise<Looked<T>> {
   }
 }
 
+/** D3 §7.1, the sharpest finding in that document: a question not yet asked was
+ *  not answered *never*. This returned `{ looked: 'never' }` before the first
+ *  fetch resolved, and `Section` drew that as "Not looked at yet." — so a page
+ *  opening for the first time claimed the daemon had never looked at the fleet.
+ *  That is R-23 broken inside the browser.
+ *
+ *  `pending` is a fourth state and not a fourth word: it is this browser's, the
+ *  other three are the daemon's, and only a surface knows how to draw it. */
+export type Reading<T> = Looked<T> | { looked: 'pending' }
+
 /** Never throws: a dead daemon becomes the same `failed` envelope the daemon
  *  itself produces, so the page has one failure path rather than two — and
  *  Query's own `isError` is therefore a state this page cannot reach. */
-export function useLooked<T>(path: string): Looked<T> {
+export function useLooked<T>(path: string): Reading<T> {
   const { data } = useQuery({
     queryKey: [path],
     queryFn: ({ signal }) => look<T>(path, signal),
     refetchInterval: POLL_MS,
   })
-  return data ?? { looked: 'never' }
+  // `look` never resolves undefined, so undefined is the first fetch in flight.
+  return data ?? { looked: 'pending' }
 }
 
 // Y-084's route is the one that answers something other than 200, and its 404
@@ -72,7 +83,7 @@ async function lookAtAgent(
  *  name missing from it is that row's state, not the class failing. */
 function collapse(
   answers: { name: string; answer: OneAgent | undefined }[],
-): Looked<Record<string, WorkspaceStatus | null>> {
+): Reading<Record<string, WorkspaceStatus | null>> {
   const found: Record<string, WorkspaceStatus | null> = {}
   let age_seconds = 0
   let looked = false
@@ -80,7 +91,7 @@ function collapse(
   for (const { name, answer } of answers) {
     // A name still in flight is not a name with no report, so the class waits
     // for all of them — which is what one `Promise.all` used to say.
-    if (answer === undefined) return { looked: 'never' }
+    if (answer === undefined) return { looked: 'pending' }
     if (answer === MISSING) {
       found[name] = null
       continue
@@ -98,7 +109,9 @@ function collapse(
 
 /** The agent class, which `/api` names one workspace at a time. The list to ask
  *  for is the workspaces class, so a look that failed there is not seen past. */
-export function useAgents(workspaces: Looked<Workspace[]>): Looked<AgentRow[]> {
+export function useAgents(
+  workspaces: Reading<Workspace[]>,
+): Reading<AgentRow[]> {
   const names =
     workspaces.looked === 'ok' ? workspaces.data.map((one) => one.name) : []
   const results = useQueries({
@@ -132,7 +145,7 @@ export function useAgents(workspaces: Looked<Workspace[]>): Looked<AgentRow[]> {
  *  form, a row's buttons, a session's command, a per-workspace status fetch —
  *  and a file that did not load is not something any of them can be asked
  *  about. */
-export function loaded(listed: Looked<Listed[]>): Looked<Workspace[]> {
+export function loaded(listed: Reading<Listed[]>): Reading<Workspace[]> {
   if (listed.looked !== 'ok') return listed
   return {
     ...listed,
@@ -142,7 +155,7 @@ export function loaded(listed: Looked<Listed[]>): Looked<Workspace[]> {
 
 /** The machines the next sweep will pay an ssh timeout for — Y-100's evidence
  *  that an age near the threshold is ordinary rather than a refresh that died. */
-export function sessionsWaiting(sessions: Looked<MachineSessions[]>): string[] {
+export function sessionsWaiting(sessions: Reading<MachineSessions[]>): string[] {
   return sessions.looked === 'ok'
     ? sessions.data.flatMap((answer) =>
         answer.reached === 'no' ? [answer.machine] : [],
@@ -152,7 +165,7 @@ export function sessionsWaiting(sessions: Looked<MachineSessions[]>): string[] {
 
 /** The same for the agent class, which reaches the same machines and pays the
  *  same timeout — deduplicated, since it answers per workspace. */
-export function agentsWaiting(agents: Looked<AgentRow[]>): string[] {
+export function agentsWaiting(agents: Reading<AgentRow[]>): string[] {
   if (agents.looked !== 'ok') return []
   return [
     ...new Set(

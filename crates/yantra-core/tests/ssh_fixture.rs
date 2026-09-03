@@ -41,3 +41,19 @@ fn ssh_reaches_a_real_tmux_in_the_container() -> Result<()> {
     );
     Ok(())
 }
+
+/// Both wordings are real: `rootlessport` reported the first when this cost a
+/// CI run, and `pasta` says the second on a developer's machine.
+#[test]
+fn a_lost_host_port_race_is_recognised_whichever_forwarder_reports_it() {
+    assert!(common::lost_the_port_race(
+        "Error: rootlessport listen tcp 127.0.0.1:37043: bind: address already in use"
+    ));
+    assert!(common::lost_the_port_race(
+        "Error: pasta failed with exit code 1:\nListen failed for HOST TCP port \
+         127.0.0.1/34921: Address already in use"
+    ));
+    assert!(!common::lost_the_port_race(
+        "Error: localhost/yantra-fixture:2: image not known"
+    ));
+}

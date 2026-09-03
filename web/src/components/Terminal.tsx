@@ -35,12 +35,17 @@ export const PAUSE = 500
 
 type Ended = { ended: 'no' } | { ended: 'yes'; said: string | null }
 
+/** Whether the socket is up, and which attempt is in flight while it is not —
+ *  attempt 0 being the first connection, which nobody chose to retry. */
+type Link = { up: boolean; attempt: number }
+
 /** The socket and xterm.js, wired to each other and to nothing that renders.
  *  Returns the teardown, which is the whole of what closing a terminal is. */
 function attach(
   name: string,
   host: HTMLElement,
   over: (said: string | null) => void,
+  linked: (link: Link) => void,
 ): () => void {
   const xterm = new Xterm({ cursorBlink: true, fontSize: 13 })
   const fit = new FitAddon()
@@ -77,7 +82,10 @@ function attach(
     const live = new WebSocket(url)
     socket = live
     live.binaryType = 'arraybuffer'
-    live.onopen = measure
+    live.onopen = () => {
+      linked({ up: true, attempt: attempts })
+      measure()
+    }
     live.onmessage = (frame: MessageEvent<string | ArrayBuffer>) => {
       attempts = 0
       // Text from the daemon is why a terminal could not be opened. Written to
@@ -98,6 +106,7 @@ function attach(
         return
       }
       attempts += 1
+      linked({ up: false, attempt: attempts })
       waiting = setTimeout(open, PAUSE)
     }
   }
@@ -134,15 +143,20 @@ export function Terminal({
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [end, setEnd] = useState<Ended>({ ended: 'no' })
+  const [link, setLink] = useState<Link>({ up: false, attempt: 0 })
 
   // The daemon's reason arrives before the close that follows it, so the first
   // answer is the one that says anything.
   useEffect(
     () =>
-      attach(name, host.current!, (said) =>
-        setEnd((before) =>
-          before.ended === 'yes' ? before : { ended: 'yes', said },
-        ),
+      attach(
+        name,
+        host.current!,
+        (said) =>
+          setEnd((before) =>
+            before.ended === 'yes' ? before : { ended: 'yes', said },
+          ),
+        setLink,
       ),
     [name],
   )
@@ -158,13 +172,24 @@ export function Terminal({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
+        {/* An empty black box says nothing about itself, so the state that
+            produced it is said above it rather than left to be inferred. */}
+        {end.ended === 'no' && !link.up && (
+          <p role="status" className="text-muted-foreground text-sm">
+            {link.attempt === 0
+              ? 'Connecting…'
+              : `Reconnecting, attempt ${link.attempt} of ${ATTEMPTS}.`}
+          </p>
+        )}
         <div ref={host} className="h-[60vh] w-full" />
         {end.ended === 'yes' &&
           (end.said === null ? (
             <p className="text-muted-foreground text-sm">
-              The terminal ended, and reopening it did not bring it back.
-              Detaching never stops a session, and whether this one is still
-              running is what the Workspaces row says.
+              The terminal ended, and {ATTEMPTS} attempts to reopen it all
+              failed. Whether you are off the tailnet or the daemon is down is
+              not something this page can tell. Detaching never stops a session,
+              and whether this one is still running is what the Workspaces row
+              says. Open the terminal again once the connection is back.
             </p>
           ) : (
             <Alert variant="destructive">

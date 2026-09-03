@@ -10,11 +10,21 @@ const Overflow = lazy(() =>
   import('@/components/Overflow').then((it) => ({ default: it.Overflow })),
 )
 
+const ConfirmPopup = lazy(() =>
+  import('@/components/ConfirmPopup').then((it) => ({
+    default: it.ConfirmPopup,
+  })),
+)
+
 export type Verb = 'up' | 'down' | 'resume'
+
+/** `kill` takes a machine and a session rather than a workspace, so it is not a
+ *  `Verb` — what it shares with the three is the sentence drawn while it waits. */
+type Doing = Verb | 'kill'
 
 type Acted =
   | { acted: 'no' }
-  | { acted: 'acting'; verb: Verb }
+  | { acted: 'acting'; verb: Doing }
   | { acted: 'done'; said: string }
   // `null` is a request that never got an answer, which is not a refusal.
   | { acted: 'refused'; status: number | null; said: string }
@@ -118,13 +128,44 @@ async function act(workspace: Workspace, verb: Verb): Promise<Acted> {
   }
 }
 
+/** `DELETE /api/machines/{machine}/sessions/{session}`. `killed: false` is a
+ *  session that was already gone, which is the state asked for (I-30). */
+type Killed = { machine: string; session: string; killed: boolean }
+
+async function kill(machine: string, session: string): Promise<Acted> {
+  const path = `/api/machines/${encodeURIComponent(machine)}/sessions/${encodeURIComponent(session)}`
+
+  try {
+    const response = await fetch(path, { method: 'DELETE' })
+    if (!response.ok) {
+      return {
+        acted: 'refused',
+        status: response.status,
+        said: await response.text(),
+      }
+    }
+    const report = (await response.json()) as Killed
+    return {
+      acted: 'done',
+      said: report.killed
+        ? `Killed ${report.session} on ${report.machine}.`
+        : `No session named ${report.session} was running on ${report.machine}, so there was nothing to kill.`,
+    }
+  } catch (cause) {
+    return { acted: 'refused', status: null, said: String(cause) }
+  }
+}
+
+/** The last hand-rolled control, and it is `Terminal.tsx`'s — a file this row
+ *  does not own (D3 §7.4). */
 export const button =
   'border-input rounded-md border px-2 py-1 text-xs disabled:opacity-50'
 
-const inFlight: Record<Verb, string> = {
+const inFlight: Record<Doing, string> = {
   up: 'starting…',
   down: 'stopping…',
   resume: 'resuming…',
+  kill: 'killing…',
 }
 
 /** Everything that is only true after a tap: what is still awaited, and what the
@@ -160,6 +201,97 @@ function Outcome({ outcome, machine }: { outcome: Acted; machine: string }) {
         </Alert>
       )}
     </>
+  )
+}
+
+/** D3 §4.7: only what cannot be undone asks first, and the question names what
+ *  it will leave alone as well as what it takes — there is no undo to offer
+ *  afterwards, since the daemon persists nothing (ADR-0015). */
+export function Confirm({
+  label,
+  title,
+  body,
+  confirm,
+  onConfirm,
+  disabled,
+}: {
+  label: string
+  title: string
+  body: string
+  confirm: string
+  onConfirm: () => void
+  disabled: boolean
+}) {
+  // The same two flags the overflow uses, and for the same reason: `armed`
+  // fetches the question's chunk and never unsets, `open` is what it is doing.
+  const [armed, setArmed] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      {/* The button says what it opens itself, since `DialogTrigger` lives in
+          the chunk it opens. It can only ever arm and open — nothing here can
+          reach `onConfirm` before the question is drawn. */}
+      <Button
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        disabled={disabled}
+        onClick={() => {
+          setArmed(true)
+          setOpen(true)
+        }}
+        size="sm"
+        variant="destructive-outline"
+      >
+        {label}
+      </Button>
+
+      {armed && (
+        <Suspense fallback={null}>
+          <ConfirmPopup
+            body={body}
+            confirm={confirm}
+            onConfirm={onConfirm}
+            onOpenChange={setOpen}
+            open={open}
+            title={title}
+          />
+        </Suspense>
+      )}
+    </>
+  )
+}
+
+/** A session no workspace claims, which `down` cannot reach: every workspace
+ *  verb takes a workspace name and this one has none (D3 §4.3). */
+export function Kill({
+  machine,
+  session,
+}: {
+  machine: string
+  session: string
+}) {
+  const [outcome, setOutcome] = useState<Acted>({ acted: 'no' })
+  const acting = outcome.acted === 'acting'
+
+  const tap = async () => {
+    setOutcome({ acted: 'acting', verb: 'kill' })
+    setOutcome(await kill(machine, session))
+  }
+
+  return (
+    <div className="flex max-w-xs flex-col gap-2">
+      <Confirm
+        body={`tmux ends the session and every process in it on ${machine}. Nothing saves what is in its panes, and nothing here can put them back.`}
+        confirm="Kill it"
+        disabled={acting}
+        label={acting ? inFlight.kill : 'Kill'}
+        onConfirm={() => void tap()}
+        title={`Kill ${session} on ${machine}?`}
+      />
+
+      <Outcome machine={machine} outcome={outcome} />
+    </div>
   )
 }
 
@@ -298,44 +430,45 @@ export function Act({
     <div className="flex max-w-xs flex-col gap-2">
       <div className="flex flex-wrap gap-2">
         {offers('up') && (
-          <button
-            type="button"
-            className={button}
+          <Button
             disabled={acting}
             onClick={() => void tap('up')}
+            size="sm"
+            variant="outline"
           >
             {outcome.acted === 'acting' && outcome.verb === 'up'
               ? inFlight.up
               : workspace.startup === null
                 ? 'Start claude'
                 : 'Start'}
-          </button>
+          </Button>
         )}
+        {/* §4.7: a stopped session starts again, so it does not ask first. */}
         {offers('down') && (
-          <button
-            type="button"
-            className={button}
+          <Button
             disabled={acting}
             onClick={() => void tap('down')}
+            size="sm"
+            variant="outline"
           >
             {outcome.acted === 'acting' && outcome.verb === 'down'
               ? inFlight.down
               : 'Stop'}
-          </button>
+          </Button>
         )}
         {/* ADR-0015 refuses a workspace that starts something of its own, so
             the button is not offered where it could only ever be refused. */}
         {offers('resume') && workspace.startup === null && (
-          <button
-            type="button"
-            className={button}
+          <Button
             disabled={acting}
             onClick={() => void tap('resume')}
+            size="sm"
+            variant="outline"
           >
             {outcome.acted === 'acting' && outcome.verb === 'resume'
               ? inFlight.resume
               : 'Resume'}
-          </button>
+          </Button>
         )}
       </div>
 

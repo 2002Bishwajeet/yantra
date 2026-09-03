@@ -6,6 +6,7 @@
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  Broken,
   Listed,
   Looked,
   Machine,
@@ -13,6 +14,7 @@ import type {
   Opened,
   Readiness,
   Resumed,
+  Spend,
   Stopped,
   TerminalSize,
   Workspace,
@@ -372,6 +374,65 @@ export const resumed = {
   "resumed": false,
   "term": "xterm-256color"
 } satisfies Resumed
+
+export const broken = {
+  "error": "workspace `site` at /home/<user>/.config/yantra/workspaces/site.toml is not valid TOML: TOML parse error at line 2, column 7",
+  "name": "site",
+  "path": "/home/<user>/.config/yantra/workspaces/site.toml",
+  "text": "machine = \"cachyos-g14\"\nrepo =\n"
+} satisfies Broken
+
+export const spend = {
+  "as_of": "2026-08-11",
+  "cost": 5.4633115,
+  "fast": 0,
+  "models": [
+    {
+      "cost": 5.4633115,
+      "model": "claude-opus-5-20260115",
+      "responses": 66
+    },
+    {
+      "cost": null,
+      "model": "unknown",
+      "responses": 2
+    }
+  ],
+  "path": "/home/<user>/.claude/projects/-home-<user>-Github-site/1f0c1a2e.jsonl",
+  "total": {
+    "cache_read": 9624006,
+    "cache_write": 240800,
+    "input": 9530,
+    "output": 84950,
+    "responses": 68
+  }
+} satisfies Spend
+
+export const spendFast = {
+  "as_of": "2026-08-11",
+  "cost": null,
+  "fast": 3,
+  "models": [
+    {
+      "cost": null,
+      "model": "claude-opus-5-20260115",
+      "responses": 66
+    },
+    {
+      "cost": null,
+      "model": "unknown",
+      "responses": 2
+    }
+  ],
+  "path": "/home/<user>/.claude/projects/-home-<user>-Github-site/1f0c1a2e.jsonl",
+  "total": {
+    "cache_read": 9624006,
+    "cache_write": 240800,
+    "input": 9530,
+    "output": 84950,
+    "responses": 68
+  }
+} satisfies Spend
 
 export const terminalSize = {
   "cols": 120,

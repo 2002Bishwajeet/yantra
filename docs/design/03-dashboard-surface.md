@@ -87,6 +87,20 @@ Measured 2026-08-11 on `y-182-price-table`, against the daemon's own contract fi
 bytes: Rollup drops them, and `Autocomplete`, `Combobox`, `ScrollArea` and `ToggleGroup` appear in no
 chunk. Deleting them buys clarity, not weight. §9.1 says so rather than claiming a saving.
 
+> **Finding 10 reaches one word too far, and its substance is unchanged. Recorded 2026-08-11
+> (Y-194).** One `prefers-reduced-motion` rule already shipped, inside a sheet the page imports:
+> `shadcn/tailwind.css` stops `.shimmer`'s animation under `reduce` and restores the text colour it
+> was painting over. So *nothing anywhere* is too strong. Read the finding as **nothing in app code
+> honours it**, which is what it was counting and what §9.3 answers.
+>
+> The correction costs the finding nothing, because the page uses no `.shimmer` — the rule protects a
+> utility this interface never draws. The two animations the finding names, the skeleton and the
+> spinner, were both unguarded exactly as it says.
+>
+> One detail is worth carrying for whoever greps next: the rule is in `shadcn/tailwind.css`, **not**
+> in `tw-animate-css`, which ships no `prefers-reduced-motion` at all at 1.4.0. §9.3 repeats the
+> claim in its own words and takes the same correction; its ruling is untouched.
+
 ---
 
 ## 3. Routes and navigation
@@ -177,6 +191,22 @@ name the same cause. The machine is the problem; the workspaces are downstream o
 next*, so `no_agent` sits in Running because its session is live, not because an agent works in it.
 Collapsing nine verdicts into three words would throw away the vocabulary R-23 protects.
 
+> **A workspace the agent class answered 404 for has no state, and this table has no row for it.
+> Recorded 2026-08-11 (Y-188).** `useAgents` collapses that 404 to `null` (Y-084), and `chosen()`
+> reads `null` as *nothing has been looked at yet*. Filing it under *needs you*, *running* or *idle*
+> would be a guess painted as knowledge, which is what R-23 forbids.
+>
+> So there is a quiet fourth group, **Not read yet**, drawn last and empty in normal operation.
+> [`web/src/work.ts`](../../web/src/work.ts) carries it as the `unknown` band. It adds no data and no
+> round trip, exactly as the three above it do not.
+>
+> **It forced a consequence in §4.4, and the consequence is §7.1's mistake in a second place.** Every
+> row starts unread. Held order therefore pinned all of them in this group, and the first read never
+> moved them, so the page kept saying *unread* about something it had read. **Held order never holds
+> a row in this band**: a row leaves it the moment its first read arrives. A row nobody has seen
+> before takes its live band at once for the same reason — appearing is not moving, and no thumb is
+> over a row that was not there.
+
 ### 4.2 The agent has a column, and there is one agent
 
 Each row names its agent. Today every value is `claude`, and a plain shell reads `—`.
@@ -258,6 +288,22 @@ The reason is that the alternative sends a fresh install to a form whose `up` wi
 `claude` is not installed on the target and nothing said so. R13 §6 named this gap: *the interface
 has never been given a way to say what is still missing.*
 
+> **On the install this section exists for, the checklist has nothing to draw. Found while planning
+> Y-197, recorded 2026-08-11.** Readiness is swept only for **the machines a workspace names** —
+> `doctor::fleet`, and `/api/readiness/{machine}` says so in the words of its own 404: *"no workspace
+> names a machine called `x`, so none was asked"*. A fresh install has no workspace, so no machine is
+> asked and D2 §3.1's nine checks would draw blank. The page would say nothing at the one moment it
+> is the whole page.
+>
+> **So the page lists the tailnet's machines and asks each one on request**, through §12's re-check
+> `POST`. Nothing fans out on open: one machine is asked per tap, which is §11.4's rule applied to a
+> second page.
+>
+> The re-check is therefore not an extra affordance beside the checklist. **It is what gives the
+> checklist anything to show**, and this section depends on the row §12's table calls *"re-check
+> readiness now"* — **D3.21 before D3.20**. That is an order, not a block, so §16's count of two
+> blocked units stands.
+
 ---
 
 ## 5. Hierarchy, density and type
@@ -336,6 +382,24 @@ tmux formats it on the remote machine's clock, in that machine's timezone. Parse
 it parses; show it verbatim where it does not. Guessing a remote clock's timezone would be a lie in
 a page whose whole discipline is refusing to guess.
 
+> **Those two sentences cannot both hold, and parsing is the guess. Recorded 2026-08-11 (Y-192).**
+> `created` arrives as `Thu Jul 30 13:02:31 2026`, and that string names **no zone**. V8 reads it
+> happily, on the *browser's* clock, so a machine in another zone yields an age wrong by the offset
+> with nothing on screen to reveal it. *Where it parses* is not the safe half of the rule — it is the
+> half that lies. The parse is also implementation-defined, so another engine can fail where Chromium
+> succeeds.
+>
+> **So a stamp is read only where it names its zone** — a trailing `Z` or `±HH:MM`. `last_seen` is
+> ISO and zoned, so it still reads `7 Jul`; tmux's `created` shows verbatim.
+> [`web/src/lib/time.ts`](../../web/src/lib/time.ts) holds the one test, and returns `null` where no
+> instant can be read out of a string, which is the caller's cue to print it as it arrived.
+>
+> What changed sits upstream of the sentence above: the string was taken to carry an instant, and it
+> carries a wall-clock reading. **The fix that would give this page a real age is in the daemon, and
+> nobody has proposed it.** [`tmux.rs`](../../crates/yantra-core/src/tmux.rs) asks tmux for
+> `#{t:session_created}`, which is tmux's own formatting; `#{session_created}` is a Unix epoch, which
+> needs no zone because it is not a wall clock. No row asks for that change today.
+
 ---
 
 ## 6. State without colour
@@ -374,6 +438,21 @@ is the whole treatment, and it is the one that must survive a greyscale screensh
 
 **The accent never means a state.** `design-system.md` §7's warning, verbatim in effect: otherwise *a
 crashed agent and a hyperlink end up the same colour*.
+
+> **Two of the three roles have no value to take, so today they take the foreground. Recorded
+> 2026-08-11 (Y-193).** §0 fixes the **number** of roles and none of their values, and the owner
+> holds the visual direction. The shadcn sheet the page ships carries one semantic colour,
+> `--destructive`. So `--tone-critical` takes `--destructive`, and `--tone-warn` and `--tone-good`
+> take `currentColor` until the design system grounds them.
+>
+> **`warn` and `good` are therefore visually identical to the page's own foreground.** The separation
+> a reader sees is carried entirely by §6.1's four marks — which is what this section already
+> requires of them, so nothing promised is lost. No pigment was invented, which is §0 holding rather
+> than bending.
+>
+> Say it plainly: the roles exist and two are unpainted. Grounding them is one line each in
+> `index.css`, which is the diff ADR-0014 already expects. What those two values should be is the
+> owner's to decide and is not decided.
 
 ---
 
@@ -428,8 +507,7 @@ that loses its focus ring when the tokens change — the failure ADR-0014's seco
 
 ### 7.5 A workspace file that will not parse
 
-`yantra edit` cannot repair one: `update` loads before it writes, so the file is the fix (I-30,
-Y-137). Today the dashboard names the error and offers nothing, and you go to a terminal — which is
+`yantra edit` cannot repair one: `update` loads before it writes, so the file is the fix (Y-137). Today the dashboard names the error and offers nothing, and you go to a terminal — which is
 the founding UI principle broken in exactly one place.
 
 **`/w/{name}/repair` shows the file's bytes with the parse error beside them.** You edit and save.
@@ -502,6 +580,73 @@ question: they are a ported set at a pinned commit, and deleting half makes the 
 reconcile. Keep them, and say in
 [`THIRD-PARTY.md`](../../web/src/components/ui/THIRD-PARTY.md) that the set is complete on purpose.
 
+> **The saving is right and the file named does not exist. Recorded 2026-08-11 (Y-194).**
+> `@fontsource-variable/geist@5.3.0` publishes **no per-subset stylesheet**. It ships `index.css`,
+> `wght.css` and `wght-italic.css`; `index.css` and `wght.css` are byte-identical, and each declares
+> all five subsets. There is no `latin.css` to import.
+>
+> **The 47 kB was measured and holds: 76,420 B to 29,400 B, a saving of 47,020 B.** What works is a
+> local `@font-face` in `index.css`, copied from the package's own latin block:
+>
+> ```css
+> @font-face {
+>   font-family: 'Geist Variable';
+>   font-style: normal;
+>   font-display: swap;
+>   font-weight: 100 900;
+>   src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format('woff2-variations');
+>   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+> }
+> ```
+>
+> Two details are worth carrying. **Vite resolves a bare package specifier inside `url()`**, so no
+> relative path into `node_modules` is needed and no build step copies the file by hand. And the
+> `unicode-range` and the `format()` are the package's own, so **no glyph changes** — which is the
+> half of D3.12 that a hand-written `@font-face` could quietly break.
+>
+> Two figures elsewhere were checked and left alone. Sources' *"five Geist woff2 totalling 76,420 B"*
+> is correct: it measures the branch this document was written on. §16's D3.12 asks for fonts under
+> 30 kB, and 29,400 B meets it. The table above still reads **76 kB** under *Now*, which is what
+> *now* meant on 2026-08-11 before this landed.
+
+> **The budget is met at 144.38 kB, and the unimported primitives were a weight problem after all.
+> Recorded 2026-08-22 (Y-194).** First load is the entry script and every `modulepreload` and
+> stylesheet `dist/index.html` names, gzip -9, decimal kB. It was **149.73 kB**; it is **144.38 kB**,
+> against the 145 kB ceiling. **Fonts are unchanged and are not in that figure.**
+>
+> | | before | after |
+> | --- | --- | --- |
+> | entry JS | 116.82 | 106.16 |
+> | Base UI core, preloaded | 13.63 | 13.63 |
+> | TanStack Query, preloaded | — | 8.31 |
+> | `button`, preloaded | — | 1.64 |
+> | react-dom, preloaded | 1.36 | 1.36 |
+> | CSS | 17.91 | 13.28 |
+> | **total** | **149.73** | **144.38** |
+>
+> **The paragraph above says the twenty-two unimported primitives are not a weight problem. For the
+> JS that is right, and for the CSS it is wrong.** Tailwind reads a file whether or not a route
+> imports it, so eleven primitives nothing can reach were worth **3.74 kB gzip** — a fifth of the
+> stylesheet — in rules for markup the browser never draws. **The files stay**, which is what this
+> section actually settles; `index.css` skips them in the scan and `motion.test.ts` recomputes the
+> list from the import graph, so importing one is enough to get its CSS back. A further **0.57 kB**
+> was the automatic scan reading `README.md`, `package.json` and the tests and taking an English word
+> for a class name — `.container`, `.hidden`, `.transition`, `.tabular-nums`. `source(none)` and two
+> `@source` lines end that.
+>
+> **`tailwind-merge` at 8.9 kB was the obvious cut and it is load-bearing.** Logging every `cn` call
+> across the suite found 22 distinct class strings where the merge drops a class, all in the ported
+> set: the table head keeps `text-muted-foreground` over `text-foreground`, the autocomplete input
+> keeps `h-9.5` over `h-8.5`, a badge keeps `border-border` over `border-transparent`, and
+> `text-body` beats `text-sm` — which is the extension D3 §5.4 needed. A `clsx`-only `cn` changes all
+> of them and no test sees it. It stays (§B1).
+>
+> **`/usage` is split and no other route pays to be.** It is worth 0.72 kB on its own. Splitting
+> `/machines` and `/m/$machine` beside it lands **1.34 kB above the unsplit build**, so those two
+> cost more than `/usage` saves — Y-197's reason, which the setup checklist already found: Rollup
+> hoists what they share with the fleet into preloaded chunks of their own, and many small gzip
+> streams lose the dictionary one large one shares.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
@@ -513,6 +658,23 @@ to animate. Nothing loops except the skeleton.
 Motion is not used as signal. A row entering *Needs you* is marked by the pill and by its position,
 not by a flash: a page you glance at from across a room should not depend on having been watched at
 the right moment.
+
+> **Two tokens cannot reach the things that animate, so they ground Tailwind's defaults instead.
+> Recorded 2026-08-11 (Y-194).** The overlays and disclosures named above live in
+> `web/src/components/ui/`, and ADR-0014 forbids editing that directory. A rule written as two
+> classes those files would have to spend has no way in.
+>
+> So `--motion-duration` and `--motion-ease` ground Tailwind's own `--default-transition-duration`
+> and `--default-transition-timing-function`. Every `transition-colors` and `transition-all` that
+> names no duration of its own then takes them, which is most of the ported set — `popover`,
+> `button`, `input`, `select`, `badge` and the rest. Verified in the built CSS. **The rule holds, and
+> it is reached indirectly.**
+>
+> **Four primitives name a duration on the base class and keep it**: `sheet`, `collapsible`, `switch`
+> and `menu`, all at 200 ms, and `sheet` names `ease-in-out` as well. Two of those four are the
+> overlay fade and the disclosure slide this section names, so the timing a reader sees there is the
+> port's rather than D3's. A utility class cannot be overruled from a token, and editing the file is
+> what ADR-0014 refuses. **Named, not solved.**
 
 ### 9.3 The reduced-motion floor
 
@@ -601,6 +763,41 @@ its age.
 already requires of the CLI. An unknown model shows unpriced rather than free; a fast-mode session
 shows tokens and no money.
 
+> **2026-08-11, [Y-199](../../tracker.md#3-task-board): the picker is a workspace, not a machine.**
+> Spend is counted per workspace and there is no per-machine verb to publish. `yantra tokens
+> <workspace>` loads a workspace and finds *its* transcript, and
+> [`tokens.rs`](../../crates/yantra-core/src/tokens.rs) has no other entry point. A per-machine
+> figure would need either the fan-out this section itself forbids — one read per workspace on that
+> machine, on open — or new CLI surface that nothing has asked for.
+>
+> So the daemon publishes `POST /api/workspaces/{name}/tokens` and `/usage` opens holding a
+> **workspace** picker. Everything else in this section stands unchanged: on request rather than on
+> open, `AS_OF` beside the figure, unpriced shown as unpriced, and a fast-mode session showing tokens
+> and no money.
+>
+> **What is still unknown:** whether a per-machine total is worth having at all. Nobody has asked for
+> one, and the honest way to get it is a verb in the CLI first — this repo's own rule — rather than a
+> loop in the browser.
+
+> **2026-08-11, [Y-199](../../tracker.md#3-task-board): this section says the figure is stamped and
+> does not say by whom, and the answer turned out to be the page.** `POST /api/workspaces/{name}/
+> tokens` answers a bare `Spend` rather than the `Looked<T>` envelope every other read carries, so it
+> is the only reading on the dashboard with no `age_seconds`. The page stamps its own arrival instead,
+> and because nothing here polls, it keeps a one-second clock to move the figure — a clock that
+> fetches nothing. A stamp that never moves is the lie the stamp exists to prevent.
+>
+> `AS_OF` is a **day**, not an instant. [`lib/time.ts`](../../web/src/lib/time.ts) refuses to read a
+> stamp that names no zone (§5.7's amendment) and so prints it verbatim, which is correct — this
+> document nowhere says a date is not a time, and now it does.
+>
+> **Building this found a bug in shipped code, and it is worth recording here because it is this
+> document's own rule broken one layer in.** A session carrying only models the price table does not
+> know published `cost: 0.0`: summing an empty list of prices gives zero, and zero beside a date reads
+> as a session that cost nothing. `price.rs` already refused to price an unknown model *per model*;
+> the total then added them up as free. Both the daemon and `yantra tokens` now report no figure at
+> all, and the CLI's own test had been asserting `$0.00` under the name
+> *an_unpriced_model_is_named_rather_than_counted_as_free*.
+
 ---
 
 ## 12. What this needs that does not exist
@@ -643,6 +840,15 @@ it is where a daemon that persists nothing keeps a value that must survive a res
 file the unit reads, a config file beside `~/.config/yantra/workspaces/`, or a token the browser holds
 and sends per-notification are three different answers with three different §B4 consequences.
 **Named, not decided.**
+
+> **Decided 2026-08-22 by the owner, and it is the first of the three: an environment file the unit
+> reads** — [ADR-0021](../adr/0021-the-relay-is-written-to-an-environment-file.md), built as
+> [Y-199](../../tracker.md#3-task-board). `/settings` and `yantra relay` write
+> `/etc/yantra/daemon.env` at mode `0600`, owned by the account `yantrad` runs as, and the unit hands
+> it back with `EnvironmentFile=`. **The daemon's read path does not change**, so a relay set here
+> reaches it at the next start, and the write sends a test message so the box says whether the topic
+> works. The ADR names both rules this bends — §B4's *never store secrets*, and Y-044's *the daemon
+> persists nothing* — and what the exposure is.
 
 ---
 
@@ -729,11 +935,11 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 | **D3.26** | `/w/{name}/repair` (§7.5) | both refusals hold — a file that loads is refused, and bytes that still will not load are refused with the next error. **After §12.1's ADR** |
 | **D3.27** | The presence beacon suppresses ntfy (§13) | one event produces one notification while a tab is visible, and none of it survives a restart |
 | **D3.28** | Assertions gate, screenshots advise (§15) | every number in this document is asserted somewhere, and no image comparison fails CI |
-| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. **After §12.2 is decided** |
+| **D3.29** | `/settings` writes the ntfy relay (§0, §12.2) | the relay URL and token are set from the browser and a test message arrives. §12.2 is decided — [ADR-0021](../adr/0021-the-relay-is-written-to-an-environment-file.md) |
 
 **D3.1 and D3.2 come first.** Every other unit is cheaper once the page has an outline and a subject.
 
-**Two are blocked**: D3.26 on §12.1's ADR, and D3.29 on §12.2. Nothing else is.
+**One is blocked**: D3.26, on §12.1's ADR. D3.29 was, until §12.2 was decided above. Nothing else is.
 
 > **These twenty-nine units are thirteen rows.** The owner opened **M13** on 2026-08-11 and grouped
 > them, because `tracker.md` reserves Y-200 upward for the landing page and Y-187–Y-199 is what was
@@ -769,4 +975,5 @@ asked for"; [`docs/brainstorm.md:394`](../brainstorm.md); ADRs
 [0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),
 [0015](../adr/0015-resume-forks-the-conversation.md),
 [0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md); Q6; R-2, R-23; I-30, I-47, I-49.
+[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md),
+[0020](../adr/0020-a-raw-write-only-from-broken-to-valid.md); Q6; R-2, R-23; I-47, I-49.

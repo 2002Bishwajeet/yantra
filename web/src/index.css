@@ -1,7 +1,43 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import "tailwindcss" source(none);
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+
+/* `source(none)` and these two, because the automatic scan reads every file
+   Vite's root holds and takes an English word for a class: `README.md` alone
+   was buying `.container`, `.hidden`, `.transition` and `.tabular-nums`. */
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
+
+/* A test renders in jsdom, which applies no stylesheet. */
+@source not "./**/*.test.{ts,tsx}";
+
+/* D3 §9.1 keeps the ported primitives no route imports, and Tailwind reads
+   their class names anyway — 3.7 kB gzip of rules for markup nothing draws.
+   The files stay; the scan skips them. `motion.test.ts` recomputes this list
+   from the import graph, so importing one is enough to get its CSS back. */
+@source not "./components/ui/combobox.tsx";
+@source not "./components/ui/label.tsx";
+@source not "./components/ui/popover.tsx";
+@source not "./components/ui/select.tsx";
+@source not "./components/ui/separator.tsx";
+@source not "./components/ui/sheet.tsx";
+@source not "./components/ui/spinner.tsx";
+@source not "./components/ui/switch.tsx";
+@source not "./components/ui/toggle-group.tsx";
+@source not "./components/ui/toggle.tsx";
+@source not "./components/ui/tooltip.tsx";
+
+/* D3 §9.1: the package's own stylesheet ships five subsets — cyrillic,
+   cyrillic-ext, latin-ext, vietnamese and latin — for an English interface, and
+   it publishes no per-subset stylesheet to import instead. So the latin face is
+   declared here, copied verbatim from the package's `wght.css` latin block. */
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
 
 /* Q6 ruled out a theme switcher, so the OS preference is the whole story and
    shadcn's `.dark` class has nothing to toggle it. */
@@ -10,6 +46,31 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    /* D3 §5.5: Geist has no `tnum` and its digits are proportional, so
+       `tabular-nums` fixes nothing and every numeric cell asks for this. */
+    --font-mono: ui-monospace, SFMono-Regular, monospace;
+
+    /* D3 §5.4: four sizes. A fifth asks for a level of hierarchy §5.1 says
+       does not exist. */
+    --text-meta: 0.75rem;
+    --text-body: 0.875rem;
+    --text-group: 1.125rem;
+    --text-title: 1.5rem;
+
+    /* D3 §5.3, as `max-w-page`, `h-row`, `px-gutter` and `gap-group`. The
+       breakpoint is carried by the values below rather than by a prefix at
+       every call site. */
+    --container-page: var(--page-width);
+    --spacing-row: var(--row-height);
+    --spacing-gutter: var(--gutter);
+    --spacing-group: var(--group-gap);
+
+    /* D3 §9.2: one duration and one easing, spent by every transition that
+       does not name its own. */
+    --motion-duration: 150ms;
+    --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+    --default-transition-duration: var(--motion-duration);
+    --default-transition-timing-function: var(--motion-ease);
     --color-destructive-foreground: var(--destructive-foreground);
     --color-placeholder: var(--placeholder);
     --color-icon-muted: var(--icon-muted);
@@ -115,6 +176,31 @@
     --glass-blur: 12px;
     --glass-opacity: 80%;
     --glass-saturation: 1.14;
+
+    /* D3 §5.3's phone column. A row is 3.5rem here because a touch target is
+       44 px and a row carries a button. */
+    --page-width: calc(100% - 2rem);
+    --row-height: 3.5rem;
+    --gutter: 1rem;
+    --group-gap: 1.5rem;
+
+    /* D3 §6.2: three semantic roles, and their number is what is settled — the
+       values are the design system's to ground, so `warn` and `good` sit on the
+       page's own foreground until it supplies a hue. Idle takes that foreground
+       by design, unknown gets no tint at all, and the accent is links and the
+       primary button and never a state. */
+    --tone-critical: var(--destructive);
+    --tone-warn: currentColor;
+    --tone-good: currentColor;
+}
+
+@media (width >= 48rem) {
+  :root {
+    --page-width: 72rem;
+    --row-height: 2.5rem;
+    --gutter: 2rem;
+    --group-gap: 2rem;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -161,6 +247,48 @@
    Copied from T3 Code at 963ebf5b; its `.dark` selector is a media query here
    because Q6 ruled out a theme switcher. */
 @layer components {
+  /* D3 §6.1's four marks, so a greyscale render still separates *needs you*,
+     *running*, *idle* and *unknown*. The form carries the state and the tone
+     token only tints it; unknown is drawn rather than omitted (R-23). */
+  .mark::before {
+    content: "";
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border: 1px solid currentColor;
+    border-radius: 9999px;
+  }
+
+  .tone-bad {
+    color: var(--tone-critical);
+  }
+  .tone-warn {
+    color: var(--tone-warn);
+  }
+  .tone-ok {
+    color: var(--tone-good);
+  }
+
+  .tone-bad::before,
+  .tone-warn::before {
+    background: currentColor;
+  }
+
+  /* One weight lighter than *needs you*, and still filled. */
+  .tone-ok::before {
+    background: currentColor;
+    opacity: 0.55;
+  }
+
+  .tone-idle::before,
+  .tone-unknown::before {
+    background: transparent;
+  }
+
+  .tone-unknown::before {
+    border-style: dashed;
+  }
+
   .dialog-glass {
     background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
@@ -222,4 +350,24 @@
   html {
     @apply font-sans;
     }
+}
+
+/* D3 §9.3, quoting design-system.md §6: `reduce` renders **one static frame**
+   rather than nothing, because blanking a visual is a regression and not an
+   accommodation. The skeleton flattens to its tint and the spinner holds a
+   ring, and both still say *waiting*. Unlayered so it reaches the primitives in
+   `components/ui/`, which ADR-0014 forbids editing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  [data-slot="skeleton"] {
+    background-image: none !important;
+  }
 }
