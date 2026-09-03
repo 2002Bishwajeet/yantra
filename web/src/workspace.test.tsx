@@ -17,7 +17,8 @@ import {
 import type { Listed } from './api'
 import App from './App'
 import { Terminal } from './components/Terminal'
-import { logs } from './contract.gen'
+import { logs, spend } from './contract.gen'
+import { renderRouted } from './test/inRouter'
 
 afterEach(() => {
   cleanup()
@@ -34,9 +35,9 @@ const yantra: Listed = {
 }
 
 /** The workspace list, which this page reads before it opens anything, and one
- *  window of the transcript for the tab that reads on open. Every other path
- *  answers `never`, so a reading added to the page later cannot make this file
- *  fail for a reason that is not its subject. */
+ *  window of the transcript and one spend for the two tabs that read on open.
+ *  Every other path answers `never`, so a reading added to the page later
+ *  cannot make this file fail for a reason that is not its subject. */
 function daemon() {
   vi.stubGlobal(
     'fetch',
@@ -53,7 +54,9 @@ function daemon() {
               ? { looked: 'ok', age_seconds: 1, data: [yantra] }
               : path === '/api/workspaces/yantra/logs'
                 ? logs
-                : { looked: 'never' },
+                : path === '/api/workspaces/yantra/tokens'
+                  ? spend
+                  : { looked: 'never' },
           ),
       })
     }),
@@ -166,7 +169,7 @@ describe('the three tabs of one workspace', () => {
     vi.stubGlobal('scrollTo', () => {})
 
     open('/w/yantra?view=spend', LAPTOP)
-    expect(await screen.findByText('Spend is not built yet.')).toBeTruthy()
+    expect(await screen.findByText(/tokens, unpriced/)).toBeTruthy()
     expect(screen.queryByText('Terminal — yantra')).toBeNull()
   })
 
@@ -209,7 +212,7 @@ describe('the three tabs of one workspace', () => {
     fireEvent.click(screen.getByRole('link', { name: 'spend' }))
 
     await waitFor(() => expect(location.search).toBe('?view=spend'))
-    expect(await screen.findByText('Spend is not built yet.')).toBeTruthy()
+    expect(await screen.findByText(/tokens, unpriced/)).toBeTruthy()
 
     history.back()
 
@@ -229,11 +232,17 @@ describe('the height of the terminal', () => {
     expect(pane()?.style.height).toBe('60vh')
   })
 
-  it('is whatever a caller asks for', () => {
+  it('is whatever a caller asks for', async () => {
     viewport(LAPTOP)
     quietSocket()
 
-    render(<Terminal target={{ workspace: 'yantra' }} height="12rem" onClose={() => {}} />)
+    await renderRouted(
+      <Terminal
+        height="12rem"
+        onClose={() => {}}
+        target={{ machine: 'cachyos-g14', workspace: 'yantra' }}
+      />,
+    )
 
     expect(pane()?.style.height).toBe('12rem')
   })

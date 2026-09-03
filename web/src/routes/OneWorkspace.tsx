@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import type { Listed } from '@/api'
+import { Machine } from '@/components/Machine'
 import { Section } from '@/components/Section'
+import { SpendTab } from '@/components/Spend'
 import { Terminal } from '@/components/Terminal'
 import { Title } from '@/components/Title'
 import { Transcript } from '@/components/Transcript'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { useLooked } from '@/useLooked'
+import { useSpend } from '@/useSpend'
 import { useTranscript } from '@/useTranscript'
 import { VIEWS } from '@/views'
 
@@ -40,8 +42,9 @@ export function OneWorkspace() {
 
   // Held by the page rather than by the tab: only the open tab is mounted, and
   // switching to the terminal and back may not spend a second ssh (D5 §4.3).
-  // It reads nothing until the transcript tab asks it to.
+  // Neither reads anything until its tab asks it to.
   const transcript = useTranscript(name)
+  const spend = useSpend()
 
   // The `h1` is the route's, so it is drawn before the list decides whether
   // there is anything under it — D3 §5.2 wants one on every branch.
@@ -102,10 +105,7 @@ export function OneWorkspace() {
     <>
       {heading}
       <p className="text-muted-foreground text-sm">
-        on{' '}
-        <Link to="/m/$machine" params={{ machine: entry.machine }}>
-          {entry.machine}
-        </Link>
+        on <Machine name={entry.machine} />
       </p>
       {/* Links rather than a tab widget: a tab here changes the URL, and that
           is navigation — middle-click and copy-link come free (D5 §3.2). */}
@@ -132,7 +132,7 @@ export function OneWorkspace() {
       {tab === 'terminal' && (
         <Terminal
           onClose={() => void navigate({ to: '/' })}
-          target={{ workspace: name }}
+          target={{ machine: entry.machine, workspace: name }}
         />
       )}
       {tab === 'transcript' && (
@@ -144,11 +144,7 @@ export function OneWorkspace() {
         />
       )}
       {tab === 'spend' && (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>Spend is not built yet.</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
+        <SpendTab asked={spend.asked} onAsk={() => void spend.ask(entry)} />
       )}
     </>
   )

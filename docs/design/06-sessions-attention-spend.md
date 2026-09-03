@@ -250,6 +250,15 @@ that fetches nothing.
 **D5 §6.1 moves `Answer` and `Figure` into a shared module** so `/w/{name}`'s `spend` tab draws the
 same figure. `/usage` keeps the picker and loses nothing. That is D5's row, not one of §9's.
 
+> **2026-09-04, [Y-311](../../tracker.md#3-task-board): one line of that list changed rather than
+> stayed.** *An unpriced model showing tokens and no money* is what `/usage` draws now. It is not
+> what `/usage` drew when this was written: the headline was the word *unpriced*, and a session with
+> one unpriced model among priced ones showed a dollar figure.
+>
+> `Answer` is shared, so [D5](05-workspace-page.md) §6.2 moved both surfaces at once — see the
+> amendment there for why the daemon's `cost` is not the test it looked like. **The rest of the list
+> is unchanged**, and so is the picker.
+
 ---
 
 ## 6. The terminal on any session
