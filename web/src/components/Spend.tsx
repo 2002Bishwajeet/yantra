@@ -3,32 +3,19 @@
    of a label and one figure, a hairline strip of counts, and the model
    breakdown under both. The code is this repo's, on this repo's tokens.
    See `ui/THIRD-PARTY.md`. */
-import { useEffect, useState } from 'react'
 import type { ModelSpend, Spend } from '@/api'
 import { Stamp } from '@/components/Age'
 import { DataTable } from '@/components/DataTable'
 import { type Asked, refusal, session } from '@/lib/spend'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
-
-/** §11.4 stamps every answer with its age, and a stamp that never moves is the
- *  lie the stamp exists to prevent — nothing else on this page re-renders. A
- *  clock, not a read: it asks the daemon nothing. */
-function useTick(on: boolean) {
-  const [, tick] = useState(0)
-
-  useEffect(() => {
-    if (!on) return
-    const timer = setInterval(() => tick((count) => count + 1), 1_000)
-    return () => clearInterval(timer)
-  }, [on])
-}
+import { useTick } from '@/useTick'
 
 /** One workspace's answer, whatever state that ask is in. Shared with
  *  `/w/{name}`'s spend tab ([D5](../../../docs/design/05-workspace-page.md)
  *  §6.1), which passes the same `Asked` and draws no picker. */
 export function Answer({ asked }: { asked: Asked }) {
-  useTick(asked.asked === 'read')
+  const now = useTick(asked.asked === 'read')
   if (asked.asked === 'no') return null
 
   return (
@@ -39,7 +26,7 @@ export function Answer({ asked }: { asked: Asked }) {
         </h2>
         {asked.asked === 'read' && (
           <span className="text-muted-foreground text-xs">
-            read <Stamp stamp={asked.at} />
+            read <Stamp now={now} stamp={asked.at} />
           </span>
         )}
       </div>

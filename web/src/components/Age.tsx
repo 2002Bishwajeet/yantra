@@ -13,9 +13,12 @@ export function Ago({ seconds }: { seconds: number }) {
 }
 
 /** A timestamp another program wrote. Shown verbatim where no instant can be
- *  read out of it, because D3 §5.7 refuses to guess a remote clock's zone. */
-export function Stamp({ stamp }: { stamp: string }) {
-  const clock = at(stamp)
+ *  read out of it, because D3 §5.7 refuses to guess a remote clock's zone.
+ *
+ *  `now` is what a stamp that must age is measured against — `useTick`'s, since
+ *  a compiled component redraws this only when a prop moves. */
+export function Stamp({ stamp, now }: { stamp: string; now?: number }) {
+  const clock = at(stamp, now)
   if (!clock) return <span className="font-mono">{stamp}</span>
   return (
     <time className="font-mono" dateTime={clock.iso} title={clock.title}>
