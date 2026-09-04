@@ -28,6 +28,7 @@ flowchart TB
         daemon["yantrad<br/>the daemon — the read model, the dashboard,<br/>and a pty per attached terminal"]
         core["yantra-core<br/>every decision lives here<br/>never prints, never exits"]
         tsd["tailscaled"]
+        gh["gh<br/>your own GitHub login, in its keyring"]
     end
 
     subgraph target["any machine on the tailnet"]
@@ -42,20 +43,23 @@ flowchart TB
     daemon --> core
     core -->|"system ssh<br/>ControlMaster multiplexed"| tmux
     core -->|"tailscale status --json<br/>read-only, advisory"| tsd
+    daemon -->|"gh api, every 300 s<br/>no token reaches Yantra"| gh
     tmux --> claude
     claude --> jsonl
     jsonl -->|"read back by yantra logs"| core
 ```
 
 Nothing in that diagram is dashed any more. The browser edge was drawn planned through M4, and the
-whole of it — the read model, the dashboard, and since M6 a live pane — now exists.
+whole of it — the read model, the dashboard, and since M6 a live pane — now exists. The `gh` edge is
+M11's: the work inbox reads the pull requests and issues waiting on you through the `gh` already
+logged in on this machine, so the daemon holds no credential of its own.
 
 **Four crates, and only one of them thinks.**
 
 | Crate | Job | State |
 | --- | --- | --- |
 | [`yantra-core`](../crates/yantra-core/README.md) | All orchestration: ssh, tmux, agents, inventory, workspaces. Never prints, never exits ([ADR-0005](adr/0005-core-logic-in-a-library-crate.md)). | **Nearly all the code** |
-| [`yantra`](../crates/yantra/README.md) | The CLI. Layout, wording, exit codes. | Working, four milestones deep |
+| [`yantra`](../crates/yantra/README.md) | The CLI. Layout, wording, exit codes. | Working; every verb the dashboard has, and `ls attention` |
 | [`yantrad`](../crates/yantrad/README.md) | The daemon. An HTTP surface over the same library, plus the dashboard and a pty per attached terminal. | Serves the read model, control, and a live terminal |
 | [`yantra-agent`](../crates/yantra-agent/README.md) | Per-machine heartbeat, so a person choosing a machine can see a sleeping laptop. | Probes and reports, on a 10 s tick |
 
@@ -225,11 +229,20 @@ the ADR's §7 launchd job, which is what puts such a server there with nobody at
 flowchart LR
     M1["M1 · walking skeleton"] --> M2["M2 · real machines"] --> M3["M3 · agents"] --> M4["M4 · web UI"] --> M5["M5 · control from the phone"] --> M6["M6 · browser terminal"] --> M7["M7 · appliance"] --> M8["M8 · hardware panel"] --> M9["M9 · enclosure & PCB"] --> M10["M10 · placement"]
 
+    M6 --> M11["M11 · work inbox"] --> M12["M12 · sessions and cost"] --> M13["M13 · a dashboard you can work in"]
+
     classDef done fill:#1e4620,stroke:#3fb950,color:#fff
     classDef doing fill:#3d2e00,stroke:#d29922,color:#fff
-    class M1,M2,M3,M4,M5 done
+    class M1,M2,M3,M4,M5,M11,M12,M13 done
     class M6,M7 doing
 ```
+
+**M11, M12 and M13 closed on 2026-09-04, and they were dashboard work rather than new orchestration.**
+`/` opens on what needs you: the GitHub queue as a band with its own clock, then every tmux session
+on the fleet, whether a workspace names it or not, each one attachable and killable from the page.
+A workspace page carries three tabs — the terminal, the transcript read on request, and what the
+session spent — and each tab names the machine it could not reach. M13's phone clause, *three
+screens and one tap*, is built and not yet measured on a phone.
 
 **M6 and M7 are both open for reasons that are not code.** M6's layers are all built and each is
 tested against something real; what it waits on is one run against

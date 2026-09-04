@@ -34,18 +34,21 @@ and Yantra restores the context — picking a machine, opening the session, and 
 
 ## Status
 
-🚧 **Usable from the CLI, against real machines, with a real agent.** M0–M4 are closed, and M5's
-buildable work is finished — what is left of it is a demonstration on the Mac, not code.
+🚧 **Usable from the CLI and from a browser, against real machines, with a real agent.** M0–M5 and
+M11–M13 are closed. M6 waits on one run at the Mac's own keyboard, M7 on hardware that is not on the
+tailnet yet, and M10 was deferred by choice.
 
 `yantra up <workspace>` opens a tmux session in a repo on a machine reached over SSH — idempotently,
 so running it twice attaches rather than duplicating. With `--agent claude` it launches Claude Code
 in that session, and `logs` / `status` / `down` watch it and stop it. All four were verified end to
 end against a live Claude Code on a real machine, not a stub.
 
-`yantrad` serves that same work to a browser: the read model the dashboard draws, the writes behind
-its buttons, and a pty for each terminal attached from a page. It listens on this machine's Tailscale
-addresses and refuses to start anywhere else. Still ahead: placement — picking the machine for you
-rather than offering a list to tap — and the hardware.
+`yantrad` serves that same work to a browser. `/` opens on what needs you: the pull requests and
+issues GitHub is waiting on, read through your own `gh` login so no token reaches Yantra, and every
+tmux session on the fleet, whether a workspace names it or not. A workspace page has a live terminal,
+the agent's transcript, and what the session spent. It listens on this machine's Tailscale addresses
+and refuses to start anywhere else. Still ahead: the always-on box, placement — picking the machine
+for you rather than offering a list to tap — and the hardware.
 
 **Start here → [`tracker.md`](tracker.md)** — the single source of truth for what is decided, what is
 being worked on, and what is still an open question.

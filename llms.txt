@@ -50,4 +50,4 @@ something else.
 - [docs/archive/m2-m3.md](docs/archive/m2-m3.md): closed milestones M2 and M3, with the evidence behind each task.
 - [docs/archive/m4-m5.md](docs/archive/m4-m5.md): closed milestones M4 and M5 — the dashboard, the heartbeat agent and control from the phone — plus the rolling status narrative `tracker.md §0` carried until 2026-08-03.
 - [docs/archive/m6-m7.md](docs/archive/m6-m7.md): the closed rows of M6 (terminal in browser) and M7 (appliance), plus the preamble `tracker.md §3` opened them under. Both milestones are still open; nothing below waits on a row here.
-- [docs/archive/m11-m13.md](docs/archive/m11-m13.md): the closed rows of M11 (work inbox), M12 (sessions and cost) and M13 (the dashboard you can work in).
+- [docs/archive/m11-m13.md](docs/archive/m11-m13.md): closed milestones M11 (work inbox), M12 (sessions and cost) and M13 (the dashboard you can work in), all closed 2026-09-04. M13 closed as buildable work done; its phone clause is unmeasured.
