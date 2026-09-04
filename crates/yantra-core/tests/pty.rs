@@ -696,3 +696,43 @@ async fn pipes_with_a_forced_remote_tty_interrupt_but_report_a_size_nobody_asked
     );
     Ok(())
 }
+
+/// I-63: a name beginning with `-` reaches `ssh` as a destination and never as
+/// an option. `-V` is the sharpest probe: read as a flag it prints the version
+/// and exits 0 before any connection is tried. This is the one path whose
+/// output is not sentinel-wrapped, so what `ssh` said is what the test reads.
+#[tokio::test]
+async fn a_leading_dash_name_is_a_destination_and_not_an_option() -> Result<()> {
+    let Some(lab) = Lab::start("dash").await? else {
+        return Ok(());
+    };
+    // No user: the daemon reaches a machine by its bare name (ADR-0009), so the
+    // name is the whole destination.
+    let ssh = Ssh::new(Machine {
+        host: "-V".to_owned(),
+        user: None,
+        port: Some(lab.fixture.port()),
+        identity: Some(lab.fixture.key_path()),
+        state_dir: lab.dir.clone(),
+    })?;
+    let plan = attach::Plan {
+        machine: "-V".to_owned(),
+        ..lab.plan()
+    };
+
+    let mut terminal = pty::on(&ssh, &plan, cells(WINDOW))?;
+    let mut said = Vec::new();
+    while let Some(bytes) = terminal.read().await {
+        said.extend(bytes);
+    }
+    let said = String::from_utf8_lossy(&said);
+    assert!(
+        !said.contains("OpenSSH_"),
+        "`-V` was honoured as a flag: {said:?}"
+    );
+    assert!(
+        said.contains("invalid characters"),
+        "`-V` was not refused as a host: {said:?}"
+    );
+    Ok(())
+}

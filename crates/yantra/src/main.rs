@@ -1516,9 +1516,11 @@ fn hand_over(machine: &str, remote: &str) -> ExitCode {
     use std::os::unix::process::CommandExt as _;
 
     // `exec` only returns when it failed, so anything after it is the error path.
+    // I-63: `--` keeps a name beginning with `-` from being read as an option.
     let err = std::process::Command::new("ssh")
-        .arg(machine)
         .arg("-t")
+        .arg("--")
+        .arg(machine)
         .arg(remote)
         .exec();
     eprintln!("yantra: could not run ssh: {err}");
