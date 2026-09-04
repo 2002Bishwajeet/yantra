@@ -76,6 +76,10 @@ per job, so the two cannot silently drift. If you add a check, add it to the
 `check` is the fast subset to run before every push; `ci` additionally
 cross-compiles for the appliance, which CI does on a runner anyway.
 
+Every recipe builds into `target/` beside the `justfile`, whatever `CARGO_TARGET_DIR`
+says in your shell. Cargo names a unit by its path relative to the workspace root, so
+two checkouts sharing one target dir serve each other stale test binaries (Y-326).
+
 ## Running the dashboard
 
 Two ways, and they are for different jobs.

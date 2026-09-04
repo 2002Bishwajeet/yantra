@@ -1,5 +1,9 @@
 # Yantra task runner.  `just` with no argument lists everything.
 
+# Pinned per checkout: a target dir shared between worktrees serves one
+# worktree's stale test binary to another (Y-326), so the profile's must not leak in.
+export CARGO_TARGET_DIR := justfile_directory() / "target"
+
 # Q15 has not answered which box and `Pi 5 / N100` is two architectures, so
 # this is the default rather than the answer (docs/appliance.md).
 appliance_target := "aarch64-unknown-linux-musl"
