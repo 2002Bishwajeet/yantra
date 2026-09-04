@@ -1,0 +1,364 @@
+/* design-sync stylesheet entry. Mirrors web/src/index.css with three changes:
+   every primitive under components/ui is scanned (index.css skips seven the
+   app never imports), the palettes from the options round are appended, and a
+   safelist of layout utilities is generated so a design built with these
+   components can lay them out. Fonts and tokens are index.css's own. */
+@import "../../web/node_modules/tailwindcss/index.css" source(none);
+@import "../../web/node_modules/shadcn/dist/tailwind.css";
+@source "../../web/src/**/*.{ts,tsx}";
+@source not "../../web/src/**/*.test.{ts,tsx}";
+@source not "../../web/design/**";
+@source inline("{sm:,md:,lg:,}{flex,inline-flex,grid,block,inline-block,hidden,flex-col,flex-row,flex-wrap,flex-1,shrink-0,grow,items-center,items-start,items-end,items-baseline,justify-between,justify-center,justify-start,justify-end,self-start,self-end,w-full,h-full,min-w-0,min-h-screen,max-w-page,mx-auto,text-left,text-right,text-center,truncate,whitespace-nowrap,overflow-hidden,overflow-auto,overflow-x-auto,relative,absolute,sticky,top-0,inset-0,z-10,z-50,rounded,rounded-md,rounded-lg,rounded-full,border,border-t,border-b,border-l,border-r,divide-y,shadow-sm,tabular-nums,uppercase,tracking-wide,font-medium,font-semibold,font-mono,font-sans,font-heading,cursor-pointer,select-none}");
+@source inline("{sm:,md:,}{grid-cols-1,grid-cols-2,grid-cols-3,grid-cols-4,grid-cols-6,grid-cols-12,col-span-2,col-span-3,col-span-4,col-span-6,col-span-12}");
+@source inline("{gap,p,px,py,pt,pb,pl,pr,m,mx,my,mt,mb,ml,mr,space-y,space-x}-{0,0.5,1,1.5,2,3,4,6,8,12}");
+@source inline("{w,h,min-w,max-w,min-h,max-h}-{4,5,6,8,10,12,16,24,32,48,64,80,96}");
+@source inline("{gap,px,py,h}-{gutter,group,row}");
+@source inline("text-{meta,body,group,title,foreground,muted-foreground,primary,primary-foreground,secondary-foreground,destructive,card-foreground}");
+@source inline("{bg,border}-{background,card,muted,secondary,primary,destructive,border,input,accent,popover}");
+@source inline("{hover:,}{bg-muted,bg-accent,text-foreground,underline}");
+@source inline("{leading-none,leading-tight,leading-snug,leading-normal,leading-relaxed}");
+/* D3 §9.1: the package's own stylesheet ships five subsets — cyrillic,
+   cyrillic-ext, latin-ext, vietnamese and latin — for an English interface, and
+   it publishes no per-subset stylesheet to import instead. So the latin face is
+   declared here, copied verbatim from the package's `wght.css` latin block. */
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../../web/node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+/* Q6 ruled out a theme switcher, so the OS preference is the whole story and
+   shadcn's `.dark` class has nothing to toggle it. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+    /* D3 §5.5: Geist has no `tnum` and its digits are proportional, so
+       `tabular-nums` fixes nothing and every numeric cell asks for this. */
+    --font-mono: ui-monospace, SFMono-Regular, monospace;
+
+    /* D3 §5.4: four sizes. A fifth asks for a level of hierarchy §5.1 says
+       does not exist. */
+    --text-meta: 0.75rem;
+    --text-body: 0.875rem;
+    --text-group: 1.125rem;
+    --text-title: 1.5rem;
+
+    /* D3 §5.3, as `max-w-page`, `h-row`, `px-gutter` and `gap-group`. The
+       breakpoint is carried by the values below rather than by a prefix at
+       every call site. */
+    --container-page: var(--page-width);
+    --spacing-row: var(--row-height);
+    --spacing-gutter: var(--gutter);
+    --spacing-group: var(--group-gap);
+
+    /* D3 §9.2: one duration and one easing, spent by every transition that
+       does not name its own. */
+    --motion-duration: 150ms;
+    --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+    --default-transition-duration: var(--motion-duration);
+    --default-transition-timing-function: var(--motion-ease);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-placeholder: var(--placeholder);
+    --color-icon-muted: var(--icon-muted);
+    --color-secondary-label: var(--secondary-label);
+    --animate-skeleton: skeleton 2s -1s infinite linear;
+    @keyframes skeleton {
+        to {
+            background-position: -200% 0;
+        }
+    }
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* THE SWAP POINT. shadcn's default values, held here so the design system
+   replaces this file and nothing else. No .tsx names a colour. */
+:root {
+    color-scheme: light dark;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+
+    /* Y-164: the T3 Code primitives name five tokens shadcn's sheet does not
+       have. Without them a button has no radius and a scrollbar no thumb. */
+    --control-radius: 0.5rem;
+    --destructive-foreground: var(--destructive);
+    --placeholder: var(--muted-foreground);
+    --app-scrollbar-thumb: rgb(217 217 217);
+    --app-scrollbar-thumb-hover: rgb(191 191 191);
+
+    /* Y-166: the overlay primitives add four more, and the glass trio the two
+       surface classes below read. A popup with no `.dropdown-glass` has no
+       background at all, so this is not decoration. */
+    --icon-muted: var(--muted-foreground);
+    --secondary-label: var(--muted-foreground);
+    --command-shell-inset: 0.5rem;
+    --command-content-inset: 1rem;
+    --glass-blur: 12px;
+    --glass-opacity: 80%;
+    --glass-saturation: 1.14;
+
+    /* D3 §5.3's phone column. A row is 3.5rem here because a touch target is
+       44 px and a row carries a button. */
+    --page-width: calc(100% - 2rem);
+    --row-height: 3.5rem;
+    --gutter: 1rem;
+    --group-gap: 1.5rem;
+
+    /* D3 §6.2: three semantic roles, and their number is what is settled — the
+       values are the design system's to ground, so `warn` and `good` sit on the
+       page's own foreground until it supplies a hue. Idle takes that foreground
+       by design, unknown gets no tint at all, and the accent is links and the
+       primary button and never a state. */
+    --tone-critical: var(--destructive);
+    --tone-warn: currentColor;
+    --tone-good: currentColor;
+}
+
+@media (width >= 48rem) {
+  :root {
+    --page-width: 72rem;
+    --row-height: 2.5rem;
+    --gutter: 2rem;
+    --group-gap: 2rem;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+    --app-scrollbar-thumb: rgb(255 255 255 / 8%);
+    --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
+    --glass-blur: 16px;
+    --glass-saturation: 1.08;
+  }
+}
+
+/* Y-166: the surfaces `dialog`, `command`, `menu`, `select` and `combobox` name.
+   Copied from T3 Code at 963ebf5b; its `.dark` selector is a media query here
+   because Q6 ruled out a theme switcher. */
+@layer components {
+  /* D3 §6.1's four marks, so a greyscale render still separates *needs you*,
+     *running*, *idle* and *unknown*. The form carries the state and the tone
+     token only tints it; unknown is drawn rather than omitted (R-23). */
+  .mark::before {
+    content: "";
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border: 1px solid currentColor;
+    border-radius: 9999px;
+  }
+
+  .tone-bad {
+    color: var(--tone-critical);
+  }
+  .tone-warn {
+    color: var(--tone-warn);
+  }
+  .tone-ok {
+    color: var(--tone-good);
+  }
+
+  .tone-bad::before,
+  .tone-warn::before {
+    background: currentColor;
+  }
+
+  /* One weight lighter than *needs you*, and still filled. */
+  .tone-ok::before {
+    background: currentColor;
+    opacity: 0.55;
+  }
+
+  .tone-idle::before,
+  .tone-unknown::before {
+    background: transparent;
+  }
+
+  .tone-unknown::before {
+    border-style: dashed;
+  }
+
+  .dialog-glass {
+    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
+  }
+
+  .dialog-backdrop {
+    background: color-mix(in srgb, var(--background) 60%, transparent);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+
+  /* T3's note: nesting the mix inside an 18% popover tint keeps high-contrast
+     page content from blooming through a menu. */
+  .dropdown-glass {
+    background: color-mix(
+      in srgb,
+      var(--popover) 18%,
+      color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .dialog-glass {
+      border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+      box-shadow:
+        inset 0 1px rgb(255 255 255 / 4%),
+        0 24px 72px -20px rgb(0 0 0 / 90%);
+    }
+    .dialog-backdrop {
+      background: color-mix(in srgb, var(--background) 64%, transparent);
+    }
+    .dropdown-glass {
+      box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
+    }
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .dialog-glass,
+    .dropdown-glass {
+      background: var(--popover) !important;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
+
+/* D3 §9.3, quoting design-system.md §6: `reduce` renders **one static frame**
+   rather than nothing, because blanking a visual is a regression and not an
+   accommodation. The skeleton flattens to its tint and the spinner holds a
+   ring, and both still say *waiting*. Unlayered so it reaches the primitives in
+   `components/ui/`, which ADR-0014 forbids editing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  [data-slot="skeleton"] {
+    background-image: none !important;
+  }
+}
