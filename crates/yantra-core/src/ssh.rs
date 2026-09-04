@@ -61,11 +61,14 @@ pub fn machine_at(host: &str) -> Option<Machine> {
 }
 
 impl Machine {
-    fn destination(&self) -> String {
-        match &self.user {
+    /// I-63: `--` keeps a name beginning with `-` from being read as an option.
+    /// It also ends option parsing for the command that follows.
+    fn destination_args(&self) -> [String; 2] {
+        let destination = match &self.user {
             Some(user) => format!("{user}@{}", self.host),
             None => self.host.clone(),
-        }
+        };
+        ["--".to_owned(), destination]
     }
 
     fn control_path(&self) -> PathBuf {
@@ -235,8 +238,7 @@ impl Ssh {
         self.machine.prepare_sockets()?;
         let mut args = self.machine.connection_args();
         args.push("-tt".to_owned());
-        args.push(self.machine.destination());
-        args.push("--".to_owned());
+        args.extend(self.machine.destination_args());
         args.push(command.to_owned());
         Ok(args)
     }
@@ -257,7 +259,7 @@ impl Exec for Ssh {
         // A ~/.ssh/config that forces a pty would corrupt stdout with CRLF and
         // merge stderr into it.
         cmd.arg("-o").arg("RequestTTY=no");
-        cmd.arg(m.destination());
+        cmd.args(m.destination_args());
         cmd.arg(payload(command, &nonce));
 
         // ADR-0008: no stdin is forwarded. The watchdog that needed a held-open
@@ -479,6 +481,39 @@ mod tests {
         assert_eq!(
             argv.last().map(String::as_str),
             Some("tmux attach -t '=demo'")
+        );
+    }
+
+    /// I-63: the destination is never the first thing `ssh` could read as an
+    /// option, whatever the name is.
+    #[test]
+    fn the_destination_follows_a_double_dash() {
+        let state_dir = std::env::temp_dir().join("yantra-dash-argv");
+        let ssh = Ssh::new(Machine {
+            host: "-V".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: state_dir.clone(),
+        })
+        .expect("the path is short enough");
+
+        let argv = ssh.tty_argv("true").expect("an argv");
+        let _ = std::fs::remove_dir_all(&state_dir);
+
+        let at = argv
+            .iter()
+            .position(|arg| arg == "-V")
+            .expect("the name is in the argv");
+        assert_eq!(
+            argv[at - 1],
+            "--",
+            "nothing but `--` may precede the name: {argv:?}"
+        );
+        assert_eq!(
+            argv[at + 1],
+            "true",
+            "the command follows the name directly: {argv:?}"
         );
     }
 
