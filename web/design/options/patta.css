@@ -1,0 +1,43 @@
+/* Patta — the cloth.
+   The ground is tamarind-treated cloth, lightened well past the landing's
+   `#D0A87F` so a table of small type still reads; the line is soot, warm rather
+   than neutral. Action takes indigo — `--neela`, held in reserve until now —
+   because cinnabar must stay free to mean trouble (D3 §6.2). The night ground is
+   design-system §3's repaint: the same cloth blacked, conch-white line, the
+   accents left hot. Warn is orpiment; good is derived. */
+:root {
+  color-scheme: light dark;
+  --background: light-dark(#f3e8d6, #191108);
+  --foreground: light-dark(#1a1410, #f0e2c8);
+  --card: light-dark(#faf2e4, #241809);
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(#345c9f, #8aa6db);
+  --primary-foreground: light-dark(#faf0e6, #191108);
+  --secondary: light-dark(#e8d8be, #2e1f0e);
+  --secondary-foreground: var(--foreground);
+  --muted: light-dark(#ebdfcb, #2a1b0c);
+  --muted-foreground: light-dark(#705f49, #b9a386);
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --destructive: light-dark(#bb1f15, #e5432f);
+  --border: light-dark(#1a14102e, #f0e2c826);
+  --input: var(--border);
+  --ring: var(--primary);
+  --radius: 0.375rem;
+  --control-radius: 0.375rem;
+  --app-scrollbar-thumb: light-dark(#1a141033, #f0e2c833);
+  --app-scrollbar-thumb-hover: light-dark(#1a141055, #f0e2c855);
+  --tone-critical: var(--destructive);
+  --tone-warn: light-dark(#8c6900, #e9bc2a);
+  --tone-good: light-dark(#256b47, #79b993);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Unlayered on purpose: `index.css` keeps `.tone-warn` and `.tone-ok` in
+   `@layer components`, where the badge's own `text-foreground` utility beats
+   them — so D3 §6.2's warn and good roles have never painted. D7 moves them. */
+.tone-warn { color: var(--tone-warn); }
+.tone-ok { color: var(--tone-good); }
