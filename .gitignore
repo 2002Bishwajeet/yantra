@@ -52,3 +52,4 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+web/design/dist/

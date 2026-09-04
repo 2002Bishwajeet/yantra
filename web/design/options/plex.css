@@ -1,0 +1,14 @@
+/* Plex — a type overlay, applied on top of kalam.
+   design-system §5 names IBM Plex Mono as the utility face and D3 §5.5 says
+   whatever face arrives must carry tabular figures. This is the pairing: Plex
+   Sans for the page, Plex Mono for every numeric cell, the same family. The
+   cost is the font budget — D3 §9.1 holds fonts under 30 kB, and three Plex
+   files from Google Fonts weigh about 45 kB. The number is the question. */
+html,
+.font-sans,
+.font-heading {
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+}
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+}

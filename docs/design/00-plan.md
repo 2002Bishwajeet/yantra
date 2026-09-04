@@ -221,6 +221,21 @@ pigments, derives its own semantic colour, and what it does with the motif vocab
 
 **Gate:** the options round needs nothing. D7 needs the owner's pick.
 
+> **2026-09-04: the round is built, as [`web/design/`](../../web/design/README.md) (Y-330).** A second
+> Vite root mounts the real fleet page on fixture data — ten workspaces and three machines, every
+> state of §6 on the page at once — and a bar switches between candidate stylesheets and forces
+> either ground. Four options and a control: **kalam**, ink on paper with the ink as the accent and
+> cinnabar reserved for trouble; **patta**, the cloth ground and the soot line with indigo for action;
+> **neela**, a cool white ground with indigo for action and cinnabar the only warm note; **plex**,
+> kalam's colours set in IBM Plex so numbers get tabular figures, at the cost of the font budget.
+> Each is one `:root` block written with `light-dark()`, so one line carries both grounds.
+>
+> **One finding.** D3 §6.2's `warn` and `good` roles have never painted: `.tone-warn` and `.tone-ok`
+> sit in `@layer components`, and the badge's own `text-foreground` utility beats them. The options
+> override unlayered; D7 moves the rules out of the layer.
+>
+> §8 below is stale: both PRs it lists merged in August.
+
 ---
 
 ## 8. What is in flight

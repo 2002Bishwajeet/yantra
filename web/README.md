@@ -25,6 +25,9 @@ and what it may weigh.
 what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
 [R9](../docs/research/09-component-libraries.md) are the evidence.
 
+[`design/`](design/README.md) is the options round for the visual system (D0 §7): the same
+page on fixture data, under candidate stylesheets. It is a second Vite root and ships nothing.
+
 Serving these assets from the binary is [Y-073](../tracker.md) and is not here.
 Nothing in this directory is on the Rust build's path — `cargo build` still needs
 no Node, including the musl cross-build.

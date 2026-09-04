@@ -1,0 +1,42 @@
+/* Kalam — ink on paper.
+   The instrument reading of the name. Paper is barely warm and never tan; every
+   line is lamp soot; the accent (links, the primary button) is the ink itself.
+   Cinnabar appears once, for what is wrong, so a hyperlink and a crash can never
+   share a colour (D3 §6.2). Warn is orpiment darkened to hold contrast on paper;
+   good is derived, not sabaja (design-system §2). Corners are near-square. */
+:root {
+  color-scheme: light dark;
+  --background: light-dark(#fbfaf7, #131313);
+  --foreground: light-dark(#101010, #ece8e1);
+  --card: light-dark(#ffffff, #1a1a1a);
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(#101010, #ece8e1);
+  --primary-foreground: light-dark(#fbfaf7, #131313);
+  --secondary: light-dark(#efece5, #232323);
+  --secondary-foreground: var(--foreground);
+  --muted: light-dark(#f2f0eb, #1f1f1f);
+  --muted-foreground: light-dark(#6b6660, #9b968e);
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --destructive: light-dark(#bb1f15, #e5432f);
+  --border: light-dark(#10101024, #ece8e122);
+  --input: var(--border);
+  --ring: var(--primary);
+  --radius: 0.25rem;
+  --control-radius: 0.25rem;
+  --app-scrollbar-thumb: light-dark(#10101033, #ece8e133);
+  --app-scrollbar-thumb-hover: light-dark(#10101055, #ece8e155);
+  --tone-critical: var(--destructive);
+  --tone-warn: light-dark(#7a5d00, #e9bc2a);
+  --tone-good: light-dark(#2a6a45, #6db58a);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Unlayered on purpose: `index.css` keeps `.tone-warn` and `.tone-ok` in
+   `@layer components`, where the badge's own `text-foreground` utility beats
+   them — so D3 §6.2's warn and good roles have never painted. D7 moves them. */
+.tone-warn { color: var(--tone-warn); }
+.tone-ok { color: var(--tone-good); }

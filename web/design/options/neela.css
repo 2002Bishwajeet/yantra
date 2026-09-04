@@ -1,0 +1,43 @@
+/* Neela — the cool room.
+   Modern is the substrate and folk is the accent, taken literally: a cool white
+   ground and a cool ink, with two pigments admitted and no more. Indigo is the
+   accent, for links and the primary button. Cinnabar is the only warm colour
+   on the page and it means one thing. Rounder corners than kalam; this is the
+   option nearest to a conventional control panel, kept so the others are judged
+   against something and not against nothing. */
+:root {
+  color-scheme: light dark;
+  --background: light-dark(#f7f8fa, #0e1116);
+  --foreground: light-dark(#14181e, #e6e9ee);
+  --card: light-dark(#ffffff, #151a21);
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(#2b55a6, #86a6e6);
+  --primary-foreground: light-dark(#ffffff, #0e1116);
+  --secondary: light-dark(#e9edf3, #1d242e);
+  --secondary-foreground: var(--foreground);
+  --muted: light-dark(#eef1f5, #181e26);
+  --muted-foreground: light-dark(#5e6873, #97a1ae);
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --destructive: light-dark(#bb1f15, #f0584a);
+  --border: light-dark(#14181e1f, #e6e9ee1f);
+  --input: var(--border);
+  --ring: var(--primary);
+  --radius: 0.5rem;
+  --control-radius: 0.5rem;
+  --app-scrollbar-thumb: light-dark(#14181e2e, #e6e9ee2e);
+  --app-scrollbar-thumb-hover: light-dark(#14181e4d, #e6e9ee4d);
+  --tone-critical: var(--destructive);
+  --tone-warn: light-dark(#8c6900, #e9bc2a);
+  --tone-good: light-dark(#1f6e46, #6dba8e);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Unlayered on purpose: `index.css` keeps `.tone-warn` and `.tone-ok` in
+   `@layer components`, where the badge's own `text-foreground` utility beats
+   them — so D3 §6.2's warn and good roles have never painted. D7 moves them. */
+.tone-warn { color: var(--tone-warn); }
+.tone-ok { color: var(--tone-good); }
