@@ -1,0 +1,9 @@
+{
+  "machines": { "looked": "failed", "age_seconds": 0, "error": "`tailscale status --json` failed: failed to connect to local tailscaled" },
+  "workspaces": { "looked": "failed", "age_seconds": 0, "error": "`tailscale status --json` failed: failed to connect to local tailscaled" },
+  "status": {},
+  "sessions": { "looked": "failed", "age_seconds": 0, "error": "`tailscale status --json` failed: failed to connect to local tailscaled" },
+  "readiness": { "looked": "failed", "age_seconds": 0, "error": "`tailscale status --json` failed: failed to connect to local tailscaled" },
+  "attention": { "looked": "failed", "age_seconds": 0, "error": "`tailscale status --json` failed: failed to connect to local tailscaled" },
+  "github": { "looked": "failed", "age_seconds": 0, "error": "`tailscale status --json` failed: failed to connect to local tailscaled" }
+}

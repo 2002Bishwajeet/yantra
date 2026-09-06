@@ -1,0 +1,7 @@
+{
+  "extends": "busy",
+  "refuse": {
+    "status": 403,
+    "text": "node biswas-iphone is on this tailnet but is not yours"
+  }
+}

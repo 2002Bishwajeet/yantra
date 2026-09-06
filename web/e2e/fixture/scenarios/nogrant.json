@@ -1,0 +1,13 @@
+{
+  "extends": "busy",
+  "attention": {
+    "looked": "failed",
+    "age_seconds": 0,
+    "error": "no GitHub grant: nothing is signed in here, so reviews, issues and repositories cannot be read"
+  },
+  "github": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": { "check": "github", "state": "absent", "detail": "no GitHub grant is stored here" }
+  }
+}

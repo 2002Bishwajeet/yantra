@@ -37,7 +37,40 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit -p tsconfig.app.json
+      - run: npx tsc --noEmit -p e2e/tsconfig.json
       # Runs `npm run compiled`, which fails if the React Compiler emitted no
       # memo caches — a bail-out is otherwise silent and exits 0.
       - run: npm run build
       - run: npm test
+      # D3 §9.1 and ADR-0024 §7: 145 KiB first load, 80 KiB of fonts, or red.
+      - run: npm run budget -- --no-build
+
+  e2e:
+    name: e2e (${{ matrix.project }})
+    runs-on: ubuntu-24.04
+    # One job per form factor: three sizes triple the run (plan §7).
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [phone, tablet, desktop]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.18.1'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e -- --project ${{ matrix.project }}
+      # Baselines are rendered on Linux and the snapshot path carries no
+      # platform, so the report is where a font or layout diff is legible.
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-${{ matrix.project }}
+          path: |
+            web/e2e/report/
+            web/e2e/test-results/
+          retention-days: 7
