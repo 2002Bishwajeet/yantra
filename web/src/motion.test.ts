@@ -12,18 +12,22 @@ import { describe, expect, it } from 'vitest'
 // environment does not hand back as a file URL.
 const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
 
-/** D3 §9.1: five subsets shipped for an English interface. */
+/** D3 §9.1 as ADR-0024 §7 amends it: Google Sans Flex and IBM Plex Mono,
+ *  latin only, declared in m3/tokens.css; Geist is gone. */
 describe('the font is latin and nothing else', () => {
-  it('declares the latin face and imports no subset it does not use', () => {
-    expect(css).toContain('geist-latin-wght-normal.woff2')
-    expect(css).not.toContain('@import "@fontsource-variable/geist"')
+  const tokens = readFileSync(resolve(process.cwd(), 'src/m3/tokens.css'), 'utf8')
+
+  it('declares the latin faces and imports no subset it does not use', () => {
+    expect(css).not.toContain('geist')
+    expect(css).toContain('--font-sans: var(--md-ref-typeface-plain)')
+    expect(tokens).toContain('google-sans-flex-latin-wght-normal.woff2')
     for (const subset of ['cyrillic', 'cyrillic-ext', 'latin-ext', 'vietnamese']) {
-      expect(css).not.toContain(`geist-${subset}-wght`)
+      expect(tokens).not.toContain(`-${subset}-`)
     }
   })
 
   it('keeps the range the package declares, so no glyph changes', () => {
-    expect(css).toContain('unicode-range: U+0000-00FF,U+0131,U+0152-0153')
+    expect(tokens).toContain('unicode-range: U+0000-00FF,U+0131,U+0152-0153')
   })
 })
 

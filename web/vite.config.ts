@@ -40,5 +40,10 @@ export default defineConfig({
       },
     },
   },
-  test: { environment: 'jsdom' },
+  test: {
+    environment: 'jsdom',
+    // R14 §2.1: the colour package's own imports lack `.js`, so Node refuses
+    // them and only Vite's resolver loads it.
+    server: { deps: { inline: ['@material/material-color-utilities'] } },
+  },
 })
