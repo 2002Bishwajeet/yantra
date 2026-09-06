@@ -17,6 +17,7 @@ pub mod dirs;
 pub mod doctor;
 pub mod down;
 pub mod edit;
+pub mod github;
 pub mod heartbeat;
 pub mod identity;
 pub mod inventory;
