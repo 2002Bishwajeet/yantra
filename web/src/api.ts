@@ -6,6 +6,35 @@ export type Looked<T> =
   | { looked: 'failed'; age_seconds: number; error: string }
   | { looked: 'never' }
 
+// What the writes in `api/mutations.ts` send and answer (Y-341). The forms
+// that predate that layer still spell these out for themselves.
+
+/** `POST /api/workspaces`. `startup` omitted is "just a shell". */
+export type Create = {
+  name: string
+  machine: string
+  repo: string
+  startup?: string
+}
+
+/** What `PATCH /api/workspaces/{name}` reads. A field left out is left alone,
+ *  and `startup: null` is the one `null` that means something — it is
+ *  `--no-startup`, and the only way a command set once is ever taken away. */
+export type Change = {
+  machine?: string
+  repo?: string
+  startup?: string | null
+}
+
+/** `DELETE /api/workspaces/{name}`. `removed: false` is a workspace that was
+ *  already gone, which is the state asked for and never a failure (I-30), and a
+ *  `null` machine is a file that never parsed and so named none. */
+export type Removed = { machine: string | null; removed: boolean }
+
+/** `DELETE /api/machines/{machine}/sessions/{session}`. `killed: false` is a
+ *  session that was already gone, which is the state asked for (I-30). */
+export type Killed = { machine: string; session: string; killed: boolean }
+
 export type Machine = {
   name: string
   dns_name: string

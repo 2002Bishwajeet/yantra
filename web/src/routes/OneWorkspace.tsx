@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
-import type { Listed } from '@/api'
 import { Machine } from '@/components/Machine'
 import { Section } from '@/components/Section'
 import { SpendTab } from '@/components/Spend'
@@ -8,9 +7,7 @@ import { Terminal } from '@/components/Terminal'
 import { Title } from '@/components/Title'
 import { Transcript } from '@/components/Transcript'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { useLooked } from '@/useLooked'
-import { useSpend } from '@/useSpend'
-import { useTranscript } from '@/useTranscript'
+import { useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
 import { VIEWS } from '@/views'
 
 /** `getRouteApi` rather than the route object: this module is loaded *by* the
@@ -32,7 +29,7 @@ const WIDE = '(min-width: 768px)'
 export function OneWorkspace() {
   const { name } = route.useParams()
   const { view } = route.useSearch()
-  const listed = useLooked<Listed[]>('/api/workspaces')
+  const listed = useWorkspaces()
   const navigate = useNavigate()
 
   // Read once in a state initialiser rather than subscribed to: a tab that

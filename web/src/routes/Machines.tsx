@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router'
 import type {
-  Listed,
   Machine,
   MachineSessions,
   Readiness as Report,
@@ -13,17 +12,24 @@ import { Section } from '@/components/Section'
 import { Title } from '@/components/Title'
 import { Unreachable } from '@/components/Unreachable'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { loaded, sessionsWaiting, useLooked } from '@/useLooked'
+import {
+  loaded,
+  sessionsWaiting,
+  useMachines,
+  useReadiness,
+  useSessions,
+  useWorkspaces,
+} from '@/api/hooks'
 import { unclaimed, unreachable } from '@/work'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 
 /** The three groups D3 §3.1 takes off the work page. This page answers *which
  *  machine*; [`/m/{name}`](./OneMachine.tsx) answers *what about this one*. */
 export function Machines() {
-  const machines = useLooked<Machine[]>('/api/machines')
-  const listed = useLooked<Listed[]>('/api/workspaces')
-  const sessions = useLooked<MachineSessions[]>('/api/sessions')
-  const readiness = useLooked<Report[]>('/api/readiness')
+  const machines = useMachines()
+  const listed = useWorkspaces()
+  const sessions = useSessions()
+  const readiness = useReadiness()
   const nothing = unreachable([machines, listed, sessions, readiness])
 
   return (

@@ -14,7 +14,8 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import { type WebSocket as Client, WebSocket as Ws, WebSocketServer } from 'ws'
-import { ATTEMPTS, PAUSE, type Target, Terminal } from './components/Terminal'
+import { ATTEMPTS, PAUSE, type Target } from './api/socket'
+import { Terminal } from './components/Terminal'
 import { renderRouted } from './test/inRouter'
 
 /** Every refusal names its machine and links to it (D5 §7), so the component

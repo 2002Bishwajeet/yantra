@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 import { Age } from '@/components/Age'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'

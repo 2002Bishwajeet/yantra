@@ -16,35 +16,6 @@ export type Asked =
       said: string
     }
 
-/** Here rather than beside `Answer`, because a module that exports a function
- *  next to a component loses fast refresh — and both routes need this one. */
-export async function read(workspace: Workspace): Promise<Asked> {
-  const path = `/api/workspaces/${encodeURIComponent(workspace.name)}/tokens`
-
-  try {
-    const response = await fetch(path, { method: 'POST' })
-    if (response.status === 409) {
-      return { asked: 'nothing', workspace, said: await response.text() }
-    }
-    if (!response.ok) {
-      return {
-        asked: 'refused',
-        workspace,
-        status: response.status,
-        said: await response.text(),
-      }
-    }
-    return {
-      asked: 'read',
-      workspace,
-      spend: (await response.json()) as Spend,
-      at: new Date().toISOString(),
-    }
-  } catch (cause) {
-    return { asked: 'refused', workspace, status: null, said: String(cause) }
-  }
-}
-
 const refusals: Record<number, string> = {
   403: "This browser is not on a node this tailnet's owner holds.",
   404: 'The daemon knows no workspace by that name.',

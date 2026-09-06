@@ -1,7 +1,7 @@
 import { HeadContent, Link, Outlet } from '@tanstack/react-router'
 import { Palette } from '@/components/Palette'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { useViewing } from '@/useViewing'
+import { useViewing } from '@/api/hooks'
 
 /** D3 §3: three items, and the other routes are reached from the thing that
  *  needs them. */

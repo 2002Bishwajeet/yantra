@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import type { TerminalSize } from '@/api'
+import {
+  ATTEMPTS,
+  attachTerminal,
+  type Link,
+  type Target,
+  terminalAddress,
+} from '@/api/socket'
 import { button } from '@/components/Act'
 import { Machine } from '@/components/Machine'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -14,51 +20,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 
-/** What xterm.js is in terminfo's vocabulary, and the one thing this page tells
- *  the far side about itself. Every consumer of xterm.js measured says the same
- *  (VS Code, ttyd, wetty, terminado), and it is the entry `ncurses-base` and
- *  Apple's 2015 ncurses both carry, where `xterm-direct` and ncurses' own
- *  `xterm.js` alias are in neither — an entry tmux cannot find is an attach that
- *  aborts (I-36). */
-const TERM = 'xterm-256color'
-
-/** How many times a socket that went away with nothing to say is reopened, and
- *  how long apart. A phone waking or a network changing hands is one attempt
- *  and half a second, and nobody sees it; a daemon that is down is given up on
- *  rather than hammered, because every attempt is an `ssh` connection and a
- *  tmux client on a machine that may be asleep. The budget is per outage — a
- *  socket that printed anything worked, and refills it.
- *
- *  Exported so the tests assert the budget this file declares rather than a
- *  number copied out of it. */
-export const ATTEMPTS = 5
-export const PAUSE = 500
-
 type Ended = { ended: 'no' } | { ended: 'yes'; said: string | null }
-
-/** Whether the socket is up, and which attempt is in flight while it is not —
- *  attempt 0 being the first connection, which nobody chose to retry. */
-type Link = { up: boolean; attempt: number }
-
-/** What a socket attaches to: a workspace the daemon looks up, or a machine and
- *  a session it is handed
- *  ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
- *  It mirrors the daemon's own `Target`, addresses and all.
- *
- *  **Both variants carry the machine**, which the daemon's does not need and a
- *  refusal does: D5 §7 has every tab name the machine it could not reach, and a
- *  workspace's is not in its address. `address()` is unaffected — the
- *  discriminant is still `workspace`. */
-export type Target =
-  | { workspace: string; machine: string }
-  | { machine: string; session: string }
-
-function address(target: Target): string {
-  const daemon = location.origin.replace(/^http/, 'ws')
-  return 'workspace' in target
-    ? `${daemon}/api/workspaces/${encodeURIComponent(target.workspace)}/terminal`
-    : `${daemon}/api/machines/${encodeURIComponent(target.machine)}/sessions/${encodeURIComponent(target.session)}/terminal`
-}
 
 /** What a refusal names, which is the daemon's `Display` for the same two
  *  addresses — a session that went away is named, never a workspace (§4.3). */
@@ -68,7 +30,7 @@ function names(target: Target): string {
     : `${target.session} on ${target.machine}`
 }
 
-/** The socket and xterm.js, wired to each other and to nothing that renders.
+/** xterm.js and the socket, wired to each other and to nothing that renders.
  *  Returns the teardown, which is the whole of what closing a terminal is. */
 function attach(
   url: string,
@@ -83,74 +45,22 @@ function attach(
   fit.fit()
   xterm.focus()
 
-  let socket: WebSocket | undefined
-  let waiting: ReturnType<typeof setTimeout> | undefined
-  let attempts = 0
-  let finished = false
-
-  const send = (frame: string | Uint8Array<ArrayBuffer>) => {
-    if (socket?.readyState === WebSocket.OPEN) socket.send(frame)
-  }
-
-  // A pty is opened with a window, so this is what *starts* the terminal and
-  // every later one resizes it — and a reopened socket needs the first sense
-  // again, its pty being as new as it is.
-  const measure = () => {
-    fit.fit()
-    send(
-      JSON.stringify({
-        rows: xterm.rows,
-        cols: xterm.cols,
-        term: TERM,
-      } satisfies TerminalSize),
-    )
-  }
-
-  const open = () => {
-    const live = new WebSocket(url)
-    socket = live
-    live.binaryType = 'arraybuffer'
-    live.onopen = () => {
-      linked({ up: true, attempt: attempts })
-      measure()
-    }
-    live.onmessage = (frame: MessageEvent<string | ArrayBuffer>) => {
-      attempts = 0
-      // Text from the daemon is why a terminal could not be opened. Written to
-      // the screen it would be indistinguishable from something the session
-      // said — and reopening a socket that was refused only refuses again.
-      if (typeof frame.data === 'string') {
-        finished = true
-        over(frame.data)
-      } else xterm.write(new Uint8Array(frame.data))
-    }
-    // **The screen is not lost with the socket.** tmux draws the pane's
-    // contents for whichever client attaches next, so reopening is the whole of
-    // replay and nothing on this side keeps the stream (Q5).
-    live.onclose = () => {
-      if (finished) return
-      if (attempts >= ATTEMPTS) {
-        over(null)
-        return
-      }
-      attempts += 1
-      linked({ up: false, attempt: attempts })
-      waiting = setTimeout(open, PAUSE)
-    }
-  }
-
-  const bytes = new TextEncoder()
-  const typed = xterm.onData((data) => send(bytes.encode(data)))
-
-  open()
-  window.addEventListener('resize', measure)
+  const link = attachTerminal(url, {
+    size: () => {
+      fit.fit()
+      return { rows: xterm.rows, cols: xterm.cols }
+    },
+    onBytes: (bytes) => xterm.write(bytes),
+    onEnd: (refused) => over(refused ? refused.said : null),
+    onLink: linked,
+  })
+  const typed = xterm.onData(link.type)
+  window.addEventListener('resize', link.resize)
 
   return () => {
-    finished = true
-    clearTimeout(waiting)
-    window.removeEventListener('resize', measure)
+    window.removeEventListener('resize', link.resize)
     typed.dispose()
-    socket?.close()
+    link.close()
     xterm.dispose()
   }
 }
@@ -178,7 +88,7 @@ export function Terminal({
   const host = useRef<HTMLDivElement>(null)
   const [end, setEnd] = useState<Ended>({ ended: 'no' })
   const [link, setLink] = useState<Link>({ up: false, attempt: 0 })
-  const url = address(target)
+  const url = terminalAddress(target)
   const name = names(target)
   const listed =
     'workspace' in target ? 'the Workspaces row' : "the machine's Sessions table"

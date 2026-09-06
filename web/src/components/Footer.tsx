@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { Ago } from '@/components/Age'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 
 // One refresh period. A read this far behind the rest is not the same reading.
 const BEHIND = 30
