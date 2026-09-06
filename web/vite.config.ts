@@ -31,6 +31,9 @@ export default defineConfig({
   // yantrad binds this machine's Tailscale addresses and refuses loopback
   // (R-22), so `npm run dev` supplies the real target.
   server: {
+    // A phone or a Mac on the tailnet opens the dev server by its MagicDNS
+    // name, which Vite refuses unless the host is listed.
+    allowedHosts: ['.ts.net'],
     proxy: {
       // `ws`, because the terminal is an upgrade on this same prefix and the
       // string form of a proxy entry forwards only the plain requests.

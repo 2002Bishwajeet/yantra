@@ -50,6 +50,14 @@ was on **24.0.0**, which is below it, so `npm ci` warns `EBADENGINE` there. CI r
 are no CORS headers and a cross-origin `fetch` cannot work. `vite.config.ts`
 proxies `/api` to the daemon.
 
+**Seeing it from another device on the tailnet.** `npm run dev:tailnet` binds the dev server
+to this machine's Tailscale address, so a Mac or a phone opens
+`http://<this machine>.<tailnet>.ts.net:5173` (the MagicDNS name is allowed in `vite.config.ts`).
+With no `yantrad` running, `npm run fixture` starts the e2e fixture daemon on 7790 with the
+`busy` scenario (`FIXTURE_SCENARIO=empty|unreachable|refused|flaky` for the others), and
+`npm run dev:fixture` proxies `/api` to it instead, so every screen draws with fleet data. Plain
+HTTP: the service worker and the PWA install need HTTPS and are for the daemon's own build.
+
 **The proxy target is a tailnet address, not loopback.** `yantrad` binds only the
 addresses Tailscale says this machine holds and fails closed otherwise, so
 `127.0.0.1:7717` is refused by design (R-22). `npm run dev` fills the target in

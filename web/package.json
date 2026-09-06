@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "YANTRA_API=http://$(tailscale ip -4):7717 vite",
+    "dev:tailnet": "YANTRA_API=http://$(tailscale ip -4):7717 vite --host $(tailscale ip -4)",
+    "dev:fixture": "YANTRA_API=http://127.0.0.1:7790 vite --host $(tailscale ip -4)",
     "build": "tsc -b && vite build && npm run compiled",
     "compiled": "grep -c react.memo_cache_sentinel dist/assets/*.js",
     "lint": "oxlint",
