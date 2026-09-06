@@ -41,6 +41,8 @@ pub struct Summary {
     /// Formatted by tmux on the machine that owns the session, so it is that
     /// machine's clock and timezone.
     pub created: String,
+    /// The same moment as Unix seconds, so a page can age it (Y-343).
+    pub created_at: u64,
 }
 
 /// A pane, and how its process ended if it has.
@@ -167,8 +169,7 @@ const IDS: &str = "#{session_id} #{window_id} #{pane_id}";
 ///
 /// I-42: not a tab. tmux 3.5a rewrites tabs in format output to `_` while 3.7b
 /// passes them through, and the fleet runs both.
-const LIST_FORMAT: &str =
-    "#{session_windows}|#{session_attached}|#{t:session_created}|#{session_name}";
+const LIST_FORMAT: &str = "#{session_windows}|#{session_attached}|#{t:session_created}|#{session_created}|#{session_name}";
 
 /// Same `|` and the same reason as [`LIST_FORMAT`] — and here the empty field
 /// is the point, so a delimiter that survives an empty value is mandatory.
@@ -518,13 +519,22 @@ fn parse_summary(line: &str) -> Result<Summary, Error> {
     let bad = || Error::Listing {
         raw: line.to_owned(),
     };
-    let mut fields = line.splitn(4, '|');
-    match (fields.next(), fields.next(), fields.next(), fields.next()) {
-        (Some(windows), Some(attached), Some(created), Some(name)) if !name.is_empty() => {
+    let mut fields = line.splitn(5, '|');
+    match (
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+    ) {
+        (Some(windows), Some(attached), Some(created), Some(created_at), Some(name))
+            if !name.is_empty() =>
+        {
             Ok(Summary {
                 windows: windows.parse().map_err(|_| bad())?,
                 attached: attached.parse().map_err(|_| bad())?,
                 created: created.to_owned(),
+                created_at: created_at.parse().map_err(|_| bad())?,
                 name: name.to_owned(),
             })
         }
@@ -674,11 +684,12 @@ mod tests {
 
     #[test]
     fn a_session_row_parses_and_a_name_may_contain_spaces() {
-        let s = parse_summary("3|1|Thu Jul 30 13:02:31 2026|my session")
+        let s = parse_summary("3|1|Thu Jul 30 13:02:31 2026|1785502951|my session")
             .expect("a well-formed row parses");
         assert_eq!(s.windows, 3);
         assert_eq!(s.attached, 1);
         assert_eq!(s.created, "Thu Jul 30 13:02:31 2026");
+        assert_eq!(s.created_at, 1_785_502_951);
         assert_eq!(s.name, "my session", "the name is last, so spaces survive");
     }
 
@@ -686,7 +697,14 @@ mod tests {
     /// wrong answer as I-30's absence-is-not-failure, in the other direction.
     #[test]
     fn a_malformed_row_is_an_error_rather_than_a_dropped_session() {
-        for bad in ["", "1|0", "x|0|when|name", "1|0|when|"] {
+        for bad in [
+            "",
+            "1|0",
+            "x|0|when|1|name",
+            "1|0|when|1|",
+            "1|0|when|name",
+            "1|0|when|soon|name",
+        ] {
             assert!(
                 matches!(parse_summary(bad), Err(Error::Listing { .. })),
                 "{bad:?} must not silently vanish"

@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
 use yantra_core::attention::{self, Attention, Forge as _, Gh};
+use yantra_core::clone;
 use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::identity;
@@ -129,6 +130,17 @@ enum Command {
         /// Absolute path **on that machine**, not on this one
         path: String,
     },
+    /// Clone a repository onto a machine, inside a tmux session there
+    Clone {
+        /// `https://host/path`, `ssh://user@host/path` or `user@host:path`
+        url: String,
+        /// Machine, as `~/.ssh/config` spells it
+        #[arg(long)]
+        machine: String,
+        /// Where to put it **on that machine**: absolute, or `~/…`
+        #[arg(long)]
+        into: String,
+    },
     /// Stop a tmux session by machine and name, for one no workspace claims
     Kill {
         /// Machine, as `~/.ssh/config` spells it
@@ -184,6 +196,8 @@ enum Command {
     },
     /// Prepare this account's ssh identity, and print the public key to place
     SshIdentity,
+    /// Say which build this is
+    About,
 }
 
 /// Spelled out rather than a bare bool so that adding a second agent is a new
@@ -204,6 +218,9 @@ enum LsTarget {
         machine: String,
         /// Absolute path **on that machine**. Its `$HOME` if omitted
         path: Option<String>,
+        /// Make one directory of this name under the path first
+        #[arg(long)]
+        make: Option<String>,
     },
     /// tmux sessions on the machines your workspaces name
     Sessions,
@@ -211,6 +228,8 @@ enum LsTarget {
     Workspaces,
     /// Issues, reviews and notifications waiting for you on GitHub
     Attention,
+    /// The last events the daemon would have pushed — held by yantrad, in memory
+    Notifications,
 }
 
 #[tokio::main]
@@ -248,14 +267,20 @@ async fn main() -> ExitCode {
         Some(Command::Tokens { workspace }) => show_tokens(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
         Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
+        Some(Command::Clone { url, machine, into }) => clone_repo(&url, &machine, &into).await,
         Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
         Some(Command::Ls {
-            target: LsTarget::Dirs { machine, path },
-        }) => ls_dirs(&machine, path.as_deref()).await,
+            target:
+                LsTarget::Dirs {
+                    machine,
+                    path,
+                    make,
+                },
+        }) => ls_dirs(&machine, path.as_deref(), make.as_deref()).await,
         Some(Command::Ls {
             target: LsTarget::Sessions,
         }) => ls_sessions().await,
@@ -265,6 +290,9 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Attention,
         }) => ls_attention().await,
+        Some(Command::Ls {
+            target: LsTarget::Notifications,
+        }) => ls_notifications().await,
         Some(Command::Notify {
             message,
             title,
@@ -281,6 +309,7 @@ async fn main() -> ExitCode {
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity) => ssh_identity(),
+        Some(Command::About) => about(),
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -919,13 +948,18 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
 /// never automatic**: whether generating the keypair is Yantra's job rather than
 /// the owner's is still unconfirmed, so nothing calls this for them.
 fn ssh_identity() -> ExitCode {
-    match identity::prepare() {
-        Ok(prepared) => {
+    match identity::prepare().and_then(|prepared| Ok((identity::describe()?, prepared))) {
+        Ok((described, prepared)) => {
             let key = prepared.key.display();
             if prepared.generated {
                 println!("key:    {key}, generated");
             } else {
                 println!("key:    {key}, already here and left alone");
+            }
+            // The same four fields `GET /api/ssh-identity` serves (Y-343).
+            if let Some(identity) = described {
+                println!("kind:   {}", identity.kind);
+                println!("fpr:    {}", identity.fingerprint);
             }
             let config = prepared.config.display();
             if prepared.configured.is_empty() {
@@ -954,6 +988,83 @@ fn ssh_identity() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `GET /api/about`'s three build facts. The other three — uptime, where it
+/// listens, the tailnet — are a running daemon's, and this process is not one.
+fn about() -> ExitCode {
+    print!("{}", render_about());
+    ExitCode::SUCCESS
+}
+
+fn render_about() -> String {
+    format!(
+        "version: {}\ntarget:  {}\nbuilt:   {}\n\nuptime, listening addresses and tailnet are the daemon's: GET /api/about\n",
+        yantra_core::about::VERSION,
+        yantra_core::about::TARGET,
+        yantra_core::about::BUILT
+    )
+}
+
+/// ADR-0025's list is the daemon's memory, and this process runs in-process
+/// with no daemon between it and the fleet (ADR-0012) — so it has nothing to
+/// list and says where the list is rather than pretending an empty one.
+async fn ls_notifications() -> ExitCode {
+    let address = Tailscale
+        .addresses()
+        .await
+        .ok()
+        .and_then(|addresses| addresses.into_iter().find(|a| a.is_ipv4()))
+        .map_or("<this machine's tailnet address>".to_owned(), |a| {
+            a.to_string()
+        });
+    eprintln!(
+        "yantra: notifications are the daemon's memory (ADR-0025), and yantra runs in-process \
+         with none —\n  read them at http://{address}:7717/api/notifications"
+    );
+    ExitCode::FAILURE
+}
+
+/// Answers as soon as the session is open: the clone runs there, and
+/// `yantra probe` says when it has landed. A session already running is the
+/// state asked for (I-30), and it says which happened.
+async fn clone_repo(url: &str, machine: &str, into: &str) -> ExitCode {
+    let plan = match clone::plan(url, into) {
+        Ok(plan) => plan,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    match clone::clone(machine, &plan).await {
+        Ok(cloning) => {
+            print!("{}", render_cloning(&cloning, &plan));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_cloning(cloning: &clone::Cloning, plan: &clone::Plan) -> String {
+    let verb = if cloning.opened.was_created() {
+        "cloning"
+    } else {
+        "already cloning"
+    };
+    format!(
+        "{verb} {} into {} on {}, in tmux session {}\n  watch it:  ssh -t {} tmux attach -t ={}\n  landed?    yantra probe {} {}\n",
+        plan.url,
+        plan.path,
+        cloning.machine,
+        cloning.session,
+        cloning.machine,
+        cloning.session,
+        cloning.machine,
+        plan.path
+    )
 }
 
 const IDENTITY_NOTE: &str = "\
@@ -1078,8 +1189,12 @@ async fn ls_machines() -> ExitCode {
 /// directory exits **0**: the machine answered, and *nothing here* is what it
 /// said. A path that is not there exits 1, which is `probe`'s rule, since the
 /// two are different answers and only one of them is a reason to stop.
-async fn ls_dirs(machine: &str, path: Option<&str>) -> ExitCode {
-    match dirs::list(machine, path).await {
+async fn ls_dirs(machine: &str, path: Option<&str>, make: Option<&str>) -> ExitCode {
+    let listed = match make {
+        Some(name) => dirs::make(machine, path, name).await,
+        None => dirs::list(machine, path).await,
+    };
+    match listed {
         Ok(listing) => {
             print!("{}", render_dirs(&listing));
             ExitCode::SUCCESS
@@ -2242,6 +2357,7 @@ mod tests {
             windows,
             attached,
             created: "Thu Jul 30 13:02:31 2026".to_owned(),
+            created_at: 1_785_502_951,
         }
     }
 
@@ -2562,7 +2678,7 @@ mod tests {
         assert!(matches!(
             walked.command,
             Some(Command::Ls {
-                target: LsTarget::Dirs { ref machine, path: Some(ref path) }
+                target: LsTarget::Dirs { ref machine, path: Some(ref path), .. }
             }) if machine == "mac" && path == "/code"
         ));
 
@@ -2571,14 +2687,115 @@ mod tests {
         assert!(matches!(
             home.command,
             Some(Command::Ls {
-                target: LsTarget::Dirs { path: None, .. }
+                target: LsTarget::Dirs {
+                    path: None,
+                    make: None,
+                    ..
+                }
             })
+        ));
+
+        let made = Cli::try_parse_from(["yantra", "ls", "dirs", "mac", "/code", "--make", "new"])
+            .expect("`--make` parses");
+        assert!(matches!(
+            made.command,
+            Some(Command::Ls {
+                target: LsTarget::Dirs { make: Some(ref name), .. }
+            }) if name == "new"
         ));
 
         assert!(
             Cli::try_parse_from(["yantra", "ls", "dirs"]).is_err(),
             "a path belongs to one machine, so there is no listing without one"
         );
+    }
+
+    /// Y-344: both flags are required, because a clone has one machine and
+    /// one destination and neither has a default this side could compose.
+    #[test]
+    fn clone_takes_a_url_a_machine_and_a_destination() {
+        let cli = Cli::try_parse_from([
+            "yantra",
+            "clone",
+            "https://github.com/o/r.git",
+            "--machine",
+            "mac",
+            "--into",
+            "~/src/r",
+        ])
+        .expect("`clone` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Clone { ref url, ref machine, ref into })
+                if url == "https://github.com/o/r.git" && machine == "mac" && into == "~/src/r"
+        ));
+        assert!(
+            Cli::try_parse_from([
+                "yantra",
+                "clone",
+                "https://github.com/o/r.git",
+                "--machine",
+                "mac"
+            ])
+            .is_err(),
+            "no destination is composed here"
+        );
+    }
+
+    #[test]
+    fn about_and_ls_notifications_are_spellings_users_type() {
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "about"])
+                .expect("`about` parses")
+                .command,
+            Some(Command::About)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "ls", "notifications"])
+                .expect("`ls notifications` parses")
+                .command,
+            Some(Command::Ls {
+                target: LsTarget::Notifications
+            })
+        ));
+    }
+
+    /// The three facts are the build's own, and the line under them names
+    /// where the other three live.
+    #[test]
+    fn about_prints_the_build_and_names_the_daemon_for_the_rest() {
+        let out = render_about();
+        assert!(out.starts_with(&format!("version: {}\n", env!("CARGO_PKG_VERSION"))));
+        assert!(out.contains("target:  "), "{out}");
+        assert!(out.contains("built:   20"), "{out}");
+        assert!(out.trim_end().ends_with("GET /api/about"), "{out}");
+    }
+
+    /// Which of the two happened is the sentence, and both name the session
+    /// to watch and the probe that says when it has landed.
+    #[test]
+    fn a_clone_says_whether_it_started_or_was_already_running() {
+        use yantra_core::tmux::{Opened, Session};
+        let plan = clone::plan("https://github.com/o/r.git", "~/src/r").expect("planned");
+        let session = Session {
+            name: "clone-r".to_owned(),
+            session_id: "$1".to_owned(),
+            window_id: "@1".to_owned(),
+            pane_id: "%1".to_owned(),
+        };
+        let cloning = |opened| clone::Cloning {
+            machine: "mac".to_owned(),
+            session: "clone-r".to_owned(),
+            opened,
+        };
+
+        let started = render_cloning(&cloning(Opened::Created(session.clone())), &plan);
+        assert!(started.starts_with("cloning https://github.com/o/r.git into ~/src/r on mac"));
+        assert!(started.contains("tmux attach -t =clone-r"), "{started}");
+        assert!(started.contains("yantra probe mac ~/src/r"), "{started}");
+
+        let again = render_cloning(&cloning(Opened::Attached(session)), &plan);
+        assert!(again.starts_with("already cloning"), "{again}");
     }
 
     /// A repository with no origin and a plain directory both leave the column

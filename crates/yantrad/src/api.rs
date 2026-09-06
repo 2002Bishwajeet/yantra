@@ -27,11 +27,13 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, response::IntoResponse};
 use std::collections::BTreeMap;
-use yantra_core::doctor;
+use std::net::{IpAddr, SocketAddr};
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
+use yantra_core::{about, doctor, identity};
 
+use crate::events::{self, Event};
 use crate::heartbeat::{Beats, Fleet};
 use crate::refresh::Model;
 
@@ -48,7 +50,93 @@ pub fn router() -> Router<Fleet> {
         .route("/machines/{name}/readiness", get(machine_readiness))
         .route("/attention", get(attention))
         .route("/readiness/github", get(github))
+        .route("/about", get(about))
+        .route("/ssh-identity", get(ssh_identity))
+        .route("/notifications", get(notifications))
         .fallback(no_such_route)
+}
+
+/// `yantra about` on the wire, plus what only a running daemon knows: how long
+/// it has been up and where it listens. No ssh and no network — the tailnet
+/// name is read off the machines look, for the node holding a bound address.
+async fn about(State(fleet): State<Fleet>) -> Json<About> {
+    let snapshot = fleet.model.read().await.clone();
+    Json(About {
+        version: about::VERSION,
+        target: about::TARGET,
+        built: about::BUILT,
+        uptime_seconds: fleet.facts.started.elapsed().as_secs(),
+        listening_on: fleet
+            .facts
+            .listening_on
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
+    })
+}
+
+/// The tailnet is `DNSName` past this node's own label. Which node is this one
+/// is answered by the addresses `listen_on` bound — the same join the
+/// heartbeat makes, in the other direction.
+fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
+    let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
+    let bound: Vec<IpAddr> = listening_on
+        .iter()
+        .map(|address| address.ip().to_canonical())
+        .collect();
+    let me = machines.iter().find(|machine| {
+        machine
+            .addresses
+            .iter()
+            .any(|held| bound.contains(&held.to_canonical()))
+    })?;
+    let (_, tailnet) = me.dns_name.trim_end_matches('.').split_once('.')?;
+    Some(tailnet.to_owned())
+}
+
+/// `yantra ssh-identity`'s read half. **A 404 and never a key**: the CLI verb
+/// generates one when there is none, and a route a browser opens must not —
+/// `identity.rs` says invoked, never automatic. The private half is not read.
+async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
+    let dir = fleet.facts.ssh_dir.clone();
+    // `ssh-keygen -l` is a subprocess, so off the worker (I-13).
+    let described = tokio::task::spawn_blocking(move || identity::describe_in(&dir)).await;
+    match described {
+        Ok(Ok(Some(identity))) => Json(SshIdentity::of(&identity)).into_response(),
+        Ok(Ok(None)) => (
+            StatusCode::NOT_FOUND,
+            Json(Missing {
+                error: "no ssh identity yet — `yantra ssh-identity` on the daemon's machine prepares one"
+                    .to_owned(),
+            }),
+        )
+            .into_response(),
+        Ok(Err(error)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(Missing {
+                error: because(&error),
+            }),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(Missing {
+                error: "reading the identity did not finish".to_owned(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// ADR-0025: the last fifty events, newest first, in the same envelope as
+/// every other read. It is in memory and asked for now, so the age is 0 — and
+/// an empty list after a start is the answer, not a look that never happened.
+async fn notifications(State(fleet): State<Fleet>) -> Json<Answer<Vec<Event>>> {
+    Json(Answer::Ok {
+        age_seconds: 0,
+        data: events::newest_first(&fleet.events).await,
+    })
 }
 
 /// The `/api` nest answers its own misses (Y-169). Without this the miss falls
@@ -343,10 +431,47 @@ fn because(error: &dyn std::error::Error) -> String {
     out
 }
 
+/// `&'static str` because the contract fixture spells fixed values: the real
+/// build date changes daily and the target per machine, and either would make
+/// `just test` red on the next morning or the next box.
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct About {
+    pub(crate) version: &'static str,
+    pub(crate) target: &'static str,
+    pub(crate) built: &'static str,
+    pub(crate) uptime_seconds: u64,
+    pub(crate) listening_on: Vec<String>,
+    /// `None` until the machines look has run, or when no node holds a bound
+    /// address — never a guess.
+    pub(crate) tailnet: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct SshIdentity {
+    pub(crate) path: String,
+    pub(crate) kind: String,
+    pub(crate) public_key: String,
+    pub(crate) fingerprint: String,
+}
+
+impl SshIdentity {
+    fn of(identity: &identity::Identity) -> Self {
+        Self {
+            path: identity.path.display().to_string(),
+            kind: identity.kind.clone(),
+            public_key: identity.public_key.clone(),
+            fingerprint: identity.fingerprint.clone(),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 struct Machine {
     name: String,
     dns_name: String,
+    /// The first Tailscale IPv4, which is what an ssh config or a browser
+    /// address bar wants; `null` is a node that reported none.
+    address: Option<String>,
     os: String,
     online: bool,
     /// I-39: an expired key is a third state. Such a machine can be powered on,
@@ -369,6 +494,11 @@ impl Machine {
         Self {
             name: machine.name.clone(),
             dns_name: machine.dns_name.clone(),
+            address: machine
+                .addresses
+                .iter()
+                .find(|address| address.is_ipv4())
+                .map(ToString::to_string),
             os: machine.os.to_string(),
             online: machine.online,
             expired: machine.expired,
@@ -496,6 +626,8 @@ struct Session {
     /// tmux formatted this on the machine that owns the session, so it is that
     /// machine's clock and timezone.
     created: String,
+    /// The same moment as Unix seconds, for a page to age.
+    created_at: u64,
 }
 
 impl Session {
@@ -505,8 +637,47 @@ impl Session {
             windows: session.windows,
             attached: session.attached,
             created: session.created.clone(),
+            created_at: session.created_at,
         }
     }
+}
+
+/// The two answers on this seam that the router cannot render deterministically
+/// — a build date and a key on the daemon's own disk — built for
+/// [`crate::contract`] the way `write::answers` builds its own.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
+    fn of<T: serde::Serialize>(value: &T) -> serde_json::Value {
+        serde_json::to_value(value).expect("a DTO of owned strings and numbers")
+    }
+    vec![
+        (
+            "about",
+            "About",
+            of(&About {
+                version: "0.1.0",
+                target: "aarch64-unknown-linux-musl",
+                built: "2026-09-06",
+                uptime_seconds: 86_412,
+                listening_on: vec![
+                    "100.64.0.1:7717".to_owned(),
+                    "[fd7a:115c:a1e0::1]:7717".to_owned(),
+                ],
+                tailnet: Some("<tailnet>.ts.net".to_owned()),
+            }),
+        ),
+        (
+            "sshIdentity",
+            "SshIdentity",
+            of(&SshIdentity {
+                path: "/home/<user>/.ssh/id_yantra".to_owned(),
+                kind: "ed25519".to_owned(),
+                public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra".to_owned(),
+                fingerprint: "SHA256:<fingerprint>".to_owned(),
+            }),
+        ),
+    ]
 }
 
 /// The two lists are kept apart because a review waiting on this account and an
@@ -869,6 +1040,7 @@ mod tests {
                         windows: 2,
                         attached: 1,
                         created: "Thu Jul 30 13:02:31 2026".into(),
+                        created_at: 1_785_502_951,
                     }]),
                 },
                 MachineSessions {
@@ -1523,11 +1695,126 @@ mod tests {
         );
     }
 
+    /// Y-343: what a settings page draws about the daemon itself. The build
+    /// facts are whatever this build is, so they are asserted present rather
+    /// than equal; the tailnet is read off the node holding a bound address.
+    #[tokio::test]
+    async fn about_names_the_build_the_uptime_and_the_tailnet_of_the_bound_node() {
+        let fleet = Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
+                ssh_dir: std::path::PathBuf::new(),
+            }),
+            ..looking_at_machines(vec![
+                MachineInfo {
+                    addresses: vec!["100.64.0.2".parse().expect("an address")],
+                    ..machine("n-2", "pi", true)
+                },
+                MachineInfo {
+                    addresses: vec!["100.64.0.1".parse().expect("an address")],
+                    ..machine("n-1", "cachyos-g14", true)
+                },
+            ])
+        };
+
+        let body = get_json(fleet, "/about").await;
+        assert_eq!(body["version"], json!(env!("CARGO_PKG_VERSION")));
+        assert!(
+            body["target"].as_str().is_some_and(|t| t.contains('-')),
+            "{body}"
+        );
+        assert_eq!(body["built"].as_str().map(str::len), Some(10), "{body}");
+        assert!(body["uptime_seconds"].as_u64().is_some(), "{body}");
+        assert_eq!(body["listening_on"], json!(["100.64.0.1:7717"]));
+        assert_eq!(body["tailnet"], json!("example.ts.net"));
+
+        let unlooked = get_json(holding(Snapshot::default()), "/about").await;
+        assert_eq!(unlooked["tailnet"], Value::Null, "no look, no guess");
+        assert_eq!(unlooked["listening_on"], json!([]));
+    }
+
+    fn looking_at_machines(machines: Vec<MachineInfo>) -> Fleet {
+        holding(Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(machines)))),
+            ..Snapshot::default()
+        })
+    }
+
+    /// The route reads and never generates: before `yantra ssh-identity` has
+    /// run it is a 404 naming that verb, and afterwards it is the public half
+    /// with the fingerprint `ssh-keygen` prints. The private key is not in the
+    /// answer, and the directory it would read is a parameter of the fleet.
+    #[tokio::test]
+    async fn the_identity_is_read_and_never_made_by_a_get() {
+        let dir = std::env::temp_dir().join("yantra-api-identity");
+        let _ = std::fs::remove_dir_all(&dir);
+        let with_dir = |dir: &std::path::Path| Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: dir.to_owned(),
+            }),
+            ..Fleet::default()
+        };
+
+        let (status, body) = get(with_dir(&dir), "/ssh-identity").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("yantra ssh-identity")),
+            "{body}"
+        );
+        assert!(!dir.exists(), "a GET made a key");
+
+        let prepared = yantra_core::identity::prepare_in(&dir, &[]).expect("a key");
+        let body = get_json(with_dir(&dir), "/ssh-identity").await;
+        assert_eq!(body["path"], json!(prepared.key.display().to_string()));
+        assert_eq!(body["kind"], json!("ed25519"));
+        assert_eq!(body["public_key"], json!(prepared.public_key));
+        assert!(
+            body["fingerprint"]
+                .as_str()
+                .is_some_and(|f| f.starts_with("SHA256:")),
+            "{body}"
+        );
+        assert!(!body.to_string().contains("PRIVATE"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR-0025 §3 on the wire: a fresh daemon answers an empty list under
+    /// `ok`, which is the state stated rather than hidden, and what is
+    /// remembered comes back newest first.
+    #[tokio::test]
+    async fn notifications_are_empty_after_a_start_and_newest_first_after_that() {
+        let fleet = Fleet::default();
+        let body = get_json(fleet.clone(), "/notifications").await;
+        assert_eq!(body, json!({"looked": "ok", "age_seconds": 0, "data": []}));
+
+        events::remember(&fleet.events, Event::unreachable("pi")).await;
+        events::remember(&fleet.events, Event::relay_test()).await;
+
+        let body = get_json(fleet, "/notifications").await;
+        assert_eq!(body["data"][0]["kind"], json!("relay-test"));
+        assert_eq!(body["data"][1]["kind"], json!("unreachable"));
+        assert_eq!(body["data"][1]["machine"], json!("pi"));
+        assert_eq!(body["data"][1]["workspace"], Value::Null);
+        assert!(body["data"][1]["at"].as_u64().is_some());
+        assert!(body["data"][1]["said"].as_str().is_some());
+    }
+
     /// M4 reads and nothing else. A write route is where Q6's absent auth stops
     /// being free (R-22), so the refusal is the thing worth asserting.
     #[tokio::test]
     async fn nothing_here_accepts_a_write() {
-        for path in ["/machines", "/workspaces/api/status"] {
+        for path in [
+            "/machines",
+            "/workspaces/api/status",
+            "/about",
+            "/notifications",
+        ] {
             for method in ["POST", "PUT", "DELETE", "PATCH"] {
                 let response = router()
                     .with_state(holding(Snapshot::default()))

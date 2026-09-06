@@ -14,6 +14,13 @@
 //! dashboard says so itself, on [`crate::write`]'s beacon; here that is one
 //! bool, and the diff still runs under it — a change seen while a tab was open
 //! is a change already told, not one owed later.
+//!
+//! **Every notification is remembered before any of that** ([ADR-0025]): the
+//! diff runs with or without a relay, and what it produced goes into
+//! [`crate::events`] first, so a send that is dropped, or never configured, is
+//! still a remembered event.
+//!
+//! [ADR-0025]: ../../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,6 +28,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use yantra_core::notify::{Notification, Relay, Watch, post};
 use yantra_core::status::Fleet;
+
+use crate::events::{self, Event, Events};
 
 /// The whole of what one look may spend telling someone, well under
 /// `refresh::EVERY`. Without it a fleet where several things changed at once,
@@ -46,13 +55,14 @@ pub async fn watched(viewers: &Viewers) -> bool {
 
 #[derive(Debug)]
 pub struct Notifier {
-    relay: Relay,
+    /// `None` is a daemon with no relay, which still remembers.
+    relay: Option<Relay>,
     watch: Watch,
     log: Log,
 }
 
 impl Notifier {
-    pub fn new(relay: Relay) -> Self {
+    pub fn new(relay: Option<Relay>) -> Self {
         Self {
             relay,
             watch: Watch::default(),
@@ -67,11 +77,17 @@ impl Notifier {
     /// whole of D3 §13: the notifications a watched look produced are dropped
     /// here rather than held, so closing the tab does not deliver a backlog of
     /// things the page already showed.
-    pub async fn tell(&mut self, fleet: &Fleet, watched: bool) {
+    pub async fn tell(&mut self, fleet: &Fleet, watched: bool, events: &Events) {
         let notifications = self.watch.look(fleet);
         if notifications.is_empty() {
             return;
         }
+        for notification in &notifications {
+            events::remember(events, Event::of(notification, fleet)).await;
+        }
+        let Some(relay) = &self.relay else {
+            return;
+        };
         if watched {
             tracing::debug!(
                 "{} notification(s) not pushed: the dashboard is open",
@@ -79,7 +95,7 @@ impl Notifier {
             );
             return;
         }
-        let outcome = tokio::time::timeout(BUDGET, send(&self.relay, &notifications))
+        let outcome = tokio::time::timeout(BUDGET, send(relay, &notifications))
             .await
             .unwrap_or(Err("the budget for this look ran out".to_owned()));
         if let Some(line) = self.log.line(outcome) {
@@ -168,9 +184,12 @@ mod tests {
     async fn a_fresh_daemon_sends_nothing_and_then_sends_only_what_changed() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let address = listener.local_addr().expect("the port it got");
-        let mut notifier = Notifier::new(relay(address));
+        let mut notifier = Notifier::new(Some(relay(address)));
+        let events = Events::default();
 
-        notifier.tell(&fleet("api", Verdict::Running), false).await;
+        notifier
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
 
         listener.set_nonblocking(true).expect("a nonblocking check");
         assert!(
@@ -178,17 +197,64 @@ mod tests {
             "the first look after a start must not open a connection at all"
         );
         listener.set_nonblocking(false).expect("blocking again");
+        assert!(
+            events.read().await.is_empty(),
+            "and remembers nothing either"
+        );
 
         let served = thread::spawn(move || answer(&listener, "200 OK"));
 
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), false)
+            .tell(&fleet("api", Verdict::AwaitingTrust), false, &events)
             .await;
 
         assert_eq!(
             served.join().expect("the listener thread"),
             "api: waiting at claude's trust prompt"
         );
+        let remembered = events::newest_first(&events).await;
+        assert_eq!(remembered.len(), 1);
+        assert_eq!(remembered[0].kind, "awaiting_trust");
+        assert_eq!(remembered[0].workspace.as_deref(), Some("api"));
+        assert_eq!(remembered[0].machine.as_deref(), Some("cachyos-g14"));
+        assert_eq!(remembered[0].said, "api: waiting at claude's trust prompt");
+    }
+
+    /// ADR-0025 §2 from both sides a send can fail on: no relay at all, and a
+    /// relay that refused. Either way the event is there, because it was
+    /// remembered before the send was tried.
+    #[tokio::test]
+    async fn an_event_is_remembered_with_no_relay_and_when_the_relay_refuses() {
+        let events = Events::default();
+        let mut quiet = Notifier::new(None);
+        quiet
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
+        quiet
+            .tell(
+                &fleet("api", Verdict::Crashed { status: 2 }),
+                false,
+                &events,
+            )
+            .await;
+        assert_eq!(events.read().await.len(), 1, "no relay, still remembered");
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let served = thread::spawn(move || answer(&listener, "503 Service Unavailable"));
+        let mut refused = Notifier::new(Some(relay(address)));
+        refused
+            .tell(&fleet("site", Verdict::Running), false, &events)
+            .await;
+        refused
+            .tell(&fleet("site", Verdict::Finished), false, &events)
+            .await;
+        served.join().expect("the listener thread");
+
+        let remembered = events::newest_first(&events).await;
+        assert_eq!(remembered.len(), 2, "{remembered:?}");
+        assert_eq!(remembered[0].kind, "finished");
+        assert_eq!(remembered[1].kind, "crashed");
     }
 
     /// The rule that has no state to inspect, so it is asserted from the
@@ -203,15 +269,24 @@ mod tests {
                 .map(|status| answer(&listener, status))
                 .to_vec()
         });
-        let mut notifier = Notifier::new(relay(address));
+        let mut notifier = Notifier::new(Some(relay(address)));
+        let events = Events::default();
 
-        notifier.tell(&fleet("api", Verdict::Running), false).await;
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), false)
+            .tell(&fleet("api", Verdict::Running), false, &events)
             .await;
-        notifier.tell(&fleet("api", Verdict::Running), false).await;
         notifier
-            .tell(&fleet("api", Verdict::Crashed { status: 1 }), false)
+            .tell(&fleet("api", Verdict::AwaitingTrust), false, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
+        notifier
+            .tell(
+                &fleet("api", Verdict::Crashed { status: 1 }),
+                false,
+                &events,
+            )
             .await;
 
         let seen = served.join().expect("the listener thread");
@@ -232,21 +307,29 @@ mod tests {
     async fn a_change_seen_while_the_page_was_open_is_never_pushed() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let address = listener.local_addr().expect("the port it got");
-        let mut notifier = Notifier::new(relay(address));
+        let mut notifier = Notifier::new(Some(relay(address)));
+        let events = Events::default();
 
-        notifier.tell(&fleet("api", Verdict::Running), true).await;
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), true)
+            .tell(&fleet("api", Verdict::Running), true, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), true, &events)
             .await;
         // The tab is closed now, and the fleet has not changed since.
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), false)
+            .tell(&fleet("api", Verdict::AwaitingTrust), false, &events)
             .await;
 
         listener.set_nonblocking(true).expect("a nonblocking check");
         assert!(
             listener.accept().is_err(),
             "a watched change must be dropped, not held for the next look"
+        );
+        assert_eq!(
+            events.read().await.len(),
+            1,
+            "dropped from the relay, and still on the page's list"
         );
     }
 
