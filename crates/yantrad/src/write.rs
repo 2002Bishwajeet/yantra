@@ -28,6 +28,7 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
+use yantra_core::github;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
@@ -133,6 +134,8 @@ where
     let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
         .route("/viewing", post(viewing::<I>))
+        .route("/github/login", post(login::<I>))
+        .route("/github", axum::routing::delete(logout::<I>))
         .with_state(Remembered { authoriser, fleet });
 
     acts.merge(remembered)
@@ -639,7 +642,7 @@ async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     tracing::info!("relay written for {}", caller.node);
 
     let file = std::path::Path::new(notify::RELAY_FILE);
-    notify::write_to(file, &publish.url, publish.token.as_deref()).map_err(|error| {
+    notify::write_relay(file, &publish.url, publish.token.as_deref()).map_err(|error| {
         Refused::Verb {
             status: match error {
                 notify::NotWritten::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
@@ -661,6 +664,102 @@ async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
             ),
         })?;
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Step 1 of the device flow, as the page draws it: the code to type and where
+/// to type it. **`device_code` is not in it** — with the client id it is
+/// enough to collect the token, so it stays in the task that polls.
+#[derive(Debug, serde::Serialize)]
+struct Device {
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: u64,
+}
+
+impl Device {
+    fn of(device: &github::Device) -> Self {
+        Self {
+            user_code: device.user_code.clone(),
+            verification_uri: device.verification_uri.clone(),
+            expires_in: device.expires_in,
+            interval: device.interval,
+        }
+    }
+}
+
+/// `yantra github login` on the wire ([ADR-0023] §5). It answers as soon as
+/// GitHub has issued a code, and the rest of the flow — the poll, the write,
+/// the grant going live — runs in a task the daemon owns, because the person
+/// is now on their phone at github.com and nothing here should wait on them.
+/// `GET /api/github` says when it is done.
+///
+/// **One flow at a time**: a second `POST` while a code is waiting is a
+/// **409**, since two would race for one file. A daemon with no client id is
+/// a **500** naming the variable — that is this deployment's own fault — and
+/// a GitHub that refused or could not be reached is a **502**.
+///
+/// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
+async fn login<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Device>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let client_id = github::client_id().ok_or_else(|| Refused::Verb {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        said: github::Error::NoClientId.to_string(),
+    })?;
+    let grant = &state.fleet.github;
+    if !grant.begin().await {
+        return Err(Refused::Verb {
+            status: StatusCode::CONFLICT,
+            said: "a sign-in is already waiting for its code to be entered at github.com"
+                .to_owned(),
+        });
+    }
+    let device = match github::Github::default().begin(&client_id).await {
+        Ok(device) => device,
+        Err(error) => {
+            grant.clear().await;
+            return Err(Refused::Verb {
+                status: match error {
+                    github::Error::Rejected { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+                    _ => StatusCode::BAD_GATEWAY,
+                },
+                said: chain(&error),
+            });
+        }
+    };
+    tracing::info!("github sign-in begun for {}", caller.node);
+    tokio::spawn(crate::github::sign_in(
+        grant.clone(),
+        client_id,
+        device.clone(),
+    ));
+    Ok(Json(Device::of(&device)))
+}
+
+/// `yantra github logout` on the wire: the line leaves the file, then the
+/// grant leaves memory. In that order, so a file that could not be written
+/// answers **500** naming it while the daemon still holds what the file does
+/// — the two never disagree in the direction that brings a revoked grant back
+/// at the next start.
+async fn logout<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
+        Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        }
+    })?;
+    state.fleet.github.clear().await;
+    tracing::info!("github grant removed by {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1359,6 +1458,16 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         serde_json::to_value(value).expect("a DTO of owned strings and numbers")
     }
     vec![
+        (
+            "device",
+            "Device",
+            of(&Device {
+                user_code: "WDJB-MJHT".to_owned(),
+                verification_uri: "https://github.com/login/device".to_owned(),
+                expires_in: 900,
+                interval: 5,
+            }),
+        ),
         (
             "made",
             "Workspace",
@@ -2228,6 +2337,63 @@ mod tests {
         let answered = app.oneshot(set).await.expect("the router is infallible");
 
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Both halves of the grant are behind the gate and refuse before anything
+    /// is asked of GitHub or written: this tailnet holds nobody. The `DELETE`
+    /// shares its path with `api.rs`'s `GET`, so the 403 also says the merge
+    /// kept both methods.
+    #[tokio::test]
+    async fn signing_in_and_out_are_authorised_before_anything_happens() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app = crate::api::router()
+            .with_state(fleet.clone())
+            .merge(router(direct(tailnet(vec![])), fleet.clone()));
+
+        for request in [
+            Request::post("/github/login").body(Body::empty()),
+            Request::delete("/github").body(Body::empty()),
+        ] {
+            let mut request = request.expect("a request with no body");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            let answered = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        }
+        assert!(
+            !fleet.github.read().await.pending,
+            "a refused caller starts no flow"
+        );
+    }
+
+    /// The code a page draws, and never the one the poll presents.
+    #[test]
+    fn the_device_answer_carries_no_device_code() {
+        let device: github::Device = serde_json::from_str(
+            r#"{"device_code":"3584d83530557fdd1f46af8289938c8ef79f9dc5","user_code":"WDJB-MJHT","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"#,
+        )
+        .expect("GitHub's own example parses");
+
+        let json = serde_json::to_value(Device::of(&device)).expect("a DTO");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "user_code": "WDJB-MJHT",
+                "verification_uri": "https://github.com/login/device",
+                "expires_in": 900,
+                "interval": 5
+            })
+        );
     }
 
     /// A token nobody meant to send is worse here than anywhere: it would be

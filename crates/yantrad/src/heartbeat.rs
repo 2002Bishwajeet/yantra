@@ -57,6 +57,8 @@ pub struct Fleet {
     /// D3 §13's one piece of viewer state, here for the same reason the beats
     /// are: it is neither a look this daemon took nor a beat a machine sent.
     pub viewers: crate::notify::Viewers,
+    /// The GitHub grant (ADR-0023 §3), here for the same reason again.
+    pub github: crate::github::Grant,
 }
 
 /// So a handler asks for the half it reads: `/api/machines` joins the two, and
@@ -70,6 +72,12 @@ impl axum::extract::FromRef<Fleet> for Model {
 impl axum::extract::FromRef<Fleet> for Beats {
     fn from_ref(fleet: &Fleet) -> Self {
         fleet.beats.clone()
+    }
+}
+
+impl axum::extract::FromRef<Fleet> for crate::github::Grant {
+    fn from_ref(fleet: &Fleet) -> Self {
+        fleet.github.clone()
     }
 }
 

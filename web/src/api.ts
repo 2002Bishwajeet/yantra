@@ -289,3 +289,45 @@ export type Item = {
   // RFC 3339 as GitHub sent it. Aged against now, not against the look.
   updated_at: string
 }
+
+// ---------------------------------------------------------------------------
+// Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
+// edits above it is trivial.
+
+/** `GET /api/github` — what the daemon holds, read from memory (ADR-0023 §3).
+ *  Never the token: `login` is the one thing about the account that is
+ *  shown, and it is `null` until the grant's first `GET /user` has answered.
+ *  `scopes` is empty for a grant read from the environment. `pending` is a
+ *  device flow waiting for its code to be typed at github.com. */
+export type Connection = {
+  connected: boolean
+  login: string | null
+  scopes: string[]
+  pending: boolean
+}
+
+/** `POST /api/github/login` — step 1 of the device flow: the code to type and
+ *  where to type it. The daemon polls; `GET /api/github` says when it is done.
+ *  A second `POST` while one is `pending` is a 409. */
+export type Device = {
+  user_code: string
+  verification_uri: string
+  // Seconds. GitHub's are 900 and 5.
+  expires_in: number
+  interval: number
+}
+
+/** One entry of `GET /api/repos`, swept every 300 s like `/api/attention` and
+ *  filtered **in the browser** — a typed box polls, and a read handler never
+ *  awaits the network. No grant is `looked: 'failed'` naming the login. */
+export type Repo = {
+  // `owner/name`.
+  full_name: string
+  private: boolean
+  // null is a repository GitHub has not classified.
+  language: string | null
+  // RFC 3339; null is a repository never pushed to.
+  pushed_at: string | null
+  clone_url: string
+  default_branch: string
+}

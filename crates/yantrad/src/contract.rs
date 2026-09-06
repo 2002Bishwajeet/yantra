@@ -31,6 +31,7 @@ use tower::ServiceExt as _;
 use yantra_core::agent::Running;
 use yantra_core::attention::{Attention, Item};
 use yantra_core::doctor;
+use yantra_core::github::{Repo, Token};
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::inventory::{MachineInfo, Os};
 use yantra_core::sessions::{self, MachineSessions};
@@ -39,6 +40,7 @@ use yantra_core::status::{self, MachineStatus, Report, Verdict};
 use yantra_core::tmux::Summary;
 use yantra_core::workspace::{Listing, Unusable, Workspace};
 
+use crate::github::Grant;
 use crate::heartbeat::{Beats, Fleet};
 
 const GENERATED: &str = "../../web/src/contract.gen.ts";
@@ -54,6 +56,8 @@ const HEADER: &str = "\
 import type {
   Attention,
   Broken,
+  Connection,
+  Device,
   Listed,
   Listing,
   Looked,
@@ -61,6 +65,7 @@ import type {
   MachineSessions,
   Opened,
   Readiness,
+  Repo,
   Resumed,
   Spend,
   Stopped,
@@ -129,6 +134,13 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             "attention",
             "Looked<Attention>",
             read(&fleet, "/attention").await,
+        ),
+        ("repos", "Looked<Repo[]>", read(&fleet, "/repos").await),
+        ("github", "Connection", read(&fleet, "/github").await),
+        (
+            "disconnected",
+            "Connection",
+            read(&Fleet::default(), "/github").await,
         ),
         (
             "notLooked",
@@ -272,7 +284,28 @@ async fn fleet() -> Fleet {
         // `/readiness/github` has no entry below: the type it would satisfy is
         // the card's, and the dashboard is parked (Y-174).
         github: None,
+        repos: Some(Arc::new(Reading::new(Ok(vec![
+            Repo {
+                full_name: "2002Bishwajeet/yantra".into(),
+                private: false,
+                language: Some("Rust".into()),
+                pushed_at: Some("2026-09-05T21:14:03Z".into()),
+                clone_url: "https://github.com/2002Bishwajeet/yantra.git".into(),
+                default_branch: "main".into(),
+            },
+            // Both `null`s the browser has to draw: no language, never pushed.
+            Repo {
+                full_name: "2002Bishwajeet/scratch".into(),
+                private: true,
+                language: None,
+                pushed_at: None,
+                clone_url: "https://github.com/2002Bishwajeet/scratch.git".into(),
+                default_branch: "main".into(),
+            },
+        ])))),
     });
+    // A grant whose login the sweep has learned; the token is in no answer.
+    fleet.github.learned("2002Bishwajeet".into()).await;
 
     let mut beats = fleet.beats.write().await;
     beats.insert("n-1".to_owned(), Reading::new(beat(Power::Ac)));
@@ -301,6 +334,7 @@ fn holding(snapshot: Snapshot) -> Fleet {
     Fleet {
         model: Arc::new(tokio::sync::RwLock::new(snapshot)),
         beats: Beats::default(),
+        github: Grant::holding(Some(Token::new("gho_notarealtoken".into()))),
         ..Fleet::default()
     }
 }
