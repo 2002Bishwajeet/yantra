@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&family=IBM+Plex+Mono:wght@500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; min-height: 0; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .track { height: 6px; border-radius: 3px; background: #FFFFFF; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 10px 16px; font-size: 14px; font-weight: 500; line-height: 20px; min-height: 44px; box-sizing: border-box; background: #FFFFFF; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; line-height: 16px; color: #424940; }
+    .step-n { width: 24px; height: 24px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 12px; box-sizing: border-box; }
+    .field { background: #FFFFFF; border-radius: 16px; padding: 16px 18px; min-height: 56px; box-sizing: border-box; display: flex; align-items: center; font-size: 16px; line-height: 24px; }
+    .swatch { width: 32px; height: 32px; border-radius: 999px; box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 1024px; background: #F8FAF3; position: relative; overflow: hidden; box-sizing: border-box;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; height: 64px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 28px; height: 28px; border-radius: 999px; background: #48674B;"></div>
+      <div style="font-size: 22px; font-weight: 700; line-height: 28px;">Yantra</div>
+    </div>
+    <nav style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+      <a href="#" class="pill" style="background: #D6E8D0; color: #3B4B39;">Dashboard</a>
+      <a href="#" class="pill" style="color: #424940;">Fleet</a>
+      <a href="#" class="pill" style="color: #424940;">Machines</a>
+      <a href="#" class="pill" style="color: #424940;">Usage</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 24px; padding: 8px 12px 8px 16px; border-radius: 999px; background: #E6E9E0;">
+        <span style="font-size: 14px; line-height: 20px; color: #424940;">Search anything</span>
+        <span class="mono" style="font-size: 12px; line-height: 16px; padding: 2px 8px; border-radius: 6px; background: #FFFFFF; color: #424940;">⌘K</span>
+      </div>
+      <div class="icon-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+      </div>
+      <div style="width: 36px; height: 36px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;">B</div>
+    </div>
+  </header>
+
+  <div style="position: absolute; top: 0; left: 0; width: 1440px; height: 1024px; background: rgba(25, 29, 24, 0.32); display: flex; align-items: center; justify-content: center;">
+
+    <section style="width: 880px; background: #F2F4EC; border-radius: 28px; padding: 28px 32px 24px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px;">
+
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 28px; font-weight: 700; line-height: 36px;">New session</div>
+          <div class="t2" style="font-size: 13px;">a name, a machine, a repository, and what to start in it</div>
+        </div>
+        <div class="icon-btn" style="background: #E6E9E0;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div class="step" style="color: #191D18;"><span class="step-n" style="background: #D6E8D0; color: #3B4B39;">1</span>Name</div>
+        <div style="flex: 1; height: 1px; background: #C2C9BE;"></div>
+        <div class="step"><span class="step-n" style="border: 1.5px solid #C2C9BE;">2</span>Machine</div>
+        <div style="flex: 1; height: 1px; background: #C2C9BE;"></div>
+        <div class="step"><span class="step-n" style="border: 1.5px solid #C2C9BE;">3</span>Source</div>
+        <div style="flex: 1; height: 1px; background: #C2C9BE;"></div>
+        <div class="step"><span class="step-n" style="border: 1.5px solid #C2C9BE;">4</span>Start</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="eyebrow">Name</div>
+        <div style="display: flex; gap: 16px; align-items: flex-start;">
+          <div style="width: 72px; height: 72px; border-radius: 22px; background: #48674B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; flex: none;">Q</div>
+          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1;">
+            <div class="field" style="color: #727A70;">quiet-otter</div>
+            <div class="t2">optional. Leave it and the session is called quiet-otter; the letter and colour are how you tell sessions apart at a glance.</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding-left: 88px;">
+          <div class="swatch" style="background: #48674B; border: 3px solid #F2F4EC; box-shadow: 0 0 0 2px #48674B;"></div>
+          <div class="swatch" style="background: #7A6A45;"></div>
+          <div class="swatch" style="background: #A85B3C;"></div>
+          <div class="swatch" style="background: #4E6A7A;"></div>
+          <div class="swatch" style="background: #6B4E7A;"></div>
+          <div class="swatch" style="background: #3A3D38;"></div>
+          <a href="#" class="pill" style="background: #FFFFFF; color: #48674B; padding: 6px 14px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#48674B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"></path></svg>
+            Upload an image
+          </a>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="eyebrow">Machine</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="chip" style="background: #D6E8D0; color: #3B4B39;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>cachyos-g14</span>
+          <span class="chip"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>macbook</span>
+          <span class="chip"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>pi-5</span>
+          <span class="chip"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>hetzner-1</span>
+          <span class="chip"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>nas</span>
+          <span class="chip" style="background: #FFDAD6; color: #93000A;"><span class="mark" style="width: 8px; height: 8px; border: 1.5px dashed #BA1A1A;"></span>thinkpad · unreachable</span>
+        </div>
+        <div class="t2">the session runs here; the repository is looked for on this machine in the next step.</div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 4px;">
+        <a href="#" class="pill" style="color: #424940; padding: 10px 18px;">Cancel</a>
+        <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; padding: 12px 24px;">Continue</a>
+      </div>
+
+    </section>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

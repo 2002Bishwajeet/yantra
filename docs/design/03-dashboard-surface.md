@@ -36,6 +36,14 @@ appearance: it sets how much chrome is allowed and how loud state may be.
 > before the product works: the ntfy relay's URL and token (D1 §6), which are environment variables
 > nothing in the product can write today.
 
+> **2026-09-06, [Y-332](../../tracker.md#3-task-board): the owner reopened preferences.** The
+> Figma-to-canvas redesign adds an **Appearance** category to `/settings`: a dashboard layout
+> choice (Clean or Compact), a colour seed that recolours the whole Material scheme, and Light,
+> Dark or System. What changed upstream is the audience: the owner expects a phone and an iPad to
+> be the main drivers, and one layout does not serve a 390 px feed and a wide monitor equally.
+> The rest of Q6 holds: one tenant, no auth beyond Tailscale, configuration in `/settings`. Rows
+> never drop below 44 px in either layout, and state marks keep their shapes under every seed.
+
 ---
 
 ## 1. What the dashboard is for

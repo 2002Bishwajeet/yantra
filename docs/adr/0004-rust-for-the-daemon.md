@@ -109,3 +109,9 @@ serves one user. Throughput was never the constraint, and no benchmark motivated
 >
 > The rest of the amendment stands unchanged: `rusqlite` is in no `Cargo.toml`, I-12, I-13 and I-14
 > stay parked, and what would bring a store back is still the Y-044 row's list.
+
+> **Bent a second time on 2026-09-06 (Y-334), by the same bound.**
+> [ADR-0023](0023-the-github-grant-lives-beside-the-relay.md) writes a GitHub token to the same file
+> ADR-0021 chose. It is still one of the daemon's own inputs, not a store: no session, no verdict,
+> no beat, no history, and the first look after a start still says nothing. The rest of the
+> amendment above stands unchanged.

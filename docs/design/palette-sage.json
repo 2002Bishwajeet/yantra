@@ -1,0 +1,30 @@
+{
+  "name": "Yantra / M3 scheme",
+  "note": "Material 3 role names. Sage-green primary, olive secondary, beige tertiary, warm green-grey neutrals. Owner asked for sage green or beige on 2026-09-06 (Y-332). Dark values are a first pass and unreviewed.",
+  "light": {
+    "Primary": "#48674B", "On Primary": "#FFFFFF", "Primary Container": "#CBE8C6", "On Primary Container": "#2F4E33",
+    "Secondary": "#536350", "On Secondary": "#FFFFFF", "Secondary Container": "#D6E8D0", "On Secondary Container": "#3B4B39",
+    "Tertiary": "#7A6A45", "On Tertiary": "#FFFFFF", "Tertiary Container": "#F2E1B8", "On Tertiary Container": "#5C4E2D",
+    "Error": "#BA1A1A", "On Error": "#FFFFFF", "Error Container": "#FFDAD6", "On Error Container": "#93000A",
+    "Surface": "#F8FAF3", "Surface Dim": "#D9DBD3", "Surface Bright": "#F8FAF3",
+    "Surface Container Lowest": "#FFFFFF", "Surface Container Low": "#F2F4EC", "Surface Container": "#ECEEE6",
+    "Surface Container High": "#E6E9E0", "Surface Container Highest": "#E1E3DB",
+    "On Surface": "#191D18", "On Surface Variant": "#424940", "Outline": "#727A70", "Outline Variant": "#C2C9BE",
+    "Inverse Surface": "#2E322D", "Inverse On Surface": "#EFF2EA", "Inverse Primary": "#AFCFAC",
+    "Background": "#F8FAF3", "On Background": "#191D18", "Surface Variant": "#E1E3DB", "Surface Tint": "#48674B",
+    "Scrim": "#000000", "Shadow": "#000000"
+  },
+  "dark": {
+    "Primary": "#AFCFAC", "On Primary": "#1C3620", "Primary Container": "#324F35", "On Primary Container": "#CBE8C6",
+    "Secondary": "#BACCB4", "On Secondary": "#253424", "Secondary Container": "#3B4B39", "On Secondary Container": "#D6E8D0",
+    "Tertiary": "#D6C59E", "On Tertiary": "#3A3117", "Tertiary Container": "#5C4E2D", "On Tertiary Container": "#F2E1B8",
+    "Error": "#FFB4AB", "On Error": "#690005", "Error Container": "#93000A", "On Error Container": "#FFDAD6",
+    "Surface": "#11140F", "Surface Dim": "#11140F", "Surface Bright": "#373A34",
+    "Surface Container Lowest": "#0C0F0A", "Surface Container Low": "#191D18", "Surface Container": "#1D211C",
+    "Surface Container High": "#282C26", "Surface Container Highest": "#333731",
+    "On Surface": "#E1E3DB", "On Surface Variant": "#C2C9BE", "Outline": "#8C9489", "Outline Variant": "#424940",
+    "Inverse Surface": "#E1E3DB", "Inverse On Surface": "#2E322D", "Inverse Primary": "#48674B",
+    "Background": "#11140F", "On Background": "#E1E3DB", "Surface Variant": "#424940", "Surface Tint": "#AFCFAC",
+    "Scrim": "#000000", "Shadow": "#000000"
+  }
+}

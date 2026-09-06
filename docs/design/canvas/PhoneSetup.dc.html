@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&family=IBM+Plex+Mono:wght@500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .mark-done { background: #CBE8C6; border: 1.5px solid #48674B; }
+    .t1 { font-size: 15px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .t3 { font-size: 13px; font-weight: 400; line-height: 18px; color: #424940; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .icon-btn { width: 44px; height: 44px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .list { background: #FFFFFF; border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+    .item { display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 10px 8px 10px 14px; box-sizing: border-box; }
+    .item + .item { border-top: 1px solid #C2C9BE; }
+    .lead { width: 36px; height: 36px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; flex: none; }
+    .chev { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex: none; }
+    .btn-text { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; color: #48674B; flex: none; }
+    .btn-filled { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; background: #48674B; color: #FFFFFF; flex: none; }
+    .track { height: 6px; border-radius: 3px; background: #E6E9E0; overflow: hidden; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; background: #F8FAF3; position: relative; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; height: 64px; flex: none; box-sizing: border-box;">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 700; line-height: 28px;">Set up Yantra</h1>
+    <div style="display: flex; align-items: center; gap: 4px;">
+      <a href="#" class="icon-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+      </a>
+      <a href="#" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+        <span style="width: 36px; height: 36px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;">B</span>
+      </a>
+    </div>
+  </header>
+
+  <main style="flex: 1; min-height: 0; overflow: hidden; padding: 4px 16px 0 16px; box-sizing: border-box;">
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 0 2px;">
+        <div class="t3">the appliance checks each step itself and tells you what is left</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div class="mono t2" style="color: #191D18;">3 of 6 done</div>
+            <div class="mono t2">checked 4s ago</div>
+          </div>
+          <div class="track"><div style="width: 50%; height: 6px; background: #48674B; border-radius: 3px;"></div></div>
+        </div>
+      </div>
+
+      <section class="list">
+
+        <div class="item">
+          <div class="lead" style="background: #CBE8C6;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F4E33" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1">On your tailnet</div>
+            <div class="t2 state" style="align-items: flex-start;"><span class="mark mark-done" style="width: 8px; height: 8px; margin-top: 4px;"></span><span>done · yantra.tail3a1b.ts.net over HTTPS</span></div>
+          </div>
+          <a href="#" class="btn-text">Open</a>
+        </div>
+
+        <div class="item">
+          <div class="lead" style="background: #CBE8C6;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F4E33" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1">This account's ssh key</div>
+            <div class="t2 state" style="align-items: flex-start;"><span class="mark mark-done" style="width: 8px; height: 8px; margin-top: 4px;"></span><span>done · created here, not yet on every machine</span></div>
+          </div>
+          <div class="chev"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </div>
+
+        <div class="item">
+          <div class="lead" style="background: #F2E1B8;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5C4E2D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 1 0 16z" fill="#5C4E2D" stroke="none"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1">Machines</div>
+            <div class="t2 state" style="align-items: flex-start;"><span class="mark mark-running" style="width: 8px; height: 8px; margin-top: 4px;"></span><span>in progress · 2 of 4 ready · see machines</span></div>
+          </div>
+          <div class="chev"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </div>
+
+        <div class="item">
+          <div class="lead" style="background: #CBE8C6;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F4E33" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1">GitHub</div>
+            <div class="t2 state" style="align-items: flex-start;"><span class="mark mark-done" style="width: 8px; height: 8px; margin-top: 4px;"></span><span>done · gh signed in as 2002Bishwajeet</span></div>
+          </div>
+          <div class="chev"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </div>
+
+        <div class="item">
+          <div class="lead" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1">Push to this phone</div>
+            <div class="t2 state" style="align-items: flex-start;"><span class="mark mark-idle" style="width: 8px; height: 8px; margin-top: 4px;"></span><span>not set · an ntfy topic, saved once, tested once</span></div>
+          </div>
+          <a href="#" class="btn-filled">Set up</a>
+        </div>
+
+        <div class="item">
+          <div class="lead" style="background: #48674B;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1">Your first session</div>
+            <div class="t2 state" style="align-items: flex-start;"><span class="mark mark-needs" style="width: 8px; height: 8px; margin-top: 4px;"></span><span>waiting on you · two machines are ready</span></div>
+          </div>
+          <a href="#" class="btn-filled">New session</a>
+        </div>
+
+      </section>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 0 2px;">
+        <div class="t2">Nothing here needs a terminal. Each step re-checks itself every few seconds.</div>
+        <div style="display: flex; justify-content: flex-end;">
+          <a href="#" class="btn-text" style="color: #424940;">Skip for now</a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

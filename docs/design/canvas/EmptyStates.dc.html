@@ -1,0 +1,174 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&family=IBM+Plex+Mono:wght@500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; min-height: 0; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .track { height: 6px; border-radius: 3px; background: #FFFFFF; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 1400px; background: #F8FAF3; display: flex; flex-direction: column; gap: 24px; padding: 32px 40px 40px 40px; overflow: hidden; box-sizing: border-box;">
+
+  <div style="display: flex; flex-direction: column; gap: 8px; flex: none;">
+    <h1 style="margin: 0; font-size: 28px; font-weight: 700; line-height: 32px;">Empty and pending states</h1>
+    <div style="font-size: 15px; line-height: 22px; color: #424940;">one block per surface, drawn in place of its rows</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 300px; gap: 16px; flex: none;">
+
+    <section class="card" style="background: #CBE8C6; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow" style="color: #2F4E33;">Fleet / Needs you</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed rgba(47,78,51,0.35); border-radius: 20px; text-align: center; color: #2F4E33;">
+        <div class="state" style="gap: 8px; font-size: 18px; font-weight: 600; line-height: 24px;"><span class="mark mark-idle" style="border-color: #2F4E33;"></span>Nothing needs you</div>
+        <div style="font-size: 13px; line-height: 18px;">when an agent asks for trust or a review is requested, it appears here first</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #E6E9E0; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow">Fleet / Running</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed #C2C9BE; border-radius: 20px; text-align: center;">
+        <div class="state t1" style="gap: 8px; font-size: 15px;"><span class="mark mark-idle"></span>Nothing is running</div>
+        <div class="t2" style="font-size: 13px; line-height: 18px;">Start a session and its elapsed time shows here</div>
+      </div>
+    </section>
+
+    <section class="card" style="border: 1px solid #C2C9BE; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow">Fleet / Idle</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed #C2C9BE; border-radius: 20px; text-align: center;">
+        <div class="state t1" style="gap: 8px; font-size: 15px;"><span class="mark mark-idle"></span>no workspaces yet</div>
+        <div class="t2" style="font-size: 13px; line-height: 18px;">New makes one</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #ECEEE6; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow">Machines</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed #C2C9BE; border-radius: 20px; text-align: center;">
+        <div class="state t1" style="gap: 8px; font-size: 15px;"><span class="mark mark-idle"></span>No machine answered</div>
+        <div class="t2" style="font-size: 13px; line-height: 18px;">no machines on this tailnet · the appliance is on the tailnet but no ssh destination is configured yet</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #F2E1B8; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow" style="color: #5C4E2D;">Machines / Unclaimed</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed rgba(92,78,45,0.35); border-radius: 20px; text-align: center; color: #5C4E2D;">
+        <div class="state" style="gap: 8px; font-size: 15px; font-weight: 500; line-height: 20px;"><span class="mark mark-idle" style="border-color: #7A6A45;"></span>every tmux session on the machines that answered belongs to a workspace</div>
+        <div style="font-size: 13px; line-height: 18px;">the workspace list was read, so this is an answer</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #F2E1B8; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow" style="color: #5C4E2D;">Machines / Unclaimed, list unknown</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed rgba(92,78,45,0.35); border-radius: 20px; text-align: center; color: #5C4E2D;">
+        <div class="state" style="gap: 8px; font-size: 15px; font-weight: 500; line-height: 20px;"><span class="mark mark-unknown" style="border-color: #7A6A45;"></span>no workspace list to check these against, so none can be called unclaimed</div>
+        <div style="font-size: 13px; line-height: 18px;">the workspace read failed, so nothing here is called anything</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #ECEEE6; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow">Usage</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed #C2C9BE; border-radius: 20px; text-align: center;">
+        <div class="state t1" style="gap: 8px; font-size: 15px;"><span class="mark mark-idle"></span>No spend yet</div>
+        <div class="t2" style="font-size: 13px; line-height: 18px;">the first session's transcript is where the numbers come from</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #ECEEE6; padding: 20px 24px; gap: 14px;">
+      <div class="eyebrow">Session / Chat</div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed #C2C9BE; border-radius: 20px; text-align: center;">
+        <div class="state t1" style="gap: 8px; font-size: 15px;"><span class="mark mark-idle"></span>No turns yet</div>
+        <div class="t2" style="font-size: 13px; line-height: 18px;">the agent has not written its transcript; the Terminal tab shows it starting</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; height: 48px; padding: 4px 4px 4px 18px; border-radius: 24px; background: #FFFFFF; box-sizing: border-box; flex: none;">
+        <span style="flex: 1; font-size: 14px; line-height: 20px; color: #727A70;">Message Claude…</span>
+        <span style="width: 40px; height: 40px; border-radius: 999px; background: #48674B; display: flex; align-items: center; justify-content: center; flex: none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path></svg>
+        </span>
+      </div>
+    </section>
+
+    <section class="card" style="background: #11140F; padding: 20px 24px; gap: 12px;">
+      <div class="eyebrow" style="color: #C2C9BE;">Session / Terminal pending</div>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
+        <div class="mono" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px 16px; border: 1.5px dashed #424940; border-radius: 16px; font-size: 13px; line-height: 20px; color: #E1E3DB;"><span class="mark mark-unknown" style="border-color: #C2C9BE;"></span>connecting…</div>
+        <div class="mono" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px 16px; border: 1.5px dashed #424940; border-radius: 16px; font-size: 13px; line-height: 20px; color: #E1E3DB;"><span class="mark mark-unknown" style="border-color: #C2C9BE;"></span>reconnecting, attempt 3 of 5</div>
+      </div>
+      <div class="mono" style="display: flex; align-items: center; gap: 10px; font-size: 12px; line-height: 16px; color: #8F978B; flex: none;">
+        <span class="mark mark-unknown" style="width: 8px; height: 8px; border-color: #8F978B;"></span>
+        <span>not attached · tmux yantra-web on cachyos-g14</span>
+      </div>
+    </section>
+
+    <section class="card" style="background: #F2F4EC; border: 1px solid #C2C9BE; padding: 20px 24px; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <div class="eyebrow">Notifications popover</div>
+        <div style="display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+          <span class="pill" style="background: #D6E8D0; color: #3B4B39; padding: 6px 12px; font-size: 13px; line-height: 18px;">Unread <span class="mono" style="font-size: 12px; line-height: 16px;">0</span></span>
+          <span class="pill" style="color: #424940; padding: 6px 12px; font-size: 13px; line-height: 18px;">All</span>
+        </div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1.5px dashed #C2C9BE; border-radius: 20px; text-align: center;">
+        <div class="state t1" style="gap: 8px; font-size: 15px;"><span class="mark mark-idle"></span>You're caught up</div>
+        <div class="t2 state" style="font-size: 13px; line-height: 18px; gap: 8px;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>push to phone is on</div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #CBE8C6; padding: 20px 24px; gap: 14px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <div class="eyebrow" style="color: #2F4E33;">Needs you / GitHub</div>
+        <div class="t2" style="color: #2F4E33;">as of <span class="mono">2m</span> · read every 5 min</div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; border-radius: 20px; background: #FFDAD6; color: #93000A; box-sizing: border-box;">
+        <div class="state" style="gap: 8px; font-size: 15px; font-weight: 500; line-height: 20px;"><span class="mark mark-failed"></span>GitHub cannot be asked</div>
+        <div style="font-size: 13px; line-height: 18px;"><span class="mono">gh</span> is not signed in on the appliance</div>
+        <div class="mono" style="font-size: 12px; line-height: 16px; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.6); color: #93000A;">gh is installed but not logged in — run gh auth login</div>
+        <div style="flex: 1;"></div>
+        <div style="display: flex;">
+          <a href="#" class="textbtn" style="color: #93000A; padding: 10px 0;">Sign in</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="background: #ECEEE6; padding: 20px 24px; gap: 14px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <div class="eyebrow">Loading</div>
+        <div class="t2 state" style="gap: 6px;"><span class="mark mark-unknown" style="width: 8px; height: 8px;"></span>pending, not never</div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px;">
+        <div style="height: 56px; border-radius: 16px; background: #C2C9BE; opacity: 0.4;"></div>
+        <div style="height: 56px; border-radius: 16px; background: #C2C9BE; opacity: 0.4; width: 84%;"></div>
+        <div style="height: 56px; border-radius: 16px; background: #C2C9BE; opacity: 0.4; width: 64%;"></div>
+      </div>
+      <div class="t2" style="font-size: 13px; line-height: 18px;">a read that has not resolved draws bars, never a sentence</div>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&family=IBM+Plex+Mono:wght@500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; min-height: 0; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .track { height: 6px; border-radius: 3px; background: #FFFFFF; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 1024px; background: #F8FAF3; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; height: 64px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 28px; height: 28px; border-radius: 999px; background: #48674B;"></div>
+      <div style="font-size: 22px; font-weight: 700; line-height: 28px;">Yantra</div>
+    </div>
+    <nav style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+      <a href="#" class="pill" style="background: #D6E8D0; color: #3B4B39;">Dashboard</a>
+      <a href="#" class="pill" style="color: #424940;">Fleet</a>
+      <a href="#" class="pill" style="color: #424940;">Machines</a>
+      <a href="#" class="pill" style="color: #424940;">Usage</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 24px; padding: 8px 12px 8px 16px; border-radius: 999px; background: #E6E9E0;">
+        <span style="font-size: 14px; line-height: 20px; color: #424940;">Search anything</span>
+        <span class="mono" style="font-size: 12px; line-height: 16px; padding: 2px 8px; border-radius: 6px; background: #FFFFFF; color: #424940;">⌘K</span>
+      </div>
+      <div class="icon-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+        <span class="mono" style="position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #BA1A1A; color: #FFFFFF; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box;">3</span>
+      </div>
+      <div style="width: 36px; height: 36px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;">B</div>
+    </div>
+  </header>
+
+  <div style="display: flex; gap: 16px; padding: 8px 24px 24px 24px; flex: 1; min-height: 0;">
+
+    <aside style="width: 320px; flex: none; background: #F2F4EC; border-radius: 28px; padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px 8px;">
+        <div style="font-size: 18px; font-weight: 600; line-height: 24px;">Sessions</div>
+        <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; padding: 8px 16px 8px 14px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          New
+        </a>
+      </div>
+
+      <div class="eyebrow" style="padding: 8px 8px 4px 8px;">Live</div>
+      <div class="row" style="background: #D6E8D0; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #48674B;">Y</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1" style="color: #3B4B39;">yantra-web</div>
+          <div class="t2 state"><span class="mark mark-needs" style="width: 8px; height: 8px;"></span>waiting for trust · cachyos-g14</div>
+        </div>
+        <div class="mono t2">4m</div>
+      </div>
+      <div class="row" style="background: #FFFFFF; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #7A6A45;">L</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">landing</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · macbook</div>
+        </div>
+        <div class="mono t2">3h 41m</div>
+      </div>
+      <div class="row" style="background: #FFFFFF; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #3F5F7A;">H</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">homelab-k8s</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · pi-5</div>
+        </div>
+        <div class="mono t2">1h 12m</div>
+      </div>
+      <div class="row" style="background: #FFFFFF; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #6B4E7A;">A</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">agent-sdk</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · hetzner-1</div>
+        </div>
+        <div class="mono t2">26m</div>
+      </div>
+      <div class="row" style="background: #FFFFFF; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #4E6E7A;">A</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">appliance</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>no agent, a shell · nas</div>
+        </div>
+        <div class="mono t2">12m</div>
+      </div>
+
+      <div class="eyebrow" style="padding: 12px 8px 4px 8px;">History</div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #8A5A3A;">P</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">price-table</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>stopped · cachyos-g14</div>
+        </div>
+        <div class="mono t2">7 Jul</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #A85B3C;">N</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">ntfy-relay</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>finished · pi-5</div>
+        </div>
+        <div class="mono t2">5 Jul</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #5A6E3A;">D</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">docs-sweep</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>finished · macbook</div>
+        </div>
+        <div class="mono t2">2 Jul</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #9A7A3A;">L</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">landing-copy</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>stopped · macbook</div>
+        </div>
+        <div class="mono t2">30 Jun</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #3A5A5A;">C</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">cargo-zig</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>finished · hetzner-1</div>
+        </div>
+        <div class="mono t2">28 Jun</div>
+      </div>
+
+      <div style="flex: 1;"></div>
+      <a href="#" style="padding: 4px 12px; font-size: 14px; font-weight: 500; line-height: 20px;">All sessions →</a>
+    </aside>
+
+    <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+
+      <header style="display: flex; align-items: center; gap: 16px; padding: 8px 8px 0 8px; flex: none;">
+        <div style="width: 36px; height: 36px; border-radius: 12px; background: #48674B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none;">Y</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: baseline; gap: 14px;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: 700; line-height: 32px;">yantra-web</h1>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="mark mark-needs"></div>
+              <span style="font-size: 14px; font-weight: 500; line-height: 20px; color: #424940;">waiting for trust</span>
+              <span class="mono t2">· 4m</span>
+            </div>
+          </div>
+          <div class="t2" style="font-size: 13px; line-height: 18px;">cachyos-g14 · ~/Github/yantra · <a href="#">github.com/2002Bishwajeet/yantra</a></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; flex: none;">
+          <a href="#" class="pill" style="padding: 12px 20px; color: #424940;">Stop</a>
+          <span class="pill" style="padding: 12px 20px; background: #D6E8D0; color: #3B4B39; opacity: 0.45;">Resume</span>
+          <a href="#" class="pill" style="padding: 12px 20px; color: #93000A;">Delete</a>
+        </div>
+      </header>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 8px; flex: none;">
+        <nav style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+          <a href="#" class="pill" style="background: #D6E8D0; color: #3B4B39;">Terminal</a>
+          <a href="#" class="pill" style="color: #424940;">Transcript</a>
+          <a href="#" class="pill" style="color: #424940;">Spend</a>
+        </nav>
+        <div class="mono t2">looked 4s ago</div>
+      </div>
+
+      <section style="flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 28px; background: #11140F; box-sizing: border-box; overflow: hidden;">
+        <div class="mono" style="flex: 1; min-height: 0; overflow: hidden; font-size: 13px; line-height: 20px; color: #E1E3DB; white-space: pre; font-weight: 500; display: flex; flex-direction: column;">
+            <div style="color: #8F978B;">● I'll start by reading the tracker row for Y-306 before touching the probe.</div>
+            <div>&nbsp;</div>
+            <div>● Read(tracker.md)</div>
+            <div style="color: #8F978B;">  ⎿  Read 412 lines</div>
+            <div>&nbsp;</div>
+            <div>● The row wants two things: `before` skips newer records, and `total` comes from the same</div>
+            <div>  filter. The tail already takes a count, so the window is `tail -n {lines+before} | head -n</div>
+            <div>  {lines}`. The count is a second pass and I will time it separately.</div>
+            <div>&nbsp;</div>
+            <div>● Update(crates/yantra-core/src/logs.rs)</div>
+            <div style="color: #8F978B;">  ⎿  Added 14 lines, removed 3 lines</div>
+            <div>&nbsp;</div>
+            <div>● Both edits are in. I'll run the core crate's tests, including the container fixture that</div>
+            <div>  times the windowed read against a bare ssh round trip.</div>
+            <div>&nbsp;</div>
+            <div>● Bash(cargo test -p yantra-core)</div>
+            <div style="color: #8F978B;">  ⎿  Waiting…</div>
+            <div>&nbsp;</div>
+            <div style="color: #C2C9BE;">╭──────────────────────────────────────────────────────────────────────────────╮</div>
+            <div style="color: #C2C9BE;">│ Bash command                                                                 │</div>
+            <div style="color: #C2C9BE;">│                                                                              │</div>
+            <div style="color: #C2C9BE;">│   cargo test -p yantra-core                                                  │</div>
+            <div style="color: #C2C9BE;">│   Run the core crate's tests, including the container fixture                │</div>
+            <div style="color: #C2C9BE;">│                                                                              │</div>
+            <div style="color: #C2C9BE;">│ Do you want to proceed?                                                      │</div>
+            <div style="color: #CBE8C6;">│ &gt; 1. Yes                                                                     │</div>
+            <div style="color: #C2C9BE;">│   2. Yes, and don't ask again for cargo test commands in ~/Github/yantra     │</div>
+            <div style="color: #C2C9BE;">│   3. No, and tell Claude what to do differently (esc)                        │</div>
+            <div style="color: #C2C9BE;">╰──────────────────────────────────────────────────────────────────────────────╯</div>
+            <div>&nbsp;</div>
+            <div style="display: flex; gap: 0;"><span>&gt; </span><span style="display: inline-block; width: 8px; height: 18px; background: #E1E3DB; margin-top: 1px;"></span></div>
+        </div>
+        <div class="mono" style="display: flex; align-items: center; gap: 10px; font-size: 12px; line-height: 16px; color: #C2C9BE; flex: none;">
+          <span class="mark" style="width: 8px; height: 8px; background: #7A6A45;"></span>
+          <span>attached · tmux yantra-web on cachyos-g14 · 131×31</span>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

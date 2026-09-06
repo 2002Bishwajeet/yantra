@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&family=IBM+Plex+Mono:wght@500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; flex: none; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 10px 14px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; flex: none; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 6px 6px 6px 8px; min-height: 56px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track { height: 6px; border-radius: 3px; background: #ECEEE6; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 44px; height: 44px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+    .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 52px; color: #424940; }
+    .nav-ind { width: 64px; height: 32px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }
+    .nav-label { font-size: 12px; font-weight: 500; line-height: 16px; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; background: #F8FAF3; position: relative; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; height: 64px; flex: none; box-sizing: border-box;">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 700; line-height: 28px;">Dashboard</h1>
+    <div style="display: flex; align-items: center; gap: 4px;">
+      <a href="#" class="icon-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+        <span class="mono" style="position: absolute; top: 0; right: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #BA1A1A; color: #FFFFFF; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box;">3</span>
+      </a>
+      <a href="#" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+        <span style="width: 36px; height: 36px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;">B</span>
+      </a>
+    </div>
+  </header>
+
+  <main style="flex: 1; min-height: 0; overflow: hidden; padding: 4px 16px 0 16px; box-sizing: border-box;">
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 4px; min-height: 24px; font-size: 13px; line-height: 20px; color: #424940; white-space: nowrap;">
+        <span class="state" style="gap: 8px;"><span class="mark mark-running"></span>5 of 6 online</span>
+        <span>·</span>
+        <span class="state" style="gap: 8px; color: #93000A;"><span class="mark" style="border: 1.5px dashed #BA1A1A;"></span>thinkpad unreachable</span>
+        <span>·</span>
+        <a href="#" style="font-weight: 500;">Fix</a>
+      </div>
+
+      <section class="card" style="background: #CBE8C6;">
+        <div style="display: flex; align-items: center; gap: 12px; padding: 0 4px;">
+          <div style="font-size: 44px; font-weight: 700; line-height: 44px; color: #2F4E33;">3</div>
+          <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0;">
+            <h2 class="eyebrow" style="margin: 0; color: #2F4E33;">Needs you</h2>
+            <div style="font-size: 18px; font-weight: 500; line-height: 24px; color: #2F4E33;">things are waiting on you</div>
+          </div>
+          <div class="mono t2" style="color: #2F4E33;">as of 4s</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div class="row" style="background: rgba(255,255,255,0.7); gap: 10px;">
+            <div class="tile" style="background: #48674B;">Y</div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+              <div class="t1 clip" style="font-size: 15px;">yantra-web</div>
+              <div class="t2 state clip" style="display: flex;"><span class="mark mark-needs" style="width: 8px; height: 8px;"></span><span class="clip">waiting · cachyos-g14 · <span class="mono">4m</span></span></div>
+            </div>
+            <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; font-size: 13px; padding: 10px 12px;">Answer</a>
+          </div>
+          <div class="row" style="background: rgba(255,255,255,0.7); gap: 10px;">
+            <div class="tile" style="background: #E6E9E0;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+              <div class="t1 clip" style="font-size: 15px;">Review: <span class="mono" style="font-size: 14px;">yantra#246</span></div>
+              <div class="t2 clip">Y-331: the component library · <span class="mono">2h</span></div>
+            </div>
+            <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; font-size: 13px; padding: 10px 12px;">Review</a>
+          </div>
+          <div class="row" style="background: rgba(255,255,255,0.7); gap: 10px;">
+            <div class="tile" style="background: #E6E9E0;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+              <div class="t1 clip" style="font-size: 15px;">Issue: <span class="mono" style="font-size: 14px;">homelab#88</span></div>
+              <div class="t2 clip">pi-5 loses tailscale after resume · <span class="mono">1d</span></div>
+            </div>
+            <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; font-size: 13px; padding: 10px 12px;">Open</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" style="background: #E6E9E0; gap: 10px;">
+        <div style="display: flex; align-items: flex-end; gap: 10px; padding: 0 4px;">
+          <h2 style="margin: 0; font-size: 18px; font-weight: 600; line-height: 24px;">Running</h2>
+          <div class="t2" style="font-size: 13px; line-height: 22px;">4 sessions · longest <span class="mono">3h 41m</span></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <a href="#" class="row" style="background: #FFFFFF; padding: 6px 12px 6px 8px; flex-direction: column; align-items: stretch; gap: 2px; height: 56px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div class="tile" style="background: #7A6A45;">L</div>
+              <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0;">
+                <div class="t1 clip">landing</div>
+                <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · macbook</div>
+              </div>
+              <div class="mono" style="font-size: 13px; line-height: 20px; color: #191D18;">3h 41m</div>
+            </div>
+            <div class="track"><div style="width: 100%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          </a>
+          <a href="#" class="row" style="background: #FFFFFF; padding: 6px 12px 6px 8px; flex-direction: column; align-items: stretch; gap: 2px; height: 56px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div class="tile" style="background: #3F5F7A;">H</div>
+              <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0;">
+                <div class="t1 clip">homelab-k8s</div>
+                <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · pi-5</div>
+              </div>
+              <div class="mono" style="font-size: 13px; line-height: 20px; color: #191D18;">1h 12m</div>
+            </div>
+            <div class="track"><div style="width: 33%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          </a>
+          <a href="#" class="row" style="background: #FFFFFF; padding: 6px 12px 6px 8px; flex-direction: column; align-items: stretch; gap: 2px; height: 56px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div class="tile" style="background: #6B4E7A;">A</div>
+              <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0;">
+                <div class="t1 clip">agent-sdk</div>
+                <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · hetzner-1</div>
+              </div>
+              <div class="mono" style="font-size: 13px; line-height: 20px; color: #191D18;">26m</div>
+            </div>
+            <div class="track"><div style="width: 12%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          </a>
+          <a href="#" class="row" style="background: #FFFFFF; padding: 6px 12px 6px 8px; flex-direction: column; align-items: stretch; gap: 2px; height: 56px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div class="tile" style="background: #4E6E7A;">A</div>
+              <div style="display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0;">
+                <div class="t1 clip">appliance</div>
+                <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>no agent, a shell · nas</div>
+              </div>
+              <div class="mono" style="font-size: 13px; line-height: 20px; color: #191D18;">12m</div>
+            </div>
+            <div class="track"><div style="width: 6%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          </a>
+        </div>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 6px; background: #F2E1B8; border-radius: 22px; padding: 10px 10px 10px 16px; box-sizing: border-box; flex: none;">
+        <div style="display: flex; align-items: baseline; gap: 8px; padding: 0 4px;">
+          <h2 class="eyebrow" style="margin: 0; color: #5C4E2D;">Worth a look</h2>
+          <div class="t2" style="font-size: 13px; color: #5C4E2D;">2 sessions no workspace claims</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div class="row" style="background: rgba(255,255,255,0.7); gap: 8px; padding: 6px 4px 6px 12px;">
+            <div class="mark mark-unknown" style="border-color: #7A6A45;"></div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+              <div class="t1 clip" style="color: #5C4E2D;">scratch</div>
+              <div class="t2 clip" style="color: #5C4E2D;">pi-5 · 2 windows · <span class="mono">3d</span></div>
+            </div>
+            <a href="#" class="pill" style="background: #FFFFFF; color: #5C4E2D; font-size: 13px; padding: 10px 12px;">Attach</a>
+            <a href="#" class="pill" style="color: #93000A; font-size: 13px; padding: 10px 8px;">Kill</a>
+          </div>
+          <div class="row" style="background: rgba(255,255,255,0.7); gap: 8px; padding: 6px 4px 6px 12px;">
+            <div class="mark mark-unknown" style="border-color: #7A6A45;"></div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+              <div class="t1 clip" style="color: #5C4E2D;">old-landing</div>
+              <div class="t2 clip" style="color: #5C4E2D;">macbook · 1 window · <span class="mono">9 Jun</span></div>
+            </div>
+            <a href="#" class="pill" style="background: #FFFFFF; color: #5C4E2D; font-size: 13px; padding: 10px 12px;">Attach</a>
+            <a href="#" class="pill" style="color: #93000A; font-size: 13px; padding: 10px 8px;">Kill</a>
+          </div>
+        </div>
+      </section>
+
+      <a href="#" class="row" style="border: 1px solid #C2C9BE; border-radius: 22px; padding: 6px 8px 6px 20px; gap: 10px; height: 56px; flex: none;">
+        <div class="mark mark-idle"></div>
+        <div class="eyebrow">Idle</div>
+        <div class="t2" style="font-size: 13px;">·</div>
+        <div class="mono t2" style="font-size: 13px;">8</div>
+        <div class="t2 clip" style="font-size: 13px; flex: 1; min-width: 0;">nothing running</div>
+        <span class="textbtn" style="color: #48674B; padding: 10px 8px 10px 12px; gap: 4px;">
+          Show
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#48674B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+        </span>
+      </a>
+
+    </div>
+  </main>
+
+  <a href="#" style="position: absolute; right: 16px; bottom: 96px; width: 56px; height: 56px; border-radius: 16px; background: #CBE8C6; display: flex; align-items: center; justify-content: center;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2F4E33" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+  </a>
+
+  <nav style="height: 80px; flex: none; background: #ECEEE6; display: grid; grid-template-columns: repeat(4, 1fr); padding: 12px 8px 16px 8px; box-sizing: border-box;">
+    <a href="#" class="nav-item" style="color: #191D18;">
+      <span class="nav-ind" style="background: #D6E8D0;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B4B39" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="2"></rect><rect x="13" y="3" width="8" height="8" rx="2"></rect><rect x="3" y="13" width="8" height="8" rx="2"></rect><rect x="13" y="13" width="8" height="8" rx="2"></rect></svg>
+      </span>
+      <span class="nav-label">Dashboard</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-ind">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h12M9 12h12M9 18h12"></path><circle cx="4.5" cy="6" r="1"></circle><circle cx="4.5" cy="12" r="1"></circle><circle cx="4.5" cy="18" r="1"></circle></svg>
+      </span>
+      <span class="nav-label">Fleet</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-ind">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+      </span>
+      <span class="nav-label">Machines</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-ind">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20v-8M12 20V5M19 20v-5M3 20h18"></path></svg>
+      </span>
+      <span class="nav-label">Usage</span>
+    </a>
+  </nav>
+
+</div>
+</x-dc>
+</body>
+</html>

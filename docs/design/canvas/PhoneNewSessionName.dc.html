@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap"/>
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-running { background: #7A6A45; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 10px 18px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; flex: none; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .step-n { width: 24px; height: 24px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; color: #424940; box-sizing: border-box; flex: none; }
+    .icon-btn { width: 44px; height: 44px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; flex: none; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 10px 16px; font-size: 14px; font-weight: 500; line-height: 20px; min-height: 44px; box-sizing: border-box; background: #FFFFFF; }
+    .field { background: #FFFFFF; border-radius: 16px; padding: 16px 18px; min-height: 56px; box-sizing: border-box; display: flex; align-items: center; font-size: 16px; line-height: 24px; }
+    .swatch { width: 32px; height: 32px; border-radius: 999px; box-sizing: border-box; flex: none; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; background: #F2F4EC; position: relative; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column;">
+
+  <header style="display: flex; align-items: center; gap: 8px; padding: 0 16px 0 12px; height: 64px; flex: none; box-sizing: border-box;">
+    <a href="#" class="icon-btn">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+    </a>
+    <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+      <div style="width: 32px; height: 32px; border-radius: 10px; background: #48674B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; flex: none;">Q</div>
+      <h1 class="clip" style="margin: 0; font-size: 22px; font-weight: 700; line-height: 28px;">New session</h1>
+    </div>
+  </header>
+
+  <main style="flex: 1; min-height: 0; overflow: hidden; padding: 4px 16px 0 16px; box-sizing: border-box;">
+    <div style="display: flex; flex-direction: column; gap: 20px;">
+
+      <div style="display: flex; align-items: center; gap: 8px; min-height: 32px;">
+        <span style="display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 999px; background: #D6E8D0; color: #3B4B39; height: 32px; box-sizing: border-box;">
+          <span class="step-n" style="background: #FFFFFF; color: #3B4B39;">1</span>
+          <span style="font-size: 13px; font-weight: 500; line-height: 16px;">Name</span>
+        </span>
+        <span style="width: 16px; height: 1px; background: #C2C9BE;"></span>
+        <span class="step-n" style="border: 1.5px solid #C2C9BE;">2</span>
+        <span style="width: 16px; height: 1px; background: #C2C9BE;"></span>
+        <span class="step-n" style="border: 1.5px solid #C2C9BE;">3</span>
+        <span style="width: 16px; height: 1px; background: #C2C9BE;"></span>
+        <span class="step-n" style="border: 1.5px solid #C2C9BE;">4</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="eyebrow">Name</div>
+        <div style="display: flex; gap: 16px; align-items: flex-start;">
+          <div style="width: 72px; height: 72px; border-radius: 22px; background: #48674B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; flex: none;">Q</div>
+          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0;">
+            <div class="field" style="color: #727A70;">quiet-otter</div>
+            <div class="t2">optional. Leave it and the session is called quiet-otter; the letter and colour are how you tell sessions apart.</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 44px;">
+          <div class="swatch" style="background: #48674B; border: 3px solid #F2F4EC; box-shadow: 0 0 0 2px #48674B;"></div>
+          <div class="swatch" style="background: #7A6A45;"></div>
+          <div class="swatch" style="background: #A85B3C;"></div>
+          <div class="swatch" style="background: #4E6A7A;"></div>
+          <div class="swatch" style="background: #6B4E7A;"></div>
+          <div class="swatch" style="background: #3A3D38;"></div>
+        </div>
+        <div style="display: flex;">
+          <a href="#" class="pill" style="background: #FFFFFF; color: #48674B; padding: 10px 16px 10px 14px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#48674B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"></path></svg>
+            Upload an image
+          </a>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="eyebrow">Machine</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <a href="#" class="chip" style="background: #D6E8D0; color: #3B4B39;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>cachyos-g14</a>
+          <a href="#" class="chip" style="color: #191D18;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>macbook</a>
+          <a href="#" class="chip" style="color: #191D18;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>pi-5</a>
+          <a href="#" class="chip" style="color: #191D18;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>hetzner-1</a>
+          <a href="#" class="chip" style="color: #191D18;"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>nas</a>
+          <span class="chip" style="background: #FFDAD6; color: #93000A;"><span class="mark" style="width: 8px; height: 8px; border: 1.5px dashed #BA1A1A;"></span>thinkpad · unreachable</span>
+        </div>
+        <div class="t2" style="padding: 0 4px;">the session runs here; the repository is looked for on this machine in the next step.</div>
+      </div>
+
+    </div>
+  </main>
+
+  <div style="height: 80px; flex: none; background: #ECEEE6; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; box-sizing: border-box;">
+    <a href="#" class="pill" style="color: #424940;">Cancel</a>
+    <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; padding: 12px 24px; min-height: 48px;">Continue</a>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
