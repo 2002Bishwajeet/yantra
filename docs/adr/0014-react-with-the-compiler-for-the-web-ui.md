@@ -122,3 +122,9 @@ building before it arrives.
 > after** — the router's own weight paid for several times over by splitting xterm.js onto the route
 > that uses it. Weight is now a thing this project measures; R9's finding that it was irrelevant was
 > true of the page R9 was looking at.
+
+> **2026-09-06, Y-337: the seam sentence came true in the way it predicted.** The design system
+> landed as a component library, a token file and a router change, not as `index.css`. As this
+> ADR asked, it is superseded rather than worked around:
+> [ADR-0024](0024-the-dashboard-is-material-3-built-by-hand.md) replaces the *Components* and
+> *Styling* rows and the two seam rules. React, the compiler, Vite and oxlint stand.

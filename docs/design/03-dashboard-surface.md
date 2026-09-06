@@ -351,6 +351,12 @@ A phone row is 3.5rem because a touch target is 44 px and a row carries a button
 `0.75rem` meta and column labels · `0.875rem` rows and body · `1.125rem` group heading · `1.5rem`
 route title. A fifth size asks for a level of hierarchy §5.1 says does not exist.
 
+> **2026-09-06, [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) (Y-337): the
+> four sizes become Material's type scale.** The owner asked for a fully Material 3 build, whose
+> ramp is fifteen roles plus an emphasized weight. What changed upstream is the audience and the
+> register: a hero number and a bottom navigation bar need display and label roles this section
+> had no room for. §5.1's hierarchy still holds; a role is used only where the board uses it.
+
 ### 5.5 Numbers need a second face, and this was measured
 
 This page is ages, percentages, memory, token counts and money, in columns. Proportional digits make
@@ -706,6 +712,11 @@ reconcile. Keep them, and say in
 > the local `@font-face`. The table's *Now* column still reads **76 kB**, which has been wrong since
 > that change shipped.
 
+> **2026-09-06, [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) §7 (Y-337):
+> the fonts line moves from 30 KiB to 80 KiB**, for Google Sans Flex on the weight axis and IBM
+> Plex Mono, both latin and self-hosted. The 145 KiB first-load ceiling for `/` does not move, and
+> `npm run budget` fails above either number.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
@@ -734,6 +745,11 @@ the right moment.
 > overlay fade and the disclosure slide this section names, so the timing a reader sees there is the
 > port's rather than D3's. A utility class cannot be overruled from a token, and editing the file is
 > what ADR-0014 refuses. **Named, not solved.**
+
+> **2026-09-06, [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) (Y-337): one
+> duration and one easing become Material's twelve springs**, shipped as four CSS `linear()`
+> curves and a duration table (R14 §5). Everything else here stands: rows never animate, groups
+> never re-flow, motion is never a signal, and §9.3's reduced-motion floor applies to every spring.
 
 ### 9.3 The reduced-motion floor
 
