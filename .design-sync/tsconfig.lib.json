@@ -1,0 +1,18 @@
+{
+  "extends": "../web/tsconfig.app.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "../web/dist-lib",
+    "rootDir": "../web/src",
+    "tsBuildInfoFile": null,
+    "composite": false,
+    "incremental": false,
+    "types": []
+  },
+  "include": [
+    "../web/src/components/ui",
+    "../web/src/lib/utils.ts"
+  ]
+}

@@ -1,0 +1,30 @@
+# Claude Design sync — notes for the next run
+
+- **The package is the `web/` app, not a library.** There is no `dist/`; the converter synthesises an entry from `srcDir: src/components/ui` (the shadcn-on-Base-UI ports, ADR-0014). Run it with `--entry ./web/dist-lib/index.js`, a path that does not exist, so `PKG_DIR` resolves to `web/` and the entry falls back to synthesis.
+- **`web/tsconfig.app.json` cannot be given as `cfg.tsconfig`.** The converter's comment stripper reads `"@/*"` as the start of a block comment and swallows the file up to the next `*/`, so the paths plugin silently returns null and every `@/` import fails to resolve. `.design-sync/tsconfig.json` holds the one `paths` entry, comment-free.
+- **The stylesheet is compiled for the sync, not taken from the app build.** `web/src/index.css` deliberately skips seven primitives no route imports (D3 §9.1); `.design-sync/css/entry.css` scans all of them, appends a layout-utility safelist for the design agent, and `.design-sync/css/palettes.mjs` rewrites the four `web/design/options/*.css` sheets to `[data-palette="…"]`. `cfg.buildCmd` regenerates both; the Vite config for it is `web/.design-sync.vite.mjs` (gitignored — recreate from this note: root `../.design-sync/css`, `base: './'`, `@tailwindcss/vite`, `outDir ../../web/.design-sync-css`, unhashed asset names).
+- **`design/tokens.css` (the landing page's Pattachitra tokens) is deliberately not shipped.** Its `--accent` is cinnabar; shadcn's `--accent` is the hover surface (design-system.md §7). Importing it turns every hover cinnabar.
+- **`Toggle` is excluded** (`componentSrcMap`): `toggle.tsx` and `toggle-group.tsx` both export a different `Toggle`, so the synth entry's `export *` makes the name ambiguous and esbuild drops it. `ToggleGroupItem` is the in-group one. `TooltipCreateHandle` is excluded because it is a function, not a component.
+- **`web/index.d.ts` and `web/dist-lib/` are generated, gitignored inputs.** `tsconfig.lib.json` emits declarations for the primitives; `lib-entry.mjs` rewrites their `@/` imports to relative ones (ts-morph has no path map) and writes the esbuild entry plus the types entry. `dialog-styles.ts` is skipped: it exports class-name constants, not components. Pass `--entry ./web/dist-lib/index.js`.
+- **Known render warns.** `[TOKENS_MISSING]` for `--collapsible-panel-height`, `--nested-dialogs` and the four `--scroll-area-overflow-*` vars: Base UI sets them inline at runtime. `[FONT_REMOTE]` for IBM Plex: the `plex` palette loads it from Google Fonts by design, so a design that selects it needs network.
+- **Sub-parts are top-level cards.** The ports export `DialogTrigger`, `TableRow` and so on as flat names with no `Dialog.Trigger` namespace, so the converter's compound grouping finds nothing and every export gets its own card. Roots carry the authored previews; the parts stay on the floor card, and each root's `.prompt.md` lists its parts under *Related*.
+
+## Re-sync risks
+
+- **The safelist is the design agent's whole layout vocabulary.** `.design-sync/css/entry.css` names it and `conventions.md` restates it; change one and the other is stale. Validate the header against `ds-bundle/_ds_bundle.css` after any edit (the sync did this with a script: every backticked name must exist as a selector).
+- **Palettes are copies of `web/design/options/*.css` at sync time.** Y-330's options round may change or be superseded by D7; re-run `buildCmd` after any change there, and delete a palette from `palettes.mjs` when the owner rejects it.
+- **The four grounds of `light-dark()` need `color-scheme`.** Each palette block sets it; a wrapper element that sets `data-palette` but sits under a `data-theme` of the opposite ground follows the nearest `color-scheme`.
+- **Only verified with Node 24 and the repo's own `web/node_modules`** (Vite 8, Tailwind 4.3, Playwright 1.62 with chromium-1234 cached). Plex fonts come from Google Fonts at runtime.
+- **Card layout is flat.** If a later sync sees compound grouping appear (the converter learns prefix grouping, or the ports gain namespaces), expect every sub-part card path to land in `deletePaths`.
+
+## Authoring gotchas (wave 1)
+
+- `FieldError` renders only with `match` or a real validity failure; `<Field invalid>` alone shows nothing. Base UI `Input` composes with `Field` directly; `FieldControl` is unstyled.
+- `Spinner` sizes with `size={n}`. A vertical `Separator` needs a parent with a height. `Empty` ships borderless (`border-dashed` with no width). `Badge` `ghost` and `link` are bare text at rest.
+- Hover, focus and `active` states cannot be captured statically.
+- `--font-mono` is not a custom property in the shipped CSS (Tailwind inlines `@theme inline` values into the `.font-mono` utility), so `var(--font-mono)` in an inline style falls back to the body font. Use the `font-mono` class or the literal stack.
+- **A `viewport` override edits the config slice the targeted rebuild checks.** Add overrides, then run `package-build.mjs` once before any `preview-rebuild.mjs`, or it stops with `[CONFIG_STALE]`.
+- Overlay popups need no `container` prop: the capture screenshots the whole viewport, so a popup anchored below a trigger near the top lands inside the card. `Dialog` needs a 640 px viewport, or `DialogFooter` stacks its buttons full-width below Tailwind's `sm`. `ScrollArea`'s scrollbar is hover-only; the clip edge and fade are the static evidence.
+- `TooltipPopup` sizes to the bare text width, so its own `px-2` pushes the last word onto a second line for any text near the popup's width. That is `web/src/components/ui/tooltip.tsx` (T3 Code, ADR-0014 forbids editing), not the preview; the app wraps the same way.
+- `Command`'s card holds one input, three group labels and six rows at 560x420; the preview keeps six entries and no `CommandFooter`. `Select` needs `alignItemWithTrigger={false}` to stay in frame.
+- Known render warns after authoring: none new. Interactive-only states (hover, focus, menu highlight, enter/exit animations, ScrollArea's hover scrollbar) are not captured.

@@ -1,0 +1,69 @@
+{
+  "projectId": "b3765fd2-9e8e-4ff7-b02e-dff7dd57e55d",
+  "shape": "package",
+  "pkg": "yantra-web",
+  "globalName": "Yantra",
+  "srcDir": "src/components/ui",
+  "tsconfig": "../.design-sync/tsconfig.json",
+  "cssEntry": ".design-sync-css/entry.css",
+  "buildCmd": "node .design-sync/css/palettes.mjs && cd web && npx tsc -p ../.design-sync/tsconfig.lib.json && node ../.design-sync/lib-entry.mjs && npx vite build --config .design-sync.vite.mjs",
+  "componentSrcMap": {
+    "TooltipCreateHandle": null
+  },
+  "overrides": {
+    "Table": {
+      "cardMode": "column"
+    },
+    "Dialog": {
+      "cardMode": "single",
+      "viewport": "640x420",
+      "primaryStory": "DeleteWorkspace"
+    },
+    "Sheet": {
+      "cardMode": "single",
+      "viewport": "640x420",
+      "primaryStory": "WorkspaceDetail"
+    },
+    "Command": {
+      "cardMode": "single",
+      "viewport": "560x420",
+      "primaryStory": "Palette"
+    },
+    "Menu": {
+      "cardMode": "single",
+      "viewport": "420x360",
+      "primaryStory": "RowOverflow"
+    },
+    "DropdownMenu": {
+      "cardMode": "single",
+      "viewport": "420x360",
+      "primaryStory": "StartOnMachine"
+    },
+    "Popover": {
+      "cardMode": "single",
+      "viewport": "420x300",
+      "primaryStory": "Machines"
+    },
+    "Tooltip": {
+      "cardMode": "single",
+      "viewport": "360x200",
+      "primaryStory": "Recheck"
+    },
+    "Select": {
+      "cardMode": "single",
+      "viewport": "420x360",
+      "primaryStory": "Agent"
+    },
+    "Combobox": {
+      "cardMode": "single",
+      "viewport": "480x440",
+      "primaryStory": "Directories"
+    },
+    "Autocomplete": {
+      "cardMode": "single",
+      "viewport": "480x440",
+      "primaryStory": "Directories"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
