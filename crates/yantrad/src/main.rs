@@ -26,6 +26,7 @@ mod api;
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod contract;
+mod events;
 mod heartbeat;
 mod notify;
 mod refresh;
@@ -150,7 +151,18 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     // arrive from, so the authoriser is built from it rather than from anything
     // that could drift.
     let authoriser = write::Authoriser::new(inventory.clone(), &addresses);
-    let fleet = heartbeat::Fleet::default();
+    let ssh_dir = yantra_core::identity::dir().unwrap_or_else(|error| {
+        tracing::warn!("no ssh identity can be served: {error}");
+        PathBuf::new()
+    });
+    let fleet = heartbeat::Fleet {
+        facts: std::sync::Arc::new(heartbeat::Facts {
+            started: std::time::Instant::now(),
+            listening_on: addresses.clone(),
+            ssh_dir,
+        }),
+        ..heartbeat::Fleet::default()
+    };
     let relay = yantra_core::notify::from_env();
 
     // The unit's environment is not the shell's, so a headless box needs the
@@ -159,13 +171,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         Some(_) => tracing::info!("notifying the relay {} names", RELAY_URL),
         None => tracing::info!("no {}, so nothing is notified", RELAY_URL),
     }
-    refresh::spawn(
-        &fleet.model,
-        inventory.clone(),
-        yantra_core::attention::Gh,
-        relay,
-        fleet.viewers.clone(),
-    );
+    refresh::spawn(&fleet, inventory.clone(), yantra_core::attention::Gh, relay);
     let app = app(fleet, authoriser, dashboard(web::from_env())?);
 
     let mut servers = tokio::task::JoinSet::new();

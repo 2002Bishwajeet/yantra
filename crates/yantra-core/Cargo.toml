@@ -23,3 +23,7 @@ ureq.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+
+# `build.rs` stamps the build date; `time` is already in the tree.
+[build-dependencies]
+time.workspace = true

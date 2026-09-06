@@ -35,6 +35,11 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
+| `GET /api/about` | `yantra about` (the build; uptime, addresses and tailnet are the daemon's) |
+| `GET /api/ssh-identity` | `yantra ssh-identity` (the read half — a GET makes no key) |
+| `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
+| `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
+| `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 
 The `/api/…` routes that write are authorised by Tailscale identity

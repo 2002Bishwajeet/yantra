@@ -39,6 +39,7 @@ use yantra_core::status::{self, MachineStatus, Report, Verdict};
 use yantra_core::tmux::Summary;
 use yantra_core::workspace::{Listing, Unusable, Workspace};
 
+use crate::events::Event;
 use crate::heartbeat::{Beats, Fleet};
 
 const GENERATED: &str = "../../web/src/contract.gen.ts";
@@ -52,8 +53,11 @@ const HEADER: &str = "\
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  About,
   Attention,
   Broken,
+  Cloning,
+  Event,
   Listed,
   Listing,
   Looked,
@@ -63,6 +67,7 @@ import type {
   Readiness,
   Resumed,
   Spend,
+  SshIdentity,
   Stopped,
   TerminalSize,
   Transcript,
@@ -131,6 +136,11 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             read(&fleet, "/attention").await,
         ),
         (
+            "notifications",
+            "Looked<Event[]>",
+            read(&fleet, "/notifications").await,
+        ),
+        (
             "notLooked",
             "Looked<Machine[]>",
             read(&Fleet::default(), "/machines").await,
@@ -141,6 +151,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             read(&broken(), "/machines").await,
         ),
     ];
+    out.extend(crate::api::answers());
     out.extend(crate::write::answers());
     out.extend(crate::terminal::answers());
     out
@@ -225,6 +236,7 @@ async fn fleet() -> Fleet {
                     windows: 2,
                     attached: 1,
                     created: "Thu Jul 30 13:02:31 2026".into(),
+                    created_at: 1_785_502_951,
                 }]),
             },
             MachineSessions {
@@ -281,6 +293,42 @@ async fn fleet() -> Fleet {
         Reading::new(beat(Power::Battery { percent: 42 })),
     );
     drop(beats);
+
+    // One of each kind the page draws, oldest first so the route's reversal
+    // is what the fixture shows. `at` is fixed rather than now, for the same
+    // reason the beats are.
+    let mut events = fleet.events.write().await;
+    events.extend([
+        Event {
+            at: 1_785_522_600,
+            kind: "awaiting_trust",
+            workspace: Some("api".to_owned()),
+            machine: Some("cachyos-g14".to_owned()),
+            said: "api: waiting at claude's trust prompt".to_owned(),
+        },
+        Event {
+            at: 1_785_522_660,
+            kind: "crashed",
+            workspace: Some("site".to_owned()),
+            machine: Some("bishwajeets-macbook-pro".to_owned()),
+            said: "site: crashed (exit 1)".to_owned(),
+        },
+        Event {
+            at: 1_785_522_720,
+            kind: "unreachable",
+            workspace: None,
+            machine: Some("pi".to_owned()),
+            said: "pi is no longer online".to_owned(),
+        },
+        Event {
+            at: 1_785_522_780,
+            kind: "relay-test",
+            workspace: None,
+            machine: None,
+            said: "yantra can reach this topic".to_owned(),
+        },
+    ]);
+    drop(events);
     fleet
 }
 
@@ -305,6 +353,8 @@ fn holding(snapshot: Snapshot) -> Fleet {
     }
 }
 
+/// One address for the first node and none for the rest, so the fixture
+/// carries both spellings of `address` (Y-343).
 fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> MachineInfo {
     MachineInfo {
         id: id.into(),
@@ -314,7 +364,13 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
         online,
         last_seen: last_seen.map(str::to_owned),
         expired: false,
-        addresses: Vec::new(),
+        addresses: match id {
+            "n-1" => vec![
+                "100.64.0.1".parse().expect("an address"),
+                "fd7a:115c:a1e0::1".parse().expect("an address"),
+            ],
+            _ => Vec::new(),
+        },
     }
 }
 

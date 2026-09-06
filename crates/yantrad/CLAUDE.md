@@ -251,11 +251,24 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}` and `POST /api/relay` — **the CLI's
-own verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair` and `relay`. The daemon may do what `yantra` can already do, which is what stops it growing a richer API
-the CLI cannot reach. A new verb here starts in the CLI, and `yantra relay` was written before this
-route was.
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}`, `POST /api/relay` and
+`POST /api/machines/{machine}/clone` — **the CLI's own verbs and nothing more**, being `yantra new`,
+`edit`, `up`, `down`, `resume`, `tokens`, `logs`, `repair`, `relay` and `clone`. The daemon may do what
+`yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new verb
+here starts in the CLI, and `yantra relay` was written before this route was.
+
+**`clone` is the one write that answers before its work is done** (Y-344). `git clone` runs as the
+startup command of a tmux session on the machine and the route answers `202` with the session's name;
+nothing awaits the clone, progress is that session's terminal socket (ADR-0022) and completion is the
+probe. Both values are checked in [`clone.rs`](../yantra-core/src/clone.rs) before ssh, and a URL
+carrying a credential is refused: it would sit in the pane's start command for as long as the session
+lives (ADR-0023 §4).
+
+**`GET /api/notifications` and the ring behind it are
+[ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)** (Y-343), proposed rather than
+accepted: [`events.rs`](src/events.rs) holds the last 50 events in memory, `notify.rs` fills it before
+any send and whether or not a relay exists, the machines sweep adds `unreachable`, and `POST
+/api/relay` adds `relay-test`. A restart empties it, and that is what the route says.
 
 **`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3

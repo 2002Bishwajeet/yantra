@@ -10,9 +10,11 @@
 //! 2. **Keep the public surface small.** Export the operation and its error
 //!    type; keep the rest private until something outside needs it.
 
+pub mod about;
 pub mod agent;
 pub mod attach;
 pub mod attention;
+pub mod clone;
 pub mod dirs;
 pub mod doctor;
 pub mod down;

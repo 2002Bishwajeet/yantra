@@ -13,6 +13,8 @@ use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::{doctor, sessions, status, workspace};
 
+use crate::events::{self, Event, Events};
+use crate::heartbeat::Fleet;
 use crate::notify::{Notifier, Viewers};
 
 /// `ssh.rs` sets `ControlPersist=300`, so anything under five minutes keeps
@@ -44,16 +46,19 @@ pub type Model = Arc<RwLock<Snapshot>>;
 /// The class the `forge` answers is the one that reaches off the tailnet, and
 /// the only one not on `EVERY` — see [`ATTENTION`] for why.
 pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'static>(
-    model: &Model,
+    fleet: &Fleet,
     inventory: I,
     forge: F,
     relay: Option<Relay>,
-    viewers: Viewers,
 ) {
+    let model = &fleet.model;
+    let viewers = fleet.viewers.clone();
+
     let machines = model.clone();
+    let flips = fleet.events.clone();
     tokio::spawn(async move {
         loop {
-            look_at_machines(&machines, &inventory).await;
+            look_at_machines(&machines, &inventory, &flips).await;
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -75,10 +80,11 @@ pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'sta
     });
 
     let agents = model.clone();
+    let remembered = fleet.events.clone();
     tokio::spawn(async move {
-        let mut notifier = relay.map(Notifier::new);
+        let mut notifier = Notifier::new(relay);
         loop {
-            look_at_agents(&agents, notifier.as_mut(), &viewers).await;
+            look_at_agents(&agents, &mut notifier, &viewers, &remembered).await;
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -108,9 +114,26 @@ pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'sta
     });
 }
 
-async fn look_at_machines<I: Inventory>(model: &Model, inventory: &I) {
-    let reading = Reading::new(inventory.machines().await);
-    model.write().await.machines = Some(Arc::new(reading));
+/// The one diff this sweep makes (ADR-0025): a machine the last look had
+/// online and this one does not is remembered as `unreachable`. The first look
+/// after a start has nothing to diff against, and a look that failed says
+/// nothing, for the notifier's reason — an unknown fleet is not a changed one.
+async fn look_at_machines<I: Inventory>(model: &Model, inventory: &I, events: &Events) {
+    let reading = Arc::new(Reading::new(inventory.machines().await));
+    let before = model.write().await.machines.replace(reading.clone());
+
+    let was_online = |id: &str| {
+        before
+            .as_deref()
+            .map(Reading::value)
+            .and_then(|looked| looked.as_ref().ok())
+            .is_some_and(|machines| machines.iter().any(|m| m.id == id && m.online))
+    };
+    if let Ok(machines) = reading.value() {
+        for machine in machines.iter().filter(|m| !m.online && was_online(&m.id)) {
+            events::remember(events, Event::unreachable(&machine.name)).await;
+        }
+    }
 }
 
 async fn look_at_workspaces(model: &Model) {
@@ -156,12 +179,17 @@ async fn look_at_github(model: &Model) {
 /// The reading lands in the model before anything is sent, so a browser never
 /// waits on a relay — and a look that *failed* tells nobody anything, because
 /// an unknown fleet is not a changed one (I-47).
-async fn look_at_agents(model: &Model, notifier: Option<&mut Notifier>, viewers: &Viewers) {
+async fn look_at_agents(
+    model: &Model,
+    notifier: &mut Notifier,
+    viewers: &Viewers,
+    events: &Events,
+) {
     let reading = Arc::new(Reading::new(status::fleet().await));
     model.write().await.agents = Some(reading.clone());
-    if let (Some(notifier), Ok(fleet)) = (notifier, reading.value()) {
+    if let Ok(fleet) = reading.value() {
         notifier
-            .tell(fleet, crate::notify::watched(viewers).await)
+            .tell(fleet, crate::notify::watched(viewers).await, events)
             .await;
     }
 }
@@ -197,11 +225,40 @@ mod tests {
         let model = Model::default();
         assert!(model.read().await.machines.is_none());
 
-        look_at_machines(&model, &Fake::default()).await;
+        look_at_machines(&model, &Fake::default(), &Events::default()).await;
 
         let reading = model.read().await.machines.clone().expect("looked");
         let machines = reading.value().as_ref().expect("the tailnet answered");
         assert!(machines.is_empty());
+    }
+
+    /// ADR-0025's one new diff: a machine that was online and is not now is an
+    /// event, once — and the first look after a start, which has no previous
+    /// reading, says nothing about a machine that is offline from the start.
+    #[tokio::test]
+    async fn a_machine_that_stops_being_online_is_remembered_once() {
+        let model = Model::default();
+        let events = Events::default();
+        let looking = |online: bool| Fake {
+            machines: vec![MachineInfo {
+                online,
+                ..machine("pi")
+            }],
+            ..Fake::default()
+        };
+
+        look_at_machines(&model, &looking(false), &events).await;
+        assert!(events.read().await.is_empty(), "nothing to diff against");
+
+        look_at_machines(&model, &looking(true), &events).await;
+        look_at_machines(&model, &looking(false), &events).await;
+        look_at_machines(&model, &looking(false), &events).await;
+
+        let remembered = events::newest_first(&events).await;
+        assert_eq!(remembered.len(), 1, "{remembered:?}");
+        assert_eq!(remembered[0].kind, "unreachable");
+        assert_eq!(remembered[0].machine.as_deref(), Some("pi"));
+        assert_eq!(remembered[0].workspace, None);
     }
 
     #[tokio::test]
@@ -211,7 +268,7 @@ mod tests {
             machines: vec![machine("pi")],
             ..Fake::default()
         };
-        look_at_machines(&model, &inventory).await;
+        look_at_machines(&model, &inventory, &Events::default()).await;
 
         let reading = model.read().await.machines.clone().expect("looked");
         let first = reading.age();
@@ -247,7 +304,7 @@ mod tests {
         }
 
         let model = Model::default();
-        look_at_machines(&model, &Down).await;
+        look_at_machines(&model, &Down, &Events::default()).await;
 
         let reading = model.read().await.machines.clone().expect("looked");
         let failure = reading.value().as_ref().expect_err("the look failed");
