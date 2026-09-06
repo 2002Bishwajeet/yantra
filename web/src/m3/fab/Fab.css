@@ -1,0 +1,48 @@
+.m3-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex: none;
+  box-sizing: border-box;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-large);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+  text-decoration: none;
+  transition: border-radius var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
+}
+
+.m3-fab[data-size="medium"] {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
+}
+
+.m3-fab[data-size="extended"] {
+  width: auto;
+  padding: 0 20px 0 16px;
+}
+
+.m3-fab:active {
+  border-radius: var(--md-sys-shape-corner-extra-large);
+}
+
+.m3-fab__icon {
+  display: inline-flex;
+}
+
+.m3-fab__icon > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.m3-fab[data-size="medium"] .m3-fab__icon > svg {
+  width: 28px;
+  height: 28px;
+}

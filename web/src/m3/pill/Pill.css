@@ -1,0 +1,45 @@
+.m3-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--md-sys-color-on-surface-variant);
+  background: transparent;
+  transition:
+    background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects),
+    color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+.m3-pill[data-selected],
+.m3-pill[aria-current] {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-pill__icon {
+  display: inline-flex;
+  margin-left: -4px;
+}
+
+.m3-pill__icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.m3-pill-group {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-high);
+}

@@ -1,0 +1,70 @@
+.m3-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-card-gap);
+  box-sizing: border-box;
+  min-height: 0;
+  padding: var(--m3-card-padding) var(--m3-card-padding-x);
+  border-radius: var(--m3-card-radius);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container);
+}
+
+.m3-card[data-surface="low"] {
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.m3-card[data-surface="high"] {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.m3-card[data-surface="highest"] {
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+.m3-card[data-surface="lowest"] {
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.m3-card[data-surface="primary"] {
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+}
+
+.m3-card[data-surface="secondary"] {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-card[data-surface="tertiary"] {
+  color: var(--md-sys-color-on-tertiary-container);
+  background: var(--md-sys-color-tertiary-container);
+}
+
+.m3-card[data-surface="error"] {
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+.m3-card[data-surface="inverse"] {
+  color: var(--md-sys-color-inverse-on-surface);
+  background: var(--md-sys-color-inverse-surface);
+}
+
+.m3-card[data-variant="elevated"] {
+  background: var(--md-sys-color-surface-container-low);
+  box-shadow: var(--md-sys-elevation-level1);
+}
+
+.m3-card[data-variant="outlined"] {
+  background: transparent;
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+
+/* A tinted card's eyebrow takes the card's own text colour. */
+.m3-card[data-surface="primary"] .m3-eyebrow,
+.m3-card[data-surface="tertiary"] .m3-eyebrow,
+.m3-card[data-surface="error"] .m3-eyebrow,
+.m3-card[data-surface="inverse"] .m3-eyebrow {
+  color: inherit;
+}

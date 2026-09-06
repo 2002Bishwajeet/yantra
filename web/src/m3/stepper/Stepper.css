@@ -1,0 +1,69 @@
+.m3-stepper {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m3-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* The connector between steps. */
+.m3-step + .m3-step {
+  flex: 1;
+}
+
+.m3-step + .m3-step::before {
+  content: "";
+  flex: 1;
+  height: 1px;
+  margin-right: 8px;
+  background: var(--md-sys-color-outline-variant);
+}
+
+.m3-step[data-state="current"] {
+  color: var(--md-sys-color-on-surface);
+}
+
+.m3-step__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-medium);
+}
+
+.m3-step[data-state="current"] .m3-step__number {
+  border-color: transparent;
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-step[data-state="done"] .m3-step__number {
+  border-color: transparent;
+  color: var(--md-sys-color-on-primary);
+  background: var(--md-sys-color-primary);
+}
+
+.m3-step__number > svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+}
+
+.m3-step__label {
+  white-space: nowrap;
+}

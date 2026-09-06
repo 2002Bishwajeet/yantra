@@ -1,0 +1,73 @@
+/* Shared by the dialog and the bottom sheet. */
+.m3-scrim {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
+  transition: opacity var(--md-sys-motion-duration-default-effects) var(--md-sys-motion-spring-default-effects);
+}
+
+.m3-scrim[data-starting-style],
+.m3-scrim[data-ending-style] {
+  opacity: 0;
+}
+
+.m3-dialog__viewport {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.m3-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 280px;
+  max-width: 560px;
+  max-height: 100%;
+  padding: 24px;
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-low);
+  box-shadow: var(--md-sys-elevation-level3);
+  overflow: auto;
+  outline: none;
+  transition:
+    transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    opacity var(--md-sys-motion-duration-default-effects) var(--md-sys-motion-spring-default-effects);
+}
+
+.m3-dialog[data-starting-style],
+.m3-dialog[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.m3-dialog__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.m3-dialog__title {
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-headline-small);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
+}
+
+.m3-dialog__description {
+  margin: 0;
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}

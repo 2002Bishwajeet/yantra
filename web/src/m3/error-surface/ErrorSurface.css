@@ -1,0 +1,148 @@
+.m3-error {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
+  color: var(--md-sys-color-on-surface);
+}
+
+.m3-error[data-layout="page"] {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 640px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 24px;
+  text-align: center;
+}
+
+.m3-error[data-layout="card"] {
+  padding: var(--m3-card-padding) var(--m3-card-padding-x);
+  border-radius: var(--m3-card-radius);
+  background: var(--md-sys-color-surface-container);
+}
+
+.m3-error[data-layout="inline"] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--m3-row-min-height);
+  padding: var(--m3-row-padding);
+  border-radius: var(--m3-row-radius);
+  background: var(--md-sys-color-surface-container);
+}
+
+/* The dashed ring of the Unreachable board: unknown, drawn large. */
+.m3-error__mark {
+  box-sizing: border-box;
+  width: 64px;
+  height: 64px;
+  border: 2px dashed var(--md-sys-color-outline);
+  border-radius: var(--md-sys-shape-corner-full);
+}
+
+.m3-error__text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.m3-error[data-layout="page"] .m3-error__text {
+  align-items: center;
+  gap: 12px;
+}
+
+.m3-error[data-layout="inline"] .m3-error__text {
+  flex: 1;
+  gap: 2px;
+}
+
+.m3-error__title {
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-title-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
+  outline: none;
+}
+
+.m3-error[data-layout="page"] .m3-error__title {
+  font: var(--md-sys-typescale-emphasized-headline-medium);
+}
+
+.m3-error[data-layout="inline"] .m3-error__title {
+  font: var(--md-sys-typescale-emphasized-body-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
+}
+
+.m3-error__title:focus-visible {
+  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-focus-ring-color);
+  outline-offset: var(--md-sys-focus-ring-offset);
+  border-radius: var(--md-sys-shape-corner-extra-small);
+}
+
+.m3-error__sentence {
+  margin: 0;
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-error[data-layout="page"] .m3-error__sentence {
+  font: var(--md-sys-typescale-body-large);
+}
+
+.m3-error[data-layout="inline"] .m3-error__sentence {
+  font: var(--md-sys-typescale-body-small);
+}
+
+/* The daemon's own words, beneath the sentence (D3 §8.1). */
+.m3-error__said {
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-error__unknowns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 16px 20px;
+  list-style: none;
+  border-radius: var(--md-sys-shape-corner-large-increased);
+  background: var(--md-sys-color-surface-container);
+  text-align: left;
+}
+
+.m3-error[data-layout="page"] .m3-error__unknowns {
+  min-width: 320px;
+}
+
+.m3-error[data-layout="card"] .m3-error__unknowns {
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.m3-error__unknowns .m3-state {
+  gap: 10px;
+  font: var(--md-sys-typescale-body-medium);
+}
+
+.m3-error__word {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-error__meta {
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-error__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

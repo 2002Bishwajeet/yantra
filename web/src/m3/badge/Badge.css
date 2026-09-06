@@ -1,0 +1,23 @@
+.m3-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-error);
+  background: var(--md-sys-color-error);
+}
+
+.m3-badge[data-size="small"] {
+  width: 6px;
+  height: 6px;
+}
+
+.m3-badge[data-size="large"] {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: var(--md-sys-typescale-label-small-size);
+  line-height: 16px;
+}

@@ -1,0 +1,39 @@
+.m3-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-surface);
+  background: transparent;
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+.m3-icon-button[data-variant="tonal"] {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.m3-icon-button[data-variant="filled"] {
+  color: var(--md-sys-color-on-primary);
+  background: var(--md-sys-color-primary);
+}
+
+.m3-icon-button__icon {
+  display: inline-flex;
+}
+
+.m3-icon-button__icon > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.m3-icon-button > .m3-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+}

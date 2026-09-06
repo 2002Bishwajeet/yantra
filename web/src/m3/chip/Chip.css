@@ -1,0 +1,65 @@
+.m3-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-lowest);
+  white-space: nowrap;
+}
+
+.m3-chip[data-tone="high"] {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.m3-chip[data-tone="primary"] {
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+}
+
+.m3-chip[data-tone="tertiary"] {
+  color: var(--md-sys-color-on-tertiary-container);
+  background: var(--md-sys-color-tertiary-container);
+}
+
+.m3-chip[data-tone="error"] {
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+.m3-chip__icon {
+  display: inline-flex;
+}
+
+.m3-chip__icon > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.m3-chip--filter {
+  /* R14 §7: an outlined chip's edge is outline, not outline-variant. */
+  border: 1px solid var(--md-sys-color-outline);
+  color: var(--md-sys-color-on-surface-variant);
+  background: transparent;
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+.m3-chip--filter .m3-chip__check {
+  display: none;
+}
+
+.m3-chip--filter[data-pressed] {
+  border-color: transparent;
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-chip--filter[data-pressed] .m3-chip__check {
+  display: inline-flex;
+}

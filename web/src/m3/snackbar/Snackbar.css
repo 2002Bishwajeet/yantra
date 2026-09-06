@@ -1,0 +1,37 @@
+.m3-snackbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 48px;
+  max-width: 560px;
+  padding: 4px 4px 4px 16px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+  color: var(--md-sys-color-inverse-on-surface);
+  background: var(--md-sys-color-inverse-surface);
+  box-shadow: var(--md-sys-elevation-level3);
+}
+
+.m3-snackbar__text {
+  flex: 1;
+  padding: 6px 0;
+}
+
+.m3-snackbar__action {
+  flex: none;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-inverse-primary);
+  background: transparent;
+}
+
+.m3-snackbar__close {
+  color: var(--md-sys-color-inverse-on-surface);
+}
