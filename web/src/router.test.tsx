@@ -47,6 +47,7 @@ beforeEach(() => {
 const laptop: Machine = {
   name: 'cachyos-g14',
   dns_name: 'cachyos-g14.<tailnet>.ts.net.',
+  address: null,
   os: 'linux',
   online: true,
   expired: false,
@@ -281,7 +282,7 @@ describe('one machine, as a subject', () => {
                 name: 'scratch',
                 windows: 2,
                 attached: 0,
-                created: 'Thu Jul 30 13:02:31 2026',
+                created: 'Thu Jul 30 13:02:31 2026', created_at: 0,
               },
             ],
           },
@@ -406,7 +407,7 @@ describe('moving between them', () => {
             machine: 'cachyos-g14',
             reached: 'yes',
             sessions: [
-              { name: 'yantra', windows: 1, attached: 0, created: 'today' },
+              { name: 'yantra', windows: 1, attached: 0, created: 'today', created_at: 0 },
             ],
           },
         ],

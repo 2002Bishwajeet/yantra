@@ -42,6 +42,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Playwright's specs live under e2e/ and refuse Vitest's runner.
+    exclude: ['e2e/**', 'node_modules/**', 'dist/**', 'design/**'],
     // R14 §2.1: the colour package's own imports lack `.js`, so Node refuses
     // them and only Vite's resolver loads it.
     server: { deps: { inline: ['@material/material-color-utilities'] } },

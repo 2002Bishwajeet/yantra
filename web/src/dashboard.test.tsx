@@ -75,6 +75,7 @@ function machine(overrides: Partial<Machine> = {}): Machine {
   return {
     name: 'cachyos-g14',
     dns_name: 'cachyos-g14.<tailnet>.ts.net.',
+    address: null,
     os: 'linux',
     online: true,
     expired: false,
@@ -507,7 +508,7 @@ describe('the sessions section', () => {
     windows: 2,
     // A client count: 0 is detached, and rendering it as "no" would be a lie.
     attached: 0,
-    created: 'Thu Jul 30 13:02:31 2026',
+    created: 'Thu Jul 30 13:02:31 2026', created_at: 0,
   }
   const answers: MachineSessions[] = [
     { machine: 'cachyos-g14', reached: 'yes', sessions: [session] },
@@ -719,7 +720,7 @@ describe('the command a row carries', () => {
     name: 'yantra',
     windows: 1,
     attached: 0,
-    created: 'Thu Jul 30 13:02:31 2026',
+    created: 'Thu Jul 30 13:02:31 2026', created_at: 0,
   }
   const row: SessionRow = { machine: 'cachyos-g14', session }
   const running = ok<MachineSessions[]>([

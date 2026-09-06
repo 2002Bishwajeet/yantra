@@ -121,3 +121,11 @@ test, not a note.
 - Whether `tailwind-merge` and `class-variance-authority` survive the quality pass.
 - The GitLab grant, Usage time windows, streaming chat: rows of their own in `tracker.md`.
 - Shape morphing: `corner-shape` is Chrome-only; radii animate between scale steps instead.
+
+> **2026-09-06, Y-338: the sage reproduction is not within two hex units for every role.** The
+> Packages agent fitted `palette-sage.json` with `DynamicScheme` and five tonal palettes: every
+> role lands within two units except `primary-container` and its on-colour at three and the
+> tertiary group at six to thirteen, because the file's tertiary sits at tone 45.5 where Material
+> fixes 40. Nothing visible depends on it: sage ships from the file as CSS, and only the
+> Appearance picker's sage preview goes through the engine. `scheme.test.ts` names the six roles
+> and their ceilings.

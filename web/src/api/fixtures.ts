@@ -22,6 +22,7 @@ export function aMachine(overrides: Partial<Machine> = {}): Machine {
   return {
     name: 'cachyos-g14',
     dns_name: 'cachyos-g14.<tailnet>.ts.net.',
+    address: '100.64.0.12',
     os: 'linux',
     online: true,
     expired: false,
