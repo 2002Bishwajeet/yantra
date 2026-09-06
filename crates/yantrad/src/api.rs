@@ -34,6 +34,7 @@ use yantra_core::status::{MachineStatus, Verdict};
 use yantra_core::{about, doctor, identity};
 
 use crate::events::{self, Event};
+use crate::github::Grant;
 use crate::heartbeat::{Beats, Fleet};
 use crate::refresh::Model;
 
@@ -53,6 +54,8 @@ pub fn router() -> Router<Fleet> {
         .route("/about", get(about))
         .route("/ssh-identity", get(ssh_identity))
         .route("/notifications", get(notifications))
+        .route("/github", get(connection))
+        .route("/repos", get(repos))
         .fallback(no_such_route)
 }
 
@@ -302,6 +305,25 @@ async fn github(State(model): State<Model>) -> impl IntoResponse {
         },
         None => Answer::Never,
     })
+}
+
+/// `yantra github status` on the wire (ADR-0023). A read of what the daemon
+/// holds, so it awaits no network: whether `GET /user` still accepts the grant
+/// is `/readiness/github`'s, on the sweep. **The token is not in it** — the
+/// login is the one thing about the account that is shown.
+async fn connection(State(grant): State<Grant>) -> impl IntoResponse {
+    Json(Connection::of(&grant.read().await))
+}
+
+/// `yantra ls repos` on the wire, without the filter: the search box filters
+/// this list in the browser, because a typed box polls and a read handler never
+/// awaits the network. No grant is `looked: "failed"` naming the login, for
+/// `/attention`'s reason.
+async fn repos(State(model): State<Model>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    Json(Answer::of(snapshot.repos.as_deref(), |repos| {
+        repos.iter().map(Repo::of).collect::<Vec<_>>()
+    }))
 }
 
 /// The library answers `heartbeat` *unknown* from every caller it has, and that
@@ -726,6 +748,52 @@ impl Item {
     }
 }
 
+/// `scopes` is GitHub's own list from the grant that made it, and empty for a
+/// grant read from the environment — nothing asks GitHub what a token may do.
+/// `pending` is a device flow waiting for its code to be typed.
+#[derive(Debug, serde::Serialize)]
+struct Connection {
+    connected: bool,
+    login: Option<String>,
+    scopes: Vec<String>,
+    pending: bool,
+}
+
+impl Connection {
+    fn of(held: &crate::github::Held) -> Self {
+        Self {
+            connected: held.token.is_some(),
+            login: held.login.clone(),
+            scopes: held.scopes.clone(),
+            pending: held.pending,
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Repo {
+    full_name: String,
+    private: bool,
+    language: Option<String>,
+    /// RFC 3339 as GitHub sent it, or `null` for a repository never pushed to.
+    pushed_at: Option<String>,
+    clone_url: String,
+    default_branch: String,
+}
+
+impl Repo {
+    fn of(repo: &yantra_core::github::Repo) -> Self {
+        Self {
+            full_name: repo.full_name.clone(),
+            private: repo.private,
+            language: repo.language.clone(),
+            pushed_at: repo.pushed_at.clone(),
+            clone_url: repo.clone_url.clone(),
+            default_branch: repo.default_branch.clone(),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 struct Missing {
     error: String,
@@ -953,6 +1021,7 @@ mod tests {
             "/machines/cachyos-g14/readiness",
             "/attention",
             "/readiness/github",
+            "/repos",
         ] {
             let body = get_json(holding(Snapshot::default()), path).await;
             assert_eq!(body, json!({"looked": "never"}), "{path}");
@@ -1438,12 +1507,12 @@ mod tests {
     }
 
     /// **The state this route is likeliest to be in, and the one it must not
-    /// draw as a quiet morning.** A `gh` nobody has logged in has an empty
+    /// draw as a quiet morning.** A daemon nobody has signed in has an empty
     /// inbox in exactly the way an unplugged sensor reads zero (R-23), and the
     /// remedy is a command the reader has to be told.
     #[tokio::test]
-    async fn a_gh_nobody_logged_in_is_a_failed_look_and_never_an_empty_inbox() {
-        let fleet = waiting(Reading::new(Err(yantra_core::attention::Error::LoggedOut)));
+    async fn no_grant_is_a_failed_look_and_never_an_empty_inbox() {
+        let fleet = waiting(Reading::new(Err(yantra_core::attention::Error::NoGrant)));
 
         let body = get_json(fleet, "/attention").await;
         assert_eq!(body["looked"], "failed", "{body}");
@@ -1451,9 +1520,97 @@ mod tests {
         assert!(
             body["error"]
                 .as_str()
-                .is_some_and(|e| e.contains("gh auth login")),
+                .is_some_and(|e| e.contains("no grant") || e.contains("no GitHub grant")),
             "{body}"
         );
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("yantra github login")),
+            "{body}"
+        );
+    }
+
+    fn repo(full_name: &str) -> yantra_core::github::Repo {
+        yantra_core::github::Repo {
+            full_name: full_name.into(),
+            private: true,
+            language: Some("Rust".into()),
+            pushed_at: Some("2026-09-01T00:00:00Z".into()),
+            clone_url: format!("https://github.com/{full_name}.git"),
+            default_branch: "main".into(),
+        }
+    }
+
+    /// The list New session searches, whole: the filter is the browser's.
+    #[tokio::test]
+    async fn repos_reach_the_json_by_name_with_a_grant() {
+        let fleet = holding(Snapshot {
+            repos: Some(Arc::new(Reading::new(Ok(vec![repo(
+                "2002Bishwajeet/yantra",
+            )])))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(fleet, "/repos").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        let first = &body["data"][0];
+        assert_eq!(first["full_name"], "2002Bishwajeet/yantra");
+        assert_eq!(first["private"], true);
+        assert_eq!(first["language"], "Rust");
+        assert_eq!(
+            first["clone_url"],
+            "https://github.com/2002Bishwajeet/yantra.git"
+        );
+        assert_eq!(first["default_branch"], "main");
+    }
+
+    /// `/attention`'s rule for the list: no grant is a failed look naming the
+    /// login, never an owner with no repositories.
+    #[tokio::test]
+    async fn repos_without_a_grant_are_a_failed_look_and_never_an_empty_list() {
+        let fleet = holding(Snapshot {
+            repos: Some(Arc::new(Reading::new(Err(
+                yantra_core::github::Error::NoGrant,
+            )))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(fleet, "/repos").await;
+        assert_eq!(body["looked"], "failed", "{body}");
+        assert!(body.get("data").is_none(), "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("yantra github login")),
+            "{body}"
+        );
+    }
+
+    /// The two shapes the page draws: nobody signed in, and a grant with its
+    /// login. `null` for a login not yet learned is a state, not an absence
+    /// — and the token is in neither.
+    #[tokio::test]
+    async fn the_connection_says_whether_a_grant_is_held_and_never_what_it_is() {
+        let none = get_json(holding(Snapshot::default()), "/github").await;
+        assert_eq!(
+            none,
+            json!({"connected": false, "login": null, "scopes": [], "pending": false})
+        );
+
+        let fleet = Fleet {
+            github: Grant::holding(Some(yantra_core::github::Token::new(
+                "gho_notarealtoken".into(),
+            ))),
+            ..holding(Snapshot::default())
+        };
+        fleet.github.learned("octocat".into()).await;
+
+        let held = get_json(fleet, "/github").await;
+        assert_eq!(held["connected"], true, "{held}");
+        assert_eq!(held["login"], "octocat", "{held}");
+        assert_eq!(held["pending"], false, "{held}");
+        assert!(!held.to_string().contains("gho_"), "{held}");
     }
 
     /// The check that is about this host, served under its own name and its own

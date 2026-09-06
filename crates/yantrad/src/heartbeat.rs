@@ -63,6 +63,8 @@ pub struct Fleet {
     /// the past.
     pub events: crate::events::Events,
     pub facts: Arc<Facts>,
+    /// The GitHub grant (ADR-0023 §3), here for the same reason again.
+    pub github: crate::github::Grant,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -88,6 +90,7 @@ impl Default for Fleet {
                 listening_on: Vec::new(),
                 ssh_dir: PathBuf::new(),
             }),
+            github: crate::github::Grant::default(),
         }
     }
 }
@@ -103,6 +106,12 @@ impl axum::extract::FromRef<Fleet> for Model {
 impl axum::extract::FromRef<Fleet> for Beats {
     fn from_ref(fleet: &Fleet) -> Self {
         fleet.beats.clone()
+    }
+}
+
+impl axum::extract::FromRef<Fleet> for crate::github::Grant {
+    fn from_ref(fleet: &Fleet) -> Self {
+        fleet.github.clone()
     }
 }
 

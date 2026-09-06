@@ -18,6 +18,7 @@ use std::process::ExitCode;
 
 use axum::Router;
 use axum::routing::get;
+use yantra_core::github::TOKEN as GITHUB_TOKEN;
 use yantra_core::inventory::{Inventory, Tailscale};
 use yantra_core::notify::RELAY_URL;
 
@@ -27,6 +28,7 @@ mod api;
 #[allow(clippy::expect_used)]
 mod contract;
 mod events;
+mod github;
 mod heartbeat;
 mod notify;
 mod refresh;
@@ -161,6 +163,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             listening_on: addresses.clone(),
             ssh_dir,
         }),
+        github: github::Grant::from_env(),
         ..heartbeat::Fleet::default()
     };
     let relay = yantra_core::notify::from_env();
@@ -171,7 +174,14 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         Some(_) => tracing::info!("notifying the relay {} names", RELAY_URL),
         None => tracing::info!("no {}, so nothing is notified", RELAY_URL),
     }
-    refresh::spawn(&fleet, inventory.clone(), yantra_core::attention::Gh, relay);
+    match fleet.github.token().await {
+        Some(_) => tracing::info!("reading GitHub with the grant {} names", GITHUB_TOKEN),
+        None => tracing::info!(
+            "no {}, so GitHub is not read until someone signs in",
+            GITHUB_TOKEN
+        ),
+    }
+    refresh::spawn(&fleet, inventory.clone(), fleet.github.clone(), relay);
     let app = app(fleet, authoriser, dashboard(web::from_env())?);
 
     let mut servers = tokio::task::JoinSet::new();

@@ -148,6 +148,8 @@ yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine it can reach
 yantra ls attention              # what GitHub is waiting on you for
+yantra ls repos [--search q]     # every repository the GitHub grant can see
+yantra github login              # sign in with the device flow, for yantrad and the dashboard
 yantra notify 'needs you'        # publish a message to the relay you configured
 yantra relay <url> [--token T]   # configure that relay, and send one test message
 yantra doctor [machine] [--json] # what each machine can and cannot do — a read, it changes nothing

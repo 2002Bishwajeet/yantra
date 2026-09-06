@@ -27,7 +27,8 @@ bind where:
 | `identity.rs` | ADR-0009 (the config is the only authority on a name, so a block the owner wrote is never rewritten), and `ssh.rs`'s known-hosts half — which is why nothing here writes one |
 | `terminfo.rs` | I-36, I-43 (two terminfo databases on one machine) |
 | `agent.rs` | I-23 (trust dialog), I-34 (`$HOME` is **in** this candidate list and not in tmux's), I-44 (macOS keychain — and since Y-151 the reason the gate runs *inside* the tmux server there, ADR-0018 §5), I-49 (an agent at the trust prompt is inert), **I-53** (`auth status` reports the credential it found, never that it works), I-51 (tmux's own quotes around a start command) |
-| `doctor.rs` | **R-23 above all** — every branch answers *unknown* where it could not ask, and an *absent* it did not earn sends someone to install software on a box that already has it. Then, through what it calls: I-34 (`agent::locate`), I-36/I-43 (terminfo, whose *absent* is bounded by the second), I-44/I-53 and ADR-0018 §1 **and** §5 (the login-session gate, which asks whether a server exists rather than starting one), and `attention::credential` — the one check about **this** host, where R-23 binds hardest because `gh auth status` cannot tell a refused token from a GitHub it could not reach |
+| `doctor.rs` | **R-23 above all** — every branch answers *unknown* where it could not ask, and an *absent* it did not earn sends someone to install software on a box that already has it. Then, through what it calls: I-34 (`agent::locate`), I-36/I-43 (terminfo, whose *absent* is bounded by the second), I-44/I-53 and ADR-0018 §1 **and** §5 (the login-session gate, which asks whether a server exists rather than starting one), and `github` — the one check about **this** host, a pure mapper over `GET /user`'s answer where R-23 binds hardest: no grant and a refused grant are the two *absent*s, and a GitHub that could not be reached is *unknown* |
+| `github.rs` | §B4 through [ADR-0023](../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md) — the token is a value on disk in one file and nowhere else, `Token` and `Device` print none of what they hold, and no error carries either; I-13 (every send on a blocking thread). `Forge` is still the seam the daemon and the tests are written against |
 | `status.rs` | I-47/I-48 through `tmux.rs`, and **I-49** — the trust state is read from the pane's *screen*, and only in the branch where the two sources already disagree |
 | `logs.rs` | I-45 (`stat -c` vs `stat -f`), I-46 (the transcript is a journal, not a log) |
 | `tokens.rs` | I-46 through `logs.rs`, whose `locate` finds the same file — then the journal's own two arithmetic traps: **I-61**, one API response written once per content block, so a sum per record double-counts and each record names the counts twice (its totals, then `iterations`); and **I-62**, which is what the three fields read for `price.rs` are guarding — `model` occurs again as a tool call's argument, and a cache write cannot be priced without knowing whether it was bought for five minutes or an hour |
@@ -51,8 +52,8 @@ That agent must stay tiny (R-12). The *dependency edge* is nearly free — 11 KB
 `docker` and `tmux` exactly as `claude` does. Two lists that drifted would produce a fleet where one
 binary is found and the other is not, which is the bug I-34 exists to name.
 
-**`ureq` is in this crate and `notify.rs` is the only thing that reaches it** (Y-146), which is the
-sharpest measurement of that rule so far. Adding the dependency and calling nothing changed all three
+**`ureq` is in this crate and `notify.rs` and `github.rs` are the only things that reach it** (Y-146,
+Y-342), which is the sharpest measurement of that rule so far. Adding the dependency and calling nothing changed all three
 aarch64-musl binaries by **exactly zero bytes**; calling it from the daemon cost `yantrad`
 **+1,137,016 bytes (+48.6 %)** while `yantra` and `yantra-agent`, which do not, paid 1,632 and 600.
 The cost is TLS: `rustls`, `ring` and a bundled Mozilla root store, which a static musl binary has to

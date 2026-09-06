@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 use crate::attention;
 use crate::doctor;
+use crate::github;
 use crate::inventory::{self, MachineInfo};
 use crate::sessions::{self, MachineSessions};
 use crate::status::{self, Fleet};
@@ -82,6 +83,9 @@ pub type Attention = Reading<Result<attention::Attention, attention::Error>>;
 /// the fleet ([`crate::doctor::github`]). No [`Result`]: the check carries a look
 /// it could not take as [`doctor::State::Unknown`], which is the whole of R-23.
 pub type Github = Reading<doctor::Check>;
+/// Every repository the grant can see (ADR-0023). Off the tailnet like
+/// [`Attention`], and on the same slow clock for the same reason.
+pub type Repos = Reading<Result<Vec<github::Repo>, github::Error>>;
 
 /// Each class costs something different to look at, so each is looked at on its
 /// own and carries its own age. Behind an [`Arc`] so a handler can take the
@@ -95,6 +99,7 @@ pub struct Snapshot {
     pub readiness: Option<Arc<Readiness>>,
     pub attention: Option<Arc<Attention>>,
     pub github: Option<Arc<Github>>,
+    pub repos: Option<Arc<Repos>>,
 }
 
 #[cfg(test)]
@@ -122,6 +127,7 @@ mod tests {
         assert!(snapshot.readiness.is_none());
         assert!(snapshot.attention.is_none());
         assert!(snapshot.github.is_none());
+        assert!(snapshot.repos.is_none());
     }
 
     /// The clone a handler serves is the same reading, not a re-taken one.

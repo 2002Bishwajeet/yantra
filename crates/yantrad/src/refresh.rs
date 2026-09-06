@@ -8,12 +8,14 @@ use std::time::Duration;
 
 use tokio::sync::RwLock;
 use yantra_core::attention::Forge;
+use yantra_core::github::{self, Github};
 use yantra_core::inventory::Inventory;
 use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::{doctor, sessions, status, workspace};
 
 use crate::events::{self, Event, Events};
+use crate::github::Grant;
 use crate::heartbeat::Fleet;
 use crate::notify::{Notifier, Viewers};
 
@@ -22,11 +24,12 @@ use crate::notify::{Notifier, Viewers};
 /// tax on it. Q6 is why it is a constant: one owner, one fleet, nothing to tune.
 const EVERY: Duration = Duration::from_secs(30);
 
-/// The one look that leaves the tailnet, and the one where the sentence above
-/// inverts: a `gh` poll warms nothing and is spent from the owner's own GitHub
-/// quota, which their `gh` and their `git push` draw on too. GitHub asks for
-/// this directly — `/notifications` answered `X-Poll-Interval: 60` on
-/// 2026-08-10, so `EVERY` would poll it at twice the rate its server requests.
+/// The looks that leave the tailnet, and where the sentence above inverts: a
+/// GitHub poll warms nothing and is spent from the owner's own quota, which
+/// their `gh` and their `git push` draw on too. GitHub asks for this directly
+/// — `/notifications` answered `X-Poll-Interval: 60` on 2026-08-10, so `EVERY`
+/// would poll it at twice the rate its server requests. Three classes share
+/// it since Y-342: the inbox, the repository list, and the grant check.
 const ATTENTION: Duration = Duration::from_secs(300);
 
 pub type Model = Arc<RwLock<Snapshot>>;
@@ -43,12 +46,14 @@ pub type Model = Arc<RwLock<Snapshot>>;
 /// the whole of its input, so `relay` adds a send to a loop that already exists
 /// rather than a loop of its own.
 ///
-/// The class the `forge` answers is the one that reaches off the tailnet, and
-/// the only one not on `EVERY` — see [`ATTENTION`] for why.
-pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'static>(
+/// The three classes the `grant` answers reach off the tailnet, and are the
+/// ones not on `EVERY` — see [`ATTENTION`] for why. **They also wake when the
+/// grant changes**, so a sign-in shows its repositories now and a logout
+/// empties them now, rather than at the next tick.
+pub fn spawn<I: Inventory + Send + Sync + 'static>(
     fleet: &Fleet,
     inventory: I,
-    forge: F,
+    grant: Grant,
     relay: Option<Relay>,
 ) {
     let model = &fleet.model;
@@ -98,20 +103,37 @@ pub fn spawn<I: Inventory + Send + Sync + 'static, F: Forge + Send + Sync + 'sta
     });
 
     let attention = model.clone();
+    let forge = grant.clone();
     tokio::spawn(async move {
         loop {
             look_at_attention(&attention, &forge).await;
-            tokio::time::sleep(ATTENTION).await;
+            tick_or_change(&forge).await;
         }
     });
 
     let github = model.clone();
+    let checked = grant.clone();
     tokio::spawn(async move {
         loop {
-            look_at_github(&github).await;
-            tokio::time::sleep(EVERY).await;
+            look_at_github(&github, &checked).await;
+            tick_or_change(&checked).await;
         }
     });
+
+    let repos = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_repos(&repos, &grant).await;
+            tick_or_change(&grant).await;
+        }
+    });
+}
+
+async fn tick_or_change(grant: &Grant) {
+    tokio::select! {
+        () = tokio::time::sleep(ATTENTION) => {}
+        () = grant.changed() => {}
+    }
 }
 
 /// The one diff this sweep makes (ADR-0025): a machine the last look had
@@ -156,24 +178,40 @@ async fn look_at_readiness(model: &Model) {
     model.write().await.readiness = Some(Arc::new(reading));
 }
 
-/// Three subprocesses and three round trips to GitHub, which is why it is here
-/// and not in a handler: `gh` is a network call, and a browser polls whether or
-/// not anyone is looking. An absent or logged-out `gh` is a failed reading
-/// carrying why, never an empty inbox — nothing waiting and nothing asked are
-/// the two answers this daemon must never fold together (R-23).
+/// Three round trips to GitHub, which is why it is here and not in a handler:
+/// a browser polls whether or not anyone is looking. No grant is a failed
+/// reading carrying why, never an empty inbox — nothing waiting and nothing
+/// asked are the two answers this daemon must never fold together (R-23).
 async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
     let reading = Reading::new(forge.attention().await);
     model.write().await.attention = Some(Arc::new(reading));
 }
 
-/// The one look that touches no machine in the fleet: `gh` runs here, so this is
-/// what the readiness sweep beside it cannot ask. Its own task rather than a
-/// line in that one because a local probe must not queue behind a `ConnectTimeout`
-/// per asleep machine, and it is on a task at all because `gh auth status` is a
-/// network call — the rule keeping ssh off the request path, for the same reason.
-async fn look_at_github(model: &Model) {
-    let reading = Reading::new(doctor::github().await);
+/// The one look that touches no machine in the fleet: whether the grant this
+/// daemon holds is still accepted, which the readiness sweep beside it cannot
+/// ask. Its own task because a local answer must not queue behind a
+/// `ConnectTimeout` per asleep machine. A grant from the environment learns
+/// its login here; one the daemon made already knows it.
+async fn look_at_github(model: &Model, grant: &Grant) {
+    let asked = match grant.token().await {
+        None => None,
+        Some(token) => Some(Github::default().login_name(&token).await),
+    };
+    if let Some(Ok(login)) = &asked {
+        grant.learned(login.clone()).await;
+    }
+    let reading = Reading::new(doctor::github(asked.as_ref()));
     model.write().await.github = Some(Arc::new(reading));
+}
+
+/// Every repository the grant can see, for New session to search **in the
+/// browser**: a typed box polls, and a read handler never awaits the network.
+async fn look_at_repos(model: &Model, grant: &Grant) {
+    let repos = match grant.token().await {
+        None => Err(github::Error::NoGrant),
+        Some(token) => Github::default().repos(&token).await,
+    };
+    model.write().await.repos = Some(Arc::new(Reading::new(repos)));
 }
 
 /// The reading lands in the model before anything is sent, so a browser never
@@ -370,7 +408,7 @@ mod tests {
 
     impl Forge for Inbox {
         async fn attention(&self) -> Result<Attention, attention::Error> {
-            self.0.clone().ok_or(attention::Error::NotInstalled)
+            self.0.clone().ok_or(attention::Error::NoGrant)
         }
     }
 
@@ -398,16 +436,42 @@ mod tests {
         assert!(reading.age() >= first + Duration::from_millis(20));
     }
 
-    /// A machine with no `gh`, or one nobody has logged in, is the commonest
-    /// state this class has — and an empty inbox is what it must never look
-    /// like, because nothing waiting is an answer a person acts on.
+    /// A daemon nobody has signed in is the commonest state this class has —
+    /// and an empty inbox is what it must never look like, because nothing
+    /// waiting is an answer a person acts on.
     #[tokio::test]
-    async fn a_gh_that_could_not_be_asked_is_a_failed_reading_and_not_an_empty_inbox() {
+    async fn no_grant_is_a_failed_reading_and_not_an_empty_inbox() {
         let model = Model::default();
         look_at_attention(&model, &Inbox(None)).await;
 
         let reading = model.read().await.attention.clone().expect("looked");
         let failure = reading.value().as_ref().expect_err("the look failed");
-        assert!(failure.to_string().contains("GitHub CLI"), "{failure}");
+        assert!(failure.to_string().contains("no GitHub grant"), "{failure}");
+    }
+
+    /// The same rule for the repository list: no grant is a failed look that
+    /// names the remedy, and nothing is asked of GitHub to learn it.
+    #[tokio::test]
+    async fn repos_without_a_grant_are_a_failed_reading_that_names_the_login() {
+        let model = Model::default();
+        look_at_repos(&model, &Grant::default()).await;
+
+        let reading = model.read().await.repos.clone().expect("looked");
+        let failure = reading.value().as_ref().expect_err("the look failed");
+        assert!(
+            failure.to_string().contains("yantra github login"),
+            "{failure}"
+        );
+    }
+
+    /// No grant is *absent* on the check, earned without a network call.
+    #[tokio::test]
+    async fn the_grant_check_without_a_grant_is_absent_and_asks_nothing() {
+        let model = Model::default();
+        look_at_github(&model, &Grant::default()).await;
+
+        let reading = model.read().await.github.clone().expect("looked");
+        assert_eq!(reading.value().state, doctor::State::Absent);
+        assert!(reading.value().detail.contains("yantra github login"));
     }
 }

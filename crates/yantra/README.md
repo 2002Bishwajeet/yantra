@@ -25,6 +25,10 @@ yantra ls notifications          # says where yantrad's list is — the CLI hold
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what is running, everywhere
 yantra ls attention              # issues, reviews and notifications waiting on GitHub
+yantra ls repos [--search q]     # every repository the GitHub grant can see
+yantra github login              # sign in with the device flow; write the grant down for yantrad
+yantra github logout             # remove it
+yantra github status             # whom GitHub says the grant in this shell belongs to
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
 yantra relay <url> [--token T]   # write that relay down for yantrad, and test it
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing

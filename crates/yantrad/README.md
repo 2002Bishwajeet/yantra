@@ -22,7 +22,11 @@ API the CLI cannot reach.
 | `GET /api/readiness` | `yantra doctor` |
 | `GET /api/machines/{name}/readiness` | `yantra doctor <machine>` |
 | `GET /api/attention` | `yantra ls attention` |
-| `GET /api/readiness/github` | — (`yantra` runs where you are, not where the daemon does) |
+| `GET /api/readiness/github` | `yantra github status` |
+| `GET /api/github` | `yantra github status` |
+| `POST /api/github/login` | `yantra github login` |
+| `DELETE /api/github` | `yantra github logout` |
+| `GET /api/repos` | `yantra ls repos` |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
@@ -108,28 +112,33 @@ one the tailnet list does not hold stays *unknown* — the beats are keyed on th
 names a machine the way a workspace does.
 
 `GET /api/attention` is what is waiting for the owner on GitHub: pull requests wanting their review,
-issues assigned to them, and the number of unread notifications. The daemon holds no GitHub
-credential — it reads the `gh` on the machine it runs on, which keeps its own token in that machine's
-keyring. **A `gh` that is absent or logged out is `looked: "failed"` carrying the remedy**, never an
-empty inbox: nothing waiting is something a person acts on, and the two must not read alike.
+issues assigned to them, and the number of unread notifications. The daemon reads GitHub's REST API
+with a grant of its own — an OAuth App token from the device flow, held in memory and written beside
+the relay in `/etc/yantra/daemon.env`
+([ADR-0023](../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md)). **No grant is
+`looked: "failed"` carrying the remedy**, never an empty inbox: nothing waiting is something a person
+acts on, and the two must not read alike.
+
+`POST /api/github/login` starts that device flow and answers the code to type at github.com; the
+daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the scopes
+and whether a sign-in is pending, never the token. `DELETE /api/github` removes it. `GET /api/repos`
+is every repository the grant can see, swept every five minutes and filtered in the browser.
 
 **It is polled every five minutes rather than every thirty seconds**, which is the one read that
 departs from the fleet's interval. The fleet poll pays for itself by keeping the ssh masters warm;
 this one warms nothing and spends a quota that is not Yantra's — the owner's own `gh` and `git`
 draw on the same token. GitHub asks for it directly: `/notifications` answers `X-Poll-Interval: 60`,
 so the fleet's interval would poll it at twice the rate its own server requests.
-`GET /api/readiness/github` is the check about **this** host (Y-175): whether `gh` is installed and
-logged in where the daemon runs, which is the credential the work inbox reads because `gh` is spawned
-here. It is a route of its own rather than a tenth check on every report, since an answer about this
-machine copied onto each machine's card claims something no ssh session asked. Two of its answers are
-earned — no `gh` on the daemon's `PATH`, and a `gh` that names no credential — and every other
-failure is *unknown*, because `gh auth status` says the same thing about a token GitHub refused as
-about a GitHub it could not reach.
+`GET /api/readiness/github` is the check about **this** host (Y-175, Y-342): whether the grant the
+daemon holds is present and still accepted. It is a route of its own rather than a tenth check on
+every report, since an answer about this machine copied onto each machine's card claims something no
+ssh session asked. Two of its answers are earned — no grant, and a grant GitHub refused — and every
+other failure is *unknown*, because a GitHub that could not be reached says nothing about the grant.
 
 ```json
 {"looked": "ok", "age_seconds": 3,
  "data": {"check": "github", "state": "present",
-          "detail": "`gh` reports a stored credential here — that it works is not asked"}}
+          "detail": "GitHub accepts the grant, signed in as octocat"}}
 ```
 
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:

@@ -10,6 +10,8 @@ import type {
   Attention,
   Broken,
   Cloning,
+  Connection,
+  Device,
   Event,
   Listed,
   Listing,
@@ -18,6 +20,7 @@ import type {
   MachineSessions,
   Opened,
   Readiness,
+  Repo,
   Resumed,
   Spend,
   SshIdentity,
@@ -376,6 +379,43 @@ export const attention = {
   "looked": "ok"
 } satisfies Looked<Attention>
 
+export const repos = {
+  "age_seconds": 0,
+  "data": [
+    {
+      "clone_url": "https://github.com/2002Bishwajeet/yantra.git",
+      "default_branch": "main",
+      "full_name": "2002Bishwajeet/yantra",
+      "language": "Rust",
+      "private": false,
+      "pushed_at": "2026-09-05T21:14:03Z"
+    },
+    {
+      "clone_url": "https://github.com/2002Bishwajeet/scratch.git",
+      "default_branch": "main",
+      "full_name": "2002Bishwajeet/scratch",
+      "language": null,
+      "private": true,
+      "pushed_at": null
+    }
+  ],
+  "looked": "ok"
+} satisfies Looked<Repo[]>
+
+export const github = {
+  "connected": true,
+  "login": "2002Bishwajeet",
+  "pending": false,
+  "scopes": []
+} satisfies Connection
+
+export const disconnected = {
+  "connected": false,
+  "login": null,
+  "pending": false,
+  "scopes": []
+} satisfies Connection
+
 export const notifications = {
   "age_seconds": 0,
   "data": [
@@ -439,6 +479,13 @@ export const sshIdentity = {
   "path": "/home/<user>/.ssh/id_yantra",
   "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra"
 } satisfies SshIdentity
+
+export const device = {
+  "expires_in": 900,
+  "interval": 5,
+  "user_code": "WDJB-MJHT",
+  "verification_uri": "https://github.com/login/device"
+} satisfies Device
 
 export const made = {
   "machine": "cachyos-g14",
