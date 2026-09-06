@@ -28,14 +28,16 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
+use yantra_core::github;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
-    agent, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
+    agent, clone, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
     terminfo, tmux, tokens, up, workspace,
 };
 
 use crate::api::Answer;
+use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
@@ -124,15 +126,19 @@ where
         )
         .route("/machines/{machine}/probe", post(ask::<I>))
         .route("/machines/{machine}/dirs", post(walk::<I>))
-        .route("/relay", post(relay::<I>))
+        .route("/machines/{machine}/clone", post(fetch::<I>))
         .with_state(authoriser.clone());
 
     // `{name}` rather than `{machine}`, which the routes above prefer: the `GET`
     // on this path spells it `{name}`, and two spellings of one route are a
     // matchit conflict rather than two routes (measured — it panics at startup).
+    // `/relay` is here since Y-343 because its test send is an event (ADR-0025).
     let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
         .route("/viewing", post(viewing::<I>))
+        .route("/relay", post(relay::<I>))
+        .route("/github/login", post(login::<I>))
+        .route("/github", axum::routing::delete(logout::<I>))
         .with_state(Remembered { authoriser, fleet });
 
     acts.merge(remembered)
@@ -530,6 +536,11 @@ async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
 /// `$HOME` is the only directory this daemon can name without asking, and
 /// composing one here would be the placement decision ADR-0009 declined.
 ///
+/// **`make` beside `path` is `yantra ls dirs --make`** (Y-344): one directory
+/// under `path`, and then the listing a picker was already drawing. A field
+/// rather than a sibling route because the answer is this route's answer and
+/// the picker has one call to make either way.
+///
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn walk<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
@@ -539,14 +550,22 @@ async fn walk<I: Inventory + Clone + Send + Sync + 'static>(
     body: Option<Json<Walked>>,
 ) -> Result<Json<Listing>, Refused> {
     let caller = allowed(&authoriser, from.ip(), &headers).await?;
-    tracing::info!("dirs {machine} for {}", caller.node);
+    let Walked { path, make } = body.map(|Json(walked)| walked).unwrap_or_default();
 
-    let listing = dirs::list(&machine, body.and_then(|Json(at)| at.path).as_deref())
-        .await
-        .map_err(|error| Refused::Verb {
-            status: from_dirs(&error),
-            said: chain(&error),
-        })?;
+    let listing = match make {
+        Some(name) => {
+            tracing::info!("mkdir on {machine} for {}", caller.node);
+            dirs::make(&machine, path.as_deref(), &name).await
+        }
+        None => {
+            tracing::info!("dirs {machine} for {}", caller.node);
+            dirs::list(&machine, path.as_deref()).await
+        }
+    }
+    .map_err(|error| Refused::Verb {
+        status: from_dirs(&error),
+        said: chain(&error),
+    })?;
 
     Ok(Json(Listing::from(listing)))
 }
@@ -554,16 +573,76 @@ async fn walk<I: Inventory + Clone + Send + Sync + 'static>(
 /// **A path that is not there is a 409**, which is `up::Error::NoRepo`'s own
 /// reading: the machine answered clearly, and a `mkdir` on that machine is what
 /// changes the answer. An empty directory is none of this — it is a `200` with
-/// no entries, and the two are different answers (R-23).
+/// no entries, and the two are different answers (R-23). A directory the
+/// machine would not make is the same 409; a name it was never asked about,
+/// because it is not one segment, is the caller's `400`.
 fn from_dirs(error: &dirs::Error) -> StatusCode {
     match error {
         dirs::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
-        dirs::Error::NotADirectory { .. } => StatusCode::CONFLICT,
+        dirs::Error::NotADirectory { .. } | dirs::Error::NotMade { .. } => StatusCode::CONFLICT,
+        dirs::Error::InvalidName { .. } => StatusCode::BAD_REQUEST,
         // An answer this build cannot parse is this build's problem, and so is
         // having nowhere to keep a control socket.
         dirs::Error::Unreadable { .. } | dirs::Error::NoStateDir => {
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+/// `yantra clone <url> --machine <m> --into <path>` on the wire (Y-344).
+///
+/// **It answers before the clone has done anything but start**, which is the
+/// whole design: `git clone` runs inside a tmux session on the machine, the
+/// `202` names the session, progress is that session's terminal socket
+/// ([ADR-0022]) and completion is [`ask`]. Nothing here awaits the clone, and
+/// a handler that did would hold a request for as long as a repository takes.
+///
+/// **No token goes with it** ([ADR-0023] §4): the machine's own git credential
+/// fetches, and a URL carrying one is a `400` before any machine is asked.
+///
+/// [ADR-0022]: ../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md
+/// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
+async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    Json(asked): Json<Fetch>,
+) -> Result<(StatusCode, Json<Cloning>), Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let plan = clone::plan(&asked.url, &asked.path).map_err(|error| Refused::Verb {
+        status: from_clone(&error),
+        said: chain(&error),
+    })?;
+    tracing::info!("clone into {machine}:{} for {}", plan.path, caller.node);
+
+    let cloning = clone::clone(&machine, &plan)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_clone(&error),
+            said: chain(&error),
+        })?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(Cloning {
+            machine: cloning.machine,
+            session: cloning.session,
+        }),
+    ))
+}
+
+/// The two refusals are the caller's; a macOS machine with no tmux server is
+/// the world's answer a person changes (`up`'s 409); ssh and tmux decided
+/// nothing (R-23).
+fn from_clone(error: &clone::Error) -> StatusCode {
+    match error {
+        clone::Error::InvalidUrl { .. } | clone::Error::InvalidPath { .. } => {
+            StatusCode::BAD_REQUEST
+        }
+        clone::Error::NoLoginServer { .. } => StatusCode::CONFLICT,
+        clone::Error::Ssh(_) | clone::Error::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
+        clone::Error::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -630,16 +709,16 @@ struct Publish {
 }
 
 async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(publish): Json<Publish>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("relay written for {}", caller.node);
 
     let file = std::path::Path::new(notify::RELAY_FILE);
-    notify::write_to(file, &publish.url, publish.token.as_deref()).map_err(|error| {
+    notify::write_relay(file, &publish.url, publish.token.as_deref()).map_err(|error| {
         Refused::Verb {
             status: match error {
                 notify::NotWritten::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
@@ -650,6 +729,8 @@ async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     })?;
 
     let relay = notify::Relay::new(publish.url, publish.token);
+    // ADR-0025 §2: remembered before the send, so a 502 is still an event.
+    events::remember(&state.fleet.events, Event::relay_test()).await;
     notify::post(&relay, notify::test_message())
         .await
         .map_err(|error| Refused::Verb {
@@ -661,6 +742,102 @@ async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
             ),
         })?;
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Step 1 of the device flow, as the page draws it: the code to type and where
+/// to type it. **`device_code` is not in it** — with the client id it is
+/// enough to collect the token, so it stays in the task that polls.
+#[derive(Debug, serde::Serialize)]
+struct Device {
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: u64,
+}
+
+impl Device {
+    fn of(device: &github::Device) -> Self {
+        Self {
+            user_code: device.user_code.clone(),
+            verification_uri: device.verification_uri.clone(),
+            expires_in: device.expires_in,
+            interval: device.interval,
+        }
+    }
+}
+
+/// `yantra github login` on the wire ([ADR-0023] §5). It answers as soon as
+/// GitHub has issued a code, and the rest of the flow — the poll, the write,
+/// the grant going live — runs in a task the daemon owns, because the person
+/// is now on their phone at github.com and nothing here should wait on them.
+/// `GET /api/github` says when it is done.
+///
+/// **One flow at a time**: a second `POST` while a code is waiting is a
+/// **409**, since two would race for one file. A daemon with no client id is
+/// a **500** naming the variable — that is this deployment's own fault — and
+/// a GitHub that refused or could not be reached is a **502**.
+///
+/// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
+async fn login<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Device>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let client_id = github::client_id().ok_or_else(|| Refused::Verb {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        said: github::Error::NoClientId.to_string(),
+    })?;
+    let grant = &state.fleet.github;
+    if !grant.begin().await {
+        return Err(Refused::Verb {
+            status: StatusCode::CONFLICT,
+            said: "a sign-in is already waiting for its code to be entered at github.com"
+                .to_owned(),
+        });
+    }
+    let device = match github::Github::default().begin(&client_id).await {
+        Ok(device) => device,
+        Err(error) => {
+            grant.clear().await;
+            return Err(Refused::Verb {
+                status: match error {
+                    github::Error::Rejected { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+                    _ => StatusCode::BAD_GATEWAY,
+                },
+                said: chain(&error),
+            });
+        }
+    };
+    tracing::info!("github sign-in begun for {}", caller.node);
+    tokio::spawn(crate::github::sign_in(
+        grant.clone(),
+        client_id,
+        device.clone(),
+    ));
+    Ok(Json(Device::of(&device)))
+}
+
+/// `yantra github logout` on the wire: the line leaves the file, then the
+/// grant leaves memory. In that order, so a file that could not be written
+/// answers **500** naming it while the daemon still holds what the file does
+/// — the two never disagree in the direction that brings a revoked grant back
+/// at the next start.
+async fn logout<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
+        Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        }
+    })?;
+    state.fleet.github.clear().await;
+    tracing::info!("github grant removed by {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1058,11 +1235,29 @@ struct Found {
 }
 
 /// Absent, and an absent `path` inside it, both mean the machine's `$HOME`.
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Walked {
     #[serde(default)]
     path: Option<String>,
+    /// One directory to make under `path` before listing it (Y-344).
+    #[serde(default)]
+    make: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fetch {
+    url: String,
+    path: String,
+}
+
+/// What a `202` carries: where to watch. The session is
+/// `GET /api/machines/{machine}/sessions/{session}/terminal`'s address.
+#[derive(Debug, serde::Serialize)]
+struct Cloning {
+    machine: String,
+    session: String,
 }
 
 /// One level of a machine's filesystem. **No entry is a file and none begins
@@ -1360,6 +1555,16 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
     }
     vec![
         (
+            "device",
+            "Device",
+            of(&Device {
+                user_code: "WDJB-MJHT".to_owned(),
+                verification_uri: "https://github.com/login/device".to_owned(),
+                expires_in: 900,
+                interval: 5,
+            }),
+        ),
+        (
             "made",
             "Workspace",
             of(&Made {
@@ -1412,6 +1617,14 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         ("spend", "Spend", of(&Spend::of(&transcript(0)))),
         ("spendFast", "Spend", of(&Spend::of(&transcript(3)))),
         ("logs", "Transcript", of(&Transcript::of(&conversation()))),
+        (
+            "cloning",
+            "Cloning",
+            of(&Cloning {
+                machine: "cachyos-g14".to_owned(),
+                session: "clone-yantra".to_owned(),
+            }),
+        ),
         (
             "listing",
             "Listing",
@@ -2230,6 +2443,63 @@ mod tests {
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
     }
 
+    /// Both halves of the grant are behind the gate and refuse before anything
+    /// is asked of GitHub or written: this tailnet holds nobody. The `DELETE`
+    /// shares its path with `api.rs`'s `GET`, so the 403 also says the merge
+    /// kept both methods.
+    #[tokio::test]
+    async fn signing_in_and_out_are_authorised_before_anything_happens() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app = crate::api::router()
+            .with_state(fleet.clone())
+            .merge(router(direct(tailnet(vec![])), fleet.clone()));
+
+        for request in [
+            Request::post("/github/login").body(Body::empty()),
+            Request::delete("/github").body(Body::empty()),
+        ] {
+            let mut request = request.expect("a request with no body");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            let answered = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        }
+        assert!(
+            !fleet.github.read().await.pending,
+            "a refused caller starts no flow"
+        );
+    }
+
+    /// The code a page draws, and never the one the poll presents.
+    #[test]
+    fn the_device_answer_carries_no_device_code() {
+        let device: github::Device = serde_json::from_str(
+            r#"{"device_code":"3584d83530557fdd1f46af8289938c8ef79f9dc5","user_code":"WDJB-MJHT","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"#,
+        )
+        .expect("GitHub's own example parses");
+
+        let json = serde_json::to_value(Device::of(&device)).expect("a DTO");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "user_code": "WDJB-MJHT",
+                "verification_uri": "https://github.com/login/device",
+                "expires_in": 900,
+                "interval": 5
+            })
+        );
+    }
+
     /// A token nobody meant to send is worse here than anywhere: it would be
     /// written to disk. So the body denies what it does not name, and an open
     /// topic is an absent field rather than an empty string.
@@ -2360,6 +2630,147 @@ mod tests {
             swept.status(),
             StatusCode::OK,
             "the sweep's own answer still reaches the same path"
+        );
+    }
+
+    /// An authorised caller and a body the verb refuses: every refusal here is
+    /// a `400` that arrives before any machine is asked, which is also the
+    /// only way the test can end — a body that passed would ssh to `pi` and
+    /// wait out `ConnectTimeout`.
+    async fn refused_body(path: &str, body: serde_json::Value) -> (StatusCode, String) {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let fake = tailnet(vec![(address(2), caller(ME, &[]))]);
+        let app: Router<()> = router(direct(fake), Fleet::default());
+        let mut asked = Request::post(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("a POST");
+        asked
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+        let response = app.oneshot(asked).await.expect("the router is infallible");
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("the body is in memory");
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// Y-344, I-24: a URL that is not one of git's three spellings, one that
+    /// carries a credential, and a destination that is relative, climbs or
+    /// holds a shell character are each refused by name before ssh.
+    #[tokio::test]
+    async fn a_clone_refuses_a_bad_url_or_destination_before_any_machine_is_asked() {
+        for (url, path, about) in [
+            ("github.com/o/r", "/srv/r", "clone URL"),
+            ("http://github.com/o/r", "/srv/r", "clone URL"),
+            ("file:///etc", "/srv/r", "clone URL"),
+            ("https://user:token@github.com/o/r", "/srv/r", "clone URL"),
+            ("https://github.com/o/r; id", "/srv/r", "clone URL"),
+            ("--upload-pack=id@host:o/r", "/srv/r", "clone URL"),
+            ("https://github.com/o/r", "srv/r", "destination"),
+            ("https://github.com/o/r", "/srv/../etc/r", "destination"),
+            ("https://github.com/o/r", "~/x;id", "destination"),
+            ("https://github.com/o/r", "/srv/$HOME", "destination"),
+            ("https://github.com/o/r", "", "destination"),
+        ] {
+            let (status, said) = refused_body(
+                "/machines/pi/clone",
+                serde_json::json!({"url": url, "path": path}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{url} {path}: {said}");
+            assert!(said.contains(about), "{url} {path}: {said}");
+        }
+
+        let (status, _) = refused_body(
+            "/machines/pi/clone",
+            serde_json::json!({"url": "https://github.com/o/r", "path": "/srv/r", "token": "x"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no field carries a token"
+        );
+    }
+
+    /// Y-344: `make` is one segment or a `400`, and a directory the machine
+    /// would not make is the same `409` as a path that is not there.
+    #[tokio::test]
+    async fn a_directory_name_that_is_not_one_segment_is_refused_before_ssh() {
+        for name in [
+            "", ".", "..", ".hidden", "a/b", "/abs", "a b", "a;b", "$HOME", "-x",
+        ] {
+            let (status, said) = refused_body(
+                "/machines/pi/dirs",
+                serde_json::json!({"path": "/home/u", "make": name}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name:?}: {said}");
+            assert!(said.contains("directory name"), "{name:?}: {said}");
+        }
+
+        let not_made = dirs::Error::NotMade {
+            machine: "pi".to_owned(),
+            path: "/home/u/new".to_owned(),
+            reason: "mkdir: can't create directory '/home/u/new': File exists".to_owned(),
+        };
+        let (status, said) = answered(from_dirs(&not_made), &not_made).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("File exists"), "{said}");
+    }
+
+    /// The clone route is gated like every other write, and the mapper sends
+    /// each of the library's answers where the verbs beside it send theirs.
+    #[tokio::test]
+    async fn a_clone_is_authorised_and_fails_the_way_the_verbs_beside_it_do() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let app: Router<()> = router(direct(tailnet(vec![])), Fleet::default());
+        let mut asked = Request::post("/machines/pi/clone")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"url":"https://github.com/o/r","path":"/srv/r"}"#,
+            ))
+            .expect("a POST");
+        asked
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+        let refused = app.oneshot(asked).await.expect("the router is infallible");
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+        let asleep = clone::Error::Ssh(yantra_core::ssh::Error::Transport {
+            host: "pi".to_string(),
+            diagnosis: "connect to host pi port 22: Connection refused".to_string(),
+        });
+        let (status, said) = answered(from_clone(&asleep), &asleep).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(said.contains("Connection refused"), "{said}");
+        assert_eq!(
+            from_clone(&clone::Error::NoLoginServer {
+                machine: "mac".to_owned()
+            }),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            from_clone(&clone::Error::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let answered = serde_json::to_value(Cloning {
+            machine: "pi".to_owned(),
+            session: "clone-r".to_owned(),
+        })
+        .expect("a DTO");
+        assert_eq!(
+            answered,
+            serde_json::json!({"machine": "pi", "session": "clone-r"})
         );
     }
 

@@ -17,17 +17,24 @@ yantra down yantra               # stop it, cleanly
 yantra rm yantra [--force]       # delete the workspace, refusing while its session is open
 yantra kill mac scratch          # stop any session by machine and name
 yantra probe mac /code/site      # is it there, and what origin does it hold?
+yantra clone <url> --machine mac --into ~/code/site   # git clone there, inside a tmux session
 
 yantra ls machines               # the tailnet
-yantra ls dirs mac [/code]       # one level of a machine, with the repositories marked
+yantra ls dirs mac [/code] [--make NAME]   # one level of a machine, with the repositories marked
+yantra ls notifications          # says where yantrad's list is — the CLI holds none (ADR-0025)
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what is running, everywhere
 yantra ls attention              # issues, reviews and notifications waiting on GitHub
+yantra ls repos [--search q]     # every repository the GitHub grant can see
+yantra github login              # sign in with the device flow; write the grant down for yantrad
+yantra github logout             # remove it
+yantra github status             # whom GitHub says the grant in this shell belongs to
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
 yantra relay <url> [--token T]   # write that relay down for yantrad, and test it
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
+yantra about                     # version, target and build date of this binary
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:

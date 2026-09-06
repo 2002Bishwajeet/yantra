@@ -11,9 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use yantra_core::agent;
 use yantra_core::attach;
-use yantra_core::attention::{self, Attention, Forge as _, Gh};
+use yantra_core::attention::{self, Attention, Forge as _};
+use yantra_core::clone;
 use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
+use yantra_core::github::{self, Github};
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
@@ -129,6 +131,17 @@ enum Command {
         /// Absolute path **on that machine**, not on this one
         path: String,
     },
+    /// Clone a repository onto a machine, inside a tmux session there
+    Clone {
+        /// `https://host/path`, `ssh://user@host/path` or `user@host:path`
+        url: String,
+        /// Machine, as `~/.ssh/config` spells it
+        #[arg(long)]
+        machine: String,
+        /// Where to put it **on that machine**: absolute, or `~/…`
+        #[arg(long)]
+        into: String,
+    },
     /// Stop a tmux session by machine and name, for one no workspace claims
     Kill {
         /// Machine, as `~/.ssh/config` spells it
@@ -169,6 +182,11 @@ enum Command {
         #[arg(long)]
         token: Option<String>,
     },
+    /// The GitHub grant yantrad reads repositories and the work inbox with
+    Github {
+        #[command(subcommand)]
+        action: GithubAction,
+    },
     /// Say what each machine can and cannot do — a read, it changes nothing
     Doctor {
         /// ssh destination to check. Every machine a workspace names, if omitted
@@ -184,6 +202,8 @@ enum Command {
     },
     /// Prepare this account's ssh identity, and print the public key to place
     SshIdentity,
+    /// Say which build this is
+    About,
 }
 
 /// Spelled out rather than a bare bool so that adding a second agent is a new
@@ -191,6 +211,16 @@ enum Command {
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum AgentArg {
     Claude,
+}
+
+#[derive(Debug, Subcommand)]
+enum GithubAction {
+    /// Sign in with the device flow, and write the grant down where yantrad reads it
+    Login,
+    /// Remove the grant from that file
+    Logout,
+    /// Say whether this shell holds a grant, and whom GitHub says it is
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -204,6 +234,9 @@ enum LsTarget {
         machine: String,
         /// Absolute path **on that machine**. Its `$HOME` if omitted
         path: Option<String>,
+        /// Make one directory of this name under the path first
+        #[arg(long)]
+        make: Option<String>,
     },
     /// tmux sessions on the machines your workspaces name
     Sessions,
@@ -211,6 +244,14 @@ enum LsTarget {
     Workspaces,
     /// Issues, reviews and notifications waiting for you on GitHub
     Attention,
+    /// The last events the daemon would have pushed — held by yantrad, in memory
+    Notifications,
+    /// Every repository the GitHub grant can see, newest push first
+    Repos {
+        /// Keep only the repositories whose `owner/name` contains this
+        #[arg(long)]
+        search: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -248,14 +289,20 @@ async fn main() -> ExitCode {
         Some(Command::Tokens { workspace }) => show_tokens(&workspace).await,
         Some(Command::Down { workspace }) => down(&workspace).await,
         Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
+        Some(Command::Clone { url, machine, into }) => clone_repo(&url, &machine, &into).await,
         Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
             target: LsTarget::Machines,
         }) => ls_machines().await,
         Some(Command::Ls {
-            target: LsTarget::Dirs { machine, path },
-        }) => ls_dirs(&machine, path.as_deref()).await,
+            target:
+                LsTarget::Dirs {
+                    machine,
+                    path,
+                    make,
+                },
+        }) => ls_dirs(&machine, path.as_deref(), make.as_deref()).await,
         Some(Command::Ls {
             target: LsTarget::Sessions,
         }) => ls_sessions().await,
@@ -265,6 +312,12 @@ async fn main() -> ExitCode {
         Some(Command::Ls {
             target: LsTarget::Attention,
         }) => ls_attention().await,
+        Some(Command::Ls {
+            target: LsTarget::Notifications,
+        }) => ls_notifications().await,
+        Some(Command::Ls {
+            target: LsTarget::Repos { search },
+        }) => ls_repos(search.as_deref()).await,
         Some(Command::Notify {
             message,
             title,
@@ -278,9 +331,19 @@ async fn main() -> ExitCode {
             .await
         }
         Some(Command::Relay { url, token }) => relay(&url, token.as_deref()).await,
+        Some(Command::Github {
+            action: GithubAction::Login,
+        }) => github_login().await,
+        Some(Command::Github {
+            action: GithubAction::Logout,
+        }) => github_logout(),
+        Some(Command::Github {
+            action: GithubAction::Status,
+        }) => github_status().await,
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity) => ssh_identity(),
+        Some(Command::About) => about(),
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -845,7 +908,7 @@ async fn publish(message: notify::Message) -> ExitCode {
 /// the way that avoids it.
 async fn relay(url: &str, token: Option<&str>) -> ExitCode {
     let path = std::path::Path::new(notify::RELAY_FILE);
-    if let Err(err) = notify::write_to(path, url, token) {
+    if let Err(err) = notify::write_relay(path, url, token) {
         report_error(&err);
         return ExitCode::FAILURE;
     }
@@ -919,13 +982,18 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
 /// never automatic**: whether generating the keypair is Yantra's job rather than
 /// the owner's is still unconfirmed, so nothing calls this for them.
 fn ssh_identity() -> ExitCode {
-    match identity::prepare() {
-        Ok(prepared) => {
+    match identity::prepare().and_then(|prepared| Ok((identity::describe()?, prepared))) {
+        Ok((described, prepared)) => {
             let key = prepared.key.display();
             if prepared.generated {
                 println!("key:    {key}, generated");
             } else {
                 println!("key:    {key}, already here and left alone");
+            }
+            // The same four fields `GET /api/ssh-identity` serves (Y-343).
+            if let Some(identity) = described {
+                println!("kind:   {}", identity.kind);
+                println!("fpr:    {}", identity.fingerprint);
             }
             let config = prepared.config.display();
             if prepared.configured.is_empty() {
@@ -954,6 +1022,83 @@ fn ssh_identity() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `GET /api/about`'s three build facts. The other three — uptime, where it
+/// listens, the tailnet — are a running daemon's, and this process is not one.
+fn about() -> ExitCode {
+    print!("{}", render_about());
+    ExitCode::SUCCESS
+}
+
+fn render_about() -> String {
+    format!(
+        "version: {}\ntarget:  {}\nbuilt:   {}\n\nuptime, listening addresses and tailnet are the daemon's: GET /api/about\n",
+        yantra_core::about::VERSION,
+        yantra_core::about::TARGET,
+        yantra_core::about::BUILT
+    )
+}
+
+/// ADR-0025's list is the daemon's memory, and this process runs in-process
+/// with no daemon between it and the fleet (ADR-0012) — so it has nothing to
+/// list and says where the list is rather than pretending an empty one.
+async fn ls_notifications() -> ExitCode {
+    let address = Tailscale
+        .addresses()
+        .await
+        .ok()
+        .and_then(|addresses| addresses.into_iter().find(|a| a.is_ipv4()))
+        .map_or("<this machine's tailnet address>".to_owned(), |a| {
+            a.to_string()
+        });
+    eprintln!(
+        "yantra: notifications are the daemon's memory (ADR-0025), and yantra runs in-process \
+         with none —\n  read them at http://{address}:7717/api/notifications"
+    );
+    ExitCode::FAILURE
+}
+
+/// Answers as soon as the session is open: the clone runs there, and
+/// `yantra probe` says when it has landed. A session already running is the
+/// state asked for (I-30), and it says which happened.
+async fn clone_repo(url: &str, machine: &str, into: &str) -> ExitCode {
+    let plan = match clone::plan(url, into) {
+        Ok(plan) => plan,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    match clone::clone(machine, &plan).await {
+        Ok(cloning) => {
+            print!("{}", render_cloning(&cloning, &plan));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_cloning(cloning: &clone::Cloning, plan: &clone::Plan) -> String {
+    let verb = if cloning.opened.was_created() {
+        "cloning"
+    } else {
+        "already cloning"
+    };
+    format!(
+        "{verb} {} into {} on {}, in tmux session {}\n  watch it:  ssh -t {} tmux attach -t ={}\n  landed?    yantra probe {} {}\n",
+        plan.url,
+        plan.path,
+        cloning.machine,
+        cloning.session,
+        cloning.machine,
+        cloning.session,
+        cloning.machine,
+        plan.path
+    )
 }
 
 const IDENTITY_NOTE: &str = "\
@@ -1078,8 +1223,12 @@ async fn ls_machines() -> ExitCode {
 /// directory exits **0**: the machine answered, and *nothing here* is what it
 /// said. A path that is not there exits 1, which is `probe`'s rule, since the
 /// two are different answers and only one of them is a reason to stop.
-async fn ls_dirs(machine: &str, path: Option<&str>) -> ExitCode {
-    match dirs::list(machine, path).await {
+async fn ls_dirs(machine: &str, path: Option<&str>, make: Option<&str>) -> ExitCode {
+    let listed = match make {
+        Some(name) => dirs::make(machine, path, name).await,
+        None => dirs::list(machine, path).await,
+    };
+    match listed {
         Ok(listing) => {
             print!("{}", render_dirs(&listing));
             ExitCode::SUCCESS
@@ -1208,22 +1357,206 @@ async fn rm(name: &str, force: bool) -> ExitCode {
     }
 }
 
+/// The grant this shell holds, read from the environment and nowhere else —
+/// `yantra github login` writes the daemon's file and cannot read it back for
+/// a terminal, so each refusal names the variable that would change it.
+fn grant() -> Option<github::Token> {
+    let token = github::from_env();
+    if token.is_none() {
+        eprintln!(
+            "yantra: no GitHub grant in this shell — {} is not set",
+            github::TOKEN
+        );
+        eprintln!("{}", grant_note());
+    }
+    token
+}
+
+fn grant_note() -> String {
+    format!(
+        "\x20 note: `yantra github login` writes the grant to {} for yantrad;\n\
+         \x20       a terminal reads it from {} and nowhere else.",
+        notify::RELAY_FILE,
+        github::TOKEN
+    )
+}
+
 /// An empty inbox exits 0. Nothing waiting is the answer, not a partial one —
 /// the same reading that makes `down` succeed on something already stopped.
 async fn ls_attention() -> ExitCode {
-    match Gh.attention().await {
+    let Some(token) = grant() else {
+        return ExitCode::FAILURE;
+    };
+    let api = github::Api {
+        github: Github::default(),
+        token,
+    };
+    match api.attention().await {
         Ok(attention) => {
             print!("{}", render_attention(&attention));
             ExitCode::SUCCESS
         }
         Err(err) => {
             report_error(&err);
-            // Each of these is one person's action away, so name it (the
-            // crate's *name the fix, not just the fault*). `LoggedOut` needs no
-            // note: its own message already carries `gh auth login`.
-            if matches!(err, attention::Error::NotInstalled) {
-                eprintln!("  install it from https://cli.github.com, then run `gh auth login`");
-            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The list the dashboard's New session searches, filtered here for the same
+/// reason it is filtered in the browser: the whole list is one read, and a
+/// typed box is many.
+async fn ls_repos(search: Option<&str>) -> ExitCode {
+    let Some(token) = grant() else {
+        return ExitCode::FAILURE;
+    };
+    match Github::default().repos(&token).await {
+        Ok(repos) => {
+            print!("{}", render_repos(&repos, search));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_repos(repos: &[github::Repo], search: Option<&str>) -> String {
+    let wanted = search.map(str::to_lowercase);
+    let rows: Vec<Vec<String>> = repos
+        .iter()
+        .filter(|repo| {
+            wanted
+                .as_ref()
+                .is_none_or(|q| repo.full_name.to_lowercase().contains(q.as_str()))
+        })
+        .map(|repo| {
+            vec![
+                repo.full_name.clone(),
+                if repo.private { "private" } else { "public" }.to_owned(),
+                repo.language.clone().unwrap_or_else(|| "-".to_owned()),
+                repo.pushed_at.clone().unwrap_or_else(|| "never".to_owned()),
+                repo.default_branch.clone(),
+            ]
+        })
+        .collect();
+    let mut out = if rows.is_empty() {
+        String::new()
+    } else {
+        table(
+            &["REPO", "VISIBILITY", "LANGUAGE", "PUSHED", "BRANCH"],
+            &rows,
+        )
+    };
+    out.push_str(&format!(
+        "\n{} of {} repositor{}\n",
+        rows.len(),
+        repos.len(),
+        if repos.len() == 1 { "y" } else { "ies" }
+    ));
+    out
+}
+
+/// The device flow from a keyboard
+/// ([ADR-0023](../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md)
+/// §5): print the code, wait, write the file, say who signed in. **The token is
+/// never printed.** It is written where the daemon reads it, and the daemon
+/// takes it at its next start — the route is what makes it live at once.
+async fn github_login() -> ExitCode {
+    let Some(client_id) = github::client_id() else {
+        report_error(&github::Error::NoClientId);
+        eprintln!(
+            "\x20 note: register an OAuth App at github.com/settings/developers with the device\n\
+             \x20       flow enabled, and put its client id in {}.",
+            github::CLIENT_ID
+        );
+        return ExitCode::FAILURE;
+    };
+    let api = Github::default();
+    let device = match api.begin(&client_id).await {
+        Ok(device) => device,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "open {} and enter the code {}",
+        device.verification_uri, device.user_code
+    );
+    println!(
+        "  waiting — the code is good for {} minutes",
+        device.expires_in / 60
+    );
+
+    let grant = match api.wait(&client_id, &device).await {
+        Ok(grant) => grant,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let login = match api.login_name(&grant.token).await {
+        Ok(login) => login,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    if let Err(err) = notify::write_github(path, Some(&grant.token)) {
+        report_error(&err);
+        eprintln!(
+            "  GitHub granted the sign-in as {login}, and nothing holds it now — run this again where {} is writable",
+            notify::RELAY_FILE
+        );
+        return ExitCode::FAILURE;
+    }
+    println!(
+        "signed in as {login}; wrote the grant to {}",
+        notify::RELAY_FILE
+    );
+    println!("  note: yantrad reads that file when systemd starts it —");
+    println!(
+        "        `sudo systemctl restart yantrad`, or sign in from the dashboard to skip the restart."
+    );
+    ExitCode::SUCCESS
+}
+
+/// The line leaves the file and nothing else in it moves. Exit 0 whether or
+/// not it was there: absence is the state asked for (I-30's rule).
+fn github_logout() -> ExitCode {
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    match notify::write_github(path, None) {
+        Ok(()) => {
+            println!("removed the grant from {}", notify::RELAY_FILE);
+            println!(
+                "  note: yantrad holds what it read at start until it restarts, or until the dashboard signs out."
+            );
+            println!("        revoke the token itself under github.com/settings/applications.");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Exit 1 unless GitHub accepts the grant this shell holds, so an installer
+/// can loop on it — `doctor`'s rule, on the one check that is about here.
+async fn github_status() -> ExitCode {
+    let Some(token) = grant() else {
+        return ExitCode::FAILURE;
+    };
+    match Github::default().login_name(&token).await {
+        Ok(login) => {
+            println!("signed in as {login}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
             ExitCode::FAILURE
         }
     }
@@ -2242,6 +2575,7 @@ mod tests {
             windows,
             attached,
             created: "Thu Jul 30 13:02:31 2026".to_owned(),
+            created_at: 1_785_502_951,
         }
     }
 
@@ -2562,7 +2896,7 @@ mod tests {
         assert!(matches!(
             walked.command,
             Some(Command::Ls {
-                target: LsTarget::Dirs { ref machine, path: Some(ref path) }
+                target: LsTarget::Dirs { ref machine, path: Some(ref path), .. }
             }) if machine == "mac" && path == "/code"
         ));
 
@@ -2571,14 +2905,115 @@ mod tests {
         assert!(matches!(
             home.command,
             Some(Command::Ls {
-                target: LsTarget::Dirs { path: None, .. }
+                target: LsTarget::Dirs {
+                    path: None,
+                    make: None,
+                    ..
+                }
             })
+        ));
+
+        let made = Cli::try_parse_from(["yantra", "ls", "dirs", "mac", "/code", "--make", "new"])
+            .expect("`--make` parses");
+        assert!(matches!(
+            made.command,
+            Some(Command::Ls {
+                target: LsTarget::Dirs { make: Some(ref name), .. }
+            }) if name == "new"
         ));
 
         assert!(
             Cli::try_parse_from(["yantra", "ls", "dirs"]).is_err(),
             "a path belongs to one machine, so there is no listing without one"
         );
+    }
+
+    /// Y-344: both flags are required, because a clone has one machine and
+    /// one destination and neither has a default this side could compose.
+    #[test]
+    fn clone_takes_a_url_a_machine_and_a_destination() {
+        let cli = Cli::try_parse_from([
+            "yantra",
+            "clone",
+            "https://github.com/o/r.git",
+            "--machine",
+            "mac",
+            "--into",
+            "~/src/r",
+        ])
+        .expect("`clone` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Clone { ref url, ref machine, ref into })
+                if url == "https://github.com/o/r.git" && machine == "mac" && into == "~/src/r"
+        ));
+        assert!(
+            Cli::try_parse_from([
+                "yantra",
+                "clone",
+                "https://github.com/o/r.git",
+                "--machine",
+                "mac"
+            ])
+            .is_err(),
+            "no destination is composed here"
+        );
+    }
+
+    #[test]
+    fn about_and_ls_notifications_are_spellings_users_type() {
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "about"])
+                .expect("`about` parses")
+                .command,
+            Some(Command::About)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "ls", "notifications"])
+                .expect("`ls notifications` parses")
+                .command,
+            Some(Command::Ls {
+                target: LsTarget::Notifications
+            })
+        ));
+    }
+
+    /// The three facts are the build's own, and the line under them names
+    /// where the other three live.
+    #[test]
+    fn about_prints_the_build_and_names_the_daemon_for_the_rest() {
+        let out = render_about();
+        assert!(out.starts_with(&format!("version: {}\n", env!("CARGO_PKG_VERSION"))));
+        assert!(out.contains("target:  "), "{out}");
+        assert!(out.contains("built:   20"), "{out}");
+        assert!(out.trim_end().ends_with("GET /api/about"), "{out}");
+    }
+
+    /// Which of the two happened is the sentence, and both name the session
+    /// to watch and the probe that says when it has landed.
+    #[test]
+    fn a_clone_says_whether_it_started_or_was_already_running() {
+        use yantra_core::tmux::{Opened, Session};
+        let plan = clone::plan("https://github.com/o/r.git", "~/src/r").expect("planned");
+        let session = Session {
+            name: "clone-r".to_owned(),
+            session_id: "$1".to_owned(),
+            window_id: "@1".to_owned(),
+            pane_id: "%1".to_owned(),
+        };
+        let cloning = |opened| clone::Cloning {
+            machine: "mac".to_owned(),
+            session: "clone-r".to_owned(),
+            opened,
+        };
+
+        let started = render_cloning(&cloning(Opened::Created(session.clone())), &plan);
+        assert!(started.starts_with("cloning https://github.com/o/r.git into ~/src/r on mac"));
+        assert!(started.contains("tmux attach -t =clone-r"), "{started}");
+        assert!(started.contains("yantra probe mac ~/src/r"), "{started}");
+
+        let again = render_cloning(&cloning(Opened::Attached(session)), &plan);
+        assert!(again.starts_with("already cloning"), "{again}");
     }
 
     /// A repository with no origin and a plain directory both leave the column
@@ -2647,6 +3082,73 @@ mod tests {
                 target: LsTarget::Attention
             })
         ));
+    }
+
+    /// The verbs ADR-0023 §5 names, spelled as a person types them.
+    #[test]
+    fn github_login_logout_status_and_ls_repos_are_spellings_users_type() {
+        for (action, wanted) in [
+            ("login", GithubAction::Login),
+            ("logout", GithubAction::Logout),
+            ("status", GithubAction::Status),
+        ] {
+            let cli = Cli::try_parse_from(["yantra", "github", action]).expect(action);
+            assert!(
+                matches!(
+                    cli.command,
+                    Some(Command::Github { action: ref parsed })
+                        if std::mem::discriminant(parsed) == std::mem::discriminant(&wanted)
+                ),
+                "{action}: {:?}",
+                cli.command
+            );
+        }
+
+        let cli = Cli::try_parse_from(["yantra", "ls", "repos", "--search", "yan"])
+            .expect("`ls repos --search` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Ls {
+                target: LsTarget::Repos { search: Some(ref q) }
+            }) if q == "yan"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "ls", "repos"]).is_ok());
+    }
+
+    fn repo(full_name: &str, private: bool) -> github::Repo {
+        github::Repo {
+            full_name: full_name.to_owned(),
+            private,
+            language: Some("Rust".to_owned()),
+            pushed_at: None,
+            clone_url: format!("https://github.com/{full_name}.git"),
+            default_branch: "main".to_owned(),
+        }
+    }
+
+    /// The filter is on `owner/name`, case-insensitive, and the count under
+    /// the table says how many of the whole list it kept — so an empty match
+    /// is not mistaken for an empty account.
+    #[test]
+    fn ls_repos_filters_on_the_full_name_and_counts_what_it_kept() {
+        let repos = [
+            repo("2002Bishwajeet/yantra", false),
+            repo("o/scratch", true),
+        ];
+
+        let all = render_repos(&repos, None);
+        assert!(all.contains("2002Bishwajeet/yantra"), "{all}");
+        assert!(all.contains("private"), "{all}");
+        assert!(all.contains("never"), "a repository never pushed to: {all}");
+        assert!(all.trim_end().ends_with("2 of 2 repositories"), "{all}");
+
+        let some = render_repos(&repos, Some("YANTRA"));
+        assert!(!some.contains("o/scratch"), "{some}");
+        assert!(some.trim_end().ends_with("1 of 2 repositories"), "{some}");
+
+        let none = render_repos(&repos, Some("nothing"));
+        assert!(!none.contains("REPO"), "no table without rows: {none}");
+        assert_eq!(none.trim(), "0 of 2 repositories");
     }
 
     fn item(repo: &str, number: u64, title: &str) -> attention::Item {

@@ -60,6 +60,21 @@ pub enum Error {
 
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
+
+    #[error(
+        "`{name}` is not a usable directory name: one segment, no leading dot, and only letters, \
+         digits and `-_.+@`"
+    )]
+    InvalidName { name: String },
+
+    /// The machine answered, and what it said is that the directory could not
+    /// be made there — a file in the way, or a parent that is not there.
+    #[error("{machine} could not make {path}: {reason}")]
+    NotMade {
+        machine: String,
+        path: String,
+        reason: String,
+    },
 }
 
 /// `path` of `None` is the machine's own `$HOME`, which is the only directory
@@ -67,6 +82,66 @@ pub enum Error {
 pub async fn list(machine: &str, path: Option<&str>) -> Result<Listing, Error> {
     let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
     list_on(&ssh, machine, path).await
+}
+
+/// Makes one directory called `name` under `path` and lists `path` again, so a
+/// picker draws what it just made (Y-344). A directory already there is the
+/// state asked for (§B4), and a parent that is not there is a refusal.
+pub async fn make(machine: &str, path: Option<&str>, name: &str) -> Result<Listing, Error> {
+    let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
+    make_on(&ssh, machine, path, name).await
+}
+
+pub async fn make_on<E: Exec>(
+    exec: &E,
+    machine: &str,
+    path: Option<&str>,
+    name: &str,
+) -> Result<Listing, Error> {
+    if !valid_name(name) {
+        return Err(Error::InvalidName {
+            name: name.to_owned(),
+        });
+    }
+    let out = exec.exec(&make_command(path, name)).await?;
+    if !out.success() {
+        return Err(Error::NotMade {
+            machine: machine.to_owned(),
+            path: format!("{}/{name}", path.unwrap_or("~")),
+            reason: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        });
+    }
+    list_on(exec, machine, path).await
+}
+
+/// One segment (I-24): no `/`, no `..`, and no leading dot, because the
+/// listing beside it skips dotfiles and a directory it cannot show is one a
+/// picker cannot pick.
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.+@".contains(c))
+}
+
+fn base(path: Option<&str>) -> String {
+    match path {
+        Some(path) => tmux::sq(path),
+        None => r#""$HOME""#.to_owned(),
+    }
+}
+
+/// `mkdir -p` under a parent that was checked first: `-p` makes an existing
+/// directory a success rather than a refusal, and the check keeps it from
+/// making the parent too.
+fn make_command(path: Option<&str>, name: &str) -> String {
+    format!(
+        "b={}\ntest -d \"$b\" || {{ echo \"no directory at $b\" >&2; exit 1; }}\nmkdir -p -- \"$b\"/{}",
+        base(path),
+        tmux::sq(name)
+    )
 }
 
 /// The testable half, driven by the container fixture.
@@ -105,10 +180,7 @@ pub async fn list_on<E: Exec>(
 /// also why a dotfile is not listed (D4 §3.1). `$p` gives the base exactly one
 /// trailing slash, so `/` lists as `/bin` rather than `//bin`.
 fn command(path: Option<&str>) -> String {
-    let base = match path {
-        Some(path) => tmux::sq(path),
-        None => r#""$HOME""#.to_owned(),
-    };
+    let base = base(path);
     format!(
         r#"b={base}
 if test -d "$b"; then
@@ -262,5 +334,29 @@ mod tests {
     #[test]
     fn no_path_lists_the_machines_own_home() {
         assert!(command(None).contains("b=\"$HOME\""));
+        assert!(make_command(None, "x").contains("b=\"$HOME\""));
+    }
+
+    /// One segment or nothing: a name that is a path would make a directory
+    /// somewhere the listing beside it never showed.
+    #[test]
+    fn a_directory_name_is_one_plain_segment() {
+        for good in ["Github", "my-repo_2", "v1.0", "a+b@c"] {
+            assert!(valid_name(good), "{good}");
+        }
+        for bad in [
+            "", ".", "..", ".hidden", "-x", "a/b", "/abs", "~", "a b", "a;b", "$HOME", "`id`",
+            "a'b", "a\nb", "a*",
+        ] {
+            assert!(!valid_name(bad), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn the_make_command_quotes_both_halves() {
+        assert_eq!(
+            make_command(Some("/home/u/it's"), "new"),
+            "b='/home/u/it'\\''s'\ntest -d \"$b\" || { echo \"no directory at $b\" >&2; exit 1; }\nmkdir -p -- \"$b\"/'new'"
+        );
     }
 }

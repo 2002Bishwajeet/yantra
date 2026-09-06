@@ -43,6 +43,18 @@ pub struct Prepared {
     pub left_alone: Vec<String>,
 }
 
+/// The identity as a reader sees it (Y-343): the public half and its
+/// fingerprint. The private key is never read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub path: PathBuf,
+    /// `ed25519`, read off the public key's own type word.
+    pub kind: String,
+    pub public_key: String,
+    /// `SHA256:…`, as `ssh-keygen -l` prints it.
+    pub fingerprint: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("could not read the workspaces to see which machines to configure")]
@@ -53,6 +65,13 @@ pub enum Error {
 
     #[error("could not write {}", path.display())]
     Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("could not read {}", path.display())]
+    Read {
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -75,8 +94,6 @@ pub enum Error {
 /// all is still the owner's to confirm (D2 §2), and a verb survives either
 /// answer.
 pub fn prepare() -> Result<Prepared, Error> {
-    use etcetera::BaseStrategy as _;
-    let base = etcetera::choose_base_strategy().map_err(|_| Error::NoHome)?;
     let listing = workspace::list()?;
     let mut machines: Vec<String> = listing
         .workspaces
@@ -85,7 +102,69 @@ pub fn prepare() -> Result<Prepared, Error> {
         .collect();
     machines.sort();
     machines.dedup();
-    prepare_in(&base.home_dir().join(".ssh"), &machines)
+    prepare_in(&dir()?, &machines)
+}
+
+/// This account's `~/.ssh`, which is the only directory anything here touches.
+pub fn dir() -> Result<PathBuf, Error> {
+    use etcetera::BaseStrategy as _;
+    let base = etcetera::choose_base_strategy().map_err(|_| Error::NoHome)?;
+    Ok(base.home_dir().join(".ssh"))
+}
+
+/// The identity as it is, changing nothing. `None` is no key yet, which
+/// [`prepare`] changes and nothing else does — so a read can sit on a route a
+/// browser opens without generating anything.
+pub fn describe() -> Result<Option<Identity>, Error> {
+    describe_in(&dir()?)
+}
+
+pub fn describe_in(dir: &Path) -> Result<Option<Identity>, Error> {
+    let key = dir.join(KEY);
+    let public = key.with_extension("pub");
+    let public_key = match fs::read_to_string(&public) {
+        Ok(text) => text.trim().to_owned(),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::Read {
+                path: public,
+                source,
+            });
+        }
+    };
+    let kind = public_key
+        .split_whitespace()
+        .next()
+        .map(|word| word.strip_prefix("ssh-").unwrap_or(word))
+        .unwrap_or_default()
+        .to_owned();
+    Ok(Some(Identity {
+        fingerprint: fingerprint(&public)?,
+        path: key,
+        kind,
+        public_key,
+    }))
+}
+
+/// `ssh-keygen -l` rather than a hash written here: it is the spelling every
+/// `authorized_keys` tool prints, and the binary is already required.
+fn fingerprint(public: &Path) -> Result<String, Error> {
+    let out = Command::new("ssh-keygen")
+        .arg("-lf")
+        .arg(public)
+        .output()
+        .map_err(Error::Spawn)?;
+    if !out.status.success() {
+        return Err(Error::Keygen(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        ));
+    }
+    // `256 SHA256:… comment (ED25519)` — the second word.
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .nth(1)
+        .map(str::to_owned)
+        .ok_or_else(|| Error::Keygen("`ssh-keygen -l` printed no fingerprint".to_owned()))
 }
 
 /// The half the tests drive, against a directory that is not the developer's.
@@ -290,6 +369,29 @@ mod tests {
             Err(Error::UnusableMachine { .. })
         ));
         assert!(!dir.exists(), "refused before anything was written");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The read half: nothing before a key exists, and afterwards the public
+    /// key, its kind and the fingerprint `ssh-keygen` itself prints — never
+    /// the private half.
+    #[test]
+    fn describing_generates_nothing_and_reads_only_the_public_half() {
+        let dir = scratch("describe");
+        assert_eq!(describe_in(&dir).expect("readable"), None);
+        assert!(!dir.exists(), "a read that made a key would be a write");
+
+        let prepared = prepare_in(&dir, &[]).expect("prepared");
+        let identity = describe_in(&dir)
+            .expect("readable")
+            .expect("a key is there now");
+
+        assert_eq!(identity.path, prepared.key);
+        assert_eq!(identity.kind, "ed25519");
+        assert_eq!(identity.public_key, prepared.public_key);
+        assert!(identity.fingerprint.starts_with("SHA256:"), "{identity:?}");
+        assert!(!identity.public_key.contains("PRIVATE"));
 
         let _ = fs::remove_dir_all(&dir);
     }

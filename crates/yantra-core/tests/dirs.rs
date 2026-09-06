@@ -224,6 +224,47 @@ async fn a_real_repository_reports_its_origin_and_a_bare_one_does_not() -> Resul
     Ok(())
 }
 
+/// Y-344: one directory under a path that is there, the same listing back,
+/// success again when it is already there (§B4), and a refusal when the
+/// parent is not — never a parent made on the way.
+#[tokio::test]
+async fn making_a_directory_lists_it_and_asking_twice_is_still_success() -> Result<()> {
+    let Some((_fixture, ssh)) = lab("dirs-make").await? else {
+        return Ok(());
+    };
+    ssh.exec("rm -rf /tmp/lab-make && mkdir -p /tmp/lab-make")
+        .await?;
+
+    let made = dirs::make_on(&ssh, "fixture", Some("/tmp/lab-make"), "new").await?;
+    assert_eq!(made.path, "/tmp/lab-make");
+    assert!(named(&made, "new").is_some(), "{made:?}");
+
+    let again = dirs::make_on(&ssh, "fixture", Some("/tmp/lab-make"), "new").await?;
+    assert_eq!(
+        again.entries.len(),
+        1,
+        "already there is success: {again:?}"
+    );
+
+    let refused = dirs::make_on(&ssh, "fixture", Some("/tmp/lab-make/absent"), "new")
+        .await
+        .expect_err("no parent, no directory");
+    assert!(
+        matches!(refused, dirs::Error::NotMade { ref path, .. } if path == "/tmp/lab-make/absent/new"),
+        "{refused:?}"
+    );
+    let ran = ssh
+        .exec("test -e /tmp/lab-make/absent && echo yes || echo no")
+        .await?;
+    assert_eq!(String::from_utf8_lossy(&ran.stdout).trim(), "no");
+
+    let bad = dirs::make_on(&ssh, "fixture", Some("/tmp/lab-make"), "../escape")
+        .await
+        .expect_err("not one segment");
+    assert!(matches!(bad, dirs::Error::InvalidName { .. }), "{bad:?}");
+    Ok(())
+}
+
 /// D4 §3: the daemon composes no path, so the machine's own `$HOME` is the
 /// only place a listing can start.
 #[tokio::test]

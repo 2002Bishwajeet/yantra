@@ -38,6 +38,8 @@ export type Killed = { machine: string; session: string; killed: boolean }
 export type Machine = {
   name: string
   dns_name: string
+  // The first Tailscale IPv4; null is a node that reported none (Y-343).
+  address: string | null
   os: 'linux' | 'macOS' | 'iOS' | 'windows' | 'android' | (string & {})
   online: boolean
   expired: boolean
@@ -142,6 +144,8 @@ export type Session = {
   attached: number
   // tmux's own formatting on the remote machine's clock. Opaque.
   created: string
+  // The same moment as Unix seconds, to age (Y-343).
+  created_at: number
 }
 
 export type MachineSessions =
@@ -317,4 +321,123 @@ export type Item = {
   url: string
   // RFC 3339 as GitHub sent it. Aged against now, not against the look.
   updated_at: string
+}
+
+// ---- Y-343 / Y-344: daemon facts, events, clone (yantrad routes) ----
+
+/** `GET /api/about` — `yantra about` plus what only a running daemon knows.
+ *  No envelope: nothing here is a look. `tailnet` is null until the machines
+ *  look has run, or when no node holds a bound address — never a guess. */
+export type About = {
+  version: string
+  target: string
+  // `YYYY-MM-DD`, UTC, the date the build script last ran.
+  built: string
+  uptime_seconds: number
+  // `listen_on`'s set exactly, as `host:port`.
+  listening_on: string[]
+  tailnet: string | null
+}
+
+/** `GET /api/ssh-identity` — the public half of the daemon's key and the
+ *  fingerprint `ssh-keygen -l` prints. **404 before `yantra ssh-identity` has
+ *  run on the daemon's machine**: a GET reads and never generates. The private
+ *  key is never in it. */
+export type SshIdentity = {
+  path: string
+  // `ed25519`, off the key's own type word.
+  kind: string
+  public_key: string
+  // `SHA256:…`
+  fingerprint: string
+}
+
+/** `GET /api/notifications` — `Looked<Event[]>`, newest first, at most fifty,
+ *  in memory ([ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)).
+ *  A restart empties it, and the page says so rather than hides it (I-59).
+ *  Read and unread are the browser's: one `localStorage` key holding the
+ *  newest `at` the owner has seen. GitHub items are not events — they stay in
+ *  `/api/attention` and the browser merges the two lists. */
+export type Event = {
+  // Unix seconds, when the daemon saw it.
+  at: number
+  // A verdict as `AgentState` spells it, or one of the two of its own.
+  kind:
+    | 'awaiting_trust'
+    | 'finished'
+    | 'crashed'
+    | 'killed'
+    | 'unclear'
+    | 'no_session'
+    | 'running'
+    | 'stopped'
+    | 'no_agent'
+    | 'unreachable'
+    | 'relay-test'
+  workspace: string | null
+  machine: string | null
+  // The sentence the relay was, or would have been, sent.
+  said: string
+}
+
+/** `POST /api/machines/{machine}/clone` with `{ url, path }` — `yantra clone`
+ *  on the wire (Y-344). **202, and nothing awaits the clone**: `git clone`
+ *  runs inside the tmux session named here, progress is
+ *  `GET /api/machines/{machine}/sessions/{session}/terminal`
+ *  ([ADR-0022](../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)),
+ *  and completion is `POST …/probe` on `path`. Asking twice attaches to the
+ *  session already running (I-30). A URL that is not `https://`, `ssh://` or
+ *  `user@host:path`, or carries a credential, is a 400; so is a `path` that
+ *  is relative, climbs, or holds a shell character. The machine's own git
+ *  credential fetches; no token goes with it (ADR-0023 §4).
+ *
+ *  `POST /api/machines/{machine}/dirs` takes `{ path?, make? }` since the same
+ *  row: `make` is one directory name to create under `path` first, and the
+ *  answer is the same `Listing`. A name that is not one segment is a 400. */
+export type Cloning = {
+  machine: string
+  session: string
+}
+
+// ---- end Y-343 / Y-344 ----
+// ---------------------------------------------------------------------------
+// Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
+// edits above it is trivial.
+
+/** `GET /api/github` — what the daemon holds, read from memory (ADR-0023 §3).
+ *  Never the token: `login` is the one thing about the account that is
+ *  shown, and it is `null` until the grant's first `GET /user` has answered.
+ *  `scopes` is empty for a grant read from the environment. `pending` is a
+ *  device flow waiting for its code to be typed at github.com. */
+export type Connection = {
+  connected: boolean
+  login: string | null
+  scopes: string[]
+  pending: boolean
+}
+
+/** `POST /api/github/login` — step 1 of the device flow: the code to type and
+ *  where to type it. The daemon polls; `GET /api/github` says when it is done.
+ *  A second `POST` while one is `pending` is a 409. */
+export type Device = {
+  user_code: string
+  verification_uri: string
+  // Seconds. GitHub's are 900 and 5.
+  expires_in: number
+  interval: number
+}
+
+/** One entry of `GET /api/repos`, swept every 300 s like `/api/attention` and
+ *  filtered **in the browser** — a typed box polls, and a read handler never
+ *  awaits the network. No grant is `looked: 'failed'` naming the login. */
+export type Repo = {
+  // `owner/name`.
+  full_name: string
+  private: boolean
+  // null is a repository GitHub has not classified.
+  language: string | null
+  // RFC 3339; null is a repository never pushed to.
+  pushed_at: string | null
+  clone_url: string
+  default_branch: string
 }
