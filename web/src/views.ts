@@ -1,8 +1,9 @@
-/** The three tabs of `/w/{name}` — D5 §3.1, where `repair` is deliberately not
- *  a fourth. Its own module because `router.ts` validates the search param and
- *  `OneWorkspace` draws the bar, and `router.ts` importing the page would pull
- *  xterm.js into the first load. */
-export const VIEWS = ['terminal', 'transcript', 'spend'] as const
+/** The four views of `/w/{name}` — chat first (M14 board 13), then D5 §3.1's
+ *  three, where `repair` is deliberately not a fifth. Its own module because
+ *  `router.ts` validates the search param and the session screen draws the
+ *  bar, and `router.ts` importing the screen would pull xterm.js into the
+ *  first load. */
+export const VIEWS = ['chat', 'terminal', 'transcript', 'spend'] as const
 
 export type View = (typeof VIEWS)[number]
 
