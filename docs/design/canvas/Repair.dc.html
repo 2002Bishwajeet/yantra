@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" />
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; min-height: 0; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .track { height: 6px; border-radius: 3px; background: #FFFFFF; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+    .line { display: flex; align-items: center; gap: 16px; height: 26px; padding: 0 10px; border-radius: 8px; font-size: 14px; line-height: 26px; white-space: pre; box-sizing: border-box; }
+    .ln { width: 24px; text-align: right; font-size: 12px; color: #727A70; flex: none; }
+    .cm { color: #727A70; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 1024px; background: #F8FAF3; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; height: 64px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 28px; height: 28px; border-radius: 999px; background: #48674B;"></div>
+      <div style="font-size: 22px; font-weight: 700; line-height: 28px;">Yantra</div>
+    </div>
+    <nav style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+      <a href="#" class="pill" style="color: #424940;">Dashboard</a>
+      <a href="#" class="pill" style="background: #D6E8D0; color: #3B4B39;">Fleet</a>
+      <a href="#" class="pill" style="color: #424940;">Machines</a>
+      <a href="#" class="pill" style="color: #424940;">Usage</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 24px; padding: 8px 12px 8px 16px; border-radius: 999px; background: #E6E9E0;">
+        <span style="font-size: 14px; line-height: 20px; color: #424940;">Search anything</span>
+        <span class="mono" style="font-size: 12px; line-height: 16px; padding: 2px 8px; border-radius: 6px; background: #FFFFFF; color: #424940;">⌘K</span>
+      </div>
+      <div class="icon-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+        <span class="mono" style="position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #BA1A1A; color: #FFFFFF; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box;">3</span>
+      </div>
+      <div style="width: 36px; height: 36px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;">B</div>
+    </div>
+  </header>
+
+  <main style="display: flex; flex-direction: column; gap: 16px; padding: 8px 24px 24px 24px; flex: 1; min-height: 0;">
+
+    <div style="display: flex; align-items: center; justify-content: space-between; height: 48px; flex: none;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <h1 style="margin: 0; font-size: 44px; font-weight: 700; line-height: 48px;">Repair price-table</h1>
+        <div class="mono t2" style="font-size: 13px;">~/.config/yantra/workspaces/price-table.toml</div>
+      </div>
+      <div class="t2" style="font-size: 13px; line-height: 18px;">the file as it is on the machine running the daemon</div>
+    </div>
+
+    <section class="card" style="flex: none; background: #FFDAD6; padding: 16px 20px; gap: 8px;">
+      <div class="state" style="gap: 10px; font-size: 14px; font-weight: 500; line-height: 20px; color: #93000A;"><span class="mark mark-failed"></span>will not load</div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600; line-height: 24px; color: #93000A;">price-table will not load.</h2>
+        <div class="mono" style="font-size: 14px; line-height: 20px; color: #93000A;">missing field 'machine' at line 7</div>
+      </div>
+      <div style="font-size: 13px; line-height: 18px; color: #93000A;">Fix the file below and save. Save refuses bytes that still will not load, so a half-finished fix cannot be kept.</div>
+    </section>
+
+    <section class="card" style="flex: 1; background: #ECEEE6; padding: 16px 20px; gap: 10px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 4px; height: 20px; flex: none;">
+        <div style="display: flex; align-items: baseline; gap: 10px;">
+          <h2 class="eyebrow" style="margin: 0;">The file</h2>
+          <div class="mono" style="font-size: 13px; line-height: 16px; color: #424940;">14 lines</div>
+        </div>
+        <div class="t2" style="font-size: 13px;">TOML. Three keys load: <span class="mono">machine</span>, <span class="mono">repo</span>, <span class="mono">startup</span>. Any other key is refused.</div>
+      </div>
+
+      <div class="mono" style="flex: 1; min-height: 0; background: #FFFFFF; border-radius: 20px; padding: 14px 10px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; color: #191D18;">
+        <div class="line"><span class="ln">1</span><span class="cm"># price-table</span></div>
+        <div class="line"><span class="ln">2</span><span class="cm"># generated by yantra on 7 Jul, edited by hand on 4 Sep</span></div>
+        <div class="line"><span class="ln">3</span><span></span></div>
+        <div class="line"><span class="ln">4</span><span class="cm"># The session runs here. The repo path below is looked for on this machine.</span></div>
+        <div class="line"><span class="ln">5</span><span class="cm"># 4 Sep: moving to the thinkpad once it is back on the tailnet,</span></div>
+        <div class="line"><span class="ln">6</span><span class="cm"># so the old line is parked until then.</span></div>
+        <div class="line" style="background: #FFDAD6;"><span class="ln" style="color: #93000A;">7</span><span class="cm" style="color: #93000A;"># machine = "cachyos-g14"</span><span style="flex: 1;"></span><span class="state" style="gap: 8px; font-size: 12px; line-height: 16px; color: #93000A;"><span class="mark mark-failed" style="width: 8px; height: 8px;"></span>missing field 'machine'</span></div>
+        <div class="line"><span class="ln">8</span><span></span></div>
+        <div class="line"><span class="ln">9</span><span>repo = "/home/biswa/Github/price-table"</span></div>
+        <div class="line"><span class="ln">10</span><span></span></div>
+        <div class="line"><span class="ln">11</span><span class="cm"># What to start in the window. A reference, never a value.</span></div>
+        <div class="line"><span class="ln">12</span><span>startup = "op run --env-file=.env -- claude"</span></div>
+        <div class="line"><span class="ln">13</span><span></span></div>
+        <div class="line"><span class="ln">14</span><span class="cm"># thinkpad: machine = "thinkpad", repo = "/home/biswa/src/price-table"</span></div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 4px; flex: none;">
+        <div class="t2" style="font-size: 13px; line-height: 18px;">Save writes the whole file. If it still will not load, the daemon names the next error and writes nothing.</div>
+        <div style="display: flex; align-items: center; gap: 8px; flex: none;">
+          <a href="#" class="textbtn" style="color: #424940; padding: 10px 18px;">Cancel</a>
+          <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; padding: 12px 24px; min-height: 44px; box-sizing: border-box;">Save</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

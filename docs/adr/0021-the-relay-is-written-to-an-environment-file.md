@@ -130,3 +130,10 @@ for.
   reason to reread this decision, not a licence granted by it.
 - **Whether the relay should be live without a restart.** Decision 3 says it is not. If that becomes
   worth the plumbing, it is a change to how the daemon holds the relay and gets its own row.
+
+> **Reread on 2026-09-06 (Y-334), and the second secret went in.**
+> [ADR-0023](0023-the-github-grant-lives-beside-the-relay.md) puts the daemon's GitHub token in this
+> file as `YANTRA_GITHUB_TOKEN`, under decisions 1, 2 and 5 above unchanged. What changed upstream is
+> that New session must list the owner's private repositories, which no machine can answer for the
+> daemon. Decision 3 does not carry over: that grant is live when its device flow completes, because
+> the daemon obtained it itself. The exposure paragraph now covers two credentials with one mode.

@@ -1,0 +1,690 @@
+{
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Desktop"
+    },
+    {
+      "id": "page-2",
+      "name": "Tablet"
+    },
+    {
+      "id": "page-3",
+      "name": "Phone PWA"
+    },
+    {
+      "id": "page-4",
+      "name": "ESP32 display"
+    }
+  ],
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "title": "Dashboard",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "NotificationsPopover.dc.html",
+      "title": "Dashboard, notifications open",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Fleet.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Machines.dc.html",
+      "x": 4680,
+      "y": 0,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Usage.dc.html",
+      "x": 6240,
+      "y": 0,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "NewSession.dc.html",
+      "title": "New session 1, name and machine",
+      "x": 0,
+      "y": 1200,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "NewSessionSource.dc.html",
+      "title": "New session 2, source",
+      "x": 1560,
+      "y": 1200,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "NewSessionStart.dc.html",
+      "title": "New session 3, start",
+      "x": 3120,
+      "y": 1200,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Settings.dc.html",
+      "title": "Settings, providers",
+      "x": 0,
+      "y": 2400,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SettingsNotifications.dc.html",
+      "title": "Settings, notifications, relay sheet open",
+      "x": 1560,
+      "y": 2400,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SettingsAgents.dc.html",
+      "title": "Settings, agents",
+      "x": 3120,
+      "y": 2400,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "TabletDashboard.dc.html",
+      "title": "Dashboard",
+      "x": 0,
+      "y": 0,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletFleet.dc.html",
+      "title": "Fleet",
+      "x": 960,
+      "y": 0,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletMachines.dc.html",
+      "title": "Machines",
+      "x": 1920,
+      "y": 0,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletUsage.dc.html",
+      "title": "Usage",
+      "x": 2880,
+      "y": 0,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "PhoneDashboard.dc.html",
+      "title": "Dashboard",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneFleet.dc.html",
+      "title": "Fleet",
+      "x": 500,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneMachines.dc.html",
+      "title": "Machines",
+      "x": 1000,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneUsage.dc.html",
+      "title": "Usage",
+      "x": 1500,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneNewSession.dc.html",
+      "title": "New session, source step",
+      "x": 2000,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "SessionTerminal.dc.html",
+      "title": "Session, terminal",
+      "x": 0,
+      "y": 4800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SessionTranscript.dc.html",
+      "title": "Session, transcript",
+      "x": 1560,
+      "y": 4800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SessionChat.dc.html",
+      "title": "Session, chat",
+      "x": 3120,
+      "y": 4800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Setup.dc.html",
+      "title": "Set up Yantra, first run",
+      "x": 0,
+      "y": 6000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "EmptyDashboard.dc.html",
+      "title": "Dashboard, empty",
+      "x": 1560,
+      "y": 6000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Unreachable.dc.html",
+      "title": "Nothing can be reached",
+      "x": 3120,
+      "y": 6000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "EmptyStates.dc.html",
+      "title": "Empty and pending states, sheet",
+      "x": 4680,
+      "y": 6000,
+      "w": 1440,
+      "h": 1400,
+      "page": "page-1"
+    },
+    {
+      "file": "TabletSessionChat.dc.html",
+      "title": "Session, chat",
+      "x": 3840,
+      "y": 0,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "PhoneSessionChat.dc.html",
+      "title": "Session, chat",
+      "x": 2500,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneSetup.dc.html",
+      "title": "Set up Yantra",
+      "x": 3000,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "SettingsAppearance.dc.html",
+      "title": "Settings, appearance",
+      "x": 4680,
+      "y": 2400,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Esp32Tft.dc.html",
+      "title": "ESP32, 320 by 240 TFT at 3x",
+      "x": 0,
+      "y": 0,
+      "w": 960,
+      "h": 720,
+      "page": "page-4"
+    },
+    {
+      "file": "Esp32Paper.dc.html",
+      "title": "ESP32, 2.9 inch e-paper at 3x",
+      "x": 1080,
+      "y": 0,
+      "w": 888,
+      "h": 384,
+      "page": "page-4"
+    },
+    {
+      "file": "Machine.dc.html",
+      "title": "One machine",
+      "x": 0,
+      "y": 7600,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SessionSpend.dc.html",
+      "title": "Session, spend",
+      "x": 1560,
+      "y": 7600,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SessionEnded.dc.html",
+      "title": "Session, ended",
+      "x": 3120,
+      "y": 7600,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "Repair.dc.html",
+      "title": "Repair a workspace file",
+      "x": 4680,
+      "y": 7600,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "WorkspaceNotFound.dc.html",
+      "title": "Workspace not found",
+      "x": 6240,
+      "y": 7600,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "ConfirmKill.dc.html",
+      "title": "Fleet, kill confirmation",
+      "x": 0,
+      "y": 8800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "ConfirmDelete.dc.html",
+      "title": "Fleet, delete confirmation",
+      "x": 1560,
+      "y": 8800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SettingsGeneral.dc.html",
+      "title": "Settings, general",
+      "x": 3120,
+      "y": 8800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SettingsAccess.dc.html",
+      "title": "Settings, access",
+      "x": 4680,
+      "y": 8800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SettingsAbout.dc.html",
+      "title": "Settings, about",
+      "x": 6240,
+      "y": 8800,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "SettingsProviderConnect.dc.html",
+      "title": "Settings, connect GitHub sheet",
+      "x": 0,
+      "y": 10000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "NewSessionLocal.dc.html",
+      "title": "New session 2, local directory",
+      "x": 1560,
+      "y": 10000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "NewSessionCloning.dc.html",
+      "title": "New session, starting",
+      "x": 3120,
+      "y": 10000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "CommandPalette.dc.html",
+      "title": "Dashboard, command palette open",
+      "x": 4680,
+      "y": 10000,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "MainDark.dc.html",
+      "title": "Dashboard, dark",
+      "x": 0,
+      "y": 11200,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "MainCompact.dc.html",
+      "title": "Dashboard, compact",
+      "x": 1560,
+      "y": 11200,
+      "w": 1440,
+      "h": 1024,
+      "page": "page-1"
+    },
+    {
+      "file": "TabletNewSession.dc.html",
+      "title": "New session, source",
+      "x": 0,
+      "y": 1320,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletSettings.dc.html",
+      "title": "Settings, providers",
+      "x": 960,
+      "y": 1320,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletSetup.dc.html",
+      "title": "Set up Yantra",
+      "x": 1920,
+      "y": 1320,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletNotifications.dc.html",
+      "title": "Dashboard, notifications open",
+      "x": 2880,
+      "y": 1320,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletMachine.dc.html",
+      "title": "One machine",
+      "x": 3840,
+      "y": 1320,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "TabletEmptyDashboard.dc.html",
+      "title": "Dashboard, empty",
+      "x": 4800,
+      "y": 1320,
+      "w": 834,
+      "h": 1194,
+      "page": "page-2"
+    },
+    {
+      "file": "PhoneSettings.dc.html",
+      "title": "Settings",
+      "x": 0,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneSettingsProviders.dc.html",
+      "title": "Settings, providers",
+      "x": 500,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneNotifications.dc.html",
+      "title": "Notifications",
+      "x": 1000,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneMachine.dc.html",
+      "title": "One machine",
+      "x": 1500,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneEmptyDashboard.dc.html",
+      "title": "Dashboard, empty",
+      "x": 2000,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneNewSessionName.dc.html",
+      "title": "New session, name and machine",
+      "x": 2500,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneNewSessionStart.dc.html",
+      "title": "New session, start",
+      "x": 3000,
+      "y": 970,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneSessionSpend.dc.html",
+      "title": "Session, spend",
+      "x": 0,
+      "y": 1940,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneSessionTerminal.dc.html",
+      "title": "Session, terminal",
+      "x": 500,
+      "y": 1940,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    },
+    {
+      "file": "PhoneConfirmKill.dc.html",
+      "title": "Fleet, kill confirmation",
+      "x": 1000,
+      "y": 1940,
+      "w": 390,
+      "h": 844,
+      "page": "page-3"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "y332-brief",
+      "x": 7800,
+      "y": 0,
+      "w": 420,
+      "page": "page-1",
+      "text": "Y-332, 6 Sep.\nMaterial 3 Expressive, sage primary, beige for the not-urgent card.\nState is always a mark plus a word.\nDashboard is the entry (the owner picked the rail-and-two-cards direction on 6 Sep); Fleet, Machines and Usage are the tabs; New session opens from the rail; Settings from the avatar.\nOwner, 6 Sep: the search pill stays (it is the D3 command palette, finds and never runs a verb). The Terminal tab's trust banner was cut; trust is answered in the pane or by the Chat tab's option rows, which type the key. Appearance stays."
+    },
+    {
+      "id": "y332-new-session",
+      "x": 4680,
+      "y": 1200,
+      "w": 420,
+      "page": "page-1",
+      "text": "New session, owner's flow of 6 Sep.\n1 name, optional, else a random one; letter and colour tile, or an upload.\n2 machine.\n3 source: GitHub or GitLab repositories, or a local directory. A repository already on the machine opens there; one that is not is cloned under ~/Github or ~/Gitlab.\n4 start: Claude, or a command; other agents later.\n\nNew scope, not in the product yet: cloning from a provider, the GitLab side, the icon and colour on a workspace, and the random name."
+    },
+    {
+      "id": "y332-settings",
+      "x": 6240,
+      "y": 2400,
+      "w": 420,
+      "page": "page-1",
+      "text": "Settings, second draft, 6 Sep.\nOne category at a time, list rows, secrets and long values only in the edit sheet.\nReal today: the ntfy relay per ADR-0021. New scope: hosting and LLM providers as connections, the agent list and its switches, per-event notification switches, SSH identity on the page.\nAppearance added on the owner's ask, reversing Q6's no-theming line: layout (Clean or Compact), colour seed, Light/Dark/System. D3 and Q6 need a dated amendment."
+    },
+    {
+      "id": "y332-form-factors",
+      "x": 4800,
+      "y": 0,
+      "w": 420,
+      "page": "page-2",
+      "text": "Tablet 834 by 1194 with an M3 navigation rail; phone PWA 390 by 844 with a bottom navigation bar and a FAB for New session. Type sizes hold; rows are 56 px on the phone; order never changes under a finger."
+    },
+    {
+      "id": "y332-chat",
+      "x": 4680,
+      "y": 4800,
+      "w": 420,
+      "page": "page-1",
+      "text": "Chat tab, 6 Sep, drawn to answer \"can the terminal be a chat window\".\nWhat it is: the transcript made writable. Turns come from the agent's JSONL read over ssh (polled, seconds of delay); the composer types into the tmux pane; the trust card's options send the number the agent's own dialog expects.\nNot streaming, and the agent's TUI still lives in the Terminal tab. A streaming chat needs Claude Code's SDK mode instead of the TUI in tmux, which is an ADR-sized change."
+    },
+    {
+      "id": "y333-product-screens",
+      "x": 7800,
+      "y": 7600,
+      "w": 420,
+      "page": "page-1",
+      "text": "Y-333 and Y-334, 6 Sep evening. The routes the product has today, drawn in the new register: one machine (readiness, its workspaces, its tmux sessions; unclaimed ones get Attach and Kill, never Adopt, D6 \u00a74.3), the Spend tab (read on request over ssh; per-model cards carry responses and cost only, because that is what the wire carries; the five counts sit on the total; no fleet total, D6 \u00a75.1), the ended session, Repair (ADR-0020), workspace not found, and the two confirmations. Only Kill and Delete confirm.\n\nAssumed, not ruled: the Kill and Delete dialogs open from a row's overflow menu, which no board draws yet. The Chat tab keeps a Spend tab beside it rather than folding spend into Usage."
+    },
+    {
+      "id": "y334-new-scope",
+      "x": 7800,
+      "y": 10000,
+      "w": 420,
+      "page": "page-1",
+      "text": "New scope in these boards, none of it in the product: Settings General (clone home, default machine, time format), Access (SSH identity, known hosts, the tailnet, which secret backends are found), About's version and update check, the GitHub connect sheet (owner, 6 Sep: Yantra holds the OAuth grant itself, so New session can browse and search private repositories and reviews, issues and pull requests share the sign-in later; git on the machine clones. Where it lives is ADR-0023: the env file beside the relay, never sent to a machine), the remote directory browser and New folder, the four-stage start with a live clone line, and the \u2318K palette (finds a workspace, a machine or a page; never runs a verb)."
+    },
+    {
+      "id": "y335-variants",
+      "x": 7800,
+      "y": 11200,
+      "w": 420,
+      "page": "page-1",
+      "text": "Y-335. Dark is Main recoloured from palette-sage.json's dark roles; tiles keep their colour because they are identity. Weak spots seen: the empty Running track is faint, the Attach pill is near-black on beige. Compact metrics are in BRIEF.md: radius 20, padding 14, rows 40, gaps 8, hero number 44, Idle expanded, a Recent card in the freed space."
+    },
+    {
+      "id": "y336-parity",
+      "x": 5760,
+      "y": 1320,
+      "w": 420,
+      "page": "page-2",
+      "text": "Y-336, tablet. The rail has no top bar, so notifications are a side sheet docked right (420 px), not a popover. Setup dims the rail's destinations and the FAB; bell and avatar stay live."
+    },
+    {
+      "id": "y336-phone",
+      "x": 3500,
+      "y": 970,
+      "w": 420,
+      "page": "page-3",
+      "text": "Y-336, phone. Settings, notifications, one machine and the confirmations are pushed screens without the bottom bar. The Kill sheet is an M3 bottom sheet. The terminal is the fallback: the pane shows the agent's own dialog and a key row (Esc, Tab, arrows, Ctrl, Enter); Yantra draws no trust buttons of its own."
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  }
+}

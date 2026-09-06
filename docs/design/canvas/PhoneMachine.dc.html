@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" />
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; flex: none; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 10px 14px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; flex: none; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 6px 6px 6px 8px; min-height: 56px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .t3 { font-size: 13px; font-weight: 400; line-height: 18px; color: #424940; }
+    .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track { height: 6px; border-radius: 3px; background: #ECEEE6; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 44px; height: 44px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; flex: none; }
+    .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 52px; color: #424940; }
+    .nav-ind { width: 64px; height: 32px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }
+    .nav-label { font-size: 12px; font-weight: 500; line-height: 16px; }
+    .back { width: 44px; height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; flex: none; }
+    .section { display: flex; flex-direction: column; gap: 8px; flex: none; }
+    .list { background: #FFFFFF; border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+    .item { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 8px 8px 16px; box-sizing: border-box; }
+    .item + .item { border-top: 1px solid #C2C9BE; }
+    .lead { width: 36px; height: 36px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; flex: none; }
+    .chev { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex: none; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; background: #F8FAF3; position: relative; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column;">
+
+  <header style="display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px; height: 64px; flex: none; box-sizing: border-box;">
+    <a href="#" class="back"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"></path></svg></a>
+    <h1 class="clip" style="margin: 0; font-size: 22px; font-weight: 700; line-height: 28px; flex: 1; min-width: 0;">cachyos-g14</h1>
+  </header>
+
+  <main style="flex: 1; min-height: 0; overflow: hidden; padding: 4px 16px 0 16px; box-sizing: border-box;">
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+
+      <section class="section">
+        <div class="eyebrow" style="padding: 0 4px;">About</div>
+        <div class="list">
+        <div class="item">
+          <div class="t2" style="width: 84px; flex: none;">OS</div>
+          <div style="flex: 1; min-width: 0;"><div class="t1 clip" style="font-size: 15px;">linux · arch <span class="mono t2" style="font-size: 13px;">100.64.0.12</span></div></div>
+        </div>
+        <div class="item">
+          <div class="t2" style="width: 84px; flex: none;">Status</div>
+          <div style="flex: 1; min-width: 0;"><div class="t1 state" style="font-size: 15px; gap: 8px;"><span class="mark mark-running"></span>online</div></div>
+        </div>
+        <div class="item">
+          <div class="t2" style="width: 84px; flex: none;">Heartbeat</div>
+          <div style="flex: 1; min-width: 0;"><div class="t1 state" style="font-size: 15px; gap: 8px;"><span class="mark mark-needs"></span>ready <span class="t2" style="font-size: 13px;">· beat <span class="mono">4s</span> ago</span></div></div>
+        </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 0 0 0 4px; min-height: 44px;">
+          <div class="eyebrow">Readiness</div>
+          <div class="t2" style="font-size: 13px; flex: 1; min-width: 0;"><span class="mono">9</span> of <span class="mono">9</span> · asked <span class="mono">4s</span> ago</div>
+          <a href="#" class="textbtn" style="color: #48674B; padding: 10px 12px;">Doctor</a>
+        </div>
+        <div class="list">
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">reachable</div>
+            <div class="t2 clip">ssh in <span class="mono">62ms</span></div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">sshd</div>
+            <div class="t2 clip">OpenSSH 9.9 answers on 22</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">tmux</div>
+            <div class="t2 clip">3.5a</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">agent-cli</div>
+            <div class="t2 clip">claude 2.1.0 on PATH</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">terminfo</div>
+            <div class="t2 clip">xterm-ghostty known</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">provider-cli</div>
+            <div class="t2 clip">gh 2.76.0 on PATH</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px;">provider-auth</div>
+            <div class="t2 clip">gh signed in as 2002Bishwajeet</div>
+          </div>
+          <div class="t1" style="padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">login-session</div>
+            <div class="t2 clip">a user session for biswa is open</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        <div class="item" style="gap: 12px;">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">heartbeat</div>
+            <div class="t2 clip">ready · yantra-agent beat <span class="mono">4s</span> ago</div>
+          </div>
+          <div class="t1" style="color: #424940; padding-right: 8px; flex: none;">ok</div>
+        </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="eyebrow" style="padding: 0 4px;">Workspaces</div>
+        <div class="list">
+        <div class="item" style="padding-left: 10px;">
+          <div class="tile" style="background: #48674B; color: #FFFFFF;">Y</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px;">yantra-web</div>
+            <div class="t2 state clip" style="display: flex;"><span class="mark mark-needs" style="width: 8px; height: 8px;"></span><span class="clip">waiting for trust · <span class="mono">4m</span></span></div>
+          </div>
+          <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; font-size: 13px; padding: 10px 12px;">Answer</a>
+        </div>
+        <a href="#" class="item" style="padding-left: 10px; color: #191D18;">
+          <div class="tile" style="background: #8A5A3A; color: #FFFFFF;">P</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px;">price-table</div>
+            <div class="t2 state clip" style="display: flex;"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span><span class="clip">no session · <span class="mono">7 Jul</span></span></div>
+          </div>
+          <div class="chev"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div style="display: flex; align-items: baseline; gap: 8px; padding: 0 4px;">
+          <div class="eyebrow">Sessions</div>
+          <div class="t2" style="font-size: 13px;"><span class="mono">3</span> tmux sessions · read <span class="mono">4s</span> ago</div>
+        </div>
+        <div class="list">
+        <div class="item">
+          <div class="mark mark-needs"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #191D18;">yantra-web</div>
+            <div class="t2 clip" style="color: #424940;">workspace yantra-web · 3 windows · <span class="mono">2h</span></div>
+          </div>
+          <div class="chev"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </div>
+        <div class="item" style="background: #F2E1B8; color: #5C4E2D;">
+          <div class="mark mark-unknown" style="border-color: #7A6A45;"></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1 clip" style="font-size: 15px; color: #5C4E2D;">scratch</div>
+            <div class="t2 clip" style="color: #5C4E2D;">no workspace claims it · <span class="mono">3 Sep</span></div>
+          </div>
+          <a href="#" class="pill" style="background: #FFFFFF; color: #5C4E2D; font-size: 13px; padding: 10px 12px;">Attach</a>
+          <a href="#" class="pill" style="color: #93000A; font-size: 13px; padding: 10px 8px;">Kill</a>
+        </div>
+        </div>
+        <div class="t2" style="padding: 0 4px;">Kill asks first; it cannot be undone. A session no workspace claims is not adopted: its repo is not on the wire, so a workspace for it starts at New session.</div>
+      </section>
+
+    </div>
+  </main>
+
+</div>
+</x-dc>
+</body>
+</html>

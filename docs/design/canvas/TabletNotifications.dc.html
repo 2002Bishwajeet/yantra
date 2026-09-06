@@ -1,0 +1,311 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&family=IBM+Plex+Mono:wght@500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .card { border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; min-height: 0; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .track { height: 6px; border-radius: 3px; background: #FFFFFF; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+    .dest { width: 80px; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #424940; }
+    .dest-ind { width: 56px; height: 32px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }
+    .dest-label { font-size: 12px; font-weight: 500; line-height: 16px; }
+  </style>
+</helmet>
+
+<div style="width: 834px; height: 1194px; background: #F8FAF3; display: flex; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <nav style="width: 80px; flex: none; background: #F2F4EC; display: flex; flex-direction: column; align-items: center; padding: 16px 0; gap: 20px; box-sizing: border-box;">
+    <a href="#" aria-label="New session" style="width: 56px; height: 56px; border-radius: 16px; background: #CBE8C6; display: flex; align-items: center; justify-content: center; flex: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2F4E33" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+    </a>
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <a href="#" class="dest" style="color: #191D18;">
+        <div class="dest-ind" style="background: #D6E8D0;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B4B39" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="2"></rect><rect x="13" y="3" width="8" height="5" rx="2"></rect><rect x="13" y="11" width="8" height="10" rx="2"></rect><rect x="3" y="14" width="8" height="7" rx="2"></rect></svg>
+        </div>
+        <div class="dest-label" style="font-weight: 600;">Dashboard</div>
+      </a>
+      <a href="#" class="dest">
+        <div class="dest-ind">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"></path><path d="M3 12l9 5 9-5"></path><path d="M3 16l9 5 9-5"></path></svg>
+        </div>
+        <div class="dest-label">Fleet</div>
+      </a>
+      <a href="#" class="dest">
+        <div class="dest-ind">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 7.5h.01M7 16.5h.01"></path></svg>
+        </div>
+        <div class="dest-label">Machines</div>
+      </a>
+      <a href="#" class="dest">
+        <div class="dest-ind">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V12M12 20V4M19 20v-6"></path></svg>
+        </div>
+        <div class="dest-label">Usage</div>
+      </a>
+    </div>
+    <div style="flex: 1;"></div>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
+      <a href="#" class="icon-btn" aria-label="Notifications" style="width: 44px; height: 44px; background: #D6E8D0;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+        <span class="mono" style="position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #BA1A1A; color: #FFFFFF; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box;">3</span>
+      </a>
+      <a href="#" aria-label="Account" style="width: 44px; height: 44px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600;">B</a>
+    </div>
+  </nav>
+  <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px; box-sizing: border-box;">
+
+    <div style="display: flex; flex-direction: column; gap: 8px; flex: none;">
+      <h1 style="margin: 0; font-size: 28px; font-weight: 700; line-height: 36px;">Dashboard</h1>
+      <div style="display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 4px;">
+        <div style="display: flex; align-items: center; gap: 20px; font-size: 14px; line-height: 20px; color: #424940;">
+          <span class="state" style="gap: 8px;"><span class="mark mark-running"></span>5 of 6 machines online</span>
+          <span class="state" style="gap: 8px; color: #93000A;"><span class="mark" style="border: 1.5px dashed #BA1A1A;"></span>thinkpad unreachable 2h</span>
+          <a href="#" style="font-weight: 500;">Fix →</a>
+        </div>
+        <div class="mono t2">as of 4s</div>
+      </div>
+    </div>
+
+    <section class="card" style="flex: none; background: #CBE8C6; padding: 20px 24px; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <div class="eyebrow" style="color: #2F4E33;">Needs you</div>
+        <div style="display: flex; align-items: flex-end; gap: 12px;">
+          <div style="font-size: 64px; font-weight: 700; line-height: 64px; color: #2F4E33;">3</div>
+          <div style="font-size: 18px; font-weight: 500; line-height: 28px; color: #2F4E33;">things are waiting on you</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div class="row" style="background: rgba(255,255,255,0.7); border-radius: 18px; padding: 10px 8px 10px 10px; gap: 14px;">
+          <div class="tile" style="background: #48674B;">Y</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="font-size: 15px;">yantra-web is waiting for trust</div>
+            <div class="t2 state"><span class="mark mark-needs" style="width: 8px; height: 8px;"></span>waiting · cachyos-g14 · asked 4m ago · Claude wants to run cargo test</div>
+          </div>
+          <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; height: 44px; box-sizing: border-box;">Answer</a>
+        </div>
+        <div class="row" style="background: rgba(255,255,255,0.7); border-radius: 18px; padding: 10px 8px 10px 10px; gap: 14px;">
+          <div class="tile" style="background: #E6E9E0;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="font-size: 15px;">Review requested: yantra#246</div>
+            <div class="t2">Y-331: the component library in Claude Design · 2h</div>
+          </div>
+          <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; height: 44px; box-sizing: border-box;">Review</a>
+        </div>
+        <div class="row" style="background: rgba(255,255,255,0.7); border-radius: 18px; padding: 10px 8px 10px 10px; gap: 14px;">
+          <div class="tile" style="background: #E6E9E0;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="font-size: 15px;">Issue assigned: homelab#88</div>
+            <div class="t2">pi-5 loses tailscale after resume · 1d</div>
+          </div>
+          <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; height: 44px; box-sizing: border-box;">Open</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="flex: 1; background: #E6E9E0; padding: 20px 24px; gap: 16px;">
+      <div style="display: flex; align-items: flex-end; gap: 10px;">
+        <div style="font-size: 18px; font-weight: 600; line-height: 24px;">Running</div>
+        <div class="t2" style="font-size: 13px; line-height: 22px;">4 sessions · longest 3h 41m</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="row" style="background: #FFFFFF; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+          <div class="tile" style="background: #7A6A45;">L</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; width: 200px; flex: none;">
+            <div class="t1">landing</div>
+            <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · macbook</div>
+          </div>
+          <div class="track" style="flex: 1; background: #ECEEE6;"><div style="width: 100%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          <div class="mono" style="font-size: 13px; line-height: 16px; width: 56px; text-align: right; flex: none;">3h 41m</div>
+          <a href="#" class="textbtn">Open</a>
+        </div>
+        <div class="row" style="background: #FFFFFF; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+          <div class="tile" style="background: #3F5F7A;">H</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; width: 200px; flex: none;">
+            <div class="t1">homelab-k8s</div>
+            <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · pi-5</div>
+          </div>
+          <div class="track" style="flex: 1; background: #ECEEE6;"><div style="width: 33%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          <div class="mono" style="font-size: 13px; line-height: 16px; width: 56px; text-align: right; flex: none;">1h 12m</div>
+          <a href="#" class="textbtn">Open</a>
+        </div>
+        <div class="row" style="background: #FFFFFF; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+          <div class="tile" style="background: #6B4E7A;">A</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; width: 200px; flex: none;">
+            <div class="t1">agent-sdk</div>
+            <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · hetzner-1</div>
+          </div>
+          <div class="track" style="flex: 1; background: #ECEEE6;"><div style="width: 12%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          <div class="mono" style="font-size: 13px; line-height: 16px; width: 56px; text-align: right; flex: none;">26m</div>
+          <a href="#" class="textbtn">Open</a>
+        </div>
+        <div class="row" style="background: #FFFFFF; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+          <div class="tile" style="background: #4E6E7A;">A</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; width: 200px; flex: none;">
+            <div class="t1">appliance</div>
+            <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>no agent, opened as a shell · nas</div>
+          </div>
+          <div class="track" style="flex: 1; background: #ECEEE6;"><div style="width: 6%; height: 6px; background: #7A6A45; border-radius: 3px;"></div></div>
+          <div class="mono" style="font-size: 13px; line-height: 16px; width: 56px; text-align: right; flex: none;">12m</div>
+          <a href="#" class="textbtn">Open</a>
+        </div>
+      </div>
+    </section>
+
+    <section style="flex: none; display: flex; align-items: center; gap: 16px; background: #F2E1B8; border-radius: 22px; padding: 10px 12px 10px 24px; box-sizing: border-box;">
+      <div style="display: flex; flex-direction: column; gap: 2px; width: 132px; flex: none;">
+        <div class="eyebrow" style="color: #5C4E2D;">Worth a look</div>
+        <div class="t2" style="font-size: 13px; color: #5C4E2D;">2 sessions no workspace claims</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0;">
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 44px;">
+          <div class="state" style="gap: 8px; color: #5C4E2D; font-size: 14px; line-height: 20px; flex: 1; min-width: 0;"><span class="mark mark-unknown" style="border-color: #7A6A45;"></span><span style="font-weight: 500;">scratch</span><span class="t2" style="color: #5C4E2D;">pi-5 · 2 windows · 3d</span></div>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; background: #FFFFFF; color: #5C4E2D; height: 44px; box-sizing: border-box;">Attach</a>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; color: #93000A; height: 44px; box-sizing: border-box;">Kill</a>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 44px;">
+          <div class="state" style="gap: 8px; color: #5C4E2D; font-size: 14px; line-height: 20px; flex: 1; min-width: 0;"><span class="mark mark-unknown" style="border-color: #7A6A45;"></span><span style="font-weight: 500;">old-landing</span><span class="t2" style="color: #5C4E2D;">macbook · 1 window · 9 Jun</span></div>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; background: #FFFFFF; color: #5C4E2D; height: 44px; box-sizing: border-box;">Attach</a>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; color: #93000A; height: 44px; box-sizing: border-box;">Kill</a>
+        </div>
+      </div>
+    </section>
+
+    <section style="flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #C2C9BE; border-radius: 22px; padding: 4px 12px 4px 24px; min-height: 52px; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+        <div class="eyebrow">Idle</div>
+        <div class="state t2" style="font-size: 13px; gap: 8px;"><span class="mark mark-idle"></span>8 workspaces, nothing running · price-table, ntfy-relay, docs-sweep and 5 more</div>
+      </div>
+      <a href="#" class="textbtn">Show →</a>
+    </section>
+
+  </main>
+
+  <section style="position: absolute; top: 12px; right: 12px; bottom: 12px; width: 420px; background: #F2F4EC; border: 1px solid #C2C9BE; border-radius: 24px; padding: 12px 8px 8px 8px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 0 12px; min-height: 44px;">
+      <div style="font-size: 18px; font-weight: 600; line-height: 24px; flex: 1;">Notifications</div>
+      <a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px;">Mark all read</a>
+      <a href="#" class="icon-btn" aria-label="Close" style="width: 44px; height: 44px; background: transparent;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      </a>
+    </div>
+    <div style="display: flex; padding: 0 8px 4px 8px;">
+      <div style="display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+        <a href="#" class="pill" style="background: #D6E8D0; color: #3B4B39; padding: 8px 16px;">Unread <span class="mono" style="font-size: 12px; line-height: 16px;">3</span></a>
+        <a href="#" class="pill" style="color: #424940; padding: 8px 16px;">All</a>
+      </div>
+    </div>
+
+    <div class="eyebrow" style="padding: 8px 12px 4px 12px;">Today</div>
+        <div class="row" style="height: 64px; padding: 8px 12px 8px 8px; gap: 10px; background: #FFFFFF;">
+          <div class="tile" style="background: #48674B; color: #FFFFFF;">Y</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">yantra-web is waiting for trust</div>
+            <div class="t2" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Claude wants cargo test · cachyos-g14</div>
+          </div>
+          <a href="#" class="pill" style="background: #48674B; color: #FFFFFF; padding: 7px 12px; font-size: 13px; line-height: 18px; min-height: 44px; box-sizing: border-box;">Answer</a>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none;">
+            <div class="mono t2">4m</div>
+            <div style="width: 8px; height: 8px; border-radius: 999px; background: #48674B;"></div>
+          </div>
+        </div>
+        <div class="row" style="height: 64px; padding: 8px 12px 8px 8px; gap: 10px; background: #FFFFFF;">
+          <div class="tile" style="background: #48674B; color: #FFFFFF;">Y</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Review requested on yantra#246</div>
+            <div class="t2" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Y-331: the component library in Claude Design</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none;">
+            <div class="mono t2">2h</div>
+            <div style="width: 8px; height: 8px; border-radius: 999px; background: #48674B;"></div>
+          </div>
+        </div>
+        <div class="row" style="height: 64px; padding: 8px 12px 8px 8px; gap: 10px; background: #FFFFFF;">
+          <div class="tile" style="background: #A85B3C; color: #FFFFFF;">N</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ntfy-relay crashed, exit 137</div>
+            <div class="t2" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">pi-5 · the session is gone</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none;">
+            <div class="mono t2">5h</div>
+            <div style="width: 8px; height: 8px; border-radius: 999px; background: #48674B;"></div>
+          </div>
+        </div>
+
+    <div class="eyebrow" style="padding: 8px 12px 4px 12px;">Earlier</div>
+        <div class="row" style="height: 64px; padding: 8px 12px 8px 8px; gap: 10px;">
+          <div class="tile" style="background: #7A6A45; color: #FFFFFF;">L</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">landing finished</div>
+            <div class="t2" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">macbook · 3 turns · $1.10</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none;">
+            <div class="mono t2">1d</div>
+            <div style="width: 8px; height: 8px;"></div>
+          </div>
+        </div>
+        <div class="row" style="height: 64px; padding: 8px 12px 8px 8px; gap: 10px;">
+          <div class="tile" style="background: #E6E9E0; color: #424940;">T</div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">thinkpad became unreachable</div>
+            <div class="t2" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">last seen 2d ago · sessions kept</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none;">
+            <div class="mono t2">2d</div>
+            <div style="width: 8px; height: 8px;"></div>
+          </div>
+        </div>
+        <div class="row" style="height: 64px; padding: 8px 12px 8px 8px; gap: 10px;">
+          <div class="tile" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Test message arrived at the relay</div>
+            <div class="t2" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">yantra can reach this topic · ntfy.sh</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none;">
+            <div class="mono t2">4 Sep</div>
+            <div style="width: 8px; height: 8px;"></div>
+          </div>
+        </div>
+
+    <div style="flex: 1;"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 0 12px; min-height: 44px; border-top: 1px solid #C2C9BE;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div class="mark mark-needs" style="width: 8px; height: 8px;"></div>
+        <div class="t2" style="font-size: 13px; line-height: 18px;">Push to phone is on · ntfy.sh</div>
+      </div>
+      <a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px;">Settings</a>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+</body>
+</html>

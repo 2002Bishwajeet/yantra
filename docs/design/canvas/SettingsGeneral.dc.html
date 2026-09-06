@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" />
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #191D18; }
+    a { color: #48674B; text-decoration: none; } a:hover { color: #2F4E33; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #424940; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #48674B; }
+    .mark-running { background: #7A6A45; }
+    .mark-idle { border: 1.5px solid #727A70; }
+    .mark-unknown { border: 1.5px dashed #727A70; }
+    .mark-failed { background: #BA1A1A; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #191D18; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #424940; }
+    .t3 { font-size: 13px; font-weight: 400; line-height: 18px; color: #424940; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; position: relative; }
+    .cat { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; color: #424940; box-sizing: border-box; }
+    .group { display: flex; flex-direction: column; gap: 8px; }
+    .list { background: #FFFFFF; border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+    .item { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 8px 12px 8px 16px; box-sizing: border-box; }
+    .item + .item { border-top: 1px solid #C2C9BE; }
+    .lead { width: 36px; height: 36px; border-radius: 999px; background: #E6E9E0; display: flex; align-items: center; justify-content: center; flex: none; }
+    .val { font-size: 13px; font-weight: 400; line-height: 18px; color: #424940; }
+    .btn-text { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; color: #48674B; }
+    .btn-tonal { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; background: #D6E8D0; color: #3B4B39; }
+    .btn-filled { display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; background: #48674B; color: #FFFFFF; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .switch { width: 52px; height: 32px; border-radius: 999px; position: relative; flex: none; box-sizing: border-box; }
+    .switch-on { background: #48674B; }
+    .switch-off { background: #E6E9E0; border: 2px solid #727A70; }
+    .thumb-on { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border-radius: 999px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; }
+    .thumb-off { position: absolute; top: 6px; left: 6px; width: 16px; height: 16px; border-radius: 999px; background: #727A70; }
+    .field { background: #FFFFFF; border-radius: 16px; min-height: 48px; padding: 12px 16px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .label { font-size: 13px; font-weight: 500; line-height: 16px; color: #191D18; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 1024px; background: #F8FAF3; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; height: 64px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 28px; height: 28px; border-radius: 999px; background: #48674B;"></div>
+      <div style="font-size: 22px; font-weight: 700; line-height: 28px;">Yantra</div>
+    </div>
+    <nav style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #E6E9E0;">
+      <a href="#" class="pill" style="color: #424940;">Dashboard</a>
+      <a href="#" class="pill" style="color: #424940;">Fleet</a>
+      <a href="#" class="pill" style="color: #424940;">Machines</a>
+      <a href="#" class="pill" style="color: #424940;">Usage</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 24px; padding: 8px 12px 8px 16px; border-radius: 999px; background: #E6E9E0;">
+        <span style="font-size: 14px; line-height: 20px; color: #424940;">Search anything</span>
+        <span class="mono" style="font-size: 12px; line-height: 16px; padding: 2px 8px; border-radius: 6px; background: #FFFFFF; color: #424940;">⌘K</span>
+      </div>
+      <div class="icon-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+        <span class="mono" style="position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #BA1A1A; color: #FFFFFF; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box;">3</span>
+      </div>
+      <div style="width: 36px; height: 36px; border-radius: 999px; background: #CBE8C6; color: #2F4E33; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; box-shadow: 0 0 0 2px #F8FAF3, 0 0 0 4px #48674B;">B</div>
+    </div>
+  </header>
+
+  <div style="display: flex; gap: 40px; padding: 8px 24px 24px 24px; flex: 1; min-height: 0;">
+    <aside style="width: 280px; flex: none; display: flex; flex-direction: column; gap: 20px; padding-top: 12px; box-sizing: border-box;">
+      <div style="font-size: 24px; font-weight: 600; line-height: 32px; padding: 0 14px;">Settings</div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <div class="eyebrow" style="padding: 0 14px 6px 14px;">Workspace</div>
+        <a href="#" class="cat" style="background: #D6E8D0; color: #3B4B39;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B4B39" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"></path><circle cx="15" cy="7" r="2"></circle><circle cx="9" cy="17" r="2"></circle></svg>General</a>
+        <a href="#" class="cat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>Notifications</a>
+        <a href="#" class="cat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"></path></svg>Providers</a>
+        <a href="#" class="cat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"></rect><path d="M7 15l3-3-3-3M12 15h5"></path></svg>Agents</a>
+        <a href="#" class="cat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2v-.5a2 2 0 0 1 2-2h1.5a3.5 3.5 0 0 0 3.5-3.5A9 9 0 0 0 12 3z"></path><circle cx="7.5" cy="12" r="1"></circle><circle cx="9.5" cy="7.5" r="1"></circle><circle cx="14.5" cy="7.5" r="1"></circle></svg>Appearance</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <div class="eyebrow" style="padding: 0 14px 6px 14px;">Appliance</div>
+        <a href="#" class="cat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"></circle><path d="M12 12h9M18 12v3M15 12v2"></path></svg>Access</a>
+        <a href="#" class="cat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#424940" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8h.01"></path></svg>About</a>
+      </div>
+    </aside>
+
+    <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 28px; padding-top: 12px; max-width: 760px;">
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 0 4px;">
+        <div style="font-size: 28px; font-weight: 700; line-height: 36px;">General</div>
+        <div class="t3">Where clones land and what a new session assumes before you change anything.</div>
+      </div>
+      <section class="group">
+        <div class="eyebrow" style="padding: 0 4px;">New session</div>
+        <div class="list">
+        <div class="item">
+          <div class="lead" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="color: #191D18;">Home directory for clones</div>
+            <div class="t2">a clone lands under one of these on the machine you pick</div>
+          </div>
+          <span class="val mono" style="padding-right: 8px; white-space: nowrap;">~/Github · ~/Gitlab</span>
+        </div>
+        <div class="item">
+          <div class="lead" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="3"></rect><path d="M8 20h8M12 16v4"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="color: #191D18;">Default machine for new sessions</div>
+            <div class="t2">preselected in the Where step · the last one you used wins for a workspace</div>
+          </div>
+          <span class="val mono" style="padding-right: 8px; white-space: nowrap;">cachyos-g14</span><div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex: none;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </div>
+        </div>
+      </section>
+      <section class="group">
+        <div class="eyebrow" style="padding: 0 4px;">Dashboard</div>
+        <div class="list">
+        <div class="item">
+          <div class="lead" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="color: #191D18;">Time format</div>
+            <div class="t2">Age shows 4s, 12m, 6h and a date past a day · Clock shows the wall time</div>
+          </div>
+          <span class="val" style="padding-right: 8px; white-space: nowrap;">Age</span>
+        </div>
+        <div class="item">
+          <div class="lead" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"></path><path d="M9 12l2 2 4-4"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="color: #191D18;">Confirmations</div>
+            <div class="t2">Kill and Delete ask first because they cannot be undone. Stop and Resume do not.</div>
+          </div>
+          <span class="val" style="padding-right: 8px; white-space: nowrap;">fixed</span>
+        </div>
+        <div class="item">
+          <div class="lead" style="background: #E6E9E0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191D18" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div class="t1" style="color: #191D18;">Language</div>
+            <div class="t2">the dashboard and the notifications it sends</div>
+          </div>
+          <span class="val" style="padding-right: 8px; white-space: nowrap;">English</span><div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex: none;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#727A70" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></div>
+        </div>
+        </div>
+      </section>
+      <div style="flex: 1;"></div>
+      <div class="t2" style="padding: 0 4px;">Everything here lives in <span class="mono">~/.config/yantra/</span> on the appliance. Preferences for the look of the dashboard are under Appearance.</div>
+    </main>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

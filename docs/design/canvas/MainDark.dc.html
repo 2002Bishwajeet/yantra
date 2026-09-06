@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" />
+  <style>
+    body { margin: 0; font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif; color: #E1E3DB; }
+    a { color: #AFCFAC; text-decoration: none; } a:hover { color: #CBE8C6; }
+    .card { border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; min-height: 0; }
+    .eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.8px; line-height: 16px; text-transform: uppercase; color: #C2C9BE; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-weight: 500; }
+    .mark { width: 10px; height: 10px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .mark-needs { background: #AFCFAC; }
+    .mark-running { background: #D6C59E; }
+    .mark-idle { border: 1.5px solid #8C9489; }
+    .mark-unknown { border: 1.5px dashed #8C9489; }
+    .mark-failed { background: #FFB4AB; }
+    .pill { border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; }
+    .row { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; min-height: 44px; box-sizing: border-box; }
+    .t1 { font-size: 14px; font-weight: 500; line-height: 20px; color: #E1E3DB; }
+    .t2 { font-size: 12px; font-weight: 400; line-height: 16px; color: #C2C9BE; }
+    .track { height: 6px; border-radius: 3px; background: #0C0F0A; overflow: hidden; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; line-height: 18px; min-height: 32px; box-sizing: border-box; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 999px; background: #282C26; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile { width: 36px; height: 36px; border-radius: 12px; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex: none; }
+    .state { display: inline-flex; align-items: center; gap: 6px; }
+    .textbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 20px; box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 1024px; background: #11140F; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; height: 64px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 28px; height: 28px; border-radius: 999px; background: #AFCFAC;"></div>
+      <div style="font-size: 22px; font-weight: 700; line-height: 28px;">Yantra</div>
+    </div>
+    <nav style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #282C26;">
+      <a href="#" class="pill" style="background: #3B4B39; color: #D6E8D0;">Dashboard</a>
+      <a href="#" class="pill" style="color: #C2C9BE;">Fleet</a>
+      <a href="#" class="pill" style="color: #C2C9BE;">Machines</a>
+      <a href="#" class="pill" style="color: #C2C9BE;">Usage</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 24px; padding: 8px 12px 8px 16px; border-radius: 999px; background: #282C26;">
+        <span style="font-size: 14px; line-height: 20px; color: #C2C9BE;">Search anything</span>
+        <span class="mono" style="font-size: 12px; line-height: 16px; padding: 2px 8px; border-radius: 6px; background: #0C0F0A; color: #C2C9BE;">⌘K</span>
+      </div>
+      <div class="icon-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E1E3DB" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+        <span class="mono" style="position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #FFB4AB; color: #690005; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box;">3</span>
+      </div>
+      <div style="width: 36px; height: 36px; border-radius: 999px; background: #324F35; color: #CBE8C6; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;">B</div>
+    </div>
+  </header>
+
+  <div style="display: flex; gap: 16px; padding: 8px 24px 24px 24px; flex: 1; min-height: 0;">
+
+    <aside style="width: 320px; flex: none; background: #191D18; border-radius: 28px; padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px 8px;">
+        <div style="font-size: 18px; font-weight: 600; line-height: 24px;">Sessions</div>
+        <a href="#" class="pill" style="background: #AFCFAC; color: #1C3620; padding: 8px 16px 8px 14px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1C3620" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          New
+        </a>
+      </div>
+
+      <div class="eyebrow" style="padding: 8px 8px 4px 8px;">Live</div>
+      <div class="row" style="background: #3B4B39; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #48674B;">Y</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1" style="color: #D6E8D0;">yantra-web</div>
+          <div class="t2 state"><span class="mark mark-needs" style="width: 8px; height: 8px;"></span>waiting for trust · cachyos-g14</div>
+        </div>
+        <div class="mono t2">4m</div>
+      </div>
+      <div class="row" style="background: #0C0F0A; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #7A6A45;">L</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">landing</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · macbook</div>
+        </div>
+        <div class="mono t2">3h 41m</div>
+      </div>
+      <div class="row" style="background: #0C0F0A; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #3F5F7A;">H</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">homelab-k8s</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · pi-5</div>
+        </div>
+        <div class="mono t2">1h 12m</div>
+      </div>
+      <div class="row" style="background: #0C0F0A; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #6B4E7A;">A</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">agent-sdk</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · hetzner-1</div>
+        </div>
+        <div class="mono t2">26m</div>
+      </div>
+      <div class="row" style="background: #0C0F0A; padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #4E6E7A;">A</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">appliance</div>
+          <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>no agent, a shell · nas</div>
+        </div>
+        <div class="mono t2">12m</div>
+      </div>
+
+      <div class="eyebrow" style="padding: 12px 8px 4px 8px;">History</div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #8A5A3A;">P</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">price-table</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>stopped · cachyos-g14</div>
+        </div>
+        <div class="mono t2">7 Jul</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #A85B3C;">N</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">ntfy-relay</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>finished · pi-5</div>
+        </div>
+        <div class="mono t2">5 Jul</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #5A6E3A;">D</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">docs-sweep</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>finished · macbook</div>
+        </div>
+        <div class="mono t2">2 Jul</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #9A7A3A;">L</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">landing-copy</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>stopped · macbook</div>
+        </div>
+        <div class="mono t2">30 Jun</div>
+      </div>
+      <div class="row" style="padding: 10px 12px 10px 10px;">
+        <div class="tile" style="background: #3A5A5A;">C</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+          <div class="t1">cargo-zig</div>
+          <div class="t2 state"><span class="mark mark-idle" style="width: 8px; height: 8px;"></span>finished · hetzner-1</div>
+        </div>
+        <div class="mono t2">28 Jun</div>
+      </div>
+
+      <div style="flex: 1;"></div>
+      <a href="#" style="padding: 4px 12px; font-size: 14px; font-weight: 500; line-height: 20px;">All sessions →</a>
+    </aside>
+
+    <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+
+      <div style="display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 24px; flex: none;">
+        <div style="display: flex; align-items: center; gap: 20px; font-size: 14px; line-height: 20px; color: #C2C9BE;">
+          <span class="state" style="gap: 8px;"><span class="mark mark-running"></span>5 of 6 machines online</span>
+          <span class="state" style="gap: 8px; color: #FFDAD6;"><span class="mark" style="border: 1.5px dashed #FFB4AB;"></span>thinkpad unreachable 2h</span>
+          <a href="#" style="font-weight: 500;">Fix →</a>
+        </div>
+        <div class="mono t2">as of 4s</div>
+      </div>
+
+      <section class="card" style="flex: none; background: #324F35; padding: 20px 24px; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <div class="eyebrow" style="color: #CBE8C6;">Needs you</div>
+          <div style="display: flex; align-items: flex-end; gap: 12px;">
+            <div style="font-size: 64px; font-weight: 700; line-height: 64px; color: #CBE8C6;">3</div>
+            <div style="font-size: 18px; font-weight: 500; line-height: 28px; color: #CBE8C6;">things are waiting on you</div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div class="row" style="background: rgba(12,15,10,0.45); border-radius: 18px; padding: 10px 8px 10px 10px; gap: 14px;">
+            <div class="tile" style="background: #48674B;">Y</div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
+              <div class="t1" style="font-size: 15px;">yantra-web is waiting for trust</div>
+              <div class="t2 state"><span class="mark mark-needs" style="width: 8px; height: 8px;"></span>waiting · cachyos-g14 · asked 4m ago · Claude wants to run cargo test</div>
+            </div>
+            <a href="#" class="pill" style="background: #AFCFAC; color: #1C3620; height: 40px; box-sizing: border-box;">Answer</a>
+          </div>
+          <div class="row" style="background: rgba(12,15,10,0.45); border-radius: 18px; padding: 10px 8px 10px 10px; gap: 14px;">
+            <div class="tile" style="background: #282C26;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C2C9BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
+              <div class="t1" style="font-size: 15px;">Review requested: yantra#246</div>
+              <div class="t2">Y-331: the component library in Claude Design · 2h</div>
+            </div>
+            <a href="#" class="pill" style="background: #AFCFAC; color: #1C3620; height: 40px; box-sizing: border-box;">Review</a>
+          </div>
+          <div class="row" style="background: rgba(12,15,10,0.45); border-radius: 18px; padding: 10px 8px 10px 10px; gap: 14px;">
+            <div class="tile" style="background: #282C26;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C2C9BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
+              <div class="t1" style="font-size: 15px;">Issue assigned: homelab#88</div>
+              <div class="t2">pi-5 loses tailscale after resume · 1d</div>
+            </div>
+            <a href="#" class="pill" style="background: #AFCFAC; color: #1C3620; height: 40px; box-sizing: border-box;">Open</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" style="flex: 1; background: #282C26; padding: 20px 24px; gap: 16px;">
+        <div style="display: flex; align-items: flex-end; justify-content: space-between;">
+          <div style="display: flex; align-items: flex-end; gap: 10px;">
+            <div style="font-size: 18px; font-weight: 600; line-height: 24px;">Running</div>
+            <div class="t2" style="font-size: 13px; line-height: 22px;">4 sessions · longest 3h 41m</div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div class="row" style="background: #0C0F0A; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+            <div class="tile" style="background: #7A6A45;">L</div>
+            <div style="display: flex; flex-direction: column; gap: 2px; width: 240px; flex: none;">
+              <div class="t1">landing</div>
+              <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · macbook</div>
+            </div>
+            <div class="track" style="flex: 1; background: #1D211C;"><div style="width: 100%; height: 6px; background: #D6C59E; border-radius: 3px;"></div></div>
+            <div class="mono" style="font-size: 13px; line-height: 16px; width: 64px; text-align: right; flex: none;">3h 41m</div>
+            <a href="#" class="textbtn">Open</a>
+          </div>
+          <div class="row" style="background: #0C0F0A; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+            <div class="tile" style="background: #3F5F7A;">H</div>
+            <div style="display: flex; flex-direction: column; gap: 2px; width: 240px; flex: none;">
+              <div class="t1">homelab-k8s</div>
+              <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · pi-5</div>
+            </div>
+            <div class="track" style="flex: 1; background: #1D211C;"><div style="width: 33%; height: 6px; background: #D6C59E; border-radius: 3px;"></div></div>
+            <div class="mono" style="font-size: 13px; line-height: 16px; width: 64px; text-align: right; flex: none;">1h 12m</div>
+            <a href="#" class="textbtn">Open</a>
+          </div>
+          <div class="row" style="background: #0C0F0A; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+            <div class="tile" style="background: #6B4E7A;">A</div>
+            <div style="display: flex; flex-direction: column; gap: 2px; width: 240px; flex: none;">
+              <div class="t1">agent-sdk</div>
+              <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>running · hetzner-1</div>
+            </div>
+            <div class="track" style="flex: 1; background: #1D211C;"><div style="width: 12%; height: 6px; background: #D6C59E; border-radius: 3px;"></div></div>
+            <div class="mono" style="font-size: 13px; line-height: 16px; width: 64px; text-align: right; flex: none;">26m</div>
+            <a href="#" class="textbtn">Open</a>
+          </div>
+          <div class="row" style="background: #0C0F0A; border-radius: 18px; padding: 10px 8px 10px 10px; gap: 16px; height: 64px;">
+            <div class="tile" style="background: #4E6E7A;">A</div>
+            <div style="display: flex; flex-direction: column; gap: 2px; width: 240px; flex: none;">
+              <div class="t1">appliance</div>
+              <div class="t2 state"><span class="mark mark-running" style="width: 8px; height: 8px;"></span>no agent, opened as a shell · nas</div>
+            </div>
+            <div class="track" style="flex: 1; background: #1D211C;"><div style="width: 6%; height: 6px; background: #D6C59E; border-radius: 3px;"></div></div>
+            <div class="mono" style="font-size: 13px; line-height: 16px; width: 64px; text-align: right; flex: none;">12m</div>
+            <a href="#" class="textbtn">Open</a>
+          </div>
+        </div>
+      </section>
+
+      <section style="flex: none; display: flex; align-items: center; gap: 16px; background: #5C4E2D; border-radius: 22px; padding: 10px 12px 10px 24px; min-height: 64px; box-sizing: border-box;">
+        <div style="display: flex; align-items: flex-end; gap: 8px; flex: none; white-space: nowrap;">
+          <div class="eyebrow" style="color: #F2E1B8;">Worth a look</div>
+          <div class="t2" style="font-size: 13px; color: #F2E1B8;">2 sessions no workspace claims</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+          <div class="state" style="gap: 8px; color: #F2E1B8; font-size: 14px; line-height: 20px;"><span class="mark mark-unknown" style="border-color: #D6C59E;"></span><span style="font-weight: 500;">scratch</span><span class="t2" style="color: #F2E1B8;">pi-5 · 2 windows · 3d</span></div>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; background: #0C0F0A; color: #F2E1B8; height: 44px; box-sizing: border-box;">Attach</a>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; color: #FFDAD6; height: 44px; box-sizing: border-box;">Kill</a>
+          <div style="width: 1px; height: 24px; background: rgba(242,225,184,0.3);"></div>
+          <div class="state" style="gap: 8px; color: #F2E1B8; font-size: 14px; line-height: 20px;"><span class="mark mark-unknown" style="border-color: #D6C59E;"></span><span style="font-weight: 500;">old-landing</span><span class="t2" style="color: #F2E1B8;">macbook · 1 window · 9 Jun</span></div>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; background: #0C0F0A; color: #F2E1B8; height: 44px; box-sizing: border-box;">Attach</a>
+          <a href="#" class="pill" style="padding: 6px 12px; font-size: 13px; color: #FFDAD6; height: 44px; box-sizing: border-box;">Kill</a>
+        </div>
+      </section>
+
+      <section style="flex: none; display: flex; align-items: center; justify-content: space-between; border: 1px solid #424940; border-radius: 22px; padding: 4px 12px 4px 24px; min-height: 52px; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="eyebrow">Idle</div>
+          <div class="state t2" style="font-size: 13px; gap: 8px;"><span class="mark mark-idle"></span>8 workspaces, nothing running · price-table, ntfy-relay, docs-sweep and 5 more</div>
+        </div>
+        <a href="#" class="textbtn">Show →</a>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

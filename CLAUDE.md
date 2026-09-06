@@ -184,12 +184,14 @@ traits' own implementations must be tested against the real thing.
 
 - **Idempotency.** `yantra up X` twice must attach, not duplicate. Design it in; don't bolt it on.
 - **Never store secrets.** Workspaces hold *references* (1Password/pass/sops), never values.
-  **One exception, and it is written down rather than implied:** the ntfy token, which
+  **Two exceptions, both written down rather than implied:** the ntfy token, which
   [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) puts in
-  `/etc/yantra/daemon.env` in plain text, `0600` and owned by the account the daemon runs as. The
-  owner took that decision on 2026-08-22 with the cost stated — whoever can read that file has the
-  token. It covers one file holding one credential; a second secret is a reason to reread that ADR
-  and not a licence it grants. **Workspaces are untouched**: the schema still has no field for a
+  `/etc/yantra/daemon.env` in plain text, `0600` and owned by the account the daemon runs as, and
+  the daemon's own GitHub token, which
+  [ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md) puts beside it. The owner
+  took both decisions with the cost stated — whoever can read that file has both. It covers one
+  file holding two credentials the daemon itself uses; a third is a reason to reread ADR-0023 and
+  not a licence it grants, and a machine never receives either. **Workspaces are untouched**: the schema still has no field for a
   value, and a reference is still resolved at launch on the machine that runs the agent.
 - **Start small.** Prefer the smallest thing that runs end to end. This project's failure mode is a
   beautiful architecture that never boots — see the walking-skeleton milestone in `tracker.md`.

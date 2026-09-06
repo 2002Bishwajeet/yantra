@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; color: #E1E3DB; }
+    .strip { display: flex; align-items: center; justify-content: space-between; height: 72px; font-size: 36px; line-height: 48px; flex: none; }
+    .state { display: flex; align-items: center; gap: 12px; }
+    .dot { width: 24px; height: 24px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .dot-needs { background: #AFCFAC; }
+    .dot-running { background: #D6C59E; }
+    .dot-down { border: 3px dashed #FFB4AB; }
+    .big { font-size: 108px; line-height: 108px; font-weight: 700; }
+    .word { font-size: 36px; line-height: 48px; }
+    .row { display: flex; align-items: center; gap: 12px; height: 48px; font-size: 36px; line-height: 48px; flex: none; }
+    .name { width: 300px; flex: none; }
+    .age { margin-left: auto; text-align: right; }
+  </style>
+</helmet>
+
+<div style="width: 960px; height: 720px; padding: 12px; background: #2E322D; border-radius: 12px; position: relative; overflow: hidden; box-sizing: border-box;">
+
+  <div style="position: absolute; top: 0; right: 24px; height: 12px; display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 12px; color: #FFB4AB;">
+    <span>needs you</span>
+    <span style="width: 12px; height: 12px; border-radius: 999px; background: #FFB4AB; flex: none;"></span>
+  </div>
+
+  <div style="width: 936px; height: 696px; background: #11140F; padding: 24px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box;">
+
+    <div class="strip">
+      <div style="font-weight: 700;">YANTRA</div>
+      <div class="state">
+        <span>5/6 machines ·</span>
+        <span class="dot dot-down"></span>
+        <span style="color: #FFB4AB;">thinkpad down</span>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: baseline; gap: 48px; height: 132px; flex: none;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <div class="big">3</div>
+        <div class="state" style="color: #AFCFAC;"><span class="dot dot-needs"></span><span class="word">NEED YOU</span></div>
+      </div>
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <div class="big">4</div>
+        <div class="state" style="color: #D6C59E;"><span class="dot dot-running"></span><span class="word">RUNNING</span></div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; flex: none;">
+      <div class="row"><span class="dot dot-needs"></span><span class="name">yantra-web</span><span style="color: #AFCFAC;">trust</span><span class="age">4m</span></div>
+      <div class="row"><span class="dot dot-running"></span><span class="name">landing</span><span style="color: #D6C59E;">running</span><span class="age">3h41</span></div>
+      <div class="row"><span class="dot dot-running"></span><span class="name">homelab-k8s</span><span style="color: #D6C59E;">running</span><span class="age">1h12</span></div>
+      <div class="row"><span class="dot dot-running"></span><span class="name">agent-sdk</span><span style="color: #D6C59E;">running</span><span class="age">26m</span></div>
+      <div class="row"><span class="dot dot-running"></span><span class="name">appliance</span><span style="color: #D6C59E;">no agent</span><span class="age">12m</span></div>
+    </div>
+
+    <div style="flex: 1;"></div>
+
+    <div class="strip">
+      <div>gh: 1 review 1 issue</div>
+      <div>beat 4s</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

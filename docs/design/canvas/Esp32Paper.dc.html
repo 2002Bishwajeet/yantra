@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; color: #111111; }
+    .col { display: flex; flex-direction: column; flex: none; }
+    .line1 { display: flex; align-items: baseline; gap: 12px; height: 108px; }
+    .line2 { display: flex; align-items: center; gap: 12px; height: 48px; font-size: 36px; line-height: 48px; }
+    .big { font-size: 108px; line-height: 108px; font-weight: 700; }
+    .word { font-size: 36px; line-height: 48px; }
+    .dot { width: 24px; height: 24px; border-radius: 999px; flex: none; box-sizing: border-box; }
+    .dot-ink { background: #111111; }
+    .dot-dither { background: repeating-conic-gradient(#111111 0 25%, #F5F5F0 0 50%) 0 0 / 6px 6px; }
+    .dot-dashed { border: 3px dashed #111111; }
+    .rule { height: 3px; flex: none; background: repeating-linear-gradient(90deg, #111111 0 3px, #F5F5F0 3px 6px); }
+    .row { display: flex; align-items: center; gap: 12px; height: 48px; font-size: 36px; line-height: 48px; flex: none; }
+    .name { width: 240px; flex: none; }
+    .age { margin-left: auto; text-align: right; }
+  </style>
+</helmet>
+
+<div style="width: 888px; height: 384px; border: 12px solid #C2C9BE; border-radius: 0; background: #F5F5F0; padding: 6px 18px 0 18px; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <div style="display: flex; height: 156px; flex: none;">
+    <div class="col" style="width: 240px;">
+      <div class="line1"><span class="big">3</span></div>
+      <div class="line2"><span class="dot dot-ink"></span><span>need you</span></div>
+    </div>
+    <div class="col" style="width: 264px;">
+      <div class="line1" style="gap: 6px;"><span class="big">4</span><span class="dot dot-dither" style="align-self: center;"></span><span class="word">running</span></div>
+      <div class="line2"><span>3h41</span></div>
+    </div>
+    <div class="col" style="width: 324px;">
+      <div class="line1"><span class="big">5/6</span><span class="word">up</span></div>
+      <div class="line2"><span class="dot dot-dashed"></span><span>thinkpad down</span></div>
+    </div>
+  </div>
+
+  <div style="height: 6px; flex: none;"></div>
+  <div class="rule"></div>
+  <div style="height: 6px; flex: none;"></div>
+
+  <div style="display: flex; flex-direction: column; flex: none;">
+    <div class="row"><span class="dot dot-ink"></span><span class="name">yantra-web</span><span>trust</span><span class="age">4m</span></div>
+    <div class="row"><span class="dot dot-ink"></span><span class="name">yantra#246</span><span>review</span><span class="age">2h</span></div>
+    <div class="row"><span class="dot dot-ink"></span><span class="name">homelab#88</span><span>issue</span><span class="age">1d</span></div>
+  </div>
+
+  <div style="height: 3px; flex: none;"></div>
+
+  <div style="height: 36px; font-size: 36px; line-height: 36px; flex: none;">refreshed 09:14 · beat 4s</div>
+
+</div>
+</x-dc>
+</body>
+</html>
