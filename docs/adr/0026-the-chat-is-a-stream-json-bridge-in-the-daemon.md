@@ -1,7 +1,8 @@
 # ADR-0026 — The chat is a stream-json bridge in the daemon, drawn in Material, on T3 Code's vocabulary
 
 - **Date:** 2026-09-07
-- **Status:** proposed (Y-356). The owner accepts or rejects it.
+- **Status:** accepted (Y-356), 2026-09-07, on the condition in decision 8. The owner accepted it
+  that day, and set the condition with the acceptance.
 - **Evidence:** [R15](../research/15-t3code-for-the-chat.md), read on a shallow clone of
   `pingdotgg/t3code` at `b248f5a`, 2026-09-07.
 - **Read against:** [ADR-0011](0011-claude-code-runs-as-a-tui-in-tmux.md) (the agent is a TUI),
@@ -98,6 +99,56 @@ Here `--print` is what is asked for, and no interactive process is piped.
 does today. ADR-0023's file holds the daemon's own credentials and gains nothing here; nothing is
 sent from the appliance to a machine.
 
+**8. The chat turn and the TUI must never write one working tree, and nothing is built until that
+interlock is decided.** This is a hard precondition on Y-356, not a caveat: **no code for this ADR
+lands until an amendment here picks one of the three mechanisms below.**
+[Y-359](../../tracker.md#3-task-board) is that work, and Y-356 depends on it. Decision 6 says the two
+surfaces do not meet. That is true of the pane and false of the working tree, which is the case this
+decision covers.
+
+**Refuse.** `yantrad` declines a chat turn while the workspace's machine still holds its tmux
+session. The mechanism exists already, for a different write: `edit::ensure_free` refuses a machine
+move on what `Tmux::pane` answers ([`edit.rs:91`](../../crates/yantra-core/src/edit.rs),
+[`tmux.rs:339`](../../crates/yantra-core/src/tmux.rs)). It has to ask the machine rather than read
+the snapshot, which the daemon refreshes every 30 s
+([`refresh.rs:25`](../../crates/yantrad/src/refresh.rs)). **The cost is the thing the chat was for.**
+`up` leaves the session open and ADR-0011 keeps it attachable, so a live session is the normal state,
+and the chat would refuse nearly every time the owner opens it.
+
+**Isolate.** The turn runs in its own `git worktree` for that workspace, so the two agents write
+different trees. **A workspace names exactly one path today.** `Workspace::repo` is a single
+`PathBuf` ([`workspace.rs:29`](../../crates/yantra-core/src/workspace.rs)), and every caller passes
+it verbatim: `up` cds into it ([`up.rs:120` and `:163`](../../crates/yantra-core/src/up.rs)),
+`resume` does the same ([`resume.rs:165`](../../crates/yantra-core/src/resume.rs)), `logs` derives
+the transcript path from it ([`logs.rs:144`](../../crates/yantra-core/src/logs.rs)), `tokens` sums
+spend under it ([`tokens.rs:112`](../../crates/yantra-core/src/tokens.rs)), and `status` reports it
+([`status.rs:246`](../../crates/yantra-core/src/status.rs)). A second tree means the chat's directory
+is no longer the workspace's `repo`, so the transcript path, the spend figure and the agent registry
+all answer about a directory the Terminal tab is not in. It also costs disk and a lifecycle: who
+makes the worktree, who prunes it, which branch it holds, and what happens to work a turn leaves
+uncommitted.
+
+**Serialize.** A per-workspace lock in `yantrad` gives the tree to one agent at a time. **The daemon
+cannot see whether the TUI is mid-edit.** It reads a pane and the agent registry, and it has a named
+verdict for those two disagreeing rather than an answer — `Verdict::Unclear`
+([`status.rs:68`](../../crates/yantra-core/src/status.rs)), for which `is_running` is deliberately
+false ([`status.rs:76`](../../crates/yantra-core/src/status.rs)). A lock released on that reading is
+released on a guess. **The lock also binds one caller only.**
+[ADR-0012](0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md) keeps `yantra` calling
+`yantra_core` in-process with no daemon running, and a person typing in the pane is outside both.
+
+**The order above is not a preference, and this ADR picks none of the three.** The owner picks when
+Y-359 is planned. Refuse is the cheapest and the least useful; isolate is the most work and the only
+one that lets both surfaces run at once; serialize is cheap to write and hard to make correct.
+
+**What would settle it.** Three measurements, and the first belongs to the owner rather than to a
+test. **How often the session is live when the owner wants to chat** — if it almost always is,
+Refuse is unusable and the choice is between the other two. **Whether `claude` behaves in a
+worktree** — whether `--resume <id>` continues a thread that started in the main tree, and where the
+transcript lands when the cwd is the worktree. §B3's podman fixture answers that one with a real
+`claude`. **What a worktree per workspace costs on this fleet's disks**, measured rather than
+assumed.
+
 ## Consequences
 
 **What it buys.** The features R15 lists stop being unreachable: streaming text instead of a 50-line
@@ -111,8 +162,8 @@ attachable session it bought.
 daemon has not had before (a turn that is cancelled, a socket that closes mid-turn, a machine that
 goes away), a second WebSocket route with its own authorisation test, the chat UI rebuilt on the
 new stream, and a budget line for whatever the markdown renderer weighs. **A `claude -p` turn is a
-second agent process on the machine**, running beside the TUI in the same repository; two agents
-writing the same working tree is a real hazard and this ADR does not solve it. It also widens
+second agent process on the machine**, running beside the TUI in the same repository; decision 8
+holds the whole build until the interlock between the two is decided. It also widens
 ADR-0022's blast radius by one route, on the same single authoriser that ADR-0022's Consequences
 already names as the whole of the protection.
 
