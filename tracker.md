@@ -196,6 +196,7 @@ deleted everywhere else.
 | Y-354 | Usage time windows | ⬜ todo | — | Y-347 | **Done** when Today, 7 days and 30 days filter spend from per-response timestamps in `tokens.rs` without breaking I-61 or I-62. |
 | Y-355 | The GitLab grant | ⬜ todo | — | Y-342 | **Done** when the source step's GitLab card works the way GitHub's does, under an ADR that says where the grant lives. |
 | Y-356 | Streaming chat | ⬜ todo | — | Y-348 | **Done** when an ADR decides the SDK against the TUI in tmux (ADR-0011) and the Chat tab streams. |
+| Y-357 | The dashboard is served compressed | ⬜ todo | — | Y-353 | **Done** when `web/scripts/` gzips `dist` after the build, both halves of `crates/yantrad/src/web.rs` answer `Accept-Encoding: gzip` with the `.gz` and `Content-Encoding`, a router test covers each half, and `npm run budget` measures the wire. [Shape](docs/plans/m14-quality-phase1.md). |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
