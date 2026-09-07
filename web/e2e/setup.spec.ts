@@ -24,7 +24,7 @@ test.describe('the first run', () => {
     await page.goto(route('dashboard').path)
     // The phone's app bar draws the route's own h1 and hides the screen's
     // from the accessibility tree, so this one is found in the DOM.
-    await expect(page.locator('h1', { hasText: 'Set up Yantra' })).toBeAttached()
+    await expect(page.locator('h1', { hasText: 'Set up Yantra' }).first()).toBeAttached()
   })
 
   test('draws six steps, how far along they are, and what each one is waiting on', async ({ page }) => {
