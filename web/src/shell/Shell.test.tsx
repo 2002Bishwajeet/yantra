@@ -71,10 +71,10 @@ describe('the tablet shell', () => {
   it('opens notifications as a side sheet', async () => {
     mount('tablet')
     await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
-    // A hidden aside has no accessible name to query by.
-    expect(document.querySelector<HTMLElement>('aside[aria-label="Notifications"]')?.hidden).toBe(true)
+    // The sheet's chunk loads on the first press; nothing of it is drawn before.
+    expect(document.querySelector('aside[aria-label="Notifications"]')).toBeNull()
     fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }))
-    const sheet = screen.getByRole('complementary', { name: 'Notifications' })
+    const sheet = await screen.findByRole('complementary', { name: 'Notifications' })
     expect(sheet.hidden).toBe(false)
     expect(await within(sheet).findByText('api is waiting for trust')).toBeTruthy()
     fireEvent.click(within(sheet).getByRole('button', { name: 'Close Notifications' }))

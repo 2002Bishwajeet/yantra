@@ -5,6 +5,10 @@ import * as contract from '@/contract.gen'
 import { writePrefs } from './prefs'
 import type { FormFactor } from './formFactor'
 
+// The shell loads these after first paint; warm them so a 1 s `findBy` is not
+// racing Vite's transform.
+await Promise.all([import('./Account'), import('./BellPopover'), import('./NotificationsSheet')])
+
 const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 1440 }
 
 /** The shell at one of the brief's three widths, over the contract fixtures.

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { HeadContent, Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { useResetOnRouteChange, useViewing } from '@/api/hooks'
@@ -9,18 +9,24 @@ import { IconButton } from '@/m3/icon-button/IconButton'
 import { BarDestination, NavigationBar } from '@/m3/navigation-bar/NavigationBar'
 import { NavigationRail, RailDestination } from '@/m3/navigation-rail/NavigationRail'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
-import { Popover, PopoverPopup, PopoverTrigger } from '@/m3/popover/Popover'
-import { SideSheet } from '@/m3/side-sheet/SideSheet'
 import { Text } from '@/m3/text/Text'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
-import { Account } from './Account'
 import { DESTINATIONS, isDestination } from './destinations'
 import { useFormFactor } from './formFactor'
-import { Bell, NotificationsList } from './Notifications'
+import { Bell } from './Bell'
 import { Palette } from './Palette'
 import { usePrefs } from './prefs'
 import { SessionsRail } from './SessionsRail'
 import './Shell.css'
+
+// The menu, the popover and the sheet carry Base UI's popup machinery, which
+// the first paint of `/` never draws. Each loads after it, behind a 44 px slot.
+const Account = lazy(() => import('./Account').then((it) => ({ default: it.Account })))
+const BellPopover = lazy(() => import('./BellPopover').then((it) => ({ default: it.BellPopover })))
+const NotificationsSheet = lazy(() =>
+  import('./NotificationsSheet').then((it) => ({ default: it.NotificationsSheet })),
+)
+const slot = <span aria-hidden="true" className="shell__slot" />
 
 const usePathname = () => useRouterState({ select: (state) => state.location.pathname })
 
@@ -85,14 +91,13 @@ function DesktopShell() {
             <Palette />
           </Guarded>
           <Guarded title="Notifications could not be drawn">
-            <Popover>
-              <PopoverTrigger render={<Bell />} />
-              <PopoverPopup showTitle title="Notifications">
-                <NotificationsList />
-              </PopoverPopup>
-            </Popover>
+            <Suspense fallback={slot}>
+              <BellPopover />
+            </Suspense>
           </Guarded>
-          <Account />
+          <Suspense fallback={slot}>
+            <Account />
+          </Suspense>
         </div>
       </header>
       <div className="shell__body">
@@ -109,6 +114,7 @@ function DesktopShell() {
 
 function TabletShell() {
   const [open, setOpen] = useState(false)
+  const [touched, setTouched] = useState(false)
   return (
     <div className="shell" data-shell="tablet">
       <NavigationRail
@@ -140,17 +146,27 @@ function TabletShell() {
             <Palette />
           </Guarded>
           <Guarded title="Notifications could not be drawn">
-            <Bell aria-expanded={open} onClick={() => setOpen((was) => !was)} />
+            <Bell
+              aria-expanded={open}
+              onClick={() => {
+                setTouched(true)
+                setOpen((was) => !was)
+              }}
+            />
           </Guarded>
-          <Account />
+          <Suspense fallback={slot}>
+            <Account />
+          </Suspense>
         </div>
         <Page />
       </div>
-      <Guarded title="Notifications could not be drawn">
-        <SideSheet className="shell__sheet" onClose={() => setOpen(false)} open={open} title="Notifications">
-          <NotificationsList onOpen={() => setOpen(false)} />
-        </SideSheet>
-      </Guarded>
+      {touched ? (
+        <Guarded title="Notifications could not be drawn">
+          <Suspense fallback={null}>
+            <NotificationsSheet onClose={() => setOpen(false)} open={open} />
+          </Suspense>
+        </Guarded>
+      ) : null}
     </div>
   )
 }
@@ -174,7 +190,9 @@ function PhoneShell() {
               <Guarded title="Notifications could not be drawn">
                 <Bell role="link" render={<Link to="/notifications" />} />
               </Guarded>
-              <Account />
+              <Suspense fallback={slot}>
+            <Account />
+          </Suspense>
             </>
           ) : undefined
         }

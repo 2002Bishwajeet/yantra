@@ -1,10 +1,8 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Bell as BellIcon, GitPullRequest, Radio } from 'lucide-react'
+import { GitPullRequest, Radio } from 'lucide-react'
 import { ago } from '@/lib/time'
-import { Badge } from '@/m3/badge/Badge'
 import { Button } from '@/m3/button/Button'
-import { IconButton, type IconButtonProps } from '@/m3/icon-button/IconButton'
 import { Row, RowText } from '@/m3/row/Row'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Eyebrow, Mono } from '@/m3/text/Text'
@@ -14,20 +12,6 @@ import { grouped, type Entry } from './notifications'
 import { writePrefs } from './prefs'
 import { useEntries } from './useEntries'
 import './Notifications.css'
-
-export function Bell(props: Omit<IconButtonProps, 'label' | 'badge' | 'children'>) {
-  const { badge } = useEntries()
-  return (
-    <IconButton
-      badge={badge > 0 ? <Badge count={badge} label={`${badge} unread`} /> : undefined}
-      label="Notifications"
-      variant="tonal"
-      {...props}
-    >
-      <BellIcon />
-    </IconButton>
-  )
-}
 
 function EntryTile(props: { tile: Entry['tile'] }) {
   const { tile } = props

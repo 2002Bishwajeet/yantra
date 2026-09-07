@@ -183,3 +183,9 @@
 .shell__nowhere > * {
   margin: 0;
 }
+
+/* Holds an icon button's place while its chunk loads. */
+.shell__slot {
+  inline-size: 44px;
+  block-size: 44px;
+}
