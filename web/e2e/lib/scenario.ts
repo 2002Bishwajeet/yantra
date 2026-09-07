@@ -4,6 +4,7 @@ export type Scenario =
   | 'busy'
   | 'empty'
   | 'unreachable'
+  | 'down'
   | 'nogrant'
   | 'refused'
   | 'flaky'
