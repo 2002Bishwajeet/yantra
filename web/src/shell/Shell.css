@@ -149,6 +149,12 @@
 
 /* Phone: the app bar is the h1, so the screen's own is not drawn. */
 
+/* Shell.tsx keeps one contents box at every width so the tree survives a
+   form-factor change (Y-361). The phone's draws no box of its own. */
+.shell__contents {
+  display: contents;
+}
+
 /* WCAG 2.4.11: the navigation bar and the FAB above it are fixed, so the page
    both leaves room under its last control and scrolls one clear of them —
    which New session's sticky footer, shorter than the pair, gets as well. */

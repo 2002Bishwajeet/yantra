@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { at } from './lib/sizes'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /* Y-347. What the Usage, TabletUsage and PhoneUsage boards say the page must
@@ -55,16 +56,29 @@ test.describe('usage on a busy fleet', () => {
     await axe(page)
   })
 
+  /* Y-361. A person drags the window across 600 px or 1240 px and the shell
+     changes form factor. Every other screen reads its query cache again; the
+     fan-out is Usage's own state, and a shell that remounted the tree on the
+     way threw it away. */
+  test('keeps the read when the window crosses a breakpoint', async ({ page, size }) => {
+    await page.getByRole('button', { name: 'Read spend' }).click()
+    const read = card(page, 'By workspace').getByText('10 workspaces read')
+    await expect(read).toBeVisible()
+
+    const other = size === 'phone' ? 'desktop' : 'phone'
+    await page.setViewportSize(at(other).viewport)
+    await expect(page.locator('[data-shell]')).toHaveAttribute('data-shell', other)
+    await expect(read).toBeVisible()
+  })
+
   /* The Usage boards draw the read, not the page waiting to be asked, so the
      picture waits for the count each part of the fan-out prints.
 
-     The viewport rather than the page, and this is not a preference: a
-     full-page capture makes Chromium report a 1x1 viewport for a frame,
-     `useFormFactor` reads *phone*, and `Shell` swaps the component it renders,
-     which unmounts the tree and throws the read away. Every other screen reads
-     its query cache again and looks the same; Usage holds the fan-out in its
-     own state and cannot. The boards are 1440x1024, 834x1194 and 390x844, so
-     the viewport is the frame the board was drawn at. */
+     The viewport rather than the page. A full-page capture makes Chromium
+     report a 1x1 viewport for a frame and `useFormFactor` reads *phone*; that
+     used to throw the read away, and Y-361 stopped it. The viewport stays
+     because the boards are 1440x1024, 834x1194 and 390x844, so it is the frame
+     each board was drawn at. */
   test('looks like the board once the read is on screen', async ({ page, size }) => {
     await page.getByRole('button', { name: 'Read spend' }).click()
     await expect(card(page, 'By workspace').getByText('10 workspaces read')).toBeVisible()
