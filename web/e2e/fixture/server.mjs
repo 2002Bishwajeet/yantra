@@ -119,12 +119,14 @@ function select(request) {
     state: stateFor(
       request.headers['x-fixture-scenario'] ?? jar['fixture-scenario'] ?? DEFAULT,
     ),
-    // Capped: a spec sets it, but the timer must not take a caller's number whole.
-    slow: Math.min(Number(url.searchParams.get('slow') ?? jar['fixture-slow'] ?? 0) || 0, 10_000),
+    slow: capped(Number(url.searchParams.get('slow') ?? jar['fixture-slow'] ?? 0)),
     url,
   }
 }
 
+// A spec sets the delay, but a timer never takes a caller's number whole.
+const SLOWEST = 10_000
+const capped = (ms) => (!(ms > 0) ? 0 : ms > SLOWEST ? SLOWEST : ms)
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 async function body(request) {
