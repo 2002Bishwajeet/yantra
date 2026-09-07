@@ -17,6 +17,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `d837994` | The `web/e2e/` rows: the fixture's refusal shapes, the axe list, the screenshot image, motion |
 | `d4ae96f` | The boards review's accessibility findings: the keyboard trap, the three live regions, the two focus failures |
 | `e550211` | Finding 98: the fourteen boards with no picture |
+| `aa139e2` | Finding 134: the terminal cell measured after the mono face lands |
 
 ## Closed
 
@@ -85,7 +86,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 96 | The palette's arrow keys moved an option the list never scrolled to (2.4.7) | `d4ae96f` |
 | 99 | The terminal's `role="status"` unmounted with the session's end (4.1.3) | `d4ae96f` |
 | 98 | Fourteen of the 63 boards had no screenshot baseline | `e550211` |
-| 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | this pass; see below |
+| 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
