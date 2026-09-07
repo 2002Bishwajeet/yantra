@@ -12,14 +12,10 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { DeleteWorkspace } from '@/screens/fleet/Confirm'
 import { phrase } from '@/shell/phrase'
+import { home } from './format'
 import { startedAt, verbs } from './verbs'
 
 const URL = /^https?:\/\//
-
-/** `~` for the home directory, as the boards and a shell print a path. */
-function home(path: string): string {
-  return path.replace(/^\/(?:home|Users)\/[^/]+/, '~')
-}
 
 /** The Fleet row, repeated word for word under the question (BRIEF.md). */
 export function Delete(props: { workspace: Workspace; status: WorkspaceStatus | null; trigger: ReactElement }) {

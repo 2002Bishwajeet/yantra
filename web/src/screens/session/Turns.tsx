@@ -157,21 +157,6 @@ export function Turns(props: { said: Said; machine: string; now: number; onRead:
   return (
     <>
       {said.moved ? <Moved onRefresh={refresh} /> : null}
-      {!said.moved && said.asked < said.total ? (
-        <div className="turns__older">
-          <Button
-            disabled={said.paging}
-            onClick={() =>
-              // The last window asks for what is left rather than for a full
-              // one: past the start of the file `tail` stops skipping.
-              onRead(Math.min(LINES, said.total - said.asked), said.asked)
-            }
-            variant="tonal"
-          >
-            {said.paging ? 'reading…' : 'Older'}
-          </Button>
-        </div>
-      ) : null}
       {said.turns.map((turn, index) => (
         <OneTurn key={index} now={now} turn={turn} />
       ))}

@@ -60,8 +60,15 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.session__name a {
+.session__name a,
+.session__banner a,
+.chat__foot a,
+.transcript__foot a,
+.spend__ask a {
   color: var(--md-sys-color-primary);
+  /* A link inside a sentence needs more than its colour (WCAG 1.4.1). */
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .session__unreachable {
@@ -124,9 +131,6 @@
   padding: 0 8px;
 }
 
-.session__banner a {
-  color: var(--md-sys-color-primary);
-}
 
 /* Turns */
 
@@ -244,11 +248,6 @@
   overflow-wrap: anywhere;
 }
 
-.turns__older {
-  display: flex;
-  justify-content: center;
-}
-
 .turns__waiting a {
   color: inherit;
   font-weight: 500;
@@ -272,6 +271,11 @@
 .chat__asking-head h3,
 .chat__asking p {
   margin: 0;
+}
+
+/* A command and a path are the agent's words and can be any length. */
+.chat__asking-head h3 {
+  overflow-wrap: anywhere;
 }
 
 .chat__options {
@@ -352,9 +356,6 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.chat__foot a {
-  color: var(--md-sys-color-primary);
-}
 
 .chat__ended {
   display: flex;
@@ -411,9 +412,6 @@
   margin: 0;
 }
 
-.transcript__foot a {
-  color: var(--md-sys-color-primary);
-}
 
 .transcript__actions {
   display: flex;
@@ -438,9 +436,6 @@
   margin: 0;
 }
 
-.spend__ask a {
-  color: var(--md-sys-color-primary);
-}
 
 .spend__answer {
   display: flex;
@@ -595,10 +590,22 @@
   overflow-wrap: anywhere;
 }
 
-/* Phone: the app bar is the h1; the verbs wrap under the state line. */
+/* Phone: the app bar carries the name, so the header stacks what is left —
+   the state line, then the verbs — instead of competing for one row. */
 
 [data-shell="phone"] .session__head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 8px 0 0;
+}
+
+[data-shell="phone"] .session__title {
+  gap: 12px;
+}
+
+[data-shell="phone"] .session__verbs {
+  justify-content: flex-start;
 }
 
 [data-shell="phone"] .session__bar,

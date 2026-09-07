@@ -11,6 +11,7 @@ import { State } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { type Prompt, usePane } from './pane'
+import { home } from './format'
 import { ending } from './verbs'
 import { Turns } from './Turns'
 
@@ -25,7 +26,7 @@ function Asking(props: { prompt: Prompt; repo: string; onAnswer: (number: string
         <Text as="h3" scale="title-large">
           {prompt.kind === 'Bash command' && prompt.subject ? (
             <>
-              Run <Mono>{prompt.subject}</Mono> in <Mono>{repo}</Mono>?
+              Run <Mono>{prompt.subject}</Mono> in <Mono>{home(repo)}</Mono>?
             </>
           ) : prompt.subject ? (
             <>
@@ -96,6 +97,13 @@ export type ChatProps = {
  *  (ADR-0019). Live chat is Y-356. */
 export function Chat(props: ChatProps) {
   const { workspace, state, said, now, onRead, paneOpen, endActions } = props
+
+  // Mounting the view is the request (ADR-0019), and an ended session is read
+  // here too: its turns are frozen, not absent.
+  useEffect(() => {
+    if (said.said === 'no') onRead(LINES, 0)
+  }, [said.said, onRead])
+
   const over = state !== null && ending(state) !== null
   return over && state ? (
     <div className="chat">
@@ -116,10 +124,6 @@ function LiveChat(props: ChatProps) {
   const [draft, setDraft] = useState('')
   const [typed, setTyped] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (said.said === 'no') onRead(LINES, 0)
-  }, [said.said, onRead])
 
   // The newest turn is at the bottom, as a chat is read.
   useEffect(() => {

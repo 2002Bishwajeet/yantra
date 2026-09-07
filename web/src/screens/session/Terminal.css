@@ -38,6 +38,8 @@
 
 .terminal__over a {
   color: var(--md-sys-color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .terminal__keys {
@@ -75,8 +77,21 @@
 
 .terminal__key--keyboard {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
   color: var(--md-sys-color-on-secondary-container);
   background: var(--md-sys-color-secondary-container);
+}
+
+/* Seven keys on a 390 px screen: the row keeps every one of them. */
+[data-shell="phone"] .terminal__keys {
+  gap: 2px;
+  padding: 2px 4px;
+}
+
+[data-shell="phone"] .terminal__key {
+  min-width: 40px;
+  padding: 0 6px;
 }
 
 .terminal__key > svg {

@@ -76,8 +76,6 @@ type Case = 'unreachable' | 'empty' | 'held' | 'broken' | 'flaky' | 'refused'
  *  everywhere; the sweep is re-run to move a row out as it turns green. */
 const PENDING: Partial<Record<RouteId, { row: string; why: string; cases?: readonly Case[] }>> = {
   fleet: { row: 'Y-347', why: 'a machines body without `data` is swallowed', cases: ['broken'] },
-  session: { row: 'Y-348', why: 'no page-level Try again on the Session screen', cases: ['unreachable'] },
-  'session-terminal': { row: 'Y-348', why: 'the pane draws no skeleton while the read is held', cases: ['held'] },
   new: { row: 'Y-349', why: 'no page-level Try again on New session', cases: ['unreachable', 'flaky'] },
 }
 

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
 import { useSessions, useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
@@ -48,6 +48,7 @@ export function Session() {
 /** The route's body, with the URL already read — what the tests render. */
 export function Workspace(props: { name: string; view: View }) {
   const { name, view } = props
+  const client = useQueryClient()
   const listed = useWorkspaces()
 
   if (listed.looked === 'pending') {
@@ -65,6 +66,8 @@ export function Workspace(props: { name: string; view: View }) {
   }
 
   if (listed.looked !== 'ok') {
+    // The Unreachable board: this page cannot tell the two apart, so it draws
+    // both unknown and offers the one thing that helps.
     return (
       <>
         <Text as="h1" scale="headline-medium" emphasized>
@@ -74,14 +77,16 @@ export function Workspace(props: { name: string; view: View }) {
           error={{
             kind: 'network',
             said: listed.looked === 'failed' ? listed.error : '',
-            retryable: false,
+            retryable: true,
             describe: () =>
               listed.looked === 'failed'
                 ? 'The daemon could not read its workspaces, so this one cannot be found.'
                 : 'The daemon has not read its workspaces yet.',
           }}
           eyebrow="Session"
+          reset={() => void client.invalidateQueries()}
           title="The workspaces could not be read"
+          unknowns={['off the tailnet', 'yantrad down']}
         />
       </>
     )

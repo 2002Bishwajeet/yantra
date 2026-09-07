@@ -5,3 +5,8 @@ export const count = (of: number) => of.toLocaleString()
 export function money(amount: number): string {
   return amount > 0 && amount < 0.005 ? '<$0.01' : `$${amount.toFixed(2)}`
 }
+
+/** `~` for the home directory, as the boards and a shell print a path. */
+export function home(path: string): string {
+  return path.replace(/^\/(?:home|Users)\/[^/]+/, '~')
+}

@@ -1,11 +1,15 @@
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
+import { useSessions } from '@/api/hooks'
+import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
+import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { KeyRow } from '@/screens/session/Keys'
 import { Terminal } from '@/screens/session/Terminal'
 import { useFormFactor } from '@/shell/formFactor'
+import { useTick } from '@/useTick'
 import { TerminalSquare } from 'lucide-react'
 import './SessionTerminal.css'
 
@@ -21,6 +25,10 @@ export function SessionTerminal() {
   const { machine, session } = route.useParams()
   const factor = useFormFactor()
   const navigate = useNavigate()
+  const sessions = useSessions()
+  const now = useTick(true)
+  const host = sessions.looked === 'ok' ? sessions.data.find((one) => one.machine === machine) : null
+  const one = host?.reached === 'yes' ? host.sessions.find((each) => each.name === session) : undefined
   return (
     <div className="session-terminal">
       <header className="session-terminal__head">
@@ -29,16 +37,28 @@ export function SessionTerminal() {
             <TerminalSquare />
           </IconTile>
           <div className="session-terminal__name">
+            {/* The route's own title, so the phone app bar and the page say
+                the same thing (`router.test.tsx`). */}
             <Text as="h1" scale="headline-medium" emphasized clip>
-              {session}
+              {session} on {machine}
             </Text>
             <Text as="p" scale="body-small" tone="variant">
-              tmux session on{' '}
+              <Mono>{session}</Mono> is a tmux session on{' '}
               <Link params={{ machine }} to="/m/$machine">
                 {machine}
               </Link>{' '}
-              · <Mono>{session}</Mono>
+              that no workspace claims
             </Text>
+            {/* The swept list says how old it is; a bar until it answers, so
+                the line never flashes empty (EmptyStates board). */}
+            {sessions.looked === 'pending' ? (
+              <Skeleton className="session-terminal__age" shape="text" />
+            ) : one ? (
+              <Mono className="session-terminal__age">
+                started {ago(now / 1000 - one.created_at, now).text} ago · {one.windows} window
+                {one.windows === 1 ? '' : 's'}
+              </Mono>
+            ) : null}
           </div>
         </div>
         <KillSession

@@ -52,9 +52,16 @@ function attach(
     } else link.type(data)
   })
   window.addEventListener('resize', link.resize)
+  // The window is not the only thing that moves the pane: a sheet that opens
+  // takes the page's scrollbar with it, and a pane measured either side of
+  // that is two different terminals. Guarded because jsdom has no observer,
+  // and the unit tests run there.
+  const watching = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => link.resize())
+  watching?.observe(host)
 
   return {
     close: () => {
+      watching?.disconnect()
       window.removeEventListener('resize', link.resize)
       typed.dispose()
       link.close()
@@ -93,18 +100,28 @@ export function Terminal(props: TerminalProps) {
 
   // The daemon's reason arrives before the close that follows it, so the first
   // answer is the one that says anything.
+  //
+  // **The face has to be there before the pane is measured.** A pty is opened
+  // with a window, and a cell measured against a fallback font gives the wrong
+  // column count — every line then wraps where the far side did not break it.
   useEffect(() => {
-    const live = attach(
-      url,
-      host.current!,
-      (refused) => setEnd((before) => (before.ended === 'yes' ? before : { ended: 'yes', refused })),
-      setLink,
-      setSize,
-    )
-    wired.current = live
+    let live: ReturnType<typeof attach> | null = null
+    let closed = false
+    void (document.fonts?.ready ?? Promise.resolve()).then(() => {
+      if (closed) return
+      live = attach(
+        url,
+        host.current!,
+        (refused) => setEnd((before) => (before.ended === 'yes' ? before : { ended: 'yes', refused })),
+        setLink,
+        setSize,
+      )
+      wired.current = live
+    })
     return () => {
+      closed = true
       wired.current = null
-      live.close()
+      live?.close()
     }
   }, [url, opened])
 
