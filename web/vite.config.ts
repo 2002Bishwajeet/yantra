@@ -45,6 +45,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    setupFiles: ['src/test/setup.ts'],
     // Playwright's specs live under e2e/ and refuse Vitest's runner.
     exclude: ['e2e/**', 'node_modules/**', 'dist/**', 'design/**'],
     // R14 §2.1: the colour package's own imports lack `.js`, so Node refuses
