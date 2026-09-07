@@ -195,7 +195,7 @@ deleted everywhere else.
 | Y-353 | M14: cleanup and the documents | ⬜ todo | claude | Y-352 | **Done** when `web/src/components/ui/` and every unimported component are deleted, `git grep shadcn` is empty, and `web/README.md`, `docs/architecture.md`, `llms.txt` and D3's amendments say what shipped. |
 | Y-354 | Usage time windows | ⬜ todo | — | Y-347 | **Done** when Today, 7 days and 30 days filter spend from per-response timestamps in `tokens.rs` without breaking I-61 or I-62. |
 | Y-355 | The GitLab grant | ⬜ todo | — | Y-342 | **Done** when the source step's GitLab card works the way GitHub's does, under an ADR that says where the grant lives. |
-| Y-356 | Streaming chat | ⬜ todo | — | Y-348 | **Done** when an ADR decides the SDK against the TUI in tmux (ADR-0011) and the Chat tab streams. |
+| Y-356 | Streaming chat | ⬜ todo | — | Y-348 | **Done** when an ADR decides the SDK against the TUI in tmux (ADR-0011) and the Chat tab streams. **2026-09-07**: [ADR-0026](docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md) drafted (Proposed) on [R15](docs/research/15-t3code-for-the-chat.md); the owner decides. |
 | Y-357 | The dashboard is served compressed | ⬜ todo | — | Y-353 | **Done** when `web/scripts/` gzips `dist` after the build, both halves of `crates/yantrad/src/web.rs` answer `Accept-Encoding: gzip` with the `.gz` and `Content-Encoding`, a router test covers each half, and `npm run budget` measures the wire. [Shape](docs/plans/m14-quality-phase1.md). |
 ### Landing site — out of milestone
 
@@ -303,6 +303,7 @@ Architecture decisions live in [`docs/adr/`](docs/adr/). Index:
 | [0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md) | **The GitHub grant lives beside the relay** — the daemon obtains a non-expiring OAuth App token by the device flow, writes it to `/etc/yantra/daemon.env` as `YANTRA_GITHUB_TOKEN`, reads GitHub's API with it and never sends it to a machine; a clone uses the machine's own git credential | 2026-09-06 | accepted 2026-09-06 |
 | [0024](docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md) | **The dashboard is Material 3, built by hand on Base UI, TanStack and tokens** — supersedes ADR-0014's component and styling rows; tokens are the seam, Material's numbers win over the brief's, preferences are browser-local, Playwright with axe at three sizes is the proof | 2026-09-06 | accepted 2026-09-06 |
 | [0025](docs/adr/0025-the-daemon-remembers-what-it-pushed.md) | **The daemon remembers the last events it pushed** — a 50-event ring buffer in memory at `GET /api/notifications`, read state in the browser, nothing on disk | 2026-09-06 | proposed |
+| [0026](docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md) | **The chat is a `stream-json` bridge in the daemon** — `claude -p` over the ssh transport, a Rust event model on T3 Code's vocabulary, a socket beside the terminal socket, drawn in `web/src/m3/`; ADR-0011's tmux session and Terminal tab stay | 2026-09-07 | proposed |
 
 **Still to write.** Numbers are assigned when an ADR is written, never reserved — this list had
 drifted a full four rows out of step with `docs/adr/` before it was rebuilt on 2026-07-30, because
