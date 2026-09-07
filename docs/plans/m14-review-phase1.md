@@ -1,5 +1,8 @@
 # M14 Phase 1 review — `y-338-m14-foundations` (read-only, 2026-09-06)
 
+**What happened next:** [m14-quality-phase1.md](m14-quality-phase1.md) says which of these
+findings closed, with the commit that closed each one, and which stay open.
+
 Scope: `web/src/m3/**`, `web/src/api/**`, `web/e2e/**`, `web/scripts/budget.mjs`. Reviewed against
 CLAUDE.md §A, ADR-0024, plan §3, R14 §1.2–1.5/§5–§7, BRIEF.md, and the five skills (Vercel's
 web-interface-guidelines fetched live; accessibility; react-best-practices; composition-patterns;
