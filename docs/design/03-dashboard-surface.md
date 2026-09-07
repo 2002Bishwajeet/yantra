@@ -109,6 +109,12 @@ chunk. Deleting them buys clarity, not weight. §9.1 says so rather than claimin
 > in `tw-animate-css`, which ships no `prefers-reduced-motion` at all at 1.4.0. §9.3 repeats the
 > claim in its own words and takes the same correction; its ruling is untouched.
 
+> **2026-09-07, Y-353: the sheet that carried that rule is deleted, and the finding is answered in
+> app code.** `web/src/components/ui/`, `shadcn/tailwind.css` and the `shadcn` package left the
+> repository with the Material rebuild ([ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md)
+> §1). Nothing borrows a reduced-motion rule from a vendored stylesheet now: `web/src/m3/tokens.css`
+> holds the floor, and `Skeleton.css` names its own. §9.3's ruling is still the ruling.
+
 ---
 
 ## 3. Routes and navigation
@@ -474,6 +480,13 @@ crashed agent and a hyperlink end up the same colour*.
 > `index.css`, which is the diff ADR-0014 already expects. What those two values should be is the
 > owner's to decide and is not decided.
 
+> **2026-09-07, Y-353: the two unpainted roles are painted, and they are Material's.**
+> `--tone-critical`, `--tone-warn` and `--tone-good` are gone with `index.css`'s old sheet. The six
+> marks live in [`web/src/m3/mark/Mark.css`](../../web/src/m3/mark/Mark.css) and take `primary`,
+> `tertiary`, `outline` and `error` from the sage scheme. Form still carries the state — filled,
+> outlined, dashed, ringed — so a greyscale render tells the six apart, which is what this section
+> asked for.
+
 ---
 
 ## 7. What every surface owes a reader
@@ -731,6 +744,14 @@ reconcile. Keep them, and say in
 > Plex Mono, both latin and self-hosted. The 145 KiB first-load ceiling for `/` does not move, and
 > `npm run budget` fails above either number.
 
+> **2026-09-07, Y-353: `/` is 147.3 KiB and the ceiling is missed by 2.3 KiB.** Deleting the old
+> stylesheet and the primitives under it took the first load from 159.1 KiB to 146.7, and Y-358's
+> unreachable screen put it at 147.3; fonts are 78.5 KiB and under. What is left is not a stylesheet: react-dom is 453 kB of the entry chunk's
+> 761 kB before minifying, TanStack Router about 90, TanStack Query about 40, and the shell and the
+> Dashboard 68 between them. Nothing on `/` is an eager import that could be lazy — `/` is the
+> Dashboard. So `web.yml` runs the budget with `continue-on-error: true` still, and
+> [Y-357](../../tracker.md#3-task-board) measures the wire rather than the build.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
@@ -759,6 +780,12 @@ the right moment.
 > overlay fade and the disclosure slide this section names, so the timing a reader sees there is the
 > port's rather than D3's. A utility class cannot be overruled from a token, and editing the file is
 > what ADR-0014 refuses. **Named, not solved.**
+
+> **2026-09-07, Y-353: solved, by deleting the file.** The ported primitives are gone
+> ([ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) §1), and with them the rule
+> that a token could not reach. Every component under `web/src/m3/` is ours and names a spring
+> token, so the overlay fade and the disclosure slide take their timing from
+> `web/src/m3/tokens.css` and from nowhere else.
 
 > **2026-09-06, [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) (Y-337): one
 > duration and one easing become Material's twelve springs**, shipped as four CSS `linear()`

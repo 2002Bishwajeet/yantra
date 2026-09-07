@@ -71,6 +71,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 81 | `count={0}` drew a "0" badge | `ec6e17c` |
 | 82 | The fixture's invalid-first-frame text and its binary handling | `d837994` |
 | 85 | `afterEach(cleanup)` in 35 files | `5bb41e6` |
+| 86 | `index.css` follows `prefers-color-scheme` and not `data-theme` | `e9e9158` |
 | 87 | Row 33 again, on `Fab`, `ExtendedFab` and `IconButton` | `d8e5a5e` |
 | 88 | A loader's `ensureQueryData` rejects when the page leaves mid-read | `d8e5a5e` |
 | 89 | A terminal socket closed while it was still CONNECTING | `d8e5a5e` |
@@ -95,12 +96,17 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
-| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | mainline, with the measurement below |
-| 86 | `index.css` follows `prefers-color-scheme` and not `data-theme` | Y-353, and it dies with `components/ui/` |
+| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.3 KiB against 145, so the step cannot be made to fail yet. Y-357 |
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
 because six screen agents are reading those components right now, and a signature change or a
 padding change under them costs more than it buys. They belong in the Y-353 sweep.
+
+**Y-353 did not take them either, and here is why.** That row's brief was rows 84 and 86 and the
+deletion. Rows 66 and 67 move a padding and a corner on `Button`, which moves every screenshot
+baseline the e2e holds; row 77 changes a signature at every call site; row 79 changes what a screen
+reader says on every error layout. Each is its own row, and the one that moves a baseline
+re-renders it in the Playwright image in the same change.
 
 ## The eyebrow, and the amendment it earned
 
@@ -162,6 +168,31 @@ it, so the growth is the screens, not the shell.
 Neither number meets the ceiling. `index.css` is 19 KiB of it and still carries the shadcn sheet,
 which Y-353 deletes. That deletion, and the routes under `web/src/routes/` that only it serves, are
 the first place to look before anyone splits a chunk.
+
+### After Y-353, 2026-09-07
+
+Measured on `y-353-cleanup` at `e9e9158`, with `npx vite build` then `node
+scripts/budget.mjs --no-build`:
+
+| | before | after | ceiling |
+| --- | --- | --- | --- |
+| first load of `/` | 159.1 KiB | **146.7 KiB** | 145 KiB — **1.7 KiB over** |
+| `index.css` in it | 21.0 KiB | **8.6 KiB** | — |
+| fonts | 78.5 KiB | 78.5 KiB | 80 KiB — under |
+
+`index.css` is 366 lines to 18, and Tailwind's whole remaining output is the preflight reset:
+nothing writes a utility, so the scanner was buying seventeen rules from English words in the
+`.tsx`. **What is left is not a stylesheet.** The entry chunk is 761 kB before minifying, and
+react-dom is 453 kB of it, TanStack Router about 90, TanStack Query about 40, and `Shell.tsx` plus
+`Dashboard.tsx` 68 between them. Nothing on `/` is an eager import that could be lazy: `Setup` and
+the Kill confirm already load on demand, and the Dashboard is the landing route. Two bundler
+settings were measured and neither merged a chunk under Rolldown — `output.advancedChunks.minSize`
+and `output.experimentalMinChunkSize`. So row 84 stays open and Y-357 is the next lever: gzip on
+the wire is the same bytes measured honestly rather than a smaller build.
+
+**Merging `main` puts it at 147.3 KiB.** Y-358's unreachable screen adds `reached.ts` and
+`NotReached.tsx` to the shell, which is on `/`, so the gap to the ceiling is 2.3 KiB rather than
+1.7. Nothing above changes; the lever is still Y-357.
 
 ### The `/` chunk carries none of the five
 

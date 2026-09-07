@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
-import type { Beat, Machine as OneMachine, Workspace } from '@/api'
+import type { AgentRow, Beat, Machine as OneMachine, Workspace } from '@/api'
 import { fromReading } from '@/api/client'
 import {
   loaded,
@@ -21,7 +21,6 @@ import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
-import type { AgentRow } from '@/columns'
 import { Looked } from '@/screens/fleet/age'
 import { Empty } from '@/screens/fleet/Empty'
 import { Verb } from '@/screens/fleet/Verb'
