@@ -11,6 +11,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
+import { Track } from '@/m3/track/Track'
 import { useTick } from '@/useTick'
 import type { Plan } from './form'
 import { run } from './run'
@@ -102,6 +103,9 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
 
   const refused = stages.find((one) => one.state === 'refused')
   const named = titles(plan)
+  const done = stages.filter((one) => one.state === 'done' || one.state === 'skipped').length
+  const doing = stages.find((one) => one.state === 'running') ?? refused
+  const said = doing ? `${named[doing.id]} · ${words[doing.state]}` : `${done} of ${stages.length} done`
   const retry = () => {
     emit({ type: 'retry' })
     setAttempt((was) => was + 1)
@@ -121,6 +125,14 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
 
       <Card className="ns__card">
         <Eyebrow as="h3">Four things, in order</Eyebrow>
+        {/* 4.1.3: the stages advance on a poll with no navigation, so the
+            board's progress track is also what says they moved. */}
+        <div className="ns__progress" role="status">
+          <Track label={`${done} of ${stages.length} done`} value={done / stages.length} />
+          <Text scale="body-small" tone="variant">
+            {said}
+          </Text>
+        </div>
         <ol aria-label="Stages" className="ns__stages">
           {stages.map((stage) => (
             <li className="ns__stage" data-state={stage.state} key={stage.id}>

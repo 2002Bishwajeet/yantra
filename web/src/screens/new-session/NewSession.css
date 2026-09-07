@@ -293,6 +293,20 @@ span.ns__crumb {
   gap: 16px;
 }
 
+.ns__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 8px;
+  overflow-wrap: anywhere;
+}
+
+/* The track fills the card rather than sharing a row with a sentence that has
+   a stage name in it, which at 390 px is wider than the card. */
+.ns__progress .m3-track {
+  flex: none;
+}
+
 .ns__stages {
   display: flex;
   flex-direction: column;

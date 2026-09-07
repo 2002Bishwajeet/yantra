@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -26,13 +26,31 @@ function attach(
   over: (refused: ApiError | null) => void,
   linked: (link: Wire) => void,
   sized: (size: Size) => void,
+  hint: string,
+  leave: () => void,
 ): Wired {
   const xterm = new Xterm({ cursorBlink: false, fontSize: 13, fontFamily: '"IBM Plex Mono", ui-monospace, monospace' })
   const fit = new FitAddon()
   xterm.loadAddon(fit)
   xterm.open(host)
   fit.fit()
-  xterm.focus()
+
+  // WCAG 2.1.2: xterm hands Tab to the shell, so the pane needs an exit of its
+  // own. Escape then Tab is CodeMirror's: both keys keep reaching the shell,
+  // and only the pair leaves. `hint` is the line under the pane that says so.
+  let armed = false
+  xterm.attachCustomKeyEventHandler((event) => {
+    if (event.type !== 'keydown') return true
+    if (armed && event.key === 'Tab') {
+      armed = false
+      event.preventDefault()
+      leave()
+      return false
+    }
+    armed = event.key === 'Escape'
+    return true
+  })
+  xterm.textarea?.setAttribute('aria-describedby', hint)
 
   const link = attachTerminal(url, {
     size: () => {
@@ -95,6 +113,8 @@ export function Terminal(props: TerminalProps) {
   const [link, setLink] = useState<Wire>({ up: false, attempt: 0 })
   const [size, setSize] = useState<Size | null>(null)
   const [opened, reopen] = useState(0)
+  const status = useRef<HTMLParagraphElement>(null)
+  const hint = useId()
   const url = terminalAddress(target)
   const refused = end.ended === 'yes' ? end.refused : null
 
@@ -115,6 +135,8 @@ export function Terminal(props: TerminalProps) {
         (refused) => setEnd((before) => (before.ended === 'yes' ? before : { ended: 'yes', refused })),
         setLink,
         setSize,
+        hint,
+        () => status.current?.focus(),
       )
       wired.current = live
     })
@@ -123,7 +145,7 @@ export function Terminal(props: TerminalProps) {
       wired.current = null
       live?.close()
     }
-  }, [url, opened])
+  }, [url, opened, hint])
 
   const again = () => {
     setEnd({ ended: 'no' })
@@ -134,18 +156,25 @@ export function Terminal(props: TerminalProps) {
   return (
     <div className="terminal">
       <div className="terminal__pane" ref={host} style={{ height: height ?? '60vh' }} />
-      {end.ended === 'no' ? (
-        <p className="terminal__status" role="status">
-          <Mark size="small" state={link.up ? 'running' : 'unknown'} />
-          <Mono clip>
-            {link.up
+      {/* The end is the one thing this line has to carry, so it is mounted for
+          the whole life of the pane rather than replaced by what ended it. It
+          is also where Escape-then-Tab puts focus: the first stop past it. */}
+      <p className="terminal__status" ref={status} role="status" tabIndex={-1}>
+        <Mark size="small" state={end.ended === 'no' ? (link.up ? 'running' : 'unknown') : refused ? 'failed' : 'idle'} />
+        <Mono clip>
+          {end.ended === 'yes'
+            ? `${refused ? 'refused' : 'ended'} · ${label}`
+            : link.up
               ? `attached · ${label}${size ? ` · ${size.cols}×${size.rows}` : ''}`
               : link.attempt === 0
                 ? `connecting · ${label}`
                 : `reconnecting · attempt ${link.attempt} of ${ATTEMPTS} · ${label}`}
-          </Mono>
-        </p>
-      ) : refused ? (
+        </Mono>
+      </p>
+      <p className="terminal__escape" id={hint}>
+        Esc then Tab leaves the pane. Tab on its own goes to the shell in it.
+      </p>
+      {end.ended === 'no' ? null : refused ? (
         // D5 §7: this tab's own refusal names the machine, and the name stays
         // the link to where its heartbeat is.
         <ErrorSurface.Inline

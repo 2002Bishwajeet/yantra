@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Cpu, FileText, Search } from 'lucide-react'
 import { loaded, useAgents, useMachines, useWorkspaces, type Reading } from '@/api/hooks'
@@ -121,6 +121,12 @@ export function PalettePopup(props: { open: boolean; onOpenChange: (open: boolea
   const notes = [unread('Workspaces', workspaces), unread('Machines', machines)].filter(
     (one) => one !== null,
   )
+
+  // 2.4.7: the list is 50vh and scrolls, so the arrow keys have to bring the
+  // option they moved to with them. Optional because jsdom has no such method.
+  useEffect(() => {
+    document.getElementById(`${listId}-${current}`)?.scrollIntoView?.({ block: 'nearest' })
+  }, [listId, current])
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
