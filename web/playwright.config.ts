@@ -5,10 +5,19 @@ import { at, FIXTURE_PORT, WEB_PORT } from './e2e/lib/sizes'
  *
  * Snapshots are rendered by one Chromium on one set of fonts: the Playwright
  * image CI's e2e jobs run in (web.yml). A baseline made on a developer's box
- * differs by a few pixels of text, so regenerate them inside that image:
+ * differs by a few pixels of text, so regenerate them inside that image, run
+ * from `web/`:
  *
- *   podman run --rm -v "$PWD/..:/work" -w /work/web \
- *     mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --update-snapshots
+ *   podman run --rm -v "$PWD/..:/work" \
+ *     -v "$(readlink -f node_modules):$(readlink -f node_modules)" \
+ *     -w /work/web mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --update-snapshots
+ *
+ * In a git worktree, `node_modules` is a symlink to the main checkout's, and
+ * the container cannot resolve a symlink target it has no mount for — `npx`
+ * then installs its own Playwright instead of failing, and the real error is
+ * a misleading "Cannot find package '@playwright/test'". The second mount
+ * fixes that and is a harmless no-op in the main checkout, where
+ * `node_modules` resolves to itself.
  *
  * The path template carries no platform on purpose: there is one.
  *
