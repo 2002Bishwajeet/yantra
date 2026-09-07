@@ -57,9 +57,12 @@ test.describe('the shell on busy', () => {
     await expect(dialog.getByText('Never runs a verb.')).toBeVisible()
     await screenshot(page, 'shell-palette', 'busy', size)
 
+    // `logs` and `tokens` are reads a person asked for, POSTed by design
+    // (ADR-0019); `viewing` is presence. None is a verb.
+    const READS = /\/api\/viewing$|\/(logs|tokens)$/
     const verbs: string[] = []
     page.on('request', (request) => {
-      if (request.url().includes('/api/') && request.method() !== 'GET' && !request.url().endsWith('/api/viewing')) {
+      if (request.url().includes('/api/') && request.method() !== 'GET' && !READS.test(request.url())) {
         verbs.push(`${request.method()} ${request.url()}`)
       }
     })
@@ -84,7 +87,7 @@ test.describe('the shell on busy', () => {
     await expect(list.getByRole('link', { name: 'Answer' })).toHaveAttribute('href', '/w/yantra-web?view=chat')
     await expect(list.getByRole('heading', { name: 'Today' })).toBeVisible()
     await expect(list.getByRole('heading', { name: 'Earlier' })).toBeVisible()
-    await screenshot(page, 'shell-notifications', 'busy', size)
+    await screenshot(page, 'shell-notifications', 'busy', size, { overlay: size !== 'phone' })
     await axe(page)
 
     await list.getByRole('button', { name: 'Mark all read' }).click()
