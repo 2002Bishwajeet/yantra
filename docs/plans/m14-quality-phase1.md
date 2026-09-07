@@ -70,6 +70,10 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 81 | `count={0}` drew a "0" badge | `ec6e17c` |
 | 82 | The fixture's invalid-first-frame text and its binary handling | `d837994` |
 | 85 | `afterEach(cleanup)` in 35 files | `5bb41e6` |
+| 87 | Row 33 again, on `Fab`, `ExtendedFab` and `IconButton` | `d8e5a5e` |
+| 88 | A loader's `ensureQueryData` rejects when the page leaves mid-read | `d8e5a5e` |
+| 89 | A terminal socket closed while it was still CONNECTING | `d8e5a5e` |
+| 90 | React logs an `ApiError` the boundary already drew | `d8e5a5e` |
 
 ## Open
 
