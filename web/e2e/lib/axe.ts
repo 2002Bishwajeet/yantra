@@ -5,8 +5,8 @@ export const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 
 /** Run axe on the page as it is and fail on any violation, with each one
  *  named and located. `known` lists violation ids the page is known to carry:
- *  those mark the test `fixme` by id instead of failing, so the debt stays
- *  visible and named until the page is fixed. */
+ *  those are asserted *present*, so the test stays green while the debt
+ *  stands and fails the day a fix lands without the list being edited. */
 export async function axe(page: Page, options: { known?: string[] } = {}) {
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   const known = results.violations.filter((v) => options.known?.includes(v.id))
@@ -18,9 +18,12 @@ export async function axe(page: Page, options: { known?: string[] } = {}) {
   ).toEqual([])
 
   for (const violation of known) {
-    test.info().annotations.push({ type: 'fixme', description: `axe: ${violation.id}` })
+    test.info().annotations.push({ type: 'known', description: `axe: ${violation.id}` })
   }
-  test.fixme(known.length > 0, `axe: ${known.map((v) => v.id).join(', ')}`)
+  expect(
+    known.map((v) => v.id).sort(),
+    'a known axe violation is gone: remove it from `known`',
+  ).toEqual([...(options.known ?? [])].sort())
   return results
 }
 

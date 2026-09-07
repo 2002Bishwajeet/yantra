@@ -5,7 +5,6 @@ import {
   fetchJson,
   fields,
   fromReading,
-  list,
   look,
   makeQueryClient,
   queryOptionsThrowing,
@@ -124,12 +123,8 @@ describe('fetchJson', () => {
     const partial = await thrown(() => fetchJson('/api/github', {}, fields('connected', 'login')))
     expect(partial).toMatchObject({ said: expect.stringContaining('no `login`') })
 
-    vi.stubGlobal('fetch', answer(200, {}))
-    const notList = await thrown(() => fetchJson('/api/notifications', {}, list))
-    expect(notList).toMatchObject({ kind: 'contract', said: expect.stringContaining('no `list`') })
-
-    vi.stubGlobal('fetch', answer(200, []))
-    expect(await fetchJson('/api/notifications', {}, list)).toEqual([])
+    vi.stubGlobal('fetch', answer(200, { connected: true, login: 'biswa' }))
+    expect(await fetchJson('/api/github', {}, fields('connected', 'login'))).toEqual({ connected: true, login: 'biswa' })
   })
 
   /** `null` is a request that never got an answer, which is not a refusal. */

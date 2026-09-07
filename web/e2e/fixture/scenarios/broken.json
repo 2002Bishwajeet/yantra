@@ -1,6 +1,10 @@
 {
   "extends": "busy",
   "broken": {
-    "/api/machines": { "looked": "ok", "age_seconds": 0 }
+    "/api/machines": {
+      "looked": "ok",
+      "age_seconds": 0
+    },
+    "/api/github": {}
   }
 }

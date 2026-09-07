@@ -19,5 +19,6 @@ test('the phone bar keeps 64 px of content above the safe-area inset', async ({ 
     })
   expect(await measure()).toEqual({ content: 64, total: 64 })
   await bar.evaluate((el) => el.style.setProperty('--m3-safe-bottom', '34px'))
-  expect(await measure()).toEqual({ content: 64, total: 98 })
+  // Polled: the height change rides a transition, one frame long under reduce.
+  await expect.poll(measure).toEqual({ content: 64, total: 98 })
 })

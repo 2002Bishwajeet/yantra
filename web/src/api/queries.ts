@@ -20,7 +20,6 @@ import {
   fetchJson,
   fields,
   json,
-  list,
   look,
   POLL_MS,
   SWEEP_MS,
@@ -197,12 +196,13 @@ export const reposQuery = () =>
   swept<Repo[]>(keys.repos(), '/api/repos', ATTENTION_SWEEP_MS, SLOW_POLL_MS)
 
 /** Y-343. An in-memory ring buffer, polled like the fleet: cheap, and it is
- *  what a bell counts. */
+ *  what a bell counts. api.ts has it as `Looked<Event[]>` now; the guard
+ *  reads the envelope's word until this type follows. */
 export const notificationsQuery = () =>
   queryOptions({
     queryKey: keys.notifications(),
     queryFn: ({ signal }) =>
-      fetchJson<Notification[]>('/api/notifications', { signal }, list),
+      fetchJson<Notification[]>('/api/notifications', { signal }, fields('looked')),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })

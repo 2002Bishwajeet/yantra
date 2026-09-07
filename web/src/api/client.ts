@@ -35,9 +35,6 @@ export const fields =
     return names.find((name) => !(name in body)) ?? null
   }
 
-/** The body is a list. */
-export const list: Shape = (body) => (Array.isArray(body) ? null : 'list')
-
 /** One fetch for everything that is not a `Looked` envelope. Every way it does
  *  not answer the body is an `ApiError` of one kind: `fetch` rejecting is
  *  `network`, a 404 is `missing`, any other non-2xx is `refused` carrying the
