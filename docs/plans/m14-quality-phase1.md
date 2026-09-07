@@ -15,6 +15,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `ec6e17c` | The accessibility rows and the M3 token rows in `web/src/m3/` |
 | `2d5818f` | The `web/src/api/` rows: refusal bodies, the refused upgrade, the two races, the hook tests |
 | `d837994` | The `web/e2e/` rows: the fixture's refusal shapes, the axe list, the screenshot image, motion |
+| `d4ae96f` | The boards review's accessibility findings: the keyboard trap, the three live regions, the two focus failures |
 
 ## Closed
 
@@ -74,6 +75,16 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 88 | A loader's `ensureQueryData` rejects when the page leaves mid-read | `d8e5a5e` |
 | 89 | A terminal socket closed while it was still CONNECTING | `d8e5a5e` |
 | 90 | React logs an `ApiError` the boundary already drew | `d8e5a5e` |
+| 91 | The terminal pane took Tab and never gave it back (2.1.2, Level A) | `d4ae96f` |
+| 92 | Nothing reserved room under the phone's fixed FAB, its bar or the sticky footer (2.4.11) | `d4ae96f` |
+| 93 | The four clone stages advanced with no live region and no progress track (4.1.3) | `d4ae96f` |
+| 94 | A session going running to crashed was announced nowhere (4.1.3) | `d4ae96f` |
+| 95 | The pane took focus when the fonts resolved (2.4.3, 3.2.1) | `d4ae96f` |
+| 96 | The palette's arrow keys moved an option the list never scrolled to (2.4.7) | `d4ae96f` |
+| 99 | The terminal's `role="status"` unmounted with the session's end (4.1.3) | `d4ae96f` |
+
+Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
+review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
 
 ## Open
 
