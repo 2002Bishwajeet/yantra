@@ -39,13 +39,7 @@ test.describe('the four steps', () => {
     await axe(page)
   })
 
-  test('walks by keyboard', async ({ page, size }) => {
-    // An M3 text field sets `outline: 0` on its input and rings the box
-    // instead (`m3/text-field/TextField.css`), and the walk reads the focused
-    // element's own indicator. The ring is visible and axe passes, but the
-    // walk cannot see it, so only the size whose first eight stops are the
-    // shell's is walked here.
-    test.skip(size !== 'desktop', 'the field rings its box, not its input')
+  test('walks by keyboard', async ({ page }) => {
     await keyboardWalk(page, 8)
   })
 
