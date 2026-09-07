@@ -1,36 +1,50 @@
 # yantra web — the dashboard
 
-Nine routes over the API `yantrad` serves at `/api`, on TanStack Router — the
-work at `/`, every machine compared at `/machines`, one machine at
-`/m/$machine`, one tmux session's terminal at `/m/$machine/s/$session`, a
-workspace's terminal, transcript and spend at `/w/$name`, its file at
-`/w/$name/repair`, the create form at `/new`, spend at `/usage` and the ntfy
-relay at `/settings`. `⌘K` reaches the seven a working workspace has and
-runs no verb; the palette lists only workspaces that loaded, so a broken one is reached
-from its own page.
-The readings poll on TanStack Query; the forms and every workspace row write.
+Twelve routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+work at `/`, every workspace and machine at `/fleet`, the machines compared at
+`/machines`, one machine at `/m/$machine`, one tmux session's terminal at
+`/m/$machine/s/$session`, one workspace's chat, terminal, transcript and spend
+at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
+spend at `/usage`, the preferences at `/settings` and `/settings/$category`, and
+the phone's notifications at `/notifications`. A thirteenth, `/m3`, is the
+component gallery and has a chunk behind it in dev builds only.
+`/` is the one eager route; every other screen arrives with its own chunk
+(ADR-0024 §3). The readings poll on TanStack Query and every write is a
+mutation in [`src/api/`](src/api/README.md).
+
+`⌘K` opens the palette ([`shell/Palette.tsx`](src/shell/Palette.tsx)): six
+pages, the workspaces that loaded, and the machines. **No entry is a verb**
+(D3 §3.2), which is what keeps a destructive action further than two keystrokes
+from anywhere.
 
 **While a tab is visible the page says so**, and the daemon stops pushing what
-the page is already showing (D3 §13). It is an explicit beacon rather than a
-read counted as presence: a background tab polls every five seconds and is not a
-person watching.
+the page is already showing (D3 §13). `useViewing` posts `/api/viewing` every
+20 s. It is an explicit beacon rather than a read counted as presence: a
+background tab still polls, and a poll is not a person watching.
 
-**`/` opens on work, not on an inventory.** Three groups ordered by who must act
-next — you, the agent, nobody — and the order recomputes only when you ask, so
-nothing moves under a thumb.
+**`/` opens on work, not on an inventory.** Four groups ordered by who must act
+next — you, the agent, nobody, and *not read yet* for a workspace nothing has
+answered about. The order recomputes only when you ask
+([`held.ts`](src/screens/fleet/held.ts)), so nothing moves under a thumb.
 [D3](../docs/design/03-dashboard-surface.md) settles the surface: what the page
-is about, how dense it is, what words it uses, what every surface owes a reader
-and what it may weigh.
-[ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) settled
-what it is built with; [R8](../docs/research/08-react-and-the-compiler.md) and
-[R9](../docs/research/09-component-libraries.md) are the evidence.
+is about, how dense it is, what words it uses and what every surface owes a
+reader.
+[ADR-0024](../docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md)
+settles what it is built with — hand-built Material 3 on Base UI, TanStack and
+CSS custom properties — and
+[R14](../docs/research/14-material-3-expressive-on-the-web.md) is the evidence.
+[ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md) keeps its
+framework, compiler, build and lint rows and nothing else.
 
-[`design/`](design/README.md) is the options round for the visual system (D0 §7): the same
-page on fixture data, under candidate stylesheets. It is a second Vite root and ships nothing.
+[`design/`](design/README.md) is Y-330's options round for the visual system
+(D0 §7): the same page on fixture data under candidate stylesheets. It is a
+second Vite root and ships nothing. **Switching an option now changes nothing on
+the page**: the four candidates set shadcn's variable names, which no Material
+component reads. The owner has not closed Y-330.
 
 Serving these assets from the binary is [Y-073](../tracker.md) and is not here.
 Nothing in this directory is on the Rust build's path — `cargo build` still needs
-no Node, including the musl cross-build.
+no Node, including the musl cross-build (R-24).
 
 ## Running it
 
@@ -54,7 +68,7 @@ proxies `/api` to the daemon.
 to this machine's Tailscale address, so a Mac or a phone opens
 `http://<this machine>.<tailnet>.ts.net:5173` (the MagicDNS name is allowed in `vite.config.ts`).
 With no `yantrad` running, `npm run fixture` starts the e2e fixture daemon on 7790 with the
-`busy` scenario (`FIXTURE_SCENARIO=empty|unreachable|refused|flaky` for the others), and
+`busy` scenario (`FIXTURE_SCENARIO=` picks any of the ten below), and
 `npm run dev:fixture` proxies `/api` to it instead, so every screen draws with fleet data. Plain
 HTTP: the service worker and the PWA install need HTTPS and are for the daemon's own build.
 
@@ -72,6 +86,9 @@ if the daemon is on another machine.
 | `npm run build` | `tsc -b`, then Vite, then the compiler check below |
 | `npm run lint` | oxlint, with `react/react-compiler` on |
 | `npm test` | vitest |
+| `npm run e2e` | Playwright, on all three form factors |
+| `npm run budget` | builds, then measures the two ceilings below |
+| `npm run fixture` | the e2e fixture daemon on 7790, with no browser |
 
 ## Proving the React Compiler ran
 
@@ -86,190 +103,155 @@ and neither is optional:
 - **`npm run compiled`** greps the bundle for `react.memo_cache_sentinel`, which
   only the compiler emits. `npm run build` runs it.
 
-Files under `src/components/ui/` bail out in the build and it says so, all on
-the same `AssignmentPattern` in a destructured default: `badge`, `card` and
-`empty` are shadcn's generated source, and `menu` is a T3 Code copy that D1.3
-wired in. **Most of the other T3 copies hit it too** (Y-164, Y-166) —
-`autocomplete`, `combobox`, `command`, `dialog`, `input`, `popover`,
-`scroll-area`, `select`, `sheet`, `toggle-group`, `tooltip` — but no route
-imports them, so they are absent from the bundle and only `npm test` compiles
-them, which is where their warnings appear. It is upstream's pattern, not a
-regression here — **and it is not only theirs**: the same default bails out
-wherever it is written, so `Terminal`'s `height` defaults at the use site rather
+**An `AssignmentPattern` in a destructured default bails out wherever it is
+written.** That is what the vendored primitives used to trip on, and deleting
+them did not end it: `Terminal`'s `height` still defaults at the use site rather
 than in the signature (Y-313), measured both ways.
 
 **A component the compiler kept can still stop redrawing.** Memoised JSX is
 reused where its props did not move, and a clock that only bumped a counter
-therefore ticked while the stamp beside it stayed at `0s` — measured on `/usage`,
-which had shipped that way since Y-199. So [`useTick`](src/useTick.ts) returns the
-instant it last ticked and [`Stamp`](src/components/Age.tsx) takes it as a prop:
-the clock is a value the compiler can see change, not a re-render it cannot. The
-answer it stamps is `Spend.tsx`'s, so both `/usage` and the spend tab tick.
+therefore ticked while the stamp beside it stayed at `0s` — measured on `/usage`.
+So [`useTick`](src/useTick.ts) returns the instant it last ticked and every
+component that stamps takes that instant as a prop: the clock is a value the
+compiler can see change, not a re-render it cannot.
 
 **A chunk reporting `0` is not a bail-out.** `npm run compiled` counts the
 sentinel per chunk, and the constant is emitted once and hoisted, so a lazily
-split chunk can hold compiled components and still count zero — measured on
-`Overflow` (Y-167), whose compiled memo-cache indexing is in the chunk while the
-sentinel is not. The per-file check is the `logger`, and it is the one to read.
+split chunk can hold compiled components and still count zero — measured on the
+pre-M14 overflow menu (Y-167), whose compiled memo-cache indexing was in the
+chunk while the sentinel was not. The per-file check is the `logger`, and it is
+the one to read.
 
-## The four heartbeat states
+## What a machine's state says
 
-The machines table draws ADR-0013 §7, and it has four states rather than two because a page that
-says *asleep* when it means *we have not heard from it* is the lie the read model exists not to tell
-(R-23). A beat inside 30 s is **ready**; past that, Tailscale's `online` chooses between **up, but
-not reporting** — an agent problem, a different thing to go and fix — and **asleep or off**; and a
-machine with no beat at all is **never heard from**, which is `heartbeat: null` and never a row of
-zeros. `online` picks the explanation and never decides whether a beat arrived (R-8).
+[`facts.ts`](src/screens/machines/facts.ts)'s `machineState()` names three
+things and no more: **key expired** where Tailscale says the key is, otherwise
+**online** or **unreachable**. The beat is drawn beside it as an age — a machine
+card says `beat 12s ago` or `no beat has arrived`, and the machine page says
+`never` with *nothing has ever arrived from this machine*. `heartbeat: null` is
+never a row of zeros (I-47).
 
-The daemon names none of this: `reporting()` in `columns.tsx` owns the threshold, the way `Age.tsx`
-owns the staleness one. Most of this tailnet is a phone, a tablet and two dead laptops, so *never
-heard from* is the permanent and correct state on most rows.
+**ADR-0013 §7's four states are no longer named by any screen.** The pre-M14
+table computed *ready*, *up, but not reporting*, *asleep or off* and *never heard
+from* from a 30 s threshold; the M14 screens put the tailnet's own word and the
+beat's own age side by side and let the reader combine them. Most of this tailnet
+is a phone, a tablet and two dead laptops, so *no beat has arrived* is the
+permanent and correct line on most cards.
 
-## The one verb a row computes (Y-167)
+## The one verb a row computes
 
-The row used to offer up, down and resume and make the reader work out which one this state was for.
-`chosen()` in `columns.tsx` reads the agent status instead and the row draws the single button it
-names — `Start`, `Resume`, `Open` or `Fix` — with everything else behind the overflow, including the
-terminal and the edit form, which stopped being columns. [D1](../docs/design/01-dashboard.md) §2 is
-the specification and its dated note records where the labels departed from it.
+A row offers one verb rather than three, so the reader works nothing out.
+`chosen()` in [`verbs.ts`](src/screens/fleet/verbs.ts) reads the agent status and
+[`Verb.tsx`](src/screens/fleet/Verb.tsx) draws what it names — `Start`, `Resume`,
+`Open`, an answer to a trust prompt, or a link to the machine.
+[D1](../docs/design/01-dashboard.md) §2 is the specification.
 
-Two of the readings are the ones worth knowing about. **A row that has read nothing gets no verb**:
-`Start` there would be a guess drawn as knowledge, so the button says so and is disabled (R-23) —
-and that is the state every row spends its first seconds in. **`Fix` is a link, not a verb**: a
-machine that did not answer ssh cannot be repaired from a workspace row, so the row hands over to
+Two of the readings are the ones worth knowing about. **A row that has read
+nothing gets no verb**: `Start` there would be a guess drawn as knowledge, so
+`chosen()` answers `wait` (R-23) — and that is the state every row spends its
+first seconds in. **`Fix` is a link, not a verb**: a machine that did not answer
+ssh cannot be repaired from a workspace row, so the row hands over to
 `/m/{machine}` rather than offering something that could only fail.
 
-`Act.tsx` still holds the three-button control, which the agents section uses with `verb` narrowing
-it to one — that table hands over a paste for `attach` because ADR-0011 gives the terminal to a
-person, so it cannot share this one.
+`stoppable()` is what adds **Stop** beside **Open** on a running agent's session
+and not on a plain shell. `confirms()` is D3 §4.7 in one line: only Kill and
+Delete ask first, and [`Confirm.tsx`](src/screens/fleet/Confirm.tsx) asks them in
+a dialog on a desktop or a tablet and a bottom sheet on a phone, repeating the
+row word for word under the question.
 
-## The readiness cards, and the one check they overrule (Y-168)
+## The doctor checks
 
 `GET /api/readiness` and `GET /api/machines/{name}/readiness` serve
-[D2](../docs/design/02-setup.md) §3.1's checks off the daemon's own sweep, so the page draws them
-rather than running anything. Three states, three tones, and `unknown` is never a shade of `absent` —
-one sends you to install something, the other to go and look (R-23).
+[D2](../docs/design/02-setup.md) §3.1's checks off the daemon's own sweep, so the
+page draws them rather than running anything. A machine card draws four of them
+(`CARD_CHECKS`) and the machine page draws all nine. Three states, three marks,
+and `unknown` is never a shade of `absent` — one sends you to install something,
+the other to go and look (R-23).
 
-**`heartbeat` is the exception, and it is drawn from the machines reading instead.** The daemon
-answers it *present* for any beat that ever arrived, carrying the age in the detail, because it names
-none of ADR-0013 §7's four states — that split is the same one `/api/machines` has always had. But a
-check is already a verdict where an age is not, so drawing `present` straight would put a green tick
-beside a machines table saying *asleep or off* about the same machine. `Readiness.tsx` runs the
-`heartbeat` row through `reporting()`, which owns the threshold already, so the state is named once
-and the two sections cannot disagree. A machine the tailnet does not list stays `unknown`, because
-there is nothing to reconcile against.
-
-**A machine no workspace names is not a failure.** The sweep asks the machines a workspace names, so
-the one-machine route `404`s for the rest and `useLooked` reads that as a failed look. `/m/$machine`
-answers it from the workspaces reading instead and says *nothing has asked it anything* — the same
-distinction the sessions section below it already draws.
+**`Doctor` asks again now, and is a button rather than a timer.** `POST
+…/readiness` is a full ssh round trip ([ADR-0019](../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)),
+and its answer lands in the same query key the sweep fills, which is why
+[`Doctor.tsx`](src/screens/machines/Doctor.tsx) holds no result of its own.
 
 ## A workspace file that did not load (Y-141)
 
 `GET /api/workspaces` lists one entry per **file**, and each says whether it
 loaded: `api.ts`'s `Listed` is `{loaded: 'yes'} & Workspace` or `{loaded: 'no',
 name, error}`. Before this one broken `.toml` made the whole class
-`looked: 'failed'` and this page drew nothing at all — for every workspace the
+`looked: 'failed'` and the page drew nothing at all — for every workspace the
 operator has.
 
-**The failure is named below the table, never drawn as a row in it.** That is the
-row's real decision and it is about the columns: a file that did not load has no
-machine to show a `<Status>` for, nothing for `ACT` or `TERMINAL` to target, and
-`EDIT` cannot repair it — the daemon's `update` loads before it writes, and
-[`/w/{name}/repair`](src/routes/Repair.tsx) is where the file itself is edited
-([ADR-0020](../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)). A table
-of things you can act on must not carry a row you
-cannot, and R-23 is met by naming the file loudly with its whole reason, in the
-same `<Alert variant="destructive">` an unreachable machine gets in Sessions.
+**The failure is a row of its own kind, never a row that offers verbs.** A file
+that did not load has no machine to read a state from and nothing for a verb to
+target, so `work.ts` files it as `unusable` and the Dashboard and Fleet screens
+draw its whole reason with one link, to
+[`/w/{name}/repair`](src/screens/repair/Repair.tsx), where the file itself is
+edited ([ADR-0020](../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md)).
+R-23 is met by naming the file loudly rather than by hiding it.
 
-`App.tsx`'s `loaded()` is the one narrowing: everything that acts on a workspace
-— the edit form, `workspaceColumns`, `attachable`, `sessionCommand` and
-`useAgents` — takes the entries that loaded, so **no per-workspace status is ever
-fetched for a file that is not one**.
+`loaded()` in [`api/hooks.ts`](src/api/hooks.ts) is the one narrowing:
+everything that acts on a workspace takes the entries that loaded, so **no
+per-workspace status is ever fetched for a file that is not one**.
 
-## The buttons that act (Y-113, Y-136)
+## The verbs, and the writes behind them
 
-`Act.tsx` is one cell of every workspace row and one cell of every agent row:
-**start, stop and resume**, posting to `/api/workspaces/{name}/{up,down,resume}`.
-It is what M5 exists for — a phone has no terminal to paste into.
+[`mutations.ts`](src/api/mutations.ts) is every write: create, edit, delete, up,
+down, resume, kill, and the settings writes. Each one invalidates what it changed
+**and returns that refetch**, so `isPending` holds until the page can draw the
+answer rather than the row it replaced.
 
-- **There is no machine argument, and adding one would be a bug.** The target is
-  `workspace.machine`, chosen when the workspace was written. A transient
-  override would place a session where `down`, `resume`, `status` and `logs` all
-  look elsewhere and report the absence as success — [Y-117](../tracker.md).
-  What the picker is, is the machine and Y-109's reading of it in the cell
-  beside the buttons, said before the button is tapped. A machine the tailnet
-  does not list — an `~/.ssh/config` alias, which ADR-0009 allows — gets **no**
-  state, because none was looked up.
+- **There is no machine argument on a verb, and adding one would be a bug.** The
+  target is `workspace.machine`, chosen when the workspace was written. A
+  transient override would place a session where `down`, `resume`, `status` and
+  `logs` all look elsewhere and report the absence as success —
+  [Y-117](../tracker.md).
 - **An asleep machine is not refused here.** The daemon decides; the page shows
-  *asleep or off* and leaves the button live (R-23, ADR-0009). There is no wake
-  button, because waking is not possible from here (Q10, Y-115).
+  the machine's state and leaves the button live (R-23, ADR-0009). There is no
+  wake button, because waking is not possible from here (Q10, Y-115).
 - **`launched: false` is a success, not a failure.** `up` twice attaches (§B4,
-  I-30). It also reports an *agent*, and a workspace's own `startup` is not one,
-  so a created session with `launched: false` says "running the workspace's own
-  startup" where there is one and "a plain shell" where there is not — measured
-  against a `startup` that really was running.
-- **Every status keeps its own sentence** — `404` no such workspace, `400` an
-  unusable name, `403` a node that is not the owner's, `422` a field the daemon
-  does not know, `409` a refusal about state, `503` nothing asked and nothing
-  decided, `500` the verb itself. The plain-text body is the whole `source()`
-  chain and is shown whole.
-- **The `409` is drawn as a refusal rather than a crash** (Y-135), the same way
-  the edit form draws its own. It is an agent holding at claude's trust dialog
-  (I-49) or one that is not logged in (I-44) — a state the daemon named
-  correctly, which a person changes at the machine itself, so the daemon's own
-  sentence is what says how. **The `503` no longer claims to be about Tailscale**
-  either: since the verbs answer it for a machine that could not be asked, a
-  sentence naming only the tailnet would be wrong half the time. `NewWorkspace`
-  keeps the narrower wording on purpose — `POST /api/workspaces` touches no
-  machine, so `whois` is still the only thing that can leave it undecided.
-- **Nothing may read as done while it is in flight.** These handlers `await`
-  ssh and `ConnectTimeout` is 10 s, so the tapped button names what it is doing,
-  the row says which machine it is waiting on, and all three are disabled — a
-  second tap cannot fire a second request.
+  I-30). It reports an *agent*, and a workspace's own `startup` is not one.
 - **`up` sends `{"agent":"claude"}` only where `startup` is null**, because
-  ADR-0007 refuses an agent beside a workspace's own startup; the button says
-  which it is. **Resume is not offered** to such a workspace at all, for
-  ADR-0015's reason, which is the shape Y-097 already chose.
-- **The agents section gets the same component and one verb of it** (Y-136).
-  It reads `status.status.state`, so unlike the workspaces table it knows which
-  verb the row is for: `up` where no session is open, `resume` at each of the
-  four endings, and nothing at all where a `startup` makes ADR-0015 refuse. So
-  `Act` takes a `verb` prop that narrows it to that one, rather than being
-  forked or dropped in whole — a **Stop** beside an agent that has already
-  stopped is answerable, `down` on nothing saying exactly that, and still says
-  the page does not know what it is looking at. The workspaces table passes no
-  `verb` and keeps all three, because it reads no state and the daemon is the
-  only thing that can decide. That cell's header is `ACT`, not `COMMAND`.
-- **`USABLE_NAME` guards a paste and never a button.** The name in a command
-  someone types into a shell is checked against what `workspace::validate_name`
-  allows; the name in a button's URL is `encodeURIComponent`'d and refused by
-  the daemon's own `400`, which is the rule Y-130 already applied to the
-  terminal button.
+  ADR-0007 refuses an agent beside a workspace's own startup. **Resume is not
+  offered** to such a workspace at all, for ADR-0015's reason.
+- **`killed: false` is a session that was already gone**, which is the state that
+  was asked for (I-30).
+- **A delete's `force` skips the daemon's refusal to strand a live session**, so
+  a surface sends it only where a person meant it. What was held about the name
+  goes with it, or a mounted status would keep polling a workspace that is gone.
+- **Every refusal keeps the daemon's own sentence.** The status table and the
+  five error kinds live in [`src/api/README.md`](src/api/README.md) and
+  [`errors.ts`](src/api/errors.ts); nothing invents wording for a sentence
+  [`edit.rs`](../crates/yantra-core/src/edit.rs) or `write.rs` already writes.
+- **A refusal is drawn as a refusal rather than as a crash.** A `409` is an agent
+  holding at claude's trust dialog (I-49) or one that is not logged in (I-44) — a
+  state the daemon named correctly, which a person changes at the machine itself.
+- **Nothing may read as done while it is in flight.** These handlers `await` ssh
+  and `ConnectTimeout` is 10 s, so the tapped control names what it is doing and
+  is disabled while it does.
 
-`Command` stays exactly where no write exists, and what is left there is `attach`
-in both places it appears. The workspace row's paste became a button in
-[Y-130](../tracker.md) — see below — and the agent row's `up` and `resume` became
-buttons in Y-136. The sessions section and the four agent states that answer
-`attach` keep theirs for one reason: `attach` execs `ssh -t` and hands *this*
-terminal over (ADR-0011), which is also who answers the trust prompt. A session
-Yantra did not open has no command at all, every verb taking a workspace name.
+**There is nowhere to type a secret**, and that is what keeps root §B4 here: a
+workspace has three keys and none of them is one. `startup` is a shell command,
+so a secret in it stays a reference (`op://…`, `pass show …`) the shell resolves.
+No check is made over that string — a heuristic over an arbitrary command either
+misses the real case or refuses a legitimate one.
 
-## The terminal (Y-130)
+**A form renders the answer it got and never re-reads to confirm.** `refresh.rs`
+sweeps every 30 s and a write does not poke it, so a form that confirmed by
+re-reading would draw the row it just replaced — or an empty list after a
+success. The edit form diffs what was typed against what it opened from and sends
+only what differs, because absent means *leave it alone*; emptying `startup`
+sends `"startup": null`, which is `--no-startup` and the only `null` that means
+anything on that route.
 
-`Terminal.tsx` is xterm.js on `GET /api/workspaces/{name}/terminal`, opened by the
-`Open terminal` button in a workspace row and closed by the one in its header. It
-serves a second address since Y-179, below. Four decisions, each of which could
+## The terminal
+
+[`Terminal.tsx`](src/screens/session/Terminal.tsx) is xterm.js on the socket
+[`api/socket.ts`](src/api/socket.ts) opens. Four decisions, each of which could
 reasonably have gone the other way:
 
-- **A sixth section, not a route and not an overlay** — until
-  [Y-161](../tracker.md) made it `/w/{name}`. Y-130 left the URL alone because it
-  promises a socket reopened on load; Y-132 built that, and the route is what
-  spends it. An overlay would still be the first thing here that traps focus,
-  over a screen a phone gives the whole of anyway.
-- **The same `Card` the other sections use, so no primitive was vendored.**
-  `Section` takes a `Looked<T>` and a terminal is not a reading, so this composes
-  `Card` itself. `Act.tsx` exports its button class rather than having it copied.
+- **A view of `/w/{name}`, not an overlay.** The URL promises a socket reopened
+  on load, and an overlay would be the first thing here that traps focus, over a
+  screen a phone gives the whole of anyway.
 - **`TERM` is `xterm-256color`**, sent in the first control frame and on every
   resize. It is what every xterm.js consumer sends and the one entry both
   `ncurses-base` and Apple's 2015 ncurses carry; ncurses' own `xterm.js` alias and
@@ -278,23 +260,22 @@ reasonably have gone the other way:
   constant in this code, not something read from a user's environment.
 - **The stream is never stored.** No frame reaches `console`, nothing is persisted,
   and the scrollback is xterm.js's own, in the element, gone with it (Q5).
-
-**Text frames from the daemon are errors, not output.** Writing one to the screen
-would make it indistinguishable from something the session printed, so it is drawn
-as an alert beside the terminal. A close with nothing said is not an error at all,
-and is what reconnect turns on.
+- **Text frames from the daemon are errors, not output.** Writing one to the
+  screen would make it indistinguishable from something the session printed, so it
+  becomes an `ApiError` of kind `socket` and is drawn beside the terminal. A close
+  with nothing said is not an error at all, and is what reconnect turns on.
 
 ## The transcript (Y-309, Y-310)
 
-`Transcript.tsx` draws `POST /api/workspaces/{name}/logs` — what the agent said,
-as turns of `you` and `claude` with the tool calls between them.
+[`Transcript.tsx`](src/screens/session/Transcript.tsx) draws `POST
+/api/workspaces/{name}/logs` — what the agent said, as turns of `you` and
+`claude` with the tool calls between them.
 [D5](../docs/design/05-workspace-page.md) §4 settles it; four things about the
 code are not obvious from it:
 
-- **The state lives in `OneWorkspace`, not in the tab.** Only the open tab is
-  mounted, so a component holding its own answer would re-read on every return
-  from the terminal — and a read is an ssh. `useTranscript` is the page's, and
-  the tab that mounts is what asks it to read.
+- **The state lives in `useTranscript`, which the page holds and the view calls.**
+  Only the open view is mounted, so a component holding its own answer would
+  re-read on every return from the terminal — and a read is an ssh.
 - **Text is rendered as text.** No Markdown parser, so a bulleted plan reads as
   asterisks. That is D5 §4.1's decision and its cost: a parser inside a held
   budget, an XSS surface on text a machine wrote, and a highlighter after it.
@@ -303,63 +284,60 @@ code are not obvious from it:
   window would repeat what is drawn. The last one asks for `total - asked`.
 - **A grown `total` is refused, not stitched.** The window is counted from the
   end of a file a running agent appends to, so a second read of a longer file
-  does not line up with the first. The page says the conversation moved on and
-  offers a `Refresh` (Y-310). `transcript.test.tsx` proves it against a real file
-  that gained a record between two reads.
+  does not line up with the first. `merge()` sets `moved`, the page says the
+  conversation moved on, and `Refresh` is the way back (D5 §4.4).
 
 ## A terminal on any session (Y-179)
 
 `Terminal.tsx` takes a `Target`, which is the daemon's own enum in TypeScript: a
 workspace, or a machine and a session
 ([ADR-0022](../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
-It picks the URL and the name a refusal says — `scratch on pi`, never a
-workspace — and nothing else in the file knows which address it is on. **There is
-no second terminal**, which is what D6 §6.2 refuses.
+`terminalAddress()` picks the URL and the label a refusal says — `scratch on pi`,
+never a workspace — and nothing else in the file knows which address it is on.
+**There is no second terminal**, which is what D6 §6.2 refuses.
 
 Three decisions:
 
-- **The verb in the ACT column is a link, not a button.** D6 §4.3 asks for a
-  link, and `/m/{machine}/s/{session}` gets middle-click and copy-link for free
+- **The verb on an unclaimed session is a link, not a button.** D6 §4.3 asks for
+  a link, and `/m/{machine}/s/{session}` gets middle-click and copy-link for free
   (D5 §3.2). It carries the accessible name Y-320 gave it, `Terminal for
-  {session} on {machine}`, because the address is now a machine and a session
-  and a typo lands in a live shell.
-- **The route is split.** `/machines` is eager, so a terminal drawn in its own
-  column would put xterm.js on the first load of a page that attaches to
-  nothing.
+  {session} on {machine}`, because the address is a machine and a session and a
+  typo lands in a live shell.
+- **The route is split.** `/machines` would otherwise put xterm.js on the first
+  load of a page that attaches to nothing.
 - **Nothing is read before the socket.** `/w/{name}` reads the workspace list
   first, because a workspace the daemon never heard of is a typo worth catching
   without an ssh. A session is known only to its machine, so this attaches and
   lets the daemon refuse a name that is not there (ADR-0022 §5).
 
-## The spend tab (Y-311)
+## The spend view
 
 `/w/$name?view=spend` is `/usage`'s answer with the picker removed
 ([D5](../docs/design/05-workspace-page.md) §6.1): the workspace is the URL, so
-there is nothing to pick. `Answer` and `Figure` are
-[`Spend.tsx`](src/components/Spend.tsx)'s and both routes import them; `useSpend`
-holds the answer in `OneWorkspace`, for the transcript's reason. Mounting the tab
-is the request, and `Refresh` is the only way to ask again.
+there is nothing to pick. [`Spend.tsx`](src/screens/session/Spend.tsx) draws it,
+`useSpend` holds the answer in the page for the transcript's reason, and mounting
+the view is the request.
 
 **Any unpriced model makes the headline a token count, with no dollar line.**
-That is D5 §6.2, and it changed `/usage` too, because the component is shared.
-The daemon does not help here: it sums the models the price table carries and
-nulls only the rest, so a partly-priced session arrives with a figure that is
-short of what it spent. Drawing it under *this session* is the understatement
-R-23 refuses per model. **The `COST` column keeps its per-model figures** — one
-model's cost understates nothing. See the 2026-09-04 amendments in D5 §6.2 and
+That is D5 §6.2, and it holds on `/usage` too. The daemon does not help here: it
+sums the models the price table carries and nulls only the rest, so a
+partly-priced session arrives with a figure that is short of what it spent.
+Drawing it under *this session* is the understatement R-23 refuses per model.
+**The per-model figures stay** — one model's cost understates nothing. See the
+2026-09-04 amendments in D5 §6.2 and
 [D6](../docs/design/06-sessions-attention-spend.md) §5.2.
 
 ## A machine that cannot be reached (Y-312)
 
-**Each tab draws its own refusal and there is no page-level banner** (D5 §7).
-Only the open tab is mounted, so a reader sees one at a time — and each one names
-the machine, so the first one already says where the fault is. A banner would say
-it once instead of three times and would erase a figure the reader had read.
+**Each view draws its own refusal and there is no page-level banner** (D5 §7).
+Only the open view is mounted, so a reader sees one at a time — and each one
+names the machine, so the first one already says where the fault is. A banner
+would say it once instead of three times and would erase a figure the reader had
+read.
 
-**The machine's name is a link wherever it appears.**
-[`Machine.tsx`](src/components/Machine.tsx) is that link, in the page's own line
-above the tabs and inside all three refusals: an unreachable machine is still one
-you can go and look at, and `/m/{machine}` has its heartbeat.
+**The machine's name is a link wherever it appears**, in the page's own line and
+inside every refusal: an unreachable machine is still one you can go and look at,
+and `/m/{machine}` has its beat.
 
 ## Reconnect (Y-132)
 
@@ -392,134 +370,46 @@ nothing here would know — but **the daemon now notices** (Y-134). It pings eve
 20 s and ends a socket that misses two in a row, so the `ssh`, the pty and the
 tmux client behind an abandoned terminal are released without anything on this
 side having to detect the loss. The browser answers those pings itself, below
-`WebSocket`, so nothing in `Terminal.tsx` participates and nothing here changed.
+`WebSocket`, so nothing in `Terminal.tsx` participates.
 
 **`ws: true` on the dev proxy is load-bearing.** The string form of a Vite proxy
 entry forwards plain requests only, so without it the terminal in `npm run dev`
 connects to nothing.
 
-Two things `src/terminal.test.tsx` records because they cost an hour each.
-**jsdom's own `WebSocket` cannot connect under vitest** — jsdom builds it on
-undici's, undici constructs the global `Event`, and the jsdom environment has
-replaced that class, so the handshake dies in `dispatchEvent` saying *"must be an
-instance of Event. Received an instance of Event"* and the socket times out. The
-`ws` client is stubbed in for it: a second real implementation talking to a real
-server, not a stand-in for the socket under test. And **xterm.js wants the legacy
-`MediaQueryList.addListener`**, which the `matchMedia` stub `dashboard.test.tsx`
-carries does not have.
+Two things [`Terminal.test.tsx`](src/screens/session/Terminal.test.tsx) and its
+harness record because they cost an hour each. **jsdom's own `WebSocket` cannot
+connect under vitest** — jsdom builds it on undici's, undici constructs the
+global `Event`, and the jsdom environment has replaced that class, so the
+handshake dies in `dispatchEvent` saying *"must be an instance of Event. Received
+an instance of Event"* and the socket times out. The `ws` client is stubbed in
+for it: a second real implementation talking to a real server, not a stand-in for
+the socket under test. And **xterm.js wants the legacy
+`MediaQueryList.addListener`**, which a bare `matchMedia` stub does not have.
 
 What that suite cannot reach: `FitAddon.proposeDimensions()` answers `undefined`
 where nothing has a width, so the sizes asserted in CI are xterm's own 80x24 and
 the arithmetic needs a browser. Nor has any of this met a real daemon — the server
 it talks to speaks the protocol and knows nothing of a pty.
 
-## The shape a phone gets (Y-121)
+## Three form factors
 
-Below **48rem** `DataTable` draws one labelled block per row instead of one table
-row, and above it the table is unchanged. All four tables share the component, so
-all four get it. The width is read with `matchMedia` through
-`useSyncExternalStore`, which is why narrowing a window swaps the shape without a
-reload.
+[`formFactor.ts`](src/shell/formFactor.ts) is Material's window size classes at
+the brief's three widths: **phone** under 600 px, **tablet** to 1239 px,
+**desktop** from 1240 px. Two media queries through `useSyncExternalStore`, which
+is why narrowing a window changes the shape without a reload.
 
-- **A table could not be made to fit, and no column order could save it.** Y-113
-  had already moved `ACT` third and stacked the heartbeat badge under the machine
-  name. Measured at 390 px over the real URL: the table is **924 px** inside a
-  **310 px** box and the start button lands at **x 358–443**, its centre past the
-  edge of the screen. In blocks it is at **x 140–225** at 390 px and at 320 px
-  alike, and `document.elementFromPoint` at its centre returns the button.
-- **No column is dropped, and that is not politeness.** The first two cells alone
-  measure **127 + 184 px** — wider than the 310 px a phone shows — so a table cut
-  to `WORKSPACE`, `MACHINE` and `ACT` would still hide the buttons. Hiding a fact
-  buys nothing here, so every header becomes a `<dt>` and every cell a `<dd>`,
-  including the empty ones: a blank `STARTUP` is what the table showed too.
-- **The cost is vertical.** The workspaces card grows from 322 px to 527 px at
-  390 px. That is the scroll a page already has; a sideways one is not.
-- **`48rem` is measured.** 768 px is the narrowest viewport where the table's own
-  `ACT` cell is on screen without a swipe, so it is where the table is allowed
-  back.
-
-**Every number above is the workspaces table's, and it is the only one that was
-ever put in front of a phone.** The machines, sessions and agents tables were
-given the blocks by the component rather than by a measurement, and none of them
-has been drawn at 390 px in a real browser (Y-138). The widest unbounded thing
-left on the page is the agents table's `DETAIL` cell, which renders free-form
-daemon prose in `whitespace-pre-wrap`.
+**The shell reads it once and the router never does** (ADR-0024, consequences).
+`Shell.tsx` has three shells — a header bar of pills beside a sessions rail on a
+desktop, a navigation rail on a tablet, a top app bar over a bottom navigation
+bar on a phone — and each screen lays itself out below that. A component that needs
+the width asks for it: the confirm is a dialog above 600 px and a bottom sheet
+below it, and the bell opens a popover, a side sheet or the `/notifications`
+route.
 
 **jsdom implements no `matchMedia` at all** — not a stub returning false, nothing
-— so `dashboard.test.tsx` supplies a width to every test and its stub evaluates
-the query `DataTable` really asks. The breakpoint stays the component's to choose.
-
-## The write that makes a workspace
-
-`NewWorkspace.tsx` posts `{name, machine, repo, startup?}` to `/api/workspaces`
-(Y-116). Three things about it are not free choices:
-
-- **It renders the `201`'s own body and never re-reads the list to confirm.**
-  `refresh.rs` looks every 30 s and a create does not poke it — measured at 15 s
-  during which `GET /api/workspaces` still answered without the new workspace. A
-  form that confirmed by re-reading would draw an empty list after a success.
-- **The machine is a picker over the machines reading, and an offline machine can
-  be chosen.** [ADR-0009](../docs/adr/0009-machine-names-are-ssh-destinations.md):
-  Yantra never resolves a machine, and a sleeping Mac is a legitimate target.
-- **Each status the route answers keeps its own sentence** — `409` a name already
-  taken, `400` an unusable name or an empty field, `422` a field the daemon does
-  not know, `403` a node that is not the owner's, `503` a `tailscale` that could
-  not answer, which is not the caller's fault. The body is plain text, not JSON,
-  and is shown whole.
-
-There is **nowhere to type a secret**, and that is what keeps root §B4 here: the
-schema has three keys and none of them is one. `startup` is a shell command, so a
-secret in it stays a reference (`op://…`, `pass show …`) the shell resolves. No
-check is made over that string — a heuristic over an arbitrary command either
-misses the real case or refuses a legitimate one.
-
-## The write that changes one (Y-126)
-
-`EditWorkspace.tsx` sends `PATCH /api/workspaces/{name}`, opened by the **Edit**
-button every workspace row carries and closed by the one in the form. It is what
-the row exists for: a typo in `repo` used to need an ssh session, which a phone
-does not have.
-
-- **A field nobody touched is not in the body.** The form diffs what was typed
-  against the workspace it opened from and sends only what differs, because
-  absent means *leave it alone*. A form that PATCHed all three every time would
-  turn fixing a typo in `repo` into a move of `machine` — and a move is the one
-  edit a live session refuses ([Y-117](../tracker.md), I-30). Nothing differing
-  sends nothing at all, since a body naming no field is the daemon's `400`.
-- **Emptying `startup` sends `"startup": null`, which is the only `null` that
-  means anything on this route.** It is `--no-startup`; a missing key leaves the
-  command alone. Without it a startup command set once could never be taken away
-  from a phone, which is half of why the row was opened.
-- **The `409` is a refusal, not a crash, and is drawn as one.** A session still
-  open on the machine being left keeps the plain alert rather than the
-  destructive one, and the daemon's own sentence is shown whole — it names the
-  workspace, the machine it may not leave and the `yantra down` that ends the
-  refusal. Inventing wording for it here would be a second, worse copy of a
-  sentence [`edit.rs`](../crates/yantra-core/src/edit.rs) already writes. `503`
-  covers both a `tailscale` that could not answer and a machine that could not
-  be asked, so its sentence claims neither: nothing was decided and nothing
-  changed.
-- **It renders the `200`'s own body, and the next edit is measured against
-  that.** Same reason the create form renders its `201`: the read model is up to
-  30 s behind, so re-reading to confirm draws what was just replaced. Comparing
-  a second edit against the answer rather than the stale row is what stops it
-  re-sending a `machine` that already moved.
-- **The picker keeps a machine the tailnet does not list.**
-  [ADR-0009](../docs/adr/0009-machine-names-are-ssh-destinations.md) allows an
-  `~/.ssh/config` alias, and a `<select>` without the workspace's own machine in
-  it would silently select another — turning a repo fix into a move nobody
-  asked for.
-
-A section beside the create form rather than a control inside the row: three
-fields and a picker do not fit a table column, and the row already opens a
-section this way for the terminal. **There is no name field** — the route
-addresses a workspace by its name, so renaming is a create and a delete, which
-neither `yantra edit` nor this route is.
-
-What it cannot catch: the row it opens from is up to 30 s old, so a workspace
-changed elsewhere in between is drawn as it was. It is not clobbered — an
-untouched field is compared to the stale value, matches, and is never sent — but
-the form will show what it replaced until the next look.
+— so every unit harness that mounts the shell or a component reading the width
+supplies one that evaluates the query really asked. The breakpoints stay
+`formFactor.ts`'s to choose.
 
 ## Installable on a phone (Y-114)
 
@@ -529,17 +419,17 @@ outside a secure context — which is `just https` in the repo root.
 
 **The one rule: the worker never caches a reading.** `/api`, `/healthz` and
 `/heartbeat` are not intercepted at all, so the browser makes those requests
-itself and a daemon that cannot be reached becomes `useLooked`'s `failed`
-envelope, exactly as it does with no worker installed. Offline reads as offline.
-A cached reading would be R-23's confident lie with a longer memory, and
+itself and a daemon that cannot be reached becomes a `failed` envelope, exactly
+as it does with no worker installed. Offline reads as offline. A cached reading
+would be R-23's confident lie with a longer memory, and
 `src/sw.test.ts` runs the shipped `sw.js` against a fake `caches` to prove it —
 including that a reading planted in the cache by hand is still not served.
 
 **The terminal socket is covered by that same exclusion and is asserted anyway.**
 It is under `/api`, and a WebSocket handshake never reaches a `fetch` handler in
-the first place, so nothing had to change for Y-130. What the test pins is the
-route's *address*: moving it out from under `/api` would put a terminal in the
-cache silently.
+the first place, so nothing had to change when the terminal arrived. What the
+test pins is the route's *address*: moving it out from under `/api` would put a
+terminal in the cache silently.
 
 The shell is **network first**, one path for navigations and assets alike, so a
 cached response only ever means the network was not there. Navigations share the
@@ -556,8 +446,8 @@ precache manifest of Vite's hashed filenames, which `install` reads out of
 config to audit, and defaults that cache far more than the shell.
 
 **No colour in the manifest.** `theme_color` and `background_color` take a
-literal, and `index.css` is the swap point a design system replaces; neither is
-required for installability, so neither is here.
+literal, and the tokens are where colour is decided; neither is required for
+installability, so neither is here.
 
 Icons are the existing `favicon.svg` rasterised onto white — opaque because iOS
 composites a transparent home-screen icon onto black — with `librsvg` and
@@ -576,81 +466,116 @@ icon from the `<link>` and not from the manifest.
 
 ## Where `api.ts` is checked against the daemon (Y-124)
 
-Every test in `dashboard.test.tsx` stubs `fetch` and returns a literal typed to
-match `api.ts`, so the two sides of the wire were kept in step by convention:
-renaming a field in `crates/yantrad/src/api.rs` left both suites green and this
-page blank. `src/contract.gen.ts` is the answer — the daemon's own routes
-rendered into TypeScript that `satisfies` the types above, written by a Rust test
-and regenerated with `just fixtures` in the repo root.
+A unit test stubs `fetch` and returns a literal typed to match `api.ts`, so the
+two sides of the wire were kept in step by convention: renaming a field in
+`crates/yantrad/src/api.rs` left both suites green and the page blank.
+`src/contract.gen.ts` is the answer — the daemon's own routes rendered into
+TypeScript that `satisfies` the types above, written by a Rust test and
+regenerated with `just fixtures` in the repo root.
 
-**Never edit it, and do not import it.** `tsc` type-checks every file under
-`src/`, which is the whole of how it runs; `npm run build` and the CI type-check
-step are where a mismatch surfaces. A DTO that moved without the file being
-regenerated fails on the Rust side first, saying so.
+**Never edit it, and do not import it from `src/`.** `tsc` type-checks every file
+under `src/`, which is the whole of how it runs; `npm run build` and the CI
+type-check step are where a mismatch surfaces. A DTO that moved without the file
+being regenerated fails on the Rust side first, saying so. The one thing that
+does import it is [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs), which
+answers the browser from it.
 
 It does not cover status codes, headers or the refusal bodies — those are plain
-text, and `Act.tsx`, `NewWorkspace.tsx` and `EditWorkspace.tsx` still map them by
-hand.
+text, and `errors.ts` maps them by hand.
 
-## The seam
+## The tokens
 
-A design system is arriving from elsewhere. Two rules keep it a one-file change:
+[`m3/tokens.css`](src/m3/tokens.css) is the seam ADR-0024 §2 names. It declares
+every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
+`--md-sys-motion-*` role, and the three faces.
 
-1. **Never edit `src/components/ui/`.** It is vendored — five files from shadcn's
-   CLI and the rest copied from T3 Code — and all of it is regenerable or
-   re-copyable; composition wraps it. `components.json` has `"cssVariables":
-   true`, which **cannot be changed after init** — switching would mean deleting
-   and reinstalling every component. Where each file came from, and the MIT
-   notice T3 Code's copies carry with them:
-   [`ui/THIRD-PARTY.md`](src/components/ui/THIRD-PARTY.md).
-2. **Call sites pass a `tone`, never a colour.** `Status.tsx` is the only file
-   that maps a domain state to an appearance.
+- **Sage light and dark are precomputed and shipped as CSS.** One declaration
+  carries both through `light-dark()`, so there is no second block to keep in
+  step. The theme is the root's `color-scheme`: unset follows the OS, and
+  `data-theme` pins it in either direction.
+- **`index.html` reads `localStorage` before the first paint**, under
+  [`shell/prefs.ts`](src/shell/prefs.ts)'s key and version, so the theme and the
+  density land with the first frame rather than one after it. Keep the inline
+  script and `prefs.ts` in step: preferences are browser-local and the daemon
+  persists none of them (ADR-0024 §5).
+- **The colour engine is not on this path.** `m3/theme/scheme.ts` loads only for
+  a seed other than sage, and on Appearance; the first load carries no scheme
+  code. `scheme.test.ts` names the six roles where the fitted scheme and
+  `palette-sage.json` disagree, and by how much (ADR-0024's 2026-09-06
+  amendment).
+- **Call sites pass a role, never a colour.** State is a mark plus a word
+  ([`m3/mark/`](src/m3/mark/Mark.tsx)), never colour alone (D3 §6).
 
-`src/index.css` holds the token vocabulary at shadcn's default values and is
-marked as the swap point. Light and dark both work through
-`prefers-color-scheme`; Q6 ruled out a theme switcher, so shadcn's `.dark` class
-was rewired to the media query rather than left with nothing to toggle it.
+**Tailwind v4 stays, and now emits only its preflight reset.** `index.css` is
+`@import "tailwindcss" source(none)` with no `@source`, because no call site
+writes a utility: each M3 component ships a BEM class and its own stylesheet. The
+scan was reading English words out of the `.tsx` files and buying `.container`,
+`.hidden`, `.collapse` and fourteen more that nothing drew. Add a `@source` back
+the day a call site writes a utility.
 
-**The T3 Code copies widened the seam (Y-164, Y-166).** They are built on the same
-shadcn variable names, but not only on those. Y-164 brought `--control-radius`,
-`--destructive-foreground`, `--placeholder` and the two `--app-scrollbar-thumb*`
-— without them a button has no radius and a scrollbar no thumb. Y-166's overlays
-brought `--icon-muted`, `--secondary-label`, the two `--command-*-inset` and the
-`--glass-blur` / `--glass-opacity` / `--glass-saturation` trio. All of them sit in
-`index.css` at T3's values, so the swap point is still one file.
+[`src/index.css`](src/index.css) is three statements: that import, the token
+import, and the page under them.
 
-**One of those is not a token, and that is the part to remember.** `.dialog-glass`,
-`.dialog-backdrop` and `.dropdown-glass` are *rules*, and `dialog`, `command`,
-`menu`, `select` and `combobox` name them in their class strings. A popup with no
-rule behind the name has **no background at all** — it is not a plainer popup, it
-is an unreadable one. A design system replacing `index.css` has to replace those
-three too. (T3's `.dark` selector is a `prefers-color-scheme` block here, for the
-same reason shadcn's is.) `TooltipPopup`'s opt-in `variant="glass"` works as a
-side effect of them arriving.
+## What it weighs
 
-## What the primitives cost (Y-166, Y-167)
+**145 KiB for the first load of `/`, and 80 KiB of fonts** — D3 §9.1 and
+ADR-0024 §7, measured by [`scripts/budget.mjs`](scripts/budget.mjs) over
+`dist/index.html`'s own entry, preloads and stylesheets at gzip -9.
 
-Two numbers, both measured here:
+**As of 2026-09-07 it is not green.** `/` is **146.7 KiB** and the fonts are
+**78.5 KiB**, so the fonts hold and the first load misses by 1.7 KiB. `web.yml`
+runs the budget with `continue-on-error: true` until it does hold. Deleting the
+pre-M14 stylesheet took `/` from 159.1 KiB (Y-353), and what is left is
+react-dom, TanStack Router, TanStack Query, Base UI, the shell and the dashboard
+screen — there is no single thing to remove.
 
-- **`lucide-react` tree-shakes, and the named import is why.** Importing
-  `Spinner` — one icon out of ~1500 — costs **0.77 kB gzip**. Replacing a named
-  import with `import * as` does not: pulling all seven overlays that way cost
-  **85 kB gzip**. Keep the imports named.
-- **The weight is Base UI's positioning, not the icons.** `dialog` alone is
-  **+19 kB gzip**; `dialog` + `menu` + `spinner` together are **+41 kB**. That is
-  the same order as xterm.js, which `/w/$name` already code-splits — so a route
-  that opens a dialog should probably split too.
+**The build is not the wire.** `yantrad` serves `dist` through `ServeDir` with
+neither `precompressed_gzip` nor a `CompressionLayer`, so a phone downloads the
+raw bytes. Y-357 is that row; until it lands, the number above is the build.
 
-**The CSS is not free even unimported.** Tailwind v4 scans the source tree, so it
-emits utilities for every class these files name whether or not anything renders
-them: the stylesheet went **12.7 kB gzip to 17.6 kB** on Y-166 alone.
+The plan's bundle rules are what hold the line: no barrel files, every route
+lazy except `/`, and Form, Table, Virtual, xterm and the colour engine never in
+the `/` chunk ([the plan](../docs/plans/m14-the-material-dashboard.md) §3).
 
-**D1.3 paid the menu's 29 kB and then split it back off.** Y-167 put an overflow
-on every workspace row, which took the fleet's first load from **121 to 165 kB
-gzip** — undoing the router's own win. So `Overflow.tsx` is a `lazy` module
-fetched on the first tap, and the first load is **124 kB** with 37 kB deferred.
-The trigger stays eager and the popup is *anchored* to it rather than wrapped by
-it, because a `MenuTrigger` would have dragged the chunk back in.
+## Testing
+
+**Vitest covers the units and the components.** A test file sits beside almost
+every module under `src/`: each M3 component's own `.test.tsx`, the api layer (`client`, `errors`,
+`hooks`, `mutations`, `socket`, the boundary), each screen's logic and its
+render, the shell, the tokens, the colour scheme, `sw.test.ts` and
+`router.test.tsx`. jsdom, and the harnesses live in
+[`src/test/`](src/test/): `daemon.ts` stubs `fetch` the way `yantrad` answers,
+`inQuery`, `inRouter` and `inApp` supply the context a hook or a `<Link>` needs.
+
+**Playwright covers the screens, in a browser** ([ADR-0024](../docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md) §6).
+[`e2e/`](e2e/) runs three projects over every spec — **phone 390×844, tablet
+834×1194, desktop 1440×1024** ([`lib/sizes.ts`](e2e/lib/sizes.ts)) — against
+`vite preview` over a real build rather than the dev server. `lib/axe.ts` runs
+axe with `wcag2a wcag2aa wcag21a wcag21aa wcag22aa` and fails on any violation
+outside a spec's `known` list, and fails again the day a known one is fixed
+without the list being edited. `lib/screenshot.ts` writes one file per screen,
+scenario and size.
+
+**The fixture daemon is Node, not `yantrad`.**
+[`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the
+dashboard calls from `src/contract.gen.ts`, plus both terminal sockets, under one
+of ten scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
+`contract`, `broken`, `repair`, `firstrun`. A test picks one with a cookie
+carrying its own key, so a write in one worker is not a row in another, and
+`page.clock` pins the instant so an age reads the same on every run.
+
+**The screenshot baselines are rendered in
+`mcr.microsoft.com/playwright:v1.63.0-noble`** — the image CI's e2e jobs run in —
+so a developer's own fonts never enter one. Regenerate them the same way:
+
+```sh
+podman run --rm -v "$PWD/..:/work" -w /work/web \
+  mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --update-snapshots
+```
+
+[`.github/workflows/web.yml`](../.github/workflows/web.yml) runs lint, both
+type-checks, the build, `npm test` and the budget in one job, and the e2e suite
+in three more — one per form factor, in that image.
 
 ## Layout
 
@@ -662,65 +587,63 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  useLooked.ts       the readings — every class and every agent, on TanStack
-                     Query — and the three derivations the routes share
-  useTranscript.ts   one workspace's transcript, read on request and held by
-                     the page rather than by the tab that draws it
-  useTick.ts         the one-second clock two read-on-request pages stamp
-                     against. It returns the instant rather than re-rendering,
-                     which is the compiler note above
-  router.ts          TanStack Router: three routes, `notFoundComponent`, and
-                     `getRouter(history)` so a test can drive a memory history
-  columns.tsx        four Column<T>[] arrays: the four tables, as data, plus
-                     `chosen()` — D1 §2's one verb, read off the agent state
-  routes/
-    Shell.tsx        the heading and the `<Outlet/>`, plus `Nowhere`
-    Fleet.tsx        `/` — the five sections and the edit form
-    OneMachine.tsx   `/m/$machine` — the same readings, filtered to one
-    OneWorkspace.tsx `/w/$name` — one workspace as three tabs the URL carries,
-                     and the transcript's answer, held across a tab switch.
-                     Split for the heaviest reason: xterm.js is a third of the
-                     bundle
-    OneSession.tsx   `/m/$machine/s/$session` — the same terminal on a session
-                     no workspace claims (ADR-0022). Split for the same reason
-  test/
-    inQuery.tsx      `renderHookQueried` — a client per call, for a hook that
-                     reads one out of context
-    inRouter.tsx     `renderRouted` — a one-route memory router around a subject
-  components/
-    Section.tsx      the looked switch; children run only in the ok branch
-    NewWorkspace.tsx the create form; owns the field class
-    EditWorkspace.tsx the edit form — sends only the fields that differ, and
-                     `startup: null` where one was emptied
-    Act.tsx          the workspace row's one computed verb and its overflow
-                     trigger, and the single verb an agent row's state is for;
-                     owns the button class and the outcome the daemon returned
-    Overflow.tsx     the verbs the row's state is not for. Its own module so
-                     Base UI's positioning loads on the first tap, not the
-                     first paint
-    Terminal.tsx     xterm.js on the session's WebSocket, reopened when it
-                     drops. Key it on the name
-    Transcript.tsx   the turns of one window of the agent's transcript, its
-                     tool calls, `Older`, and what it says when there are none
-    Spend.tsx        `Answer` and `Figure` — one workspace's one session, in
-                     T3 Code's usage-page shape. `/usage` and the spend tab
-                     draw the same figure; only `/usage` has a picker
-    DataTable.tsx    a table, or a block per row on a phone; owns "we looked
-                     and there is nothing"
-    Readiness.tsx    D2 §3.1's checks as three tones, and the one place the
-                     daemon's `heartbeat` answer is reconciled with the
-                     machines reading
-    Attention.tsx    the GitHub queue as a block inside `Needs you`, on the
-                     daemon's own 300 s clock; owns why `Age` is wrong here
-    Status.tsx       tone -> appearance; the only file that knows about colour
-    Age.tsx          age_seconds -> <time>; owns the staleness threshold
-    ui/              vendored primitives. NEVER EDITED. Five are shadcn's CLI
-                     output; the rest are copied from T3 Code and each says so
-                     in a header. THIRD-PARTY.md carries the MIT notice
-  index.css          the token vocabulary, plus the three glass rules the
-                     overlays name — the whole integration surface
-  App.tsx            mounts the router and the query client; `Shell` in
-                     routes/ is the heading
+  router.ts          TanStack Router: twelve routes and a dev-only gallery, one
+                     of them eager, each with a loader that warms its reads
+  work.ts            D3 §4's bands — who must act next, and the fourth state
+                     that is nobody having read yet
+  views.ts           the four views of `/w/{name}`. Its own module so `router.ts`
+                     validates `?view=` without pulling xterm.js into `/`
+  useTick.ts         the one-second clock. It returns the instant rather than
+                     re-rendering, which is the compiler note above
+  index.css          three statements: Tailwind's reset, the tokens, the page
+  lib/               `name`, `path`, `spend`, `time` — the formatting every
+                     screen shares, so an age or a figure reads the same twice
+  api/
+    keys.ts          every query key, hierarchical, from one factory
+    queries.ts       one `queryOptions` per read, so a route can preload it
+    mutations.ts     one `useMutation` per write, invalidating by key
+    hooks.ts         what a screen calls, and the `Looked<T>` it hands back
+    client.ts        `fetchJson`, the envelope, the `QueryClient` defaults
+    errors.ts        `ApiError` and its five kinds — the only rejection here
+    socket.ts        the two terminal sockets, `TERM`, and the reopen budget
+    types/           the daemon shapes that are not on the swept routes
+    README.md        the error table, and what each file owns
+  m3/
+    tokens.css       every Material role, sage light and dark. The seam
+    <one per        `Button.tsx`, `Button.css`, `Button.test.tsx`, and Base UI
+     component>      underneath wherever it has the behaviour
+    theme/           the colour engine, loaded only for a seed that is not sage
+    gallery/         every component on one page, for the reviewer and
+                     Playwright. Dev builds only
+  shell/
+    Shell.tsx        the three shells, and the outlet under one boundary that a
+                     navigation resets
+    Palette.tsx      the search pill and `⌘K`; the popup is its own chunk
+    Bell.tsx  BellPopover.tsx  NotificationsSheet.tsx  NotificationsScreen.tsx
+                     one set of notifications, at three widths
+    formFactor.ts    phone / tablet / desktop, from two media queries
+    prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
+  screens/
+    dashboard/       `/` — the bands, the status strip, and the first run
+    fleet/           `/fleet` — every workspace and machine, the one computed
+                     verb (`verbs.ts`), and the Kill and Delete confirms
+    machines/        `/machines` — a card per machine, its checks, and Doctor
+    machine/         `/m/$machine`
+    session/         `/w/$name` — chat, terminal, transcript, spend
+    session-terminal/`/m/$machine/s/$session` — the same terminal on a session
+                     no workspace claims (ADR-0022)
+    repair/          `/w/$name/repair` — the file itself (ADR-0020)
+    new-session/     `/new` — four steps on one TanStack Form
+    settings/        `/settings` and `/settings/$category`
+    usage/           `/usage`
+    setup/           the first run, drawn inside `/` while there is no fleet
+  test/              the unit harnesses: `daemon.ts`, `inQuery`, `inRouter`,
+                     `inApp`, and the vitest setup
+e2e/
+  lib/               sizes, scenario, axe, screenshot, keyboard, routes
+  fixture/           the Node daemon and its ten scenarios
+  __screenshots__/   one baseline per screen, scenario and size
+design/              Y-330's options round. A second Vite root; ships nothing
 ```
 
 ## The router (Y-161, Y-162)
@@ -728,32 +651,37 @@ src/
 **[TanStack Router](https://tanstack.com/router)**, code-based routes in
 `src/router.ts`. Y-161 hand-rolled one over the History API; the owner ruled on
 2026-08-09 that `web/` takes battle-tested packages and writes its own only where
-a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1, and an amendment on
-[ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md).
+a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1.
 
-- **The history is a parameter.** `getRouter(history)` is
-  [T3 Code](https://github.com/pingdotgg/t3code)'s shape, copied: the entry point
-  passes a browser history and a test passes a memory one, with no branch inside.
-- **`/w/$name` was the first split route, and the split is why the package pays
-  for itself.** xterm.js and its CSS are a third of the bundle and the fleet page
-  never touches them. First load went **170 kB gzip to 111 kB**, and the
-  terminal's 85 kB arrives when a terminal does. `lazyRouteComponent` does it;
-  the component reads its own params through `getRouteApi('/w/$name')`, because
-  importing the route back into the module the route loads would be a cycle.
-  `/m/$machine/s/$session` is split for the same reason and shares the chunk.
+- **The history is a parameter, and so is the query client.** `getRouter(history,
+  client)` is [T3 Code](https://github.com/pingdotgg/t3code)'s shape, copied: the
+  entry point passes a browser history and a test passes a memory one, with no
+  branch inside.
+- **One route is eager and the rest are `lazyRouteComponent`.** xterm.js, the
+  stepper's form, the tables and the virtualiser are each a third of somebody's
+  chunk and none of them is `/`'s.
+- **A loader warms its screen's reads and is never awaited.** `prefetchQuery`
+  rather than `ensureQueryData`, so a warm read is cancelled when the last
+  observer leaves, and `defaultPreload: 'intent'` starts it on a hover. The
+  screen draws its own skeleton meanwhile; awaiting would hold the whole page.
+- **Query holds the cache, so `defaultPreloadStaleTime` is 0.** The router's own
+  copy of a loader result could only ever be stale.
 - **Params are typed.** `<Link to="/m/$machine" params={{ machine }}>` fails to
   compile on a typo, which the string builders in Y-161 could not do.
+- **Search params are validated where they exist.** `?view=` on `/w/$name` and
+  `?step=` on `/new` are narrowed to their unions, and an unknown value is no
+  view rather than a 404 — the workspace is real and the page can draw.
 - **`notFoundComponent` is a state, not a redirect.** `web.rs` answers every
   unknown path with `index.html`, so a mistyped URL arrives as a page; drawing
-  the fleet under it would make the address bar a lie.
-- **`/w/$name` reads the workspace list before it opens a socket.** A round trip
-  to the daemon is cheap and an attach is an `ssh` to a machine that may be
-  asleep, so a mistyped name never costs one.
-- **A machine's page has no `EDIT` column.** `workspaceColumns` takes `null` for
-  it: a workspace is edited where it is listed, and the form is `/`'s.
+  the dashboard under it would make the address bar a lie.
+- **Every route names itself in its `<title>` first** (`{name} · Yantra`), because
+  a phone's app switcher shows the front of the title.
+- **The error component is the shell's own.** `defaultErrorComponent` is
+  `RouteError`, and `useResetOnRouteChange()` clears both the boundary and
+  Query's error state on a navigation.
 
-**A `<Link>` needs a router in context**, so a test that renders a column on its
-own supplies one: `src/test/inRouter.tsx`'s `renderRouted` builds a one-route
+**A `<Link>` needs a router in context**, so a test that renders a component on
+its own supplies one: `src/test/inRouter.tsx`'s `renderRouted` builds a one-route
 memory router around the subject. It **awaits `router.load()`** — a router
 resolves its first match asynchronously, and rendering without that draws an
 empty document, which reads as a missing element rather than as a race.
@@ -761,21 +689,20 @@ empty document, which reads as a missing element rather than as a race.
 ## The readings (Y-165)
 
 **[TanStack Query](https://tanstack.com/query)** replaces the `useState` +
-`useEffect` + `setTimeout` poll `useLooked.ts` used to be — the same ruling as
-the router, [CLAUDE.md](../CLAUDE.md) §B1. `useLooked` is `useQuery`, `useAgents`
-is `useQueries`, and both still hand back a `Looked<T>`, so no call site changed.
+`useEffect` + `setTimeout` poll this page used to run — the same ruling as the
+router, [CLAUDE.md](../CLAUDE.md) §B1. Every read is a `queryOptions` in
+`queries.ts`, and the hooks in `hooks.ts` hand back a `Looked<T>`.
 
 **`Looked<T>` is the daemon's envelope and Query wraps it — it does not replace
 it.** `api.ts`'s three variants say *nobody looked*, *a look failed* and *a
 machine did not answer*, and R-23 is the whole reason they are three things.
 Query's `isLoading` and `isError` are a second, weaker vocabulary for the first
-two, so they are not read anywhere:
+two, so a swept read never uses them:
 
-- **The query function never throws**, except to re-raise an abort. A non-200
-  becomes `failed` inside it, because every fleet state answers 200 — so a
-  status code is a fact about this browser reaching the daemon, never about the
-  fleet — and the page keeps **one** failure path. `isError` is unreachable, and
-  `retry` therefore never fires in the app.
+- **A swept read's query function never throws**, except to re-raise an abort. A
+  non-200 becomes `failed` inside it, because every fleet state answers 200 — so
+  a status code is a fact about this browser reaching the daemon, never about the
+  fleet — and the page keeps **one** failure path.
 - **`data === undefined` is `{looked: 'never'}`**, which is the same sentence the
   daemon sends before its first sweep. Nothing distinguishes them, and nothing
   should: neither is a reading.
@@ -783,29 +710,34 @@ two, so they are not read anywhere:
   unmount instead of caching an envelope nobody asked for. Consuming the
   `signal` is what makes cancellation happen at all — a query whose function
   ignores it runs to completion after the component is gone.
+- **A read a person asked for is the other kind, and it throws.** A transcript, a
+  spend, a directory listing and a doctor check each cost an ssh round trip, so
+  they are `enabled: false`, never retried, never refetched on a focus or a
+  mount, and their failures are `ApiError`s a surface draws under a boundary
+  (ADR-0019, D4 §2).
 
-**The 5 s interval is not about freshness.** `refresh.rs` sweeps every 30 s, so
-a faster poll buys no newer data; it keeps the age each `<Section>` prints
-ticking. **`useQueries` waits for every name** before the agent class reads `ok`,
-which is what one `Promise.all` used to say — a workspace whose status is still
-in flight is not a workspace with no report, and rendering it as `null` would be
-R-23's lie in the one place the envelope cannot spell the difference. A `404`
-still *is* `null` for that row, because that is what the daemon means by it: the
-agent look has not seen a name the workspaces look has.
+**The 5 s interval is not about freshness.** `refresh.rs` sweeps every 30 s, so a
+faster poll buys no newer data; it keeps the age each card prints ticking, and
+`staleTime` is the sweep's own 30 s. The two classes on the daemon's 300 s clock
+— attention and the repo list — poll every 30 s instead, since 5 s there buys
+nothing but a request.
 
-**Two readings of the same path are now one request.** The key is the path, so
-`/` and `/m/{machine}` asking for `/api/workspaces` share a cache entry and a
-poll instead of running two of each.
+**`useQueries` waits for every name** before the agent class reads `ok`, which is
+what one `Promise.all` used to say — a workspace whose status is still in flight
+is not a workspace with no report, and rendering it as `null` would be R-23's lie
+in the one place the envelope cannot spell the difference. A `404` still *is*
+`null` for that row, because that is what the daemon means by it: the agent look
+has not seen a name the workspaces look has.
 
-**It costs ≈10 kB gzip and the first load went 111 kB to 121 kB.** That is the
-opposite direction from Y-162's number and is worth saying plainly: what this
-buys is not weight but the deletion of hand-rolled request lifecycle — the
-timer, the `AbortController`, the two `useState`s and the `join('\n')`
-dependency that existed only to give an effect a stable array to compare.
+**Two readings of the same path are one request.** The key comes from
+`keys.ts`, so `/` and `/m/{machine}` asking for `/api/workspaces` share a cache
+entry and a poll instead of running two of each. The keys are hierarchical for
+the writes' sake: everything the daemon says about one workspace sits under
+`['workspaces', name, …]`, so a write invalidates by prefix rather than by
+remembering every key it touched.
 
 **A hook that reads a client out of context needs one supplied**, the same way a
 `<Link>` does: `src/test/inQuery.tsx`'s `renderHookQueried` makes a
 `QueryClient` **per call**, since one shared between tests answers the second
 from the first's cache, and sets `retry: false` so a rejected fetch is one
-fetch. Tests that render `<App/>` need nothing — it makes its own client per
-mount, for the reason it makes its own router.
+fetch.
