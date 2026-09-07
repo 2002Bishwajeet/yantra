@@ -1,4 +1,4 @@
-import { axe, expect, firstReading, keyboardWalk, scenario, test } from './lib/test'
+import { axe, expect, firstReading, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import type { Page } from '@playwright/test'
 
 /* Y-346. `smoke.spec.ts` holds `/`'s screenshots against the board; this spec
@@ -101,27 +101,43 @@ test.describe('the dashboard on an empty fleet', () => {
 })
 
 test.describe('the dashboard in Compact', () => {
-  test('expands Idle and draws Recent beside it', async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await prefer(page, { density: 'compact' })
     await scenario(page, 'busy')
     await page.goto('/')
     await firstReading(page)
+  })
+
+  test('expands Idle and draws Recent beside it', async ({ page }) => {
     await expect(page.locator('html')).toHaveAttribute('data-density', 'compact')
     await expect(page.getByRole('button', { name: /Show/ })).toHaveCount(0)
     await expect(region(page, 'Idle').getByRole('link')).toHaveCount(4)
     await expect(region(page, 'Recent').getByText('last 3 session events')).toBeVisible()
     await axe(page)
   })
+
+  test('looks like the board', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'MainCompact is a desktop board')
+    await screenshot(page, 'dashboard-compact', 'busy', size)
+  })
 })
 
 test.describe('the dashboard in the dark', () => {
-  test('draws the same page on the dark roles, and axe still passes', async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await prefer(page, { theme: 'dark' })
     await scenario(page, 'busy')
     await page.goto('/')
     await firstReading(page)
+  })
+
+  test('draws the same page on the dark roles, and axe still passes', async ({ page }) => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
     await expect(region(page, 'Needs you').getByText('things are waiting on you')).toBeVisible()
     await axe(page)
+  })
+
+  test('looks like the board', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'MainDark is a desktop board')
+    await screenshot(page, 'dashboard-dark', 'busy', size)
   })
 })

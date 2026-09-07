@@ -98,6 +98,9 @@ Machines ×3, Machine ×3 and Usage ×3. `machines.spec.ts`, `machine.spec.ts` a
 call `axe()` and never `screenshot()`, and no `fleet.spec.ts` exists, so the busy Fleet has never
 been pictured.
 
+> **2026-09-07: all 63 have one now.** Finding 98 is closed and the fourteen missing baselines were
+> rendered in the Playwright image. What they show is in §5's note.
+
 Most of the 57 are small: a word, a tier, a wrap. Four are visible defects — 15, 41, 44 and 25.
 
 ### The three ADR-0024 product rules hold
@@ -411,6 +414,18 @@ cure. `machines.spec.ts`, `machine.spec.ts` and `usage.spec.ts` call `axe()` and
 add `fleet.spec.ts` on the busy scenario, add a `screenshot()` call to the three, then generate the
 baselines inside the Playwright image with `--update-snapshots`. That is finding 98, and it is one
 sitting.
+
+> **2026-09-07: it was one sitting, and it holds now.** `fleet.spec.ts` is written, the three specs
+> call `screenshot()`, and MainDark and MainCompact are captured from `dashboard.spec.ts` through
+> its `prefer()` helper. All 63 boards have a compared picture.
+>
+> Held against their boards, the fourteen confirm §1 rows 14, 15 and 19 to 27 word for word. Rows 2
+> and 3 stand: the dark and the compact dashboards match, and both inherit row 1's three. **Row 13
+> is corrected to *differs*** — its own text already named the disabled 40 px Reorder against the
+> board's active 44, and the build also leaves blank the date the board prints on every idle row.
+> Two differences this pass did not have: `/machines` writes *opened 4 Sep ago*, an absolute date
+> inside a relative sentence, and Usage can only be pictured at the viewport, because a full-page
+> capture drops the read ([the ledger](m14-quality-phase1.md) rows 98 and 135).
 
 **Zero open findings on `web/` — no.** This pass adds 43 to the seven still open from
 [m14-quality-phase1.md](m14-quality-phase1.md): 66, 67, 77, 79, 83, 84 and 86. Fifty in total, one of

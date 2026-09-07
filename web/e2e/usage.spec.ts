@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { axe, expect, keyboardWalk, scenario, test } from './lib/test'
+import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /* Y-347. What the Usage, TabletUsage and PhoneUsage boards say the page must
    carry, at all three sizes — minus the time window, which is Y-354. */
@@ -53,6 +53,24 @@ test.describe('usage on a busy fleet', () => {
     await page.getByRole('button', { name: 'Read spend' }).click()
     await expect(card(page, 'By workspace')).toBeVisible()
     await axe(page)
+  })
+
+  /* The Usage boards draw the read, not the page waiting to be asked, so the
+     picture waits for the count each part of the fan-out prints.
+
+     The viewport rather than the page, and this is not a preference: a
+     full-page capture makes Chromium report a 1x1 viewport for a frame,
+     `useFormFactor` reads *phone*, and `Shell` swaps the component it renders,
+     which unmounts the tree and throws the read away. Every other screen reads
+     its query cache again and looks the same; Usage holds the fan-out in its
+     own state and cannot. The boards are 1440x1024, 834x1194 and 390x844, so
+     the viewport is the frame the board was drawn at. */
+  test('looks like the board once the read is on screen', async ({ page, size }) => {
+    await page.getByRole('button', { name: 'Read spend' }).click()
+    await expect(card(page, 'By workspace').getByText('10 workspaces read')).toBeVisible()
+    await expect(card(page, 'By model').getByText('2 models')).toBeVisible()
+    await expect(card(page, 'Sessions').getByText('10 read · most expensive first')).toBeVisible()
+    await screenshot(page, 'usage', 'busy', size, { overlay: true })
   })
 })
 
