@@ -24,6 +24,25 @@ async function said(response: Response): Promise<string> {
   return text
 }
 
+/** Every read that never got an answer from the daemon says this, whatever
+ *  path it asked for. The path used to be in the sentence, which is exactly
+ *  what stopped the page from seeing one broken connection rather than seven
+ *  broken classes (D3 §7.2). */
+export const NOT_REACHED = 'yantrad was not reached'
+
+/** 502, 503 and 504 have two possible senders. The daemon sends them itself —
+ *  a relay that would not take the push, an ssh that could not be made — and
+ *  always with a bare `text/plain` sentence saying why. Whatever sits between
+ *  this browser and the daemon sends them with no sentence: Vite's proxy
+ *  answers an empty body, a gateway answers HTML. **No sentence means the
+ *  daemon was never reached**, which is not a refusal to describe. */
+const GATEWAY = new Set([502, 503, 504])
+const fromProxy = (status: number, words: string) =>
+  GATEWAY.has(status) &&
+  (words.trim() === '' ||
+    words.trimStart().startsWith('<') ||
+    words.startsWith('Error occurred while trying to proxy'))
+
 /** A guard on a 2xx body: the name of what is missing, or null. */
 export type Shape = (body: unknown) => string | null
 
@@ -59,7 +78,11 @@ export async function fetchJson<T>(
     throw new ApiError('missing', await said(response), { status })
   }
   if (!response.ok) {
-    throw new ApiError('refused', await said(response), { status })
+    const words = await said(response)
+    if (fromProxy(status, words)) {
+      throw new ApiError('network', `${NOT_REACHED}: HTTP ${status}`)
+    }
+    throw new ApiError('refused', words, { status })
   }
   if (status === 204) return undefined as T
   let body: unknown
@@ -82,6 +105,8 @@ export const json = (body: unknown): RequestInit => ({
 
 export const failed = (error: string) =>
   ({ looked: 'failed', age_seconds: 0, error }) as const
+
+const notReached = (why: string) => failed(`${NOT_REACHED}: ${why}`)
 
 /** D3 §7.1, the sharpest finding in that document: a question not yet asked was
  *  not answered *never*. `pending` is a fourth state and not a fourth word: it
@@ -123,13 +148,14 @@ export async function look<T>(
 ): Promise<Looked<T>> {
   try {
     const response = await fetch(path, { signal })
-    // Every fleet state answers 200, so a non-200 is a fact about this browser
-    // reaching the daemon and never about the fleet's health.
-    if (!response.ok) return failed(`${path} answered ${response.status}`)
+    // Every fleet state answers 200 with an envelope, so a status is never
+    // news about the fleet: something between this browser and the daemon
+    // answered instead of it, and every path hears the same thing.
+    if (!response.ok) return notReached(`HTTP ${response.status}`)
     return await envelope<T>(response, path)
   } catch (cause) {
     if (signal.aborted) throw cause
-    return failed(String(cause))
+    return notReached(String(cause))
   }
 }
 
