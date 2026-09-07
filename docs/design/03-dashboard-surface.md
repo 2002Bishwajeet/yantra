@@ -316,6 +316,11 @@ has never been given a way to say what is still missing.*
 
 ## 5. Hierarchy, density and type
 
+> **2026-09-07, Y-346: the boards split this state in two.** The canvas draws `EmptyDashboard`
+> (no workspace, a machine ready: "No sessions yet" and New session) beside `Setup` (the six-step
+> checklist). So `/` is the checklist while **no machine passes readiness**, and the empty
+> Dashboard once one does and no workspace exists. D3.20's "no workspace" reads as that pair.
+
 ### 5.1 Three surfaces, not one
 
 Today every section is a `Card`, so every section weighs the same. A card that holds everything

@@ -1,4 +1,5 @@
 .m3-bottom-sheet__scrim {
+  z-index: 20;
   opacity: calc(1 - var(--drawer-swipe-progress, 0));
 }
 
@@ -7,6 +8,7 @@
 }
 
 .m3-bottom-sheet__viewport {
+  z-index: 20;
   position: fixed;
   inset: 0;
   display: flex;
