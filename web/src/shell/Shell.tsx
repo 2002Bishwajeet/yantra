@@ -11,6 +11,7 @@ import { NavigationRail, RailDestination } from '@/m3/navigation-rail/Navigation
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Text } from '@/m3/text/Text'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
+import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination } from './destinations'
 import { useFormFactor } from './formFactor'
 import { Bell } from './Bell'
@@ -291,6 +292,7 @@ export function Shell() {
     <>
       <HeadContent />
       <Chosen down={why === null ? null : <NotReached since={since} why={why} />} />
+      <StatusAnnouncer />
     </>
   )
 }

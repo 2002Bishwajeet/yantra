@@ -1,6 +1,9 @@
 # Yantra design system — Pattachitra
 
-**Status:** in use by the landing site (`landing/`). Adoptable by the M4 dashboard — see §7.
+**Status:** in use by the landing site (`landing/`). §7's offer to the dashboard was not taken:
+[ADR-0024](adr/0024-the-dashboard-is-material-3-built-by-hand.md) gave it a sage Material 3 scheme
+of its own on 2026-09-06, and Y-353 deleted the shadcn sheet §7 bridges to. The rest of this
+document is the landing site's and is current.
 
 The tokens are [`design/tokens.css`](../design/tokens.css) and that file is the source of truth.
 This document explains the reasoning; where the two disagree, the CSS wins.
@@ -164,6 +167,13 @@ UI needs, and do not bend the pigments into roles they cannot hold.
 line from the dashboard's `index.css`.
 
 ### The one known collision: `--accent`
+
+> **2026-09-07, Y-353: there is no collision any more, because there is no shadcn.**
+> [ADR-0024](adr/0024-the-dashboard-is-material-3-built-by-hand.md) superseded ADR-0014's component
+> and styling rows, and this row deleted the sheet. The dashboard's names are Material's
+> `--md-sys-*` roles in `web/src/m3/tokens.css`, and none of them is `--accent`. The bridge below
+> is kept as the reasoning it was; do not apply it.
+
 
 [ADR-0014](adr/0014-react-with-the-compiler-for-the-web-ui.md) chose **shadcn/ui in
 `cssVariables: true` mode**. shadcn defines its own `:root` token set, and exactly one name

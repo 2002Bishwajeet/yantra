@@ -1,5 +1,6 @@
-/* The control: the stock shadcn values `index.css` ships today, rewritten with
-   `light-dark()` only so the switcher can force a ground. Nothing else differs. */
+/* The control: neutral greyscale, no pigment, written with `light-dark()` so the
+   switcher can force a ground. It was the sheet `index.css` shipped until Y-353
+   deleted it for the Material tokens (ADR-0024). */
 :root {
   color-scheme: light dark;
   --background: light-dark(oklch(1 0 0), oklch(0.145 0 0));

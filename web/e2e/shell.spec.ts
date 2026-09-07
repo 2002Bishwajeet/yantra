@@ -39,6 +39,29 @@ test.describe('the shell on busy', () => {
     await keyboardWalk(page, 8)
   })
 
+  /** WCAG 2.4.11: the navigation bar and the FAB above it are fixed over the
+   *  foot of the phone's scroll, so the page keeps room under whatever takes
+   *  focus there and scrolls it clear of both. */
+  test('keeps a control focused at the foot of the page clear of the fixed bar', async ({
+    page,
+    size,
+  }) => {
+    test.skip(size !== 'phone', 'the navigation bar and the FAB are the phone shell')
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+
+    // The last control of a long page. The poll is the fleet's rows arriving,
+    // and it is also the guard: a control already on screen proves nothing.
+    const last = page.locator('main').locator('a[href], button:not([disabled])').last()
+    const view = page.viewportSize()!
+    await expect.poll(async () => (await last.boundingBox())?.y ?? 0).toBeGreaterThan(view.height)
+
+    await last.focus()
+    const focused = (await last.boundingBox())!
+    const bar = (await page.locator('.m3-navigation-bar').boundingBox())!
+    expect(focused.y + focused.height).toBeLessThanOrEqual(bar.y)
+  })
+
   test('looks like the board', async ({ page, size }) => {
     // The rail's ages arrive with the sessions read, after the heading.
     if (size === 'desktop') {

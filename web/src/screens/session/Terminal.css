@@ -98,3 +98,12 @@
   width: 20px;
   height: 20px;
 }
+
+/* WCAG 2.1.2: the way out of the pane, said where a person about to enter it
+   can read it, and named by the pane's own `aria-describedby`. */
+.terminal__escape {
+  margin: 0;
+  padding: 0 8px;
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}

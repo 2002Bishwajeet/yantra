@@ -9,6 +9,7 @@ import {
   type UseQueryOptions,
 } from '@tanstack/react-query'
 import type {
+  AgentRow,
   Listed,
   Looked,
   MachineSessions,
@@ -37,7 +38,6 @@ import {
   transcriptQuery,
   workspacesQuery,
 } from '@/api/queries'
-import type { AgentRow } from '@/columns'
 import type { Asked } from '@/lib/spend'
 
 export type { Reading } from '@/api/client'

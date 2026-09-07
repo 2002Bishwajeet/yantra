@@ -207,7 +207,11 @@ see Q6 in [`tracker.md`](tracker.md).
 tmux for persistence · Tailscale as the network · nothing persisted — state is declared, derived, or
 held in memory · appliance target `aarch64-unknown-linux-musl`.
 
-See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md) and its 2026-08-02 amendment on the datastore.
+The dashboard is React 19 with the compiler, TanStack Router, Query, Form, Table and Virtual, and
+Material 3 Expressive built by hand on Base UI — see [`web/README.md`](web/README.md).
+
+See [ADR-0004](docs/adr/0004-rust-for-the-daemon.md) and its 2026-08-02 amendment on the datastore,
+and [ADR-0024](docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md) for the browser half.
 
 ## Name
 

@@ -34,7 +34,7 @@ artifacts/
 # Web UI (M4)
 node_modules/
 dist/
-web/node_modules/
+web/node_modules
 web/dist/
 web/dist-e2e/
 web/.vite/
@@ -55,14 +55,3 @@ blob-report/
 .playwright/
 web/design/dist/
 
-# Claude Design sync: staged converter, build output, machine state
-.ds-sync/
-ds-bundle/
-.design-sync/.cache/
-.design-sync/learnings/
-.design-sync/node_modules
-web/.design-sync-css/
-web/.design-sync.vite.mjs
-web/dist-lib/
-web/index.d.ts
-.design-sync/css/palettes.css
