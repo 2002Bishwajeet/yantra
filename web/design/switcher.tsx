@@ -6,7 +6,7 @@ import neela from './options/neela.css?raw'
 import plex from './options/plex.css?raw'
 
 const OPTIONS = [
-  { id: 'today', css: today, says: 'the stock shadcn sheet — the control' },
+  { id: 'today', css: today, says: 'the neutral control — no pigment at all' },
   { id: 'kalam', css: kalam, says: 'ink on paper; the accent is the ink, and cinnabar means trouble and nothing else' },
   { id: 'patta', css: patta, says: 'the cloth ground and the soot line; indigo for action, cinnabar for trouble' },
   { id: 'neela', css: neela, says: 'a cool white ground; indigo for action, and cinnabar the only warm note' },

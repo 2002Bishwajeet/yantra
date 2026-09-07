@@ -36,8 +36,8 @@
   color-scheme: light dark;
 }
 
-/* Doubled on the root to outrank index.css's own color-scheme until Phase 3
-   deletes it; the bare form lets a wrapper pin a subtree. */
+/* Doubled: the root form outranks the bare `:root` above, and the bare form
+   lets a wrapper pin a subtree. */
 :root[data-theme="light"],
 [data-theme="light"] {
   color-scheme: light;

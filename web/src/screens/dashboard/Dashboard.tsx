@@ -2,7 +2,15 @@ import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { CircleDot, GitPullRequest, Plus, RotateCw } from 'lucide-react'
-import type { Attention, Event, Item, Machine, MachineSessions, Workspace } from '@/api'
+import type {
+  AgentRow,
+  Attention,
+  Event,
+  Item,
+  Machine,
+  MachineSessions,
+  Workspace,
+} from '@/api'
 import { fromReading } from '@/api/client'
 import { ApiError, asApiError } from '@/api/errors'
 import {
@@ -16,7 +24,6 @@ import {
   type Reading,
 } from '@/api/hooks'
 import { MISSING, statusQuery, workspacesQuery } from '@/api/queries'
-import type { AgentRow } from '@/columns'
 import { ago, at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'

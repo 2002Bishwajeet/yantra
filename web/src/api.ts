@@ -177,6 +177,10 @@ export type WorkspaceStatus = { workspace: string; machine: string } & (
   | { reached: 'no'; error: string }
 )
 
+/** A `null` status is Y-084's 404, or a workspace the last agent look predates
+ *  — the two readings are taken on their own clocks and can disagree. */
+export type AgentRow = { workspace: Workspace; status: WorkspaceStatus | null }
+
 /** [D2](../../docs/design/02-setup.md) §3.1's checks, one report per machine.
  *  `unknown` is a question that could not be asked and is never a shade of
  *  `absent` — the two send a reader to different places (R-23). */
