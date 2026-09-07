@@ -61,8 +61,10 @@ describe('step 1, the name and the machine', () => {
     mountNew('desktop', '/new', {
       'GET /api/machines': [200, { looked: 'failed', age_seconds: 0, error: 'tailscale: not running' }],
     })
-    expect(await screen.findByText(/The machines could not be read/)).toBeTruthy()
-    expect(screen.getByText('tailscale: not running')).toBeTruthy()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Machines could not be read')
+    expect(alert.textContent).toContain('tailscale: not running')
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
   })
 })
 

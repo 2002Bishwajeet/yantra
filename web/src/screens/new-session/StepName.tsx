@@ -1,5 +1,8 @@
 import { RefreshCw } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { fromReading } from '@/api/client'
 import { useMachines } from '@/api/hooks'
+import { keys } from '@/api/keys'
 import { Card } from '@/m3/card/Card'
 import { FilterChip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -15,6 +18,7 @@ import { generateName } from './words'
 function Machines(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
   const machines = useMachines()
+  const client = useQueryClient()
   if (machines.looked === 'pending') {
     return (
       <div aria-busy="true" className="ns__chips">
@@ -27,13 +31,16 @@ function Machines(props: { form: SessionForm; values: Values }) {
   if (machines.looked !== 'ok') {
     return (
       <ErrorSurface.Inline
-        error={{
-          kind: 'network',
-          said: machines.looked === 'failed' ? machines.error : '',
-          retryable: false,
-          describe: () => 'The machines could not be read, so none can be chosen yet.',
-        }}
-        title="Machines"
+        error={
+          fromReading(machines) ?? {
+            kind: 'network',
+            said: '',
+            retryable: false,
+            describe: () => 'The machines have not been looked at yet, so none can be chosen.',
+          }
+        }
+        reset={() => void client.invalidateQueries({ queryKey: keys.machines() })}
+        title="Machines could not be read"
       />
     )
   }
