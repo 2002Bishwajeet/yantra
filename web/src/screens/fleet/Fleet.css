@@ -1,0 +1,423 @@
+.fleet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+}
+
+.fleet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fleet__title {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fleet__looked {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.fleet__card {
+  gap: 10px;
+  padding: 16px 20px;
+}
+
+.fleet__eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 4px;
+}
+
+.fleet__eyebrow > .m3-mono {
+  font-size: var(--md-sys-typescale-body-small-size);
+}
+
+.fleet__spacer {
+  flex: 1;
+}
+
+.fleet__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+}
+
+.fleet__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One row, one DOM, three layouts: the grid areas move and nothing else. */
+.fleet__row {
+  display: grid;
+  grid-template-columns: 250px 180px 150px 90px minmax(0, 1fr) auto;
+  grid-template-areas: "state name machine age detail actions" "said said said said said said";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
+  min-height: 48px;
+  padding: 4px 6px 4px 14px;
+}
+
+.fleet__meta {
+  display: contents;
+}
+
+.fleet__tile {
+  grid-area: tile;
+  display: none;
+}
+
+.fleet__state {
+  grid-area: state;
+  min-width: 0;
+}
+
+.fleet__name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--md-sys-typescale-emphasized-body-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
+  color: inherit;
+  text-decoration: none;
+}
+
+.fleet__machine {
+  grid-area: machine;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+  text-decoration: none;
+}
+
+a.fleet__name:hover,
+a.fleet__machine:hover {
+  text-decoration: underline;
+}
+
+.fleet__age {
+  grid-area: age;
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.fleet__detail {
+  grid-area: detail;
+  min-width: 0;
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.fleet__actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.fleet__row .verb__said {
+  grid-area: said;
+}
+
+.fleet__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 4px 12px 4px 14px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-primary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.fleet__chevron {
+  width: 20px;
+  height: 20px;
+  transition: transform var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
+}
+
+.fleet__more[aria-expanded="true"] .fleet__chevron {
+  transform: rotate(180deg);
+}
+
+/* The GitHub block inside Needs you (D6 §3). */
+
+.github {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.github__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.github__unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--md-sys-typescale-body-small);
+  color: inherit;
+  text-decoration: none;
+}
+
+.github__unread > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.github__age {
+  margin-left: auto;
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.github__groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.github__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.github__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.github__count {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.github__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.github__row {
+  min-height: 48px;
+  padding: 4px 6px 4px 14px;
+}
+
+.github__tile {
+  display: none;
+  flex: none;
+}
+
+.github__text {
+  display: contents;
+}
+
+.github__ref {
+  flex: none;
+  width: 232px;
+  font-size: var(--md-sys-typescale-body-small-size);
+}
+
+.github__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.github__when {
+  flex: none;
+  width: 40px;
+  font-size: var(--md-sys-typescale-body-small-size);
+  text-align: right;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.github__verb {
+  flex: none;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.github__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+}
+
+.github__failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: var(--m3-row-radius);
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+.github__error {
+  padding: 8px 12px;
+  border-radius: var(--md-sys-shape-corner-small);
+  font-size: var(--md-sys-typescale-body-small-size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 60%, transparent);
+}
+
+/* Tablet: the tile appears, the columns narrow, the GitHub groups stack. */
+
+[data-shell="tablet"] .fleet__row {
+  grid-template-columns: var(--m3-tile-size) 160px 104px 84px 48px minmax(0, 1fr) auto;
+  grid-template-areas: "tile state name machine age detail actions" "said said said said said said said";
+  padding: 4px 6px 4px 8px;
+}
+
+[data-shell="tablet"] .fleet__tile,
+[data-shell="phone"] .fleet__tile {
+  display: inline-flex;
+}
+
+[data-shell="tablet"] .fleet__detail {
+  display: none;
+}
+
+[data-shell="tablet"] .github__groups,
+[data-shell="phone"] .github__groups {
+  grid-template-columns: 1fr;
+}
+
+[data-shell="tablet"] .github__tile,
+[data-shell="phone"] .github__tile {
+  display: inline-flex;
+}
+
+[data-shell="tablet"] .github__row,
+[data-shell="phone"] .github__row {
+  padding-left: 8px;
+}
+
+[data-shell="tablet"] .github__ref {
+  width: 196px;
+}
+
+/* Phone: the state on one line, the name and machine on the next. */
+
+[data-shell="phone"] .fleet__head {
+  gap: 8px;
+}
+
+[data-shell="phone"] .fleet__card {
+  padding: 16px;
+}
+
+[data-shell="phone"] .fleet__row {
+  grid-template-columns: var(--m3-tile-size) minmax(0, 1fr) auto;
+  grid-template-areas: "tile state actions" "tile meta actions" "said said said";
+  row-gap: 2px;
+  min-height: 56px;
+  padding: 6px 6px 6px 8px;
+}
+
+[data-shell="phone"] .fleet__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  grid-area: meta;
+  min-width: 0;
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-shell="phone"] .fleet__meta > * {
+  grid-area: auto;
+}
+
+[data-shell="phone"] .fleet__meta > * + *::before {
+  content: "· ";
+}
+
+[data-shell="phone"] .fleet__name {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-primary);
+}
+
+[data-shell="phone"] .fleet__detail {
+  display: none;
+}
+
+[data-shell="phone"] .fleet__row .verb__said {
+  grid-area: said;
+  margin-top: 6px;
+}
+
+[data-shell="phone"] .fleet__card--idle .fleet__eyebrow {
+  align-items: center;
+  min-height: 44px;
+}
+
+[data-shell="phone"] .github__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+[data-shell="phone"] .github__ref {
+  width: auto;
+}
+
+[data-shell="phone"] .github__when {
+  order: 3;
+  display: none;
+}
+
+[data-shell="phone"] .github__age {
+  display: none;
+}
+
+[data-shell="phone"] .github__head {
+  flex-wrap: wrap;
+}

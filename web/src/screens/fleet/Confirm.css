@@ -1,0 +1,15 @@
+.confirm .confirm__row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+/* The row is the Fleet's, word for word; here it always sits on white. */
+.confirm .m3-row {
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.confirm .m3-error {
+  margin-top: 8px;
+}
