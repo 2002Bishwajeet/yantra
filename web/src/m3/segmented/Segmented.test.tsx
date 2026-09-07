@@ -34,6 +34,23 @@ describe('Segmented', () => {
     expect(onValueChange).not.toHaveBeenCalled()
   })
 
+  it('keeps the pressed one pressed when uncontrolled, too', () => {
+    const onValueChange = vi.fn()
+    render(
+      <Segmented label="Theme" defaultValue="light" onValueChange={onValueChange}>
+        <Segment value="light">Light</Segment>
+        <Segment value="dark">Dark</Segment>
+      </Segmented>,
+    )
+    const light = screen.getByRole('button', { name: 'Light' })
+    fireEvent.click(light)
+    expect(light.getAttribute('aria-pressed')).toBe('true')
+    expect(onValueChange).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Dark' }))
+    expect(onValueChange).toHaveBeenLastCalledWith('dark')
+    expect(light.getAttribute('aria-pressed')).toBe('false')
+  })
+
   it('moves between segments with the arrow keys', async () => {
     render(
       <Segmented label="Theme" defaultValue="light">
