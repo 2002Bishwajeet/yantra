@@ -29,8 +29,10 @@ type Context = { client: QueryClient }
 /** A loader warms the reads its screen draws, so a hover starts them
  *  (`defaultPreload: 'intent'`). Not awaited: the screen draws its own
  *  skeleton while a look is out, and awaiting would hold the whole page on it.
- *  Only swept classes: `look` never throws, so a failed read is data the
- *  screen draws rather than an error the route shows. */
+ *  Only swept classes, whose failure is a `failed` envelope the screen draws
+ *  rather than an error the route shows. `prefetchQuery` rather than
+ *  `ensureQueryData`: a warm read is cancelled when the last observer leaves
+ *  before it lands, and nothing awaits the promise `ensureQueryData` rejects. */
 
 const root = createRootRouteWithContext<Context>()({
   component: Shell,
@@ -44,10 +46,10 @@ const dashboard = createRoute({
   path: '/',
   component: Dashboard,
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(workspacesQuery())
-    void client.ensureQueryData(machinesQuery())
-    void client.ensureQueryData(sessionsQuery())
-    void client.ensureQueryData(attentionQuery())
+    void client.prefetchQuery(workspacesQuery())
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(sessionsQuery())
+    void client.prefetchQuery(attentionQuery())
   },
   head: () => titled('Dashboard'),
 })
@@ -57,10 +59,10 @@ const fleet = createRoute({
   path: '/fleet',
   component: lazyRouteComponent(() => import('@/screens/fleet/Fleet'), 'Fleet'),
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(workspacesQuery())
-    void client.ensureQueryData(machinesQuery())
-    void client.ensureQueryData(sessionsQuery())
-    void client.ensureQueryData(attentionQuery())
+    void client.prefetchQuery(workspacesQuery())
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(sessionsQuery())
+    void client.prefetchQuery(attentionQuery())
   },
   head: () => titled('Fleet'),
 })
@@ -70,9 +72,9 @@ const machines = createRoute({
   path: '/machines',
   component: lazyRouteComponent(() => import('@/screens/machines/Machines'), 'Machines'),
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(machinesQuery())
-    void client.ensureQueryData(readinessQuery())
-    void client.ensureQueryData(sessionsQuery())
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(readinessQuery())
+    void client.prefetchQuery(sessionsQuery())
   },
   head: () => titled('Machines'),
 })
@@ -84,10 +86,10 @@ const machine = createRoute({
   path: '/m/$machine',
   component: lazyRouteComponent(() => import('@/screens/machine/Machine'), 'Machine'),
   loader: ({ context: { client }, params }) => {
-    void client.ensureQueryData(machinesQuery())
-    void client.ensureQueryData(machineReadinessQuery(params.machine))
-    void client.ensureQueryData(sessionsQuery())
-    void client.ensureQueryData(workspacesQuery())
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(machineReadinessQuery(params.machine))
+    void client.prefetchQuery(sessionsQuery())
+    void client.prefetchQuery(workspacesQuery())
   },
   head: ({ params }) => titled(params.machine),
 })
@@ -101,7 +103,7 @@ const sessionTerminal = createRoute({
     'SessionTerminal',
   ),
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(sessionsQuery())
+    void client.prefetchQuery(sessionsQuery())
   },
   head: ({ params }) => titled(`${params.session} on ${params.machine}`),
 })
@@ -111,7 +113,7 @@ const usage = createRoute({
   path: '/usage',
   component: lazyRouteComponent(() => import('@/screens/usage/Usage'), 'Usage'),
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(workspacesQuery())
+    void client.prefetchQuery(workspacesQuery())
   },
   head: () => titled('Usage'),
 })
@@ -127,8 +129,8 @@ const session = createRoute({
   }),
   component: lazyRouteComponent(() => import('@/screens/session/Session'), 'Session'),
   loader: ({ context: { client }, params }) => {
-    void client.ensureQueryData(workspacesQuery())
-    void client.ensureQueryData(statusQuery(params.name))
+    void client.prefetchQuery(workspacesQuery())
+    void client.prefetchQuery(statusQuery(params.name))
   },
   head: ({ params }) => titled(params.name),
 })
@@ -157,7 +159,7 @@ const newSession = createRoute({
     'NewSession',
   ),
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(machinesQuery())
+    void client.prefetchQuery(machinesQuery())
   },
   head: () => titled('New session'),
 })
@@ -188,7 +190,7 @@ const notifications = createRoute({
     'NotificationsScreen',
   ),
   loader: ({ context: { client } }) => {
-    void client.ensureQueryData(attentionQuery())
+    void client.prefetchQuery(attentionQuery())
   },
   head: () => titled('Notifications'),
 })

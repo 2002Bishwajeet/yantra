@@ -140,7 +140,9 @@ export function attachTerminal(
   }
 
   const bytes = new TextEncoder()
-  open()
+  // StrictMode runs an effect twice in dev, so the first attach closes at once.
+  // A close before this tick opens no socket, rather than closing a CONNECTING one.
+  waiting = setTimeout(open, 0)
 
   return {
     send,

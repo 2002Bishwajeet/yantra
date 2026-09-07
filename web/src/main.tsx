@@ -2,8 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { onCaughtError } from './shell/caught'
 
-createRoot(document.getElementById('root')!).render(
+createRoot(document.getElementById('root')!, { onCaughtError }).render(
   <StrictMode>
     <App />
   </StrictMode>,

@@ -174,7 +174,7 @@ describe('the socket wrapper', () => {
     expect(daemonised.connections()).toBe(0)
   })
 
-  it('ends a socket whose address cannot be opened as a socket error', () => {
+  it('ends a socket whose address cannot be opened as a socket error', async () => {
     const ended: (ApiError | null)[] = []
     attachTerminal('not a url', {
       size: () => ({ rows: 24, cols: 80 }),
@@ -182,8 +182,31 @@ describe('the socket wrapper', () => {
       onEnd: (refused) => ended.push(refused),
       onLink: () => {},
     })
-    expect(ended).toHaveLength(1)
+    await settled(() => expect(ended).toHaveLength(1))
     expect(ended[0]).toMatchObject({ kind: 'socket' })
+  })
+
+  /** StrictMode mounts, unmounts and mounts again, and a socket closed while
+   *  CONNECTING is a console error nobody can act on. `ws` aborts the upgrade
+   *  request the browser has already sent, so the count that proves this is
+   *  the constructor's and not the daemon's. */
+  it('opens nothing for an attach that is closed in the same tick', async () => {
+    const opened = vi.fn()
+    vi.stubGlobal(
+      'WebSocket',
+      class extends Ws {
+        constructor(url: string) {
+          super(url)
+          opened()
+        }
+      },
+    )
+    attach().link.close()
+    attached = undefined
+
+    await new Promise((done) => setTimeout(done, PAUSE))
+    expect(opened).not.toHaveBeenCalled()
+    expect(daemonised.connections()).toBe(0)
   })
 
   it('reopens a socket that dropped and says its size again', async () => {
