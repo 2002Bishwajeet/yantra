@@ -8,7 +8,9 @@ import { route } from './lib/routes'
  *  belong to other rows; what is asserted here is the question. */
 
 const KILL = route('session-terminal').path
-const DELETE = route('session').path
+// Spend, not Chat: the chat scrolls as its turns and the asking card arrive a
+// socket after load, so the picture behind the sheet would move run to run.
+const DELETE = `${route('session').path}?view=spend`
 
 /** Base UI moves focus into the popup after it opens; a walk that starts
  *  before that lands on the page behind. */
@@ -39,7 +41,7 @@ test.describe('Kill a session', () => {
     await focused(page)
     await axe(page)
     await keyboardWalk(page, 2)
-    await screenshot(page, 'confirm-kill', 'busy', size)
+    await screenshot(page, 'confirm-kill', 'busy', size, { overlay: true })
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
   })
@@ -50,9 +52,6 @@ test.describe('Delete a workspace', () => {
     await scenario(page, 'busy')
     await page.goto(DELETE)
     await expect(page.getByRole('heading', { level: 1, name: 'landing' }).first()).toBeVisible()
-    // Chat's "Claude is asking" card arrives a socket after load; the picture
-    // behind the dialog must not depend on which side of it the run lands.
-    await expect(page.getByText('Claude is asking')).toBeVisible()
     await page.getByRole('button', { name: 'Delete', exact: true }).click()
   })
 
@@ -69,7 +68,7 @@ test.describe('Delete a workspace', () => {
     await focused(page)
     await axe(page)
     await keyboardWalk(page, 2)
-    await screenshot(page, 'confirm-delete', 'busy', size)
+    await screenshot(page, 'confirm-delete', 'busy', size, { overlay: true })
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
   })
