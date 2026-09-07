@@ -51,6 +51,11 @@ jobs:
   e2e:
     name: e2e (${{ matrix.project }})
     runs-on: ubuntu-24.04
+    # The image the screenshot baselines are rendered in (playwright.config.ts):
+    # one Chromium, one set of fonts, here and on a developer's box.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001
     # One job per form factor: three sizes triple the run (plan §7).
     strategy:
       fail-fast: false
@@ -64,10 +69,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
       - run: npm run e2e -- --project ${{ matrix.project }}
-      # Baselines are rendered on Linux and the snapshot path carries no
-      # platform, so the report is where a font or layout diff is legible.
+      # The report is where a layout diff is legible.
       - name: Upload report on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
