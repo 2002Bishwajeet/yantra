@@ -127,18 +127,18 @@
         "machine": "cachyos-g14",
         "reached": "yes",
         "sessions": [
-          { "name": "yantra-web", "windows": 2, "attached": 1, "created": "Sun Sep  6 09:14:02 2026" },
-          { "name": "agent-sdk", "windows": 1, "attached": 0, "created": "Sun Sep  6 10:02:41 2026" },
-          { "name": "price-table", "windows": 1, "attached": 0, "created": "Sat Sep  5 22:17:09 2026" },
-          { "name": "scratch", "windows": 3, "attached": 0, "created": "Fri Sep  4 18:40:55 2026" }
+          { "name": "yantra-web", "windows": 2, "attached": 1, "created": "Sun Sep  6 09:14:02 2026", "created_at": 1788686042 },
+          { "name": "agent-sdk", "windows": 1, "attached": 0, "created": "Sun Sep  6 10:02:41 2026", "created_at": 1788688961 },
+          { "name": "price-table", "windows": 1, "attached": 0, "created": "Sat Sep  5 22:17:09 2026", "created_at": 1788646629 },
+          { "name": "scratch", "windows": 3, "attached": 0, "created": "Fri Sep  4 18:40:55 2026", "created_at": 1788547255 }
         ]
       },
       {
         "machine": "macbook",
         "reached": "yes",
         "sessions": [
-          { "name": "landing", "windows": 1, "attached": 1, "created": "Sun Sep  6 11:20:13 2026" },
-          { "name": "mux", "windows": 2, "attached": 0, "created": "Thu Sep  3 08:05:30 2026" }
+          { "name": "landing", "windows": 1, "attached": 1, "created": "Sun Sep  6 11:20:13 2026", "created_at": 1788693613 },
+          { "name": "mux", "windows": 2, "attached": 0, "created": "Thu Sep  3 08:05:30 2026", "created_at": 1788422730 }
         ]
       },
       { "machine": "pi-5", "reached": "yes", "sessions": [] },
@@ -146,7 +146,7 @@
         "machine": "hetzner-1",
         "reached": "yes",
         "sessions": [
-          { "name": "homelab-k8s", "windows": 1, "attached": 0, "created": "Sun Sep  6 07:48:27 2026" }
+          { "name": "homelab-k8s", "windows": 1, "attached": 0, "created": "Sun Sep  6 07:48:27 2026", "created_at": 1788680907 }
         ]
       },
       { "machine": "nas", "reached": "yes", "sessions": [] },
@@ -262,5 +262,24 @@
     "looked": "ok",
     "age_seconds": 0,
     "data": { "check": "github", "state": "present", "detail": "`gh` reports a stored credential here — that it works is not asked" }
+  },
+  "notifications": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      { "at": 1788695760, "kind": "awaiting_trust", "workspace": "yantra-web", "machine": "cachyos-g14", "said": "Claude wants cargo test" },
+      { "at": 1788678000, "kind": "crashed", "workspace": "ntfy-relay", "machine": "pi-5", "said": "exit 137 · the session is gone" },
+      { "at": 1788602400, "kind": "finished", "workspace": "landing", "machine": "macbook", "said": "3 turns · $1.10" },
+      { "at": 1788523200, "kind": "unreachable", "workspace": null, "machine": "thinkpad", "said": "last seen 2d ago · sessions kept" },
+      { "at": 1788516000, "kind": "relay-test", "workspace": null, "machine": null, "said": "yantra can reach this topic · ntfy.sh" }
+    ]
+  },
+  "about": {
+    "version": "0.1.0",
+    "target": "aarch64-unknown-linux-musl",
+    "built": "2026-09-06",
+    "uptime_seconds": 86412,
+    "listening_on": ["100.64.0.1:7717"],
+    "tailnet": "yantra.tail3a1b.ts.net"
   }
 }

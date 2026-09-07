@@ -34,6 +34,7 @@ function Group(props: { label: string; rows: AgentRow[]; sessions: Reading<Machi
           return (
             <li key={row.workspace.name}>
               <Row
+                role="link"
                 render={<Link params={{ name: row.workspace.name }} search={{ view: 'chat' }} to="/w/$name" />}
                 tone={open === row.workspace.name ? 'selected' : 'lowest'}
               >
@@ -73,7 +74,7 @@ export function SessionsRail() {
     <aside className="rail" aria-label="Sessions">
       <div className="rail__head">
         <h2 className="rail__title">Sessions</h2>
-        <Button icon={<Plus />} render={<Link to="/new" />}>
+        <Button icon={<Plus />} role="link" render={<Link to="/new" />}>
           New
         </Button>
       </div>

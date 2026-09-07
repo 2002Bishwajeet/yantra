@@ -67,8 +67,8 @@ function DesktopShell() {
             {DESTINATIONS.map((one) => (
               <Pill
                 key={one.to}
-                render={
-                  <Link
+                role="link"
+                render={<Link
                     activeOptions={{ exact: one.to === '/' }}
                     activeProps={{ 'aria-current': 'page' }}
                     to={one.to}
@@ -113,7 +113,7 @@ function TabletShell() {
     <div className="shell" data-shell="tablet">
       <NavigationRail
         fab={
-          <Fab label="New session" render={<Link to="/new" />}>
+          <Fab label="New session" role="link" render={<Link to="/new" />}>
             <Plus />
           </Fab>
         }
@@ -122,8 +122,8 @@ function TabletShell() {
           <RailDestination
             icon={one.icon}
             key={one.to}
-            render={
-              <Link
+            role="link"
+            render={<Link
                 activeOptions={{ exact: one.to === '/' }}
                 activeProps={{ 'aria-current': 'page' }}
                 to={one.to}
@@ -172,7 +172,7 @@ function PhoneShell() {
           top ? (
             <>
               <Guarded title="Notifications could not be drawn">
-                <Bell render={<Link to="/notifications" />} />
+                <Bell role="link" render={<Link to="/notifications" />} />
               </Guarded>
               <Account />
             </>
@@ -190,7 +190,7 @@ function PhoneShell() {
       <Page />
       {top ? (
         <>
-          <Fab className="shell__fab" label="New session" render={<Link to="/new" />}>
+          <Fab className="shell__fab" label="New session" role="link" render={<Link to="/new" />}>
             <Plus />
           </Fab>
           <NavigationBar>
@@ -198,8 +198,8 @@ function PhoneShell() {
               <BarDestination
                 icon={one.icon}
                 key={one.to}
-                render={
-                  <Link
+                role="link"
+                render={<Link
                     activeOptions={{ exact: one.to === '/' }}
                     activeProps={{ 'aria-current': 'page' }}
                     to={one.to}
@@ -218,8 +218,23 @@ function PhoneShell() {
 
 const shells = { desktop: DesktopShell, tablet: TabletShell, phone: PhoneShell }
 
-// Whether a seed is on the root, so going back to sage clears it once.
+// Whether a seed is on the root, so going back to sage clears it once. Outside
+// the component because the compiler declines a function holding `import()`.
 let seeded = false
+
+function reseed(seed: string | null) {
+  if (seed === null && !seeded) return
+  let stale = false
+  void import('@/m3/theme/scheme').then(({ applyScheme, clearScheme, schemeFor }) => {
+    if (stale) return
+    if (seed) applyScheme(schemeFor(seed, false), schemeFor(seed, true))
+    else clearScheme()
+    seeded = seed !== null
+  })
+  return () => {
+    stale = true
+  }
+}
 
 export function Shell() {
   // Here rather than on a page: every route is the dashboard being open, and
@@ -239,19 +254,7 @@ export function Shell() {
     else delete root.dataset.density
   }, [theme, density])
 
-  useEffect(() => {
-    if (seed === null && !seeded) return
-    let stale = false
-    void import('@/m3/theme/scheme').then(({ applyScheme, clearScheme, schemeFor }) => {
-      if (stale) return
-      if (seed) applyScheme(schemeFor(seed, false), schemeFor(seed, true))
-      else clearScheme()
-      seeded = seed !== null
-    })
-    return () => {
-      stale = true
-    }
-  }, [seed])
+  useEffect(() => reseed(seed), [seed])
 
   const Chosen = shells[factor]
   return (
@@ -274,7 +277,7 @@ export function Nowhere() {
       <Text as="p" scale="body-medium" tone="variant">
         The dashboard is where the sessions and machines are.
       </Text>
-      <Button render={<Link to="/" />} variant="tonal">
+      <Button role="link" render={<Link to="/" />} variant="tonal">
         Dashboard
       </Button>
     </div>

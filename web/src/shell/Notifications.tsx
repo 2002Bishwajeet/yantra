@@ -49,6 +49,7 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
         {entry.answer ? (
           <Button
             onClick={onOpen}
+            role="link"
             render={<Link params={{ name: entry.answer }} search={{ view: 'chat' }} to="/w/$name" />}
             size="s"
           >
@@ -64,7 +65,7 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
 /** The list itself: the popover's, the side sheet's and the phone screen's
  *  one body. `onOpen` closes whatever holds it when a row navigates. */
 export function NotificationsList(props: { onOpen?: () => void }) {
-  const { onOpen = () => {} } = props
+  const { onOpen } = props
   const { entries, fresh } = useEntries()
   const [filter, setFilter] = useState<'unread' | 'all'>('unread')
   const now = useTick(true)
@@ -101,7 +102,7 @@ export function NotificationsList(props: { onOpen?: () => void }) {
             </Eyebrow>
             <ul className="notifications__list">
               {shown[when].map((entry) => (
-                <EntryRow entry={entry} key={entry.id} now={now} onOpen={onOpen} />
+                <EntryRow entry={entry} key={entry.id} now={now} onOpen={() => onOpen?.()} />
               ))}
             </ul>
           </section>

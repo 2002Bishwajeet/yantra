@@ -58,6 +58,8 @@ function defaults() {
     readiness: contract.readiness,
     attention: contract.attention,
     github: { looked: 'never' },
+    notifications: contract.notifications,
+    about: contract.about,
     status: Object.fromEntries(
       contract.agents.map((one) => [one.data.workspace, one]),
     ),
@@ -146,6 +148,8 @@ const routes = [
   ['GET', /^\/api\/readiness$/, (s) => [200, s.readiness]],
   ['GET', /^\/api\/attention$/, (s) => [200, s.attention]],
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
+  ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
+  ['GET', /^\/api\/about$/, (s) => [200, s.about]],
   [
     'GET',
     /^\/api\/workspaces\/([^/]+)\/status$/,
