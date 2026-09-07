@@ -50,6 +50,9 @@ test.describe('Delete a workspace', () => {
     await scenario(page, 'busy')
     await page.goto(DELETE)
     await expect(page.getByRole('heading', { level: 1, name: 'landing' }).first()).toBeVisible()
+    // Chat's "Claude is asking" card arrives a socket after load; the picture
+    // behind the dialog must not depend on which side of it the run lands.
+    await expect(page.getByText('Claude is asking')).toBeVisible()
     await page.getByRole('button', { name: 'Delete', exact: true }).click()
   })
 

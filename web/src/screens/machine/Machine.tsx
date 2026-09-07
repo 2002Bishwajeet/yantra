@@ -184,6 +184,14 @@ export function Machine() {
         </Button>
       </div>
 
+      {machines.looked === 'failed' ? (
+        <ErrorSurface.Inline
+          error={fromReading(machines)!}
+          reset={() => void client.invalidateQueries()}
+          title="Machines could not be read"
+        />
+      ) : null}
+
       <div className="machine__columns">
         <ErrorBoundary eyebrow={name} title="About could not be drawn">
           <Card aria-labelledby="machine-about" className="machine__card">

@@ -99,6 +99,14 @@ describe('/m/nowhere', () => {
 })
 
 describe('/m/cachyos-g14 when nothing can be reached', () => {
+  it('says so in place when the machines body is not the contract', async () => {
+    const broken = { ...scenario('busy'), machines: { looked: 'ok', age_seconds: 0 } } as unknown as ReturnType<typeof scenario>
+    mount('desktop', '/m/cachyos-g14', broken)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Machines could not be read')
+    expect(screen.getByRole('heading', { level: 1, name: 'cachyos-g14' })).toBeTruthy()
+  })
+
   it('is one page-sized error with Try again', async () => {
     mount('desktop', '/m/cachyos-g14', scenario('unreachable'))
     const alert = await screen.findByRole('alert')
