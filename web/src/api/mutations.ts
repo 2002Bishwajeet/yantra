@@ -3,6 +3,7 @@ import type {
   Change,
   Cloning,
   Create,
+  Device,
   Killed,
   Listing,
   Looked,
@@ -170,6 +171,30 @@ export function useRecheckReadiness() {
       ),
     onSuccess: (answer, machine) =>
       client.setQueryData(keys.readiness(machine), answer),
+  })
+}
+
+/** Step 1 of the device flow: the code to type and where. The daemon polls
+ *  GitHub itself, so there is no poll write; `useGithub()` says when the
+ *  grant is held. A 409 is a flow already waiting for its code. */
+export function useGithubLogin() {
+  return useMutation<Device, ApiError, void>({
+    mutationFn: () => fetchJson<Device>('/api/github/login', { method: 'POST' }),
+  })
+}
+
+/** Drops the grant from memory and the env file; `/api/github` reads back
+ *  `connected: false` and the sweep that needs it fails on its next clock. */
+export function useGithubLogout() {
+  const client = useQueryClient()
+  return useMutation<void, ApiError, void>({
+    mutationFn: () => fetchJson<void>('/api/github', { method: 'DELETE' }),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.github() }),
+        client.invalidateQueries({ queryKey: keys.attention() }),
+        client.invalidateQueries({ queryKey: keys.repos() }),
+      ]),
   })
 }
 

@@ -12,6 +12,8 @@ import {
   useDeleteWorkspace,
   useDown,
   useEditWorkspace,
+  useGithubLogin,
+  useGithubLogout,
   useKillSession,
   useMakeDir,
   useRecheckReadiness,
@@ -178,6 +180,41 @@ describe('a session no workspace claims', () => {
   })
 })
 
+describe('the GitHub grant', () => {
+  it('begins the device flow and hands back the code to type, never a token', async () => {
+    const device = {
+      user_code: 'ABCD-1234',
+      verification_uri: 'https://github.com/login/device',
+      expires_in: 900,
+      interval: 5,
+    }
+    const asked = daemon(200, device)
+    const { result } = renderHookQueried(() => useGithubLogin())
+
+    const answer = await act(() => result.current.mutateAsync())
+
+    expect(sent(asked)).toMatchObject({ path: '/api/github/login', method: 'POST' })
+    expect(answer).toEqual(device)
+    expect(JSON.stringify(answer)).not.toMatch(/token/)
+  })
+
+  it('logs out with a DELETE and asks the grant, the inbox and the repositories again', async () => {
+    const asked = daemon(204)
+    const { result } = renderHookQueried(() => ({
+      logout: useGithubLogout(),
+      client: useQueryClient(),
+    }))
+    for (const key of [keys.github(), keys.attention(), keys.repos()])
+      result.current.client.setQueryData(key, looked.ok([]))
+
+    await act(() => result.current.logout.mutateAsync())
+
+    expect(sent(asked)).toMatchObject({ path: '/api/github', method: 'DELETE' })
+    for (const key of [keys.github(), keys.attention(), keys.repos()])
+      expect(result.current.client.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+})
+
 describe('a readiness recheck', () => {
   /** The POST answers the GET's own envelope at age 0, so it goes straight into
    *  that key rather than waiting for the sweep to notice. */
@@ -277,6 +314,8 @@ const writes = [
   ['recheck', () => useRecheckReadiness(), 'pi'],
   ['clone', () => useClone(), { machine: 'pi', url: 'https://github.com/a/b.git', path: '/a/b' }],
   ['mkdir', () => useMakeDir(), { machine: 'pi', path: '/a', make: 'b' }],
+  ['github login', () => useGithubLogin(), undefined],
+  ['github logout', () => useGithubLogout(), undefined],
 ] as const
 
 describe('every write refused', () => {
