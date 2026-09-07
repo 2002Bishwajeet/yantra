@@ -107,6 +107,9 @@ export async function envelope<T>(
   if (typeof word !== 'string' || !WORDS.has(word)) {
     return failed(contract(path))
   }
+  if (word === 'ok' && !('data' in (body as object))) {
+    return failed(contract(path, 'data'))
+  }
   return body as Looked<T>
 }
 

@@ -198,6 +198,14 @@ describe('look', () => {
     })
   })
 
+  it('reads an ok look with no data as a failed look naming the field', async () => {
+    vi.stubGlobal('fetch', answer(200, { looked: 'ok', age_seconds: 0 }))
+    expect(await look('/api/machines', signal)).toMatchObject({
+      looked: 'failed',
+      error: expect.stringContaining('no `data`'),
+    })
+  })
+
   it('reads a body that is not JSON the same way', async () => {
     vi.stubGlobal('fetch', answer(200, '<html>'))
     expect(await look('/api/machines', signal)).toMatchObject({

@@ -108,6 +108,16 @@ describe('/fleet when nothing can be reached', () => {
   })
 })
 
+describe('/fleet when the machines body is not the contract', () => {
+  it('says so in place and keeps the rows', async () => {
+    const broken = { ...scenario('busy'), machines: { looked: 'ok', age_seconds: 0 } } as unknown as ReturnType<typeof scenario>
+    mount('desktop', '/fleet', broken)
+    const alert = await screen.findByRole('alert', {}, { timeout: 2000 })
+    expect(alert.textContent).toContain('Machines could not be read')
+    expect(await screen.findByRole('region', { name: 'Running' }, { timeout: 2000 })).toBeTruthy()
+  })
+})
+
 describe('/fleet when a write is refused', () => {
   it("shows the daemon's text under the row that asked", async () => {
     mount('desktop', '/fleet', scenario('refused'))

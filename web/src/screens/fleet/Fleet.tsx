@@ -108,6 +108,13 @@ export function Fleet() {
           title="The workspaces could not be read"
         />
       ) : null}
+      {machines.looked === 'failed' ? (
+        <ErrorSurface.Inline
+          error={fromReading(machines)!}
+          reset={() => void client.invalidateQueries()}
+          title="Machines could not be read"
+        />
+      ) : null}
 
       <ErrorBoundary eyebrow="Needs you" title="Needs you could not be drawn">
         <Group
