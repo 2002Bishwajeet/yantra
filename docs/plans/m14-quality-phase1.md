@@ -97,7 +97,8 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
-| 134 | The terminal measures its cell before IBM Plex Mono has loaded when the suite runs in parallel, so the pane opens on the wrong column count | Found re-verifying Y-352 against `main` at `75c46fa`. `document.fonts.ready` no longer waits for the face since Y-353 shrank `index.css`. Gates Y-352 |
+| 134 | `session-terminal-busy-phone` and two other phone specs disagree with their baselines on the pane's column count | Open, and mis-diagnosed twice — see below. Gates Y-352 |
+
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
 because six screen agents are reading those components right now, and a signature change or a
@@ -109,15 +110,36 @@ baseline the e2e holds; row 77 changes a signature at every call site; row 79 ch
 reader says on every error layout. Each is its own row, and the one that moves a baseline
 re-renders it in the Playwright image in the same change.
 
-**Row 134, and the evidence for it.** `Terminal.tsx` opens the pane inside `document.fonts.ready`
-because a cell measured against a fallback face gives the wrong column count, and every line then
-wraps where the far side did not break it. That promise no longer holds under load. On
-`y-352-a11y` before the merge, the phone project passed four runs at six workers. On the merged
-tree it failed four — `session-terminal-busy-phone` every time, the pane rendering 41 columns where
-the baseline holds 49 — and passed at one worker and on the spec alone. So the baseline is right
-and the render is wrong, and `--update-snapshots` would write the fallback in as the truth. The
-only thing that moved between the two trees is Y-353 taking `index.css` from 21.0 KiB to 8.6, which
-is why the fix belongs to whoever reads the font path rather than to Y-352.
+**Row 134, and two wrong diagnoses before the measurements.** `session-terminal-busy-phone`
+fails at six workers and passes at one, and `confirm.spec.ts:40` and `session.spec.ts:202` join it
+under some changes. The pane reports 43 columns where the baseline holds 49.
+
+**It was first recorded as a fallback-face race**: `Terminal.tsx` opens the pane inside
+`document.fonts.ready`, that promise settles on the loads already pending, and nothing on the route
+asks for the mono face until the pane draws — so the pane measures the fallback. The fix that
+follows from that reading is to ask for the face with `document.fonts.load` before waiting. **It was
+written, and it is wrong.** With it, all three specs fail 4 runs out of 4, still reporting 43.
+
+**The measurements, at one worker, on this route.** The face is verifiably absent when the pane asks
+for it (`check` false) and present when the request resolves (`check` true, one face matched).
+
+| the pane draws with | columns |
+| --- | --- |
+| the woff2 aborted, so the true fallback | 52 |
+| the face loaded before the measurement | 43 |
+| whatever the stored baseline holds | 49 |
+
+**So the baseline is neither state.** It is not the fallback and it is not the face; 49 is a
+measurement taken while the swap was in flight. That rules out both readings — the original one,
+which called the baseline right and the render wrong, and its inverse, which would make the
+baselines fallback captures to be regenerated. Neither is supported.
+
+What is known: the column count depends on when the pane is measured relative to the font swap, the
+baselines were captured in that window, and loading the face correctly moves every one of them.
+What is not known: what 49 is a measurement *of*. **Whoever takes this row starts there**, and does
+not regenerate a baseline until they can say which of the three numbers is the right one. The
+attempted fix and its unit test were reverted rather than merged, because a change whose correct
+behaviour disagrees with every stored baseline is not ready to ship.
 
 ## The eyebrow, and the amendment it earned
 
