@@ -38,6 +38,22 @@ describe('the command palette', () => {
     await waitFor(() => expect(location.pathname + location.search).toBe('/w/site?view=chat'))
   })
 
+  /** 2.4.7: the list is 50 % of the window and scrolls, so an active option the
+   *  arrow keys moved to has to come with them. */
+  it('scrolls the option the arrow keys moved to into view', async () => {
+    const scrolled: HTMLElement[] = []
+    Element.prototype.scrollIntoView = function scrollIntoView(this: HTMLElement) {
+      scrolled.push(this)
+    }
+    mount('desktop')
+    await screen.findByRole('button', { name: /Search anything/ })
+    const dialog = await open()
+    const options = await dialog.findAllByRole('option')
+    fireEvent.keyDown(dialog.getByRole('combobox'), { key: 'ArrowDown' })
+    await waitFor(() => expect(options[1]!.getAttribute('aria-selected')).toBe('true'))
+    expect(scrolled.at(-1)).toBe(options[1])
+  })
+
   it('lists machines and pages too', async () => {
     mount('desktop')
     await screen.findByRole('button', { name: /Search anything/ })

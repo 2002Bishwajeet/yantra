@@ -522,13 +522,13 @@ import, and the page under them.
 ADR-0024 §7, measured by [`scripts/budget.mjs`](scripts/budget.mjs) over
 `dist/index.html`'s own entry, preloads and stylesheets at gzip -9.
 
-**As of 2026-09-07 it is not green.** `/` is **147.3 KiB** and the fonts are
-**78.5 KiB**, so the fonts hold and the first load misses by 2.3 KiB. `web.yml`
+**As of 2026-09-07 it is not green.** `/` is **147.6 KiB** and the fonts are
+**78.5 KiB**, so the fonts hold and the first load misses by 2.6 KiB. `web.yml`
 runs the budget with `continue-on-error: true` until it does hold. Deleting the
-pre-M14 stylesheet took `/` from 159.1 KiB to 146.7 (Y-353) and the unreachable
-screen added the rest (Y-358); what is left is react-dom, TanStack Router,
-TanStack Query, Base UI, the shell and the dashboard screen — there is no single
-thing to remove.
+pre-M14 stylesheet took `/` from 159.1 KiB to 146.7 (Y-353), the unreachable
+screen took it to 147.3 (Y-358) and the shell's live region to 147.6 (Y-352);
+what is left is react-dom, TanStack Router, TanStack Query, Base UI, the shell
+and the dashboard screen — there is no single thing to remove.
 
 **The build is not the wire.** `yantrad` serves `dist` through `ServeDir` with
 neither `precompressed_gzip` nor a `CompressionLayer`, so a phone downloads the

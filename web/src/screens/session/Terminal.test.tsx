@@ -35,6 +35,12 @@ const settled = <T,>(check: () => T) => waitFor(check, { timeout: 10_000 })
 const screenText = () =>
   document.querySelector('.xterm-rows')?.textContent ?? ''
 
+/** A key on the pane's own textarea, which is where xterm listens. */
+const press = (area: HTMLElement, key: string, keyCode: number) =>
+  area.dispatchEvent(
+    new KeyboardEvent('keydown', { key, code: key, keyCode, bubbles: true, cancelable: true }),
+  )
+
 const first = (heard: Frame[]) =>
   'text' in heard[0] ? (JSON.parse(heard[0].text) as unknown) : heard[0]
 
@@ -171,6 +177,38 @@ describe('the terminal in the dashboard', () => {
     expect(screen.getByRole('status').textContent).toMatch(/\d+×\d+/)
   })
 
+  /** **WCAG 2.1.2, and the reason the pane is not a trap.** Tab is the shell's:
+   *  it goes down the socket and moves no focus. Escape is the shell's too.
+   *  Only the pair leaves, and it leaves to the status line under the pane. */
+  it('sends Tab and Escape to the shell, and leaves the pane on Escape then Tab', async () => {
+    await open()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    const area = document.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement
+    area.focus()
+
+    press(area, 'Tab', 9)
+    await settled(() => expect(daemonised.heard.length).toBe(2))
+    expect(daemonised.heard[1]).toEqual({ bytes: [0x09] })
+    expect(document.activeElement).toBe(area)
+
+    press(area, 'Escape', 27)
+    await settled(() => expect(daemonised.heard.length).toBe(3))
+    expect(daemonised.heard[2]).toEqual({ bytes: [0x1b] })
+
+    press(area, 'Tab', 9)
+    expect(document.activeElement).toBe(screen.getByRole('status'))
+    // The Tab that left was not also typed into the session.
+    expect(daemonised.heard.length).toBe(3)
+  })
+
+  /** **2.4.3 and 3.2.1.** The fonts resolve after the page has settled, and a
+   *  pane that took focus then moved it without being asked. */
+  it('does not take focus when the fonts resolve', async () => {
+    await open()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    expect(document.activeElement).toBe(document.body)
+  })
+
   it('names which attempt of how many it is on while it reconnects', async () => {
     await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
@@ -243,7 +281,9 @@ describe('the terminal in the dashboard', () => {
     expect(
       screen.getByRole('link', { name: MACHINE }).getAttribute('href'),
     ).toBe(`/m/${MACHINE}`)
-    expect(screen.queryByRole('status')).toBeNull()
+    // 4.1.3: the line that has been speaking all along is the one that has to
+    // carry the end, so it stays rather than going with what ended it.
+    expect(screen.getByRole('status').textContent).toContain('ended · tmux yantra on cachyos-g14')
     // The first socket, then the five it is worth reopening.
     expect(daemonised.asked.length).toBe(ATTEMPTS + 1)
   }, 10000)
@@ -295,7 +335,7 @@ describe('the same terminal on a session no workspace claims', () => {
     )
     // The daemon's own chain is beside the name rather than instead of it.
     expect(screen.getByRole('alert').textContent).toContain("can't find session")
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('status').textContent).toContain('refused · tmux scratch on pi')
     // No workspace is invented for a session that has none.
     expect(document.body.textContent).not.toContain('Workspaces row')
   })
