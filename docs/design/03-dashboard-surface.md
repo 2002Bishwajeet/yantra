@@ -511,6 +511,14 @@ sections each repeating the same failure.
 R-23 applied to the browser's own network. The page does not draw the last data it had — old fleet
 state on screen during an outage is the failure mode this project spends the most effort avoiding.
 
+> **Amended 2026-09-07 (Y-358).** This board now stands for the daemon as well as for the tailnet.
+> A read that never reached `yantrad` — `fetch` rejected, or a gateway answered with none of the
+> daemon's own words — is worded the same on every path, so the page sees one broken connection
+> rather than seven broken classes. **The shell owns the board and draws it in place of whichever
+> route is open**, Settings included: the daemon is down for Settings as much as for the fleet. Its
+> title is *Yantra cannot be reached*, it keeps the two unknowns above, and it says it is retrying,
+> because the swept reads keep their own cadence and clear it when the daemon comes back.
+
 ### 7.3 The terminal says nothing while it connects
 
 [`Terminal.tsx:97-102`](../../web/src/components/Terminal.tsx) retries five times, 500 ms apart, in

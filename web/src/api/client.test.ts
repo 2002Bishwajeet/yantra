@@ -7,6 +7,7 @@ import {
   fromReading,
   look,
   makeQueryClient,
+  NOT_REACHED,
   queryOptionsThrowing,
   RETRIES,
 } from './client'
@@ -73,6 +74,35 @@ describe('fetchJson', () => {
       said: CANNOT_ASK,
       retryable: false,
     })
+  })
+
+  /** Y-358. A gateway status is the daemon's own only when it carries the
+   *  daemon's own sentence; with nothing in it, whatever sits between this
+   *  browser and the daemon answered and the daemon never heard the call. */
+  it('reads a gateway status with no sentence as the daemon not reached', async () => {
+    for (const [status, body] of [
+      [502, ''],
+      [503, '   '],
+      [504, '<html><body>504 Gateway Time-out</body></html>'],
+      [502, 'Error occurred while trying to proxy: 127.0.0.1:5174/api/relay'],
+    ] as const) {
+      vi.stubGlobal('fetch', answer(status, body))
+      const error = await thrown(() => fetchJson('/api/relay', { method: 'POST' }))
+      expect(error).toMatchObject({
+        kind: 'network',
+        said: `${NOT_REACHED}: HTTP ${status}`,
+        retryable: true,
+      })
+      // Never the relay sentence: the daemon was not asked to reach a relay.
+      expect((error as ApiError).describe()).toBe('The daemon did not answer.')
+    }
+  })
+
+  it('keeps a gateway status the daemon signed as its own refusal', async () => {
+    vi.stubGlobal('fetch', answer(502, 'ntfy.sh answered 401'))
+    const error = await thrown(() => fetchJson('/api/relay', { method: 'POST' }))
+    expect(error).toMatchObject({ kind: 'refused', status: 502, said: 'ntfy.sh answered 401' })
+    expect((error as ApiError).describe()).toBe('The daemon could not reach the relay.')
   })
 
   /** `write.rs` answers a verb's 404 as a bare string; `api.rs` answers its
@@ -181,13 +211,24 @@ describe('look', () => {
     expect(await look('/api/machines', signal)).toEqual(fleet)
   })
 
-  it('never throws: a non-200 is a failed look naming the status', async () => {
+  /** Y-358: the wording carries no path, so every class that met the same
+   *  dead proxy says the same thing and the shell sees one fact. */
+  it('never throws: a non-200 is one failed look, worded the same on every path', async () => {
     vi.stubGlobal('fetch', answer(502, 'bad gateway'))
-    expect(await look('/api/machines', signal)).toEqual({
+    const failed = { looked: 'failed', age_seconds: 0, error: `${NOT_REACHED}: HTTP 502` }
+    expect(await look('/api/machines', signal)).toEqual(failed)
+    expect(await look('/api/workspaces', signal)).toEqual(failed)
+  })
+
+  it('words a fetch that rejected the same way, on every path', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))))
+    const failed = {
       looked: 'failed',
       age_seconds: 0,
-      error: '/api/machines answered 502',
-    })
+      error: `${NOT_REACHED}: TypeError: Failed to fetch`,
+    }
+    expect(await look('/api/machines', signal)).toEqual(failed)
+    expect(await look('/api/sessions', signal)).toEqual(failed)
   })
 
   it('reads a body that is not an envelope as a failed look, not as data', async () => {

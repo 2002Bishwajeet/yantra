@@ -197,6 +197,7 @@ deleted everywhere else.
 | Y-355 | The GitLab grant | ⬜ todo | — | Y-342 | **Done** when the source step's GitLab card works the way GitHub's does, under an ADR that says where the grant lives. |
 | Y-356 | Streaming chat | ⬜ todo | — | Y-348 | **Done** when an ADR decides the SDK against the TUI in tmux (ADR-0011) and the Chat tab streams. |
 | Y-357 | The dashboard is served compressed | ⬜ todo | — | Y-353 | **Done** when `web/scripts/` gzips `dist` after the build, both halves of `crates/yantrad/src/web.rs` answer `Accept-Encoding: gzip` with the `.gz` and `Content-Encoding`, a router test covers each half, and `npm run budget` measures the wire. [Shape](docs/plans/m14-quality-phase1.md). |
+| Y-358 | The daemon-unreachable screen | ✅ done | claude | Y-345 | **Done** when a read that never reached the daemon is worded the same on every path, and the shell draws one full-page board in place of the route. **Done 2026-09-07**: `NOT_REACHED` in `client.ts`, the shell's gate over machines, workspaces and sessions, a `down` fixture scenario and `down.spec.ts` over every route at three sizes. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

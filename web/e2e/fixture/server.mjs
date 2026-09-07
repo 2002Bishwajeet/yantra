@@ -16,7 +16,9 @@
 // `api.rs`'s own 404s are JSON `{error}`. A handler answers a string for the
 // first and an object for the second, and the strings are the daemon's own.
 //
-// Three scenario fields are about the wire rather than the fleet. `refuse`
+// Four scenario fields are about the wire rather than the fleet. `down`
+// answers every call, read or write, the way Vite's proxy answers with no
+// daemon behind it: a 502, `text/plain`, and an empty body. `refuse`
 // answers every write and every terminal upgrade with that status and text,
 // as the daemon's write authoriser does (write.rs, `Refused`). `flaky` fails
 // each read once with a 502 and then answers it, and refuses each terminal
@@ -459,6 +461,10 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { 'content-type': 'text/plain' }).end('ok')
     return
   }
+  if (state.down) {
+    response.writeHead(502, { 'content-type': 'text/plain' }).end()
+    return
+  }
   if (request.method === 'GET' && flakes(state, url.pathname)) {
     response.writeHead(502, { 'content-type': 'text/plain' }).end('bad gateway')
     return
@@ -500,6 +506,10 @@ const sockets = new WebSocketServer({ noServer: true })
 
 server.on('upgrade', (request, socket, head) => {
   const { state, url } = select(request)
+  if (state.down) {
+    socket.end('HTTP/1.1 502 Bad Gateway\r\nconnection: close\r\n\r\n')
+    return
+  }
   const workspace = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/terminal$/)
   const session = url.pathname.match(/^\/api\/machines\/([^/]+)\/sessions\/([^/]+)\/terminal$/)
   if (!workspace && !session) {
