@@ -15,11 +15,13 @@ export type IconButtonProps = Base.Props & {
 
 /** 44 px drawn, 48 px hit (ADR-0024 §4). */
 export function IconButton(props: IconButtonProps) {
-  const { label, variant, badge, className, children, ...rest } = props
+  const { label, variant, badge, className, children, render, ...rest } = props
   return (
     <Base
       className={clsx('m3-icon-button', 'm3-interactive', className)}
       data-variant={variant ?? 'standard'}
+      render={render}
+      nativeButton={!render}
       {...rest}
     >
       <span className="m3-sr-only">{label}</span>

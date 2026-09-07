@@ -132,3 +132,39 @@ describe('a route warms its reads', () => {
     await waitFor(() => expect(asked).toContain('/api/machines/pi-5/readiness'))
   })
 })
+
+const tick = () => new Promise((done) => setTimeout(done, 0))
+
+/** A warm read is cancelled when the page that warmed it goes away — StrictMode
+ *  in dev, a person who leaves the dashboard before the looks land in
+ *  production. The loader awaits nothing, so a promise that rejects for it has
+ *  nobody to reach. */
+describe('a warm-up the page outlived', () => {
+  it('is not an unhandled rejection', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_path: string, init?: RequestInit) =>
+          new Promise((_never, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            )
+          }),
+      ),
+    )
+    const loose: unknown[] = []
+    const collect = (reason: unknown) => loose.push(reason)
+    process.on('unhandledRejection', collect)
+    try {
+      history.pushState(null, '', '/')
+      render(<App />)
+      await tick()
+      cleanup()
+      await tick()
+      await tick()
+      expect(loose).toEqual([])
+    } finally {
+      process.off('unhandledRejection', collect)
+    }
+  })
+})
