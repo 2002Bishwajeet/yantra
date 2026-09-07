@@ -238,6 +238,15 @@ pigments, derives its own semantic colour, and what it does with the motif vocab
 
 ---
 
+> **2026-09-06, Y-337: D7 was answered on the canvas, not in a document.** The owner rejected the
+> options round's premise on 2026-09-04 and redesigned the whole dashboard in Material 3
+> Expressive (Y-332 to Y-336). What survived is written as
+> [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) and built under
+> [M14](../plans/m14-the-material-dashboard.md). §7.2's list is amended where D3 is: the type
+> scale and motion move to Material's tokens, the four marks, the semantic roles and the budget
+> stand.
+
+
 ## 8. What is in flight
 
 | PR | Branch | Carries | Bearing on this plan |
