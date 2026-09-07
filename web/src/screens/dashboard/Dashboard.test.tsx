@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import type { Machine } from '@/api'
+import { aMachine, looked } from '@/api/fixtures'
 import { writePrefs } from '@/shell/prefs'
-import { mount, scenario, unmount } from '@/screens/fleet/harness'
+import { mount, scenario, unmount, type Scenario } from '@/screens/fleet/harness'
 
 /* The e2e fixture's own instant, so an age here reads as it does in a
    screenshot (`e2e/lib/scenario.ts`). Only Date is faked: React Testing
@@ -155,6 +157,35 @@ describe('the Dashboard on an empty fleet', () => {
     )
     expect(screen.getByText('no workspaces yet')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
+  })
+})
+
+describe('the Dashboard on the first run', () => {
+  /** No workspace, and the sweep asks no machine because none is named, so
+   *  readiness is blank and the machine list is the only signal. */
+  const firstRun = (machines: Machine[]): Scenario =>
+    Object.assign(scenario('empty'), {
+      machines: looked.ok(machines),
+      readiness: looked.ok<never[]>([]),
+    })
+
+  it('is the setup checklist while no machine is online', async () => {
+    mount('desktop', '/', firstRun([aMachine({ online: false })]))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+  })
+
+  it('is the checklist when the tailnet lists no machine at all', async () => {
+    mount('desktop', '/', firstRun([]))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+  })
+
+  it('gives way to the empty board as soon as one machine answers', async () => {
+    mount('desktop', '/', firstRun([aMachine({ online: true })]))
+    await drawn()
+    expect(screen.queryByRole('heading', { name: 'Set up Yantra' })).toBeNull()
+    expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
   })
 })
 

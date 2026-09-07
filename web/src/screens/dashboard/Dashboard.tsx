@@ -68,6 +68,10 @@ const KillSession = lazy(() =>
   import('@/screens/fleet/Confirm').then((it) => ({ default: it.KillSession })),
 )
 
+/** The first run is a rare page and a whole one, so it arrives in its own
+ *  chunk behind the skeleton this page already draws. */
+const Setup = lazy(() => import('@/screens/setup/Setup').then((it) => ({ default: it.Setup })))
+
 const kill = (ready: boolean) => (
   <Button className="dash__kill" disabled={!ready} tone="error" variant="text">
     Kill
@@ -734,6 +738,17 @@ export function Dashboard() {
         {title}
         <Pending />
       </>
+    )
+  }
+
+  // D3 §4.8, amended 2026-09-07: the first run is a fleet with no workspace and
+  // no machine answering, and the checklist is the page until one answers. It
+  // draws its own h1, so this one is not also rendered.
+  if (fleetEmpty && machines.looked === 'ok' && !machines.data.some((one) => one.online)) {
+    return (
+      <Suspense fallback={<Pending />}>
+        <Setup />
+      </Suspense>
     )
   }
 
