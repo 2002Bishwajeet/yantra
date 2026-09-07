@@ -5,8 +5,13 @@ import { FIXTURE_PORT } from './lib/sizes'
  *  write is a fact the next read agrees with. Straight to the fixture's port
  *  with the header, so this is also the way a test outside a page picks one. */
 const api = `http://127.0.0.1:${FIXTURE_PORT}/api`
+
+/** A test id is the same on every run, and the fixture keeps what a write
+ *  left behind, so a reused server (`reuseExistingServer`) would answer the
+ *  second run from the first run's state. One word per run keys them apart. */
+const RUN = Math.random().toString(36).slice(2, 8)
 const under = (scenario: string) => ({
-  headers: { 'x-fixture-scenario': `${scenario}#${test.info().testId}` },
+  headers: { 'x-fixture-scenario': `${scenario}#${test.info().testId}-${RUN}` },
 })
 
 test('busy lists the brief\'s six machines and ten workspaces', async ({ request }) => {
