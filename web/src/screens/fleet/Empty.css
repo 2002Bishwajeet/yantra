@@ -1,0 +1,24 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.empty__title {
+  font: var(--md-sys-typescale-emphasized-body-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-large-tracking);
+}
+
+.empty__why {
+  max-width: 48ch;
+}
+
+/* A tinted card's empty block takes the card's own text colour. */
+.m3-card[data-surface="primary"] .empty__why,
+.m3-card[data-surface="tertiary"] .empty__why {
+  color: inherit;
+}

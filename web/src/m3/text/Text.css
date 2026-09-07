@@ -164,26 +164,3 @@
 .m3-text[data-tone="error"] {
   color: var(--md-sys-color-error);
 }
-
-.m3-clip {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* BRIEF.md: every age, duration, token count and amount is mono. */
-.m3-mono {
-  font-family: var(--md-ref-typeface-mono);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The boards' uppercase eyebrow, on label-medium; R14 §4 notes the case and
-   tracking are the boards' and not M3's. */
-.m3-eyebrow {
-  margin: 0;
-  font: var(--md-sys-typescale-label-medium);
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: var(--md-sys-color-on-surface-variant);
-}

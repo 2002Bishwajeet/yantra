@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { Plus } from 'lucide-react'
 import { ExtendedFab, Fab } from './Fab'
-
-afterEach(cleanup)
 
 describe('Fab', () => {
   it('is named by its label and sized by a word', () => {

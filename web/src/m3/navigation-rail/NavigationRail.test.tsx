@@ -1,12 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { Link } from '@tanstack/react-router'
 import { LayoutDashboard, Layers, Plus } from 'lucide-react'
 import { renderRouted } from '@/test/inRouter'
 import { Fab } from '../fab/Fab'
 import { NavigationRail, RailDestination } from './NavigationRail'
-
-afterEach(cleanup)
 
 describe('NavigationRail', () => {
   it('is the main navigation with its FAB and destinations', () => {
@@ -30,7 +28,8 @@ describe('NavigationRail', () => {
     expect(screen.getByRole('button', { name: 'Fleet' }).hasAttribute('aria-current')).toBe(false)
   })
 
-  it('lets the router mark the current link', async () => {
+  it('lets the router mark the current link, and warns of nothing', async () => {
+    const complained = vi.spyOn(console, 'error').mockImplementation(() => {})
     await renderRouted(
       <NavigationRail>
         <RailDestination icon={<LayoutDashboard />} render={<Link to="/" />}>
@@ -38,6 +37,10 @@ describe('NavigationRail', () => {
         </RailDestination>
       </NavigationRail>,
     )
-    expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBe('page')
+    const link = screen.getByRole('link', { name: 'Dashboard' })
+    expect(link.getAttribute('aria-current')).toBe('page')
+    expect(link.hasAttribute('type')).toBe(false)
+    expect(complained).not.toHaveBeenCalled()
+    complained.mockRestore()
   })
 })

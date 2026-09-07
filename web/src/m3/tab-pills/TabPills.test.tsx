@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TabPanel, TabPill, TabPills, TabsRoot } from './TabPills'
-
-afterEach(cleanup)
 
 function Session() {
   return (
@@ -37,7 +35,12 @@ describe('TabPills', () => {
     fireEvent.click(terminal)
     expect(terminal.getAttribute('aria-selected')).toBe('true')
     expect(chat.getAttribute('aria-selected')).toBe('false')
-    // The panel swap waits on a transition jsdom never runs; the browser
-    // swaps it, and the gallery screenshot shows that.
+    await waitFor(() => expect(screen.getByRole('tabpanel').textContent).toBe('the terminal'))
+  })
+
+  it('gives the panel a focus stop that is not hidden', () => {
+    render(<Session />)
+    const panel = screen.getByRole('tabpanel')
+    expect(panel.getAttribute('tabindex')).toBe('0')
   })
 })

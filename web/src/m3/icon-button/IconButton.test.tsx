@@ -1,10 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Bell } from 'lucide-react'
 import { Badge } from '../badge/Badge'
 import { IconButton } from './IconButton'
-
-afterEach(cleanup)
 
 describe('IconButton', () => {
   it('takes its name from the label and hides the icon', () => {

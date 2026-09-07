@@ -4,7 +4,8 @@
  * the next page opens on the last page's failure.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import { answer } from '../test/daemon'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import {
   createMemoryHistory,
@@ -20,10 +21,7 @@ import { asApiError } from './errors'
 import { useResetOnRouteChange } from './hooks'
 import { aboutQuery } from './queries'
 
-afterEach(() => {
-  cleanup()
-  vi.unstubAllGlobals()
-})
+afterEach(() => vi.unstubAllGlobals())
 
 /** What the Packages agent's `ErrorSurface` reads: one shape, one sentence. */
 function Fallback({ error }: FallbackProps) {
@@ -72,17 +70,11 @@ describe('a route under an error boundary', () => {
   it('shows the typed error, and a navigation clears it and asks again', async () => {
     let refusing = true
     const asked = vi.fn(() =>
-      refusing
-        ? Promise.resolve({
-            ok: false,
-            status: 503,
-            text: () => Promise.resolve('could not establish who is calling'),
-          })
-        : Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({ version: '0.9.0' }),
-          }),
+      Promise.resolve(
+        refusing
+          ? answer(503, 'could not establish who is calling')
+          : answer(200, { version: '0.9.0', uptime_seconds: 1, listening_on: [] }),
+      ),
     )
     vi.stubGlobal('fetch', asked)
     const router = open()

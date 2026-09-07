@@ -3,9 +3,14 @@ import { at, FIXTURE_PORT, WEB_PORT } from './e2e/lib/sizes'
 
 /* Every screen at three sizes against the fixture daemon (ADR-0024 §6).
  *
- * Snapshots are OS-specific and the path template carries no platform on
- * purpose, as landing's does: baselines are rendered on Linux and CI runs Linux.
- * Add {platform} before trusting a diff from anywhere else.
+ * Snapshots are rendered by one Chromium on one set of fonts: the Playwright
+ * image CI's e2e jobs run in (web.yml). A baseline made on a developer's box
+ * differs by a few pixels of text, so regenerate them inside that image:
+ *
+ *   podman run --rm -v "$PWD/..:/work" -w /work/web \
+ *     mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --update-snapshots
+ *
+ * The path template carries no platform on purpose: there is one.
  *
  * `E2E_DEV=1` runs `vite` instead of a build and `vite preview`, for a spec
  * being written against a page that is still changing. */
@@ -27,6 +32,9 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
 
   expect: {
+    // The fixture is one Node process for every worker on three projects, and
+    // a read behind six of them takes longer than the 5 s default.
+    timeout: 10_000,
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',

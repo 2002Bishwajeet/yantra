@@ -18,6 +18,7 @@ import {
   envelope,
   failed,
   fetchJson,
+  fields,
   json,
   look,
   POLL_MS,
@@ -38,14 +39,19 @@ function swept<T>(
   queryKey: readonly unknown[],
   path: string,
   staleTime = SWEEP_MS,
+  refetchInterval = POLL_MS,
 ) {
   return queryOptions({
     queryKey,
     queryFn: ({ signal }) => look<T>(path, signal),
     staleTime,
-    refetchInterval: POLL_MS,
+    refetchInterval,
   })
 }
+
+/** The two classes on the daemon's 300 s clock: asked every 30 s, since 5 s
+ *  buys nothing there but a request. */
+const SLOW_POLL_MS = SWEEP_MS
 
 /** A read a person asked for, which costs an ssh round trip
  *  ([ADR-0019](../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)):
@@ -73,7 +79,7 @@ export const machineReadinessQuery = (name: string) =>
 /** On the daemon's 300 s clock rather than the 30 s sweep, which is why the
  *  band that draws it stamps itself (D6 §2). */
 export const attentionQuery = () =>
-  swept<Attention>(keys.attention(), '/api/attention', ATTENTION_SWEEP_MS)
+  swept<Attention>(keys.attention(), '/api/attention', ATTENTION_SWEEP_MS, SLOW_POLL_MS)
 
 // Y-084's route is the one that answers something other than 200, and its 404
 // says the agent look has not seen a name the workspaces look has.
@@ -179,22 +185,24 @@ export const probeQuery = (name: string, path: string) =>
 export const githubQuery = () =>
   queryOptions({
     queryKey: keys.github(),
-    queryFn: ({ signal }) => fetchJson<Connection>('/api/github', { signal }),
+    queryFn: ({ signal }) =>
+      fetchJson<Connection>('/api/github', { signal }, fields('connected', 'login', 'scopes')),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
 
 /** Y-342. Swept on `attention`'s clock — it leaves the tailnet. */
 export const reposQuery = () =>
-  swept<Repo[]>(keys.repos(), '/api/repos', ATTENTION_SWEEP_MS)
+  swept<Repo[]>(keys.repos(), '/api/repos', ATTENTION_SWEEP_MS, SLOW_POLL_MS)
 
 /** Y-343. An in-memory ring buffer, polled like the fleet: cheap, and it is
- *  what a bell counts. */
+ *  what a bell counts. api.ts has it as `Looked<Event[]>` now; the guard
+ *  reads the envelope's word until this type follows. */
 export const notificationsQuery = () =>
   queryOptions({
     queryKey: keys.notifications(),
     queryFn: ({ signal }) =>
-      fetchJson<Notification[]>('/api/notifications', { signal }),
+      fetchJson<Notification[]>('/api/notifications', { signal }, fields('looked')),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
@@ -203,7 +211,8 @@ export const notificationsQuery = () =>
 export const aboutQuery = () =>
   queryOptions({
     queryKey: keys.about(),
-    queryFn: ({ signal }) => fetchJson<About>('/api/about', { signal }),
+    queryFn: ({ signal }) =>
+      fetchJson<About>('/api/about', { signal }, fields('version', 'uptime_seconds', 'listening_on')),
     staleTime: SWEEP_MS,
   })
 

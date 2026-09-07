@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type {
   Change,
+  Cloning,
   Create,
+  Device,
   Killed,
+  Listing,
   Looked,
   Opened,
   Readiness,
@@ -48,7 +51,9 @@ export function useEditWorkspace() {
 }
 
 /** `force` skips the daemon's refusal to strand a live session, which is the
- *  thing worth reading — a surface sends it only where a person meant it. */
+ *  thing worth reading — a surface sends it only where a person meant it.
+ *  What was held about the name goes with it, or a mounted status would keep
+ *  polling a workspace that is gone. */
 export function useDeleteWorkspace() {
   const client = useQueryClient()
   return useMutation<Removed, ApiError, { name: string; force?: boolean }>({
@@ -56,11 +61,13 @@ export function useDeleteWorkspace() {
       fetchJson<Removed>(workspace(name, force ? '?force=true' : ''), {
         method: 'DELETE',
       }),
-    onSuccess: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: keys.workspaces() }),
+    onSuccess: async (_, { name }) => {
+      client.removeQueries({ queryKey: keys.workspace(name) })
+      await Promise.all([
+        client.invalidateQueries({ queryKey: keys.workspaces(), exact: true }),
         client.invalidateQueries({ queryKey: keys.sessions() }),
-      ]),
+      ])
+    },
   })
 }
 
@@ -166,3 +173,62 @@ export function useRecheckReadiness() {
       client.setQueryData(keys.readiness(machine), answer),
   })
 }
+
+/** Step 1 of the device flow: the code to type and where. The daemon polls
+ *  GitHub itself, so there is no poll write; `useGithub()` says when the
+ *  grant is held. A 409 is a flow already waiting for its code. */
+export function useGithubLogin() {
+  return useMutation<Device, ApiError, void>({
+    mutationFn: () => fetchJson<Device>('/api/github/login', { method: 'POST' }),
+  })
+}
+
+/** Drops the grant from memory and the env file; `/api/github` reads back
+ *  `connected: false` and the sweep that needs it fails on its next clock. */
+export function useGithubLogout() {
+  const client = useQueryClient()
+  return useMutation<void, ApiError, void>({
+    mutationFn: () => fetchJson<void>('/api/github', { method: 'DELETE' }),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.github() }),
+        client.invalidateQueries({ queryKey: keys.attention() }),
+        client.invalidateQueries({ queryKey: keys.repos() }),
+      ]),
+  })
+}
+
+// ---- Y-349: clone and mkdir, for New session (Y-344's routes) ----
+
+/** `POST /api/machines/{m}/clone` → 202 with the tmux session `git clone`
+ *  runs in. Nothing is awaited: progress is that session's terminal socket,
+ *  and completion is `probeQuery` on `path`. Asking twice attaches (I-30).
+ *  The session is the one thing that exists at 202, so it is the one key. */
+export function useClone() {
+  const client = useQueryClient()
+  return useMutation<Cloning, ApiError, { machine: string; url: string; path: string }>({
+    mutationFn: ({ machine, url, path }) =>
+      fetchJson<Cloning>(`/api/machines/${encodeURIComponent(machine)}/clone`, {
+        method: 'POST',
+        ...json({ url, path }),
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.sessions(), exact: true }),
+  })
+}
+
+/** `POST …/dirs` with `make`: one directory under `path`, answered with the
+ *  listing that now holds it — which goes straight into that level's key. */
+export function useMakeDir() {
+  const client = useQueryClient()
+  return useMutation<Listing, ApiError, { machine: string; path: string; make: string }>({
+    mutationFn: ({ machine, path, make }) =>
+      fetchJson<Listing>(`/api/machines/${encodeURIComponent(machine)}/dirs`, {
+        method: 'POST',
+        ...json({ path, make }),
+      }),
+    onSuccess: (listing, { machine, path }) =>
+      client.setQueryData(keys.dirs(machine, path), listing),
+  })
+}
+
+// ---- end Y-349 ----

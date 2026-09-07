@@ -1,12 +1,13 @@
 .m3-navigation-bar {
+  --m3-safe-bottom: env(safe-area-inset-bottom, 0px);
   display: grid;
   grid-auto-columns: 1fr;
   grid-auto-flow: column;
   flex: none;
   box-sizing: border-box;
-  height: 64px;
-  padding: 0 8px;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* R14 §6.1: 64 is the container above the home-indicator inset, not with it. */
+  height: calc(64px + var(--m3-safe-bottom));
+  padding: 0 8px var(--m3-safe-bottom);
   background: var(--md-sys-color-surface-container);
 }
 

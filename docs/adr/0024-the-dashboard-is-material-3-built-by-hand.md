@@ -129,3 +129,12 @@ test, not a note.
 > fixes 40. Nothing visible depends on it: sage ships from the file as CSS, and only the
 > Appearance picker's sage preview goes through the engine. `scheme.test.ts` names the six roles
 > and their ceilings.
+
+> **2026-09-07, Y-352: the eyebrow is label-medium, and its case and tracking are the brief's.**
+> §4 names the seven numbers where the brief and Material disagreed, and says nothing about the
+> small-caps label the boards put above a title. It is Material's **label-medium**: `.m3-eyebrow`
+> in `tokens.css` takes `--md-sys-typescale-label-medium` whole — 500 12px/16px on the plain
+> typeface — and colours itself `on-surface-variant`. Two properties are not Material's, and both
+> are BRIEF.md's and kept: `text-transform: uppercase`, and 0.8 px of tracking where the role gives
+> 0.5. The boards' eyebrow must read as a label rather than a small title, and the case is what
+> does that.

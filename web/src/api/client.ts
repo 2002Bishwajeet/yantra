@@ -2,18 +2,50 @@ import { QueryClient } from '@tanstack/react-query'
 import type { Looked } from '@/api'
 import { ApiError, isApiError } from '@/api/errors'
 
-const contract = (path: string) =>
-  `${path} answered something this dashboard cannot read`
+const contract = (path: string, missing?: string) =>
+  `${path} answered something this dashboard cannot read${missing ? `: no \`${missing}\`` : ''}`
+
+/** What the daemon said with a status. `write.rs` answers a bare string and
+ *  `api.rs` a `{error}` for its 404s; either way the sentence, never the
+ *  braces. A body that cannot be read is its own reason. */
+async function said(response: Response): Promise<string> {
+  let text: string
+  try {
+    text = await response.text()
+  } catch (cause) {
+    return String(cause)
+  }
+  try {
+    const body = JSON.parse(text) as { error?: unknown } | null
+    if (typeof body?.error === 'string') return body.error
+  } catch {
+    // A bare string, which is what most refusals are.
+  }
+  return text
+}
+
+/** A guard on a 2xx body: the name of what is missing, or null. */
+export type Shape = (body: unknown) => string | null
+
+/** The body is an object carrying every named field. */
+export const fields =
+  (...names: string[]): Shape =>
+  (body) => {
+    if (typeof body !== 'object' || body === null) return names[0] ?? 'body'
+    return names.find((name) => !(name in body)) ?? null
+  }
 
 /** One fetch for everything that is not a `Looked` envelope. Every way it does
  *  not answer the body is an `ApiError` of one kind: `fetch` rejecting is
  *  `network`, a 404 is `missing`, any other non-2xx is `refused` carrying the
  *  daemon's own sentence, a body that is not JSON is `contract`. A 204 is
  *  `undefined`, and an abort is rethrown so Query reads the unmount as the
- *  cancellation it is. */
+ *  cancellation it is. A `shape` names what a 2xx body must carry, and a body
+ *  without it is `contract` too, with the field in `said`. */
 export async function fetchJson<T>(
   path: string,
   init: RequestInit = {},
+  shape?: Shape,
 ): Promise<T> {
   let response: Response
   try {
@@ -24,17 +56,23 @@ export async function fetchJson<T>(
   }
   const { status } = response
   if (status === 404) {
-    throw new ApiError('missing', await response.text(), { status })
+    throw new ApiError('missing', await said(response), { status })
   }
   if (!response.ok) {
-    throw new ApiError('refused', await response.text(), { status })
+    throw new ApiError('refused', await said(response), { status })
   }
   if (status === 204) return undefined as T
+  let body: unknown
   try {
-    return (await response.json()) as T
+    body = await response.json()
   } catch (cause) {
     throw new ApiError('contract', String(cause), { status })
   }
+  const missing = shape?.(body)
+  if (missing) {
+    throw new ApiError('contract', contract(path, missing), { status })
+  }
+  return body as T
 }
 
 export const json = (body: unknown): RequestInit => ({
@@ -68,6 +106,9 @@ export async function envelope<T>(
   const word = (body as { looked?: unknown } | null)?.looked
   if (typeof word !== 'string' || !WORDS.has(word)) {
     return failed(contract(path))
+  }
+  if (word === 'ok' && !('data' in (body as object))) {
+    return failed(contract(path, 'data'))
   }
   return body as Looked<T>
 }

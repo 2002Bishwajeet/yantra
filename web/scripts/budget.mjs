@@ -47,7 +47,10 @@ for (const { url } of chunks.filter((c) => c.url.endsWith('.css'))) {
 const firstLoad = chunks.reduce((sum, c) => sum + c.gzip, 0)
 const fontBytes = [...fonts.values()].reduce((sum, n) => sum + n, 0)
 
-console.log('first load of /  (gzip -9)')
+// Y-357: yantrad serves dist through ServeDir with no precompressed_gzip and
+// no CompressionLayer, so the phone downloads the raw bytes. Until that row,
+// this is the build measured, not the wire.
+console.log('first load of /  (gzip -9; the wire is uncompressed until Y-357, so this measures the build)')
 for (const c of chunks) {
   console.log(`  ${c.url.padEnd(44)} ${String(c.gzip).padStart(8)} B  (${kib(c.gzip)} KiB)`)
 }

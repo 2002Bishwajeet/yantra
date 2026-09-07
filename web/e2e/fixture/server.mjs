@@ -11,6 +11,11 @@
 // `?slow=ms` on a read, or a `fixture-slow` cookie, holds the answer for the
 // pending state.
 //
+// A refusal is answered the way the daemon answers it: `write.rs` sends a
+// bare `text/plain` sentence for every 4xx and 5xx a verb produces, and only
+// `api.rs`'s own 404s are JSON `{error}`. A handler answers a string for the
+// first and an object for the second, and the strings are the daemon's own.
+//
 // Three scenario fields are about the wire rather than the fleet. `refuse`
 // answers every write and every terminal upgrade with that status and text,
 // as the daemon's write authoriser does (write.rs, `Refused`). `flaky` fails
@@ -47,6 +52,14 @@ const TRUST_PROMPT = [
   '> ',
 ].join('\r\n')
 
+// `git clone --progress` down a pane: one line rewritten with \r, which is
+// what the starting screen draws as its detail (Y-349).
+const CLONE_PROGRESS = [
+  "Cloning into 'homelab-k8s'...\r\n",
+  'remote: Enumerating objects: 1204, done.\r',
+  'Receiving objects:  62% (747/1204)\r',
+].join('')
+
 const scenarios = new URL('./scenarios/', import.meta.url)
 
 /** The raw fixtures, which is also what the `contract` scenario serves. */
@@ -58,6 +71,14 @@ function defaults() {
     readiness: contract.readiness,
     attention: contract.attention,
     github: { looked: 'never' },
+    // Y-349: the swept repository list New session filters in the browser.
+    repos: contract.repos,
+    notifications: contract.notifications,
+    about: contract.about,
+    // Y-350: what /api/github holds, and the daemon's key. `null` is a key
+    // `yantra ssh-identity` has not made, a 404.
+    connection: contract.github,
+    sshIdentity: contract.sshIdentity,
     status: Object.fromEntries(
       contract.agents.map((one) => [one.data.workspace, one]),
     ),
@@ -117,6 +138,15 @@ async function body(request) {
 
 const ok = (data, age = 0) => ({ looked: 'ok', age_seconds: age, data })
 
+// workspace::Error, as `chain()` prints it: the file the daemon looked for.
+const file = (name) => `/home/biswa/.config/yantra/workspaces/${name}.toml`
+const notFound = (name) => `no workspace named \`${name}\` (looked for ${file(name)})`
+
+function openSession(state, name) {
+  const was = state.status[name]?.data
+  return was?.reached === 'yes' && was.session !== null
+}
+
 const failedLike = (envelope) => (envelope.looked === 'failed' ? envelope : null)
 
 function findWorkspace(state, name) {
@@ -140,8 +170,30 @@ function setStatus(state, workspace, status, session) {
   })
 }
 
+const HOME = '/home/biswa'
+
+const dir = (path, name, origin) => ({ path: `${path}/${name}`, name, repo: origin !== null, origin })
+
+/** One level of the machine, as `dirs` answers it: `$HOME`, the clone home
+ *  under it holding the repository the fleet already has, and whatever
+ *  `make` has added this run. */
+function entriesOf(state, path) {
+  const made = (state.made?.[path] ?? []).map((name) => dir(path, name, null))
+  if (path === HOME) return [dir(path, 'Github', null), dir(path, 'notes', null), ...made]
+  if (path === `${HOME}/Github`) {
+    return [
+      dir(path, 'yantra', 'git@github.com:2002Bishwajeet/yantra.git'),
+      dir(path, 'landing', 'https://github.com/2002Bishwajeet/landing.git'),
+      dir(path, 'notes', null),
+      ...made,
+    ]
+  }
+  return made
+}
+
 /** Route table: method, path pattern, handler. A handler answers
- *  `[status, json]`, `[status]` for an empty body, or `null` to fall through. */
+ *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
+ *  for an empty body. */
 const routes = [
   ['GET', /^\/api\/machines$/, (s) => [200, s.machines]],
   ['GET', /^\/api\/workspaces$/, (s) => [200, s.workspaces]],
@@ -149,32 +201,72 @@ const routes = [
   ['GET', /^\/api\/readiness$/, (s) => [200, s.readiness]],
   ['GET', /^\/api\/attention$/, (s) => [200, s.attention]],
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
+  ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
+  ['GET', /^\/api\/about$/, (s) => [200, s.about]],
+  [
+    'GET',
+    /^\/api\/ssh-identity$/,
+    (s) => (s.sshIdentity ? [200, s.sshIdentity] : [404, { error: 'no identity: run `yantra ssh-identity`' }]),
+  ],
+  // Y-350: the device flow. The daemon polls GitHub itself, so a login here
+  // is a grant that lands on its own a moment later, and the page sees it on
+  // its next GET.
+  [
+    'GET',
+    /^\/api\/github$/,
+    (s) => {
+      if (s.connection.pending && Date.now() >= s.grantAt) s.connection = contract.github
+      return [200, s.connection]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/github\/login$/,
+    (s) => {
+      if (s.connection.connected) return [409, 'a grant is already held; sign out first']
+      if (s.connection.pending) return [409, 'a device flow is already waiting for its code']
+      s.connection = { ...contract.disconnected, pending: true }
+      s.grantAt = Date.now() + 1500
+      return [200, contract.device]
+    },
+  ],
+  [
+    'DELETE',
+    /^\/api\/github$/,
+    (s) => {
+      s.connection = contract.disconnected
+      return [204]
+    },
+  ],
   [
     'GET',
     /^\/api\/workspaces\/([^/]+)\/status$/,
     (s, [name]) => {
       const one = s.status[name] ?? failedLike(s.workspaces)
-      return one ? [200, one] : [404, { error: `no workspace named ${name}` }]
+      // api.rs `absent`, and JSON: this is a read, not a verb.
+      return one ? [200, one] : [404, { error: `no workspace named \`${name}\`` }]
     },
   ],
   [
     /GET|POST/,
     /^\/api\/machines\/([^/]+)\/readiness$/,
-    (s, [machine]) => {
+    (s, [machine], _, request) => {
       if (s.readiness.looked !== 'ok') return [200, s.readiness]
       const one = s.readiness.data.find((r) => r.machine === machine)
-      return one ? [200, ok(one)] : [404, { error: `no machine named ${machine}` }]
+      if (one) return [200, ok(one)]
+      // The GET is api.rs's (JSON); the POST is a verb in write.rs (a string).
+      const said = `no workspace names a machine called \`${machine}\`, so none was asked`
+      return [404, request.method === 'GET' ? { error: said } : said]
     },
   ],
   [
     'POST',
     /^\/api\/workspaces$/,
     (s, _, sent) => {
-      if (!sent.name || !sent.machine || !sent.repo) {
-        return [400, { error: 'a workspace needs a name, a machine and a repo' }]
-      }
+      const empty = ['name', 'machine', 'repo'].find((field) => !sent[field])
+      if (empty) return [400, `a workspace's ${empty} cannot be empty`]
       if (findWorkspace(s, sent.name)) {
-        return [409, { error: `workspace \`${sent.name}\` already exists` }]
+        return [409, `workspace \`${sent.name}\` already exists at ${file(sent.name)}`]
       }
       const made = {
         name: sent.name,
@@ -192,7 +284,16 @@ const routes = [
     /^\/api\/workspaces\/([^/]+)$/,
     (s, [name], sent) => {
       const one = findWorkspace(s, name)
-      if (!one) return [404, { error: `no workspace named ${name}` }]
+      if (!one) return [404, notFound(name)]
+      const empty = ['name', 'machine', 'repo'].find((field) => field in sent && !sent[field])
+      if (empty) return [400, `a workspace's ${empty} cannot be empty`]
+      // edit.rs `SessionOpen`: a move off a machine with a session open there.
+      if (sent.machine && sent.machine !== one.machine && openSession(s, name)) {
+        return [
+          409,
+          `\`${name}\` cannot be moved off \`${one.machine}\` while a session is open there: the session would stay behind where nothing looks for it, and \`down\`, \`resume\`, \`status\` and \`logs\` would each report it as absent — run \`yantra down ${name}\` first`,
+        ]
+      }
       Object.assign(one, sent)
       const { loaded: _, ...workspace } = one
       return [200, workspace]
@@ -201,9 +302,17 @@ const routes = [
   [
     'DELETE',
     /^\/api\/workspaces\/([^/]+)$/,
-    (s, [name]) => {
-      if (!findWorkspace(s, name)) return [404, { error: `no workspace named ${name}` }]
-      s.workspaces.data = s.workspaces.data.filter((one) => one.name !== name)
+    (s, [name], _, request, url) => {
+      const one = findWorkspace(s, name)
+      if (!one) return [404, notFound(name)]
+      // remove.rs `SessionOpen`, unless `?force=true` means it (write.rs `forced`).
+      if (openSession(s, name) && url.searchParams.get('force') !== 'true') {
+        return [
+          409,
+          `\`${name}\` still has a session open on \`${one.machine}\`: deleting the file would leave it there with nothing pointing at it, and \`down\`, \`resume\`, \`status\` and \`logs\` would each report it as absent — run \`yantra down ${name}\` first, or \`--force\` to delete anyway`,
+        ]
+      }
+      s.workspaces.data = s.workspaces.data.filter((entry) => entry.name !== name)
       delete s.status[name]
       return [204]
     },
@@ -213,7 +322,7 @@ const routes = [
     /^\/api\/workspaces\/([^/]+)\/up$/,
     (s, [name]) => {
       const one = findWorkspace(s, name)
-      if (!one) return [404, { error: `no workspace named ${name}` }]
+      if (!one) return [404, notFound(name)]
       const was = s.status[name]?.data
       const live = was?.reached === 'yes' && was.session !== null
       setStatus(s, one, { state: 'running' }, live ? was.session : { id: crypto.randomUUID(), pid: 40000 + Math.floor(Math.random() * 9999) })
@@ -229,7 +338,7 @@ const routes = [
     /^\/api\/workspaces\/([^/]+)\/down$/,
     (s, [name]) => {
       const one = findWorkspace(s, name)
-      if (!one) return [404, { error: `no workspace named ${name}` }]
+      if (!one) return [404, notFound(name)]
       const was = s.status[name]?.data
       const live = was?.reached === 'yes' && was.status.state !== 'no_session'
       setStatus(s, one, { state: 'stopped' }, null)
@@ -241,7 +350,7 @@ const routes = [
     /^\/api\/workspaces\/([^/]+)\/resume$/,
     (s, [name]) => {
       const one = findWorkspace(s, name)
-      if (!one) return [404, { error: `no workspace named ${name}` }]
+      if (!one) return [404, notFound(name)]
       const was = s.status[name]?.data
       const running = was?.reached === 'yes' && was.status.state === 'running'
       if (!running) setStatus(s, one, { state: 'running' }, { id: crypto.randomUUID(), pid: 40000 })
@@ -255,9 +364,11 @@ const routes = [
     /^\/api\/workspaces\/([^/]+)\/repair$/,
     (s, [name]) => {
       const one = s.workspaces.looked === 'ok' && s.workspaces.data.find((w) => w.name === name)
-      if (!one) return [404, { error: `no workspace named ${name}` }]
-      if (one.loaded === 'yes') return [409, { error: `workspace \`${name}\` loads, so there is nothing to repair` }]
-      return [200, { ...contract.broken, name, error: one.error }]
+      if (!one) return [404, notFound(name)]
+      if (one.loaded === 'yes') {
+        return [409, `workspace \`${name}\` at ${file(name)} loads, so its file may not be written whole — \`yantra edit\` is what changes a workspace that works`]
+      }
+      return [200, { ...contract.broken, name, path: file(name), text: s.broken_text ?? contract.broken.text, error: one.error }]
     },
   ],
   [
@@ -265,9 +376,10 @@ const routes = [
     /^\/api\/workspaces\/([^/]+)\/repair$/,
     (s, [name], sent) => {
       const index = s.workspaces.looked === 'ok' ? s.workspaces.data.findIndex((w) => w.name === name) : -1
-      if (index < 0) return [404, { error: `no workspace named ${name}` }]
+      if (index < 0) return [404, notFound(name)]
       if (typeof sent.text !== 'string' || !sent.text.includes('machine')) {
-        return [422, { error: 'that text still does not load: missing field `machine`' }]
+        // write.rs `from_repair`: bytes that still will not load are a 400.
+        return [400, `workspace \`${name}\` at ${file(name)} is not valid TOML: missing field \`machine\` at line 7`]
       }
       const mended = { loaded: 'yes', ...contract.made, name }
       s.workspaces.data[index] = mended
@@ -285,17 +397,48 @@ const routes = [
       return [200, { machine, session, killed: had }]
     },
   ],
+  ['GET', /^\/api\/repos$/, (s) => [200, s.repos]],
   [
     'POST',
     /^\/api\/machines\/([^/]+)\/probe$/,
-    (_, [machine], sent) => [200, { machine, path: sent.path ?? '', exists: true, origin: null }],
+    (s, [machine], sent) => {
+      const path = sent.path ?? ''
+      // A clone still running has not left its directory behind yet.
+      const until = s.cloning?.[path] ?? 0
+      return [200, { machine, path, exists: Date.now() >= until, origin: null }]
+    },
   ],
   [
     'POST',
     /^\/api\/machines\/([^/]+)\/dirs$/,
-    (_, [machine], sent) => [200, { ...contract.listing, machine, path: sent.path ?? contract.listing.path }],
+    (s, [machine], sent) => {
+      const path = sent.path ?? HOME
+      if (sent.make !== undefined) {
+        if (sent.make.includes('/')) return [400, `a folder name is one segment, not \`${sent.make}\``]
+        s.made ??= {}
+        s.made[path] = [...(s.made[path] ?? []), sent.make]
+      }
+      return [200, { machine, path, entries: entriesOf(s, path) }]
+    },
   ],
-  ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, { error: 'a relay needs a topic URL' }])],
+  [
+    'POST',
+    /^\/api\/machines\/([^/]+)\/clone$/,
+    (s, [machine], sent) => {
+      if (!sent.url || !sent.path) return [400, 'a clone needs a url and a path']
+      const session = `clone-${sent.path.split('/').pop()}`
+      const host = sessionsOf(s, machine)
+      if (host?.reached === 'yes' && !host.sessions.some((t) => t.name === session)) {
+        host.sessions.push({ name: session, windows: 1, attached: 0, created: 'Sun Sep  6 12:00:00 2026' })
+      }
+      s.cloning ??= {}
+      // `git clone` takes a moment, and the starting screen probes until it
+      // is there — 1.2 s is under one probe interval and over none.
+      s.cloning[sent.path] = Date.now() + 1200
+      return [202, { machine, session }]
+    },
+  ],
+  ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
   ['POST', /^\/api\/viewing$/, () => [204]],
   ['POST', /^\/api\/heartbeat$/, () => [204]],
 ]
@@ -331,20 +474,23 @@ const server = createServer(async (request, response) => {
     const params = match.slice(1).map(decodeURIComponent)
     const sent = request.method === 'GET' ? {} : await body(request)
     if (slow > 0 && request.method === 'GET') await sleep(slow)
-    const [status, json] = state.broken?.[url.pathname]
+    const [status, answered] = state.broken?.[url.pathname]
       ? [200, state.broken[url.pathname]]
-      : handle(state, params, sent)
-    if (json === undefined) {
+      : handle(state, params, sent, request, url)
+    if (answered === undefined) {
       response.writeHead(status).end()
+    } else if (typeof answered === 'string') {
+      response.writeHead(status, { 'content-type': 'text/plain' }).end(answered)
     } else {
       response
         .writeHead(status, { 'content-type': 'application/json' })
-        .end(JSON.stringify(json))
+        .end(JSON.stringify(answered))
     }
     return
   }
+  // api.rs `no_such_route`, word for word.
   response.writeHead(404, { 'content-type': 'application/json' }).end(
-    JSON.stringify({ error: `the fixture has no ${request.method} ${url.pathname}` }),
+    JSON.stringify({ error: 'this daemon serves no such route under /api' }),
   )
 })
 
@@ -369,7 +515,7 @@ server.on('upgrade', (request, socket, head) => {
   const refusal = workspace
     ? findWorkspace(state, decodeURIComponent(workspace[1]))
       ? null
-      : `no workspace named ${decodeURIComponent(workspace[1])}`
+      : notFound(decodeURIComponent(workspace[1]))
     : sessionsOf(state, decodeURIComponent(session[1]))?.sessions?.some(
           (t) => t.name === decodeURIComponent(session[2]),
         )
@@ -383,11 +529,8 @@ server.on('upgrade', (request, socket, head) => {
     let sized = false
     ws.on('message', (data, binary) => {
       if (!sized) {
-        if (binary) {
-          ws.send('the first frame must say the window size', { binary: false })
-          ws.close()
-          return
-        }
+        // terminal.rs: bytes before a terminal exists go nowhere, quietly.
+        if (binary) return
         let size
         try {
           size = JSON.parse(data.toString())
@@ -395,7 +538,7 @@ server.on('upgrade', (request, socket, head) => {
           size = null
         }
         if (!size || typeof size.rows !== 'number' || typeof size.cols !== 'number' || typeof size.term !== 'string') {
-          ws.send('the first frame must be {rows, cols, term}', { binary: false })
+          ws.send('a terminal opens with {"rows":…,"cols":…,"term":…}', { binary: false })
           ws.close()
           return
         }
@@ -405,7 +548,10 @@ server.on('upgrade', (request, socket, head) => {
           ws.close()
           return
         }
-        ws.send(Buffer.from(TRUST_PROMPT), { binary: true })
+        const name = session ? decodeURIComponent(session[2]) : ''
+        ws.send(Buffer.from(name.startsWith('clone-') ? CLONE_PROGRESS : TRUST_PROMPT), {
+          binary: true,
+        })
         return
       }
       if (binary) ws.send(data, { binary: true })

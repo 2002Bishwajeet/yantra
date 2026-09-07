@@ -1,22 +1,55 @@
 {
   "extends": "busy",
-  "workspaces": { "looked": "ok", "age_seconds": 0, "data": [] },
+  "workspaces": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": []
+  },
   "status": {},
   "sessions": {
     "looked": "ok",
     "age_seconds": 0,
     "data": [
-      { "machine": "cachyos-g14", "reached": "yes", "sessions": [] },
-      { "machine": "macbook", "reached": "yes", "sessions": [] },
-      { "machine": "pi-5", "reached": "yes", "sessions": [] },
-      { "machine": "hetzner-1", "reached": "yes", "sessions": [] },
-      { "machine": "nas", "reached": "yes", "sessions": [] },
-      { "machine": "thinkpad", "reached": "no", "error": "ssh to thinkpad failed before the command reported a status: connect to host thinkpad port 22: No route to host" }
+      {
+        "machine": "cachyos-g14",
+        "reached": "yes",
+        "sessions": []
+      },
+      {
+        "machine": "macbook",
+        "reached": "yes",
+        "sessions": []
+      },
+      {
+        "machine": "pi-5",
+        "reached": "yes",
+        "sessions": []
+      },
+      {
+        "machine": "hetzner-1",
+        "reached": "yes",
+        "sessions": []
+      },
+      {
+        "machine": "nas",
+        "reached": "yes",
+        "sessions": []
+      },
+      {
+        "machine": "thinkpad",
+        "reached": "no",
+        "error": "ssh to thinkpad failed before the command reported a status: connect to host thinkpad port 22: No route to host"
+      }
     ]
   },
   "attention": {
     "looked": "ok",
     "age_seconds": 0,
-    "data": { "reviews": [], "issues": [], "notifications": 0 }
-  }
+    "data": {
+      "reviews": [],
+      "issues": [],
+      "notifications": 0
+    }
+  },
+  "notifications": []
 }

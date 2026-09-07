@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Chip, FilterChip } from './Chip'
-
-afterEach(cleanup)
 
 describe('Chip', () => {
   it('is a label with a tone', () => {
@@ -15,7 +13,9 @@ describe('Chip', () => {
 })
 
 describe('FilterChip', () => {
-  it('toggles with a click and with Space, and reports it', () => {
+  /** A native button: Space and Enter are the browser's, which jsdom does
+   *  not play, so the click is what this proves. */
+  it('toggles with a click, and reports it', () => {
     const onPressedChange = vi.fn()
     render(<FilterChip onPressedChange={onPressedChange}>Running</FilterChip>)
     const chip = screen.getByRole('button', { name: 'Running', pressed: false })
@@ -23,9 +23,7 @@ describe('FilterChip', () => {
     expect(onPressedChange).toHaveBeenLastCalledWith(true, expect.anything())
     expect(chip.getAttribute('aria-pressed')).toBe('true')
     expect(chip.hasAttribute('data-pressed')).toBe(true)
-    chip.focus()
-    fireEvent.keyDown(chip, { key: ' ' })
-    fireEvent.keyUp(chip, { key: ' ' })
+    expect(chip.tagName).toBe('BUTTON')
     fireEvent.click(chip)
     expect(chip.getAttribute('aria-pressed')).toBe('false')
   })

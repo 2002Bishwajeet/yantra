@@ -1,0 +1,474 @@
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+  flex: 1;
+  min-width: 0;
+}
+
+/* The tablet board titles the page; the desktop board's tab pill is the title,
+   so the h1 stays for readers only. The phone's is the app bar (Shell.css). */
+[data-shell="desktop"] .dash__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.dash__head {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* The status strip. */
+
+.dash__strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--m3-status-line);
+  padding: 0 24px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.dash__facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.dash__fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.dash__facts .m3-state {
+  gap: 8px;
+}
+
+.dash__down {
+  color: var(--md-sys-color-on-error-container);
+}
+
+.dash__down .m3-mark {
+  border-color: var(--md-sys-color-error);
+}
+
+.dash__fix {
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+}
+
+.dash__dot {
+  display: none;
+}
+
+.dash__stamp,
+.dash__hero-stamp,
+.dash__age,
+.dash__elapsed {
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+}
+
+.dash__stamp,
+.dash__age {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* The hero. */
+
+.dash__hero-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "eyebrow eyebrow"
+    "number words";
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: end;
+}
+
+.dash__hero-eyebrow {
+  grid-area: eyebrow;
+  margin: 0;
+}
+
+.dash__hero-n {
+  grid-area: number;
+  font: 500 var(--m3-hero-size) / var(--m3-hero-line-height) var(--md-ref-typeface-brand);
+  letter-spacing: 0;
+}
+
+.dash__hero-words {
+  grid-area: words;
+  padding-bottom: 4px;
+}
+
+.dash__hero-stamp {
+  grid-area: stamp;
+  color: inherit;
+}
+
+.dash__hero-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.dash__hero-empty-title {
+  gap: 10px;
+  font: var(--md-sys-typescale-emphasized-headline-small);
+}
+
+.dash__hero-empty-title .m3-mark {
+  width: 12px;
+  height: 12px;
+  border-color: currentColor;
+}
+
+.dash__unread {
+  padding: 4px 8px;
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: inherit;
+  text-decoration: none;
+}
+
+.dash__rows,
+.dash__idle-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-list-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash__hero .m3-row,
+.dash__running .m3-row {
+  padding-right: 8px;
+}
+
+/* Running rows: the track takes the middle, the time and Open sit right. */
+
+.dash__run {
+  gap: 16px;
+}
+
+.dash__run-line {
+  display: contents;
+}
+
+.dash__run .m3-row__text {
+  flex: none;
+  width: 240px;
+}
+
+.dash__track {
+  order: 1;
+}
+
+.dash__elapsed {
+  order: 2;
+  flex: none;
+  width: 64px;
+  text-align: right;
+}
+
+.dash__open {
+  order: 3;
+}
+
+.dash__running {
+  flex: 1;
+}
+
+.dash__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 24px;
+  border: 1.5px dashed var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-large-increased);
+  text-align: center;
+}
+
+.dash__empty-title {
+  gap: 8px;
+  font: var(--md-sys-typescale-emphasized-body-large);
+}
+
+/* Worth a look: one tertiary line on the desktop, rows on the phone. */
+
+.dash__worth {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  padding: 10px 12px 10px 24px;
+  border-radius: 22px;
+}
+
+.dash__worth-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.dash__worth-head .m3-eyebrow {
+  margin: 0;
+}
+
+.dash__unclaimed-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash__unclaimed {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dash__unclaimed .m3-state {
+  gap: 8px;
+}
+
+.dash__unclaimed .m3-mark {
+  border-color: var(--md-sys-color-tertiary);
+}
+
+.dash__unclaimed + .dash__unclaimed::before {
+  content: "";
+  width: 1px;
+  height: 24px;
+  background: color-mix(in srgb, var(--md-sys-color-on-tertiary-container) 25%, transparent);
+}
+
+.dash__name {
+  font: var(--md-sys-typescale-emphasized-body-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
+}
+
+.dash__meta {
+  font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
+}
+
+.dash__attach {
+  color: var(--md-sys-color-on-tertiary-container);
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+/* Idle, Not read yet, Recent. */
+
+.dash__line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 52px;
+  padding: 4px 24px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 22px;
+}
+
+.dash__line .m3-eyebrow,
+.m3-disclosure__summary .m3-eyebrow {
+  margin: 0;
+}
+
+.dash__idle-row .m3-state,
+.dash__recent-words {
+  flex: none;
+}
+
+.dash__idle-row .dash__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash__age {
+  flex: none;
+  min-width: 48px;
+  text-align: right;
+}
+
+.dash__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash__pair {
+  display: flex;
+  gap: var(--m3-page-gap);
+}
+
+.dash__pair > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash__recent-row .dash__name {
+  flex: none;
+  width: 100px;
+}
+
+.dash__recent-words {
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+
+[data-shell="desktop"] .dash__recent {
+  flex: none;
+  width: 452px;
+}
+
+[data-shell="phone"] .dash__pair,
+[data-shell="tablet"] .dash__pair {
+  flex-direction: column;
+}
+
+/* Phone: the vertical feed. */
+
+[data-shell="phone"] .dash__strip {
+  gap: 8px;
+  min-height: 24px;
+  padding: 0 4px;
+  font: var(--md-sys-typescale-body-small);
+  white-space: nowrap;
+}
+
+[data-shell="phone"] .dash__facts,
+[data-shell="phone"] .dash__fact {
+  gap: 8px;
+}
+
+[data-shell="phone"] .dash__long,
+[data-shell="phone"] .dash__names {
+  display: none;
+}
+
+[data-shell="phone"] .dash__dot {
+  display: inline;
+}
+
+[data-shell="phone"] .dash__hero-head {
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "number eyebrow stamp"
+    "number words stamp";
+  align-items: center;
+  padding: 0 4px;
+}
+
+[data-shell="phone"] .dash__hero-words {
+  padding: 0;
+}
+
+[data-shell="phone"] .dash__hero .m3-row,
+[data-shell="phone"] .dash__running .m3-row,
+[data-shell="phone"] .dash__unclaimed {
+  min-height: 56px;
+}
+
+[data-shell="phone"] .dash__run {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 12px 6px 8px;
+}
+
+[data-shell="phone"] .dash__run-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+[data-shell="phone"] .dash__run .m3-row__text {
+  flex: 1;
+  width: auto;
+}
+
+[data-shell="phone"] .dash__elapsed {
+  width: auto;
+  color: var(--md-sys-color-on-surface);
+}
+
+[data-shell="phone"] .dash__worth {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 10px 10px 16px;
+}
+
+[data-shell="phone"] .dash__worth-head {
+  align-items: baseline;
+  white-space: normal;
+}
+
+[data-shell="phone"] .dash__unclaimed-list {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+[data-shell="phone"] .dash__unclaimed {
+  gap: 8px;
+  padding: 6px 4px 6px 12px;
+  border-radius: var(--m3-row-radius);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 70%, transparent);
+}
+
+[data-shell="phone"] .dash__unclaimed .m3-state {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+[data-shell="phone"] .dash__unclaimed + .dash__unclaimed::before {
+  content: none;
+}
+
+[data-shell="phone"] .dash__grid {
+  grid-template-columns: 1fr;
+}
+
+[data-shell="phone"] .dash__line {
+  padding: 4px 8px 4px 20px;
+}
+
+.dash__new {
+  margin-left: auto;
+}
+
+/* The FAB floats over the bottom-right of the feed, so the last row's own
+   button would sit under it (Shell.css owns both the FAB and the bar). */
+[data-shell="phone"] .dash {
+  padding-bottom: 56px;
+}

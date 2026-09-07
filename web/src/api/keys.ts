@@ -24,9 +24,13 @@ export const keys = {
   notifications: () => ['notifications'] as const,
   about: () => ['about'] as const,
   sshIdentity: () => ['ssh-identity'] as const,
-  /** `null` is the machine's own `$HOME`, which only the far side can name. */
+  /** One workspace and everything under it, for a delete to drop. */
+  workspace: (name: string) => ['workspaces', name] as const,
+  /** Rooted apart from `machines`: a prefix invalidation of that class must
+   *  not discard a directory listing held for the page's whole life.
+   *  `null` is the machine's own `$HOME`, which only the far side can name. */
   dirs: (machine: string, path: string | null) =>
-    ['machines', machine, 'dirs', path] as const,
+    ['dirs', machine, path] as const,
   probe: (machine: string, path: string) =>
-    ['machines', machine, 'probe', path] as const,
+    ['probe', machine, path] as const,
 }

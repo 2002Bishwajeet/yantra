@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { Stepper } from './Stepper'
-
-afterEach(cleanup)
 
 const steps = ['Name', 'Machine', 'Source', 'Start'] as const
 

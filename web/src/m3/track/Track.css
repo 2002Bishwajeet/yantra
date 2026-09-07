@@ -8,8 +8,11 @@
 }
 
 .m3-track__fill {
+  width: 100%;
   height: 100%;
   border-radius: 3px;
   background: var(--md-sys-color-tertiary);
-  transition: width var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
+  transform: scaleX(var(--m3-track-value, 0));
+  transform-origin: left;
+  transition: transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
 }

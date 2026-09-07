@@ -1,0 +1,191 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface);
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+}
+
+.shell__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+  flex: 1;
+  min-width: 0;
+}
+
+.shell__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Desktop: the top bar and, on / and /new, the sessions rail. */
+
+.shell__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  box-sizing: border-box;
+  height: 64px;
+  padding: 12px 24px;
+}
+
+.shell__wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: var(--md-sys-typescale-emphasized-title-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
+  color: inherit;
+  text-decoration: none;
+}
+
+.shell__disc {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-primary);
+}
+
+.shell__search {
+  gap: 10px;
+  padding-right: 8px;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.shell__body {
+  display: flex;
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+  padding: 0 24px 24px;
+}
+
+[data-shell="desktop"] .shell__main {
+  padding-top: 16px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: none;
+  box-sizing: border-box;
+  width: 320px;
+  padding: 20px 20px 24px;
+  border-radius: var(--m3-card-radius);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rail__title {
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-title-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
+}
+
+.rail__group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rail__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-list-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail__note {
+  margin: 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.rail__all {
+  margin-top: auto;
+  font: var(--md-sys-typescale-label-large);
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+}
+
+/* Tablet: the rail on the left, the sheet docked on the right. */
+
+[data-shell="tablet"] {
+  flex-direction: row;
+}
+
+.shell__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 16px 20px 24px;
+}
+
+[data-shell="tablet"] .shell__actions {
+  justify-content: flex-end;
+}
+
+.shell__sheet {
+  align-self: flex-start;
+  margin: 8px 8px 8px 0;
+}
+
+/* Phone: the app bar is the h1, so the screen's own is not drawn. */
+
+[data-shell="phone"] .shell__main {
+  padding: 0 16px 96px;
+}
+
+[data-shell="phone"] .shell__main h1 {
+  display: none;
+}
+
+[data-shell="phone"] .m3-navigation-bar {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 5;
+}
+
+.shell__fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(64px + 16px + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+}
+
+.shell__nowhere {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+  border-radius: var(--m3-card-radius);
+  background: var(--md-sys-color-surface-container);
+}
+
+.shell__nowhere > * {
+  margin: 0;
+}
+
+/* Holds an icon button's place while its chunk loads. */
+.shell__slot {
+  inline-size: 44px;
+  block-size: 44px;
+}

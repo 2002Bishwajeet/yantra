@@ -1,0 +1,163 @@
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 880px;
+  min-width: 0;
+  margin: 0 auto;
+  padding-top: 8px;
+}
+
+.setup__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.setup__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.setup__count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+}
+
+.setup__stamp {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.setup__track {
+  flex: none;
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.setup__track .m3-track__fill {
+  background: var(--md-sys-color-primary);
+}
+
+.setup__list .m3-list-item {
+  min-height: 64px;
+  padding: 10px 8px 10px 16px;
+}
+
+.setup__list .m3-list-item__supporting {
+  overflow: visible;
+  white-space: normal;
+}
+
+/* The lines under a step: the board's `.sub`, indented past the lead. */
+.setup__sub {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 12px 66px;
+}
+
+.setup__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup__line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 6px 4px 6px 12px;
+  border-radius: 14px;
+  background: var(--md-sys-color-surface);
+}
+
+.setup__line[data-kind="refused"] {
+  align-items: flex-start;
+  padding-top: 8px;
+}
+
+.setup__line[data-kind="refused"] > .m3-state {
+  margin-top: 8px;
+}
+
+.setup__machine {
+  display: inline-block;
+  width: 108px;
+  font: var(--md-sys-typescale-emphasized-body-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
+}
+
+.setup__said {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setup__bad {
+  color: var(--md-sys-color-on-error-container);
+}
+
+.setup__copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setup__code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  background: var(--md-sys-color-surface-container);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 4px;
+}
+
+.setup__skip {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-shell="phone"] .setup {
+  gap: 16px;
+}
+
+[data-shell="phone"] .setup__sub {
+  padding: 8px 8px 12px 16px;
+}
+
+[data-shell="phone"] .setup__line {
+  flex-wrap: wrap;
+}
+
+[data-shell="phone"] .setup__machine {
+  width: auto;
+}
+
+[data-shell="phone"] .setup__foot {
+  flex-direction: column;
+  align-items: flex-start;
+}

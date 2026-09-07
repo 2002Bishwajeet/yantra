@@ -11,6 +11,8 @@ export type BadgeProps = ComponentPropsWithRef<'span'> & {
 
 export function Badge(props: BadgeProps) {
   const { label, count, className, ...rest } = props
+  // Nothing to count is nothing to draw: a bell with no unread has no badge.
+  if (count === 0) return null
   const large = count !== undefined
   return (
     <span

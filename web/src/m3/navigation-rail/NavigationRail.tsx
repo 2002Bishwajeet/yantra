@@ -32,10 +32,14 @@ export type DestinationProps = Base.Props & {
 
 /** One rail destination: a 56 × 32 indicator over a label. */
 export function RailDestination(props: DestinationProps) {
-  const { icon, active, className, children, ...rest } = props
+  const { icon, active, className, children, render, role, ...rest } = props
   return (
     <Base
       className={clsx('m3-destination', 'm3-interactive', className)}
+      // `render` is a Link here: not a native button, and its own role.
+      render={render}
+      nativeButton={!render}
+      role={role}
       aria-current={active ? 'page' : undefined}
       {...rest}
     >

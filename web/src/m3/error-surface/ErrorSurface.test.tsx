@@ -1,10 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { ApiError } from '@/api/errors'
 import { Button } from '../button/Button'
 import { ErrorSurface } from './ErrorSurface'
-
-afterEach(cleanup)
 
 const network = new ApiError('network', 'fetch failed')
 

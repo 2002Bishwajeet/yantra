@@ -1,0 +1,47 @@
+.session-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.session-terminal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 8px 0;
+}
+
+.session-terminal__title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.session-terminal__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-terminal__name > * {
+  margin: 0;
+}
+
+.session-terminal__name a {
+  color: var(--md-sys-color-primary);
+  /* A link inside a sentence needs more than its colour (WCAG 1.4.1). */
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.session-terminal__age {
+  display: block;
+  min-width: 160px;
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: 18px;
+  color: var(--md-sys-color-on-surface-variant);
+}

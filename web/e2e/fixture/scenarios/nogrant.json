@@ -8,6 +8,16 @@
   "github": {
     "looked": "ok",
     "age_seconds": 0,
-    "data": { "check": "github", "state": "absent", "detail": "no GitHub grant is stored here" }
+    "data": {
+      "check": "github",
+      "state": "absent",
+      "detail": "no GitHub grant is stored here"
+    }
+  },
+  "connection": {
+    "connected": false,
+    "login": null,
+    "scopes": [],
+    "pending": false
   }
 }

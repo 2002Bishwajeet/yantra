@@ -1,7 +1,3 @@
-.m3-tab-pills {
-  display: inline-flex;
-}
-
 .m3-tab-pills__list {
   position: relative;
   display: inline-flex;
@@ -14,13 +10,16 @@
 .m3-tab-pills__indicator {
   position: absolute;
   top: var(--active-tab-top);
-  left: var(--active-tab-left);
+  left: 0;
   width: var(--active-tab-width);
   height: var(--active-tab-height);
   border-radius: var(--md-sys-shape-corner-full);
   background: var(--md-sys-color-secondary-container);
+  /* The slide is a transform; the width still changes, since scaleX would
+     flatten the pill's ends. */
+  transform: translateX(var(--active-tab-left));
   transition:
-    left var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
     width var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
 }
 
@@ -46,6 +45,7 @@
   color: var(--md-sys-color-on-secondary-container);
 }
 
-.m3-tab-panel {
-  outline: none;
+.m3-tab-panel:focus-visible {
+  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-focus-ring-color);
+  outline-offset: var(--md-sys-focus-ring-offset);
 }

@@ -1,4 +1,5 @@
 .m3-bottom-sheet__scrim {
+  z-index: 20;
   opacity: calc(1 - var(--drawer-swipe-progress, 0));
 }
 
@@ -7,6 +8,7 @@
 }
 
 .m3-bottom-sheet__viewport {
+  z-index: 20;
   position: fixed;
   inset: 0;
   display: flex;
@@ -25,6 +27,7 @@
   border-radius: var(--md-sys-shape-corner-extra-large) var(--md-sys-shape-corner-extra-large) 0 0;
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface-container-low);
+  --m3-field-surface: var(--md-sys-color-surface-container-low);
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: auto;
@@ -58,8 +61,8 @@
   width: 32px;
   height: 4px;
   border-radius: 2px;
-  background: var(--md-sys-color-outline);
-  opacity: 0.5;
+  background: var(--md-sys-color-on-surface-variant);
+  opacity: 0.4;
 }
 
 .m3-bottom-sheet__content {

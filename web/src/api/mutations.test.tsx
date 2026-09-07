@@ -1,16 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { useQueryClient } from '@tanstack/react-query'
+import { daemon } from '../test/daemon'
 import { renderHookQueried } from '../test/inQuery'
 import { ApiError } from './errors'
 import { aWorkspace, looked, opened, stopped } from './fixtures'
 import { keys } from './keys'
 import {
+  useClone,
   useCreateWorkspace,
   useDeleteWorkspace,
   useDown,
   useEditWorkspace,
+  useGithubLogin,
+  useGithubLogout,
   useKillSession,
+  useMakeDir,
   useRecheckReadiness,
   useRepairWorkspace,
   useResume,
@@ -18,26 +23,7 @@ import {
   useUp,
 } from './mutations'
 
-afterEach(() => {
-  cleanup()
-  vi.unstubAllGlobals()
-})
-
-/** Records the method and path of every call, and answers what it is told. */
-function daemon(status: number, body: unknown) {
-  const asked = vi.fn((path: string, init?: RequestInit) => {
-    void path
-    void init
-    return Promise.resolve({
-      ok: status < 400,
-      status,
-      json: () => Promise.resolve(body),
-      text: () => Promise.resolve(String(body)),
-    })
-  })
-  vi.stubGlobal('fetch', asked)
-  return asked
-}
+afterEach(() => vi.unstubAllGlobals())
 
 const sent = (asked: ReturnType<typeof daemon>, index = 0) => {
   const [path, init] = asked.mock.calls[index] as [string, RequestInit?]
@@ -151,6 +137,24 @@ describe('the workspace file', () => {
     })
     expect(sent(asked, 1).path).toBe('/api/workspaces/site?force=true')
   })
+
+  it('drops everything held about the name, so no status keeps polling it', async () => {
+    daemon(200, { machine: 'pi', removed: true })
+    const { result } = renderHookQueried(() => ({
+      remove: useDeleteWorkspace(),
+      client: useQueryClient(),
+    }))
+    const { client } = result.current
+    client.setQueryData(keys.status('site'), looked.ok({}))
+    client.setQueryData(keys.spend('site'), {})
+    client.setQueryData(keys.status('other'), looked.ok({}))
+
+    await act(() => result.current.remove.mutateAsync({ name: 'site' }))
+
+    expect(client.getQueryState(keys.status('site'))).toBeUndefined()
+    expect(client.getQueryState(keys.spend('site'))).toBeUndefined()
+    expect(client.getQueryState(keys.status('other'))).toBeDefined()
+  })
 })
 
 describe('a session no workspace claims', () => {
@@ -173,6 +177,41 @@ describe('a session no workspace claims', () => {
     expect(
       result.current.client.getQueryState(keys.sessions())?.isInvalidated,
     ).toBe(true)
+  })
+})
+
+describe('the GitHub grant', () => {
+  it('begins the device flow and hands back the code to type, never a token', async () => {
+    const device = {
+      user_code: 'ABCD-1234',
+      verification_uri: 'https://github.com/login/device',
+      expires_in: 900,
+      interval: 5,
+    }
+    const asked = daemon(200, device)
+    const { result } = renderHookQueried(() => useGithubLogin())
+
+    const answer = await act(() => result.current.mutateAsync())
+
+    expect(sent(asked)).toMatchObject({ path: '/api/github/login', method: 'POST' })
+    expect(answer).toEqual(device)
+    expect(JSON.stringify(answer)).not.toMatch(/token/)
+  })
+
+  it('logs out with a DELETE and asks the grant, the inbox and the repositories again', async () => {
+    const asked = daemon(204)
+    const { result } = renderHookQueried(() => ({
+      logout: useGithubLogout(),
+      client: useQueryClient(),
+    }))
+    for (const key of [keys.github(), keys.attention(), keys.repos()])
+      result.current.client.setQueryData(key, looked.ok([]))
+
+    await act(() => result.current.logout.mutateAsync())
+
+    expect(sent(asked)).toMatchObject({ path: '/api/github', method: 'DELETE' })
+    for (const key of [keys.github(), keys.attention(), keys.repos()])
+      expect(result.current.client.getQueryState(key)?.isInvalidated).toBe(true)
   })
 })
 
@@ -200,6 +239,61 @@ describe('a readiness recheck', () => {
   })
 })
 
+describe('a clone, and the folder to clone into', () => {
+  /** 202 and the tmux session the clone runs in: nothing is awaited here, and
+   *  the starting screen reads that session's socket for progress. */
+  it('asks one machine to clone one URL into one path', async () => {
+    const cloning = { machine: 'pi', session: 'clone-yantra' }
+    const asked = daemon(202, cloning)
+    const { result } = renderHookQueried(() => useClone())
+
+    let answer: unknown
+    await act(async () => {
+      answer = await result.current.mutateAsync({
+        machine: 'pi',
+        url: 'https://github.com/a/yantra.git',
+        path: '/home/x/Github/yantra',
+      })
+    })
+
+    expect(sent(asked)).toEqual({
+      path: '/api/machines/pi/clone',
+      method: 'POST',
+      body: JSON.stringify({
+        url: 'https://github.com/a/yantra.git',
+        path: '/home/x/Github/yantra',
+      }),
+    })
+    expect(answer).toEqual(cloning)
+  })
+
+  /** `make` answers the listing that now holds the folder, so it goes into
+   *  that level's key and the picker draws it without asking again. */
+  it('writes the listing a new folder answers under that level', async () => {
+    const listing = {
+      machine: 'pi',
+      path: '/home/x/Github',
+      entries: [{ path: '/home/x/Github/landing', name: 'landing', repo: false, origin: null }],
+    }
+    const asked = daemon(200, listing)
+    const { result } = renderHookQueried(() => ({
+      make: useMakeDir(),
+      client: useQueryClient(),
+    }))
+
+    await act(() =>
+      result.current.make.mutateAsync({ machine: 'pi', path: '/home/x/Github', make: 'landing' }),
+    )
+
+    expect(sent(asked)).toEqual({
+      path: '/api/machines/pi/dirs',
+      method: 'POST',
+      body: JSON.stringify({ path: '/home/x/Github', make: 'landing' }),
+    })
+    expect(result.current.client.getQueryData(keys.dirs('pi', '/home/x/Github'))).toEqual(listing)
+  })
+})
+
 /** Every write, refused by the authoriser in its own words (`write.rs`,
  *  `Refused`): 403 is about the caller, 503 says nothing was decided. Each
  *  rejects with an `ApiError` carrying both, and nothing else. */
@@ -218,6 +312,10 @@ const writes = [
   ['repair', () => useRepairWorkspace(), { name: 'a', text: '' }],
   ['relay', () => useSetRelay(), { url: 'https://ntfy.sh/x' }],
   ['recheck', () => useRecheckReadiness(), 'pi'],
+  ['clone', () => useClone(), { machine: 'pi', url: 'https://github.com/a/b.git', path: '/a/b' }],
+  ['mkdir', () => useMakeDir(), { machine: 'pi', path: '/a', make: 'b' }],
+  ['github login', () => useGithubLogin(), undefined],
+  ['github logout', () => useGithubLogout(), undefined],
 ] as const
 
 describe('every write refused', () => {

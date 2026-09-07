@@ -23,9 +23,14 @@ export function Segmented(props: SegmentedProps) {
       aria-label={label}
       value={value === undefined ? undefined : [value]}
       defaultValue={defaultValue === undefined ? undefined : [defaultValue]}
-      onValueChange={(next) => {
-        // A group with nothing pressed is not a state a segmented button has.
-        if (next.length && onValueChange) onValueChange(String(next[0]))
+      onValueChange={(next, details) => {
+        // A group with nothing pressed is not a state a segmented button has,
+        // and only a cancel stops Base UI's own state from emptying.
+        if (!next.length) {
+          details.cancel()
+          return
+        }
+        onValueChange?.(String(next[0]))
       }}
       {...rest}
     />

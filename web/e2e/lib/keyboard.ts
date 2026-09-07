@@ -5,19 +5,23 @@ export type Stop = {
   name: string
   indicator: string
   visible: boolean
+  /** Base UI's focus-trap sentinel, which takes a Tab and hands it straight
+   *  on. It is `aria-hidden` and one pixel wide, so it is not a stop. */
+  guard?: boolean
 }
 
 /** Tab through the first `n` stops. Every one must be on screen, carry an
  *  accessible name, and show a focus indicator — a computed outline or box
- *  shadow, since Chromium applies `:focus-visible` to a Tab. Stops early when
- *  focus leaves the document, and fails if nothing took it at all. */
+ *  shadow on the element or on a box around it under `:focus-within`, since
+ *  Chromium applies `:focus-visible` to a Tab. Stops early when focus leaves
+ *  the document, and fails if nothing took it at all. */
 export async function keyboardWalk(page: Page, n: number): Promise<Stop[]> {
   const stops: Stop[] = []
-  for (let i = 0; i < n; i++) {
+  for (let presses = 0; stops.length < n && presses < n * 2; presses++) {
     await page.keyboard.press('Tab')
     const stop = await page.evaluate(inspect)
     if (!stop) break
-    stops.push(stop)
+    if (!stop.guard) stops.push(stop)
   }
 
   expect(stops.length, 'nothing on the page took focus').toBeGreaterThan(0)
@@ -39,6 +43,8 @@ export async function keyboardWalk(page: Page, n: number): Promise<Stop[]> {
 function inspect(): Stop | null {
   const el = document.activeElement as HTMLElement | null
   if (!el || el === document.body) return null
+  if (el.hasAttribute('data-base-ui-focus-guard'))
+    return { element: 'guard', name: '', indicator: 'none', visible: false, guard: true }
 
   const byId = (ids: string | null) =>
     (ids ?? '')
@@ -59,16 +65,25 @@ function inspect(): Stop | null {
 
   const style = getComputedStyle(el)
   const transparent = (c: string) => c === 'transparent' || /rgba\(.*,\s*0\)$/.test(c)
-  const outline =
-    style.outlineStyle !== 'none' &&
-    parseFloat(style.outlineWidth) > 0 &&
-    !transparent(style.outlineColor)
-  const shadow = style.boxShadow !== 'none'
-  const indicator = outline
-    ? `outline ${style.outlineWidth} ${style.outlineStyle}`
-    : shadow
-      ? `box-shadow ${style.boxShadow.slice(0, 40)}`
-      : 'none'
+  // Material draws a text field's focus on the container, under
+  // `:focus-within`, and leaves the input itself with no outline, so the ring
+  // is looked for on the element and then on the boxes around it.
+  const ring = (node: HTMLElement, where: string): string | null => {
+    const own = getComputedStyle(node)
+    if (
+      own.outlineStyle !== 'none' &&
+      parseFloat(own.outlineWidth) > 0 &&
+      !transparent(own.outlineColor)
+    )
+      return `outline ${own.outlineWidth} ${own.outlineStyle}${where}`
+    if (own.boxShadow !== 'none') return `box-shadow ${own.boxShadow.slice(0, 40)}${where}`
+    return null
+  }
+  let indicator = ring(el, '')
+  for (let up = el.parentElement, depth = 0; !indicator && up && depth < 3; up = up.parentElement, depth++) {
+    if (up.matches(':focus-within')) indicator = ring(up, ` on ${up.className || up.tagName.toLowerCase()}`)
+  }
+  indicator ??= 'none'
 
   const box = el.getBoundingClientRect()
   const visible =

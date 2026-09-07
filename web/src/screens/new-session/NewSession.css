@@ -1,0 +1,386 @@
+.ns {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 880px;
+  min-width: 0;
+  margin: 0;
+}
+
+.ns__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ns__title {
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-headline-small);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
+}
+
+.ns__lead,
+.ns__note {
+  margin: 0;
+}
+
+.ns__recap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.ns__stepper {
+  padding: 4px 0;
+}
+
+.ns__card {
+  gap: 12px;
+}
+
+.ns__card > h2 {
+  margin: 0;
+}
+
+.ns__name {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.ns__preview {
+  --m3-tile-size: 56px;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  font: var(--md-sys-typescale-headline-small);
+}
+
+.ns__field {
+  flex: 1;
+  min-width: 0;
+}
+
+.ns__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Choice cards: a tonal surface, the pressed one on secondary-container. */
+
+.ns__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.ns__option {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ns__choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 20px;
+  text-align: left;
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-lowest);
+  cursor: pointer;
+  font: inherit;
+}
+
+.ns__choice[aria-pressed="true"] {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.ns__choice:disabled {
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: default;
+  opacity: 0.62;
+}
+
+.ns__choice-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--md-sys-color-primary);
+}
+
+.ns__choice-icon > svg {
+  width: 22px;
+  height: 22px;
+}
+
+.ns__choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Rows in the repository and folder lists. */
+
+.ns__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-list-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ns__list > li > .m3-row {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ns__list > li > .m3-row:disabled {
+  cursor: default;
+}
+
+.ns__place {
+  flex: none;
+  max-width: 45%;
+  text-align: right;
+  white-space: normal;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.ns__github,
+.ns__local {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ns__signed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+}
+
+.ns__link {
+  font: var(--md-sys-typescale-label-large);
+  color: var(--md-sys-color-primary);
+}
+
+.ns__crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ns__crumbs li + li::before {
+  content: "/";
+  margin-right: 4px;
+  color: var(--md-sys-color-outline);
+}
+
+.ns__crumb {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-high);
+  cursor: pointer;
+}
+
+span.ns__crumb {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+  cursor: default;
+}
+
+.ns__make {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ns__make > .m3-text-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.ns__make > .m3-button {
+  margin-top: 8px;
+}
+
+.ns__chosen {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.ns__because {
+  white-space: pre-wrap;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* Step 3. */
+
+.ns__happen {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.ns__recap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.ns__recap-list > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.ns__recap-list dt {
+  flex: none;
+  width: 72px;
+  font: var(--md-sys-typescale-label-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.ns__recap-list dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+/* The starting screen. */
+
+.ns__starting {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ns__stages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ns__stage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: var(--m3-row-radius);
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.ns__stage[data-state="running"] {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.ns__stage-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.ns__stage-line > .m3-state {
+  flex: none;
+  min-width: 96px;
+}
+
+.ns__stage-line > .m3-mono {
+  margin-left: auto;
+}
+
+.ns__stage-detail {
+  padding-left: 108px;
+  color: var(--md-sys-color-on-surface-variant);
+  overflow-wrap: anywhere;
+}
+
+.ns__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Phone: the shell's app bar is the h1, the sheet is the screen, and the
+   stepper keeps only the current step's word. */
+
+[data-shell="phone"] .ns {
+  max-width: none;
+}
+
+[data-shell="phone"] .ns__stepper .m3-step:not([data-state="current"]) .m3-step__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+[data-shell="phone"] .ns__stepper .m3-step {
+  position: relative;
+}
+
+[data-shell="phone"] .ns__foot {
+  position: sticky;
+  bottom: 0;
+  margin: 0 -16px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--md-sys-color-surface);
+}
+
+[data-shell="phone"] .ns__place {
+  max-width: none;
+  text-align: left;
+}
+
+[data-shell="phone"] .ns__list > li > .m3-row {
+  flex-wrap: wrap;
+}
+
+[data-shell="phone"] .ns__stage-detail {
+  padding-left: 0;
+}

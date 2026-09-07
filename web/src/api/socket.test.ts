@@ -22,7 +22,13 @@ import {
 type Frame = { text: string } | { bytes: number[] }
 
 async function daemon() {
-  const server = new WebSocketServer({ port: 0 })
+  let upgrading = true
+  // The authoriser's answer is a status on the upgrade: no socket, no frame.
+  const server = new WebSocketServer({
+    port: 0,
+    verifyClient: (_info: unknown, done: (ok: boolean, code?: number, why?: string) => void) =>
+      done(upgrading, 403, 'node pi is on this tailnet but is not yours'),
+  })
   await once(server, 'listening')
   const heard: Frame[] = []
   let live: Client | undefined
@@ -50,6 +56,9 @@ async function daemon() {
     hangUp: () => live?.close(),
     keepHangingUp: () => {
       refusing = true
+    },
+    refuseUpgrades: () => {
+      upgrading = false
     },
     stop: () =>
       new Promise((done) => {
@@ -149,6 +158,32 @@ describe('the socket wrapper', () => {
     daemonised.hangUp()
     await new Promise((done) => setTimeout(done, PAUSE * 3))
     expect(daemonised.connections()).toBe(1)
+  })
+
+  /** The authoriser's 403 or 503 on the upgrade reaches a browser as a close
+   *  with no text frame. A socket that never opened is not an outage. */
+  it('ends a socket that never opened as refused, and reopens nothing', async () => {
+    daemonised.refuseUpgrades()
+    const { ended, links } = attach()
+
+    await settled(() => expect(ended.length).toBe(1))
+    expect(ended[0]).toBeInstanceOf(ApiError)
+    expect(ended[0]).toMatchObject({ kind: 'refused', retryable: false })
+    expect(links).toEqual([])
+    await new Promise((done) => setTimeout(done, PAUSE * 3))
+    expect(daemonised.connections()).toBe(0)
+  })
+
+  it('ends a socket whose address cannot be opened as a socket error', () => {
+    const ended: (ApiError | null)[] = []
+    attachTerminal('not a url', {
+      size: () => ({ rows: 24, cols: 80 }),
+      onBytes: () => {},
+      onEnd: (refused) => ended.push(refused),
+      onLink: () => {},
+    })
+    expect(ended).toHaveLength(1)
+    expect(ended[0]).toMatchObject({ kind: 'socket' })
   })
 
   it('reopens a socket that dropped and says its size again', async () => {
