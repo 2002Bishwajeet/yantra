@@ -10,7 +10,9 @@ afterEach(() => {
 describe('Access', () => {
   it('names the key, and shows the public half with Copy in the sheet', async () => {
     const writeText = vi.fn(() => Promise.resolve())
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    // Base UI reads `navigator.userAgent` when it first loads, and a spread
+    // of `navigator` leaves the prototype's getters behind.
+    vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText } })
     mountSettings('desktop', '/settings/access')
     expect(await screen.findByText('/home/<user>/.ssh/id_yantra')).toBeTruthy()
     expect(screen.getByText(/ed25519 · SHA256:<fingerprint>/)).toBeTruthy()
