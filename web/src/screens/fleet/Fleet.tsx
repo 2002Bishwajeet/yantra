@@ -87,7 +87,7 @@ export function Fleet() {
 
   return (
     <div className="fleet">
-      <header className="fleet__head">
+      <div className="fleet__head">
         <div className="fleet__title">
           <Text as="h1" emphasized scale="display-small">
             Fleet
@@ -98,7 +98,7 @@ export function Fleet() {
         <Pill disabled={changed === 0} icon={<RefreshCw />} onClick={reorder}>
           Reorder{changed > 0 ? ` · ${changed} changed` : ''}
         </Pill>
-      </header>
+      </div>
 
       {failed && !ready ? (
         <ErrorSurface.Card

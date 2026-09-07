@@ -166,7 +166,7 @@ export function Machine() {
 
   return (
     <div className="machine">
-      <header className="machine__title">
+      <div className="machine__title">
         <Text as="h1" emphasized scale="display-small">
           {name}
         </Text>
@@ -182,7 +182,7 @@ export function Machine() {
         <Button render={<Link to="/new" />} role="link" variant="tonal">
           New session
         </Button>
-      </header>
+      </div>
 
       <div className="machine__columns">
         <ErrorBoundary eyebrow={name} title="About could not be drawn">

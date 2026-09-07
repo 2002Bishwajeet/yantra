@@ -53,7 +53,9 @@ export function SessionsTable(props: { data: Line[]; factor: FormFactor }) {
   const table = useTable({ features, columns: SETS[factor], data })
 
   return (
-    <div className="usage__scroll">
+    // Focusable so a keyboard can scroll it, which is what axe asks of any
+    // region that scrolls (`scrollable-region-focusable`).
+    <div aria-label="Sessions table" className="usage__scroll" role="group" tabIndex={0}>
       <table className="usage__table">
         <thead>
           {table.getHeaderGroups().map((group) => (

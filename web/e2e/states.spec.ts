@@ -51,7 +51,9 @@ const READS_MACHINES: readonly RouteId[] = ['dashboard', 'fleet', 'machines', 'm
 const WRITES: Partial<Record<RouteId, string>> = {
   dashboard: 'Start',
   fleet: 'Start',
-  machine: 'Start',
+  // Every workspace on cachyos-g14 is past its first start, so the verb the
+  // machine page offers is Resume rather than Start.
+  machine: 'Resume',
 }
 
 // write.rs `Refused::NotYours`, as refused.json carries it.
@@ -74,9 +76,6 @@ type Case = 'unreachable' | 'empty' | 'held' | 'broken' | 'flaky' | 'refused'
 const PENDING: Partial<Record<RouteId, { row: string; why: string; cases?: readonly Case[] }>> = {
   dashboard: { row: 'Y-346', why: 'the Dashboard is still being written', cases: ['refused'] },
   fleet: { row: 'Y-347', why: 'a machines body without `data` is swallowed', cases: ['broken'] },
-  machines: { row: 'Y-347', why: 'the Machines screen is still being written' },
-  machine: { row: 'Y-347', why: 'the route is the Y-345 stub' },
-  usage: { row: 'Y-347', why: 'the route is the Y-345 stub' },
   session: { row: 'Y-348', why: 'no page-level Try again on the Session screen', cases: ['unreachable', 'flaky'] },
   'session-terminal': {
     row: 'Y-348',

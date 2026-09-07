@@ -193,7 +193,7 @@ export function Usage() {
 
   return (
     <div className="usage">
-      <header className="usage__title">
+      <div className="usage__title">
         <Text as="h1" emphasized scale="display-small">
           Usage
         </Text>
@@ -211,7 +211,7 @@ export function Usage() {
                 : 'Read spend'}
           </Button>
         ) : null}
-      </header>
+      </div>
 
       {workspaces.looked === 'pending' ? (
         <Card className="usage__card">

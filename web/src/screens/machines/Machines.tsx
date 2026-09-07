@@ -60,12 +60,12 @@ export function Machines() {
 
   return (
     <div className="machines">
-      <header className="machines__title">
+      <div className="machines__title">
         <Text as="h1" emphasized scale="display-small">
           Machines
         </Text>
         <Looked className="machines__looked" reads={[machines, readiness, sessions]} />
-      </header>
+      </div>
 
       <ErrorBoundary eyebrow="Machines" title="The machines could not be drawn">
         {machines.looked === 'failed' ? (
