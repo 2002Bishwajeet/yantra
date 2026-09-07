@@ -14,6 +14,9 @@
    their class names anyway — 3.7 kB gzip of rules for markup nothing draws.
    The files stay; the scan skips them. `motion.test.ts` recomputes this list
    from the import graph, so importing one is enough to get its CSS back. */
+@source not "./components/ui/autocomplete.tsx";
+@source not "./components/ui/command.tsx";
+@source not "./components/ui/kbd.tsx";
 @source not "./components/ui/label.tsx";
 @source not "./components/ui/popover.tsx";
 @source not "./components/ui/select.tsx";

@@ -1,0 +1,64 @@
+.notifications {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notifications__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.notifications__count {
+  margin-left: 6px;
+  font-size: var(--md-sys-typescale-label-medium-size);
+}
+
+.notifications__label {
+  display: block;
+  padding: 8px 12px 4px;
+}
+
+.notifications__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notifications__age {
+  flex: none;
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.notifications__empty {
+  margin: 0;
+  padding: 24px 12px;
+  font: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface-variant);
+  text-align: center;
+}
+
+.notifications__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 0;
+  padding: 12px 12px 4px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.notifications__foot a {
+  font: var(--md-sys-typescale-label-large);
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+}

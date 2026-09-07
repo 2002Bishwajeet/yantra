@@ -8,6 +8,17 @@
     <!-- Safari takes its home-screen icon from here and not from the manifest. -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Yantra</title>
+    <!-- shell/prefs.ts's key, read here so the theme and density land before
+         the first paint rather than a frame after it. -->
+    <script>
+      try {
+        var p = JSON.parse(localStorage.getItem('yantra.prefs'))
+        if (p && p.v === 1) {
+          if (p.theme === 'light' || p.theme === 'dark') document.documentElement.dataset.theme = p.theme
+          if (p.density === 'compact') document.documentElement.dataset.density = 'compact'
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

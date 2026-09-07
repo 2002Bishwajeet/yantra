@@ -178,6 +178,21 @@ const settingsCategory = createRoute({
   head: ({ params }) => titled(`${params.category} · Settings`),
 })
 
+// The phone's pushed notifications screen; the shell's bell links here
+// under 600 px and opens a popover or a side sheet above it.
+const notifications = createRoute({
+  getParentRoute: () => root,
+  path: '/notifications',
+  component: lazyRouteComponent(
+    () => import('@/shell/NotificationsScreen'),
+    'NotificationsScreen',
+  ),
+  loader: ({ context: { client } }) => {
+    void client.ensureQueryData(attentionQuery())
+  },
+  head: () => titled('Notifications'),
+})
+
 // Y-339: the component gallery, for the reviewer and Playwright. Dev only;
 // the production tree has the route and no chunk behind it.
 const gallery = createRoute({
@@ -201,6 +216,7 @@ export const routeTree = root.addChildren([
   newSession,
   settings,
   settingsCategory,
+  notifications,
   gallery,
 ])
 

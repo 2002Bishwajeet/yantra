@@ -1,0 +1,67 @@
+.palette {
+  align-self: start;
+  gap: 8px;
+  max-width: 640px;
+  margin-top: 12vh;
+  padding: 12px;
+}
+
+/* The field is the title a reader needs; the dialog's own stays for the name. */
+.palette .m3-dialog__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.palette__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.palette__label {
+  display: block;
+  padding: 8px 12px 4px;
+}
+
+.palette__row {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.palette__match {
+  color: inherit;
+  background: var(--md-sys-color-primary-container);
+  border-radius: 4px;
+}
+
+.palette__empty {
+  margin: 0;
+  padding: 12px;
+  font: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.palette__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px 0;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.palette__legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
