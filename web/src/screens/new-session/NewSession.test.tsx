@@ -174,6 +174,21 @@ describe('step 4, starting', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/w/quiet-otter'))
   })
 
+  /** 4.1.3: the four stages advance on a poll with no navigation, so the track
+   *  over them is a live region and it says which stage is which. */
+  it('draws a progress track that says what the stages are doing', async () => {
+    await toStepThree({
+      'POST /api/workspaces': (sent) => [201, { ...sent, startup: sent.startup ?? null }],
+      'POST /api/workspaces/quiet-otter/up': [200, contract.opened],
+    })
+    press('Create and open')
+
+    const track = await screen.findByRole('progressbar')
+    expect(track.closest('[role="status"]')).not.toBeNull()
+    // The clone was skipped, so one of the four is behind it before anything ran.
+    await waitFor(() => expect(Number(track.getAttribute('aria-valuenow'))).toBeGreaterThan(0))
+  })
+
   it('draws a refusal in the daemon’s own words, and offers the stage again', async () => {
     const create = vi.fn(() => [409, 'workspace `quiet-otter` already exists'] as [number, unknown])
     await toStepThree({ 'POST /api/workspaces': create })

@@ -29,6 +29,7 @@ is a broken build rather than a reader's problem.
 | R12 | A custom domain over the tailnet, and the certificate Tailscale will not issue | Y-154, M7 | [12-custom-domain-tls.md](12-custom-domain-tls.md) |
 | R13 | Everything from the dashboard, and the credential a `git clone` needs | [ADR-0004](../adr/0004-rust-for-the-daemon.md), [ADR-0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md), Q5 | [13-dashboard-revamp-and-github.md](13-dashboard-revamp-and-github.md) |
 | R14 | What Material 3 Expressive is in numbers, and how to build it on the web without a component library | Y-332, D3 §0 | [14-material-3-expressive-on-the-web.md](14-material-3-expressive-on-the-web.md) |
+| R15 | T3 Code — what a streaming Chat tab can take from it, and what the licence asks in return | [ADR-0026](../adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md), Y-356 | [15-t3code-for-the-chat.md](15-t3code-for-the-chat.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that

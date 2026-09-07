@@ -34,7 +34,7 @@ artifacts/
 # Web UI (M4)
 node_modules/
 dist/
-web/node_modules/
+web/node_modules
 web/dist/
 web/dist-e2e/
 web/.vite/

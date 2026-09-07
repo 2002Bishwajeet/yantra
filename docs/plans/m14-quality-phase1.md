@@ -15,6 +15,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `ec6e17c` | The accessibility rows and the M3 token rows in `web/src/m3/` |
 | `2d5818f` | The `web/src/api/` rows: refusal bodies, the refused upgrade, the two races, the hook tests |
 | `d837994` | The `web/e2e/` rows: the fixture's refusal shapes, the axe list, the screenshot image, motion |
+| `d4ae96f` | The boards review's accessibility findings: the keyboard trap, the three live regions, the two focus failures |
 
 ## Closed
 
@@ -75,6 +76,16 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 88 | A loader's `ensureQueryData` rejects when the page leaves mid-read | `d8e5a5e` |
 | 89 | A terminal socket closed while it was still CONNECTING | `d8e5a5e` |
 | 90 | React logs an `ApiError` the boundary already drew | `d8e5a5e` |
+| 91 | The terminal pane took Tab and never gave it back (2.1.2, Level A) | `d4ae96f` |
+| 92 | Nothing reserved room under the phone's fixed FAB, its bar or the sticky footer (2.4.11) | `d4ae96f` |
+| 93 | The four clone stages advanced with no live region and no progress track (4.1.3) | `d4ae96f` |
+| 94 | A session going running to crashed was announced nowhere (4.1.3) | `d4ae96f` |
+| 95 | The pane took focus when the fonts resolved (2.4.3, 3.2.1) | `d4ae96f` |
+| 96 | The palette's arrow keys moved an option the list never scrolled to (2.4.7) | `d4ae96f` |
+| 99 | The terminal's `role="status"` unmounted with the session's end (4.1.3) | `d4ae96f` |
+
+Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
+review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
 
 ## Open
 
@@ -85,7 +96,9 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
-| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.3 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 134 | `session-terminal-busy-phone` and two other phone specs disagree with their baselines on the pane's column count | Open, and mis-diagnosed twice — see below. Gates Y-352 |
+
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
 because six screen agents are reading those components right now, and a signature change or a
@@ -96,6 +109,37 @@ deletion. Rows 66 and 67 move a padding and a corner on `Button`, which moves ev
 baseline the e2e holds; row 77 changes a signature at every call site; row 79 changes what a screen
 reader says on every error layout. Each is its own row, and the one that moves a baseline
 re-renders it in the Playwright image in the same change.
+
+**Row 134, and two wrong diagnoses before the measurements.** `session-terminal-busy-phone`
+fails at six workers and passes at one, and `confirm.spec.ts:40` and `session.spec.ts:202` join it
+under some changes. The pane reports 43 columns where the baseline holds 49.
+
+**It was first recorded as a fallback-face race**: `Terminal.tsx` opens the pane inside
+`document.fonts.ready`, that promise settles on the loads already pending, and nothing on the route
+asks for the mono face until the pane draws — so the pane measures the fallback. The fix that
+follows from that reading is to ask for the face with `document.fonts.load` before waiting. **It was
+written, and it is wrong.** With it, all three specs fail 4 runs out of 4, still reporting 43.
+
+**The measurements, at one worker, on this route.** The face is verifiably absent when the pane asks
+for it (`check` false) and present when the request resolves (`check` true, one face matched).
+
+| the pane draws with | columns |
+| --- | --- |
+| the woff2 aborted, so the true fallback | 52 |
+| the face loaded before the measurement | 43 |
+| whatever the stored baseline holds | 49 |
+
+**So the baseline is neither state.** It is not the fallback and it is not the face; 49 is a
+measurement taken while the swap was in flight. That rules out both readings — the original one,
+which called the baseline right and the render wrong, and its inverse, which would make the
+baselines fallback captures to be regenerated. Neither is supported.
+
+What is known: the column count depends on when the pane is measured relative to the font swap, the
+baselines were captured in that window, and loading the face correctly moves every one of them.
+What is not known: what 49 is a measurement *of*. **Whoever takes this row starts there**, and does
+not regenerate a baseline until they can say which of the three numbers is the right one. The
+attempted fix and its unit test were reverted rather than merged, because a change whose correct
+behaviour disagrees with every stored baseline is not ready to ship.
 
 ## The eyebrow, and the amendment it earned
 
@@ -182,6 +226,11 @@ the wire is the same bytes measured honestly rather than a smaller build.
 **Merging `main` puts it at 147.3 KiB.** Y-358's unreachable screen adds `reached.ts` and
 `NotReached.tsx` to the shell, which is on `/`, so the gap to the ceiling is 2.3 KiB rather than
 1.7. Nothing above changes; the lever is still Y-357.
+
+**Y-352's accessibility fixes then add 317 B**, for **147.6 KiB** (151 124 B) and a gap of 2.6 KiB.
+The entry chunk carries 294 B of that — the shell's live region — and the stylesheet 23 B, the
+phone's `scroll-padding-bottom`. Everything else the row fixed sits in a lazy chunk. Measured on
+`y-352-a11y` at `d61b61e` against 150 807 B on `main` at `75c46fa`; fonts are 78.5 KiB on both.
 
 ### The `/` chunk carries none of the five
 

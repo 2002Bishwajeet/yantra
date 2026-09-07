@@ -123,6 +123,29 @@ test.describe('the session screen, the other three views', () => {
     await screenshot(page, 'session-terminal', 'busy', size)
   })
 
+  /** **WCAG 2.1.2, and the worst thing the review found.** xterm hands Tab to
+   *  the shell — `Keys.tsx` ships a Tab button because of it — so the pane needs
+   *  an exit that is not Tab. Escape then Tab is it, and the line under the pane
+   *  is where a keyboard reads that. */
+  test('lets a keyboard leave the pane, and still sends Tab to the shell', async ({ page }) => {
+    await open(page, 'Terminal')
+    await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
+    await expect(page.getByText('Esc then Tab leaves the pane')).toBeVisible()
+
+    const pane = page.locator('.xterm-helper-textarea')
+    await pane.focus()
+    await expect(pane).toBeFocused()
+
+    // Tab on its own is the shell's, and moves no focus.
+    await page.keyboard.press('Tab')
+    await expect(pane).toBeFocused()
+
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Tab')
+    await expect(pane).not.toBeFocused()
+    await expect(page.locator('.terminal__status')).toBeFocused()
+  })
+
   test('the Transcript view reads over ssh, on request', async ({ page, size }) => {
     await open(page, 'Transcript')
 
@@ -200,6 +223,8 @@ test.describe('the terminal for a session no workspace claims', () => {
     const alert = page.getByRole('alert')
     await expect(alert).toContainText('tmux gone on cachyos-g14 has no terminal to attach to')
     await expect(alert).toContainText("can't find session: =gone")
-    await expect(page.getByRole('status')).toHaveCount(0)
+    // 4.1.3: the line that speaks while the pane is live is the one that has to
+    // carry the end, so it stays rather than going with what ended it.
+    await expect(page.getByRole('status')).toContainText('refused · tmux gone on cachyos-g14')
   })
 })
