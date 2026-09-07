@@ -229,12 +229,12 @@ the ADR's §7 launchd job, which is what puts such a server there with nobody at
 flowchart LR
     M1["M1 · walking skeleton"] --> M2["M2 · real machines"] --> M3["M3 · agents"] --> M4["M4 · web UI"] --> M5["M5 · control from the phone"] --> M6["M6 · browser terminal"] --> M7["M7 · appliance"] --> M8["M8 · hardware panel"] --> M9["M9 · enclosure & PCB"] --> M10["M10 · placement"]
 
-    M6 --> M11["M11 · work inbox"] --> M12["M12 · sessions and cost"] --> M13["M13 · a dashboard you can work in"]
+    M6 --> M11["M11 · work inbox"] --> M12["M12 · sessions and cost"] --> M13["M13 · a dashboard you can work in"] --> M14["M14 · the Material dashboard"]
 
     classDef done fill:#1e4620,stroke:#3fb950,color:#fff
     classDef doing fill:#3d2e00,stroke:#d29922,color:#fff
     class M1,M2,M3,M4,M5,M11,M12,M13 done
-    class M6,M7 doing
+    class M6,M7,M14 doing
 ```
 
 **M11, M12 and M13 closed on 2026-09-04, and they were dashboard work rather than new orchestration.**
@@ -243,6 +243,17 @@ on the fleet, whether a workspace names it or not, each one attachable and killa
 A workspace page carries three tabs — the terminal, the transcript read on request, and what the
 session spent — and each tab names the machine it could not reach. M13's phone clause, *three
 screens and one tap*, is built and not yet measured on a phone.
+
+**M14 rebuilt the dashboard rather than restyling it.** The owner redesigned it in Material 3
+Expressive on sixty-five artboards, and [ADR-0024](adr/0024-the-dashboard-is-material-3-built-by-hand.md)
+superseded ADR-0014's component and styling rows: the visible components are hand-built in
+`web/src/m3/` on Base UI, every Material role is a custom property in `web/src/m3/tokens.css`, and
+TanStack carries routing, reads, forms, the table and the virtual lists. Twelve routes replace the
+one page. Verification is Playwright with axe at 390, 834 and 1440 against a Node fixture daemon,
+beside the Vitest suite. Y-353 deleted the stylesheet and the vendored primitives the old page
+carried. **The milestone is not closed**: the first load of `/` is 2.3 KiB over its 145 KiB ceiling,
+and the owner has not yet opened it on a phone and an iPad. [`web/README.md`](../web/README.md) is
+the map of what shipped.
 
 **M6 and M7 are both open for reasons that are not code.** M6's layers are all built and each is
 tested against something real; what it waits on is one run against

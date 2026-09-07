@@ -13,6 +13,7 @@ const SCENARIOS: readonly Scenario[] = [
   'nogrant',
   'repair',
   'unreachable',
+  'down',
 ]
 
 /** The browser logs a failed response itself, from outside the page; no code

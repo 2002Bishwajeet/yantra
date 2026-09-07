@@ -54,6 +54,15 @@ D3 §0: *"It does not settle pigment, type or motif."* The dashboard runs today 
 tokens and the Geist face, which is a correct structure wearing a default. That is **D7**, and §7
 says why it is written differently from the rest.
 
+> **2026-09-07, Y-353: D7 was never written, and the pigment landed anyway.** The owner redesigned
+> the dashboard on the canvas and
+> [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) settled it: sage Material 3
+> Expressive, Google Sans Flex and IBM Plex Mono, every role a custom property in
+> `web/src/m3/tokens.css`. The shadcn tokens and the Geist face are deleted. What is still open is
+> whether the options round in [`web/design/`](../../web/README.md) has a question left — its four
+> candidate stylesheets swap names the Material components no longer read, so switching one changes
+> nothing on the page. That is Y-330's to close.
+
 ---
 
 ## 3. The order, and what it costs

@@ -16,6 +16,8 @@ import { useFormFactor } from './formFactor'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
 import { usePrefs } from './prefs'
+import { NotReached } from './NotReached'
+import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
 import { useScreenTitle, useScreenTitleOverride } from './title'
 import './Shell.css'
@@ -43,12 +45,13 @@ const useTitle = () => {
   return override ?? named
 }
 
-/** The outlet, under one boundary that a navigation resets. */
-function Page() {
+/** The outlet, under one boundary that a navigation resets — or, when nothing
+ *  reached the daemon, the one screen that says so in its place. */
+function Page({ down }: { down: ReactNode }) {
   return (
     <main className="shell__main">
       <ErrorBoundary layout="page" {...useResetOnRouteChange()}>
-        <Outlet />
+        {down ?? <Outlet />}
       </ErrorBoundary>
     </main>
   )
@@ -63,7 +66,7 @@ function Guarded(props: { title: string; children: ReactNode }) {
   )
 }
 
-function DesktopShell() {
+function DesktopShell({ down }: Shells) {
   const pathname = usePathname()
   return (
     <div className="shell" data-shell="desktop">
@@ -105,18 +108,18 @@ function DesktopShell() {
         </div>
       </header>
       <div className="shell__body">
-        {pathname === '/' || pathname === '/new' ? (
+        {down === null && (pathname === '/' || pathname === '/new') ? (
           <Guarded title="Sessions could not be drawn">
             <SessionsRail />
           </Guarded>
         ) : null}
-        <Page />
+        <Page down={down} />
       </div>
     </div>
   )
 }
 
-function TabletShell() {
+function TabletShell({ down }: Shells) {
   const [open, setOpen] = useState(false)
   const [touched, setTouched] = useState(false)
   return (
@@ -162,7 +165,7 @@ function TabletShell() {
             <Account />
           </Suspense>
         </div>
-        <Page />
+        <Page down={down} />
       </div>
       {touched ? (
         <Guarded title="Notifications could not be drawn">
@@ -175,7 +178,7 @@ function TabletShell() {
   )
 }
 
-function PhoneShell() {
+function PhoneShell({ down }: Shells) {
   const pathname = usePathname()
   const title = useTitle()
   const router = useRouter()
@@ -209,7 +212,7 @@ function PhoneShell() {
         }
         title={title}
       />
-      <Page />
+      <Page down={down} />
       {top ? (
         <>
           <Fab className="shell__fab" label="New session" role="link" render={<Link to="/new" />}>
@@ -238,6 +241,8 @@ function PhoneShell() {
   )
 }
 
+type Shells = { down: ReactNode }
+
 const shells = { desktop: DesktopShell, tablet: TabletShell, phone: PhoneShell }
 
 // Whether a seed is on the root, so going back to sage clears it once. Outside
@@ -264,6 +269,9 @@ export function Shell() {
   useViewing()
   const { theme, density, seed } = usePrefs()
   const factor = useFormFactor()
+  // One screen, owned here: the daemon is down for Settings as much as for the
+  // fleet, and seven inline surfaces saying so are seven copies of one fact.
+  const { why, since } = useReached()
 
   // index.html applied these before the first paint; this keeps them live
   // when Appearance writes. The colour engine loads for a seed other than sage
@@ -282,7 +290,7 @@ export function Shell() {
   return (
     <>
       <HeadContent />
-      <Chosen />
+      <Chosen down={why === null ? null : <NotReached since={since} why={why} />} />
     </>
   )
 }
