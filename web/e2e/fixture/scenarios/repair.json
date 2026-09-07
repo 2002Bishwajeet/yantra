@@ -1,0 +1,206 @@
+{
+  "extends": "busy",
+  "workspaces": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "loaded": "yes",
+        "name": "yantra-web",
+        "machine": "cachyos-g14",
+        "repo": "/home/biswa/Github/yantra",
+        "startup": null
+      },
+      {
+        "loaded": "yes",
+        "name": "homelab-k8s",
+        "machine": "hetzner-1",
+        "repo": "/home/biswa/Github/homelab-k8s",
+        "startup": null
+      },
+      {
+        "loaded": "yes",
+        "name": "landing",
+        "machine": "macbook",
+        "repo": "/Users/biswa/Github/yantra-landing",
+        "startup": null
+      },
+      {
+        "loaded": "yes",
+        "name": "agent-sdk",
+        "machine": "cachyos-g14",
+        "repo": "/home/biswa/Github/agent-sdk",
+        "startup": null
+      },
+      {
+        "loaded": "no",
+        "name": "price-table",
+        "error": "workspace `price-table` at /home/biswa/.config/yantra/workspaces/price-table.toml will not load: missing field 'machine' at line 7"
+      },
+      {
+        "loaded": "yes",
+        "name": "ntfy-relay",
+        "machine": "pi-5",
+        "repo": "/home/biswa/ntfy-relay",
+        "startup": "npm run dev"
+      },
+      {
+        "loaded": "yes",
+        "name": "docs-sweep",
+        "machine": "macbook",
+        "repo": "/Users/biswa/Github/yantra-docs",
+        "startup": null
+      },
+      {
+        "loaded": "yes",
+        "name": "appliance",
+        "machine": "pi-5",
+        "repo": "/home/biswa/appliance",
+        "startup": null
+      },
+      {
+        "loaded": "yes",
+        "name": "landing-copy",
+        "machine": "macbook",
+        "repo": "/Users/biswa/Github/landing-copy",
+        "startup": null
+      },
+      {
+        "loaded": "yes",
+        "name": "cargo-zig",
+        "machine": "thinkpad",
+        "repo": "/home/biswa/Github/cargo-zig",
+        "startup": null
+      }
+    ]
+  },
+  "status": {
+    "yantra-web": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "yantra-web",
+        "machine": "cachyos-g14",
+        "reached": "yes",
+        "status": {
+          "state": "awaiting_trust"
+        },
+        "session": {
+          "id": "1f0c1a2e-4c2b-4f7a-9a1d-3f0c2b8e7d61",
+          "pid": 48213
+        }
+      }
+    },
+    "homelab-k8s": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "homelab-k8s",
+        "machine": "hetzner-1",
+        "reached": "yes",
+        "status": {
+          "state": "running"
+        },
+        "session": {
+          "id": "7b2e9c40-1d6f-4a3b-8e5c-2f9d0a1b3c4d",
+          "pid": 2231
+        }
+      }
+    },
+    "landing": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "landing",
+        "machine": "macbook",
+        "reached": "yes",
+        "status": {
+          "state": "running"
+        },
+        "session": {
+          "id": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+          "pid": 9107
+        }
+      }
+    },
+    "agent-sdk": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "agent-sdk",
+        "machine": "cachyos-g14",
+        "reached": "yes",
+        "status": {
+          "state": "running"
+        },
+        "session": {
+          "id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+          "pid": 51340
+        }
+      }
+    },
+    "ntfy-relay": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "ntfy-relay",
+        "machine": "pi-5",
+        "reached": "yes",
+        "status": {
+          "state": "no_session"
+        },
+        "session": null
+      }
+    },
+    "docs-sweep": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "docs-sweep",
+        "machine": "macbook",
+        "reached": "yes",
+        "status": {
+          "state": "finished"
+        },
+        "session": null
+      }
+    },
+    "appliance": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "appliance",
+        "machine": "pi-5",
+        "reached": "yes",
+        "status": {
+          "state": "stopped"
+        },
+        "session": null
+      }
+    },
+    "landing-copy": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "landing-copy",
+        "machine": "macbook",
+        "reached": "yes",
+        "status": {
+          "state": "no_session"
+        },
+        "session": null
+      }
+    },
+    "cargo-zig": {
+      "looked": "ok",
+      "age_seconds": 0,
+      "data": {
+        "workspace": "cargo-zig",
+        "machine": "thinkpad",
+        "reached": "no",
+        "error": "ssh to thinkpad failed before the command reported a status: connect to host thinkpad port 22: No route to host"
+      }
+    }
+  },
+  "broken_text": "# price-table\n# generated by yantra on 7 Jul, edited by hand on 4 Sep\n\n# The session runs here. The repo path below is looked for on this machine.\n# 4 Sep: moving to the thinkpad once it is back on the tailnet,\n# so the old line is parked until then.\n# machine = \"cachyos-g14\"\n\nrepo = \"/home/biswa/Github/price-table\"\n\n# What to start in the window. A reference, never a value.\nstartup = \"op run --env-file=.env -- claude\"\n\n# thinkpad: machine = \"thinkpad\", repo = \"/home/biswa/src/price-table\"\n"
+}

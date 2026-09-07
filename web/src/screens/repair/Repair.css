@@ -1,0 +1,208 @@
+.repair {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+  flex: 1;
+  min-width: 0;
+}
+
+.repair__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.repair__title {
+  margin: 0;
+}
+
+.repair__path {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+  overflow-wrap: anywhere;
+}
+
+.repair__where {
+  flex-basis: 100%;
+}
+
+[data-shell="desktop"] .repair__where {
+  flex-basis: auto;
+  margin-left: auto;
+}
+
+.repair__alert {
+  gap: 8px;
+}
+
+.repair__reason {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.repair__reason-title {
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-title-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
+}
+
+.repair__error {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.repair__advice {
+  margin: 0;
+}
+
+.repair__file {
+  gap: 10px;
+  flex: 1;
+  margin: 0;
+}
+
+.repair__file-head,
+.repair__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 0 4px;
+}
+
+.repair__file-name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.repair__count {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.repair__foot p {
+  margin: 0;
+}
+
+.repair__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* The editor: one scroll container, the gutter stuck to its left edge, and
+   the textarea laid over a mirror of its own lines. Both share one metric. */
+.repair__editor {
+  --repair-line: 26px;
+  display: flex;
+  overflow: auto;
+  box-sizing: border-box;
+  min-height: 240px;
+  padding: 14px 10px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  font: 500 var(--md-sys-typescale-body-medium-size) / var(--repair-line) var(--md-ref-typeface-mono);
+  tab-size: 4;
+}
+
+.repair__gutter {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  padding-right: 6px;
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.repair__gutter span {
+  box-sizing: border-box;
+  min-width: 36px;
+  height: var(--repair-line);
+  padding: 0 6px;
+  border-radius: var(--md-sys-shape-corner-small);
+  font-size: var(--md-sys-typescale-body-small-size);
+  text-align: right;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.repair__gutter span[data-error] {
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+.repair__text {
+  position: relative;
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+.repair__mirror {
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  width: max-content;
+  white-space: pre;
+}
+
+.repair__line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+  min-height: var(--repair-line);
+  padding: 0 10px;
+  border-radius: var(--md-sys-shape-corner-small);
+}
+
+/* The textarea draws the glyphs; the mirror only holds their width. */
+.repair__line > span:first-child {
+  flex: 1;
+  color: transparent;
+}
+
+.repair__line[data-error] {
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+.repair__marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  font-size: var(--md-sys-typescale-body-small-size);
+  white-space: nowrap;
+}
+
+.repair__input {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-small);
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  caret-color: var(--md-sys-color-on-surface);
+  font: inherit;
+  white-space: pre;
+  tab-size: inherit;
+}
+
+.repair__input:focus-visible {
+  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-focus-ring-color);
+  outline-offset: 2px;
+}
