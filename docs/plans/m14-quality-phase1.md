@@ -106,6 +106,7 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 67 | The pressed corner morphs to `medium` for both sizes; Expressive gives one shape per size | Packages, same reading |
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 137 | `Palette.test.tsx`'s *never runs a verb* counts a POST the e2e version excludes: the transcript's own `/logs` read arrives late under load and the assertion sees it | Found in Y-363's CI; passes 12 of 12 alone and fails only when the box is saturated |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
