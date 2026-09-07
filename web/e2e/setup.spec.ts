@@ -15,15 +15,16 @@ const STEPS = [
   'Your first session',
 ]
 
-// Y-350 wrote `src/screens/setup/Setup.tsx`; nothing renders it. `/` drew it
-// while the fleet was empty (D3 §4.8) until Y-346 gave that branch to the
-// EmptyDashboard board, so the checklist has no route and these cases are
-// held rather than deleted.
-test.describe.fixme('the first run', () => {
+// D3 §4.8: `/` draws the checklist while the machine list says nothing is on
+// the tailnet, and the EmptyDashboard board once a machine is. `firstrun` is
+// the fleet with no workspace and no machine online.
+test.describe('the first run', () => {
   test.beforeEach(async ({ page }) => {
-    await scenario(page, 'empty')
+    await scenario(page, 'firstrun')
     await page.goto(route('dashboard').path)
-    await expect(page.getByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeVisible()
+    // The phone's app bar draws the route's own h1 and hides the screen's
+    // from the accessibility tree, so this one is found in the DOM.
+    await expect(page.locator('h1', { hasText: 'Set up Yantra' })).toBeAttached()
   })
 
   test('draws six steps, how far along they are, and what each one is waiting on', async ({ page }) => {
@@ -33,16 +34,17 @@ test.describe.fixme('the first run', () => {
     await expect(page.getByText(/\d of 6 done/)).toBeVisible()
     await expect(page.getByRole('progressbar')).toBeVisible()
     await expect(page.getByText('waiting on you')).toBeVisible()
-    await expect(page.getByRole('link', { name: 'New session' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'New session' }).first()).toBeVisible()
     await expect(page.getByRole('link', { name: 'Skip for now' })).toBeVisible()
   })
 
   test('asks a machine for its checks only when told to', async ({ page }) => {
     const ask = page.getByRole('button', { name: /^Check/ }).first()
     await expect(ask).toBeVisible()
-    await expect(page.getByText('not checked yet · a check costs one ssh round trip').first()).toBeVisible()
+    await expect(page.getByText('0 of 6 machines ready')).toBeVisible()
     await ask.click()
-    await expect(page.getByText('not checked yet · a check costs one ssh round trip')).toHaveCount(0)
+    await expect(ask).toBeEnabled()
+    await expect(page.getByRole('alert')).toHaveCount(0)
   })
 
   test('passes axe', async ({ page }) => {
@@ -54,6 +56,6 @@ test.describe.fixme('the first run', () => {
   })
 
   test('looks like the board', async ({ page, size }) => {
-    await screenshot(page, 'setup', 'empty', size)
+    await screenshot(page, 'setup', 'firstrun', size)
   })
 })

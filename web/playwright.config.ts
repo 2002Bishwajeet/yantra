@@ -32,6 +32,9 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
 
   expect: {
+    // The fixture is one Node process for every worker on three projects, and
+    // a read behind six of them takes longer than the 5 s default.
+    timeout: 10_000,
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',

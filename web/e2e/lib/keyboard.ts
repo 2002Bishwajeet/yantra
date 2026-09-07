@@ -5,6 +5,9 @@ export type Stop = {
   name: string
   indicator: string
   visible: boolean
+  /** Base UI's focus-trap sentinel, which takes a Tab and hands it straight
+   *  on. It is `aria-hidden` and one pixel wide, so it is not a stop. */
+  guard?: boolean
 }
 
 /** Tab through the first `n` stops. Every one must be on screen, carry an
@@ -13,11 +16,11 @@ export type Stop = {
  *  focus leaves the document, and fails if nothing took it at all. */
 export async function keyboardWalk(page: Page, n: number): Promise<Stop[]> {
   const stops: Stop[] = []
-  for (let i = 0; i < n; i++) {
+  for (let presses = 0; stops.length < n && presses < n * 2; presses++) {
     await page.keyboard.press('Tab')
     const stop = await page.evaluate(inspect)
     if (!stop) break
-    stops.push(stop)
+    if (!stop.guard) stops.push(stop)
   }
 
   expect(stops.length, 'nothing on the page took focus').toBeGreaterThan(0)
@@ -39,6 +42,8 @@ export async function keyboardWalk(page: Page, n: number): Promise<Stop[]> {
 function inspect(): Stop | null {
   const el = document.activeElement as HTMLElement | null
   if (!el || el === document.body) return null
+  if (el.hasAttribute('data-base-ui-focus-guard'))
+    return { element: 'guard', name: '', indicator: 'none', visible: false, guard: true }
 
   const byId = (ids: string | null) =>
     (ids ?? '')

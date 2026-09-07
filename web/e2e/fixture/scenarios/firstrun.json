@@ -1,0 +1,63 @@
+{
+  "extends": "empty",
+  "machines": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "name": "cachyos-g14",
+        "dns_name": "cachyos-g14.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "macbook",
+        "dns_name": "macbook.yantra.tail3a1b.ts.net.",
+        "os": "macOS",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "pi-5",
+        "dns_name": "pi-5.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "hetzner-1",
+        "dns_name": "hetzner-1.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "nas",
+        "dns_name": "nas.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "thinkpad",
+        "dns_name": "thinkpad.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      }
+    ]
+  }
+}

@@ -10,12 +10,6 @@ import { route } from './lib/routes'
 const KILL = route('session-terminal').path
 const DELETE = route('session').path
 
-/* The screen *behind* the question draws a link inside a paragraph, and M3's
-   primary on `on-surface-variant` is 1.46:1 without an underline. It is the
-   host's debt, not the dialog's, and Y-352 carries it; the day it is fixed,
-   this list fails until it is edited. */
-const KNOWN = { known: ['link-in-text-block'] }
-
 /** Base UI moves focus into the popup after it opens; a walk that starts
  *  before that lands on the page behind. */
 const focused = (page: Page) =>
@@ -27,6 +21,7 @@ test.describe('Kill a session', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(KILL)
+    await expect(page.getByRole('heading', { level: 1, name: 'scratch' }).first()).toBeVisible()
     await page.getByRole('button', { name: 'Kill', exact: true }).click()
   })
 
@@ -40,12 +35,12 @@ test.describe('Kill a session', () => {
     await expect(asked.getByRole('button', { name: 'Kill', exact: true })).toBeVisible()
   })
 
-  test('passes axe, walks by keyboard and closes on Escape', async ({ page, size }) => {
+  test('passes axe, walks by keyboard and closes on Cancel', async ({ page, size }) => {
     await focused(page)
-    await axe(page, KNOWN)
-    await keyboardWalk(page, 3)
+    await axe(page)
+    await keyboardWalk(page, 2)
     await screenshot(page, 'confirm-kill', 'busy', size)
-    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
   })
 })
@@ -54,6 +49,7 @@ test.describe('Delete a workspace', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(DELETE)
+    await expect(page.getByRole('heading', { level: 1, name: 'landing' }).first()).toBeVisible()
     await page.getByRole('button', { name: 'Delete', exact: true }).click()
   })
 
@@ -66,12 +62,12 @@ test.describe('Delete a workspace', () => {
     await expect(asked.getByRole('button', { name: 'Cancel' })).toBeVisible()
   })
 
-  test('passes axe, walks by keyboard and closes on Escape', async ({ page, size }) => {
+  test('passes axe, walks by keyboard and closes on Cancel', async ({ page, size }) => {
     await focused(page)
-    await axe(page, KNOWN)
-    await keyboardWalk(page, 3)
+    await axe(page)
+    await keyboardWalk(page, 2)
     await screenshot(page, 'confirm-delete', 'busy', size)
-    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
   })
 })

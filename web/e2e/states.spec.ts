@@ -49,7 +49,8 @@ const READS_MACHINES: readonly RouteId[] = ['dashboard', 'fleet', 'machines', 'm
 /** The write each route offers on `busy`, for `refused`. Only the verbs the
  *  boards name; a screen with none is not asked. */
 const WRITES: Partial<Record<RouteId, string>> = {
-  dashboard: 'Start',
+  // No Dashboard board offers Start: its rows Open, Answer and Kill, and the
+  // refusal a write draws there is the one Fleet's Start draws.
   fleet: 'Start',
   // Every workspace on cachyos-g14 is past its first start, so the verb the
   // machine page offers is Resume rather than Start.
@@ -74,14 +75,9 @@ type Case = 'unreachable' | 'empty' | 'held' | 'broken' | 'flaky' | 'refused'
 /** Cases whose screens have not landed. A row with no `cases` is `fixme`
  *  everywhere; the sweep is re-run to move a row out as it turns green. */
 const PENDING: Partial<Record<RouteId, { row: string; why: string; cases?: readonly Case[] }>> = {
-  dashboard: { row: 'Y-346', why: 'the Dashboard is still being written', cases: ['refused'] },
   fleet: { row: 'Y-347', why: 'a machines body without `data` is swallowed', cases: ['broken'] },
-  session: { row: 'Y-348', why: 'no page-level Try again on the Session screen', cases: ['unreachable', 'flaky'] },
-  'session-terminal': {
-    row: 'Y-348',
-    why: 'the machine link in the status line fails link-in-text-block, and nothing draws a skeleton',
-    cases: ['unreachable', 'held'],
-  },
+  session: { row: 'Y-348', why: 'no page-level Try again on the Session screen', cases: ['unreachable'] },
+  'session-terminal': { row: 'Y-348', why: 'the pane draws no skeleton while the read is held', cases: ['held'] },
   new: { row: 'Y-349', why: 'no page-level Try again on New session', cases: ['unreachable', 'flaky'] },
 }
 

@@ -22,9 +22,7 @@ for (const fleet of ['busy', 'empty'] as const) {
     })
 
     test('passes axe', async ({ page }) => {
-      // The old page: the destructive badge is 3.98:1 and the kbd 4.34:1.
-      // Phase 2's page removes this list, and the test fails if it does not.
-      await axe(page, { known: ['color-contrast'] })
+      await axe(page)
     })
 
     test('walks by keyboard', async ({ page }) => {
@@ -48,22 +46,27 @@ test.describe('/ on unreachable', () => {
 
   test('draws an error surface, and axe still passes', async ({ page }) => {
     await expect(page.getByRole('alert').first()).toBeVisible()
-    await axe(page, { known: ['color-contrast'] })
+    await axe(page)
   })
 
   test('offers Try again', async ({ page }) => {
-    test.fixme(true, 'the old page has no Try again; ErrorSurface is Y-339')
-    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Try again' }).first()).toBeVisible()
   })
 })
 
-test.describe('/ on refused', () => {
-  test("a write shows the daemon's text", async ({ page }) => {
+/* No Dashboard board offers Start, so the refusal a write draws is Fleet's
+   (states.spec.ts sweeps the rest). */
+test.describe('/fleet on refused', () => {
+  test("a write shows the daemon's text", async ({ page, size }) => {
+    // The phone keeps the idle rows behind a disclosure, so Start is not on
+    // screen; `states.spec.ts` sweeps the wire at every route.
+    test.skip(size !== 'desktop', 'the verb is not on the phone board')
     await scenario(page, 'refused')
-    await page.goto('/')
-    await firstReading(page)
-    await page.getByRole('button', { name: 'Start', exact: true }).click()
-    await expect(page.getByRole('alert').filter({ hasText: REFUSAL })).toBeVisible()
+    await page.goto('/fleet')
+    const start = page.getByRole('button', { name: 'Start', exact: true }).first()
+    await expect(start).toBeVisible()
+    await start.click()
+    await expect(page.getByRole('alert').filter({ hasText: REFUSAL }).first()).toBeVisible()
   })
 })
 
@@ -72,8 +75,7 @@ test.describe('/ on flaky', () => {
     await scenario(page, 'flaky')
     await page.goto('/')
     await expect(page.getByRole('alert').first()).toBeVisible()
-    test.fixme(true, 'the old page has no Try again; it repolls in 5 s instead')
-    await page.getByRole('button', { name: 'Try again' }).click()
+    await page.getByRole('button', { name: 'Try again' }).first().click()
     await firstReading(page)
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
