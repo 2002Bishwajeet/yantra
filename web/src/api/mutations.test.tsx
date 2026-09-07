@@ -7,11 +7,13 @@ import { ApiError } from './errors'
 import { aWorkspace, looked, opened, stopped } from './fixtures'
 import { keys } from './keys'
 import {
+  useClone,
   useCreateWorkspace,
   useDeleteWorkspace,
   useDown,
   useEditWorkspace,
   useKillSession,
+  useMakeDir,
   useRecheckReadiness,
   useRepairWorkspace,
   useResume,
@@ -200,6 +202,61 @@ describe('a readiness recheck', () => {
   })
 })
 
+describe('a clone, and the folder to clone into', () => {
+  /** 202 and the tmux session the clone runs in: nothing is awaited here, and
+   *  the starting screen reads that session's socket for progress. */
+  it('asks one machine to clone one URL into one path', async () => {
+    const cloning = { machine: 'pi', session: 'clone-yantra' }
+    const asked = daemon(202, cloning)
+    const { result } = renderHookQueried(() => useClone())
+
+    let answer: unknown
+    await act(async () => {
+      answer = await result.current.mutateAsync({
+        machine: 'pi',
+        url: 'https://github.com/a/yantra.git',
+        path: '/home/x/Github/yantra',
+      })
+    })
+
+    expect(sent(asked)).toEqual({
+      path: '/api/machines/pi/clone',
+      method: 'POST',
+      body: JSON.stringify({
+        url: 'https://github.com/a/yantra.git',
+        path: '/home/x/Github/yantra',
+      }),
+    })
+    expect(answer).toEqual(cloning)
+  })
+
+  /** `make` answers the listing that now holds the folder, so it goes into
+   *  that level's key and the picker draws it without asking again. */
+  it('writes the listing a new folder answers under that level', async () => {
+    const listing = {
+      machine: 'pi',
+      path: '/home/x/Github',
+      entries: [{ path: '/home/x/Github/landing', name: 'landing', repo: false, origin: null }],
+    }
+    const asked = daemon(200, listing)
+    const { result } = renderHookQueried(() => ({
+      make: useMakeDir(),
+      client: useQueryClient(),
+    }))
+
+    await act(() =>
+      result.current.make.mutateAsync({ machine: 'pi', path: '/home/x/Github', make: 'landing' }),
+    )
+
+    expect(sent(asked)).toEqual({
+      path: '/api/machines/pi/dirs',
+      method: 'POST',
+      body: JSON.stringify({ path: '/home/x/Github', make: 'landing' }),
+    })
+    expect(result.current.client.getQueryData(keys.dirs('pi', '/home/x/Github'))).toEqual(listing)
+  })
+})
+
 /** Every write, refused by the authoriser in its own words (`write.rs`,
  *  `Refused`): 403 is about the caller, 503 says nothing was decided. Each
  *  rejects with an `ApiError` carrying both, and nothing else. */
@@ -218,6 +275,8 @@ const writes = [
   ['repair', () => useRepairWorkspace(), { name: 'a', text: '' }],
   ['relay', () => useSetRelay(), { url: 'https://ntfy.sh/x' }],
   ['recheck', () => useRecheckReadiness(), 'pi'],
+  ['clone', () => useClone(), { machine: 'pi', url: 'https://github.com/a/b.git', path: '/a/b' }],
+  ['mkdir', () => useMakeDir(), { machine: 'pi', path: '/a', make: 'b' }],
 ] as const
 
 describe('every write refused', () => {
