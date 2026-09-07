@@ -55,7 +55,6 @@ function Refused(props: { name: string; error: unknown; reset: () => void }) {
           </Button>
         )
       }
-      autoFocus
     />
   )
 }

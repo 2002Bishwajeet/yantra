@@ -24,6 +24,8 @@ for (const one of ROUTES) {
     await expect(page.getByRole('heading', { name: TITLE })).toBeVisible()
     const board = page.getByRole('alert')
     await expect(board).toHaveCount(1)
+    // Row 79: the live region is the whole announcement, so nothing takes focus.
+    await expect(page.getByRole('heading', { name: TITLE })).not.toBeFocused()
     for (const words of [
       'yantrad was not reached: HTTP 502',
       'off the tailnet',
