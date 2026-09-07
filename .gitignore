@@ -36,6 +36,7 @@ node_modules/
 dist/
 web/node_modules/
 web/dist/
+web/dist-e2e/
 web/.vite/
 
 # Local agent skills - installed via `npx skills add`, not part of the project
