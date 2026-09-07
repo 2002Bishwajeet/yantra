@@ -44,8 +44,9 @@ jobs:
       - run: npm test
       # D3 §9.1 and ADR-0024 §7: 145 KiB first load, 80 KiB of fonts, or red.
       # Still advisory after Y-353: deleting the old stylesheet took `/` from
-      # 159.1 to 146.7 KiB, and the 1.7 KiB left is React, TanStack Router and
-      # Query, Base UI and the dashboard itself. Y-357 measures the wire.
+      # 159.1 to 146.7 KiB, and Y-358's screen put it at 147.3. The 2.3 KiB
+      # left is React, TanStack Router and Query, Base UI and the dashboard
+      # itself. Y-357 measures the wire.
       - run: npm run budget -- --no-build
         continue-on-error: true
 

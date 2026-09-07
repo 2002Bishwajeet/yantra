@@ -251,7 +251,7 @@ superseded ADR-0014's component and styling rows: the visible components are han
 TanStack carries routing, reads, forms, the table and the virtual lists. Twelve routes replace the
 one page. Verification is Playwright with axe at 390, 834 and 1440 against a Node fixture daemon,
 beside the Vitest suite. Y-353 deleted the stylesheet and the vendored primitives the old page
-carried. **The milestone is not closed**: the first load of `/` is 1.7 KiB over its 145 KiB ceiling,
+carried. **The milestone is not closed**: the first load of `/` is 2.3 KiB over its 145 KiB ceiling,
 and the owner has not yet opened it on a phone and an iPad. [`web/README.md`](../web/README.md) is
 the map of what shipped.
 

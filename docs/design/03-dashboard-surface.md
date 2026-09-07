@@ -744,9 +744,9 @@ reconcile. Keep them, and say in
 > Plex Mono, both latin and self-hosted. The 145 KiB first-load ceiling for `/` does not move, and
 > `npm run budget` fails above either number.
 
-> **2026-09-07, Y-353: `/` is 146.7 KiB and the ceiling is missed by 1.7 KiB.** Deleting the old
-> stylesheet and the primitives under it took the first load from 159.1 KiB to 146.7; fonts are
-> 78.5 KiB and under. What is left is not a stylesheet: react-dom is 453 kB of the entry chunk's
+> **2026-09-07, Y-353: `/` is 147.3 KiB and the ceiling is missed by 2.3 KiB.** Deleting the old
+> stylesheet and the primitives under it took the first load from 159.1 KiB to 146.7, and Y-358's
+> unreachable screen put it at 147.3; fonts are 78.5 KiB and under. What is left is not a stylesheet: react-dom is 453 kB of the entry chunk's
 > 761 kB before minifying, TanStack Router about 90, TanStack Query about 40, and the shell and the
 > Dashboard 68 between them. Nothing on `/` is an eager import that could be lazy — `/` is the
 > Dashboard. So `web.yml` runs the budget with `continue-on-error: true` still, and

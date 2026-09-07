@@ -85,7 +85,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
-| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 146.7 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.3 KiB against 145, so the step cannot be made to fail yet. Y-357 |
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
 because six screen agents are reading those components right now, and a signature change or a
@@ -178,6 +178,10 @@ the Kill confirm already load on demand, and the Dashboard is the landing route.
 settings were measured and neither merged a chunk under Rolldown — `output.advancedChunks.minSize`
 and `output.experimentalMinChunkSize`. So row 84 stays open and Y-357 is the next lever: gzip on
 the wire is the same bytes measured honestly rather than a smaller build.
+
+**Merging `main` puts it at 147.3 KiB.** Y-358's unreachable screen adds `reached.ts` and
+`NotReached.tsx` to the shell, which is on `/`, so the gap to the ceiling is 2.3 KiB rather than
+1.7. Nothing above changes; the lever is still Y-357.
 
 ### The `/` chunk carries none of the five
 
