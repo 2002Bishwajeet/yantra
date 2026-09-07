@@ -119,7 +119,8 @@ function select(request) {
     state: stateFor(
       request.headers['x-fixture-scenario'] ?? jar['fixture-scenario'] ?? DEFAULT,
     ),
-    slow: Number(url.searchParams.get('slow') ?? jar['fixture-slow'] ?? 0),
+    // Capped: a spec sets it, but the timer must not take a caller's number whole.
+    slow: Math.min(Number(url.searchParams.get('slow') ?? jar['fixture-slow'] ?? 0) || 0, 10_000),
     url,
   }
 }
