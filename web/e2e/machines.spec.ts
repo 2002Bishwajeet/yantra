@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { axe, expect, keyboardWalk, scenario, test } from './lib/test'
+import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /* Y-347. What the Machines, TabletMachines and PhoneMachines boards say the
    page must carry, at all three sizes. `states.spec.ts` holds its empty and
@@ -66,6 +66,10 @@ test.describe('the machines on a busy fleet', () => {
   test('passes axe and walks by keyboard', async ({ page }) => {
     await axe(page)
     await keyboardWalk(page, 12)
+  })
+
+  test('looks like the board', async ({ page, size }) => {
+    await screenshot(page, 'machines', 'busy', size)
   })
 })
 

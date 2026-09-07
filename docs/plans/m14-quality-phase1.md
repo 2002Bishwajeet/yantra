@@ -16,6 +16,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `2d5818f` | The `web/src/api/` rows: refusal bodies, the refused upgrade, the two races, the hook tests |
 | `d837994` | The `web/e2e/` rows: the fixture's refusal shapes, the axe list, the screenshot image, motion |
 | `d4ae96f` | The boards review's accessibility findings: the keyboard trap, the three live regions, the two focus failures |
+| `e550211` | Finding 98: the fourteen boards with no picture |
 
 ## Closed
 
@@ -83,6 +84,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 95 | The pane took focus when the fonts resolved (2.4.3, 3.2.1) | `d4ae96f` |
 | 96 | The palette's arrow keys moved an option the list never scrolled to (2.4.7) | `d4ae96f` |
 | 99 | The terminal's `role="status"` unmounted with the session's end (4.1.3) | `d4ae96f` |
+| 98 | Fourteen of the 63 boards had no screenshot baseline | `e550211` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -98,6 +100,7 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
 | 134 | `session-terminal-busy-phone` and two other phone specs disagree with their baselines on the pane's column count | Open, and mis-diagnosed twice — see below. Gates Y-352 |
+| 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and a screen loses its own state. Usage loses the fan-out | UI; found closing 98, sits beside row 100 |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
@@ -140,6 +143,29 @@ What is not known: what 49 is a measurement *of*. **Whoever takes this row start
 not regenerate a baseline until they can say which of the three numbers is the right one. The
 attempted fix and its unit test were reverted rather than merged, because a change whose correct
 behaviour disagrees with every stored baseline is not ready to ship.
+
+## Finding 98: the fourteen boards, and what picturing Usage cost
+
+`e2e/fleet.spec.ts` is new on the busy scenario, and `machines.spec.ts`, `machine.spec.ts` and
+`usage.spec.ts` now call `screenshot()` beside the `axe()` they already called. MainDark and
+MainCompact come from `dashboard.spec.ts`, whose `prefer()` helper writes `shell/prefs.ts`'s key
+before the first paint, so the theme and the density are set the way a person sets them. The
+fourteen baselines were rendered in `mcr.microsoft.com/playwright:v1.63.0-noble`, never on the host.
+All 63 boards have a picture.
+
+**One of the fourteen would not hold still, and the cause is a defect.** `usage-busy-desktop` was
+first written with *Nothing read yet* on it, and it then passed five runs out of six against that
+wrong picture. A full-page capture makes Chromium report a **1x1 viewport** for a frame. Then
+`useFormFactor` reads *phone*, `Shell.tsx:290` renders `shells[factor]`, and that is a different
+component type, so React unmounts the tree and mounts a new one. Every other screen reads its query
+cache again and looks the same. Usage holds the fan-out in `useFleetSpend`'s own state, which no
+cache can give back, so the read is gone.
+
+The Usage picture is the viewport rather than the page for that reason. The boards are drawn at
+1440x1024, 834x1194 and 390x844, so the viewport is the board's own frame, and the capture no longer
+resizes anything. Eight repeats at three sizes pass. **The defect stands**: a person who drags a
+window across 600 px or 1240 px loses the read the same way, and that is row 135 above, beside
+row 100.
 
 ## The eyebrow, and the amendment it earned
 
