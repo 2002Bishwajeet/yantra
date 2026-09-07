@@ -19,6 +19,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `e550211` | Finding 98: the fourteen boards with no picture |
 | `aa139e2` | Finding 134: the terminal cell measured after the mono face lands |
 | `2f50305` | Row 135: one shell at every width, so a form-factor change keeps the tree |
+| `f1193ec` | Rows 79 and 83: one announcement per error layout, and what the e2e clock freezes |
 
 ## Closed
 
@@ -70,9 +71,11 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 75 | An unused spring token | `179693b` |
 | 76 | The drag handle used the wrong role | `ec6e17c` |
 | 78 | `key={one}` on free text | `ec6e17c` |
+| 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | `f1193ec` |
 | 80 | The bell was named twice | `ec6e17c` |
 | 81 | `count={0}` drew a "0" badge | `ec6e17c` |
 | 82 | The fixture's invalid-first-frame text and its binary handling | `d837994` |
+| 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | `f1193ec` |
 | 85 | `afterEach(cleanup)` in 35 files | `5bb41e6` |
 | 86 | `index.css` follows `prefers-color-scheme` and not `data-theme` | `e9e9158` |
 | 87 | Row 33 again, on `Fab`, `ExtendedFab` and `IconButton` | `d8e5a5e` |
@@ -100,8 +103,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 66 | `Button.css` pads S at 20 and M at 28; the Expressive tokens say 16 and 24 | Packages, and it needs the token file read before either number moves |
 | 67 | The pressed corner morphs to `medium` for both sizes; Expressive gives one shape per size | Packages, same reading |
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
-| 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
-| 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
 
 
@@ -114,6 +115,16 @@ deletion. Rows 66 and 67 move a padding and a corner on `Button`, which moves ev
 baseline the e2e holds; row 77 changes a signature at every call site; row 79 changes what a screen
 reader says on every error layout. Each is its own row, and the one that moves a baseline
 re-renders it in the Playwright image in the same change.
+
+> **Y-360 took 79 and 83 on 2026-09-07, and left the other three.** The live region is the
+> announcement at every layout: `role="alert"` reads the whole board, where a focus move reads the
+> title alone and takes the caret from wherever the reader left it. So `autoFocus` is gone from
+> `ErrorSurface` and its four callers, with the heading's `tabIndex` and the focus ring that served
+> it. `scenario.ts` now says what `setFixedTime` freezes — `Date`, and not `setTimeout` or
+> `setInterval` — and carries the measurement that rules out the alternative: under `install()` and
+> `pauseAt()` 49 of the 54 desktop cases in `down`, `smoke`, `dashboard` and `session` fail, and the
+> page never draws a first reading. Rows 66, 67 and 77 still move a baseline or a signature, so they
+> stay where they are.
 
 **Row 134, and the third diagnosis is the one that held.** The pane opened on the wrong column
 count, and `session-terminal-busy-phone` failed at six workers while passing at one. Two readings
