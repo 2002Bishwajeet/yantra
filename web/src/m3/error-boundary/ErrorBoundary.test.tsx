@@ -14,7 +14,7 @@ function Throws(props: { error: unknown; until?: { ok: boolean } }) {
 const quiet = () => vi.spyOn(console, 'error').mockImplementation(() => {})
 
 describe('ErrorBoundary', () => {
-  it('draws the fallback as an alert, focuses the title, and Try again re-renders the children', async () => {
+  it('draws the fallback as one alert, moves no focus, and Try again re-renders the children', async () => {
     quiet()
     const until = { ok: false }
     await mount(
@@ -24,8 +24,8 @@ describe('ErrorBoundary', () => {
     )
     const alert = await screen.findByRole('alert')
     expect(alert.dataset.layout).toBe('card')
-    const title = screen.getByRole('heading', { name: 'Fleet could not be read' })
-    expect(document.activeElement).toBe(title)
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(document.activeElement).toBe(document.body)
     expect(screen.getByText('The daemon did not answer.')).toBeTruthy()
     until.ok = true
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))

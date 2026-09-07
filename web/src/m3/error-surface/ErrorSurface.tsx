@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ComponentPropsWithRef, type ReactNode } from 'react'
+import type { ComponentPropsWithRef, ReactNode } from 'react'
 import { clsx } from 'clsx'
 import type { ApiError } from '@/api/errors'
 import { Button } from '../button/Button'
@@ -22,16 +22,13 @@ export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
   meta?: string
   /** The optional text button beside Try again. */
   action?: ReactNode
-  /** Where focus lands: the title, so a reader hears it. */
-  autoFocus?: boolean
 }
 
+/** Every layout announces one way, and it is the live region: `role="alert"`
+ *  reads the whole board, where a focus move reads the title alone and takes
+ *  the caret from wherever the reader left it. Do not add both back (row 79). */
 function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' }) {
-  const { layout, eyebrow, title, error, reset, unknowns, meta, action, autoFocus, className, ...rest } = props
-  const heading = useRef<HTMLHeadingElement>(null)
-  useEffect(() => {
-    if (autoFocus) heading.current?.focus()
-  }, [autoFocus])
+  const { layout, eyebrow, title, error, reset, unknowns, meta, action, className, ...rest } = props
   const retry = reset && error.retryable
   return (
     <section
@@ -43,9 +40,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
       {layout === 'page' ? <span className="m3-error__mark" aria-hidden="true" /> : null}
       <div className="m3-error__text">
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-        <h2 className="m3-error__title" tabIndex={-1} ref={heading}>
-          {title}
-        </h2>
+        <h2 className="m3-error__title">{title}</h2>
         <p className="m3-error__sentence">{error.describe()}</p>
         {error.said ? (
           <Mono className="m3-error__said" clip={layout === 'inline'}>

@@ -66,7 +66,6 @@
   margin: 0;
   font: var(--md-sys-typescale-emphasized-title-large);
   letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
-  outline: none;
 }
 
 .m3-error[data-layout="page"] .m3-error__title {
@@ -76,12 +75,6 @@
 .m3-error[data-layout="inline"] .m3-error__title {
   font: var(--md-sys-typescale-emphasized-body-medium);
   letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
-}
-
-.m3-error__title:focus-visible {
-  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-focus-ring-color);
-  outline-offset: var(--md-sys-focus-ring-offset);
-  border-radius: var(--md-sys-shape-corner-extra-small);
 }
 
 .m3-error__sentence {

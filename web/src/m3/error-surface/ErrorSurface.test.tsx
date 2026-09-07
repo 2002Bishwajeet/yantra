@@ -18,7 +18,6 @@ describe('ErrorSurface', () => {
         unknowns={['off the tailnet', 'yantrad down']}
         meta="last good read 2m ago"
         action={<Button variant="text">Open Tailscale</Button>}
-        autoFocus
       />,
     )
     const alert = screen.getByRole('alert')
@@ -27,7 +26,6 @@ describe('ErrorSurface', () => {
     expect(screen.getByText('fetch failed')).toBeTruthy()
     expect(screen.getAllByText('unknown')).toHaveLength(2)
     expect(screen.getByText('last good read 2m ago')).toBeTruthy()
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Nothing here can be reached' }))
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(reset).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Open Tailscale' })).toBeTruthy()
@@ -43,5 +41,14 @@ describe('ErrorSurface', () => {
   it('has an inline row', () => {
     render(<ErrorSurface.Inline title="Transcript" error={network} />)
     expect(screen.getByRole('alert').dataset.layout).toBe('inline')
+  })
+
+  it.each(['Page', 'Card', 'Inline'] as const)('announces %s once: one live region, no focus move', (which) => {
+    const Surface = ErrorSurface[which]
+    render(<Surface title="Nothing here can be reached" error={network} />)
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    const title = screen.getByRole('heading', { name: 'Nothing here can be reached' })
+    expect(title.hasAttribute('tabindex')).toBe(false)
+    expect(document.activeElement).toBe(document.body)
   })
 })

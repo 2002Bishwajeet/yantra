@@ -727,7 +727,6 @@ export function Dashboard() {
               Open Tailscale
             </Button>
           }
-          autoFocus
           error={new ApiError('network', nothing, { sentence: UNREACHABLE })}
           eyebrow="Dashboard"
           meta={good === null ? undefined : `last good read ${ago((now - good.at) / 1000, now).text} ago`}

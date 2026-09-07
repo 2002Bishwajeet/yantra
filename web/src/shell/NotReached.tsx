@@ -19,7 +19,6 @@ export function NotReached(props: { why: string; since: number | null }) {
   const every = `retrying every ${POLL_MS / 1000} s`
   return (
     <ErrorSurface.Page
-      autoFocus
       error={new ApiError('network', why, { sentence: SENTENCE })}
       eyebrow="Yantra"
       meta={

@@ -43,7 +43,6 @@ function Fallback(props: FallbackProps & Omit<ErrorBoundaryProps, 'children' | '
         void router.invalidate()
         resetErrorBoundary()
       }}
-      autoFocus
     />
   )
 }
