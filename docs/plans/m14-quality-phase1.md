@@ -18,6 +18,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `d4ae96f` | The boards review's accessibility findings: the keyboard trap, the three live regions, the two focus failures |
 | `e550211` | Finding 98: the fourteen boards with no picture |
 | `aa139e2` | Finding 134: the terminal cell measured after the mono face lands |
+| `2f50305` | Row 135: one shell at every width, so a form-factor change keeps the tree |
 
 ## Closed
 
@@ -87,6 +88,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 99 | The terminal's `role="status"` unmounted with the session's end (4.1.3) | `d4ae96f` |
 | 98 | Fourteen of the 63 boards had no screenshot baseline | `e550211` |
 | 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
+| 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and Usage loses the fan-out | `2f50305` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -101,7 +103,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
-| 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and a screen loses its own state. Usage loses the fan-out | UI; found closing 98, sits beside row 100 |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone

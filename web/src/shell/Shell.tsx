@@ -67,73 +67,135 @@ function Guarded(props: { title: string; children: ReactNode }) {
   )
 }
 
-function DesktopShell({ down }: Shells) {
-  const pathname = usePathname()
+function DesktopBar() {
   return (
-    <div className="shell" data-shell="desktop">
-      <header className="shell__bar">
-        <Link className="shell__wordmark" to="/">
-          <span aria-hidden="true" className="shell__disc" />
-          Yantra
-        </Link>
-        <nav aria-label="Main">
-          <PillGroup>
-            {DESTINATIONS.map((one) => (
-              <Pill
-                key={one.to}
-                role="link"
-                render={<Link
-                    activeOptions={{ exact: one.to === '/' }}
-                    activeProps={{ 'aria-current': 'page' }}
-                    to={one.to}
-                  />
-                }
-              >
-                {one.label}
-              </Pill>
-            ))}
-          </PillGroup>
-        </nav>
-        <div className="shell__actions">
-          <Guarded title="Search could not be drawn">
-            <Palette />
-          </Guarded>
-          <Guarded title="Notifications could not be drawn">
-            <Suspense fallback={slot}>
-              <BellPopover />
-            </Suspense>
-          </Guarded>
+    <header className="shell__bar">
+      <Link className="shell__wordmark" to="/">
+        <span aria-hidden="true" className="shell__disc" />
+        Yantra
+      </Link>
+      <nav aria-label="Main">
+        <PillGroup>
+          {DESTINATIONS.map((one) => (
+            <Pill
+              key={one.to}
+              role="link"
+              render={<Link
+                  activeOptions={{ exact: one.to === '/' }}
+                  activeProps={{ 'aria-current': 'page' }}
+                  to={one.to}
+                />
+              }
+            >
+              {one.label}
+            </Pill>
+          ))}
+        </PillGroup>
+      </nav>
+      <div className="shell__actions">
+        <Guarded title="Search could not be drawn">
+          <Palette />
+        </Guarded>
+        <Guarded title="Notifications could not be drawn">
           <Suspense fallback={slot}>
-            <Account />
+            <BellPopover />
           </Suspense>
-        </div>
-      </header>
-      <div className="shell__body">
-        {down === null && (pathname === '/' || pathname === '/new') ? (
-          <Guarded title="Sessions could not be drawn">
-            <SessionsRail />
-          </Guarded>
-        ) : null}
-        <Page down={down} />
+        </Guarded>
+        <Suspense fallback={slot}>
+          <Account />
+        </Suspense>
       </div>
+    </header>
+  )
+}
+
+function TabletRail() {
+  return (
+    <NavigationRail
+      fab={
+        <Fab label="New session" role="link" render={<Link to="/new" />}>
+          <Plus />
+        </Fab>
+      }
+    >
+      {DESTINATIONS.map((one) => (
+        <RailDestination
+          icon={one.icon}
+          key={one.to}
+          role="link"
+          render={<Link
+              activeOptions={{ exact: one.to === '/' }}
+              activeProps={{ 'aria-current': 'page' }}
+              to={one.to}
+            />
+          }
+        >
+          {one.label}
+        </RailDestination>
+      ))}
+    </NavigationRail>
+  )
+}
+
+function TabletActions({ onToggle, open }: { onToggle: () => void; open: boolean }) {
+  return (
+    <div className="shell__actions">
+      <Guarded title="Search could not be drawn">
+        <Palette />
+      </Guarded>
+      <Guarded title="Notifications could not be drawn">
+        <Bell aria-expanded={open} onClick={onToggle} />
+      </Guarded>
+      <Suspense fallback={slot}>
+        <Account />
+      </Suspense>
     </div>
   )
 }
 
-function TabletShell({ down }: Shells) {
-  const [open, setOpen] = useState(false)
-  const [touched, setTouched] = useState(false)
+/** The app bar is the page's h1 on the phone; Shell.css hides the screen's. */
+function PhoneBar({ top }: { top: boolean }) {
+  const title = useTitle()
+  const router = useRouter()
+  const back = () => {
+    if (router.history.canGoBack()) router.history.back()
+    else void router.navigate({ to: '/' })
+  }
   return (
-    <div className="shell" data-shell="tablet">
-      <NavigationRail
-        fab={
-          <Fab label="New session" role="link" render={<Link to="/new" />}>
-            <Plus />
-          </Fab>
-        }
-      >
+    <TopAppBar
+      actions={
+        top ? (
+          <>
+            <Guarded title="Notifications could not be drawn">
+              <Bell role="link" render={<Link to="/notifications" />} />
+            </Guarded>
+            <Suspense fallback={slot}>
+              <Account />
+            </Suspense>
+          </>
+        ) : undefined
+      }
+      leading={
+        top ? undefined : (
+          <IconButton label="Back" onClick={back}>
+            <ArrowLeft />
+          </IconButton>
+        )
+      }
+      title={title}
+    />
+  )
+}
+
+function PhoneBottom() {
+  return (
+    <>
+      <Fab className="shell__fab" label="New session" role="link" render={<Link to="/new" />}>
+        <Plus />
+      </Fab>
+      <NavigationBar>
         {DESTINATIONS.map((one) => (
-          <RailDestination
+          <BarDestination
             icon={one.icon}
             key={one.to}
             role="link"
@@ -145,106 +207,21 @@ function TabletShell({ down }: Shells) {
             }
           >
             {one.label}
-          </RailDestination>
+          </BarDestination>
         ))}
-      </NavigationRail>
-      <div className="shell__column">
-        <div className="shell__actions">
-          <Guarded title="Search could not be drawn">
-            <Palette />
-          </Guarded>
-          <Guarded title="Notifications could not be drawn">
-            <Bell
-              aria-expanded={open}
-              onClick={() => {
-                setTouched(true)
-                setOpen((was) => !was)
-              }}
-            />
-          </Guarded>
-          <Suspense fallback={slot}>
-            <Account />
-          </Suspense>
-        </div>
-        <Page down={down} />
-      </div>
-      {touched ? (
-        <Guarded title="Notifications could not be drawn">
-          <Suspense fallback={null}>
-            <NotificationsSheet onClose={() => setOpen(false)} open={open} />
-          </Suspense>
-        </Guarded>
-      ) : null}
-    </div>
+      </NavigationBar>
+    </>
   )
 }
 
-function PhoneShell({ down }: Shells) {
-  const pathname = usePathname()
-  const title = useTitle()
-  const router = useRouter()
-  const top = isDestination(pathname)
-  const back = () => {
-    if (router.history.canGoBack()) router.history.back()
-    else void router.navigate({ to: '/' })
-  }
-  return (
-    <div className="shell" data-shell="phone">
-      {/* The app bar is the page's h1 here; Shell.css hides the screen's. */}
-      <TopAppBar
-        actions={
-          top ? (
-            <>
-              <Guarded title="Notifications could not be drawn">
-                <Bell role="link" render={<Link to="/notifications" />} />
-              </Guarded>
-              <Suspense fallback={slot}>
-            <Account />
-          </Suspense>
-            </>
-          ) : undefined
-        }
-        leading={
-          top ? undefined : (
-            <IconButton label="Back" onClick={back}>
-              <ArrowLeft />
-            </IconButton>
-          )
-        }
-        title={title}
-      />
-      <Page down={down} />
-      {top ? (
-        <>
-          <Fab className="shell__fab" label="New session" role="link" render={<Link to="/new" />}>
-            <Plus />
-          </Fab>
-          <NavigationBar>
-            {DESTINATIONS.map((one) => (
-              <BarDestination
-                icon={one.icon}
-                key={one.to}
-                role="link"
-                render={<Link
-                    activeOptions={{ exact: one.to === '/' }}
-                    activeProps={{ 'aria-current': 'page' }}
-                    to={one.to}
-                  />
-                }
-              >
-                {one.label}
-              </BarDestination>
-            ))}
-          </NavigationBar>
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-type Shells = { down: ReactNode }
-
-const shells = { desktop: DesktopShell, tablet: TabletShell, phone: PhoneShell }
+// The box between the chrome and the page. It is one <div> at every width, so
+// a form-factor change reconciles the tree under it instead of remounting and
+// losing what a screen holds (Y-361); on the phone it lays nothing out.
+const CONTENTS = {
+  desktop: 'shell__body',
+  tablet: 'shell__column',
+  phone: 'shell__contents',
+} as const
 
 // Whether a seed is on the root, so going back to sage clears it once. Outside
 // the component because the compiler declines a function holding `import()`.
@@ -270,6 +247,9 @@ export function Shell() {
   useViewing()
   const { theme, density, seed } = usePrefs()
   const factor = useFormFactor()
+  const pathname = usePathname()
+  const [open, setOpen] = useState(false)
+  const [touched, setTouched] = useState(false)
   // One screen, owned here: the daemon is down for Settings as much as for the
   // fleet, and seven inline surfaces saying so are seven copies of one fact.
   const { why, since } = useReached()
@@ -287,11 +267,46 @@ export function Shell() {
 
   useEffect(() => reseed(seed), [seed])
 
-  const Chosen = shells[factor]
+  const down = why === null ? null : <NotReached since={since} why={why} />
+  const top = isDestination(pathname)
   return (
     <>
       <HeadContent />
-      <Chosen down={why === null ? null : <NotReached since={since} why={why} />} />
+      <div className="shell" data-shell={factor}>
+        {factor === 'desktop' ? (
+          <DesktopBar />
+        ) : factor === 'tablet' ? (
+          <TabletRail />
+        ) : (
+          <PhoneBar top={top} />
+        )}
+        <div className={CONTENTS[factor]}>
+          {factor === 'desktop' && down === null && (pathname === '/' || pathname === '/new') ? (
+            <Guarded title="Sessions could not be drawn">
+              <SessionsRail />
+            </Guarded>
+          ) : null}
+          {factor === 'tablet' ? (
+            <TabletActions
+              onToggle={() => {
+                setTouched(true)
+                setOpen((was) => !was)
+              }}
+              open={open}
+            />
+          ) : null}
+          <Page down={down} />
+        </div>
+        {factor === 'tablet' && touched ? (
+          <Guarded title="Notifications could not be drawn">
+            <Suspense fallback={null}>
+              <NotificationsSheet onClose={() => setOpen(false)} open={open} />
+            </Suspense>
+          </Guarded>
+        ) : factor === 'phone' && top ? (
+          <PhoneBottom />
+        ) : null}
+      </div>
       <StatusAnnouncer />
     </>
   )
