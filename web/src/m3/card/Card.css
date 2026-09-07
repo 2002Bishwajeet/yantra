@@ -8,22 +8,27 @@
   border-radius: var(--m3-card-radius);
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface-container);
+  --m3-field-surface: var(--md-sys-color-surface-container);
 }
 
 .m3-card[data-surface="low"] {
   background: var(--md-sys-color-surface-container-low);
+  --m3-field-surface: var(--md-sys-color-surface-container-low);
 }
 
 .m3-card[data-surface="high"] {
   background: var(--md-sys-color-surface-container-high);
+  --m3-field-surface: var(--md-sys-color-surface-container-high);
 }
 
 .m3-card[data-surface="highest"] {
   background: var(--md-sys-color-surface-container-highest);
+  --m3-field-surface: var(--md-sys-color-surface-container-highest);
 }
 
 .m3-card[data-surface="lowest"] {
   background: var(--md-sys-color-surface-container-lowest);
+  --m3-field-surface: var(--md-sys-color-surface-container-lowest);
 }
 
 .m3-card[data-surface="primary"] {

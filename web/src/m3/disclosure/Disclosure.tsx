@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useId } from 'react'
 import { Collapsible } from '@base-ui/react/collapsible'
 import { ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -15,11 +15,16 @@ export type DisclosureProps = Collapsible.Root.Props & {
 /** The dashboard's Idle line: an outlined row that opens on a spring. */
 export function Disclosure(props: DisclosureProps) {
   const { summary, action, className, children, ...rest } = props
+  const id = useId()
   return (
     <Collapsible.Root className={clsx('m3-disclosure', className)} {...rest}>
       <div className="m3-disclosure__row">
-        <div className="m3-disclosure__summary">{summary}</div>
-        <Collapsible.Trigger className="m3-disclosure__trigger m3-interactive">
+        <div className="m3-disclosure__summary" id={`${id}-summary`}>{summary}</div>
+        <Collapsible.Trigger
+          className="m3-disclosure__trigger m3-interactive"
+          id={`${id}-trigger`}
+          aria-labelledby={`${id}-trigger ${id}-summary`}
+        >
           {action ?? 'Show'}
           <ChevronDown className="m3-disclosure__chevron" aria-hidden="true" />
         </Collapsible.Trigger>

@@ -1,4 +1,4 @@
-import type { ComponentPropsWithRef, ReactNode } from 'react'
+import { type ComponentPropsWithRef, type ReactNode, useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
 import { IconButton } from '../icon-button/IconButton'
@@ -17,6 +17,17 @@ export type SideSheetProps = ComponentPropsWithRef<'aside'> & {
  *  own button or Escape. */
 export function SideSheet(props: SideSheetProps) {
   const { title, open, onClose, actions, className, children, ...rest } = props
+  const heading = useRef<HTMLHeadingElement>(null)
+  const opener = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (open) {
+      opener.current = document.activeElement as HTMLElement | null
+      heading.current?.focus()
+    } else if (opener.current?.isConnected) {
+      opener.current.focus()
+      opener.current = null
+    }
+  }, [open])
   return (
     <aside
       className={clsx('m3-side-sheet', className)}
@@ -28,7 +39,9 @@ export function SideSheet(props: SideSheetProps) {
       {...rest}
     >
       <div className="m3-side-sheet__head">
-        <h2 className="m3-side-sheet__title">{title}</h2>
+        <h2 className="m3-side-sheet__title" tabIndex={-1} ref={heading}>
+          {title}
+        </h2>
         {actions}
         <IconButton label={`Close ${title}`} onClick={onClose}>
           <X />

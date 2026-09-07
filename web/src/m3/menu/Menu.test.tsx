@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { Link } from '@tanstack/react-router'
 import { LogOut, Settings } from 'lucide-react'
+import { renderRouted } from '@/test/inRouter'
 import { Button } from '../button/Button'
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './Menu'
-
-afterEach(cleanup)
+import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from './Menu'
 
 describe('Menu', () => {
   it('opens from its trigger, walks with the arrow keys and fires an item', async () => {
@@ -41,7 +41,7 @@ describe('Menu', () => {
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
   })
 
-  it('closes on Escape', async () => {
+  it('closes on Escape and hands focus back to the trigger', async () => {
     render(
       <Menu>
         <MenuTrigger render={<Button variant="text" />}>More</MenuTrigger>
@@ -50,9 +50,30 @@ describe('Menu', () => {
         </MenuPopup>
       </Menu>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    const trigger = screen.getByRole('button', { name: 'More' })
+    trigger.focus()
+    fireEvent.click(trigger)
     const menu = await screen.findByRole('menu')
     fireEvent.keyDown(menu, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+
+  it('holds a link item that the router routes', async () => {
+    await renderRouted(
+      <Menu>
+        <MenuTrigger render={<Button variant="text" />}>Account</MenuTrigger>
+        <MenuPopup>
+          <MenuLinkItem icon={<Settings />} render={<Link to="/" />}>
+            Settings
+          </MenuLinkItem>
+        </MenuPopup>
+      </Menu>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }))
+    await screen.findByRole('menu')
+    const item = screen.getByRole('menuitem', { name: 'Settings' })
+    expect(item.tagName).toBe('A')
+    expect(item.getAttribute('href')).toBe('/')
   })
 })

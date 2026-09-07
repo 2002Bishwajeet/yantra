@@ -1,11 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Link } from '@tanstack/react-router'
 import { renderRouted } from '@/test/inRouter'
 import { Switch } from '../switch/Switch'
 import { List, ListChevron, ListItem, ListValue } from './List'
-
-afterEach(cleanup)
 
 describe('List', () => {
   it('is a list of items with their lines and values', () => {
@@ -34,6 +32,30 @@ describe('List', () => {
     fireEvent.click(item)
     expect(onClick).toHaveBeenCalledOnce()
     expect(item.className).toContain('m3-interactive')
+  })
+
+  /** The `<li>` sits outside the control (List.tsx) so a trailing switch is
+   *  a stop of its own rather than a control inside a control. jsdom plays no
+   *  Tab, so both stops are proven focusable and neither contains the other. */
+  it('keeps a trailing switch as its own focus stop beside a row control', () => {
+    render(
+      <List>
+        <ListItem
+          headline="Push to phone"
+          render={<button type="button" />}
+          trailing={<Switch label="Push to phone" />}
+        />
+      </List>,
+    )
+    const row = screen.getByRole('button', { name: 'Push to phone' })
+    const toggle = screen.getByRole('switch', { name: 'Push to phone' })
+    expect(row.contains(toggle)).toBe(false)
+    expect(row.tabIndex).toBe(0)
+    expect(toggle.tabIndex).toBe(0)
+    row.focus()
+    expect(document.activeElement).toBe(row)
+    toggle.focus()
+    expect(document.activeElement).toBe(toggle)
   })
 
   it('is a link when it pushes a screen', async () => {

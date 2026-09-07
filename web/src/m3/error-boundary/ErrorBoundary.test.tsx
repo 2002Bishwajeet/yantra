@@ -1,12 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { ApiError, type Kind } from '@/api/errors'
 import { ErrorBoundary, RouteError } from './ErrorBoundary'
-
-afterEach(cleanup)
 
 /** The boundary reads Query and the router, so the test supplies both. */
 async function mount(ui: ReactNode) {

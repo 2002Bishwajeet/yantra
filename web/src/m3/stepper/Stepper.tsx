@@ -18,7 +18,7 @@ export function Stepper(props: StepperProps) {
         const state = i < current ? 'done' : i === current ? 'current' : 'ahead'
         return (
           <li
-            key={step}
+            key={i}
             className="m3-step"
             data-state={state}
             aria-current={state === 'current' ? 'step' : undefined}

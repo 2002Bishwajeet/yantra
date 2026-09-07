@@ -145,7 +145,7 @@ function Catalogue() {
         <IconButton label="Notifications">
           <Bell />
         </IconButton>
-        <IconButton label="Notifications, 3 unread" variant="tonal" badge={<Badge count={3} label="3 unread" />}>
+        <IconButton label="Notifications" variant="tonal" badge={<Badge count={3} label="3 unread" />}>
           <Bell />
         </IconButton>
         <IconButton label="New" variant="filled">
@@ -231,13 +231,13 @@ function Catalogue() {
             <RowText headline="landing" supporting={<State state="running" size="small">running · macbook</State>} />
             <Track value={1} label="elapsed, the longest" />
             <Mono>3h 41m</Mono>
-            <Button variant="text">Open</Button>
           </Row>
           <Row tone="plain">
             <Tile name="price-table" size="small" />
             <RowText headline="price-table" supporting={<State state="idle" size="small">stopped · cachyos-g14</State>} />
             <Track value={0.33} label="elapsed" />
             <Mono>7 Jul</Mono>
+            <Button variant="text">Open</Button>
           </Row>
           <Card surface="primary">
             <Row tone="translucent">
@@ -331,7 +331,7 @@ function Catalogue() {
             }
             actions={
               <>
-                <IconButton label="Notifications, 3 unread" badge={<Badge count={3} label="3 unread" />}>
+                <IconButton label="Notifications" badge={<Badge count={3} label="3 unread" />}>
                   <Bell />
                 </IconButton>
                 <IconButton label="Account" variant="tonal">
@@ -375,7 +375,7 @@ function Catalogue() {
               </Fab>
             }
             trailing={
-              <IconButton label="Notifications, 3 unread" variant="tonal" badge={<Badge count={3} label="3 unread" />}>
+              <IconButton label="Notifications" variant="tonal" badge={<Badge count={3} label="3 unread" />}>
                 <Bell />
               </IconButton>
             }
@@ -423,6 +423,9 @@ function Catalogue() {
           <TextField label="Clone home" variant="filled" defaultValue="~/Github" />
           <TextField label="Custom hex" variant="filled" error="That is not a colour." defaultValue="#zz" />
           <TextField label="Token" disabled defaultValue="Set · replaced 4 Sep" />
+          <Card>
+            <TextField label="Topic URL" defaultValue="https://ntfy.sh/yantra" />
+          </Card>
         </div>
       </Section>
 

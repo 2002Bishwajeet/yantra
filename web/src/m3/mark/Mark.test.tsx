@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { Mark, State, type MarkState } from './Mark'
 import { word } from './word'
-
-afterEach(cleanup)
 
 const states: MarkState[] = ['needs', 'running', 'idle', 'unknown', 'done', 'failed']
 

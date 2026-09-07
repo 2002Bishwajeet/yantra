@@ -24,38 +24,34 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 16px;
-  height: 16px;
-  margin-left: 6px;
+  /* One 28 px thumb scaled to M3's 16, 24 and 28, so only transform moves. */
+  width: 28px;
+  height: 28px;
   border-radius: var(--md-sys-shape-corner-full);
   background: var(--md-sys-color-outline);
-  transition:
-    transform var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial),
-    width var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial),
-    height var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial),
-    margin var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
+  transform: scale(calc(16 / 28));
+  transition: transform var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
 }
 
 .m3-switch[data-checked] .m3-switch__thumb {
-  width: 24px;
-  height: 24px;
-  margin-left: 2px;
-  transform: translateX(20px);
+  transform: translateX(20px) scale(calc(24 / 28));
   background: var(--md-sys-color-on-primary);
   color: var(--md-sys-color-on-primary-container);
 }
 
 .m3-switch:active .m3-switch__thumb {
-  width: 28px;
-  height: 28px;
-  margin-left: 0;
+  transform: scale(1);
+}
+
+.m3-switch[data-checked]:active .m3-switch__thumb {
+  transform: translateX(20px) scale(1);
 }
 
 .m3-switch__check {
   display: none;
   width: 16px;
   height: 16px;
-  color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary-container);
 }
 
 .m3-switch[data-checked] .m3-switch__check {

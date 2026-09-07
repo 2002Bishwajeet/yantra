@@ -55,8 +55,8 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
       </div>
       {unknowns?.length ? (
         <ul className="m3-error__unknowns">
-          {unknowns.map((one) => (
-            <li key={one}>
+          {unknowns.map((one, i) => (
+            <li key={i}>
               <State state="unknown">
                 {one} · <span className="m3-error__word">unknown</span>
               </State>

@@ -1,11 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Disclosure } from './Disclosure'
 
-afterEach(cleanup)
-
 describe('Disclosure', () => {
-  it('opens and closes from its trigger, and says so', () => {
+  it('opens and closes from its trigger, which is named by the summary too', () => {
     render(
       <Disclosure summary="8 workspaces, nothing running">
         <ul>
@@ -13,7 +11,7 @@ describe('Disclosure', () => {
         </ul>
       </Disclosure>,
     )
-    const trigger = screen.getByRole('button', { name: 'Show' })
+    const trigger = screen.getByRole('button', { name: 'Show 8 workspaces, nothing running' })
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('price-table')).toBeNull()
     fireEvent.click(trigger)
@@ -29,7 +27,7 @@ describe('Disclosure', () => {
         rows
       </Disclosure>,
     )
-    expect(screen.getByRole('button', { name: 'Hide' }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Hide Idle' }).getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('rows')).toBeTruthy()
   })
 })

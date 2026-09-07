@@ -1,10 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { GitBranch } from 'lucide-react'
 import { IconTile, Tile } from './Tile'
 import { tileColor } from './tileColor'
-
-afterEach(cleanup)
 
 describe('Tile', () => {
   it('draws the first letter on the canonical colour and hides itself', () => {

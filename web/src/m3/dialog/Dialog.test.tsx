@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Button } from '../button/Button'
 import { Dialog, DialogClose, DialogPopup, DialogTrigger } from './Dialog'
-
-afterEach(cleanup)
 
 function Kill() {
   const onKill = vi.fn()
@@ -43,6 +41,31 @@ describe('Dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kill' }))
     await screen.findByRole('dialog')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('moves focus inside on open and back to the trigger on Escape', async () => {
+    render(<Kill />)
+    const trigger = screen.getByRole('button', { name: 'Kill' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+
+  it('closes on a click on the scrim', async () => {
+    render(<Kill />)
+    fireEvent.click(screen.getByRole('button', { name: 'Kill' }))
+    await screen.findByRole('dialog')
+    const scrim = document.querySelector('.m3-scrim')!
+    fireEvent.pointerDown(scrim, { pointerType: 'mouse', button: 0 })
+    fireEvent.mouseDown(scrim, { button: 0 })
+    fireEvent.pointerUp(scrim, { pointerType: 'mouse', button: 0 })
+    fireEvent.mouseUp(scrim, { button: 0 })
+    fireEvent.click(scrim)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 })

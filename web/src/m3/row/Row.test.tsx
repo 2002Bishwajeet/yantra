@@ -1,11 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { Link } from '@tanstack/react-router'
 import { renderRouted } from '@/test/inRouter'
 import { State } from '../mark/Mark'
 import { Row, RowText } from './Row'
-
-afterEach(cleanup)
 
 describe('Row', () => {
   it('is a plain div with its two lines when it goes nowhere', () => {

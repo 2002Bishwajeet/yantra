@@ -1,4 +1,4 @@
-import type { ComponentPropsWithRef } from 'react'
+import type { ComponentPropsWithRef, CSSProperties } from 'react'
 import { clsx } from 'clsx'
 import './Track.css'
 
@@ -23,7 +23,7 @@ export function Track(props: TrackProps) {
       aria-valuenow={Math.round(clamped * 100)}
       {...rest}
     >
-      <div className="m3-track__fill" style={{ width: `${clamped * 100}%` }} />
+      <div className="m3-track__fill" style={{ '--m3-track-value': clamped } as CSSProperties} />
     </div>
   )
 }

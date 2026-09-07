@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { Badge } from './Badge'
-
-afterEach(cleanup)
 
 describe('Badge', () => {
   it('is a dot with a label when there is no count', () => {
@@ -19,5 +17,10 @@ describe('Badge', () => {
     cleanup()
     render(<Badge label="many" count={120} />)
     expect(screen.getByText('99+')).toBeTruthy()
+  })
+
+  it('draws nothing for a count of zero', () => {
+    const { container } = render(<Badge label="0 unread" count={0} />)
+    expect(container.innerHTML).toBe('')
   })
 })

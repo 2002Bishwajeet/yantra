@@ -11,14 +11,18 @@ export type PillProps = Base.Props & {
 
 /** The boards' tab and filter pill: S button height, secondary-container when
  *  selected. As a `<Link>` (through `render`) the router writes aria-current;
- *  as a button the pill says it is pressed. */
+ *  as a button with `selected` the pill says whether it is pressed. */
 export function Pill(props: PillProps) {
-  const { selected, icon, className, children, ...rest } = props
+  const { selected, icon, className, children, render, role, ...rest } = props
   return (
     <Base
       className={clsx('m3-pill', 'm3-interactive', className)}
+      // `render` is a Link here: not a native button, and its own role.
+      render={render}
+      nativeButton={!render}
+      role={role}
       data-selected={selected ? '' : undefined}
-      aria-pressed={rest.render ? undefined : Boolean(selected)}
+      aria-pressed={render || selected === undefined ? undefined : selected}
       {...rest}
     >
       {icon ? (

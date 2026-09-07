@@ -1,15 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { Track } from './Track'
 
-afterEach(cleanup)
-
 describe('Track', () => {
-  it('is a progressbar with its value in percent', () => {
+  it('is a progressbar with its value in percent, drawn as a scale', () => {
     render(<Track value={0.33} label="elapsed" />)
     const bar = screen.getByRole('progressbar', { name: 'elapsed' })
     expect(bar.getAttribute('aria-valuenow')).toBe('33')
-    expect((bar.firstElementChild as HTMLElement).style.width).toBe('33%')
+    expect((bar.firstElementChild as HTMLElement).style.getPropertyValue('--m3-track-value')).toBe('0.33')
   })
 
   it('clamps', () => {
