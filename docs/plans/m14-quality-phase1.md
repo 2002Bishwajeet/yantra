@@ -20,7 +20,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `aa139e2` | Finding 134: the terminal cell measured after the mono face lands |
 | `2f50305` | Row 135: one shell at every width, so a form-factor change keeps the tree |
 | `f1193ec` | Rows 79 and 83: one announcement per error layout, and what the e2e clock freezes |
-| `PENDING` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
+| `170b2a2` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
 
 ## Closed
 
@@ -93,7 +93,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 98 | Fourteen of the 63 boards had no screenshot baseline | `e550211` |
 | 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
 | 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and Usage loses the fan-out | `2f50305` |
-| 136 | axe sampled the confirm dialog part-way through its 231 ms fade, so `color-contrast` failed on Cancel at 4.05:1 | `PENDING` |
+| 136 | axe sampled the confirm dialog part-way through its 231 ms fade, so `color-contrast` failed on Cancel at 4.05:1 | `170b2a2` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
