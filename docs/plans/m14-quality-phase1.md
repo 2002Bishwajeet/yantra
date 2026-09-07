@@ -17,6 +17,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `d837994` | The `web/e2e/` rows: the fixture's refusal shapes, the axe list, the screenshot image, motion |
 | `d4ae96f` | The boards review's accessibility findings: the keyboard trap, the three live regions, the two focus failures |
 | `e550211` | Finding 98: the fourteen boards with no picture |
+| `aa139e2` | Finding 134: the terminal cell measured after the mono face lands |
 
 ## Closed
 
@@ -85,6 +86,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 96 | The palette's arrow keys moved an option the list never scrolled to (2.4.7) | `d4ae96f` |
 | 99 | The terminal's `role="status"` unmounted with the session's end (4.1.3) | `d4ae96f` |
 | 98 | Fourteen of the 63 boards had no screenshot baseline | `e550211` |
+| 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -99,7 +101,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
-| 134 | `session-terminal-busy-phone` and two other phone specs disagree with their baselines on the pane's column count | Open, and mis-diagnosed twice — see below. Gates Y-352 |
 | 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and a screen loses its own state. Usage loses the fan-out | UI; found closing 98, sits beside row 100 |
 
 
@@ -113,36 +114,42 @@ baseline the e2e holds; row 77 changes a signature at every call site; row 79 ch
 reader says on every error layout. Each is its own row, and the one that moves a baseline
 re-renders it in the Playwright image in the same change.
 
-**Row 134, and two wrong diagnoses before the measurements.** `session-terminal-busy-phone`
-fails at six workers and passes at one, and `confirm.spec.ts:40` and `session.spec.ts:202` join it
-under some changes. The pane reports 43 columns where the baseline holds 49.
+**Row 134, and the third diagnosis is the one that held.** The pane opened on the wrong column
+count, and `session-terminal-busy-phone` failed at six workers while passing at one. Two readings
+were recorded and both were wrong: that the baseline was right and the render wrong, and its
+inverse. The measurements that settle it were taken by instrumenting the fit itself, in the
+Playwright image, at one worker.
 
-**It was first recorded as a fallback-face race**: `Terminal.tsx` opens the pane inside
-`document.fonts.ready`, that promise settles on the loads already pending, and nothing on the route
-asks for the mono face until the pane draws — so the pane measures the fallback. The fix that
-follows from that reading is to ask for the face with `document.fonts.load` before waiting. **It was
-written, and it is wrong.** With it, all three specs fail 4 runs out of 4, still reporting 43.
+```
+FIT#0      cols=52  hostW=358  face=false     the cell is measured, and cached
+FIT#n      cols=52  hostW=358  face=true      the face has landed; the count does not move
+REMEASURE  cols=43  hostW=358  face=true      a forced re-measure recovers it
+```
 
-**The measurements, at one worker, on this route.** The face is verifiably absent when the pane asks
-for it (`check` false) and present when the request resolves (`check` true, one face matched).
+**xterm measures the character cell once**, against whatever face is live at that instant, and
+caches it. `fit()` afterwards only divides the container by that stale cell, and reassigning the
+same `fontFamily` is a no-op — verified: the re-measure fired only when the string itself changed.
+So a webfont that lands after the pane opens leaves the terminal wrong for good, and no resize
+recovers it. The container width never moved, which rules out layout timing as well.
 
-| the pane draws with | columns |
-| --- | --- |
-| the woff2 aborted, so the true fallback | 52 |
-| the face loaded before the measurement | 43 |
-| whatever the stored baseline holds | 49 |
+**It is a product bug, not a test artifact.** A pty is opened with that window, so a person on a
+cold cache gets a tmux session whose lines wrap where the shell did not break them.
 
-**So the baseline is neither state.** It is not the fallback and it is not the face; 49 is a
-measurement taken while the swap was in flight. That rules out both readings — the original one,
-which called the baseline right and the render wrong, and its inverse, which would make the
-baselines fallback captures to be regenerated. Neither is supported.
+The fix asks for the face and waits before the pane draws, so the first measurement is the right
+one. `fonts.ready` alone never held it: it settles on the loads already pending, and nothing on this
+route asks for the face until the pane draws.
 
-What is known: the column count depends on when the pane is measured relative to the font swap, the
-baselines were captured in that window, and loading the face correctly moves every one of them.
-What is not known: what 49 is a measurement *of*. **Whoever takes this row starts there**, and does
-not regenerate a baseline until they can say which of the three numbers is the right one. The
-attempted fix and its unit test were reverted rather than merged, because a change whose correct
-behaviour disagrees with every stored baseline is not ready to ship.
+**Three baselines moved, and they had to.** `session-terminal-busy-phone`,
+`session-unclaimed-busy-phone` and `confirm-kill-busy-phone` encoded `FIT#0 face=false` — the bug.
+They held **52**, and the corrected count is 43.
+
+**The 49 in the second diagnosis was a misreading, not a third state.** The status line under the
+pane prints `cols×rows`, and `session-unclaimed-busy-phone` printed `52×`. Put the old
+`Terminal.tsx` back and it redraws that baseline pixel for pixel. So no run ever measured 49, and
+nothing was measured while the swap was in flight.
+
+No baseline without a pane moved. The whole suite says so: 513 passed, 171 skipped and none failed
+in the Playwright image, with the three specs green four runs out of four at one worker and at six.
 
 ## Finding 98: the fourteen boards, and what picturing Usage cost
 

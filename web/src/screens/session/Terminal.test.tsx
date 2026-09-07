@@ -201,6 +201,45 @@ describe('the terminal in the dashboard', () => {
     expect(daemonised.heard.length).toBe(3)
   })
 
+  /** **Row 134.** xterm measures the cell once, against whatever face is live
+   *  then, and caches it: `fit()` afterwards only divides the container by a
+   *  stale cell, and reassigning the same `fontFamily` is a no-op, so a face
+   *  that lands late leaves the pane the wrong width for good. A pty is opened
+   *  with that width, so the far side wraps where the shell did not.
+   *
+   *  `fonts.ready` alone did not hold it — it settles on the loads already
+   *  pending, and nothing on this route asks for the face until the pane draws.
+   *  The assertion is that the pane asks, and waits, before it measures. */
+  it('asks for the mono face before it measures a cell', async () => {
+    const asked: string[] = []
+    let arrive = () => {}
+    const face = new Promise<void>((done) => {
+      arrive = done
+    })
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: {
+        load: (spec: string) => {
+          asked.push(spec)
+          return face
+        },
+        ready: Promise.resolve(),
+      },
+    })
+
+    try {
+      await open()
+      expect(asked).toEqual(['13px "IBM Plex Mono"'])
+      // Nothing crossed the socket while the face was outstanding.
+      expect(daemonised.heard.length).toBe(0)
+
+      arrive()
+      await settled(() => expect(daemonised.heard.length).toBe(1))
+    } finally {
+      Reflect.deleteProperty(document, 'fonts')
+    }
+  })
+
   /** **2.4.3 and 3.2.1.** The fonts resolve after the page has settled, and a
    *  pane that took focus then moved it without being asked. */
   it('does not take focus when the fonts resolve', async () => {

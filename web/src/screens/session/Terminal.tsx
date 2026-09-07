@@ -18,6 +18,12 @@ type Size = { cols: number; rows: number }
 
 type Wired = Keys & { close: () => void }
 
+const SIZE = 13
+const FAMILY = '"IBM Plex Mono", ui-monospace, monospace'
+/** `document.fonts.load` takes one face, not a fallback list, and the webfont is
+ *  the only member of FAMILY that has to be fetched. */
+const FACE = `${SIZE}px "IBM Plex Mono"`
+
 /** xterm.js and the socket, wired to each other. Returns the teardown, which
  *  is the whole of what closing a terminal is. */
 function attach(
@@ -29,7 +35,7 @@ function attach(
   hint: string,
   leave: () => void,
 ): Wired {
-  const xterm = new Xterm({ cursorBlink: false, fontSize: 13, fontFamily: '"IBM Plex Mono", ui-monospace, monospace' })
+  const xterm = new Xterm({ cursorBlink: false, fontSize: SIZE, fontFamily: FAMILY })
   const fit = new FitAddon()
   xterm.loadAddon(fit)
   xterm.open(host)
@@ -127,7 +133,15 @@ export function Terminal(props: TerminalProps) {
   useEffect(() => {
     let live: ReturnType<typeof attach> | null = null
     let closed = false
-    void (document.fonts?.ready ?? Promise.resolve()).then(() => {
+    // xterm measures the cell once, against whatever face is live at that
+    // moment, and caches it — `fit()` afterwards only divides the container by
+    // a stale cell, and reassigning the same `fontFamily` is a no-op, so a face
+    // that lands late leaves the pane wrong for good. `fonts.ready` did not
+    // hold it either: it settles on the loads already pending, and nothing on
+    // this route asks for the face until the pane draws. So ask, then measure.
+    const faces = document.fonts
+    const there = faces ? faces.load(FACE).then(() => faces.ready) : Promise.resolve()
+    void there.catch(() => undefined).then(() => {
       if (closed) return
       live = attach(
         url,
