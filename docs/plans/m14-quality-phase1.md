@@ -20,6 +20,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `aa139e2` | Finding 134: the terminal cell measured after the mono face lands |
 | `2f50305` | Row 135: one shell at every width, so a form-factor change keeps the tree |
 | `f1193ec` | Rows 79 and 83: one announcement per error layout, and what the e2e clock freezes |
+| `170b2a2` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
 
 ## Closed
 
@@ -92,6 +93,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 98 | Fourteen of the 63 boards had no screenshot baseline | `e550211` |
 | 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
 | 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and Usage loses the fan-out | `2f50305` |
+| 136 | axe sampled the confirm dialog part-way through its 231 ms fade, so `color-contrast` failed on Cancel at 4.05:1 | `170b2a2` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -104,6 +106,7 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 67 | The pressed corner morphs to `medium` for both sizes; Expressive gives one shape per size | Packages, same reading |
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 137 | `Palette.test.tsx`'s *never runs a verb* counts a POST the e2e version excludes: the transcript's own `/logs` read arrives late under load and the assertion sees it | Found in Y-363's CI; passes 12 of 12 alone and fails only when the box is saturated |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
@@ -162,6 +165,57 @@ nothing was measured while the swap was in flight.
 
 No baseline without a pane moved. The whole suite says so: 513 passed, 171 skipped and none failed
 in the Playwright image, with the three specs green four runs out of four at one worker and at six.
+
+## Row 136: axe measured a frame, not a page
+
+CI failed once on PR #263, a documentation change that touched no code. The `e2e (desktop)` job
+reported one violation, on the initial run and on the retry:
+
+```
+color-contrast (serious)
+  .m3-button[data-variant="text"][data-tone="primary"]
+  <button type="button" tabindex="0" data-variant="text" data-tone="primary" data-size="s">Cancel</button>
+  insufficient color contrast of 4.05 (foreground #567358, background #e0e3da, 14px). Expected 4.5:1
+```
+
+That Cancel sits in the Delete-a-workspace dialog. It draws `primary` on the dialog's
+`surface-container-high`, and in the light theme those roles are `#48674B` on `#E6E9E0`, which is
+**5.15:1** — 14 % clear of the 4.5:1 that 1.4.3 asks of 14 px text. **Neither colour axe named is a
+token**, so the pair it measured is not a pair the stylesheet declares.
+
+**Both are composites of a fade in flight.** `.m3-dialog` transitions `opacity` over
+`--md-sys-motion-duration-default-effects`, 231 ms. Put the popup at opacity α over the scrim and
+the page, and axe's two numbers fall out at **α = 0.907**: the scrim at 32 % black over `surface`
+gives `#A9AAA5`, the surface reads 0.907 × `#E6E9E0` + 0.093 × `#A9AAA5` = `#E0E3DA`, and the label
+reads 0.907 × `#48674B` + 0.093 × that = `#567358`. The ratio between them is 4.05.
+
+**The fade survives `prefers-reduced-motion`, and it should.** R14 §5 removes movement and keeps
+feedback: the reduced-motion rule floors the three spatial durations at 1 ms and leaves the effects
+durations alone, and `m3/tokens.test.ts` asserts exactly that. Every e2e project runs under
+`reducedMotion: 'reduce'`, so the 231 ms fade runs in CI the way it runs for a reader.
+
+**The focus gate is what starts the race.** `confirm.spec.ts` waits for Base UI to move focus into
+the popup, and Base UI moves it when the transition *starts*.
+
+**Measured.** On the tree before the fix, in the Playwright image at six workers, the Delete case
+failed **1 run in 260**. Instrumented — reading `getComputedStyle('.m3-dialog').opacity` at the
+instant the focus gate returned — the dialog was unsettled in **40 runs of 40**, 35 of them before
+the fade had painted a frame, and axe reported a `color-contrast` violation in **4 of the 40**.
+Slow the fade to 3 s and the race stops being one: the same call fails **10 runs of 10**, each on a
+different composite, and the settle gate passes 10 of 10 on the same page. More than Cancel trips
+it — the filled Delete button's white label over `error` read **1.34:1**, and a 24 px label inside
+the dialog read 1.42:1 against the 3:1 that 1.4.3 gives large text.
+
+**The fix waits, in `e2e/lib/axe.ts` rather than in one spec.** `axe()` holds until no CSS
+transition is running. Transitions only: the skeleton shimmer is an animation and never finishes.
+Every call site gains it, which is the point — the bottom sheet, the popover, the menu and the
+snackbar all fade the same way.
+
+**No token moved and no baseline moved.** The pair passes at rest in both themes and both
+densities: `#48674B` on `#E6E9E0` is 5.15:1 light, `#AFCFAC` on `#282C26` is 8.35:1 dark, the bottom
+sheet's `surface-container-low` gives 5.71:1, and Compact changes spacing only. Raising the
+threshold, excluding the rule and listing it as `known` were all available and all refused: the
+reading was wrong, not the rule.
 
 ## Finding 98: the fourteen boards, and what picturing Usage cost
 
