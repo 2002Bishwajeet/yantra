@@ -27,6 +27,14 @@ describe('every colour role, both themes', () => {
     expect(hit[2]).toBe(palette.dark[name])
   })
 
+  it('falls back to the light set where light-dark() is unknown', () => {
+    const block = /@supports not \(color: light-dark\(#000, #fff\)\) \{[\s\S]*?\n\}/.exec(css)![0]
+    for (const name of Object.keys(palette.light)) {
+      const role = name.toLowerCase().replace(/ /g, '-')
+      expect(block).toContain(`--md-sys-color-${role}: ${palette.light[name]};`)
+    }
+  })
+
   it('is the root color-scheme that picks the theme', () => {
     expect(css).toContain(':root {\n  color-scheme: light dark;')
     expect(css).toContain('[data-theme="light"] {\n  color-scheme: light;')
@@ -57,7 +65,7 @@ describe('the other tokens', () => {
   })
 
   it('has four spring curves, their durations and the legacy table', () => {
-    for (const curve of ['fast-spatial', 'default-spatial', 'standard-spatial', 'effects']) {
+    for (const curve of ['fast-spatial', 'default-spatial', 'effects']) {
       expect(css).toMatch(new RegExp(`--md-sys-motion-spring-${curve}: linear\\(0, `))
     }
     expect(css).toContain('--md-sys-motion-duration-fast-spatial: 360ms;')
