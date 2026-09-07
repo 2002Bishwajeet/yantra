@@ -160,5 +160,5 @@
 }
 
 .machines__said {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
 }
