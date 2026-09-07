@@ -466,3 +466,9 @@
 .dash__new {
   margin-left: auto;
 }
+
+/* The FAB floats over the bottom-right of the feed, so the last row's own
+   button would sit under it (Shell.css owns both the FAB and the bar). */
+[data-shell="phone"] .dash {
+  padding-bottom: 56px;
+}

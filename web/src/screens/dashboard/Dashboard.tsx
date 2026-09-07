@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { CircleDot, GitPullRequest, Plus, RotateCw } from 'lucide-react'
@@ -30,7 +30,6 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
-import { KillSession } from '@/screens/fleet/Confirm'
 import { useFormFactor } from '@/shell/formFactor'
 import { asEvents } from '@/shell/notifications'
 import { phrase } from '@/shell/phrase'
@@ -61,6 +60,19 @@ async function readAgain(client: QueryClient) {
   })
   await Promise.all(failed.map((name) => client.refetchQueries({ queryKey: statusQuery(name).queryKey })))
 }
+
+/** The confirm carries Base UI's dialog and bottom sheet, 30 KiB the first
+ *  paint never draws (Y-352's budget). It loads beside the page rather than
+ *  inside it, and the fallback is the button it replaces. */
+const KillSession = lazy(() =>
+  import('@/screens/fleet/Confirm').then((it) => ({ default: it.KillSession })),
+)
+
+const kill = (ready: boolean) => (
+  <Button className="dash__kill" disabled={!ready} tone="error" variant="text">
+    Kill
+  </Button>
+)
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -486,23 +498,21 @@ function Worth(props: {
               >
                 Attach
               </Button>
-              <KillSession
-                machine={machine}
-                row={
-                  <Row>
-                    <RowText
-                      headline={session.name}
-                      supporting={`${machine} · ${plural(session.windows, 'window')} · ${ago(now / 1000 - session.created_at, now).text}`}
-                    />
-                  </Row>
-                }
-                session={session.name}
-                trigger={
-                  <Button className="dash__kill" tone="error" variant="text">
-                    Kill
-                  </Button>
-                }
-              />
+              <Suspense fallback={kill(false)}>
+                <KillSession
+                  machine={machine}
+                  row={
+                    <Row>
+                      <RowText
+                        headline={session.name}
+                        supporting={`${machine} · ${plural(session.windows, 'window')} · ${ago(now / 1000 - session.created_at, now).text}`}
+                      />
+                    </Row>
+                  }
+                  session={session.name}
+                  trigger={kill(true)}
+                />
+              </Suspense>
             </li>
           ))}
         </ul>

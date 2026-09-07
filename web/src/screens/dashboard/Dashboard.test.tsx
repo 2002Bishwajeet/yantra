@@ -82,7 +82,11 @@ describe('the Dashboard on a busy fleet', () => {
   it('asks before Kill, because a killed session cannot be brought back', async () => {
     const asked = mount('desktop', '/')
     await drawn()
-    fireEvent.click(region('Worth a look').getAllByRole('button', { name: 'Kill' })[0]!)
+    // The confirm arrives in its own chunk, and its button is not askable
+    // until it does — a fresh node each time, so it is looked up again.
+    const kill = () => region('Worth a look').getAllByRole('button', { name: 'Kill' })[0]!
+    await waitFor(() => expect(kill().hasAttribute('disabled')).toBe(false))
+    fireEvent.click(kill())
     const dialog = within(await screen.findByRole('dialog'))
     // The question repeats the row word for word (BRIEF.md).
     expect(dialog.getByText('scratch')).toBeTruthy()
