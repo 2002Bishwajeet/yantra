@@ -14,16 +14,19 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import { type WebSocket as Client, WebSocket as Ws, WebSocketServer } from 'ws'
-import { ATTEMPTS, PAUSE, type Target } from './api/socket'
-import { Terminal } from './components/Terminal'
-import { renderRouted } from './test/inRouter'
+import { ATTEMPTS, PAUSE, type Target } from '@/api/socket'
+import { renderRouted } from '@/test/inRouter'
+import { Terminal } from './Terminal'
 
 /** Every refusal names its machine and links to it (D5 §7), so the component
  *  wants a router. One call site keeps the props in one place. */
 const MACHINE = 'cachyos-g14'
 
+const label = (target: Target) =>
+  'workspace' in target ? `tmux ${target.workspace} on ${target.machine}` : `tmux ${target.session} on ${target.machine}`
+
 const open = (target: Target = { machine: MACHINE, workspace: 'yantra' }) =>
-  renderRouted(<Terminal onClose={() => {}} target={target} />)
+  renderRouted(<Terminal label={label(target)} target={target} />)
 
 type Frame = { text: string } | { bytes: number[] }
 
@@ -229,17 +232,23 @@ describe('the terminal in the dashboard', () => {
     expect(screen.queryByText(/attempts to reopen/)).toBeNull()
   })
 
-  /** **D3 §7.3.** The box is black either way, so the socket has to say which
-   *  of the two it is doing. */
-  it('says it is connecting until the socket opens', async () => {
+  /** **D3 §7.3.** The box is black either way, so the status line under it has
+   *  to say which of the two it is doing (SessionTerminal.dc.html). */
+  it('says it is connecting until the socket opens, then that it is attached', async () => {
     await open()
 
     // A handshake cannot have finished in the same turn as the render, so this
     // is the state a slow network holds for as long as it takes.
-    expect(screen.getByRole('status').textContent).toBe('Connecting…')
+    expect(screen.getByRole('status').textContent).toContain(
+      'connecting · tmux yantra on cachyos-g14',
+    )
 
     await settled(() => expect(daemonised.heard.length).toBe(1))
-    expect(screen.queryByRole('status')).toBeNull()
+    await settled(() =>
+      expect(screen.getByRole('status').textContent).toContain('attached'),
+    )
+    // The board's status line carries the window size beside the name.
+    expect(screen.getByRole('status').textContent).toMatch(/\d+×\d+/)
   })
 
   it('names which attempt of how many it is on while it reconnects', async () => {
@@ -250,16 +259,16 @@ describe('the terminal in the dashboard', () => {
     daemonised.hangUp()
 
     await settled(() =>
-      expect(screen.getByRole('status').textContent).toBe(
-        `Reconnecting, attempt 1 of ${ATTEMPTS}.`,
+      expect(screen.getByRole('status').textContent).toContain(
+        `reconnecting · attempt 1 of ${ATTEMPTS}`,
       ),
     )
     // The number moves, which is the whole point of printing it: two seconds of
     // silence and two seconds of counting are different things to sit through.
     await waitFor(
       () =>
-        expect(screen.getByRole('status').textContent).toBe(
-          `Reconnecting, attempt 2 of ${ATTEMPTS}.`,
+        expect(screen.getByRole('status').textContent).toContain(
+          `reconnecting · attempt 2 of ${ATTEMPTS}`,
         ),
       { timeout: PAUSE * 4 },
     )
@@ -340,10 +349,10 @@ describe('the same terminal on a session no workspace claims', () => {
     })
   })
 
-  it('names the session and the machine above the screen', async () => {
+  it('names the session and the machine on the status line', async () => {
     await open(scratch)
 
-    expect(screen.getByText('Terminal — scratch on pi')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toContain('tmux scratch on pi')
     // `ws` throws on a socket torn down mid-handshake, so the connection is
     // let finish before the test ends and cleanup unmounts it.
     await settled(() => expect(daemonised.heard.length).toBe(1))
@@ -361,7 +370,7 @@ describe('the same terminal on a session no workspace claims', () => {
 
     await settled(() =>
       expect(screen.getByRole('alert').textContent).toContain(
-        'scratch on pi has no terminal to attach to.',
+        'scratch on pi has no terminal to attach to',
       ),
     )
     // The daemon's own chain is beside the name rather than instead of it.

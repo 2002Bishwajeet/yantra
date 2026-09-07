@@ -1,0 +1,36 @@
+.session-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.session-terminal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 8px 0;
+}
+
+.session-terminal__title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.session-terminal__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-terminal__name > * {
+  margin: 0;
+}
+
+.session-terminal__name a {
+  color: var(--md-sys-color-primary);
+}

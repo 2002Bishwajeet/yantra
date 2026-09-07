@@ -1,0 +1,161 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link } from '@tanstack/react-router'
+import { FitAddon } from '@xterm/addon-fit'
+import { Terminal as Xterm } from '@xterm/xterm'
+import '@xterm/xterm/css/xterm.css'
+import type { ApiError } from '@/api/errors'
+import { ATTEMPTS, attachTerminal, type Link as Wire, type Target, terminalAddress } from '@/api/socket'
+import { Button } from '@/m3/button/Button'
+import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { Mark } from '@/m3/mark/Mark'
+import { Mono } from '@/m3/text/Text'
+import { type Keys, KeysContext } from './keysContext'
+import './Terminal.css'
+
+type Ended = { ended: 'no' } | { ended: 'yes'; refused: ApiError | null }
+
+type Size = { cols: number; rows: number }
+
+type Wired = Keys & { close: () => void }
+
+/** xterm.js and the socket, wired to each other. Returns the teardown, which
+ *  is the whole of what closing a terminal is. */
+function attach(
+  url: string,
+  host: HTMLElement,
+  over: (refused: ApiError | null) => void,
+  linked: (link: Wire) => void,
+  sized: (size: Size) => void,
+): Wired {
+  const xterm = new Xterm({ cursorBlink: false, fontSize: 13, fontFamily: '"IBM Plex Mono", ui-monospace, monospace' })
+  const fit = new FitAddon()
+  xterm.loadAddon(fit)
+  xterm.open(host)
+  fit.fit()
+  xterm.focus()
+
+  const link = attachTerminal(url, {
+    size: () => {
+      fit.fit()
+      sized({ rows: xterm.rows, cols: xterm.cols })
+      return { rows: xterm.rows, cols: xterm.cols }
+    },
+    onBytes: (bytes) => xterm.write(bytes),
+    onEnd: over,
+    onLink: linked,
+  })
+  let ctrl = false
+  const typed = xterm.onData((data) => {
+    if (ctrl && data.length === 1) {
+      ctrl = false
+      link.send(new Uint8Array([data.toUpperCase().charCodeAt(0) & 0x1f]))
+    } else link.type(data)
+  })
+  window.addEventListener('resize', link.resize)
+
+  return {
+    close: () => {
+      window.removeEventListener('resize', link.resize)
+      typed.dispose()
+      link.close()
+      xterm.dispose()
+    },
+    send: (bytes) => link.send(new Uint8Array(bytes)),
+    focus: () => xterm.focus(),
+    ctrl: () => {
+      ctrl = true
+    },
+  }
+}
+
+export type TerminalProps = {
+  target: Target
+  height?: string
+  /** The status line's subject: "tmux yantra-web on cachyos-g14". */
+  label: string
+  /** Drawn under the pane, inside `KeysContext`: the phone's key row. */
+  children?: ReactNode
+}
+
+/** The session, live (Y-129, Y-132). Nothing here keeps the stream: xterm.js
+ *  holds the scrollback and it goes with the element (Q5). Key it on the
+ *  target — a different target is a different socket and a different screen. */
+export function Terminal(props: TerminalProps) {
+  const { target, height, label, children } = props
+  const host = useRef<HTMLDivElement>(null)
+  const wired = useRef<ReturnType<typeof attach> | null>(null)
+  const [end, setEnd] = useState<Ended>({ ended: 'no' })
+  const [link, setLink] = useState<Wire>({ up: false, attempt: 0 })
+  const [size, setSize] = useState<Size | null>(null)
+  const [opened, reopen] = useState(0)
+  const url = terminalAddress(target)
+  const refused = end.ended === 'yes' ? end.refused : null
+
+  // The daemon's reason arrives before the close that follows it, so the first
+  // answer is the one that says anything.
+  useEffect(() => {
+    const live = attach(
+      url,
+      host.current!,
+      (refused) => setEnd((before) => (before.ended === 'yes' ? before : { ended: 'yes', refused })),
+      setLink,
+      setSize,
+    )
+    wired.current = live
+    return () => {
+      wired.current = null
+      live.close()
+    }
+  }, [url, opened])
+
+  const again = () => {
+    setEnd({ ended: 'no' })
+    setLink({ up: false, attempt: 0 })
+    reopen((n) => n + 1)
+  }
+
+  return (
+    <div className="terminal">
+      <div className="terminal__pane" ref={host} style={{ height: height ?? '60vh' }} />
+      {end.ended === 'no' ? (
+        <p className="terminal__status" role="status">
+          <Mark size="small" state={link.up ? 'running' : 'unknown'} />
+          <Mono clip>
+            {link.up
+              ? `attached · ${label}${size ? ` · ${size.cols}×${size.rows}` : ''}`
+              : link.attempt === 0
+                ? `connecting · ${label}`
+                : `reconnecting · attempt ${link.attempt} of ${ATTEMPTS} · ${label}`}
+          </Mono>
+        </p>
+      ) : refused ? (
+        // D5 §7: this tab's own refusal names the machine, and the name stays
+        // the link to where its heartbeat is.
+        <ErrorSurface.Inline
+          action={
+            <Button role="link" render={<Link params={{ machine: target.machine }} to="/m/$machine" />} variant="text">
+              {target.machine}
+            </Button>
+          }
+          error={{ kind: refused.kind, said: refused.said, retryable: true, describe: () => refused.describe() }}
+          eyebrow={`on ${target.machine}`}
+          reset={again}
+          title={`${label} has no terminal to attach to`}
+        />
+      ) : (
+        <p className="terminal__over">
+          The terminal on{' '}
+          <Link params={{ machine: target.machine }} to="/m/$machine">
+            {target.machine}
+          </Link>{' '}
+          ended, and {ATTEMPTS} attempts to reopen it all failed. Whether you are off the tailnet or the
+          daemon is down is not something this page can tell. Detaching never stops a session.{' '}
+          <Button onClick={again} variant="text">
+            Open it again
+          </Button>
+        </p>
+      )}
+      <KeysContext value={wired}>{children}</KeysContext>
+    </div>
+  )
+}
