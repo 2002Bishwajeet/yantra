@@ -395,10 +395,14 @@ confirm sheet at phone and the terminal at phone and tablet. Re-run inside
 `mcr.microsoft.com/playwright:v1.63.0-noble`, the image `web.yml` uses, `session.spec.ts` and
 `confirm.spec.ts` give **72 passed, 0 failed**. The five are host font rendering, exactly as
 `playwright.config.ts:6-12` warns, not drift. **So e2e and axe are green at 390, 834 and 1440.** The
-budget is not: `npm run budget` measures **159.7 KiB** gzip against the 145 KiB ceiling, 14.7 KiB
-over, with fonts at 78.5 KiB and under. `index.css` is 21.0 KiB of it and still carries the shadcn
-sheet, which Y-353 deletes. Open row 84 stands beside this: `web.yml:49` carries
+budget is not: at `435f633` `npm run budget` measured **159.7 KiB** gzip against the 145 KiB
+ceiling, 14.7 KiB over, with fonts at 78.5 KiB and under. `index.css` was 21.0 KiB of it and still
+carried the shadcn sheet, which Y-353 deletes. Open row 84 stands beside this: `web.yml:49` carries
 `continue-on-error: true`, so today the budget cannot fail a build even when it exits 1.
+
+> **2026-09-07, after Y-353 and Y-356 merged in.** The 159.7 KiB above is the figure at `435f633`
+> and nothing else in this section moves with it. `/` is **147.6 KiB** now, 2.6 KiB over, and fonts
+> are still 78.5 KiB. Row 84 stays open on the smaller gap.
 
 **Every board has a compared screenshot — no.** Forty-nine of 63 do. Fourteen have none: MainDark,
 MainCompact, Fleet ×3, Machines ×3, Machine ×3 and Usage ×3. The cause is concrete and so is the
@@ -431,6 +435,14 @@ them a Level A keyboard trap.
    routes. That is the 21.0 KiB of CSS and the ten importers standing between 159.7 KiB and the
    ceiling. Measure again after it merges; if the number still exceeds 145 KiB, the next cut is a
    route split, not a token.
+
+   > **It landed the same day, and the number still exceeds 145 KiB.** `index.css` went 21.0 KiB to
+   > 8.6 and `/` went 159.1 KiB to 146.7, then 147.3 with Y-358's screen and **147.6** with this
+   > row's live region and scroll padding. The remaining 2.6 KiB is react-dom, TanStack Router and
+   > Query, Base UI and the dashboard itself, so the next cut is neither a route split nor a token:
+   > it is Y-357, which compresses the wire. See
+   > [m14-quality-phase1.md](m14-quality-phase1.md#after-y-353-2026-09-07).
+
 3. **Take `continue-on-error: true` off `web.yml:49`** in the same PR that gets under the ceiling —
    open row 84, and the plan already says the budget is a failing test rather than a note.
 

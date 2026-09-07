@@ -96,7 +96,8 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 79 | `ErrorSurface` carries `role="alert"` and `ErrorBoundary` passes `autoFocus`, so VoiceOver says it twice | Packages; pick one per layout |
 | 83 | `scenario.ts` freezes `Date` and not the timers, and the helper still says nothing about it | Testing |
-| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.3 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
+| 134 | The terminal measures its cell before IBM Plex Mono has loaded when the suite runs in parallel, so the pane opens on the wrong column count | Found re-verifying Y-352 against `main` at `75c46fa`. `document.fonts.ready` no longer waits for the face since Y-353 shrank `index.css`. Gates Y-352 |
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
 because six screen agents are reading those components right now, and a signature change or a
@@ -107,6 +108,16 @@ deletion. Rows 66 and 67 move a padding and a corner on `Button`, which moves ev
 baseline the e2e holds; row 77 changes a signature at every call site; row 79 changes what a screen
 reader says on every error layout. Each is its own row, and the one that moves a baseline
 re-renders it in the Playwright image in the same change.
+
+**Row 134, and the evidence for it.** `Terminal.tsx` opens the pane inside `document.fonts.ready`
+because a cell measured against a fallback face gives the wrong column count, and every line then
+wraps where the far side did not break it. That promise no longer holds under load. On
+`y-352-a11y` before the merge, the phone project passed four runs at six workers. On the merged
+tree it failed four — `session-terminal-busy-phone` every time, the pane rendering 41 columns where
+the baseline holds 49 — and passed at one worker and on the spec alone. So the baseline is right
+and the render is wrong, and `--update-snapshots` would write the fallback in as the truth. The
+only thing that moved between the two trees is Y-353 taking `index.css` from 21.0 KiB to 8.6, which
+is why the fix belongs to whoever reads the font path rather than to Y-352.
 
 ## The eyebrow, and the amendment it earned
 
@@ -193,6 +204,11 @@ the wire is the same bytes measured honestly rather than a smaller build.
 **Merging `main` puts it at 147.3 KiB.** Y-358's unreachable screen adds `reached.ts` and
 `NotReached.tsx` to the shell, which is on `/`, so the gap to the ceiling is 2.3 KiB rather than
 1.7. Nothing above changes; the lever is still Y-357.
+
+**Y-352's accessibility fixes then add 317 B**, for **147.6 KiB** (151 124 B) and a gap of 2.6 KiB.
+The entry chunk carries 294 B of that — the shell's live region — and the stylesheet 23 B, the
+phone's `scroll-padding-bottom`. Everything else the row fixed sits in a lazy chunk. Measured on
+`y-352-a11y` at `d61b61e` against 150 807 B on `main` at `75c46fa`; fonts are 78.5 KiB on both.
 
 ### The `/` chunk carries none of the five
 
