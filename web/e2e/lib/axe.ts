@@ -8,6 +8,7 @@ export const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
  *  those are asserted *present*, so the test stays green while the debt
  *  stands and fails the day a fix lands without the list being edited. */
 export async function axe(page: Page, options: { known?: string[] } = {}) {
+  await settled(page)
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   const known = results.violations.filter((v) => options.known?.includes(v.id))
   const unknown = results.violations.filter((v) => !options.known?.includes(v.id))
@@ -25,6 +26,19 @@ export async function axe(page: Page, options: { known?: string[] } = {}) {
     'a known axe violation is gone: remove it from `known`',
   ).toEqual([...(options.known ?? [])].sort())
   return results
+}
+
+/** Wait for every CSS transition to end. A surface caught part-way through
+ *  its fade composites the colour axe measures, and the reading belongs to no
+ *  frame a reader sees: the confirm dialog sampled at 0.91 opacity read
+ *  4.05:1 on Cancel where the settled pair is 5.15:1 (Y-363). Base UI moves
+ *  focus into a popup when the transition starts, so waiting for focus is not
+ *  enough. Transitions only — the skeleton shimmer is an animation and never
+ *  finishes. */
+async function settled(page: Page) {
+  await page.waitForFunction(() =>
+    document.getAnimations().every((a) => !('transitionProperty' in a) || a.playState !== 'running'),
+  )
 }
 
 function report(violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations']) {
