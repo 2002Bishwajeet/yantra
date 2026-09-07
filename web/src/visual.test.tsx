@@ -18,6 +18,9 @@ beforeEach(() => {
     matches: 1440 < Number(/([\d.]+)rem/.exec(query)?.[1]) * 16,
     addEventListener: () => {},
     removeEventListener: () => {},
+    // xterm.js still asks for the legacy pair on the device-pixel-ratio query.
+    addListener: () => {},
+    removeListener: () => {},
   }))
 })
 

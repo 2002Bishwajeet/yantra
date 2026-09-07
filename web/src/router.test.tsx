@@ -40,6 +40,9 @@ beforeEach(() => {
     media: query,
     addEventListener: () => {},
     removeEventListener: () => {},
+    // xterm.js still asks for the legacy pair on the device-pixel-ratio query.
+    addListener: () => {},
+    removeListener: () => {},
   }))
 })
 

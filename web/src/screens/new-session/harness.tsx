@@ -69,6 +69,9 @@ export function mountNew(size: FormFactor, path: string, answers: Answers = {}) 
     media: query,
     addEventListener: () => {},
     removeEventListener: () => {},
+    // xterm.js still asks for the legacy pair on the device-pixel-ratio query.
+    addListener: () => {},
+    removeListener: () => {},
   }))
   vi.stubGlobal(
     'fetch',
