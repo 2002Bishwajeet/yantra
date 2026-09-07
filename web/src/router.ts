@@ -175,7 +175,7 @@ const settingsCategory = createRoute({
   getParentRoute: () => root,
   path: '/settings/$category',
   component: lazyRouteComponent(() => import('@/screens/settings/Settings'), 'Settings'),
-  head: ({ params }) => titled(`${params.category} · Settings`),
+  head: ({ params }) => titled(params.category.charAt(0).toUpperCase() + params.category.slice(1)),
 })
 
 // The phone's pushed notifications screen; the shell's bell links here

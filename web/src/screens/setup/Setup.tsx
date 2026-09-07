@@ -3,6 +3,7 @@ import { useQueries } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ArrowRight, Check, Copy, GitBranch, Plus, Radio } from 'lucide-react'
 import type { Machine, Readiness } from '@/api'
+import { useScreenTitle } from '@/shell/title'
 import { fromReading } from '@/api/client'
 import { useAbout, useGithub, useMachines, useReadiness, useSshIdentity } from '@/api/hooks'
 import { useRecheckReadiness } from '@/api/mutations'
@@ -169,6 +170,7 @@ export function Setup() {
     { name: 'readiness', reading: sweep },
   ])
 
+  useScreenTitle('Set up Yantra')
   return (
     <div className="setup">
       <div className="setup__head">

@@ -17,6 +17,7 @@ import { Bell } from './Bell'
 import { Palette } from './Palette'
 import { usePrefs } from './prefs'
 import { SessionsRail } from './SessionsRail'
+import { useScreenTitle, useScreenTitleOverride } from './title'
 import './Shell.css'
 
 // The menu, the popover and the sheet carry Base UI's popup machinery, which
@@ -31,13 +32,16 @@ const slot = <span aria-hidden="true" className="shell__slot" />
 const usePathname = () => useRouterState({ select: (state) => state.location.pathname })
 
 /** The route's own name, off the `<title>` its `head` wrote. */
-const useTitle = () =>
-  useRouterState({
+const useTitle = () => {
+  const override = useScreenTitleOverride()
+  const named = useRouterState({
     select: (state) => {
       const meta = state.matches.at(-1)?.meta?.find((one) => one?.title)
       return meta?.title?.replace(/ · Yantra$/, '') ?? 'Yantra'
     },
   })
+  return override ?? named
+}
 
 /** The outlet, under one boundary that a navigation resets. */
 function Page() {
@@ -287,13 +291,14 @@ export function Shell() {
  *  with `index.html`, so a mistyped URL arrives here as a page rather than a
  *  404 — and drawing the dashboard under it would make the address bar a lie. */
 export function Nowhere() {
+  useScreenTitle('Nowhere')
   return (
     <div className="shell__nowhere">
       <Text as="h1" scale="headline-small">
-        Nothing is at {location.pathname}.
+        Nowhere
       </Text>
       <Text as="p" scale="body-medium" tone="variant">
-        The dashboard is where the sessions and machines are.
+        Nothing is at {location.pathname}. The dashboard is where the sessions and machines are.
       </Text>
       <Button role="link" render={<Link to="/" />} variant="tonal">
         Dashboard

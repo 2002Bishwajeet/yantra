@@ -63,7 +63,7 @@ describe('every path draws its screen and names it in the title', () => {
     ['/w/landing/repair', 'Repair landing', 'Repair landing · Yantra'],
     ['/new', 'New session', 'New session · Yantra'],
     ['/settings', 'Settings', 'Settings · Yantra'],
-    ['/settings/about', 'Settings', 'about · Settings · Yantra'],
+    ['/settings/about', 'Settings', 'About · Yantra'],
   ])('%s', async (path, heading, title) => {
     await open(path)
     expect(await h1(heading)).toBeTruthy()
