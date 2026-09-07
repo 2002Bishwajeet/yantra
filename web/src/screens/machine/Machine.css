@@ -1,0 +1,145 @@
+.machine {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+}
+
+.machine__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+
+.machine__looked {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.machine__spacer {
+  flex: 1;
+}
+
+.machine__columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--m3-page-gap);
+}
+
+@media (min-width: 1240px) {
+  .machine__columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+.machine__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.machine__eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 4px;
+}
+
+.machine__eyebrow .m3-mono {
+  font-size: var(--md-sys-typescale-body-small-size);
+}
+
+.machine__about {
+  margin: 0;
+}
+
+.machine__checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.machine__check {
+  display: grid;
+  grid-template-columns: minmax(0, 150px) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  min-height: 24px;
+}
+
+.machine__check .machine__word {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.machine__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.machine__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 48px;
+  padding: 4px 6px 4px 12px;
+  border-radius: var(--m3-row-radius);
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.machine__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+
+.machine__name {
+  font-size: var(--md-sys-typescale-title-medium-size);
+  font-weight: 500;
+  color: inherit;
+}
+
+.machine__where {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.machine__age {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.machine__verbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.machine__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.machine__failed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+}
+
+.machine__note {
+  margin: 0;
+  padding: 0 4px;
+}
