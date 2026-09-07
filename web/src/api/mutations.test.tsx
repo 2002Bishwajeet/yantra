@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { useQueryClient } from '@tanstack/react-query'
+import { daemon } from '../test/daemon'
 import { renderHookQueried } from '../test/inQuery'
 import { ApiError } from './errors'
 import { aWorkspace, looked, opened, stopped } from './fixtures'
@@ -18,26 +19,7 @@ import {
   useUp,
 } from './mutations'
 
-afterEach(() => {
-  cleanup()
-  vi.unstubAllGlobals()
-})
-
-/** Records the method and path of every call, and answers what it is told. */
-function daemon(status: number, body: unknown) {
-  const asked = vi.fn((path: string, init?: RequestInit) => {
-    void path
-    void init
-    return Promise.resolve({
-      ok: status < 400,
-      status,
-      json: () => Promise.resolve(body),
-      text: () => Promise.resolve(String(body)),
-    })
-  })
-  vi.stubGlobal('fetch', asked)
-  return asked
-}
+afterEach(() => vi.unstubAllGlobals())
 
 const sent = (asked: ReturnType<typeof daemon>, index = 0) => {
   const [path, init] = asked.mock.calls[index] as [string, RequestInit?]
@@ -150,6 +132,24 @@ describe('the workspace file', () => {
       method: 'DELETE',
     })
     expect(sent(asked, 1).path).toBe('/api/workspaces/site?force=true')
+  })
+
+  it('drops everything held about the name, so no status keeps polling it', async () => {
+    daemon(200, { machine: 'pi', removed: true })
+    const { result } = renderHookQueried(() => ({
+      remove: useDeleteWorkspace(),
+      client: useQueryClient(),
+    }))
+    const { client } = result.current
+    client.setQueryData(keys.status('site'), looked.ok({}))
+    client.setQueryData(keys.spend('site'), {})
+    client.setQueryData(keys.status('other'), looked.ok({}))
+
+    await act(() => result.current.remove.mutateAsync({ name: 'site' }))
+
+    expect(client.getQueryState(keys.status('site'))).toBeUndefined()
+    expect(client.getQueryState(keys.spend('site'))).toBeUndefined()
+    expect(client.getQueryState(keys.status('other'))).toBeDefined()
   })
 })
 

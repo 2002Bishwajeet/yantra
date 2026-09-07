@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { answer } from '../test/daemon'
 import { ApiError, asApiError, isApiError, type Kind } from './errors'
 import { attention, machines, notLooked, opened, spend } from './fixtures'
 import {
@@ -131,39 +132,17 @@ const badly = [
   ],
   [
     'the authoriser refuses',
-    () =>
-      vi.fn(() =>
-        Promise.resolve({
-          ok: false,
-          status: 403,
-          text: () => Promise.resolve('node pi is on this tailnet but is not yours'),
-        }),
-      ),
+    () => vi.fn(() => Promise.resolve(answer(403, 'node pi is on this tailnet but is not yours'))),
     'refused',
   ],
   [
     'the name is unknown',
-    () =>
-      vi.fn(() =>
-        Promise.resolve({
-          ok: false,
-          status: 404,
-          text: () => Promise.resolve('no such workspace'),
-        }),
-      ),
+    () => vi.fn(() => Promise.resolve(answer(404, 'no such workspace'))),
     'missing',
   ],
   [
     'the body is not JSON',
-    () =>
-      vi.fn(() =>
-        Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.reject(new SyntaxError('Unexpected token <')),
-          text: () => Promise.resolve('<html>'),
-        }),
-      ),
+    () => vi.fn(() => Promise.resolve(answer(200, '<html>'))),
     'contract',
   ],
 ] as const

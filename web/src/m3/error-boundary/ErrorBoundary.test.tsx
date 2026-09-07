@@ -1,23 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
 import { ApiError, type Kind } from '@/api/errors'
+import { renderInApp as mount } from '@/test/inApp'
 import { ErrorBoundary, RouteError } from './ErrorBoundary'
-
-/** The boundary reads Query and the router, so the test supplies both. */
-async function mount(ui: ReactNode) {
-  const root = createRootRoute({ component: () => ui })
-  const router = createRouter({ routeTree: root, history: createMemoryHistory() })
-  await router.load()
-  const client = new QueryClient()
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  )
-}
 
 function Throws(props: { error: unknown; until?: { ok: boolean } }) {
   if (!props.until?.ok) throw props.error

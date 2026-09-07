@@ -63,7 +63,9 @@ export type Attached = {
  *  A text frame from the daemon is why the terminal could not be opened, and
  *  it ends the link: `onEnd` gets it as a `socket` error, and reopening a
  *  socket that was refused only refuses again. `onEnd(null)` is the budget
- *  spent.
+ *  spent. A socket that never opened is a refused upgrade (the authoriser's
+ *  403 or 503, which a browser hides), and it ends as `refused` at once:
+ *  reopening it is five more round trips to the same answer.
  *
  *  **The screen is not lost with the socket.** tmux draws the pane's contents
  *  for whichever client attaches next, so reopening is the whole of replay and
@@ -86,6 +88,7 @@ export function attachTerminal(
   let waiting: ReturnType<typeof setTimeout> | undefined
   let attempts = 0
   let finished = false
+  let wasOpen = false
 
   const send = (frame: string | Uint8Array<ArrayBuffer>) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(frame)
@@ -95,10 +98,20 @@ export function attachTerminal(
     send(JSON.stringify({ ...size(), term: TERM } satisfies TerminalSize))
 
   const open = () => {
-    const live = new WebSocket(url)
+    let live: WebSocket
+    try {
+      live = new WebSocket(url)
+    } catch (cause) {
+      finished = true
+      onEnd(new ApiError('socket', String(cause)))
+      return
+    }
     socket = live
     live.binaryType = 'arraybuffer'
+    // A refused upgrade is an error event and then the close that ends it.
+    live.onerror = () => {}
     live.onopen = () => {
+      wasOpen = true
       onLink({ up: true, attempt: attempts })
       resize()
     }
@@ -111,6 +124,11 @@ export function attachTerminal(
     }
     live.onclose = () => {
       if (finished) return
+      if (!wasOpen) {
+        finished = true
+        onEnd(new ApiError('refused', 'the daemon refused the terminal'))
+        return
+      }
       if (attempts >= ATTEMPTS) {
         onEnd(null)
         return

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { answer as answered } from '../test/daemon'
 import {
   backoff,
   fetchJson,
+  fields,
   fromReading,
+  list,
   look,
   makeQueryClient,
   queryOptionsThrowing,
@@ -14,20 +17,7 @@ import { machinesQuery } from './queries'
 
 afterEach(() => vi.unstubAllGlobals())
 
-/** A response as `yantrad` shapes one: a JSON body on a 2xx, a bare string on
- *  a refusal. `text` is what the refusal path reads and `json` the other. */
-const answer = (status: number, body: unknown) =>
-  vi.fn(() =>
-    Promise.resolve({
-      ok: status < 400,
-      status,
-      json: () =>
-        typeof body === 'string'
-          ? Promise.reject(new SyntaxError('Unexpected token'))
-          : Promise.resolve(body),
-      text: () => Promise.resolve(String(body)),
-    }),
-  )
+const answer = (status: number, body: unknown) => vi.fn(() => Promise.resolve(answered(status, body)))
 
 /** The write authoriser's own sentences (`write.rs`, `Refused`), verbatim. */
 export const NOT_YOURS = 'node pi is on this tailnet but is not yours'
@@ -86,15 +76,60 @@ describe('fetchJson', () => {
     })
   })
 
-  it('reads a 404 as missing', async () => {
+  /** `write.rs` answers a verb's 404 as a bare string; `api.rs` answers its
+   *  own as `{error}`. Both reach `said` as the sentence. */
+  it('reads a 404 as missing, from a bare string or from {error}', async () => {
     vi.stubGlobal('fetch', answer(404, 'no workspace called typo'))
-    const error = await thrown(() => fetchJson('/api/workspaces/typo'))
-
-    expect(error).toMatchObject({
+    const bare = await thrown(() => fetchJson('/api/workspaces/typo'))
+    expect(bare).toMatchObject({
       kind: 'missing',
       status: 404,
       said: 'no workspace called typo',
     })
+
+    vi.stubGlobal('fetch', answer(404, { error: 'this daemon serves no such route under /api' }))
+    const wrapped = await thrown(() => fetchJson('/api/nowhere'))
+    expect(wrapped).toMatchObject({
+      kind: 'missing',
+      said: 'this daemon serves no such route under /api',
+    })
+  })
+
+  it('reads a body that cannot be read as contract rather than a bare error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 403,
+          text: () => Promise.reject(new TypeError('stream error')),
+        }),
+      ),
+    )
+    const error = await thrown(() => fetchJson('/api/workspaces'))
+    expect(error).toMatchObject({ kind: 'refused', said: 'TypeError: stream error' })
+  })
+
+  it('reads a 2xx body without its fields as contract, naming the first one missing', async () => {
+    vi.stubGlobal('fetch', answer(200, {}))
+    const error = await thrown(() =>
+      fetchJson('/api/github', {}, fields('connected', 'login', 'scopes')),
+    )
+    expect(error).toMatchObject({
+      kind: 'contract',
+      said: '/api/github answered something this dashboard cannot read: no `connected`',
+    })
+
+    vi.stubGlobal('fetch', answer(200, { connected: false }))
+    const partial = await thrown(() => fetchJson('/api/github', {}, fields('connected', 'login')))
+    expect(partial).toMatchObject({ said: expect.stringContaining('no `login`') })
+
+    vi.stubGlobal('fetch', answer(200, {}))
+    const notList = await thrown(() => fetchJson('/api/notifications', {}, list))
+    expect(notList).toMatchObject({ kind: 'contract', said: expect.stringContaining('no `list`') })
+
+    vi.stubGlobal('fetch', answer(200, []))
+    expect(await fetchJson('/api/notifications', {}, list)).toEqual([])
   })
 
   /** `null` is a request that never got an answer, which is not a refusal. */

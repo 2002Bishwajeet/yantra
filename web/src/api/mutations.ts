@@ -48,7 +48,9 @@ export function useEditWorkspace() {
 }
 
 /** `force` skips the daemon's refusal to strand a live session, which is the
- *  thing worth reading — a surface sends it only where a person meant it. */
+ *  thing worth reading — a surface sends it only where a person meant it.
+ *  What was held about the name goes with it, or a mounted status would keep
+ *  polling a workspace that is gone. */
 export function useDeleteWorkspace() {
   const client = useQueryClient()
   return useMutation<Removed, ApiError, { name: string; force?: boolean }>({
@@ -56,11 +58,13 @@ export function useDeleteWorkspace() {
       fetchJson<Removed>(workspace(name, force ? '?force=true' : ''), {
         method: 'DELETE',
       }),
-    onSuccess: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: keys.workspaces() }),
+    onSuccess: async (_, { name }) => {
+      client.removeQueries({ queryKey: keys.workspace(name) })
+      await Promise.all([
+        client.invalidateQueries({ queryKey: keys.workspaces(), exact: true }),
         client.invalidateQueries({ queryKey: keys.sessions() }),
-      ]),
+      ])
+    },
   })
 }
 

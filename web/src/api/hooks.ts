@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouterState } from '@tanstack/react-router'
 import {
   type QueryClient,
@@ -179,10 +179,14 @@ async function readSpend(
 export function useSpend() {
   const client = useQueryClient()
   const [asked, setAsked] = useState<Asked>({ asked: 'no' })
+  // Two asks in flight answer in either order; only the newest one lands.
+  const newest = useRef(0)
 
   const ask = async (workspace: Workspace) => {
+    const mine = ++newest.current
     setAsked({ asked: 'asking', workspace })
-    setAsked(await readSpend(client, workspace))
+    const answer = await readSpend(client, workspace)
+    if (mine === newest.current) setAsked(answer)
   }
 
   return { asked, ask }
@@ -245,7 +249,7 @@ async function readWindow(
   }
 }
 
-function merge(
+export function merge(
   held: Said,
   answer: Answer,
   lines: number,
@@ -291,8 +295,10 @@ function merge(
 export function useTranscript(name: string) {
   const client = useQueryClient()
   const [said, setSaid] = useState<Said>({ said: 'no' })
+  const newest = useRef(0)
 
   const read = async (lines: number, before: number) => {
+    const mine = ++newest.current
     setSaid((held) =>
       before === 0
         ? { said: 'reading' }
@@ -301,7 +307,7 @@ export function useTranscript(name: string) {
           : held,
     )
     const answer = await readWindow(client, name, lines, before)
-    setSaid((held) => merge(held, answer, lines, before))
+    if (mine === newest.current) setSaid((held) => merge(held, answer, lines, before))
   }
 
   return { said, read }
