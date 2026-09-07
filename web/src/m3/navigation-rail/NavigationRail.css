@@ -1,0 +1,78 @@
+.m3-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  flex: none;
+  box-sizing: border-box;
+  width: 96px;
+  padding: 44px 0 16px;
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.m3-rail__fab {
+  display: flex;
+  flex: none;
+}
+
+.m3-rail__destinations {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.m3-rail__trailing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: auto;
+}
+
+/* Shared with the navigation bar. */
+.m3-destination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 80px;
+  min-height: 64px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-large);
+  font: var(--md-sys-typescale-label-medium);
+  letter-spacing: var(--md-sys-typescale-label-medium-tracking);
+  color: var(--md-sys-color-on-surface-variant);
+  background: transparent;
+  text-decoration: none;
+}
+
+.m3-destination__indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 32px;
+  border-radius: var(--md-sys-shape-corner-full);
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+.m3-destination__indicator > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.m3-destination[aria-current] {
+  color: var(--md-sys-color-on-surface);
+}
+
+.m3-destination[aria-current] .m3-destination__indicator {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-destination[aria-current] .m3-destination__label {
+  font-weight: var(--md-sys-typescale-emphasized-label-medium-weight);
+}

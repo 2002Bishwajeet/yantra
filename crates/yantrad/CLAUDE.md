@@ -103,15 +103,22 @@ heartbeat state is named, and nothing here parses a detail or writes 30 s down a
 `yantra-agent`'s `INTERVAL` and `columns.tsx`'s `FRESH_SECONDS`. A second consumer of this route
 inherits the same obligation, and a test in `dashboard.test.tsx` is what says so out loud.
 
-**`GET /api/readiness/github` is the other check the library answers from nobody useful** (Y-175),
-and it is the same argument pointed at a different fact: `yantra_core::attention` spawns `gh` on the
-host it runs on, so the credential the work inbox reads is the daemon's and never the terminal's. It
-is a route rather than a tenth check on every report, because an answer about this machine drawn on
-each machine's card claims something no ssh session asked. Two answers are *absent* and both are
-earned — no `gh` on `PATH`, and a `gh` that names no credential — and **everything else is
-*unknown*, including an unreachable GitHub**, because `gh auth status` reports a token it could not
-validate exactly as it reports one that was refused. It has no `failed`: a look it could not take is
-already *unknown* inside the check.
+**`GET /api/readiness/github` is the other check the library answers from nobody useful** (Y-175,
+Y-342), and it is the same argument pointed at a different fact: the grant the work inbox reads with
+is the daemon's own ([ADR-0023](../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md)),
+held in memory and never the terminal's. It is a route rather than a tenth check on every report,
+because an answer about this machine drawn on each machine's card claims something no ssh session
+asked. Two answers are *absent* and both are earned — no grant, and a grant GitHub refused with a
+401 — and **everything else is *unknown*, including an unreachable GitHub**, because a GitHub that
+could not be reached says nothing about the grant. It has no `failed`: a look it could not take is
+already *unknown* inside the check. `doctor::github` is a pure mapper over `GET /user`'s answer, and
+`refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
+
+**The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
+the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
+/api/github/login` and `DELETE /api/github` are in `write.rs` on the gate; `GET /api/repos` is the
+repository list, a class on the same slow clock, and **the search box filters it in the browser** —
+a typed box polls, and a read handler never awaits the network.
 
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
@@ -251,11 +258,33 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}` and `POST /api/relay` — **the CLI's
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}`, `POST /api/relay`,
+`POST /api/machines/{machine}/clone`, `POST /api/github/login` and `DELETE /api/github` — **the CLI's
 own verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair` and `relay`. The daemon may do what `yantra` can already do, which is what stops it growing a richer API
-the CLI cannot reach. A new verb here starts in the CLI, and `yantra relay` was written before this
-route was.
+`repair`, `relay`, `clone`, `github login` and `github logout`. The daemon may do what `yantra` can
+already do, which is what stops it growing a richer API the CLI cannot reach. A new verb here starts
+in the CLI, and `yantra relay` was written before this route was.
+
+**`clone` is one of two writes that answer before their work is done** (Y-344). `git clone` runs as the
+startup command of a tmux session on the machine and the route answers `202` with the session's name;
+nothing awaits the clone, progress is that session's terminal socket (ADR-0022) and completion is the
+probe. Both values are checked in [`clone.rs`](../yantra-core/src/clone.rs) before ssh, and a URL
+carrying a credential is refused: it would sit in the pane's start command for as long as the session
+lives (ADR-0023 §4).
+
+**`GET /api/notifications` and the ring behind it are
+[ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)** (Y-343), proposed rather than
+accepted: [`events.rs`](src/events.rs) holds the last 50 events in memory, `notify.rs` fills it before
+any send and whether or not a relay exists, the machines sweep adds `unreachable`, and `POST
+/api/relay` adds `relay-test`. A restart empties it, and that is what the route says.
+
+**`github login` is the other write that answers before it is done** (Y-342, ADR-0023 §3). It
+answers the code to type at github.com and polls in a task the daemon owns, because the person is on
+their phone and nothing here should wait on them; the grant is live in memory the moment GitHub
+returns it, and the line in `/etc/yantra/daemon.env` is for the next start. **One flow at a time**:
+a second `POST` while a code is waiting is a `409`, since two would race for one file. A daemon with
+no `YANTRA_GITHUB_CLIENT_ID` is a `500` naming it — this deployment's own fault — and a GitHub that
+refused or could not be reached is a `502`.
 
 **`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
@@ -426,7 +455,9 @@ join them up. **Land a DTO and the type that checks it in one change**, which is
 `Transcript` arrived with its own entry rather than with a comment deferring one.
 
 **`/readiness/github` still holds `github: None`**, and that deferral has not expired: nothing in
-`web/src` reads that route, so there is no type for an entry to satisfy.
+`web/src` reads that route, so there is no type for an entry to satisfy. **`/api/github`,
+`/api/repos` and the `Device` answer are in it since Y-342**, with their types appended at the end
+of `api.ts` in one block.
 
 **`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
@@ -511,22 +542,25 @@ The interval is a constant for the same reason the port is. `ControlPersist=300`
 five minutes keeps every ssh master warm, so the poll makes the fleet *faster* — and because the
 `ControlPath` is per-user, a running daemon speeds the CLI up too.
 
-**`ssh` is not the only thing this rule is about, and `gh` is the proof** (Y-172). `GET /api/attention`
-reads a `Forge` reading the sweep took; a handler that ran `gh` would spawn three subprocesses and
-make three round trips to GitHub per browser poll, which is the ssh storm with a different binary in
-it. **What is different is the interval, and it is the one class that does not run at `EVERY`.**
-The fleet poll pays for itself — `ControlPersist` again — while a `gh` poll warms nothing and is
-spent from the owner's own GitHub quota, which their `gh` and their `git push` draw on too. GitHub
-asks for the slower poll itself: `/notifications` answered **`X-Poll-Interval: 60`** on 2026-08-10, so
-`EVERY` would poll it at twice the rate its server requests. `ATTENTION` is five minutes, and the
-freshness that costs is a field rather than a lie — the reading carries its own age like every other.
+**`ssh` is not the only thing this rule is about, and GitHub is the proof** (Y-172). `GET /api/attention`
+reads a `Forge` reading the sweep took; a handler that read GitHub would make three round trips per
+browser poll, which is the ssh storm with a different wire in it. **What is different is the
+interval, and the GitHub classes are the ones that do not run at `EVERY`.** The fleet poll pays for
+itself — `ControlPersist` again — while a GitHub poll warms nothing and is spent from the owner's
+own quota, which their `gh` and their `git push` draw on too. GitHub asks for the slower poll itself:
+`/notifications` answered **`X-Poll-Interval: 60`** on 2026-08-10, so `EVERY` would poll it at twice
+the rate its server requests. `ATTENTION` is five minutes, and the freshness that costs is a field
+rather than a lie — the reading carries its own age like every other. **A change to the grant wakes
+those classes early** (Y-342), which is the one exception to the clock: a sign-in that showed its
+repositories five minutes later would read as a sign-in that failed.
 
 Two measurements from that day worth keeping, because both invert what the obvious worry would be.
 `gh search` spends the **GraphQL** budget (5000 points/hour) and **not** the REST search budget —
-which is 30 per *minute* and would have been the tight one, and is untouched. `/notifications` is
-`core`, and `/rate_limit`'s own `core.used` field does not move for it; the response header does.
-**Read `X-Ratelimit-Used` off the call, not the `/rate_limit` endpoint**, if this is ever measured
-again.
+which is 30 per *minute* and would have been the tight one. **Since Y-342 the two searches are REST
+`/search/issues`, which does spend that budget**: two calls per five minutes against thirty a minute.
+`/notifications` is `core`, and `/rate_limit`'s own `core.used` field does not move for it; the
+response header does. **Read `X-Ratelimit-Used` off the call, not the `/rate_limit` endpoint**, if
+this is ever measured again.
 
 **Four states, not three**, and folding any two together is the bug this module exists to avoid:
 nobody has looked (`None`), a look succeeded, a look succeeded and a machine within it did not answer,

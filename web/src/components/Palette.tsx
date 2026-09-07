@@ -1,9 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { SearchIcon } from 'lucide-react'
-import type { Listed, Machine } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
-import { loaded, useLooked } from '@/useLooked'
+import { loaded, useMachines, useWorkspaces } from '@/api/hooks'
 
 const PalettePopup = lazy(() =>
   import('@/components/PalettePopup').then((it) => ({
@@ -23,8 +22,8 @@ export function Palette() {
   // never unsets, `open` is what the palette itself is doing.
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
-  const workspaces = loaded(useLooked<Listed[]>('/api/workspaces'))
-  const machines = useLooked<Machine[]>('/api/machines')
+  const workspaces = loaded(useWorkspaces())
+  const machines = useMachines()
 
   useEffect(() => {
     const pressed = (event: KeyboardEvent) => {

@@ -22,18 +22,13 @@
 @source not "./components/ui/switch.tsx";
 @source not "./components/ui/tooltip.tsx";
 
-/* D3 §9.1: the package's own stylesheet ships five subsets — cyrillic,
-   cyrillic-ext, latin-ext, vietnamese and latin — for an English interface, and
-   it publishes no per-subset stylesheet to import instead. So the latin face is
-   declared here, copied verbatim from the package's `wght.css` latin block. */
-@font-face {
-  font-family: 'Geist Variable';
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format('woff2-variations');
-  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
-}
+/* Y-338: the Material tokens and their Tailwind mapping. Later in the cascade
+   than the shadcn values below, so a role wins wherever both name one. */
+@import "./m3/tokens.css";
+
+/* ADR-0024 §7: the faces are Google Sans Flex and IBM Plex Mono, declared in
+   m3/tokens.css. Geist left here on 2026-09-06 (Y-338); the package goes in
+   the Quality row. */
 
 /* Q6 ruled out a theme switcher, so the OS preference is the whole story and
    shadcn's `.dark` class has nothing to toggle it. */
@@ -41,7 +36,7 @@
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: var(--md-ref-typeface-plain);
     /* D3 §5.5: Geist has no `tnum` and its digits are proportional, so
        `tabular-nums` fixes nothing and every numeric cell asks for this. */
     --font-mono: ui-monospace, SFMono-Regular, monospace;

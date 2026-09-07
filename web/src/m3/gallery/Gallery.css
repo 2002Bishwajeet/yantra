@@ -1,0 +1,108 @@
+.m3-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 100vh;
+  padding: 24px;
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface);
+}
+
+.m3-gallery__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.m3-gallery__density {
+  margin: 16px 0 0;
+  font: var(--md-sys-typescale-emphasized-title-large);
+}
+
+.m3-gallery__catalogue {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.m3-gallery__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.m3-gallery__items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.m3-gallery__stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-list-gap);
+}
+
+.m3-gallery__pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.m3-gallery__wide {
+  width: 100%;
+}
+
+.m3-gallery__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--m3-page-gap);
+  width: 100%;
+}
+
+.m3-gallery__hero {
+  font-size: var(--m3-hero-size);
+  line-height: var(--m3-hero-line-height);
+}
+
+.m3-gallery__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.m3-gallery__phone {
+  width: 390px;
+  max-width: 100%;
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface);
+  overflow: hidden;
+}
+
+.m3-gallery__rail {
+  display: flex;
+  height: 480px;
+  border-radius: var(--md-sys-shape-corner-large);
+  overflow: hidden;
+}
+
+.m3-gallery__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-emphasized-label-large);
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+}

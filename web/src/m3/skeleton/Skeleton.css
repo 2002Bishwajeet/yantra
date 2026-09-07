@@ -1,0 +1,43 @@
+.m3-skeleton {
+  box-sizing: border-box;
+  height: 56px;
+  border-radius: var(--m3-row-radius);
+  background-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 60%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: m3-shimmer 2s linear infinite;
+}
+
+.m3-skeleton[data-shape="text"] {
+  height: 14px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+}
+
+.m3-skeleton[data-shape="round"] {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--md-sys-shape-corner-full);
+}
+
+@keyframes m3-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* One static frame: the tint stays, the sweep goes. */
+@media (prefers-reduced-motion: reduce) {
+  .m3-skeleton {
+    background-image: none;
+    animation: none;
+  }
+}

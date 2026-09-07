@@ -1,0 +1,32 @@
+.m3-top-app-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  box-sizing: border-box;
+  height: 64px;
+  padding: 0 12px 0 16px;
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface);
+}
+
+.m3-top-app-bar__leading {
+  display: flex;
+  flex: none;
+  margin-left: -4px;
+}
+
+.m3-top-app-bar__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-title-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
+}
+
+.m3-top-app-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}

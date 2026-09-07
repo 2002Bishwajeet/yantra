@@ -7,7 +7,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 import { Act, Actions, Kill, Terminal, type Verb } from '@/components/Act'
 import { Ago, Stamp } from '@/components/Age'
 import { Command } from '@/components/Command'

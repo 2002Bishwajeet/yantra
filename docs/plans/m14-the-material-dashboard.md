@@ -75,6 +75,15 @@ React 19.2 with the compiler · Vite 8 · TypeScript 6 · oxlint · TanStack Rou
 Plex Mono latin · Vitest 4 + Testing Library · Playwright 1.63 + `@axe-core/playwright`.
 Everything not on this list needs a line in a PR saying why.
 
+**Errors are designed, typed and tested (owner, 2026-09-06).** The API layer has one error type
+with a `kind` (`network`, `refused` with the status and the daemon's text, `missing`, `contract`,
+`socket`) and no hook throws a bare `Error`. The component library has an `ErrorSurface` in the
+Unreachable board's register and an `ErrorBoundary` on `react-error-boundary`, reset through
+Query's `useQueryErrorResetBoundary`; the router's `defaultErrorComponent` and every route's
+`errorComponent` use it, and so does every surface that can fail alone (a tab, a card, the
+terminal). Every error path has a unit test, and the e2e suite has `unreachable`, `refused`
+and `flaky` scenarios.
+
 Bundle rules: no barrel files; every route lazy except `/`; Form, Table, Virtual, xterm and the
 colour engine never in the `/` chunk; `npm run compiled` still proves the compiler ran;
 `npm run budget` fails above the two ceilings.

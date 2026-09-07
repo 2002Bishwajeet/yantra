@@ -218,7 +218,7 @@ fn configured(url: Option<String>, token: Option<String>) -> Option<Relay> {
 /// environment, and systemd is what puts them there.
 pub const RELAY_FILE: &str = "/etc/yantra/daemon.env";
 
-/// Why a relay could not be written down. The URL is never quoted back: on a
+/// Why a value could not be written down. The URL is never quoted back: on a
 /// public server the topic in it is the only password there is, which is the
 /// same reason [`reason`] reports a kind rather than a message.
 #[derive(Debug, thiserror::Error)]
@@ -231,6 +231,12 @@ pub enum NotWritten {
     )]
     Unholdable { field: &'static str },
 
+    #[error("{path} could not be read before being rewritten: {source}")]
+    Read {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+
     #[error("{path} could not be written: {source}")]
     Write {
         path: std::path::PathBuf,
@@ -238,20 +244,16 @@ pub enum NotWritten {
     },
 }
 
-/// Writes the two variables where the unit will read them at its next start.
+/// Writes the relay's two variables where the unit will read them at its next
+/// start, and leaves every other line in the file as it was.
 ///
 /// **This puts a secret on disk**, which §B4 forbids for a workspace and
-/// ADR-0021 permits here and nowhere else. `0600` applies when this creates the
-/// file; an existing one keeps the mode and the owner the installer gave it,
-/// which is what lets the daemon's own account rewrite a file `systemd` reads
-/// as root.
-///
-/// It truncates rather than renaming a temporary over: `/etc/yantra` belongs to
-/// root, so the account this runs as cannot create a sibling to rename.
-pub fn write_to(path: &std::path::Path, url: &str, token: Option<&str>) -> Result<(), NotWritten> {
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-
+/// ADR-0021 permits here and nowhere else.
+pub fn write_relay(
+    path: &std::path::Path,
+    url: &str,
+    token: Option<&str>,
+) -> Result<(), NotWritten> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err(NotWritten::NotAUrl);
     }
@@ -259,6 +261,72 @@ pub fn write_to(path: &std::path::Path, url: &str, token: Option<&str>) -> Resul
     if let Some(token) = token {
         holdable("token", token)?;
     }
+    rewrite(path, &[(RELAY_URL, Some(url)), (RELAY_TOKEN, token)])
+}
+
+/// The GitHub grant beside the relay, under [`crate::github::TOKEN`]
+/// ([ADR-0023](../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md)
+/// §2). `None` removes the line, which is `logout`; the relay is untouched
+/// either way.
+pub fn write_github(
+    path: &std::path::Path,
+    token: Option<&crate::github::Token>,
+) -> Result<(), NotWritten> {
+    let token = token.map(crate::github::Token::reveal);
+    if let Some(token) = token {
+        holdable("token", token)?;
+    }
+    rewrite(path, &[(crate::github::TOKEN, token)])
+}
+
+/// Replaces the lines for `changes`' keys and keeps every other line verbatim,
+/// because two writers share this file (ADR-0023) and an operator may have put
+/// `YANTRA_GITHUB_CLIENT_ID` in it by hand. `0600` applies when this creates
+/// the file; an existing one keeps the mode and the owner the installer gave
+/// it, which is what lets the daemon's own account rewrite a file `systemd`
+/// reads as root.
+///
+/// It truncates rather than renaming a temporary over: `/etc/yantra` belongs to
+/// root, so the account this runs as cannot create a sibling to rename.
+fn rewrite(path: &std::path::Path, changes: &[(&str, Option<&str>)]) -> Result<(), NotWritten> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let current = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(NotWritten::Read {
+                path: path.to_owned(),
+                source,
+            });
+        }
+    };
+    let mut lines: Vec<String> = current
+        .lines()
+        .filter(|line| {
+            !changes.iter().any(|(key, _)| {
+                line.strip_prefix(key)
+                    .is_some_and(|rest| rest.starts_with('='))
+            })
+        })
+        .map(str::to_owned)
+        .collect();
+    if lines.is_empty() {
+        lines.extend(
+            "# Written by `yantra relay`, `yantra github login` and the dashboard (ADR-0021,\n\
+             # ADR-0023). yantrad reads this through the unit's `EnvironmentFile=` at start,\n\
+             # and the GitHub grant is also live the moment its sign-in completes."
+                .lines()
+                .map(str::to_owned),
+        );
+    }
+    lines.extend(
+        changes
+            .iter()
+            .filter_map(|(key, value)| value.map(|value| format!("{key}='{value}'"))),
+    );
+    let body = format!("{}\n", lines.join("\n"));
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -270,17 +338,6 @@ pub fn write_to(path: &std::path::Path, url: &str, token: Option<&str>) -> Resul
             path: path.to_owned(),
             source,
         })?;
-
-    let mut body = format!(
-        "# Written by `yantra relay` and by the dashboard's /settings (ADR-0021).\n\
-         # yantrad reads this through the unit's `EnvironmentFile=`, so a change\n\
-         # here reaches the daemon when systemd next starts it.\n\
-         {RELAY_URL}='{url}'\n"
-    );
-    if let Some(token) = token {
-        body.push_str(&format!("{RELAY_TOKEN}='{token}'\n"));
-    }
-
     file.write_all(body.as_bytes())
         .map_err(|source| NotWritten::Write {
             path: path.to_owned(),
@@ -368,7 +425,7 @@ fn send(url: &str, token: Option<&str>, message: &Message) -> Result<(), Error> 
 /// The kind, never the message, for everything that could quote the destination
 /// back: `BadUri` and `RequireHttpsOnly` both do, and the topic in it is the
 /// only password a public relay has.
-fn reason(error: &ureq::Error) -> String {
+pub(crate) fn reason(error: &ureq::Error) -> String {
     match error {
         ureq::Error::Io(io) => io.to_string(),
         ureq::Error::Timeout(_) => "it did not answer in time".to_owned(),
@@ -861,7 +918,7 @@ mod tests {
     fn the_relay_is_written_under_the_two_names_the_daemon_reads() {
         let path = scratch("both");
 
-        write_to(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("written");
+        write_relay(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("written");
 
         let written = std::fs::read_to_string(&path).expect("it is there");
         assert!(
@@ -880,7 +937,7 @@ mod tests {
     fn a_topic_that_needs_no_token_gets_no_token_line() {
         let path = scratch("open");
 
-        write_to(&path, "https://ntfy.sh/a-topic", None).expect("written");
+        write_relay(&path, "https://ntfy.sh/a-topic", None).expect("written");
 
         let written = std::fs::read_to_string(&path).expect("it is there");
         assert!(!written.contains(RELAY_TOKEN), "{written}");
@@ -894,7 +951,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         let path = scratch("mode");
 
-        write_to(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("written");
+        write_relay(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("written");
 
         let mode = std::fs::metadata(&path)
             .expect("it is there")
@@ -910,13 +967,13 @@ mod tests {
     fn a_value_an_environment_file_cannot_hold_is_refused_rather_than_escaped() {
         let path = scratch("quoting");
 
-        let quoted = write_to(&path, "https://ntfy.sh/it's", None).expect_err("a quote");
+        let quoted = write_relay(&path, "https://ntfy.sh/it's", None).expect_err("a quote");
         assert!(
             matches!(quoted, NotWritten::Unholdable { field: "URL" }),
             "{quoted}"
         );
 
-        let split = write_to(
+        let split = write_relay(
             &path,
             "https://ntfy.sh/a-topic",
             Some("tk\nYANTRA_NTFY_URL=x"),
@@ -939,9 +996,91 @@ mod tests {
     fn something_that_is_not_a_url_is_refused_and_is_not_quoted_back() {
         let path = scratch("not-a-url");
 
-        let refused = write_to(&path, "ntfy.sh/a-topic", None).expect_err("no scheme");
+        let refused = write_relay(&path, "ntfy.sh/a-topic", None).expect_err("no scheme");
 
         assert!(matches!(refused, NotWritten::NotAUrl), "{refused}");
         assert!(!refused.to_string().contains("a-topic"), "{refused}");
+    }
+
+    fn github_token() -> crate::github::Token {
+        crate::github::Token::new("gho_notarealtoken".to_owned())
+    }
+
+    /// ADR-0023's sharpest hazard: two writers, one file. Writing the grant
+    /// keeps the relay, writing the relay keeps the grant, and a line neither
+    /// owns — the client id an operator typed — survives both.
+    #[test]
+    fn writing_one_variable_never_erases_another() {
+        let path = scratch("both-writers");
+        std::fs::write(&path, "YANTRA_GITHUB_CLIENT_ID='Iv1.abc'\n").expect("a hand-written line");
+
+        write_relay(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("relay");
+        write_github(&path, Some(&github_token())).expect("grant");
+        write_relay(&path, "https://ntfy.sh/another", None).expect("relay again");
+
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(
+            written.contains("YANTRA_GITHUB_CLIENT_ID='Iv1.abc'"),
+            "{written}"
+        );
+        assert!(
+            written.contains("YANTRA_NTFY_URL='https://ntfy.sh/another'"),
+            "{written}"
+        );
+        assert!(
+            !written.contains("a-topic"),
+            "the old topic is replaced: {written}"
+        );
+        assert!(
+            !written.contains(RELAY_TOKEN),
+            "an open topic drops the token line: {written}"
+        );
+        assert!(
+            written.contains("YANTRA_GITHUB_TOKEN='gho_notarealtoken'"),
+            "{written}"
+        );
+        assert_eq!(
+            written.matches("YANTRA_GITHUB_TOKEN=").count(),
+            1,
+            "one line per variable: {written}"
+        );
+    }
+
+    /// `logout` is the token line gone and nothing else moved.
+    #[test]
+    fn logging_out_removes_only_the_token_line() {
+        let path = scratch("logout");
+        write_relay(&path, "https://ntfy.sh/a-topic", Some("tk_notarealtoken")).expect("relay");
+        write_github(&path, Some(&github_token())).expect("grant");
+
+        write_github(&path, None).expect("logout");
+
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(!written.contains("YANTRA_GITHUB_TOKEN"), "{written}");
+        assert!(
+            written.contains("YANTRA_NTFY_URL='https://ntfy.sh/a-topic'"),
+            "{written}"
+        );
+        assert!(
+            written.contains("YANTRA_NTFY_TOKEN='tk_notarealtoken'"),
+            "{written}"
+        );
+    }
+
+    /// A rewrite reads the file first, and the mode is asserted after the
+    /// second write rather than the first: `truncate` keeps what is there.
+    #[test]
+    fn a_rewritten_file_is_still_readable_by_nobody_else() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = scratch("rewrite-mode");
+        write_github(&path, Some(&github_token())).expect("created");
+
+        write_relay(&path, "https://ntfy.sh/a-topic", None).expect("rewritten");
+
+        let mode = std::fs::metadata(&path)
+            .expect("it is there")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
     }
 }

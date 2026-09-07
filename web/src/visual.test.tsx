@@ -43,6 +43,7 @@ function machine(overrides: Partial<Machine> = {}): Machine {
   return {
     name: 'cachyos-g14',
     dns_name: 'cachyos-g14.tail.ts.net',
+    address: null,
     os: 'linux',
     online: true,
     expired: false,
@@ -56,7 +57,7 @@ const session: Session = {
   name: 'yantra',
   windows: 2,
   attached: 0,
-  created: 'Thu Jul 30 13:02:31 2026',
+  created: 'Thu Jul 30 13:02:31 2026', created_at: 0,
 }
 
 /** D3 §5.7. The boundary is 24 h, and it is chosen in one place. */

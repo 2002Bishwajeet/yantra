@@ -1,0 +1,15 @@
+.m3-track {
+  flex: 1;
+  min-width: 48px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--md-sys-color-surface-container);
+  overflow: hidden;
+}
+
+.m3-track__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--md-sys-color-tertiary);
+  transition: width var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
+}

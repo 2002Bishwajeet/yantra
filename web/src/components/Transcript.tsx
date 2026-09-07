@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTick } from '@/useTick'
-import { LINES, type Said } from '@/useTranscript'
+import { LINES, type Said } from '@/api/hooks'
 
 /** D5 §8's four verbs. A tool this list does not name reads as its own name,
  *  which is the honest fallback and what the far side sent. */

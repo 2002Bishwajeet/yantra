@@ -1,0 +1,189 @@
+/* One rule per Material type role, on the composite tokens in tokens.css. */
+.m3-text {
+  margin: 0;
+}
+
+.m3-text[data-scale="display-large"] {
+  font: var(--md-sys-typescale-display-large);
+  letter-spacing: var(--md-sys-typescale-display-large-tracking);
+}
+
+.m3-text[data-scale="display-large"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-display-large-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-display-large-tracking);
+}
+
+.m3-text[data-scale="display-medium"] {
+  font: var(--md-sys-typescale-display-medium);
+  letter-spacing: var(--md-sys-typescale-display-medium-tracking);
+}
+
+.m3-text[data-scale="display-medium"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-display-medium-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-display-medium-tracking);
+}
+
+.m3-text[data-scale="display-small"] {
+  font: var(--md-sys-typescale-display-small);
+  letter-spacing: var(--md-sys-typescale-display-small-tracking);
+}
+
+.m3-text[data-scale="display-small"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-display-small-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-display-small-tracking);
+}
+
+.m3-text[data-scale="headline-large"] {
+  font: var(--md-sys-typescale-headline-large);
+  letter-spacing: var(--md-sys-typescale-headline-large-tracking);
+}
+
+.m3-text[data-scale="headline-large"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-headline-large-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-large-tracking);
+}
+
+.m3-text[data-scale="headline-medium"] {
+  font: var(--md-sys-typescale-headline-medium);
+  letter-spacing: var(--md-sys-typescale-headline-medium-tracking);
+}
+
+.m3-text[data-scale="headline-medium"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-headline-medium-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-medium-tracking);
+}
+
+.m3-text[data-scale="headline-small"] {
+  font: var(--md-sys-typescale-headline-small);
+  letter-spacing: var(--md-sys-typescale-headline-small-tracking);
+}
+
+.m3-text[data-scale="headline-small"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-headline-small-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
+}
+
+.m3-text[data-scale="title-large"] {
+  font: var(--md-sys-typescale-title-large);
+  letter-spacing: var(--md-sys-typescale-title-large-tracking);
+}
+
+.m3-text[data-scale="title-large"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-title-large-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-large-tracking);
+}
+
+.m3-text[data-scale="title-medium"] {
+  font: var(--md-sys-typescale-title-medium);
+  letter-spacing: var(--md-sys-typescale-title-medium-tracking);
+}
+
+.m3-text[data-scale="title-medium"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-title-medium-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-medium-tracking);
+}
+
+.m3-text[data-scale="title-small"] {
+  font: var(--md-sys-typescale-title-small);
+  letter-spacing: var(--md-sys-typescale-title-small-tracking);
+}
+
+.m3-text[data-scale="title-small"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-title-small-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-small-tracking);
+}
+
+.m3-text[data-scale="body-large"] {
+  font: var(--md-sys-typescale-body-large);
+  letter-spacing: var(--md-sys-typescale-body-large-tracking);
+}
+
+.m3-text[data-scale="body-large"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-body-large-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-large-tracking);
+}
+
+.m3-text[data-scale="body-medium"] {
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+}
+
+.m3-text[data-scale="body-medium"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-body-medium-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
+}
+
+.m3-text[data-scale="body-small"] {
+  font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
+}
+
+.m3-text[data-scale="body-small"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-body-small-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-small-tracking);
+}
+
+.m3-text[data-scale="label-large"] {
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+}
+
+.m3-text[data-scale="label-large"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-label-large-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-label-large-tracking);
+}
+
+.m3-text[data-scale="label-medium"] {
+  font: var(--md-sys-typescale-label-medium);
+  letter-spacing: var(--md-sys-typescale-label-medium-tracking);
+}
+
+.m3-text[data-scale="label-medium"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-label-medium-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-label-medium-tracking);
+}
+
+.m3-text[data-scale="label-small"] {
+  font: var(--md-sys-typescale-label-small);
+  letter-spacing: var(--md-sys-typescale-label-small-tracking);
+}
+
+.m3-text[data-scale="label-small"][data-emphasized] {
+  font-weight: var(--md-sys-typescale-emphasized-label-small-weight);
+  letter-spacing: var(--md-sys-typescale-emphasized-label-small-tracking);
+}
+
+.m3-text[data-tone="variant"] {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-text[data-tone="primary"] {
+  color: var(--md-sys-color-primary);
+}
+
+.m3-text[data-tone="error"] {
+  color: var(--md-sys-color-error);
+}
+
+.m3-clip {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* BRIEF.md: every age, duration, token count and amount is mono. */
+.m3-mono {
+  font-family: var(--md-ref-typeface-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The boards' uppercase eyebrow, on label-medium; R14 §4 notes the case and
+   tracking are the boards' and not M3's. */
+.m3-eyebrow {
+  margin: 0;
+  font: var(--md-sys-typescale-label-medium);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant);
+}

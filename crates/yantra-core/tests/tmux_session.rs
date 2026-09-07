@@ -288,6 +288,9 @@ async fn listing_reports_sessions_and_no_server_means_none() -> Result<()> {
         !listed[0].created.is_empty(),
         "tmux formats the time remotely"
     );
+    // Y-343: the same moment as seconds, which a page can age; this decade at
+    // least, and never the unexpanded format string.
+    assert!(listed[0].created_at > 1_700_000_000, "{:?}", listed[0]);
 
     lab.tmux.kill(&lab.ssh, "alpha").await?;
     lab.tmux.kill(&lab.ssh, "beta").await?;

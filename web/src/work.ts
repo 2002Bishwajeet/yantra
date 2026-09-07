@@ -6,7 +6,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 import type { AgentRow } from '@/columns'
 
 /** D3 §4: who must act next — you, the agent, nobody. `unknown` is the fourth

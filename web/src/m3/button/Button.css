@@ -1,0 +1,74 @@
+.m3-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--md-sys-color-on-primary);
+  background: var(--md-sys-color-primary);
+  transition:
+    background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects),
+    border-radius var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
+}
+
+.m3-button[data-size="m"] {
+  height: 56px;
+  padding: 0 28px;
+  font: var(--md-sys-typescale-title-medium);
+}
+
+/* R14 §1.1: the corner morphs one step on press. */
+.m3-button:active {
+  border-radius: var(--md-sys-shape-corner-medium);
+}
+
+.m3-button[data-variant="filled"][data-tone="error"] {
+  color: var(--md-sys-color-on-error);
+  background: var(--md-sys-color-error);
+}
+
+.m3-button[data-variant="tonal"] {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-button[data-variant="tonal"][data-tone="error"] {
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+.m3-button[data-variant="outlined"] {
+  color: var(--md-sys-color-primary);
+  background: transparent;
+  /* R14 §7: outline, never outline-variant, is a control's only edge. */
+  border: 1px solid var(--md-sys-color-outline);
+}
+
+.m3-button[data-variant="text"] {
+  padding: 0 12px;
+  color: var(--md-sys-color-primary);
+  background: transparent;
+}
+
+.m3-button[data-variant="outlined"][data-tone="error"],
+.m3-button[data-variant="text"][data-tone="error"] {
+  color: var(--md-sys-color-error);
+}
+
+.m3-button__icon {
+  display: inline-flex;
+  margin-left: -4px;
+}
+
+.m3-button__icon > svg {
+  width: 20px;
+  height: 20px;
+}

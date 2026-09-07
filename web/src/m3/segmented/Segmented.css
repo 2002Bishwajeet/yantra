@@ -1,0 +1,60 @@
+.m3-segmented {
+  display: inline-flex;
+  box-sizing: border-box;
+  /* R14 §7: outline, never outline-variant, is a control's only edge. */
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: var(--md-sys-shape-corner-full);
+  overflow: hidden;
+}
+
+.m3-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 0;
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  white-space: nowrap;
+  color: var(--md-sys-color-on-surface);
+  background: transparent;
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+.m3-segment + .m3-segment {
+  border-left: 1px solid var(--md-sys-color-outline);
+}
+
+.m3-segment:focus-visible {
+  outline-offset: calc(-1 * var(--md-sys-focus-ring-width));
+}
+
+.m3-segment[data-pressed] {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+.m3-segment__icon {
+  display: inline-flex;
+}
+
+.m3-segment__icon > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.m3-segment__check {
+  display: none;
+}
+
+.m3-segment[data-pressed] .m3-segment__check {
+  display: block;
+}
+
+.m3-segment[data-pressed] .m3-segment__check + svg {
+  display: none;
+}

@@ -45,6 +45,7 @@ beforeEach(() => {
 const laptop: Machine = {
   name: 'cachyos-g14',
   dns_name: 'cachyos-g14.<tailnet>.ts.net.',
+  address: null,
   os: 'linux',
   online: true,
   expired: false,
@@ -306,7 +307,7 @@ describe('the footer', () => {
             machine: 'cachyos-g14',
             reached: 'yes',
             sessions: [
-              { name: 'stray', windows: 1, attached: 0, created: 'today' },
+              { name: 'stray', windows: 1, attached: 0, created: 'today', created_at: 0 },
             ],
           },
         ],

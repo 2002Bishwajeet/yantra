@@ -28,6 +28,7 @@ beforeEach(() => {
 const laptop: Machine = {
   name: 'cachyos-g14',
   dns_name: 'cachyos-g14.<tailnet>.ts.net.',
+  address: null,
   os: 'linux',
   online: true,
   expired: false,

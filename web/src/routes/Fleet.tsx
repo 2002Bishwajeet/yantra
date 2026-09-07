@@ -21,8 +21,15 @@ import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { loaded, useAgents, useLooked } from '@/useLooked'
-import type { Reading } from '@/useLooked'
+import {
+  loaded,
+  useAgents,
+  useAttention,
+  useMachines,
+  useSessions,
+  useWorkspaces,
+} from '@/api/hooks'
+import type { Reading } from '@/api/hooks'
 import {
   agentOf,
   BANDS,
@@ -99,14 +106,14 @@ function seed(was: Record<string, Band>, rows: WorkRow[]): Record<string, Band> 
 export function Fleet() {
   // Four independent readings, so each group stamps its own age; one shared
   // "last updated" would be true of at most one of them.
-  const machines = useLooked<Machine[]>('/api/machines')
-  const listed = useLooked<Listed[]>('/api/workspaces')
+  const machines = useMachines()
+  const listed = useWorkspaces()
   const workspaces = loaded(listed)
-  const sessions = useLooked<MachineSessions[]>('/api/sessions')
+  const sessions = useSessions()
   const agents = useAgents(workspaces)
   // A fifth, and it is on the daemon's 300 s clock rather than the 30 s sweep
   // — which is why it stamps itself rather than joining the footer's figure.
-  const attention = useLooked<Attention>('/api/attention')
+  const attention = useAttention()
   // The name, not the row: the workspace the form edits comes from the reading
   // every 30 s, so holding the row would edit against a copy of it.
   const [editing, setEditing] = useState<string | null>(null)

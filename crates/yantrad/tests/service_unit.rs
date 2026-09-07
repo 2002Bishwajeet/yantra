@@ -165,7 +165,7 @@ fn the_unit_hands_the_daemon_the_relay_that_was_written_to_its_environment_file(
     };
 
     let written = std::env::temp_dir().join("yantra-service-unit-daemon.env");
-    yantra_core::notify::write_to(&written, TOPIC, Some(TOKEN))?;
+    yantra_core::notify::write_relay(&written, TOPIC, Some(TOKEN))?;
     fixture.run(&["mkdir", "-p", "/etc/yantra"])?;
     fixture.copy_in(&written, "/etc/yantra/daemon.env")?;
     assert_eq!(

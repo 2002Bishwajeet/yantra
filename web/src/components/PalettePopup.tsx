@@ -1,6 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { Machine, Workspace } from '@/api'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 import {
   Command,
   CommandCollection,

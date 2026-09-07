@@ -1,0 +1,53 @@
+.m3-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: var(--m3-row-min-height);
+  padding: var(--m3-row-padding);
+  border-radius: var(--m3-row-radius);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-lowest);
+  text-decoration: none;
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+.m3-row[data-tone="plain"] {
+  background: transparent;
+}
+
+.m3-row[data-tone="selected"] {
+  color: var(--md-sys-color-on-secondary-container);
+  background: var(--md-sys-color-secondary-container);
+}
+
+/* The boards' rows inside a tinted hero card. */
+.m3-row[data-tone="translucent"] {
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 70%, transparent);
+}
+
+.m3-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.m3-row__headline {
+  font: var(--md-sys-typescale-emphasized-body-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-medium-tracking);
+}
+
+.m3-row__supporting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.m3-row[data-tone="selected"] .m3-row__supporting {
+  color: inherit;
+}

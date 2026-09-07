@@ -113,6 +113,17 @@ const repair = createRoute({
   head: ({ params }) => titled(`Repair ${params.name}`),
 })
 
+// Y-339: the component gallery, for the reviewer and Playwright. Dev only;
+// the production tree has the route and no chunk behind it.
+const gallery = createRoute({
+  getParentRoute: () => root,
+  path: '/m3',
+  component: import.meta.env.DEV
+    ? lazyRouteComponent(() => import('@/m3/gallery/Gallery'), 'Gallery')
+    : Nowhere,
+  head: () => titled('M3 gallery'),
+})
+
 export const routeTree = root.addChildren([
   fleet,
   machines,
@@ -123,6 +134,7 @@ export const routeTree = root.addChildren([
   session,
   workspace,
   repair,
+  gallery,
 ])
 
 /** The history is a parameter rather than a default, which is

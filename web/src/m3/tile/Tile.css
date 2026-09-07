@@ -1,0 +1,29 @@
+.m3-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--m3-tile-size);
+  height: var(--m3-tile-size);
+  border-radius: var(--m3-tile-radius);
+  font: var(--md-sys-typescale-emphasized-title-medium);
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.m3-tile[data-size="small"] {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  font-size: var(--md-sys-typescale-body-medium-size);
+}
+
+.m3-tile--icon {
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.m3-tile--icon > svg {
+  width: 20px;
+  height: 20px;
+}

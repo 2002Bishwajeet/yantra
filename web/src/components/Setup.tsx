@@ -5,7 +5,7 @@ import { Readiness } from '@/components/Readiness'
 import { Section } from '@/components/Section'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 
 /** What a tap produced. `no` is not *nothing is missing*: it is a question
  *  nobody has asked, which R-23 keeps distinct from an answer. */

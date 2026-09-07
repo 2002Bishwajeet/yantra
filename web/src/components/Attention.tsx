@@ -3,7 +3,7 @@ import { Ago, Stamp } from '@/components/Age'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { Reading } from '@/useLooked'
+import type { Reading } from '@/api/hooks'
 import { speaks } from '@/work'
 
 /** D3 §14 and D6 §3: a block inside `Needs you` under its own `h3`, below the

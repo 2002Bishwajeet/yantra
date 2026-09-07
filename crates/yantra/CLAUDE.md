@@ -39,6 +39,9 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `doctor`, unless every check is `present` | 1 | *ready* is the only 0, so an installer can loop on it — and an `unknown` is not a yes (R-23). An empty fleet is 1 too: nothing was asked, so nothing is known |
 | `tokens` on a session that has spent nothing | **0** | it reports a measurement rather than a state, and zero is one — the transcript was read |
 | `edit --machine` when that machine cannot be reached | 1 | it cannot be *known* that no session is being stranded, and a check that cannot know must refuse rather than allow (R-23) |
+| `github status`, unless GitHub accepts the grant | 1 | `doctor`'s rule on the one check about this host, so an installer can loop on it. No grant in this shell is 1 and names `YANTRA_GITHUB_TOKEN` |
+| `github logout` when no grant line is there | **0** | absence is the state asked for — `down`'s rule |
+| `ls repos` with nothing matching `--search` | **0** | a reading: the count under the table says `0 of N`, which is a filter that kept nothing and not an empty account |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.
@@ -70,6 +73,12 @@ a supervising parent would have to forward `SIGWINCH`, relay signals and reap a 
   send that failed does not un-write the file. It prints the path, never the topic and never the
   token, and it says the daemon takes the change at its next start — a file the unit reads is read
   when systemd starts the unit.
+- **`github login` writes the second secret and prints neither** (Y-342,
+  [ADR-0023](../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md)). It prints the code
+  and the URL, then the login and the path, and never the token — `Token`'s `Debug` is `<token>` so
+  a `{:?}` cannot leak it either. `ls attention`, `ls repos` and `github status` read the grant from
+  `YANTRA_GITHUB_TOKEN` and nowhere else, because a terminal cannot read the daemon's `0600` file
+  back, and each refusal names that variable and the verb that writes the file.
 - `report_error` walks the `source()` chain — the useful detail is usually a level or two down, so
   never flatten an error to its top line.
 - Multi-line string constants: Rust's `\` line-continuation eats leading whitespace, so an indented

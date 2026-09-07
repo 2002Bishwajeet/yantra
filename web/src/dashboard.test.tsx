@@ -4,7 +4,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from '@testing-library/react'
 import type {
@@ -34,14 +33,12 @@ import {
   type SessionRow,
   workspaceColumns,
 } from './columns'
-import { renderHookQueried } from './test/inQuery'
 import { renderRouted } from './test/inRouter'
 import { Command } from './components/Command'
 import { Readiness as ReadinessCard } from './components/Readiness'
 import { Ready } from './routes/Machines'
 import { DataTable } from './components/DataTable'
 import { Section } from './components/Section'
-import { useLooked } from './useLooked'
 import App from './App'
 
 afterEach(() => {
@@ -78,6 +75,7 @@ function machine(overrides: Partial<Machine> = {}): Machine {
   return {
     name: 'cachyos-g14',
     dns_name: 'cachyos-g14.<tailnet>.ts.net.',
+    address: null,
     os: 'linux',
     online: true,
     expired: false,
@@ -510,7 +508,7 @@ describe('the sessions section', () => {
     windows: 2,
     // A client count: 0 is detached, and rendering it as "no" would be a lie.
     attached: 0,
-    created: 'Thu Jul 30 13:02:31 2026',
+    created: 'Thu Jul 30 13:02:31 2026', created_at: 0,
   }
   const answers: MachineSessions[] = [
     { machine: 'cachyos-g14', reached: 'yes', sessions: [session] },
@@ -644,42 +642,6 @@ describe('the sessions section', () => {
   })
 })
 
-describe('useLooked', () => {
-  it('maps a rejected fetch into a failed look rather than throwing', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.reject(new Error('daemon is not running'))),
-    )
-    const { result } = renderHookQueried(() => useLooked('/api/machines'))
-
-    await waitFor(() => expect(result.current.looked).toBe('failed'))
-    expect(result.current).toMatchObject({
-      looked: 'failed',
-      error: expect.stringContaining('daemon is not running'),
-    })
-  })
-
-  it('maps a non-200 into a failed look, since the fleet answers 200 either way', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.resolve({ ok: false, status: 404 })),
-    )
-    const { result } = renderHookQueried(() => useLooked('/api/machines'))
-
-    await waitFor(() => expect(result.current.looked).toBe('failed'))
-    expect(result.current).toMatchObject({ error: expect.stringContaining('404') })
-  })
-
-  /** D3 §7.1. This asserted the bug: a question not yet asked is not a question
-   *  answered *never*, and `never` is the daemon's word for having looked at
-   *  nothing — not the browser's for not having asked. Y-190. */
-  it('answers pending before the first response, and never says never', () => {
-    stubFetch({ '/api/machines': { looked: 'ok', age_seconds: 0, data: [] } })
-    const { result } = renderHookQueried(() => useLooked('/api/machines'))
-    expect(result.current).toEqual({ looked: 'pending' })
-  })
-})
-
 describe('the age reading', () => {
   const aged = (age_seconds: number, waiting?: string[]) =>
     render(
@@ -758,7 +720,7 @@ describe('the command a row carries', () => {
     name: 'yantra',
     windows: 1,
     attached: 0,
-    created: 'Thu Jul 30 13:02:31 2026',
+    created: 'Thu Jul 30 13:02:31 2026', created_at: 0,
   }
   const row: SessionRow = { machine: 'cachyos-g14', session }
   const running = ok<MachineSessions[]>([

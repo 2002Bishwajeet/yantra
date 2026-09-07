@@ -22,7 +22,9 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Router;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, State};
@@ -50,13 +52,47 @@ pub type Beats = Arc<RwLock<BTreeMap<String, Reading<Heartbeat>>>>;
 /// would give that type a fifth member meaning something different from the
 /// other four. Two locks also keep the 10 s write off the one four 30 s refresh
 /// tasks hold.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Fleet {
     pub model: Model,
     pub beats: Beats,
     /// D3 §13's one piece of viewer state, here for the same reason the beats
     /// are: it is neither a look this daemon took nor a beat a machine sent.
     pub viewers: crate::notify::Viewers,
+    /// ADR-0025's ring, beside the beats because it is already state about
+    /// the past.
+    pub events: crate::events::Events,
+    pub facts: Arc<Facts>,
+    /// The GitHub grant (ADR-0023 §3), here for the same reason again.
+    pub github: crate::github::Grant,
+}
+
+/// What `serve` knew at start and no look changes: for `GET /api/about` and
+/// `GET /api/ssh-identity` (Y-343).
+#[derive(Debug)]
+pub struct Facts {
+    pub started: Instant,
+    /// `listen_on`'s set exactly, the same one the authoriser holds.
+    pub listening_on: Vec<SocketAddr>,
+    /// This account's `~/.ssh`, a parameter so a test names a scratch one.
+    pub ssh_dir: PathBuf,
+}
+
+impl Default for Fleet {
+    fn default() -> Self {
+        Self {
+            model: Model::default(),
+            beats: Beats::default(),
+            viewers: crate::notify::Viewers::default(),
+            events: crate::events::Events::default(),
+            facts: Arc::new(Facts {
+                started: Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: PathBuf::new(),
+            }),
+            github: crate::github::Grant::default(),
+        }
+    }
 }
 
 /// So a handler asks for the half it reads: `/api/machines` joins the two, and
@@ -70,6 +106,12 @@ impl axum::extract::FromRef<Fleet> for Model {
 impl axum::extract::FromRef<Fleet> for Beats {
     fn from_ref(fleet: &Fleet) -> Self {
         fleet.beats.clone()
+    }
+}
+
+impl axum::extract::FromRef<Fleet> for crate::github::Grant {
+    fn from_ref(fleet: &Fleet) -> Self {
+        fleet.github.clone()
     }
 }
 

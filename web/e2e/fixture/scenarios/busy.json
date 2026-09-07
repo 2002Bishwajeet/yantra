@@ -1,0 +1,266 @@
+{
+  "machines": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "name": "cachyos-g14",
+        "dns_name": "cachyos-g14.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": true,
+        "expired": false,
+        "last_seen": null,
+        "heartbeat": {
+          "age_seconds": 4,
+          "arch": "x86_64",
+          "labels": ["gpu", "docker"],
+          "free_ram_mb": 19942,
+          "free_disk_mb": 214003,
+          "cpu_busy_pct": 38,
+          "power": "ac"
+        }
+      },
+      {
+        "name": "macbook",
+        "dns_name": "macbook.yantra.tail3a1b.ts.net.",
+        "os": "macOS",
+        "online": true,
+        "expired": false,
+        "last_seen": null,
+        "heartbeat": {
+          "age_seconds": 12,
+          "arch": "aarch64",
+          "labels": [],
+          "free_ram_mb": 6120,
+          "free_disk_mb": 88210,
+          "cpu_busy_pct": 21,
+          "power": { "battery": { "percent": 42 } }
+        }
+      },
+      {
+        "name": "pi-5",
+        "dns_name": "pi-5.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": true,
+        "expired": false,
+        "last_seen": null,
+        "heartbeat": {
+          "age_seconds": 9,
+          "arch": "aarch64",
+          "labels": [],
+          "free_ram_mb": 5410,
+          "free_disk_mb": 41000,
+          "cpu_busy_pct": 6,
+          "power": "ac"
+        }
+      },
+      {
+        "name": "hetzner-1",
+        "dns_name": "hetzner-1.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": true,
+        "expired": false,
+        "last_seen": null,
+        "heartbeat": {
+          "age_seconds": 2,
+          "arch": "x86_64",
+          "labels": ["docker"],
+          "free_ram_mb": 12800,
+          "free_disk_mb": 150200,
+          "cpu_busy_pct": 64,
+          "power": "ac"
+        }
+      },
+      {
+        "name": "nas",
+        "dns_name": "nas.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": true,
+        "expired": false,
+        "last_seen": null,
+        "heartbeat": null
+      },
+      {
+        "name": "thinkpad",
+        "dns_name": "thinkpad.yantra.tail3a1b.ts.net.",
+        "os": "linux",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-07-07T09:00:00Z",
+        "heartbeat": null
+      }
+    ]
+  },
+  "workspaces": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      { "loaded": "yes", "name": "yantra-web", "machine": "cachyos-g14", "repo": "/home/biswa/Github/yantra", "startup": null },
+      { "loaded": "yes", "name": "homelab-k8s", "machine": "hetzner-1", "repo": "/home/biswa/Github/homelab-k8s", "startup": null },
+      { "loaded": "yes", "name": "landing", "machine": "macbook", "repo": "/Users/biswa/Github/yantra-landing", "startup": null },
+      { "loaded": "yes", "name": "agent-sdk", "machine": "cachyos-g14", "repo": "/home/biswa/Github/agent-sdk", "startup": null },
+      { "loaded": "yes", "name": "price-table", "machine": "cachyos-g14", "repo": "/home/biswa/Github/price-table", "startup": null },
+      { "loaded": "yes", "name": "ntfy-relay", "machine": "pi-5", "repo": "/home/biswa/ntfy-relay", "startup": "npm run dev" },
+      { "loaded": "yes", "name": "docs-sweep", "machine": "macbook", "repo": "/Users/biswa/Github/yantra-docs", "startup": null },
+      { "loaded": "yes", "name": "appliance", "machine": "pi-5", "repo": "/home/biswa/appliance", "startup": null },
+      { "loaded": "yes", "name": "landing-copy", "machine": "macbook", "repo": "/Users/biswa/Github/landing-copy", "startup": null },
+      { "loaded": "yes", "name": "cargo-zig", "machine": "thinkpad", "repo": "/home/biswa/Github/cargo-zig", "startup": null }
+    ]
+  },
+  "status": {
+    "yantra-web": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "yantra-web", "machine": "cachyos-g14", "reached": "yes", "status": { "state": "awaiting_trust" }, "session": { "id": "1f0c1a2e-4c2b-4f7a-9a1d-3f0c2b8e7d61", "pid": 48213 } } },
+    "homelab-k8s": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "homelab-k8s", "machine": "hetzner-1", "reached": "yes", "status": { "state": "running" }, "session": { "id": "7b2e9c40-1d6f-4a3b-8e5c-2f9d0a1b3c4d", "pid": 2231 } } },
+    "landing": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "landing", "machine": "macbook", "reached": "yes", "status": { "state": "running" }, "session": { "id": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f", "pid": 9107 } } },
+    "agent-sdk": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "agent-sdk", "machine": "cachyos-g14", "reached": "yes", "status": { "state": "running" }, "session": { "id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "pid": 51340 } } },
+    "price-table": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "price-table", "machine": "cachyos-g14", "reached": "yes", "status": { "state": "crashed", "exit_status": 1 }, "session": null } },
+    "ntfy-relay": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "ntfy-relay", "machine": "pi-5", "reached": "yes", "status": { "state": "no_session" }, "session": null } },
+    "docs-sweep": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "docs-sweep", "machine": "macbook", "reached": "yes", "status": { "state": "finished" }, "session": null } },
+    "appliance": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "appliance", "machine": "pi-5", "reached": "yes", "status": { "state": "stopped" }, "session": null } },
+    "landing-copy": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "landing-copy", "machine": "macbook", "reached": "yes", "status": { "state": "no_session" }, "session": null } },
+    "cargo-zig": { "looked": "ok", "age_seconds": 0, "data": { "workspace": "cargo-zig", "machine": "thinkpad", "reached": "no", "error": "ssh to thinkpad failed before the command reported a status: connect to host thinkpad port 22: No route to host" } }
+  },
+  "sessions": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "machine": "cachyos-g14",
+        "reached": "yes",
+        "sessions": [
+          { "name": "yantra-web", "windows": 2, "attached": 1, "created": "Sun Sep  6 09:14:02 2026" },
+          { "name": "agent-sdk", "windows": 1, "attached": 0, "created": "Sun Sep  6 10:02:41 2026" },
+          { "name": "price-table", "windows": 1, "attached": 0, "created": "Sat Sep  5 22:17:09 2026" },
+          { "name": "scratch", "windows": 3, "attached": 0, "created": "Fri Sep  4 18:40:55 2026" }
+        ]
+      },
+      {
+        "machine": "macbook",
+        "reached": "yes",
+        "sessions": [
+          { "name": "landing", "windows": 1, "attached": 1, "created": "Sun Sep  6 11:20:13 2026" },
+          { "name": "mux", "windows": 2, "attached": 0, "created": "Thu Sep  3 08:05:30 2026" }
+        ]
+      },
+      { "machine": "pi-5", "reached": "yes", "sessions": [] },
+      {
+        "machine": "hetzner-1",
+        "reached": "yes",
+        "sessions": [
+          { "name": "homelab-k8s", "windows": 1, "attached": 0, "created": "Sun Sep  6 07:48:27 2026" }
+        ]
+      },
+      { "machine": "nas", "reached": "yes", "sessions": [] },
+      { "machine": "thinkpad", "reached": "no", "error": "ssh to thinkpad failed before the command reported a status: connect to host thinkpad port 22: No route to host" }
+    ]
+  },
+  "readiness": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "machine": "cachyos-g14",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
+          { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 4s ago" }
+        ]
+      },
+      {
+        "machine": "macbook",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.9 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /opt/homebrew/bin/tmux" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /Users/biswa/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /opt/homebrew/bin/gh" },
+          { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
+          { "check": "login-session", "state": "present", "detail": "a launchd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 12s ago" }
+        ]
+      },
+      {
+        "machine": "pi-5",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.9 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.4 at /usr/bin/tmux" },
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
+          { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 9s ago" }
+        ]
+      },
+      {
+        "machine": "hetzner-1",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.9 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.4 at /usr/bin/tmux" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /root/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
+          { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 2s ago" }
+        ]
+      },
+      {
+        "machine": "nas",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.7 answered" },
+          { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
+          { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
+          { "check": "login-session", "state": "absent", "detail": "no user session is running" },
+          { "check": "heartbeat", "state": "absent", "detail": "no beat has ever arrived from nas" }
+        ]
+      },
+      {
+        "machine": "thinkpad",
+        "checks": [
+          { "check": "reachable", "state": "absent", "detail": "connect to host thinkpad port 22: No route to host" },
+          { "check": "sshd", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "tmux", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "agent-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "terminfo", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "provider-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "provider-auth", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "login-session", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "heartbeat", "state": "absent", "detail": "the last beat arrived 61 days ago" }
+        ]
+      }
+    ]
+  },
+  "attention": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": {
+      "reviews": [
+        { "repo": "2002Bishwajeet/yantra", "number": 245, "title": "Y-330: the options round for D7", "url": "https://github.com/2002Bishwajeet/yantra/pull/245", "updated_at": "2026-09-06T09:12:44Z" },
+        { "repo": "utopia-php/messaging", "number": 54, "title": "feat: add the APNs adapter", "url": "https://github.com/utopia-php/messaging/pull/54", "updated_at": "2026-09-04T16:40:02Z" }
+      ],
+      "issues": [
+        { "repo": "2002Bishwajeet/yantra", "number": 118, "title": "the fleet page draws an empty table while nobody has looked", "url": "https://github.com/2002Bishwajeet/yantra/issues/118", "updated_at": "2026-09-05T18:09:33Z" },
+        { "repo": "2002Bishwajeet/homelab-k8s", "number": 31, "title": "cert-manager renews a day late on the nas", "url": "https://github.com/2002Bishwajeet/homelab-k8s/issues/31", "updated_at": "2026-09-02T07:55:10Z" }
+      ],
+      "notifications": 7
+    }
+  },
+  "github": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": { "check": "github", "state": "present", "detail": "`gh` reports a stored credential here — that it works is not asked" }
+  }
+}

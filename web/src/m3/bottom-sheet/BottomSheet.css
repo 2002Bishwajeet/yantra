@@ -1,0 +1,70 @@
+.m3-bottom-sheet__scrim {
+  opacity: calc(1 - var(--drawer-swipe-progress, 0));
+}
+
+.m3-bottom-sheet__scrim[data-swiping] {
+  transition: none;
+}
+
+.m3-bottom-sheet__viewport {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.m3-bottom-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 640px;
+  max-height: calc(100% - 64px);
+  /* The 3 rem bleed keeps the surface under the edge while it overshoots. */
+  margin-bottom: -3rem;
+  padding-bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
+  border-radius: var(--md-sys-shape-corner-extra-large) var(--md-sys-shape-corner-extra-large) 0 0;
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-low);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: auto;
+  outline: none;
+  transform: translateY(var(--drawer-swipe-movement-y, 0px));
+  transition: transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
+}
+
+.m3-bottom-sheet[data-swiping] {
+  transition: none;
+  user-select: none;
+}
+
+.m3-bottom-sheet[data-starting-style],
+.m3-bottom-sheet[data-ending-style] {
+  transform: translateY(calc(100% + 2px));
+}
+
+.m3-bottom-sheet[data-ending-style] {
+  transition-duration: calc(var(--drawer-swipe-strength, 1) * var(--md-sys-motion-duration-default-spatial));
+}
+
+.m3-bottom-sheet__handle-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+}
+
+.m3-bottom-sheet__handle {
+  width: 32px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--md-sys-color-outline);
+  opacity: 0.5;
+}
+
+.m3-bottom-sheet__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 16px 16px;
+}

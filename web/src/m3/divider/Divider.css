@@ -1,0 +1,15 @@
+.m3-divider {
+  flex: none;
+  align-self: stretch;
+  background: var(--md-sys-color-outline-variant);
+}
+
+.m3-divider[data-orientation="horizontal"] {
+  height: 1px;
+  width: 100%;
+}
+
+.m3-divider[data-orientation="vertical"] {
+  width: 1px;
+  min-height: 24px;
+}

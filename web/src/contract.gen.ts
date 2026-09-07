@@ -6,8 +6,13 @@
 // them. A field renamed in crates/yantrad/src/api.rs fails the Rust test that
 // writes this file, and fails here once it is regenerated.
 import type {
+  About,
   Attention,
   Broken,
+  Cloning,
+  Connection,
+  Device,
+  Event,
   Listed,
   Listing,
   Looked,
@@ -15,8 +20,10 @@ import type {
   MachineSessions,
   Opened,
   Readiness,
+  Repo,
   Resumed,
   Spend,
+  SshIdentity,
   Stopped,
   TerminalSize,
   Transcript,
@@ -28,6 +35,7 @@ export const machines = {
   "age_seconds": 0,
   "data": [
     {
+      "address": "100.64.0.1",
       "dns_name": "cachyos-g14.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": {
@@ -48,6 +56,7 @@ export const machines = {
       "os": "linux"
     },
     {
+      "address": null,
       "dns_name": "bishwajeets-macbook-pro.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": {
@@ -72,6 +81,7 @@ export const machines = {
       "os": "linux"
     },
     {
+      "address": null,
       "dns_name": "pi.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": null,
@@ -120,6 +130,7 @@ export const sessions = {
         {
           "attached": 1,
           "created": "Thu Jul 30 13:02:31 2026",
+          "created_at": 1785502951,
           "name": "yantra",
           "windows": 2
         }
@@ -368,6 +379,78 @@ export const attention = {
   "looked": "ok"
 } satisfies Looked<Attention>
 
+export const repos = {
+  "age_seconds": 0,
+  "data": [
+    {
+      "clone_url": "https://github.com/2002Bishwajeet/yantra.git",
+      "default_branch": "main",
+      "full_name": "2002Bishwajeet/yantra",
+      "language": "Rust",
+      "private": false,
+      "pushed_at": "2026-09-05T21:14:03Z"
+    },
+    {
+      "clone_url": "https://github.com/2002Bishwajeet/scratch.git",
+      "default_branch": "main",
+      "full_name": "2002Bishwajeet/scratch",
+      "language": null,
+      "private": true,
+      "pushed_at": null
+    }
+  ],
+  "looked": "ok"
+} satisfies Looked<Repo[]>
+
+export const github = {
+  "connected": true,
+  "login": "2002Bishwajeet",
+  "pending": false,
+  "scopes": []
+} satisfies Connection
+
+export const disconnected = {
+  "connected": false,
+  "login": null,
+  "pending": false,
+  "scopes": []
+} satisfies Connection
+
+export const notifications = {
+  "age_seconds": 0,
+  "data": [
+    {
+      "at": 1785522780,
+      "kind": "relay-test",
+      "machine": null,
+      "said": "yantra can reach this topic",
+      "workspace": null
+    },
+    {
+      "at": 1785522720,
+      "kind": "unreachable",
+      "machine": "pi",
+      "said": "pi is no longer online",
+      "workspace": null
+    },
+    {
+      "at": 1785522660,
+      "kind": "crashed",
+      "machine": "bishwajeets-macbook-pro",
+      "said": "site: crashed (exit 1)",
+      "workspace": "site"
+    },
+    {
+      "at": 1785522600,
+      "kind": "awaiting_trust",
+      "machine": "cachyos-g14",
+      "said": "api: waiting at claude's trust prompt",
+      "workspace": "api"
+    }
+  ],
+  "looked": "ok"
+} satisfies Looked<Event[]>
+
 export const notLooked = {
   "looked": "never"
 } satisfies Looked<Machine[]>
@@ -377,6 +460,32 @@ export const failed = {
   "error": "`tailscale status --json` failed: failed to connect to local tailscaled",
   "looked": "failed"
 } satisfies Looked<Machine[]>
+
+export const about = {
+  "built": "2026-09-06",
+  "listening_on": [
+    "100.64.0.1:7717",
+    "[fd7a:115c:a1e0::1]:7717"
+  ],
+  "tailnet": "<tailnet>.ts.net",
+  "target": "aarch64-unknown-linux-musl",
+  "uptime_seconds": 86412,
+  "version": "0.1.0"
+} satisfies About
+
+export const sshIdentity = {
+  "fingerprint": "SHA256:<fingerprint>",
+  "kind": "ed25519",
+  "path": "/home/<user>/.ssh/id_yantra",
+  "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra"
+} satisfies SshIdentity
+
+export const device = {
+  "expires_in": 900,
+  "interval": 5,
+  "user_code": "WDJB-MJHT",
+  "verification_uri": "https://github.com/login/device"
+} satisfies Device
 
 export const made = {
   "machine": "cachyos-g14",
@@ -490,6 +599,11 @@ export const logs = {
     }
   ]
 } satisfies Transcript
+
+export const cloning = {
+  "machine": "cachyos-g14",
+  "session": "clone-yantra"
+} satisfies Cloning
 
 export const listing = {
   "entries": [

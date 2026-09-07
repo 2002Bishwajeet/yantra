@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserHistory, RouterProvider } from '@tanstack/react-router'
+import { makeQueryClient } from '@/api/client'
 import { type AppRouter, getRouter } from '@/router'
 
 /** The page is the router's — `Shell` in `routes/` is the heading and the
@@ -10,7 +11,7 @@ import { type AppRouter, getRouter } from '@/router'
  *  thing, so it is made the same way. */
 export default function App({ router }: { router?: AppRouter }) {
   const [made] = useState(() => router ?? getRouter(createBrowserHistory()))
-  const [client] = useState(() => new QueryClient())
+  const [client] = useState(makeQueryClient)
   return (
     <QueryClientProvider client={client}>
       <RouterProvider router={made} />

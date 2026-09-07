@@ -1,12 +1,6 @@
 import type { ReactNode } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
-import type {
-  Listed,
-  Machine,
-  MachineSessions,
-  Readiness as Report,
-  Workspace,
-} from '@/api'
+import type { Machine, Workspace } from '@/api'
 import { reachability, reporting, sessionColumns } from '@/columns'
 import { Ago, Stamp } from '@/components/Age'
 import { DataTable } from '@/components/DataTable'
@@ -16,8 +10,16 @@ import { Status } from '@/components/Status'
 import { Title } from '@/components/Title'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Workspaces } from '@/routes/Fleet'
-import { loaded, sessionsWaiting, useAgents, useLooked } from '@/useLooked'
-import type { Reading } from '@/useLooked'
+import {
+  loaded,
+  sessionsWaiting,
+  useAgents,
+  useMachineReadiness,
+  useMachines,
+  useSessions,
+  useWorkspaces,
+} from '@/api/hooks'
+import type { Reading } from '@/api/hooks'
 
 const route = getRouteApi('/m/$machine')
 
@@ -71,9 +73,9 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  *  what a machine is doing. */
 export function OneMachine() {
   const { machine } = route.useParams()
-  const machines = useLooked<Machine[]>('/api/machines')
-  const listed = useLooked<Listed[]>('/api/workspaces')
-  const sessions = useLooked<MachineSessions[]>('/api/sessions')
+  const machines = useMachines()
+  const listed = useWorkspaces()
+  const sessions = useSessions()
   // Filtered before it is asked, not after: the agent class costs one ssh round
   // trip per workspace, and this page draws none of the others.
   const all = loaded(listed)
@@ -82,9 +84,7 @@ export function OneMachine() {
       ? { ...all, data: all.data.filter((one) => one.machine === machine) }
       : all
   const agents = useAgents(mine)
-  const readiness = useLooked<Report>(
-    `/api/machines/${encodeURIComponent(machine)}/readiness`,
-  )
+  const readiness = useMachineReadiness(machine)
   // The sweep asks the machines a workspace names, so this route 404s for the
   // rest — which `useLooked` reads as a failed look. Answering it from the
   // workspaces reading says *not asked* rather than *the look broke*, which is
