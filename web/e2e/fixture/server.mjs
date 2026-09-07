@@ -52,6 +52,14 @@ const TRUST_PROMPT = [
   '> ',
 ].join('\r\n')
 
+// `git clone --progress` down a pane: one line rewritten with \r, which is
+// what the starting screen draws as its detail (Y-349).
+const CLONE_PROGRESS = [
+  "Cloning into 'homelab-k8s'...\r\n",
+  'remote: Enumerating objects: 1204, done.\r',
+  'Receiving objects:  62% (747/1204)\r',
+].join('')
+
 const scenarios = new URL('./scenarios/', import.meta.url)
 
 /** The raw fixtures, which is also what the `contract` scenario serves. */
@@ -63,8 +71,14 @@ function defaults() {
     readiness: contract.readiness,
     attention: contract.attention,
     github: { looked: 'never' },
+    // Y-349: the swept repository list New session filters in the browser.
+    repos: contract.repos,
     notifications: contract.notifications,
     about: contract.about,
+    // Y-350: what /api/github holds, and the daemon's key. `null` is a key
+    // `yantra ssh-identity` has not made, a 404.
+    connection: contract.github,
+    sshIdentity: contract.sshIdentity,
     status: Object.fromEntries(
       contract.agents.map((one) => [one.data.workspace, one]),
     ),
@@ -153,6 +167,27 @@ function setStatus(state, workspace, status, session) {
   })
 }
 
+const HOME = '/home/biswa'
+
+const dir = (path, name, origin) => ({ path: `${path}/${name}`, name, repo: origin !== null, origin })
+
+/** One level of the machine, as `dirs` answers it: `$HOME`, the clone home
+ *  under it holding the repository the fleet already has, and whatever
+ *  `make` has added this run. */
+function entriesOf(state, path) {
+  const made = (state.made?.[path] ?? []).map((name) => dir(path, name, null))
+  if (path === HOME) return [dir(path, 'Github', null), dir(path, 'notes', null), ...made]
+  if (path === `${HOME}/Github`) {
+    return [
+      dir(path, 'yantra', 'git@github.com:2002Bishwajeet/yantra.git'),
+      dir(path, 'landing', 'https://github.com/2002Bishwajeet/landing.git'),
+      dir(path, 'notes', null),
+      ...made,
+    ]
+  }
+  return made
+}
+
 /** Route table: method, path pattern, handler. A handler answers
  *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
  *  for an empty body. */
@@ -165,6 +200,41 @@ const routes = [
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
   ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
   ['GET', /^\/api\/about$/, (s) => [200, s.about]],
+  [
+    'GET',
+    /^\/api\/ssh-identity$/,
+    (s) => (s.sshIdentity ? [200, s.sshIdentity] : [404, { error: 'no identity: run `yantra ssh-identity`' }]),
+  ],
+  // Y-350: the device flow. The daemon polls GitHub itself, so a login here
+  // is a grant that lands on its own a moment later, and the page sees it on
+  // its next GET.
+  [
+    'GET',
+    /^\/api\/github$/,
+    (s) => {
+      if (s.connection.pending && Date.now() >= s.grantAt) s.connection = contract.github
+      return [200, s.connection]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/github\/login$/,
+    (s) => {
+      if (s.connection.connected) return [409, 'a grant is already held; sign out first']
+      if (s.connection.pending) return [409, 'a device flow is already waiting for its code']
+      s.connection = { ...contract.disconnected, pending: true }
+      s.grantAt = Date.now() + 1500
+      return [200, contract.device]
+    },
+  ],
+  [
+    'DELETE',
+    /^\/api\/github$/,
+    (s) => {
+      s.connection = contract.disconnected
+      return [204]
+    },
+  ],
   [
     'GET',
     /^\/api\/workspaces\/([^/]+)\/status$/,
@@ -324,15 +394,46 @@ const routes = [
       return [200, { machine, session, killed: had }]
     },
   ],
+  ['GET', /^\/api\/repos$/, (s) => [200, s.repos]],
   [
     'POST',
     /^\/api\/machines\/([^/]+)\/probe$/,
-    (_, [machine], sent) => [200, { machine, path: sent.path ?? '', exists: true, origin: null }],
+    (s, [machine], sent) => {
+      const path = sent.path ?? ''
+      // A clone still running has not left its directory behind yet.
+      const until = s.cloning?.[path] ?? 0
+      return [200, { machine, path, exists: Date.now() >= until, origin: null }]
+    },
   ],
   [
     'POST',
     /^\/api\/machines\/([^/]+)\/dirs$/,
-    (_, [machine], sent) => [200, { ...contract.listing, machine, path: sent.path ?? contract.listing.path }],
+    (s, [machine], sent) => {
+      const path = sent.path ?? HOME
+      if (sent.make !== undefined) {
+        if (sent.make.includes('/')) return [400, `a folder name is one segment, not \`${sent.make}\``]
+        s.made ??= {}
+        s.made[path] = [...(s.made[path] ?? []), sent.make]
+      }
+      return [200, { machine, path, entries: entriesOf(s, path) }]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/machines\/([^/]+)\/clone$/,
+    (s, [machine], sent) => {
+      if (!sent.url || !sent.path) return [400, 'a clone needs a url and a path']
+      const session = `clone-${sent.path.split('/').pop()}`
+      const host = sessionsOf(s, machine)
+      if (host?.reached === 'yes' && !host.sessions.some((t) => t.name === session)) {
+        host.sessions.push({ name: session, windows: 1, attached: 0, created: 'Sun Sep  6 12:00:00 2026' })
+      }
+      s.cloning ??= {}
+      // `git clone` takes a moment, and the starting screen probes until it
+      // is there — 1.2 s is under one probe interval and over none.
+      s.cloning[sent.path] = Date.now() + 1200
+      return [202, { machine, session }]
+    },
   ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
   ['POST', /^\/api\/viewing$/, () => [204]],
@@ -444,7 +545,10 @@ server.on('upgrade', (request, socket, head) => {
           ws.close()
           return
         }
-        ws.send(Buffer.from(TRUST_PROMPT), { binary: true })
+        const name = session ? decodeURIComponent(session[2]) : ''
+        ws.send(Buffer.from(name.startsWith('clone-') ? CLONE_PROGRESS : TRUST_PROMPT), {
+          binary: true,
+        })
         return
       }
       if (binary) ws.send(data, { binary: true })

@@ -57,12 +57,14 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
   const [since] = useState(() => Date.now())
   const now = useTick(stages.some((one) => one.state === 'running'))
 
-  // Each attempt is one run; a newer attempt, or leaving, ends the older
-  // one's say in the stages, and the socket it holds closes with it.
-  const token = useRef(0)
+  // One run per attempt, and it stops when the screen goes. The ref pair is
+  // what makes that true under a remount as well: `live` goes false with the
+  // page and true again if it comes back, and `ran` keeps the second pass of
+  // an effect from creating the workspace twice.
+  const live = useRef(true)
+  const ran = useRef(-1)
   const start = useEffectEvent(() => {
-    const mine = ++token.current
-    const alive = () => token.current === mine
+    const alive = () => live.current
     void run(
       plan,
       stages,
@@ -88,9 +90,13 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
     )
   })
   useEffect(() => {
-    start()
+    live.current = true
+    if (ran.current !== attempt) {
+      ran.current = attempt
+      start()
+    }
     return () => {
-      token.current += 1
+      live.current = false
     }
   }, [attempt])
 
