@@ -223,6 +223,25 @@ mod tests {
         assert_eq!(body, b"console.log(1)".as_slice());
     }
 
+    /// The deep link is the `ServeFile` fallback rather than the `ServeDir`, so
+    /// it needs the flag of its own that it has.
+    #[tokio::test]
+    async fn a_deep_link_gets_the_precompressed_index() {
+        let dir = temp("gzip-deep-link");
+        built(&dir);
+        std::fs::write(dir.join("index.html.gz"), "pretend-gzip").expect("the precompressed index");
+
+        let (encoding, body) = encoded(
+            router(&dir).expect("a directory with an index"),
+            "/workspaces/yantra",
+            Some("gzip"),
+        )
+        .await;
+
+        assert_eq!(encoding, "gzip");
+        assert_eq!(body, b"pretend-gzip".as_slice());
+    }
+
     #[tokio::test]
     async fn it_serves_the_app_and_its_assets() {
         let dir = temp("serves");

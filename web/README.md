@@ -532,8 +532,8 @@ what is left is react-dom, TanStack Router, TanStack Query, Base UI, the shell
 and the dashboard screen — there is no single thing to remove.
 
 **The build is the wire since Y-357.** `npm run gzip` writes a `.gz` beside every
-`.js`, `.css` and `.svg` in `dist`, and `yantrad` answers `Accept-Encoding: gzip`
-with it — from the directory through `precompressed_gzip`, and from the embedded
+`.js`, `.css`, `.svg` and `.html` in `dist`, and `yantrad` answers
+`Accept-Encoding: gzip` with it — from the directory through `precompressed_gzip`, and from the embedded
 copy the appliance carries. The appliance compresses nothing per request.
 
 The plan's bundle rules are what hold the line: no barrel files, every route

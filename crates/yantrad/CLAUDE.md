@@ -207,7 +207,7 @@ so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the a
 `index.html` rather than a 404, which is what makes a deep link work.
 
 **Both halves answer `Accept-Encoding: gzip` with a file gzipped at build time** (Y-357).
-`npm run build` writes a `.gz` beside every `.js`, `.css` and `.svg` in `dist`; the directory half
+`npm run build` writes a `.gz` beside every `.js`, `.css`, `.svg` and `.html` in `dist`; the directory half
 reads it through `ServeDir::precompressed_gzip`, and the embedded half carries both files and picks
 between them. **Do not add a `CompressionLayer`** — it would spend the appliance's CPU compressing
 the same bytes on every request. A client that does not ask, and a file with no `.gz`, both get the

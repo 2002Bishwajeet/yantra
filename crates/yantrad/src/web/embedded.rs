@@ -52,14 +52,23 @@ fn wants_gzip(headers: &HeaderMap) -> bool {
     headers
         .get(header::ACCEPT_ENCODING)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            value.split(',').any(|coding| {
-                coding
-                    .split(';')
-                    .next()
-                    .is_some_and(|name| name.trim() == "gzip")
-            })
-        })
+        .is_some_and(|value| value.split(',').any(acceptable_gzip))
+}
+
+/// `q=0` refuses a coding rather than ranking it last (RFC 9110 §12.5.3), and
+/// the directory half gets that from `tower-http`. Nothing else about a quality
+/// value is read: there are two answers here, so an order between them is moot.
+fn acceptable_gzip(coding: &str) -> bool {
+    let mut parts = coding.split(';').map(str::trim);
+    if parts.next() != Some("gzip") {
+        return false;
+    }
+    !parts.any(|parameter| {
+        parameter
+            .strip_prefix("q=")
+            .and_then(|quality| quality.parse::<f32>().ok())
+            .is_some_and(|quality| quality <= 0.0)
+    })
 }
 
 /// The directory half gets this from `ServeDir`. Here it is a list of what
@@ -172,6 +181,10 @@ mod tests {
 
         let (encoding, body) = get_encoded(&format!("/{path}"), None).await;
         assert_eq!(encoding, "");
+        assert_eq!(body, asset.contents());
+
+        let (encoding, body) = get_encoded(&format!("/{path}"), Some("gzip;q=0")).await;
+        assert_eq!(encoding, "", "q=0 refuses the coding");
         assert_eq!(body, asset.contents());
     }
 
