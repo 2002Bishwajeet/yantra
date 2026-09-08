@@ -571,6 +571,13 @@
   outline-offset: var(--md-sys-focus-ring-offset);
 }
 
+/* 1.4.11: `secondary` is 2.0:1 on `inverse-surface` in light and 1.3:1 in dark,
+   under the 3:1 the ring owes. A surface painted from the inverse palette takes
+   its ring from there too: 7.8:1 and 4.9:1. */
+[data-surface="inverse"] {
+  --md-sys-focus-ring-color: var(--md-sys-color-inverse-primary);
+}
+
 .m3-interactive:disabled,
 .m3-interactive[data-disabled],
 .m3-interactive[aria-disabled="true"] {

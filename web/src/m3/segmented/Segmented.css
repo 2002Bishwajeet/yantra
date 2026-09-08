@@ -24,15 +24,17 @@
   transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
 }
 
-.m3-segment:first-child {
+.m3-segment:first-of-type {
   border-radius: var(--md-sys-shape-corner-full) 0 0 var(--md-sys-shape-corner-full);
 }
 
-.m3-segment:last-child {
+.m3-segment:last-of-type {
   border-radius: 0 var(--md-sys-shape-corner-full) var(--md-sys-shape-corner-full) 0;
 }
 
-.m3-segment + .m3-segment {
+/* Base UI puts a hidden input after each radio, so the segments are siblings
+   but never adjacent. */
+.m3-segment ~ .m3-segment {
   border-left: 1px solid var(--md-sys-color-outline);
 }
 
@@ -40,7 +42,7 @@
   outline-offset: calc(-1 * var(--md-sys-focus-ring-width));
 }
 
-.m3-segment[data-pressed] {
+.m3-segment[data-checked] {
   color: var(--md-sys-color-on-secondary-container);
   background: var(--md-sys-color-secondary-container);
 }
@@ -58,10 +60,10 @@
   display: none;
 }
 
-.m3-segment[data-pressed] .m3-segment__check {
+.m3-segment[data-checked] .m3-segment__check {
   display: block;
 }
 
-.m3-segment[data-pressed] .m3-segment__check + svg {
+.m3-segment[data-checked] .m3-segment__check + svg {
   display: none;
 }

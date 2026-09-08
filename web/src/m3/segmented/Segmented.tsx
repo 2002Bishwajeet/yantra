@@ -1,44 +1,32 @@
 import type { ReactNode } from 'react'
-import { Toggle } from '@base-ui/react/toggle'
-import { ToggleGroup } from '@base-ui/react/toggle-group'
+import { Radio } from '@base-ui/react/radio'
+import { RadioGroup } from '@base-ui/react/radio-group'
 import { Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import './Segmented.css'
 
-export type SegmentedProps = Omit<ToggleGroup.Props, 'value' | 'defaultValue' | 'onValueChange' | 'toggleMultiple'> & {
+export type SegmentedProps = Omit<RadioGroup.Props<string>, 'onValueChange'> & {
   /** The group's accessible name: "Layout", "Theme". */
   label: string
-  value?: string
-  defaultValue?: string
   onValueChange?: (value: string) => void
   children: ReactNode
 }
 
-/** A single-select segmented button: one Segment pressed at a time. */
+/** A one-of-N choice, so Material's segmented button is a radio group: one
+ *  Segment checked at a time, and the arrow keys move between them. */
 export function Segmented(props: SegmentedProps) {
-  const { label, value, defaultValue, onValueChange, className, ...rest } = props
+  const { label, onValueChange, className, ...rest } = props
   return (
-    <ToggleGroup
+    <RadioGroup
       className={clsx('m3-segmented', className)}
       aria-label={label}
-      value={value === undefined ? undefined : [value]}
-      defaultValue={defaultValue === undefined ? undefined : [defaultValue]}
-      onValueChange={(next, details) => {
-        // A group with nothing pressed is not a state a segmented button has,
-        // and only a cancel stops Base UI's own state from emptying.
-        if (!next.length) {
-          details.cancel()
-          return
-        }
-        onValueChange?.(String(next[0]))
-      }}
+      onValueChange={(value) => onValueChange?.(String(value))}
       {...rest}
     />
   )
 }
 
-export type SegmentProps = Toggle.Props & {
-  value: string
+export type SegmentProps = Radio.Root.Props<string> & {
   icon?: ReactNode
   children: ReactNode
 }
@@ -46,12 +34,12 @@ export type SegmentProps = Toggle.Props & {
 export function Segment(props: SegmentProps) {
   const { icon, className, children, ...rest } = props
   return (
-    <Toggle className={clsx('m3-segment', 'm3-interactive', className)} {...rest}>
+    <Radio.Root className={clsx('m3-segment', 'm3-interactive', className)} {...rest}>
       <span className="m3-segment__icon" aria-hidden="true">
         <Check className="m3-segment__check" />
         {icon}
       </span>
       {children}
-    </Toggle>
+    </Radio.Root>
   )
 }

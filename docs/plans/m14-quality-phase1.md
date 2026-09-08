@@ -21,6 +21,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `2f50305` | Row 135: one shell at every width, so a form-factor change keeps the tree |
 | `f1193ec` | Rows 79 and 83: one announcement per error layout, and what the e2e clock freezes |
 | `170b2a2` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
+| `e2e9707` | Rows 66, 67 and the `m3/` package rows of the boards review: 105, 110, 123, 124, 126, 130 |
 
 ## Closed
 
@@ -94,6 +95,14 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
 | 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and Usage loses the fan-out | `2f50305` |
 | 136 | axe sampled the confirm dialog part-way through its 231 ms fade, so `color-contrast` failed on Cancel at 4.05:1 | `170b2a2` |
+| 66 | `Button.css` padded S at 20 and M at 28 where the Expressive tokens say 16 and 24 | `e2e9707` |
+| 67 | The pressed corner morphed to `medium` at both sizes; S is `small` and M is `medium` | `e2e9707` |
+| 105 | A one-of-N choice was announced as independent toggles | `e2e9707` |
+| 110 | The focus ring on `inverse-surface` was 2.0:1 in light and 1.3:1 in dark | `e2e9707` |
+| 123 | The focus ring's corner was cut on a List's first and last row | `e2e9707` |
+| 124 | `Switch`'s `label` was optional, so a nameless switch compiled | `e2e9707` |
+| 126 | Five radii in `m3/` were off the shape scale | `e2e9707` |
+| 130 | `Card[data-surface="inverse"]`, `m3/divider/` and `m3/tab-pills/` were drawn by nothing | `e2e9707` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -102,11 +111,11 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 
 | Row | Finding | Whose |
 | --- | --- | --- |
-| 66 | `Button.css` pads S at 20 and M at 28; the Expressive tokens say 16 and 24 | Packages, and it needs the token file read before either number moves |
-| 67 | The pressed corner morphs to `medium` for both sizes; Expressive gives one shape per size | Packages, same reading |
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
 | 137 | `Palette.test.tsx`'s *never runs a verb* counts a POST the e2e version excludes: the transcript's own `/logs` read arrives late under load and the assertion sees it | Found in Y-363's CI; passes 12 of 12 alone and fails only when the box is saturated |
+| 111 | `role="alert"` mounts with its text, so `ErrorSurface` announces by luck | **Refused in Y-360**: every empty-then-fill form puts the board a commit after the region, which makes 48 assertions in 15 files depend on when that commit lands; the synchronous form is barred by `oxlint`. The [boards ledger](m14-review-boards.md) §4 carries the measurement and names the shell-owned live region as the fix |
+| 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
@@ -128,6 +137,14 @@ re-renders it in the Playwright image in the same change.
 > `pauseAt()` 49 of the 54 desktop cases in `down`, `smoke`, `dashboard` and `session` fail, and the
 > page never draws a first reading. Rows 66, 67 and 77 still move a baseline or a signature, so they
 > stay where they are.
+
+> **Y-360 took 66 and 67 on 2026-09-08, and no baseline moved.** The numbers come from the tokens
+> themselves: `ButtonSmallTokens` gives `LeadingSpace` 16 and `PressedContainerShape`
+> `CornerSmall`; `ButtonMediumTokens` gives 24 and `CornerMedium`. So the padding is 16 and 24, and
+> the pressed corner is 8 at S and 12 at M — one shape per size, which is what 67 asked for. The
+> baselines were re-rendered in `mcr.microsoft.com/playwright:v1.63.0-noble` and **not one of the
+> 112 PNGs changed**: `toHaveScreenshot` carries `maxDiffPixelRatio: 0.01`, and 4 px of padding on
+> the buttons of a page is under that. Row 77 stays open.
 
 **Row 134, and the third diagnosis is the one that held.** The pane opened on the wrong column
 count, and `session-terminal-busy-phone` failed at six workers while passing at one. Two readings

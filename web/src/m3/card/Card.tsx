@@ -15,7 +15,6 @@ export type CardProps = ComponentPropsWithRef<'section'> & {
     | 'secondary'
     | 'tertiary'
     | 'error'
-    | 'inverse'
   as?: ElementType
 }
 

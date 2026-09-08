@@ -27,7 +27,6 @@ import { Card } from '../card/Card'
 import { Chip, FilterChip } from '../chip/Chip'
 import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '../dialog/Dialog'
 import { Disclosure } from '../disclosure/Disclosure'
-import { Divider } from '../divider/Divider'
 import { ErrorBoundary } from '../error-boundary/ErrorBoundary'
 import { ErrorSurface } from '../error-surface/ErrorSurface'
 import { ExtendedFab, Fab } from '../fab/Fab'
@@ -48,7 +47,6 @@ import { Skeleton } from '../skeleton/Skeleton'
 import { Snackbar } from '../snackbar/Snackbar'
 import { Stepper } from '../stepper/Stepper'
 import { Switch } from '../switch/Switch'
-import { TabPanel, TabPill, TabPills, TabsRoot } from '../tab-pills/TabPills'
 import { Eyebrow, Mono, Text, type TypeScale } from '../text/Text'
 import { TextField } from '../text-field/TextField'
 import { IconTile, Tile } from '../tile/Tile'
@@ -343,29 +341,6 @@ function Catalogue() {
         </div>
       </Section>
 
-      <Section title="TabPills">
-        <TabsRoot defaultValue="chat">
-          <TabPills label="Session views">
-            <TabPill value="chat">Chat</TabPill>
-            <TabPill value="terminal">Terminal</TabPill>
-            <TabPill value="transcript">Transcript</TabPill>
-            <TabPill value="spend">Spend</TabPill>
-          </TabPills>
-          <TabPanel value="chat">
-            <Text scale="body-medium">the chat</Text>
-          </TabPanel>
-          <TabPanel value="terminal">
-            <Text scale="body-medium">the terminal</Text>
-          </TabPanel>
-          <TabPanel value="transcript">
-            <Text scale="body-medium">the transcript</Text>
-          </TabPanel>
-          <TabPanel value="spend">
-            <Text scale="body-medium">the spend</Text>
-          </TabPanel>
-        </TabsRoot>
-      </Section>
-
       <Section title="NavigationRail and NavigationBar">
         <div className="m3-gallery__rail">
           <NavigationRail
@@ -475,13 +450,6 @@ function Catalogue() {
           </Button>
         )}
         <Snackbar tone="alert">thinkpad unreachable for 2h</Snackbar>
-      </Section>
-
-      <Section title="Divider">
-        <div className="m3-gallery__wide">
-          <Divider />
-        </div>
-        <Divider orientation="vertical" />
       </Section>
 
       <Section title="Dialog, BottomSheet, Popover, Menu">

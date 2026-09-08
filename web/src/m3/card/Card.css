@@ -51,11 +51,6 @@
   background: var(--md-sys-color-error-container);
 }
 
-.m3-card[data-surface="inverse"] {
-  color: var(--md-sys-color-inverse-on-surface);
-  background: var(--md-sys-color-inverse-surface);
-}
-
 .m3-card[data-variant="elevated"] {
   background: var(--md-sys-color-surface-container-low);
   box-shadow: var(--md-sys-elevation-level1);
@@ -69,7 +64,6 @@
 /* A tinted card's eyebrow takes the card's own text colour. */
 .m3-card[data-surface="primary"] .m3-eyebrow,
 .m3-card[data-surface="tertiary"] .m3-eyebrow,
-.m3-card[data-surface="error"] .m3-eyebrow,
-.m3-card[data-surface="inverse"] .m3-eyebrow {
+.m3-card[data-surface="error"] .m3-eyebrow {
   color: inherit;
 }

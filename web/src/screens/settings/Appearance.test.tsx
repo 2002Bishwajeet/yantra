@@ -11,7 +11,7 @@ afterEach(() => {
 describe('Appearance', () => {
   it('writes the theme and the density, and the shell applies them', async () => {
     mountSettings('desktop', '/settings/appearance')
-    fireEvent.click(await screen.findByRole('button', { name: 'Dark' }))
+    fireEvent.click(await screen.findByRole('radio', { name: 'Dark' }))
     expect(readPrefs().theme).toBe('dark')
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
     fireEvent.click(screen.getByRole('button', { name: /^Compact/ }))
