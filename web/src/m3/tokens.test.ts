@@ -92,6 +92,12 @@ describe('the other tokens', () => {
     expect(css).toContain('--md-sys-hit-area: 48px;')
   })
 
+  it('rings an inverse surface from the inverse palette', () => {
+    expect(css).toContain(
+      '[data-surface="inverse"] {\n  --md-sys-focus-ring-color: var(--md-sys-color-inverse-primary);\n}',
+    )
+  })
+
   it('switches density on an attribute', () => {
     const compact = /\[data-density="compact"\] \{[\s\S]*?\n\}/.exec(css)![0]
     expect(compact).toContain('--m3-card-padding: 14px;')

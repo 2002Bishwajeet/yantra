@@ -36,7 +36,7 @@ describe('notifications on the desktop', () => {
     expect(await popover.findByText('Nothing unread.')).toBeTruthy()
     // The GitHub items still count: they have no read state of their own.
     await waitFor(() => expect(screen.getByRole('button', { name: /Notifications\s*2 unread/ })).toBeTruthy())
-    fireEvent.click(popover.getByRole('button', { name: 'All' }))
+    fireEvent.click(popover.getByRole('radio', { name: 'All' }))
     expect((await popover.findAllByRole('listitem')).length).toBe(6)
   })
 })

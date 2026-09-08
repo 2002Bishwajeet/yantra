@@ -23,7 +23,12 @@ export function Snackbar(props: SnackbarProps) {
     return () => clearTimeout(timer)
   }, [])
   return (
-    <div className={clsx('m3-snackbar', className)} role={tone ?? 'status'} {...rest}>
+    <div
+      className={clsx('m3-snackbar', className)}
+      data-surface="inverse"
+      role={tone ?? 'status'}
+      {...rest}
+    >
       {filled ? (
         <>
           <span className="m3-snackbar__text">{children}</span>

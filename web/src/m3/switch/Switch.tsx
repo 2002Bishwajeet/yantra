@@ -4,8 +4,8 @@ import { clsx } from 'clsx'
 import './Switch.css'
 
 export type SwitchProps = Base.Root.Props & {
-  /** The accessible name when no label element points at the switch. */
-  label?: string
+  /** The accessible name. Required, as it is on `IconButton` and `Fab`. */
+  label: string
 }
 
 /** M3's 52 × 32 switch on Base UI: the thumb grows and takes a check when on. */

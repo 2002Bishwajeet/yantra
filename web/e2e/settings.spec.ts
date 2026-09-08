@@ -143,7 +143,7 @@ test.describe('settings · Appearance recolours everything', () => {
     await page.goto('/settings/appearance')
     await opened(page, 'Appearance', size)
     await page.getByRole('button', { name: /^Compact/ }).click()
-    await page.getByRole('button', { name: 'Dark' }).click()
+    await page.getByRole('radio', { name: 'Dark' }).click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
 
     await page.reload()

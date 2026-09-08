@@ -5,7 +5,7 @@
   gap: 8px;
   box-sizing: border-box;
   height: 40px;
-  padding: 0 20px;
+  padding: 0 16px;
   border: 0;
   border-radius: var(--md-sys-shape-corner-full);
   font: var(--md-sys-typescale-label-large);
@@ -21,12 +21,16 @@
 
 .m3-button[data-size="m"] {
   height: 56px;
-  padding: 0 28px;
+  padding: 0 24px;
   font: var(--md-sys-typescale-title-medium);
 }
 
-/* R14 §1.1: the corner morphs one step on press. */
+/* R14 §1.1: the corner morphs on press, one shape per size. */
 .m3-button:active {
+  border-radius: var(--md-sys-shape-corner-small);
+}
+
+.m3-button[data-size="m"]:active {
   border-radius: var(--md-sys-shape-corner-medium);
 }
 

@@ -42,6 +42,25 @@
   outline-offset: calc(-1 * var(--md-sys-focus-ring-width));
 }
 
+/* The ring is drawn inward to survive the list's `overflow: hidden`. A square
+   end row cuts its own corner against the container's radius, so the end rows
+   take that radius — on the right only where the row is all item. */
+.m3-list__row:first-child .m3-list-item {
+  border-top-left-radius: var(--m3-list-radius);
+}
+
+.m3-list__row:last-child .m3-list-item {
+  border-bottom-left-radius: var(--m3-list-radius);
+}
+
+.m3-list__row:first-child .m3-list-item:only-child {
+  border-top-right-radius: var(--m3-list-radius);
+}
+
+.m3-list__row:last-child .m3-list-item:only-child {
+  border-bottom-right-radius: var(--m3-list-radius);
+}
+
 .m3-list-item__leading {
   display: inline-flex;
   flex: none;

@@ -364,7 +364,7 @@ Rows 91 to 98 are what gates the close; everything from 119 down is an afternoon
 
 ### What Y-360 closed on the session screens
 
-`b739843` closes **103, 104, 108, 119, 120** and the `Terminal.css` half of
+`7c86f55` closes **103, 104, 108, 119, 120** and the `Terminal.css` half of
 **127**, and **133** on the canvas. Each carries a test: `Chat.test.tsx` for the
 status region that empties between two identical sends and for the foot that
 stops pinning, `Terminal.test.tsx` for the toolbar's one tab stop and for Ctrl
@@ -387,6 +387,40 @@ duplicate rather than work.
 > theme's value through a `var()`. A call site that needs a colour no single
 > role gives it writes `light-dark()` over **two roles** in the property itself,
 > which is what `.terminal__pane` does now.
+
+> **2026-09-08, Y-360: the `m3/` package rows are closed, and two of them are refused.** `e9136e2`
+> closes 105, 110, 123, 124 and 126, and the part of 130 that is dead code.
+>
+> - **105.** The segmented button is a Base UI radio group, so a one-of-N choice is announced once,
+>   as a radio group with one checked segment. The three call sites keep the same props.
+> - **110.** Anything painted `inverse-surface` carries `data-surface="inverse"`, and `tokens.css`
+>   points the ring at `inverse-primary` there: 7.8:1 in light and 4.9:1 in dark.
+> - **123.** The first and last List row take the container's corner, so the inward ring keeps its
+>   own corner. A row with trailing content rounds on the left only, where the ring meets the edge.
+> - **124.** `Switch` requires `label`, as `IconButton` and `Fab` do.
+> - **126.** The five off-scale radii in `m3/` move onto the shape scale: 22 and 24 to 20 and 28, 6
+>   and 10 to 8. The ten in `screens/` are the UI role's, and `side-sheet` belongs to row 106.
+> - **130.** `m3/divider/`, `m3/tab-pills/` and `Card`'s `inverse` surface are deleted. Neither the
+>   boards nor `m14-screen-inventory.md` §E asks for a divider or a pill tab strip, and no call site
+>   passes `surface="inverse"`. **`m3/snackbar/` stays**: it is the one surface the library paints
+>   from the inverse palette, so it is where 110's ring is fixed and tested, and it is the reference
+>   for the live region 111 asks `ErrorSurface` to copy. Deleting it would close both by removal.
+>
+> **111 is refused, with a measurement.** The snackbar's pattern is one commit for the region and
+> the next for its text, and every way of writing it — a timer, a microtask, a transition and
+> `useDeferredValue`'s initial value — puts the board a commit after the region. 48 assertions in 15
+> files read the error text straight after `findByRole('alert')`, so each one starts depending on
+> when that commit lands, and under load they fail. The one form that stays synchronous under
+> `act()` is `setState` in an effect body, which `oxlint`'s react-compiler rule refuses. The fix that
+> costs no call site is the one [m14-review-phase1.md](m14-review-phase1.md) names first: one live
+> region the shell mounts at boot and writes into. That is a shell row, not a package row.
+>
+> **118 is refused.** ADR-0024 §4 opens with *Material's numbers win over the brief's*, and
+> Material's numbers for these eight are the ones the build draws: button S 40, chip and switch 32.
+> The 44 in that section is the brief's pill, which [R14](../research/14-material-3-expressive-on-the-web.md)
+> §6.3 resolved as **S (40) inside a 48 px hit area**. §3 measured that hit area and found it whole,
+> so 2.5.8 is met with room. Raising Chip and Switch to 44 would break the sentence that governs §4
+> to satisfy a number inside it, and Compact's 40 px row is what a density is for.
 
 ### The 57 differences, and the twelve not worth a task
 

@@ -11,9 +11,9 @@ afterEach(() => {
 describe('General', () => {
   it('writes the clone home and the time format to this device', async () => {
     mountSettings('desktop', '/settings/general')
-    fireEvent.click(await screen.findByRole('button', { name: '~/Gitlab' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '~/Gitlab' }))
     expect(readPrefs().general.cloneHome).toBe('~/Gitlab')
-    fireEvent.click(screen.getByRole('button', { name: 'Clock' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Clock' }))
     expect(readPrefs().general).toEqual({ cloneHome: '~/Gitlab', defaultMachine: null, time: 'clock' })
     expect(JSON.parse(localStorage.getItem('yantra.prefs')!).general.time).toBe('clock')
   })
