@@ -613,6 +613,20 @@
   text-overflow: ellipsis;
 }
 
+/* WCAG 1.4.4, finding 107. An ellipsis puts the cut words nowhere else on the
+   page, so a name, a path or an ssh error reads shorter the more a person
+   zooms. This wraps the line instead, and breaks a path or a URL that holds no
+   space rather than let it push its box wide.
+
+   It is not a drop-in for `.m3-clip`. A box a sibling crushes to a few pixels
+   wraps to a column of single letters, which is worse than the ellipsis — so
+   the screens use this and `Row`, `ListItem` and `TopAppBar` still clip, until
+   their own rows let the text keep its width. */
+.m3-wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* BRIEF.md: every age, duration, token count and amount is mono. */
 .m3-mono {
   font-family: var(--md-ref-typeface-mono);

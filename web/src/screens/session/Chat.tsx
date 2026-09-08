@@ -10,6 +10,7 @@ import { IconButton } from '@/m3/icon-button/IconButton'
 import { State } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
+import { useFormFactor } from '@/shell/formFactor'
 import { type Prompt, usePane } from './pane'
 import { home } from './format'
 import { ending } from './verbs'
@@ -17,8 +18,13 @@ import { Turns } from './Turns'
 
 /** "Claude is asking": the agent's own dialog as rows. Each row types its
  *  number and Enter into the pane; the answer is Claude's, not Yantra's. */
-function Asking(props: { prompt: Prompt; repo: string; onAnswer: (number: string) => void }) {
-  const { prompt, repo, onAnswer } = props
+function Asking(props: {
+  prompt: Prompt
+  repo: string
+  phone: boolean
+  onAnswer: (number: string) => void
+}) {
+  const { prompt, repo, phone, onAnswer } = props
   return (
     <Card className="chat__asking" surface="primary">
       <div className="chat__asking-head">
@@ -49,7 +55,8 @@ function Asking(props: { prompt: Prompt; repo: string; onAnswer: (number: string
         ))}
       </ol>
       <Text as="p" scale="body-small">
-        each option types its number into the pane; the answer is Claude's, not Yantra's
+        each option types its number into the pane
+        {phone ? null : "; the answer is Claude's, not Yantra's"}
       </Text>
     </Card>
   )
@@ -126,6 +133,9 @@ function LiveChat(props: ChatProps) {
   const end = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const why = useId()
+  // The phone boards write their own shorter strings; the desktop ones name
+  // the workspace and the machine, which a 390 px line has no room for.
+  const phone = useFormFactor() === 'phone'
 
   // 2.2.2: the newest turn is at the bottom, as a chat is read — but a read
   // every five seconds must not drag a reader who has scrolled up back down.
@@ -185,7 +195,9 @@ function LiveChat(props: ChatProps) {
     <div className="chat">
       <div className="chat__turns">
         <Turns machine={workspace.machine} now={now} onRead={onRead} said={said} />
-        {pane.prompt ? <Asking onAnswer={answer} prompt={pane.prompt} repo={workspace.repo} /> : null}
+        {pane.prompt ? (
+          <Asking onAnswer={answer} phone={phone} prompt={pane.prompt} repo={workspace.repo} />
+        ) : null}
         <div ref={end} />
       </div>
       {refused ? (
@@ -216,7 +228,7 @@ function LiveChat(props: ChatProps) {
           <TextField
             autoComplete="off"
             disabled={pane.refused !== null || pane.over}
-            label={`Message Claude in ${workspace.name}`}
+            label={phone ? 'Message Claude' : `Message Claude in ${workspace.name}`}
             onChange={(event) => setDraft(event.target.value)}
             trailing={
               <IconButton
@@ -241,12 +253,15 @@ function LiveChat(props: ChatProps) {
           ) : null}
         </form>
         <p className="chat__foot" role="status">
-          {typed ?? (
-            <>
-              typed into the tmux pane on {machine} · turns appear when the transcript is read again,
-              after every send or on Refresh — about 5 s behind the pane
-            </>
-          )}
+          {typed ??
+            (phone ? (
+              <>typed into the tmux pane · turns refresh about every 5 s</>
+            ) : (
+              <>
+                typed into the tmux pane on {machine} · turns appear when the transcript is read
+                again, after every send or on Refresh — about 5 s behind the pane
+              </>
+            ))}
         </p>
       </div>
     </div>

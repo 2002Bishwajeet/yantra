@@ -73,7 +73,9 @@ export function Fleet() {
   if (nothing) {
     return (
       <>
-        <h1>Fleet</h1>
+        <Text as="h1" emphasized scale="display-small">
+          Fleet
+        </Text>
         <ErrorSurface.Page
           error={fromReading(listed)!}
           eyebrow="Fleet"
@@ -295,7 +297,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
             {row.workspaces} workspace{row.workspaces === 1 ? '' : 's'}
           </span>
         </span>
-        <Mono className="fleet__detail m3-clip">{row.error}</Mono>
+        <Mono className="fleet__detail m3-wrap">{row.error}</Mono>
         <span className="fleet__actions">
           <Button render={<Link params={{ machine: row.machine }} to="/m/$machine" />} role="link" variant="outlined">
             Fix
@@ -314,7 +316,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
         <span className="fleet__meta">
           <span className="fleet__name">{row.name}</span>
         </span>
-        <Mono className="fleet__detail m3-clip">{row.error}</Mono>
+        <Mono className="fleet__detail m3-wrap">{row.error}</Mono>
         <span className="fleet__actions">
           <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="outlined">
             Repair
@@ -344,7 +346,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
         </Link>
         {session ? <Since at={session.created_at} className="fleet__age" /> : null}
       </span>
-      {detail ? <span className="fleet__detail m3-clip">{detail}</span> : null}
+      {detail ? <span className="fleet__detail m3-wrap">{detail}</span> : null}
       <span className="fleet__actions">
         <Verb status={status} workspace={workspace} />
         {row.band === 'running' && stoppable(status) ? <Stop workspace={workspace} /> : null}

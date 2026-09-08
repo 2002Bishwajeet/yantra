@@ -165,7 +165,8 @@ export function Turns(props: { said: Said; machine: string; now: number; onRead:
 }
 
 /** The transcript's waiting card: the agent is at its trust prompt, and the
- *  answer is on the Chat tab (D5 §5.2 keeps Yantra's own buttons off here). */
+ *  answer is the pane itself on the Terminal tab — D5 §5.2 settles that the
+ *  dialog is the agent's own and not a picture of one this tab redraws. */
 export function Waiting(props: { name: string; subject: string | null }) {
   const { name, subject } = props
   return (
@@ -180,8 +181,8 @@ export function Waiting(props: { name: string; subject: string | null }) {
           'Claude is asking for a decision'
         )}{' '}
         · answer on the{' '}
-        <Link params={{ name }} replace search={{ view: 'chat' }} to="/w/$name">
-          Chat tab
+        <Link params={{ name }} replace search={{ view: 'terminal' }} to="/w/$name">
+          Terminal tab
         </Link>
       </Text>
     </Card>

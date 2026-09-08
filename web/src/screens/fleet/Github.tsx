@@ -102,10 +102,10 @@ function Group(props: { items: Item[]; title: string; verb: string }) {
                   <Icon />
                 </IconTile>
                 <span className="github__text">
-                  <Mono className="github__ref m3-clip">
+                  <Mono className="github__ref m3-wrap">
                     {ref}#{item.number}
                   </Mono>
-                  <span className="github__title m3-clip">{item.title}</span>
+                  <span className="github__title m3-wrap">{item.title}</span>
                 </span>
                 {/* GitHub's age, which is the item's rather than the answer's. */}
                 <Mono className="github__when">{clock?.text ?? item.updated_at}</Mono>

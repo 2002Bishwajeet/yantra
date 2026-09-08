@@ -48,8 +48,8 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
                   unclaimed
                 </State>
                 <span className="machines__text">
-                  <span className="machines__name m3-clip">{session.name}</span>
-                  <span className="machines__where m3-clip">
+                  <span className="machines__name m3-wrap">{session.name}</span>
+                  <span className="machines__where m3-wrap">
                     {machine} · {session.windows} window{session.windows === 1 ? '' : 's'} · opened{' '}
                     <Since at={session.created_at} /> ago
                   </span>

@@ -20,6 +20,13 @@ const open = (page: Page, name: string) => views(page).getByRole('link', { name 
  *  page does. */
 const asking = (page: Page) => page.getByText('Claude is asking')
 
+/** The composer's label. The PhoneSessionChat board writes the short one, and
+ *  the desktop boards name the workspace (finding 114). */
+const composer = (page: Page, size: string) =>
+  page.getByLabel(size === 'phone' ? 'Message Claude' : `Message Claude in ${NAME}`, {
+    exact: true,
+  })
+
 /** xterm fits its rows to the pane, and the pane settles only once the mono
  *  face has loaded — so the row count, and with it where the buffer scrolled,
  *  moves once after the first paint. A picture waits for it to stop. */
@@ -72,8 +79,8 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('status')).toContainText('Typed 1 and Enter into the pane.')
   })
 
-  test('the composer types the message into the pane', async ({ page }) => {
-    const field = page.getByLabel(`Message Claude in ${NAME}`)
+  test('the composer types the message into the pane', async ({ page, size }) => {
+    const field = composer(page, size)
     await field.fill('run the whole crate')
     await page.getByRole('button', { name: 'Send' }).click()
 
@@ -86,9 +93,28 @@ test.describe('the session screen, chat first', () => {
     await axe(page)
   })
 
+  /** **Finding 114.** The PhoneSessionChat board shortens three strings the
+   *  desktop boards write in full, and the build used to write the long ones
+   *  at 390 and cut them. */
+  test('writes the phone board’s strings at 390 and the desktop ones above it', async ({
+    page,
+    size,
+  }) => {
+    await expect(composer(page, size)).toBeVisible()
+    await expect(page.getByText('typed into the tmux pane')).toContainText(
+      size === 'phone'
+        ? 'typed into the tmux pane · turns refresh about every 5 s'
+        : 'typed into the tmux pane on cachyos-g14',
+    )
+    await expect(asking(page)).toBeVisible()
+    await expect(page.getByText("the answer is Claude's, not Yantra's")).toHaveCount(
+      size === 'phone' ? 0 : 1,
+    )
+  })
+
   /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and
    *  Send is off until something is typed. Neither may go quiet about it. */
-  test('says why Send and Resume are off', async ({ page }) => {
+  test('says why Send and Resume are off', async ({ page, size }) => {
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription(
       'Type a message to send it.',
     )
@@ -96,7 +122,7 @@ test.describe('the session screen, chat first', () => {
       `Resume needs an agent that has ended, and ${NAME} is waiting for trust.`,
     )
 
-    await page.getByLabel(`Message Claude in ${NAME}`).fill('run the whole crate')
+    await composer(page, size).fill('run the whole crate')
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription('')
   })
 
@@ -193,6 +219,11 @@ test.describe('the session screen, the other three views', () => {
       'href',
       `${PATH}?view=terminal`,
     )
+    // Finding 132: the board sends the answer to the pane, which is Terminal.
+    await expect(page.getByRole('link', { name: 'Terminal tab' })).toHaveAttribute(
+      'href',
+      `${PATH}?view=terminal`,
+    )
     await axe(page)
     await screenshot(page, 'session-transcript', 'busy', size)
   })
@@ -206,6 +237,8 @@ test.describe('the session screen, the other three views', () => {
     await expect(page.getByText('This session')).toBeVisible()
     await expect(page.getByText('tokens, unpriced')).toBeVisible()
     await expect(page.getByText('There is no fleet total')).toBeVisible()
+    // Finding 128: the board dates the price table `4 Sep`, not `2026-08-11`.
+    await expect(page.getByText('prices as of 11 Aug')).toBeVisible()
     await axe(page)
     await screenshot(page, 'session-spend', 'busy', size)
   })

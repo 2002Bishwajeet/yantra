@@ -36,6 +36,19 @@ export function at(stamp: string, now = Date.now()): Reading | null {
   }
 }
 
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/** A calendar day another program wrote, `2026-08-11` as `11 Aug`. It names no
+ *  instant, so `at` refuses it and it is never an age: a price table is dated
+ *  by the day it was read, however recently that was. */
+export function on(stamp: string): Reading | null {
+  const parts = DATE.exec(stamp)
+  if (!parts) return null
+  const when = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+  if (Number.isNaN(when.getTime())) return null
+  return { text: day(when), iso: stamp, title: stamp }
+}
+
 function spell(seconds: number, at: Date): string {
   if (seconds >= DAY) return day(at)
   if (seconds >= HOUR) return `${Math.floor(seconds / HOUR)}h`

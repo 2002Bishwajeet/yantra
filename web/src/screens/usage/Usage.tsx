@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { fromReading } from '@/api/client'
+import { on } from '@/lib/time'
 import { loaded, useWorkspaces } from '@/api/hooks'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -66,8 +67,8 @@ function ByWorkspace(props: { rows: Row[] }) {
               <div className="usage__line">
                 <Tile name={one.name} size="small" />
                 <span className="usage__text">
-                  <span className="usage__name m3-clip">{one.name}</span>
-                  <span className="usage__where m3-clip">
+                  <span className="usage__name m3-wrap">{one.name}</span>
+                  <span className="usage__where m3-wrap">
                     {one.machine} · {count(one.responses)} responses
                   </span>
                 </span>
@@ -106,7 +107,7 @@ function ByModel(props: { rows: Row[] }) {
             <li className="usage__row" key={one.model}>
               <div className="usage__line">
                 <span className="usage__text">
-                  <span className="usage__name m3-clip">{one.model}</span>
+                  <span className="usage__name m3-wrap">{one.model}</span>
                   <span className="usage__where">
                     {count(one.responses)} responses · {one.workspaces} workspace
                     {one.workspaces === 1 ? '' : 's'}
@@ -137,7 +138,7 @@ function Refusals(props: { rows: Row[] }) {
           <State size="small" state={row.read === 'nothing' ? 'idle' : 'failed'}>
             {row.workspace.name}
           </State>
-          <Mono className="usage__reason m3-clip">{row.said}</Mono>
+          <Mono className="usage__reason m3-wrap">{row.said}</Mono>
         </li>
       ))}
     </ul>
@@ -214,10 +215,11 @@ export function Usage() {
     )
   }
 
-  const asOf =
+  const stamp =
     fanned.fanned === 'done'
       ? fanned.rows.find((row) => row.read === 'ok')?.spend.as_of
       : undefined
+  const asOf = stamp === undefined ? undefined : (on(stamp)?.text ?? stamp)
 
   return (
     <div className="usage">

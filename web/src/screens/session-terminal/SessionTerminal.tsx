@@ -39,7 +39,7 @@ export function SessionTerminal() {
           <div className="session-terminal__name">
             {/* The route's own title, so the phone app bar and the page say
                 the same thing (`router.test.tsx`). */}
-            <Text as="h1" scale="headline-medium" emphasized clip>
+            <Text as="h1" className="m3-wrap" scale="headline-medium" emphasized>
               {session} on {machine}
             </Text>
             <Text as="p" scale="body-small" tone="variant">

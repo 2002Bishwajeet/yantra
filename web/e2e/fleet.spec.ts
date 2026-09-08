@@ -86,3 +86,15 @@ test.describe('the fleet on a busy fleet', () => {
     await screenshot(page, 'fleet', 'busy', size)
   })
 })
+
+/* Finding 131. When nothing answers, the page used to title itself with a bare
+   `<h1>Fleet</h1>` in the browser's own type beside a Material surface. */
+test.describe('the fleet when nothing answers', () => {
+  test('keeps the screen’s own title', async ({ page }) => {
+    await scenario(page, 'unreachable')
+    await page.goto('/fleet')
+    const title = page.locator('h1.m3-text')
+    await expect(title).toHaveText('Fleet')
+    await expect(title).toHaveAttribute('data-scale', 'display-small')
+  })
+})

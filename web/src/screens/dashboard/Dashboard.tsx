@@ -544,7 +544,7 @@ function IdleRow(props: { row: Extract<WorkRow, { kind: 'workspace' }>; sessions
         tone="lowest"
       >
         <Tile name={row.workspace.name} size="small" />
-        <span className="dash__name m3-clip">{row.workspace.name}</span>
+        <span className="dash__name m3-wrap">{row.workspace.name}</span>
         <State size="small" state={mark}>
           {words}
         </State>
@@ -650,7 +650,7 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
                 tone="lowest"
               >
                 <Tile name={one.workspace} size="small" />
-                <span className="dash__name m3-clip">{one.workspace}</span>
+                <span className="dash__name m3-wrap">{one.workspace}</span>
                 <State className="dash__recent-words" size="small" state={one.mark}>
                   {one.words} · {one.machine}
                 </State>
