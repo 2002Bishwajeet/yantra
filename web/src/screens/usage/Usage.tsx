@@ -10,6 +10,7 @@ import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
+import { Track } from '@/m3/track/Track'
 import { type FormFactor, useFormFactor } from '@/shell/formFactor'
 import { Empty } from '@/screens/fleet/Empty'
 import { count, money } from './format'
@@ -27,9 +28,25 @@ function Waiting() {
   )
 }
 
+/** The boards' proportion bar, drawn against the dearest row and never against
+ *  a sum: D6 §5.1 forbids a fleet total, and a share of one would be that
+ *  total. Both lists arrive sorted, so the first figure is the most spent. */
+function Share(props: { cost: number | null; most: number }) {
+  const { cost, most } = props
+  if (cost === null || most <= 0) return null
+  return (
+    <Track
+      className="usage__share"
+      label={`${money(cost)} of the most spent, ${money(most)}`}
+      value={cost / most}
+    />
+  )
+}
+
 function ByWorkspace(props: { rows: Row[] }) {
   const { rows } = props
   const spent = byWorkspace(rows)
+  const most = spent[0]?.cost ?? 0
   return (
     <Card aria-labelledby="usage-workspaces" className="usage__card">
       <div className="usage__eyebrow">
@@ -46,14 +63,19 @@ function ByWorkspace(props: { rows: Row[] }) {
         <ul className="usage__rows">
           {spent.map((one) => (
             <li className="usage__row" key={one.name}>
-              <Tile name={one.name} size="small" />
-              <span className="usage__text">
-                <span className="usage__name m3-clip">{one.name}</span>
-                <span className="usage__where m3-clip">
-                  {one.machine} · {count(one.responses)} responses
+              <div className="usage__line">
+                <Tile name={one.name} size="small" />
+                <span className="usage__text">
+                  <span className="usage__name m3-clip">{one.name}</span>
+                  <span className="usage__where m3-clip">
+                    {one.machine} · {count(one.responses)} responses
+                  </span>
                 </span>
-              </span>
-              <Mono className="usage__cost">{one.cost === null ? 'unpriced' : money(one.cost)}</Mono>
+                <Mono className="usage__cost">
+                  {one.cost === null ? 'unpriced' : money(one.cost)}
+                </Mono>
+              </div>
+              <Share cost={one.cost} most={most} />
             </li>
           ))}
         </ul>
@@ -65,6 +87,7 @@ function ByWorkspace(props: { rows: Row[] }) {
 
 function ByModel(props: { rows: Row[] }) {
   const models = byModel(props.rows)
+  const most = models[0]?.cost ?? 0
   return (
     <Card aria-labelledby="usage-models" className="usage__card">
       <div className="usage__eyebrow">
@@ -81,14 +104,19 @@ function ByModel(props: { rows: Row[] }) {
         <ul className="usage__rows">
           {models.map((one) => (
             <li className="usage__row" key={one.model}>
-              <span className="usage__text">
-                <span className="usage__name m3-clip">{one.model}</span>
-                <span className="usage__where">
-                  {count(one.responses)} responses · {one.workspaces} workspace
-                  {one.workspaces === 1 ? '' : 's'}
+              <div className="usage__line">
+                <span className="usage__text">
+                  <span className="usage__name m3-clip">{one.model}</span>
+                  <span className="usage__where">
+                    {count(one.responses)} responses · {one.workspaces} workspace
+                    {one.workspaces === 1 ? '' : 's'}
+                  </span>
                 </span>
-              </span>
-              <Mono className="usage__cost">{one.cost === null ? 'unpriced' : money(one.cost)}</Mono>
+                <Mono className="usage__cost">
+                  {one.cost === null ? 'unpriced' : money(one.cost)}
+                </Mono>
+              </div>
+              <Share cost={one.cost} most={most} />
             </li>
           ))}
         </ul>
@@ -171,7 +199,8 @@ export function Usage() {
   const listed = useWorkspaces()
   const workspaces = loaded(listed)
   const factor = useFormFactor()
-  const { fanned, read } = useFleetSpend()
+  const list = workspaces.looked === 'ok' ? workspaces.data : []
+  const { fanned, read } = useFleetSpend(list)
 
   if (listed.looked === 'failed') {
     return (
@@ -185,7 +214,6 @@ export function Usage() {
     )
   }
 
-  const list = workspaces.looked === 'ok' ? workspaces.data : []
   const asOf =
     fanned.fanned === 'done'
       ? fanned.rows.find((row) => row.read === 'ok')?.spend.as_of
@@ -203,7 +231,7 @@ export function Usage() {
         {asOf ? <Mono className="usage__as">prices from {asOf}</Mono> : null}
         <span className="usage__spacer" />
         {list.length > 0 ? (
-          <Button disabled={fanned.fanned === 'reading'} onClick={() => void read(list)}>
+          <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
             {fanned.fanned === 'reading'
               ? `reading ${fanned.of}…`
               : fanned.fanned === 'done'

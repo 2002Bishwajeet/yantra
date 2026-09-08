@@ -76,6 +76,12 @@ describe('the command palette', () => {
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull())
       dialog = await open()
     }
-    expect(asked.filter((one) => !one.startsWith('GET ') && one !== 'POST /api/viewing')).toEqual([])
+    // `logs` and `tokens` are reads a person asked for, POSTed by design
+    // (ADR-0019); `viewing` is presence. None is a verb, and the e2e version
+    // of this test excludes the same three (e2e/shell.spec.ts). The chat the
+    // palette opens reads its own transcript, and under load that POST lands
+    // late enough for this assertion to see it.
+    const READS = /\/api\/viewing$|\/(logs|tokens)$/
+    expect(asked.filter((one) => !one.startsWith('GET ') && !READS.test(one))).toEqual([])
   })
 })

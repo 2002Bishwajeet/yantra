@@ -58,12 +58,24 @@
 
 .usage__row {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
   min-height: 44px;
   padding: 4px 12px;
   border-radius: var(--m3-row-radius);
   background: var(--md-sys-color-surface-container-lowest);
+}
+
+.usage__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.usage__share {
+  flex: none;
 }
 
 .usage__text {

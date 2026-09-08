@@ -44,6 +44,32 @@ describe('/usage on the busy fleet', () => {
     expect(models.getByText('unpriced')).toBeTruthy()
   })
 
+  it('draws a proportion bar against the dearest row, not against a sum', async () => {
+    mount('desktop', '/usage', scenario('busy'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+    await screen.findByRole('region', { name: 'By workspace' })
+    const bars = card('By workspace').getAllByRole('progressbar')
+    expect(bars).toHaveLength(10)
+    // Every busy workspace reads $5.46, so each is the whole of the dearest.
+    expect(bars[0]!.getAttribute('aria-valuenow')).toBe('100')
+    expect(bars[0]!.getAttribute('aria-label')).toBe('$5.46 of the most spent, $5.46')
+  })
+
+  /* Finding 100: the fan-out was component state, so a walk to another screen
+     threw away ten ssh round trips. */
+  it('keeps the read after a walk to another screen and back', async () => {
+    mount('desktop', '/usage', scenario('busy'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+    await screen.findByRole('region', { name: 'By workspace' })
+
+    fireEvent.click(screen.getAllByRole('link', { name: 'Fleet' })[0]!)
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' }, { timeout: 2000 })
+    fireEvent.click(screen.getAllByRole('link', { name: 'Usage' })[0]!)
+
+    expect(await screen.findByRole('button', { name: 'Read again' }, { timeout: 2000 })).toBeTruthy()
+    expect(card('By workspace').getByText('10 workspaces read')).toBeTruthy()
+  })
+
   it('draws the sessions table, and no fleet total anywhere', async () => {
     mount('desktop', '/usage', scenario('busy'))
     fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
