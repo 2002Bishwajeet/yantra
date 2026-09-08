@@ -8,6 +8,7 @@ import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import { vi } from 'vitest'
 import { type WebSocket as Client, WebSocket as Ws, WebSocketServer } from 'ws'
+import type { FormFactor } from '@/shell/formFactor'
 
 export type Frame = { text: string } | { bytes: number[] }
 
@@ -63,6 +64,8 @@ export async function daemon() {
   }
 }
 
+const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 1440 }
+
 /** Two things jsdom cannot do for a terminal, and the second one is a trap.
  *
  *  xterm.js asks for the legacy `MediaQueryList.addListener` on the device
@@ -73,10 +76,15 @@ export async function daemon() {
  *  has replaced that class — so a real handshake dies in `dispatchEvent` with
  *  *"must be an instance of Event. Received an instance of Event"* and the
  *  socket times out. `ws`'s client is a second RFC-6455 implementation rather
- *  than a stand-in for this one: it really connects to the server above. */
-export function browser() {
-  vi.stubGlobal('matchMedia', () => ({
-    matches: false,
+ *  than a stand-in for this one: it really connects to the server above.
+ *
+ *  `size` answers the shell's width queries, so a view whose copy is shorter
+ *  on the phone can be mounted at 390 as well. */
+export function browser(size: FormFactor = 'desktop') {
+  const width = WIDTH[size]
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
+    media: query,
     addEventListener: () => {},
     removeEventListener: () => {},
     addListener: () => {},

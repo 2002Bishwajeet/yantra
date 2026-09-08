@@ -70,7 +70,7 @@ export function Header(props: HeaderProps) {
         <Tile name={workspace.name} />
         <div className="session__name">
           <div className="session__line">
-            <Text as="h1" scale="headline-medium" emphasized clip>
+            <Text as="h1" className="m3-wrap" scale="headline-medium" emphasized>
               {workspace.name}
             </Text>
             <State state={mark}>

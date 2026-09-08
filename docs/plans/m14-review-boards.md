@@ -558,6 +558,73 @@ duplicate rather than work.
 > **151 991 B (148.4 KiB)** against **152 263 B** on `main`: **272 B smaller**, because the tablet's
 > action row and the sheet's mount gate are gone and the live region is small.
 
+> **2026-09-08, Y-360: rows 131 and 132 close their fleet and transcript halves, 128 closes two
+> formats of three, and 107 and 114 close in part.** The screens stop cutting a name with an
+> ellipsis, the phone's chat takes the board's shorter strings, and three raw values take the
+> boards' short form.
+>
+> - **107 — seven of the nine sites, and a negative finding.** The row asks for one change to
+>   `.m3-clip`, and that change is wrong. `.m3-clip` is worn by `Row`, `ListItem` and `TopAppBar`
+>   as well as by the screens, and a box those three crush to two pixels does not wrap: it draws
+>   one letter a line, which reads worse than the ellipsis it replaced. So `.m3-clip` is untouched
+>   and `tokens.css` gains **`.m3-wrap`** beside it — `min-width: 0` and
+>   `overflow-wrap: anywhere` — and the screens wear that instead. **Sixteen boxes on seven
+>   screens** keep their whole string at 200 % zoom: two dashboard names, three fleet errors, two
+>   GitHub rows, both Worth a look rows, the machine card's check detail, four Usage names and
+>   reasons, and the two `<h1>`s on the session and the unclaimed terminal. `Fleet.css:91,101`
+>   cut their own line without the class, which the row's *Where* column does not say; they wrap
+>   now too.
+> - **107 — the two `screens/machine/` sites are refused.** `machine/Sessions.tsx:77` and
+>   `machine/Machine.tsx:96` sit in rows whose grid leaves the text about nine characters at
+>   390 px, so `.m3-wrap` there drew `/ho` `me/` `bis` `wa/` down the card and the page grew from
+>   1695 to 2247 px. The clip stays until that row layout gives the text its width, and the layout
+>   is `screens/machine/`'s, not this row's. `e2e/zoom.spec.ts` leaves `/m/cachyos-g14` out and
+>   says why.
+> - **107 — the proof is a test, not a screenshot.** `e2e/zoom.spec.ts` reads five routes, halves
+>   the viewport, and fails on any `.m3-wrap` box whose content is wider than the box. Halving is
+>   faithful: 200 % page zoom leaves the text its size and halves the viewport in CSS pixels, so
+>   1440 lays out as 720. It floors at **320**, the width 1.4.10 names — the phone's 195 crushes
+>   every row layout the build has, which is a different defect.
+> - **114 — the `Chat.tsx` half.** The phone writes `Message Claude`, `each option types its
+>   number into the pane` and `typed into the tmux pane · turns refresh about every 5 s`, which is
+>   what `PhoneSessionChat.dc.html` draws; the desktop keeps the machine and the workspace in all
+>   three. `session/harness.ts`'s `browser()` takes a size now, so a phone view can be mounted.
+> - **114 — §1 row 5 is not closed, and the row's *Where* column is why.** It names `Chat.tsx` and
+>   `Providers.tsx` and never `screens/dashboard/`, but it cites row 5, and PhoneDashboard
+>   shortens eight strings the build writes in full — `5 of 6 online` for `5 of 6 machines
+>   online`, `Review:` for `Review requested:`, and the attention row's whole supporting line.
+>   Row 107 stops those clipping; nothing yet shortens them.
+> - **128 — two formats.** The machines card dates an unreachable chip `7 Jul` through
+>   `lib/time.ts`'s one clock rather than `last_seen.slice(0, 10)`. `lib/time.ts` gains **`on()`**
+>   for a calendar day another program wrote: `at()` refuses a stamp that names no zone, and a
+>   price table is dated by the day it was read, never by an age. Spend now says `prices as of
+>   11 Aug` and Usage `prices from 11 Aug`, which is the face `SessionSpend.dc.html` and
+>   `Usage.dc.html` draw. **The `~` half is `screens/new-session/LocalDirs.tsx` and is left.**
+> - **131, the Fleet half.** The unreachable branch drew `<h1>Fleet</h1>` in the browser's own
+>   type beside a Material surface. It takes the title the screen already uses, display-small and
+>   emphasized. The board draws no page title there; the build keeps one because every route owes
+>   an `<h1>`.
+> - **132, §1 row 30.** The transcript's waiting card sent the answer to the Chat tab. It sends it
+>   to Terminal, which is the board and is D5 §5.2: the trust prompt is the pane itself.
+>   **The other five are elsewhere** — row 6 is `shell/SessionsRail.tsx:93`, and rows 45, 46, 50
+>   and 51 are the block above.
+>
+> **Two things this sweep found that no row holds.**
+>
+> 1. **A `ListItem`'s trailing value never shrinks.** `m3/list/List.css:91` is `flex: none`, so a
+>    long value squeezes the headline beside it to two pixels: `/m/cachyos-g14` draws *Tailnet
+>    name* as `T…` at every size and the value beside it runs the full width. That is why the
+>    About list keeps its ellipsis, and it is an `m3/` fix.
+> 2. **`/machines` writes `opened 4 Sep ago`.** `Unclaimed.tsx:53` appends *ago* to
+>    `fleet/clock.ts`'s `elapsed()`, which returns a date past a day. `PhoneMachines.dc.html`
+>    drops *ago* for a date and keeps it for `3d`. §5 noted the sentence and no row carries it.
+>
+> **32 baselines moved**, each re-rendered in `mcr.microsoft.com/playwright:v1.63.0-noble` and read
+> as an image: the fleet, machines, usage and session boards where a name or an error now wraps,
+> and Unreachable for its title. `--update-snapshots=all` ran on the five specs whose words
+> changed, because `maxDiffPixelRatio: 0.01` hides one word. The first load is **151 988 B
+> (148.4 KiB)**, 3 B under what the block above records for `main`.
+
 ### The 57 differences, and the twelve not worth a task
 
 Twelve of the 57 rows §1 marked *differs* do not become findings, and saying so is the point of a

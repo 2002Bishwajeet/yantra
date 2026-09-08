@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import type { Check, Machine } from '@/api'
+import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
@@ -47,7 +48,7 @@ function CheckLine(props: { check: Check }) {
       <Text className="machines__word" scale="label-small">
         {wordOf(check.state)}
       </Text>
-      <Text className="machines__detail m3-clip" scale="body-small" tone="variant">
+      <Text className="machines__detail m3-wrap" scale="body-small" tone="variant">
         {check.detail}
       </Text>
     </li>
@@ -72,6 +73,8 @@ export function MachineCard(props: MachineCardProps) {
   })
   const counted = tally(four)
   const shown = condensed ? four.filter((one) => one.state !== 'present') : four
+  // D3 §5.7's one clock, as the board prints it: `2h` under a day, `7 Jul` past one.
+  const seen = machine.last_seen ? at(machine.last_seen) : null
 
   return (
     <Card aria-labelledby={`machine-${machine.name}`} className="machines__card">
@@ -82,8 +85,12 @@ export function MachineCard(props: MachineCardProps) {
         <Chip tone={state === 'failed' ? 'error' : 'lowest'}>
           <Mark size="small" state={state} />
           {word}
-          {machine.online || !machine.last_seen ? null : (
-            <Mono className="machines__since">{machine.last_seen.slice(0, 10)}</Mono>
+          {machine.online || !seen ? null : (
+            <Mono className="machines__since">
+              <time dateTime={seen.iso} title={seen.title}>
+                {seen.text}
+              </time>
+            </Mono>
           )}
         </Chip>
       </div>

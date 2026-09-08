@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { RefreshCw } from 'lucide-react'
 import type { Counts, Spend as Read, Workspace } from '@/api'
 import { type Asked, refusal } from '@/lib/spend'
-import { at } from '@/lib/time'
+import { at, on } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
@@ -26,7 +26,7 @@ const responses = (of: number) => `${count(of)} response${of === 1 ? '' : 's'}`
 function Hero(props: { spend: Read }) {
   const { spend } = props
   const unpriced = spend.models.some((model) => model.cost === null)
-  const asOf = at(spend.as_of)
+  const asOf = on(spend.as_of)
   const nothing = spend.total.responses === 0
   return (
     <Card className="spend__hero" surface="primary">

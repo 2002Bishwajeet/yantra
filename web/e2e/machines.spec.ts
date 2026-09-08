@@ -31,6 +31,8 @@ test.describe('the machines on a busy fleet', () => {
     const gone = card(page, 'thinkpad')
     await expect(gone.getByText('unreachable')).toBeVisible()
     await expect(gone.getByText('1 failing · 3 unknown')).toBeVisible()
+    // Finding 128: the board dates the chip `7 Jul`, not `2026-07-07`.
+    await expect(gone.getByText('7 Jul', { exact: true })).toBeVisible()
   })
 
   test('offers an unclaimed session Attach and Kill, and never Adopt', async ({ page }) => {
