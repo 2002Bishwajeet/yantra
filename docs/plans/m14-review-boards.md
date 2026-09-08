@@ -387,7 +387,8 @@ duplicate rather than work.
 > theme's value through a `var()`. A call site that needs a colour no single
 > role gives it writes `light-dark()` over **two roles** in the property itself,
 > which is what `.terminal__pane` does now.
-> **2026-09-08, Y-360: the `m3/` package rows are closed, and two of them are refused.** `e2e9707`
+
+> **2026-09-08, Y-360: the `m3/` package rows are closed, and two of them are refused.** `e9136e2`
 > closes 105, 110, 123, 124 and 126, and the part of 130 that is dead code.
 >
 > - **105.** The segmented button is a Base UI radio group, so a one-of-N choice is announced once,
@@ -401,7 +402,9 @@ duplicate rather than work.
 >   and 10 to 8. The ten in `screens/` are the UI role's, and `side-sheet` belongs to row 106.
 > - **130.** `m3/divider/`, `m3/tab-pills/` and `Card`'s `inverse` surface are deleted. Neither the
 >   boards nor `m14-screen-inventory.md` §E asks for a divider or a pill tab strip, and no call site
->   passes `surface="inverse"`.
+>   passes `surface="inverse"`. **`m3/snackbar/` stays**: it is the one surface the library paints
+>   from the inverse palette, so it is where 110's ring is fixed and tested, and it is the reference
+>   for the live region 111 asks `ErrorSurface` to copy. Deleting it would close both by removal.
 >
 > **111 is refused, with a measurement.** The snackbar's pattern is one commit for the region and
 > the next for its text, and every way of writing it — a timer, a microtask, a transition and

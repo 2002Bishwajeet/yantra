@@ -21,7 +21,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `2f50305` | Row 135: one shell at every width, so a form-factor change keeps the tree |
 | `f1193ec` | Rows 79 and 83: one announcement per error layout, and what the e2e clock freezes |
 | `170b2a2` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
-| `e2e9707` | Rows 66, 67 and the `m3/` package rows of the boards review: 105, 110, 123, 124, 126, 130 |
+| `e9136e2` | Rows 66, 67 and the `m3/` package rows of the boards review: 105, 110, 123, 124, 126, 130 |
 
 ## Closed
 
@@ -95,14 +95,14 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 134 | xterm cached the cell it measured against the fallback face, so a late webfont left the pty the wrong width | `aa139e2` |
 | 135 | `Shell` renders `shells[factor]`, so a form-factor change unmounts the tree and Usage loses the fan-out | `2f50305` |
 | 136 | axe sampled the confirm dialog part-way through its 231 ms fade, so `color-contrast` failed on Cancel at 4.05:1 | `170b2a2` |
-| 66 | `Button.css` padded S at 20 and M at 28 where the Expressive tokens say 16 and 24 | `e2e9707` |
-| 67 | The pressed corner morphed to `medium` at both sizes; S is `small` and M is `medium` | `e2e9707` |
-| 105 | A one-of-N choice was announced as independent toggles | `e2e9707` |
-| 110 | The focus ring on `inverse-surface` was 2.0:1 in light and 1.3:1 in dark | `e2e9707` |
-| 123 | The focus ring's corner was cut on a List's first and last row | `e2e9707` |
-| 124 | `Switch`'s `label` was optional, so a nameless switch compiled | `e2e9707` |
-| 126 | Five radii in `m3/` were off the shape scale | `e2e9707` |
-| 130 | `Card[data-surface="inverse"]`, `m3/divider/` and `m3/tab-pills/` were drawn by nothing | `e2e9707` |
+| 66 | `Button.css` padded S at 20 and M at 28 where the Expressive tokens say 16 and 24 | `e9136e2` |
+| 67 | The pressed corner morphed to `medium` at both sizes; S is `small` and M is `medium` | `e9136e2` |
+| 105 | A one-of-N choice was announced as independent toggles | `e9136e2` |
+| 110 | The focus ring on `inverse-surface` was 2.0:1 in light and 1.3:1 in dark | `e9136e2` |
+| 123 | The focus ring's corner was cut on a List's first and last row | `e9136e2` |
+| 124 | `Switch`'s `label` was optional, so a nameless switch compiled | `e9136e2` |
+| 126 | Five radii in `m3/` were off the shape scale | `e9136e2` |
+| 130 | `Card[data-surface="inverse"]`, `m3/divider/` and `m3/tab-pills/` were drawn by nothing; `m3/snackbar/` stays, and the boards ledger says why | `e9136e2` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
