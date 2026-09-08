@@ -384,8 +384,10 @@ entry, every `modulepreload`, every stylesheet and `index.html`. Fonts keep thei
   screen eager fails by 47 KiB — the two things the route split exists for.
 - **It gives up the colour engine as an arithmetic guarantee.** ADR-0024 §2 keeps it as a rule.
 - **It is stated against a phone the owner does not own.** The tailnet holds an iPhone 15 and an
-  iPad; the target is written for a cheap Android on bad cellular, which is a margin, not a
-  description. §8 says why that margin is worth paying for and what it is worth.
+  iPad, and §4 measures the dashboard interactive in 588 ms over the relay they will really use.
+  The target is written for a cheap Android on bad cellular instead, and that is deliberate: it is
+  the only profile where bytes bind at all, so it is the only one a ceiling can come from. Read the
+  200 KiB as *a margin the owner will probably never spend*, not as a description of a bad day.
 
 **What would change this recommendation.** If `crates/yantrad/src/web/embedded.rs` gains an `ETag`
 and a `Cache-Control`, a repeat open costs the five API reads instead of 271,018 B (§3). The
