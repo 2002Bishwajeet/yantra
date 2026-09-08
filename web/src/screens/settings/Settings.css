@@ -313,6 +313,8 @@
   color: var(--md-sys-color-on-surface);
 }
 
+/* The seed behind the check is a fixed hex in both themes, so no role pairs
+   with it: `on-primary` is #1C3620 in dark, which is 2.1:1 on sage. */
 .settings__swatch {
   display: inline-flex;
   align-items: center;

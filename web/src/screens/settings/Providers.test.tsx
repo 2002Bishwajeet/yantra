@@ -22,6 +22,25 @@ describe('Providers', () => {
     expect((screen.getAllByRole('button', { name: 'Connect' })[0] as HTMLButtonElement).disabled).toBe(true)
   })
 
+  /** Row 114: `.m3-clip` cuts rather than wraps, so the 390 px row takes the
+   *  boards' shorter strings (PhoneSettingsProviders). */
+  it('takes the phone strings on a phone', async () => {
+    mountSettings('phone', '/settings/providers')
+    expect(await screen.findByText('Connected as 2002Bishwajeet')).toBeTruthy()
+    expect(screen.queryByText(/repositories, reviews, issues/)).toBeNull()
+    expect(await screen.findByText(/^Signed in on 0 of \d+ machines$/)).toBeTruthy()
+    expect(screen.getByText('Later · nothing uses it yet')).toBeTruthy()
+    expect(screen.queryByText(/for a future agent/)).toBeNull()
+  })
+
+  it('says only what the category has not said, and draws GitLab as unconnected', async () => {
+    mountSettings('desktop', '/settings/providers')
+    await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')
+    // §1 row 46: the footnote repeated the category blurb word for word.
+    expect(screen.getAllByText(/Yantra signs in to GitHub itself/)).toHaveLength(1)
+    expect(screen.getByText('not connected')).toBeTruthy()
+  })
+
   it('walks the device flow: a code, where to type it, and then the login', async () => {
     let polled = 0
     const asked = mountSettings('desktop', '/settings/providers', {

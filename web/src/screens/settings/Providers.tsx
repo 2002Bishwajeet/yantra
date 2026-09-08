@@ -6,6 +6,7 @@ import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
+import { useFormFactor } from '@/shell/formFactor'
 import { ConnectSheet } from './ConnectSheet'
 import { Group, Note } from './Group'
 import { onMachines, presentOn } from './readiness'
@@ -15,6 +16,9 @@ export function Providers() {
   const github = useGithub()
   const readiness = useReadiness()
   const [sheet, setSheet] = useState<'connect' | 'manage' | null>(null)
+  // The phone row is 390 px less a lead and a chevron, and `.m3-clip` cuts
+  // rather than wraps, so the phone takes the boards' shorter strings.
+  const phone = useFormFactor() === 'phone'
   if (github.error) throw github.error
   const connection = github.data
 
@@ -32,7 +36,9 @@ export function Providers() {
             connection === undefined
               ? 'asking the daemon'
               : connection.connected
-                ? `signed in as ${connection.login ?? 'someone'} · repositories, reviews, issues`
+                ? phone
+                  ? `Connected as ${connection.login ?? 'someone'}`
+                  : `signed in as ${connection.login ?? 'someone'} · repositories, reviews, issues`
                 : 'Not connected'
           }
           trailing={
@@ -54,7 +60,7 @@ export function Providers() {
               <GitFork />
             </Lead>
           }
-          supporting="not connected · later"
+          supporting="not connected"
           trailing={
             <Button disabled variant="text">
               Connect
@@ -70,7 +76,11 @@ export function Providers() {
               <Sparkles />
             </Lead>
           }
-          supporting={`Claude subscription · ${onMachines(presentOn(readiness, 'login-session'), 'signed in')}`}
+          supporting={
+            phone
+              ? onMachines(presentOn(readiness, 'login-session'), 'Signed in')
+              : `Claude subscription · ${onMachines(presentOn(readiness, 'login-session'), 'signed in')}`
+          }
         />
         <ListItem
           headline="OpenAI"
@@ -79,7 +89,7 @@ export function Providers() {
               <Box />
             </Lead>
           }
-          supporting="not set up · for a future agent, nothing uses it yet"
+          supporting={phone ? 'Later · nothing uses it yet' : 'not set up · for a future agent, nothing uses it yet'}
           trailing={
             <Button disabled variant="text">
               Connect
@@ -88,8 +98,8 @@ export function Providers() {
         />
       </Group>
       <Note>
-        Yantra signs in to GitHub itself; agents use the sign-ins on each machine. Yantra stores references, never
-        keys: a key lives in your 1Password, pass or sops and is resolved on the machine that runs the agent.
+        Yantra stores references, never keys. A key lives in your 1Password, pass or sops and is resolved on the
+        machine that runs the agent.
       </Note>
       <ConnectSheet onOpenChange={(open) => setSheet(open ? 'connect' : null)} open={sheet === 'connect'} />
       <ManageSheet login={connection?.login ?? null} onOpenChange={(open) => setSheet(open ? 'manage' : null)} open={sheet === 'manage'} />

@@ -43,6 +43,27 @@ describe('step 1, the name and the machine', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
+  /** The boards name four steps and draw three panels: leaving the first
+   *  ticks Name and Machine together (NewSession, NewSessionSource). */
+  it('names the boards four steps, and ticks two of them at once', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    const steps = () => within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
+    expect(steps().map((one) => one.textContent)).toEqual(['1Name', '2Machine', '3Source', '4Start'])
+    expect(steps()[0].getAttribute('aria-current')).toBe('step')
+
+    type('Name', 'quiet-otter')
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByText(/already on cachyos-g14/)
+    expect(steps().map((one) => one.getAttribute('data-state'))).toEqual([
+      'done',
+      'done',
+      'current',
+      'ahead',
+    ])
+  })
+
   it('takes one machine, and never one that is not there', async () => {
     mountNew('desktop', '/new')
     await screen.findByRole('heading', { level: 1, name: 'New session' })

@@ -434,6 +434,83 @@ duplicate rather than work.
 > Playwright serves, so what ships still has the route and nothing behind it. Row 125 takes the
 > hero's face, weight and tracking from the role instead of restating them.
 
+> **2026-09-08, Y-360: row 114's Providers half and four copy rows are closed. Row 113 is half
+> closed and half refused, and row 127's `Settings.css` half is refused.**
+>
+> - **113, the step order — closed.** New session's stepper named Name, Source, Start and Create.
+>   It now names the boards' four: Name, Machine, Source and Start. **The boards draw four labels
+>   over three panels**, and the build's first panel is the one that answers two of them: leaving
+>   it ticks Name and Machine together and the walk lands on Source, which is what
+>   `NewSessionSource.dc.html:73-79` and `NewSessionStart.dc.html:72-78` draw with two and three ticks.
+>   The `?step=` contract, the TanStack Form and every read are untouched; the change is `STEPS`
+>   and one index. Evidence that the boards mean three panels and not four: **no board draws step 2
+>   as the current one**, `NewSession.dc.html` and `PhoneNewSessionName.dc.html` both put the
+>   Machine chips inside step 1's panel, and
+>   [m14-screen-inventory.md](m14-screen-inventory.md) §A read the same boards on 2026-09-06 and
+>   numbered the groups **New session 1, 3 and 4**, skipping 2.
+> - **113, the modal — refused, and it is two blockers, not a preference.** The boards draw a
+>   scrim and an 880 px panel over the dashboard on a desktop and a tablet; the phone board
+>   (`PhoneNewSessionName.dc.html:31`) is a full screen with an app bar and an 80 px action bar and
+>   no scrim, which row 113 does not say. Neither blocker sits in `screens/`. **First**, `m3/dialog`
+>   cannot draw the board's head: `DialogPopup` takes `title`, `description` and `actions` and has
+>   no slot for the tile to the left of the name or the ✕ to the right, and `Base.Portal`,
+>   `Backdrop`, `Viewport` and `Popup` are not re-exported. `@base-ui/react` is imported by
+>   **sixteen files and every one is under `m3/`**, so composing the popup in a screen would be
+>   the first breach of that boundary and ADR-0024 §1 puts every visible component in `m3/`.
+>   **Second**, `/new` is a sibling of `/` in the route tree (`src/router.ts:151`), so nothing is
+>   rendered behind the scrim: the modal would dim an empty `.shell__main`, which is worse than the
+>   page it replaced. Making `/new` a child of the dashboard is a router and shell change. The fix
+>   is one `leading` slot on `DialogPopup` and one nested route, and both belong to the roles that
+>   own `m3/` and `shell/`.
+> - **114, the Providers half — closed.** Three phone rows clipped mid-word:
+>   *signed in as 2002Bishwajeet · …*, *…signed in on 4 of 6 mac…* and *not set up · for a future
+>   agent,…*. The phone takes the board's own strings — *Connected as …*, *Signed in on 4 of 6
+>   machines*, *Later · nothing uses it yet* — and nothing clips. `Chat.tsx` is another row.
+> - **132, §1 row 46 — closed.** The pane's footnote opened with the sentence the category blurb
+>   already says (`categories.tsx:44`), so the phone read it twice in one screenful. It says only
+>   what the blurb does not now. GitLab's *not connected · later* becomes the board's *not
+>   connected*; **the board's live Connect is refused** — GitLab is not wired
+>   ([m14-screen-inventory.md](m14-screen-inventory.md) §C), and a button that does nothing is
+>   worse than one that is drawn disabled.
+> - **132, §1 row 50 — closed.** *a clone lands under this* becomes the board's *under one of
+>   these*, which is what a two-segment picker offers. *preselected in the Where step* names a step
+>   no stepper has; it is *the Machine step* now.
+> - **132, §1 row 45 — refused, because the row has the code backwards.** It asks for a stage named
+>   *Creating tmux session* where the build says *Creating workspace*. The build is right: that
+>   stage posts `/api/workspaces` and reports `~/.config/yantra/workspaces/{name}.toml` as its own
+>   detail (`new-session/run.ts:88-96`). The tmux session is opened by the **next** stage, which
+>   calls `up` (`run.ts:99-103`) and is already named *Starting claude*. Renaming it would put a
+>   title and its detail line in contradiction. `NewSessionCloning.dc.html` is the stale one.
+> - **132, §1 row 51 — refused, all three wordings.** The boards promise pushes the daemon does not
+>   send. *a trust prompt, a question, a finished task* against what `notify::Watch` sends; *When a
+>   session crashes · the exit code comes with it* against a row that covers finished, crashed,
+>   killed and gone; and an **on** switch for an unreachable machine, which I-47 says is not a
+>   change the daemon can report. `Notifications.tsx:34-36` already carries the reason.
+> - **127, the `Settings.css` swatch half (`:323` on `main`, `:325` now) — refused, with the measurement.** The check sits on a seed
+>   swatch painted a raw hex that does not move with the theme, so no role pairs with it:
+>   `--md-sys-color-on-primary` is `#FFFFFF` in light and `#1C3620` in dark, and `#1C3620` on sage
+>   `#48674B` is **2.1:1** against 1.4.11's 3:1, where `#fff` is 6.3:1. This is `Tile`'s case, which
+>   the audit accepted and did not file: *the colour is data about the workspace, not a role*
+>   (`m3/tile/Tile.tsx:14`, `Tile.css:11`). The line carries that reason now. **A hole the row did
+>   not find**: a *custom* seed light enough to fail white has no fix on either side, because the
+>   swatch draws the hex a person typed.
+>
+> **Three things the sweep found that no row holds.**
+>
+> 1. **General's default machine is written and never read.** `defaultMachine` has no reader
+>    outside `screens/settings/` (`General.tsx:20,45,46`), and New session's `defaults()` takes
+>    `?machine=` and nothing else (`NewSession.tsx:28-38`), so *preselected in the Machine step* is
+>    still a claim the build does not honour. Two lines in `defaults()` would close it.
+> 2. **Five phone Settings baselines are stale**, and only `maxDiffPixelRatio: 0.01` hides it. The
+>    app bar reads *Providers* where `settings-{about,access,agents,notifications}-busy-phone.png`
+>    and `settings-relay-busy-phone.png` still picture *providers · Settings* — §1 row 49's app-bar
+>    half, fixed in the code and never re-pictured. They are left for whoever owns row 49.
+> 3. **`--update-snapshots=all` rewrites baselines that did not change.** Nineteen of the 37 it
+>    wrote differ only in antialiasing — the bell badge on every desktop and tablet Settings board,
+>    and the scrim on the relay sheet — so each PNG must be looked at before it is kept.
+>    `console.spec.ts` also fails 6 of 8 at `waitForLoadState('networkidle')` on this host, on
+>    `main` as much as on a branch: the app polls, so the state it waits for never comes under load.
+
 ### The 57 differences, and the twelve not worth a task
 
 Twelve of the 57 rows §1 marked *differs* do not become findings, and saying so is the point of a

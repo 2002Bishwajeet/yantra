@@ -43,6 +43,21 @@ test.describe('the four steps', () => {
     await keyboardWalk(page, 8)
   })
 
+  /** Row 113: the boards name four steps and draw three panels, so leaving
+   *  the first ticks Name and Machine together and the walk lands on Source. */
+  test('names the boards four steps, and ticks two of them at once', async ({ page }) => {
+    const steps = page.getByRole('list', { name: 'Steps' }).getByRole('listitem')
+    await expect(steps).toHaveText(['1Name', '2Machine', '3Source', '4Start'])
+    await expect(steps.first()).toHaveAttribute('aria-current', 'step')
+
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
+    await expect(steps.nth(1)).toHaveAttribute('data-state', 'done')
+    await expect(steps.nth(2)).toHaveAttribute('aria-current', 'step')
+  })
+
   test('looks like the board', async ({ page, size }) => {
     await page.getByLabel('Name').fill('quiet-otter')
     await screenshot(page, 'new-session-name', 'busy', size)
