@@ -138,3 +138,48 @@ test, not a note.
 > are BRIEF.md's and kept: `text-transform: uppercase`, and 0.8 px of tracking where the role gives
 > 0.5. The boards' eyebrow must read as a label rather than a small title, and the case is what
 > does that.
+
+> **The owner picked 200 KiB (204,800 B) on 2026-09-08**, on the target *the dashboard is
+> interactive within two seconds on a cold load on Lighthouse's mobile preset*.
+> [R16](../research/16-what-the-first-load-costs-a-phone.md) §6 prices the two alternatives they
+> did not take: 175 KiB at 1.75 s, and 396 KiB for first paint over the relay.
+
+> **2026-09-08, Y-370: §7's first-load ceiling gets a target under it, and counts `index.html`.**
+> §7 holds D3 §9.1's 145 KiB and gives no reason a reader can check. Three premises moved
+> underneath it, and none of them makes the original wrong.
+>
+> **The wire was not compressed when the number was set.** Until Y-357 merged on 2026-09-08,
+> `npm run budget` measured gzip while `yantrad` sent identity bytes. The 19 files `index.html`
+> names are **488,913 B** uncompressed against **151,102 B** gzipped, a ratio of 3.24, and the
+> entry chunk alone is 327,376 B. The test read a number the phone had never downloaded.
+>
+> **The budget sees 56% of the wire.** A cold `/` against a real `yantrad` is **41 requests and
+> 271,018 B**. Outside the ceiling: 65,930 B of fonts, **45,415 B of chunks the shell's own
+> `lazy()` calls fetch on every load** — `Account`, `BellPopover` and `NotificationsSheet` are
+> drawn on every page — `index.html`, and five API reads. R16 §3 has the table.
+>
+> **The dashboard grew.** `router.ts` has thirteen routes, and the entry chunk's fixed cost —
+> react-dom, TanStack Router, TanStack Query, Base UI — is 74% of the old ceiling before Yantra
+> writes a line ([the last kilobytes](../plans/m14-the-last-kilobytes.md)).
+>
+> **The new number comes from a target**: *the dashboard is interactive within two seconds on a
+> cold load on the worst phone we can describe*, which is Lighthouse's mobile preset — 1.6 Mbit/s
+> down, 150 ms RTT, 4× CPU. Today that is 1,606 ms; a kilobyte costs 5.25 ms there; 394 ms of
+> headroom is 75 KiB; rounded down, **200 KiB**. R16 §1 has the profiles and §4 the measurements.
+>
+> **The ratchet stays, and it was right.** xterm (86,407 B gzip), the colour engine (19,187 B) and
+> nine screens are lazy because something failed when they were not. A 200 KiB ceiling still
+> refuses xterm in the entry by 33,865 B and every screen eager by 48,423 B. It no longer refuses
+> the colour engine by arithmetic — **§2's rule keeps that**, and no target between 1.70 s and
+> 2.5 s both leaves the project room and holds that line by byte count.
+>
+> **The fonts line does not move**: 80 KiB, and 78.5 KiB today. `font-display: swap` keeps them off
+> the paint path, so they stay a ceiling of their own; the two-second arithmetic counts them
+> because they share the link with the script.
+>
+> **What is not decided here.** The appliance's half sends no `ETag`, no `Last-Modified` and no
+> `Cache-Control`, and `sw.js` is network-first by design, so **every open downloads all 271,018 B
+> again** — measured, three visits running, in R16 §3. The directory half, which gets `tower-http`'s
+> validators for free, costs 4,941 B on the second visit. Four response headers in
+> `crates/yantrad/src/web/embedded.rs` are worth more than every byte this ceiling governs, and they
+> need a row of their own.

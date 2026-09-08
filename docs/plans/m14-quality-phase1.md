@@ -108,6 +108,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 115 | No spec opened `/m3`, so the run that gates a merge never rendered the component gallery | `531093b` |
 | 125 | The dashboard hero assembled its own `font` shorthand and restated the role's tracking | `531093b` |
 | 137 | `Palette.test.tsx`'s *never runs a verb* counted the POSTed reads the e2e version excludes | `531093b` |
+| 84 | `web.yml` carried `continue-on-error: true` on the budget step | Y-370 — the ceiling now comes from a load-time target (200 KiB, [R16](../research/16-what-the-first-load-costs-a-phone.md) §6), `/` is 148.7 KiB against it, and the flag is gone |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -117,7 +118,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | Row | Finding | Whose |
 | --- | --- | --- |
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
-| 84 | Plan §3 says the budget fails above the ceilings; `web.yml` still carries `continue-on-error: true` | Still open after Y-353: `/` is 147.6 KiB against 145, so the step cannot be made to fail yet. Y-357 |
 | 111 | `role="alert"` mounts with its text, so `ErrorSurface` announces by luck | **Refused in Y-360**: every empty-then-fill form puts the board a commit after the region, which makes 48 assertions in 15 files depend on when that commit lands; the synchronous form is barred by `oxlint`. The [boards ledger](m14-review-boards.md) §4 carries the measurement and names the shell-owned live region as the fix |
 | 138 | *Never runs a verb* opens and closes the palette once per option — about 3.5 s of Vitest's 5 s — so a loaded box times it out. One run in 25. Found while checking 137, and a different defect from it | Testing; it wants its own row |
 | 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |

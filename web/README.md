@@ -519,17 +519,21 @@ import, and the page under them.
 
 ## What it weighs
 
-**145 KiB for the first load of `/`, and 80 KiB of fonts** — D3 §9.1 and
+**200 KiB for the first load of `/`, and 80 KiB of fonts** — D3 §9.1 and
 ADR-0024 §7, measured by [`scripts/budget.mjs`](scripts/budget.mjs) over
-`dist/index.html`'s own entry, preloads and stylesheets at gzip -9.
+`dist/index.html` and the entry, preloads and stylesheets it names, at gzip -9.
 
-**As of 2026-09-07 it is not green.** `/` is **147.6 KiB** and the fonts are
-**78.5 KiB**, so the fonts hold and the first load misses by 2.6 KiB. `web.yml`
-runs the budget with `continue-on-error: true` until it does hold. Deleting the
-pre-M14 stylesheet took `/` from 159.1 KiB to 146.7 (Y-353), the unreachable
-screen took it to 147.3 (Y-358) and the shell's live region to 147.6 (Y-352);
-what is left is react-dom, TanStack Router, TanStack Query, Base UI, the shell
-and the dashboard screen — there is no single thing to remove.
+**The 200 KiB comes from a target, not from what the build last measured**
+(Y-370, [R16](../docs/research/16-what-the-first-load-costs-a-phone.md) §6): the
+dashboard is interactive within 2 s on a cold load on Lighthouse's mobile preset
+— 1.6 Mbit/s, 150 ms RTT, 4× CPU. Measured there, `/` is interactive at 1,606 ms
+and a kilobyte costs 5.25 ms, so the headroom to 2 s is 75 KiB and the ceiling
+spends 52 of it. It still refuses xterm in the entry by 33 KiB and every screen
+eager by 47 KiB.
+
+**As of 2026-09-08 it is green.** `/` is **148.7 KiB** and the fonts are
+**78.5 KiB**, so `web.yml` runs the budget with no `continue-on-error` for the
+first time since M14 opened.
 
 **The build is the wire since Y-357.** `npm run gzip` writes a `.gz` beside every
 `.js`, `.css`, `.svg` and `.html` in `dist`, and `yantrad` answers

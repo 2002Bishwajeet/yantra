@@ -30,6 +30,7 @@ is a broken build rather than a reader's problem.
 | R13 | Everything from the dashboard, and the credential a `git clone` needs | [ADR-0004](../adr/0004-rust-for-the-daemon.md), [ADR-0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md), Q5 | [13-dashboard-revamp-and-github.md](13-dashboard-revamp-and-github.md) |
 | R14 | What Material 3 Expressive is in numbers, and how to build it on the web without a component library | Y-332, D3 §0 | [14-material-3-expressive-on-the-web.md](14-material-3-expressive-on-the-web.md) |
 | R15 | T3 Code — what a streaming Chat tab can take from it, and what the licence asks in return | [ADR-0026](../adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md), Y-356 | [15-t3code-for-the-chat.md](15-t3code-for-the-chat.md) |
+| R16 | What the first load costs a phone, and the target a byte ceiling should come from | [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md), Y-370 | [16-what-the-first-load-costs-a-phone.md](16-what-the-first-load-costs-a-phone.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that

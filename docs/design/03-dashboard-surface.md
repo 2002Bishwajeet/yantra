@@ -752,6 +752,46 @@ reconcile. Keep them, and say in
 > Dashboard. So `web.yml` runs the budget with `continue-on-error: true` still, and
 > [Y-357](../../tracker.md#3-task-board) measures the wire rather than the build.
 
+> **The owner picked the number below — 200 KiB (204,800 B) — on 2026-09-08.** The target under it
+> is *interactive within two seconds on a cold load on Lighthouse's mobile preset*, and
+> `web/scripts/budget.mjs` enforces it. [R16](../research/16-what-the-first-load-costs-a-phone.md)
+> §6 prices the two alternatives they did not take.
+>
+> **2026-09-08, Y-370: the ceiling was a ratchet with no target under it, and now it has one.**
+> This section set 145 KiB by measuring the branch it was written on and writing *hold, do not
+> grow*. **That did real work** — xterm, the colour engine and nine screens are behind route splits
+> because of it, and the amendments above are the record of it catching things. What it never had
+> was a device, a link or a load time, so no reader could tell whether missing it by 2.6 KiB
+> mattered to anyone.
+>
+> **Three things moved upstream of the reasoning.** The wire **was not compressed** when the number
+> was set: the same 19 files are **488,913 B** of identity bytes against **151,102 B** gzipped, and
+> [Y-357](../../tracker.md#3-task-board) only made this test describe the wire on 2026-09-08. The
+> budget **sees 56% of what a phone downloads** — a cold `/` against a real `yantrad` is **41
+> requests and 271,018 B**, and 65,930 B of fonts, 45,415 B of chunks the shell's own `lazy()` calls
+> fetch on every load, and `index.html` all sit outside it. And the app went from the handful of
+> routes D1.2's split created to **thirteen**.
+>
+> **What replaces it.** *The dashboard is interactive within two seconds on a cold load on the worst
+> phone we can describe* — Lighthouse's mobile preset, 1.6 Mbit/s down, 150 ms RTT, 4× CPU. Today
+> that is **1,606 ms** at 151,102 B, and a kilobyte costs **5.25 ms** there, measured at four bundle
+> sizes and matching *bytes ÷ link rate* to within 3%. The 394 ms of headroom is 75 KiB; rounding
+> down to **200 KiB** spends 52 of it and keeps 23 KiB back for a phone slower than the model.
+>
+> **The figure now counts `index.html`** — under a kilobyte gzipped, and every other request waits
+> behind it — so today's build reads **152,258 B**, 148.7 KiB. The fonts keep their own 80 KiB line
+> ([ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) §7) and are 78.5 KiB.
+>
+> **The gate still refuses what a person would feel**: xterm in the entry fails by 33,865 B, every
+> screen eager by 48,423 B. It no longer fails on one extra eager screen, the largest of which is
+> 29,597 B and 155 ms on the link the target names.
+>
+> **The evidence is [R16](../research/16-what-the-first-load-costs-a-phone.md)**, measured against a
+> real `yantrad` built with `--features embed-dashboard`. Read its §3 if you read one part: the
+> appliance's half sends no `ETag` and no `Cache-Control`, so **every open pays the whole 271,018 B
+> again** — three consecutive visits, measured. Four response headers are worth more than this
+> ceiling, and they need a row.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
