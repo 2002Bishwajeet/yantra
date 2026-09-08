@@ -1,5 +1,4 @@
-import { useRef, useState } from 'react'
-import { type QueryClient, useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Spend, Workspace } from '@/api'
 import { isApiError } from '@/api/errors'
 import { spendQuery } from '@/api/queries'
@@ -14,7 +13,7 @@ export type Row =
 export type Fanned =
   | { fanned: 'no' }
   | { fanned: 'reading'; of: number }
-  | { fanned: 'done'; rows: Row[]; at: string }
+  | { fanned: 'done'; rows: Row[] }
 
 // Outside the hook: the React Compiler bails out of a function whose try/catch
 // holds a conditional, and this needs both (api/hooks.ts says the same).
@@ -30,25 +29,33 @@ async function readOne(client: QueryClient, workspace: Workspace): Promise<Row> 
   }
 }
 
+/** The fan-out's own key. Not in `api/keys.ts`, which names daemon routes: this
+ *  is the screen's one read over the `keys.spend` ones. */
+const FANNED = ['usage', 'fleet-spend'] as const
+
 /** Every workspace's spend, asked for at once and only when a person asks
  *  (D5 §6.1, ADR-0019). Each read opens a transcript over ssh, so nothing here
- *  polls, refetches on focus, or runs on mount. */
-export function useFleetSpend() {
+ *  polls, refetches on focus, or runs on mount, and the rows live in the query
+ *  cache rather than in the page: leaving Usage used to throw them away. */
+export function useFleetSpend(workspaces: Workspace[]) {
   const client = useQueryClient()
-  const [fanned, setFanned] = useState<Fanned>({ fanned: 'no' })
-  // Two fan-outs answer in either order; only the newest one lands.
-  const newest = useRef(0)
+  const query = useQuery({
+    queryKey: FANNED,
+    queryFn: () => Promise.all(workspaces.map((one) => readOne(client, one))),
+    // `refetch` is the only way in, and it cancels a fan-out still in the air,
+    // so two answers in either order cannot both land.
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  })
 
-  const read = async (workspaces: Workspace[]) => {
-    const mine = ++newest.current
-    setFanned({ fanned: 'reading', of: workspaces.length })
-    const rows = await Promise.all(workspaces.map((one) => readOne(client, one)))
-    if (mine === newest.current) {
-      setFanned({ fanned: 'done', rows, at: new Date().toISOString() })
-    }
-  }
+  const fanned: Fanned = query.isFetching
+    ? { fanned: 'reading', of: workspaces.length }
+    : query.data
+      ? { fanned: 'done', rows: query.data }
+      : { fanned: 'no' }
 
-  return { fanned, read }
+  return { fanned, read: query.refetch }
 }
 
 export type ByWorkspace = {

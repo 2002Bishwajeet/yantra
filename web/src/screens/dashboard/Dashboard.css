@@ -102,10 +102,16 @@
   margin: 0;
 }
 
+/* The role, not a shorthand assembled from it: `--m3-hero-*` already swaps the
+   size and the leading per form factor (ADR-0024 §4), and the three emphasized
+   display roles share the weight, the face and the tracking. */
 .dash__hero-n {
   grid-area: number;
-  font: 500 var(--m3-hero-size) / var(--m3-hero-line-height) var(--md-ref-typeface-brand);
-  letter-spacing: 0;
+  font-family: var(--md-sys-typescale-display-large-font);
+  font-weight: var(--md-sys-typescale-emphasized-display-large-weight);
+  font-size: var(--m3-hero-size);
+  line-height: var(--m3-hero-line-height);
+  letter-spacing: var(--md-sys-typescale-emphasized-display-large-tracking);
 }
 
 .dash__hero-words {

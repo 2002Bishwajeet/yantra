@@ -74,6 +74,9 @@ describe('/fleet on the phone', () => {
     mount('phone', '/fleet')
     await screen.findByText(/^looked /, {}, { timeout: 2000 })
     const idle = region('Idle')
+    // Finding 101: the header carried a State whose own word repeated the
+    // heading, so the band read "idle IDLE 4" on screen and aloud.
+    expect(idle.queryByText('idle')).toBeNull()
     expect(idle.queryByRole('button', { name: /^(Start|Resume)$/ })).toBeNull()
     fireEvent.click(idle.getByRole('button', { name: 'Show 4' }))
     expect(idle.getAllByRole('button', { name: /^(Start|Resume)$/ })).toHaveLength(4)

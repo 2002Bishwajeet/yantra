@@ -195,14 +195,18 @@ const notifications = createRoute({
   head: () => titled('Notifications'),
 })
 
-// Y-339: the component gallery, for the reviewer and Playwright. Dev only;
-// the production tree has the route and no chunk behind it.
+// Y-339: the component gallery, for the reviewer and Playwright. Not in what
+// ships: the shipped tree has the route and no chunk behind it. `vite build
+// --mode e2e` is the only build that carries the chunk, and Y-360 made that
+// the build `npm run e2e` serves — before it, no run that gates a merge ever
+// rendered the page.
 const gallery = createRoute({
   getParentRoute: () => root,
   path: '/m3',
-  component: import.meta.env.DEV
-    ? lazyRouteComponent(() => import('@/m3/gallery/Gallery'), 'Gallery')
-    : Nowhere,
+  component:
+    import.meta.env.DEV || import.meta.env.MODE === 'e2e'
+      ? lazyRouteComponent(() => import('@/m3/gallery/Gallery'), 'Gallery')
+      : Nowhere,
   head: () => titled('M3 gallery'),
 })
 

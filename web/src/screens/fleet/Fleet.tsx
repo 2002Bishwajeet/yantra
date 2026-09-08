@@ -17,7 +17,7 @@ import { Button } from '@/m3/button/Button'
 import { Card, type CardProps } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { State } from '@/m3/mark/Mark'
+import { Mark, State } from '@/m3/mark/Mark'
 import { Pill } from '@/m3/pill/Pill'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -244,7 +244,8 @@ function Idle(props: { rows: WorkRow[]; sessions: Sessions; limit: number; pendi
   return (
     <Card aria-labelledby="fleet-idle" className="fleet__card fleet__card--idle" data-open={open ? '' : undefined}>
       <div className="fleet__eyebrow">
-        {limit === 0 ? <State size="small" state="idle" /> : null}
+        {/* The mark alone: the heading beside it is already the word (D3 §6). */}
+        {limit === 0 ? <Mark size="small" state="idle" /> : null}
         <Eyebrow as="h2" id="fleet-idle">
           Idle
         </Eyebrow>

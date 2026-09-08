@@ -78,9 +78,12 @@ export default defineConfig({
     {
       // What ships, not the dev server: `vite preview` proxies `/api` and the
       // terminal upgrade to the fixture through vite.config.ts's own entry.
+      // `--mode e2e` is still a production build — Vite fixes NODE_ENV for
+      // `build` whatever the mode — and it adds exactly one thing: the `/m3`
+      // gallery chunk router.ts drops from every other build (Y-360).
       command: DEV
         ? `npx vite --host 127.0.0.1 --port ${WEB_PORT} --strictPort`
-        : `npx vite build && npx vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`,
+        : `npx vite build --mode e2e && npx vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`,
       url: web,
       env: { YANTRA_API: `http://127.0.0.1:${FIXTURE_PORT}` },
       reuseExistingServer: !CI,

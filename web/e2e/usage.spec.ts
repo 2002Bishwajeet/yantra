@@ -39,6 +39,35 @@ test.describe('usage on a busy fleet', () => {
     await expect(page.getByText(/there is no fleet total/)).toBeVisible()
   })
 
+  /* The boards draw a proportion bar under each figure. Against the dearest
+     row, never against a sum — a share of a fleet total would be that total,
+     which D6 §5.1 forbids. */
+  test('draws a proportion bar against the dearest row', async ({ page }) => {
+    await page.getByRole('button', { name: 'Read spend' }).click()
+    const bars = card(page, 'By workspace').getByRole('progressbar')
+    await expect(bars).toHaveCount(10)
+    // Every busy workspace reads $5.46, so every bar is the whole width.
+    await expect(bars.first()).toHaveAttribute('aria-valuenow', '100')
+    await expect(bars.first()).toHaveAccessibleName('$5.46 of the most spent, $5.46')
+  })
+
+  /* Finding 100. The fan-out used to be component state, so a walk to another
+     page threw away ten ssh round trips and drew "Nothing read yet" again. */
+  test('keeps the read when the page is left and opened again', async ({ page }) => {
+    await page.getByRole('button', { name: 'Read spend' }).click()
+    await expect(card(page, 'By workspace').getByText('10 workspaces read')).toBeVisible()
+
+    // A link, not a `goto`: a reload would empty the query cache too, and the
+    // walk between two screens is what a person does.
+    await page.getByRole('link', { name: 'Fleet' }).first().click()
+    await expect(page).toHaveURL('/fleet')
+    await page.getByRole('link', { name: 'Usage' }).first().click()
+    await expect(page).toHaveURL('/usage')
+
+    await expect(card(page, 'By workspace').getByText('10 workspaces read')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Read again' })).toBeVisible()
+  })
+
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
     const h1 = page.locator('h1:visible')
     await expect(h1).toHaveCount(1)
