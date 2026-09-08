@@ -37,8 +37,8 @@ function defaults(machine: string): Values {
   }
 }
 
-/** Four steps on one form (Y-349): name and machine, source, start, and the
- *  starting screen. The step lives in `?step=`; the values live here. */
+/** Three panels on one form (Y-349): name and machine, source, start, then
+ *  the starting screen. The panel lives in `?step=`; the values live here. */
 export function NewSession() {
   const navigate = useNavigate()
   const requested = useSearch({ from: '/new' }).step ?? 1
@@ -101,7 +101,9 @@ export function NewSession() {
         )}
       </header>
 
-      <Stepper className="ns__stepper" current={step - 1} steps={STEPS} />
+      {/* Panel 1 answers labels 1 and 2, so step 2 is at label 3 and step 3
+          at label 4 (NewSession, NewSessionSource, NewSessionStart). */}
+      <Stepper className="ns__stepper" current={step === 1 ? 0 : step} steps={STEPS} />
 
       {step === 1 ? <StepName form={form} values={values} /> : null}
       {step === 2 ? <StepSource form={form} values={values} /> : null}

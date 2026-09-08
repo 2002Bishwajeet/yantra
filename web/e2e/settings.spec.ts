@@ -14,6 +14,12 @@ const CATEGORIES = [
   { id: 'about', label: 'About', shows: 'Listens on' },
 ] as const
 
+/** Providers writes the boards' shorter string on a phone (row 114). */
+const signedIn = (size: string) =>
+  size === 'phone'
+    ? 'Connected as 2002Bishwajeet'
+    : 'signed in as 2002Bishwajeet · repositories, reviews, issues'
+
 /** The list on a desktop and a tablet; a phone pushes the screen instead. */
 const list = (page: Parameters<typeof axe>[0]) => page.getByRole('navigation', { name: 'Settings' })
 
@@ -177,7 +183,20 @@ test.describe('settings · Providers', () => {
     await expect(sheet.getByText('Signed in as 2002Bishwajeet.')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('body')).not.toContainText(/gh[pousr]_/)
     await sheet.getByRole('button', { name: 'Done' }).click()
-    await expect(page.getByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeVisible()
+    await expect(page.getByText(signedIn(size))).toBeVisible()
+  })
+
+  /** Row 114: the 390 px row clips rather than wraps, so the phone takes the
+   *  boards' shorter strings (PhoneSettingsProviders). */
+  test('shortens every row on a phone', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the shorter strings are the phone’s')
+    await scenario(page, 'busy')
+    await page.goto('/settings/providers')
+    await opened(page, 'Providers', size)
+    await expect(page.getByText('Connected as 2002Bishwajeet')).toBeVisible()
+    await expect(page.getByText('Later · nothing uses it yet')).toBeVisible()
+    await expect(page.getByText(/repositories, reviews, issues/)).toHaveCount(0)
+    await expect(page.getByText(/for a future agent/)).toHaveCount(0)
   })
 
   test('signs out from Manage', async ({ page, size }) => {

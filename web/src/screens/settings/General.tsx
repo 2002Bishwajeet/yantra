@@ -24,7 +24,7 @@ export function General() {
       <Group label="New session">
         <ListItem
           headline="Home directory for clones"
-          supporting="a clone lands under this on the machine you pick"
+          supporting="a clone lands under one of these on the machine you pick"
           trailing={
             <Segmented label="Home directory for clones" onValueChange={(value) => write({ cloneHome: value as Held['cloneHome'] })} value={held.cloneHome}>
               {CLONE_HOMES.map((one) => (
@@ -37,7 +37,7 @@ export function General() {
         />
         <ListItem
           headline="Default machine for new sessions"
-          supporting="preselected in the Where step"
+          supporting="preselected in the Machine step"
           trailing={
             <select
               aria-label="Default machine for new sessions"
