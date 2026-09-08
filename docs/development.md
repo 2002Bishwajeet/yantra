@@ -276,8 +276,8 @@ under systemd as PID 1 and starts the real `yantrad` in a container that has no
 learning its address, and what the test watches is the supervisor retrying
 instead of giving up. `installer.rs` runs [`../install.sh`](../install.sh) twice
 as an unprivileged account through `sudo`, against a release served from inside
-the container by `tests/fixture/release.sh` — `/etc/hosts` points github.com at a
-local HTTPS server the container trusts, which is how a *corrupted* archive gets
+the container by `tests/fixture/release.sh` — `/etc/hosts` points github.com and
+api.github.com at a local HTTPS server the container trusts, which is how a *corrupted* archive gets
 served and refused. Both skip and label themselves the same way. What no
 container can show is the boot ordering against a real `tailscaled`.
 

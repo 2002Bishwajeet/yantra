@@ -243,6 +243,14 @@ jobs:
             cp "target/$TARGET/release/$pkg" "staging/$stage/"
           done
           cp README.md LICENSE "staging/$stage/"
+          # The units travel with the binaries they start, so SHA256SUMS covers
+          # them and install.sh needs no commit pin to fetch them (Y-365).
+          # Linux only: the macOS archive ships the agent alone and systemd is
+          # not there to read a unit.
+          if [ "$RUNNER_OS" = Linux ]; then
+            cp crates/yantrad/yantrad.service \
+               crates/yantra-agent/yantra-agent.service "staging/$stage/"
+          fi
           echo "STAGE=$stage" >> "$GITHUB_ENV"
 
       - name: Archive (tar.gz)
