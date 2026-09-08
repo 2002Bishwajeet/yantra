@@ -112,11 +112,18 @@ it, which is why the daemon's account is the one that matters.
 
 [`install.sh`](../install.sh) is this same install done on the box itself, from a published release
 rather than from a checkout — no toolchain, no zig, no cross build, and nothing that needs the
-developer's machine. It is **pinned to a version**: a release is a fixed set of checksummed archives,
-and a `latest` that moved would make one command install different bytes on different days.
+developer's machine. It **installs the current release**, which it reads from
+`api.github.com/repos/2002Bishwajeet/yantra/releases/latest` ([Y-365](../tracker.md)). That list
+skips drafts and pre-releases, so a `v0.3.0-rc.1` tag never installs itself. A call GitHub refuses —
+`403`, since 60 an hour per IP is what an unauthenticated one gets — stops the run and says so.
+
+**What resolving gives up is written in the script.** The version and the commit it replaced were a
+person's choice in a reviewed commit; `SHA256SUMS` still proves the archive arrived intact from the
+release it names, and nothing proves that release is the one the owner meant
+([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §4).
 
 Until [Y-159](../tracker.md) serves it from a name that resolves off the tailnet, it is fetched from
-the tag it installs:
+a tag. Take it from the newest one: a copy from v0.1.0 installs v0.1.0 and nothing later.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh | bash
@@ -141,7 +148,7 @@ What it does:
 2. fetches that archive and `SHA256SUMS`, and checks one against the other. **A mismatch stops the
    run before anything is installed**: what produces one is a corrupted download or a substituted
    archive, and neither is repaired by fetching again;
-3. fetches both units from the same tag — see below;
+3. takes both units out of that same archive — see below;
 4. creates the `yantra` account if it is absent;
 5. renames each binary into `/usr/local/bin`, for the reason [below](#why-the-rename);
 6. installs both units and reloads systemd, **enabling neither**;
@@ -200,22 +207,19 @@ is what answers it. It exits 0 only when nothing is left, so an installer or an 
 
 ### Where the units come from
 
-The archives hold the three binaries, a README and a LICENSE, and **no units** — so the script
-fetches `yantrad.service` and `yantra-agent.service` from `raw.githubusercontent.com`. A unit taken
-from `main` beside a binary built at a tag is drift in the one file that decides how the binary
-starts, so both come from the release's own commit.
+**From the archive, since [Y-365](../tracker.md).** The Linux archives hold the three binaries, a
+README, a LICENSE and both units — [`release.yml`](../.github/workflows/release.yml) stages them
+beside the binaries they start, so `SHA256SUMS` covers the two files that decide what runs as root.
+The macOS archives carry none: they ship `yantra-agent` alone and no systemd reads a unit there.
 
-**From the commit, not from `refs/tags/v$VERSION`.** A tag is a mutable ref — v0.1.0's was deleted
-and re-cut the day it was published — so a tag pins nothing, and these two files decide what runs as
-root. `COMMIT` sits beside `VERSION` in the script and is bumped with it. That is
-[`just pinned`](../justfile)'s own rule, which fails CI for a GitHub action naming a tag, applied to
-the one other place this repo fetches executable configuration over the network.
+Before that the script fetched them from `raw.githubusercontent.com` at a `COMMIT` pinned beside
+`VERSION`. It pinned them honestly — a tag is a mutable ref, and v0.1.0's was deleted and re-cut the
+day it was published — but **those two files were outside `SHA256SUMS`**, which lists archives and
+nothing else, and the pin was a constant somebody had to bump with every release.
 
-The cost, stated because it is real: two more fetches, a second host, a second constant to bump, and
-**those two files are not covered by `SHA256SUMS`**, which lists archives and nothing else — the
-commit is the whole of what pins them. The alternative is adding the units to the archives in
-[`release.yml`](../.github/workflows/release.yml), which is self-contained and checksummed — and
-could not install v0.1.0, whose archives are published and do not contain them.
+The cost is that **an archive published before this carries no units**, which is every release up to
+v0.1.0. The script says so and installs nothing rather than failing on a missing file, and
+[`installer.rs`](../crates/yantrad/tests/installer.rs) holds it to that.
 
 ## Install, and update
 

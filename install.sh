@@ -9,18 +9,6 @@
 # ends by naming each one. docs/appliance.md is the runbook around it.
 set -euo pipefail
 
-# Pinned: a release is a fixed set of checksummed archives, and `latest` would
-# make the same command install different bytes on different days. Override to
-# install another release; a new tag needs this default bumped.
-VERSION="${YANTRA_VERSION:-0.1.0}"
-
-# The commit that tag was built from. Named rather than resolved, because a tag
-# is a mutable ref — v0.1.0's was moved once already — and the two files below it
-# fetches decide what runs as root. It is the rule `just pinned` enforces on
-# every GitHub action, applied to the one other place this repo fetches
-# executable configuration over the network. Bump it with VERSION.
-COMMIT="${YANTRA_COMMIT:-1c5056b63b1b5c835d3a07976fea88151b9e9372}"
-
 REPO=2002Bishwajeet/yantra
 BIN_DIR=/usr/local/bin
 AGENT_ENV=/etc/yantra/agent.env
@@ -52,6 +40,40 @@ x86_64 | amd64) target=x86_64-unknown-linux-musl ;;
 *) fail "no release is built for $(uname -m)" ;;
 esac
 
+# What installs when nobody names a version. `/releases/latest` skips drafts and
+# pre-releases, so a hyphenated `rc` tag can never install itself (ADR-0027 §4).
+#
+# What resolving gives up, said plainly: the VERSION and COMMIT this replaced
+# were a person's choice in a reviewed commit, and the comment beside COMMIT
+# recorded that v0.1.0's tag was moved once. SHA256SUMS still proves the archive
+# arrived intact from the release it names. Nothing here proves that release is
+# the one the owner meant — what is left is trust in the repository and in
+# whoever can publish to it.
+latest_version() {
+    local answer status tag
+    answer=$(curl -sSL --proto '=https' --tlsv1.2 -w '\n%{http_code}' \
+        -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/$REPO/releases/latest") ||
+        fail "GitHub is unreachable, so no version was resolved and nothing was installed — name one with YANTRA_VERSION"
+    status=${answer##*$'\n'}
+    case "$status" in
+    200) ;;
+    403 | 429)
+        # 60 requests an hour per IP, shared with everything behind it, and the
+        # script sends no token (ADR-0027 §4).
+        fail "GitHub answered $status: the rate limit for an unauthenticated call. Nothing was installed — retry later, or name a version with YANTRA_VERSION"
+        ;;
+    *) fail "GitHub answered $status for the release list — nothing was installed. Name a version with YANTRA_VERSION" ;;
+    esac
+    tag=$(printf '%s' "${answer%$'\n'*}" |
+        grep -o '"tag_name" *: *"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+    [ -n "$tag" ] ||
+        fail "GitHub's release list named no tag_name — nothing was installed"
+    printf '%s\n' "${tag#v}"
+}
+
+VERSION="${YANTRA_VERSION:-$(latest_version)}"
+
 archive="yantra-$VERSION-$target.tar.gz"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -73,13 +95,11 @@ fetch "$work/SHA256SUMS" "$download/SHA256SUMS"
 tar -C "$work" -xzf "$work/$archive"
 staged="$work/yantra-$VERSION-$target"
 
-# The archives carry no units, so they come from the commit the binaries were
-# built at — a unit from `main` beside a binary from a tag is drift in the one
-# file that decides how the binary starts. These two are not in SHA256SUMS,
-# which lists archives, so the commit is the whole of what pins them.
-raw="https://raw.githubusercontent.com/$REPO/$COMMIT"
-fetch "$work/yantrad.service" "$raw/crates/yantrad/yantrad.service"
-fetch "$work/yantra-agent.service" "$raw/crates/yantra-agent/yantra-agent.service"
+# The units ride in the archive, so SHA256SUMS covers the two files that decide
+# what runs as root (Y-365). Releases before v0.2.0 carry none, and a stat error
+# would be a poor way to learn that.
+[ -e "$staged/yantrad.service" ] ||
+    fail "v$VERSION carries no units, so it predates them moving into the archive — install v0.2.0 or later"
 
 # The units name this account, and its home is where the workspace files and the
 # ssh ControlPath land.
@@ -95,7 +115,7 @@ for binary in yantrad yantra yantra-agent; do
     as_root mv -f "$BIN_DIR/$binary.new" "$BIN_DIR/$binary"
 done
 
-as_root install -m 644 "$work/yantrad.service" "$work/yantra-agent.service" /etc/systemd/system/
+as_root install -m 644 "$staged/yantrad.service" "$staged/yantra-agent.service" /etc/systemd/system/
 as_root systemctl daemon-reload
 
 # ADR-0013 §4: the address of the daemon *this* box reports to is not this

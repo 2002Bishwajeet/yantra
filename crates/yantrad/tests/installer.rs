@@ -8,12 +8,17 @@
 //!
 //! **The release is served from inside the container**, by
 //! [`tests/fixture/release.sh`](fixture/release.sh): `/etc/hosts` points
-//! `github.com` and `raw.githubusercontent.com` at a local HTTPS server whose
-//! certificate is in the container's trust store, so `curl`, TLS, the URLs the
-//! script builds and the checksums are all real — and so is a corrupted
-//! archive, which the published host cannot serve. The cost is that the archive
-//! is this fixture's rather than a published one, so the shape of it is
-//! asserted against `release.yml`, which is what produces the real one.
+//! `github.com` and `api.github.com` at a local HTTPS server whose certificate
+//! is in the container's trust store, so `curl`, TLS, the URLs the script
+//! builds, the release list it resolves a version from and the checksums are
+//! all real — and so is a corrupted archive, which the published host cannot
+//! serve. The cost is that the archive is this fixture's rather than a
+//! published one, so the shape of it is asserted against `release.yml`, which
+//! is what produces the real one.
+//!
+//! **No version appears in both this file and `install.sh`** (Y-365). The two
+//! the fixture publishes are its own, so a run that installed one of them
+//! resolved it from the release list.
 //!
 //! It runs as an unprivileged account through `sudo`, the way
 //! `docs/appliance.md` says to run it: as root every missing `as_root` passes.
@@ -31,6 +36,14 @@ use common::{Systemd, UNPRIVILEGED, fixture_dir, repo_root};
 
 const BINARIES: [&str; 3] = ["yantrad", "yantra", "yantra-agent"];
 
+const UNITS: [&str; 2] = ["yantrad.service", "yantra-agent.service"];
+
+/// What the fixture publishes first, and what it publishes over it. `install.sh`
+/// names neither, so a second run that installs the second one followed the
+/// release with nothing edited — which is the whole of Y-365.
+const VERSION: &str = "0.2.0";
+const NEXT_VERSION: &str = "0.3.0";
+
 /// The synthetic address of the test convention, so what the second run must
 /// not touch is a line only a person could have put there.
 const EDITED_ENV: &str = "YANTRA_DAEMON=100.64.0.5:7717";
@@ -44,12 +57,10 @@ const EDITED_RELAY: &str = "YANTRA_NTFY_URL=https://ntfy.example/a-topic";
 /// the installed file instead. Its own unit takes no arguments and cannot.
 const AGENT_UNIT: &str = "agent-under-install";
 
-/// The container, the release it is served, and `install.sh`'s own constants.
+/// The container, and the one constant `install.sh` still carries.
 struct Installer {
     systemd: Systemd,
     repo: String,
-    version: String,
-    commit: String,
 }
 
 impl Installer {
@@ -59,9 +70,7 @@ impl Installer {
             return Ok(None);
         };
         let installer = Self {
-            repo: constant(&script, "REPO")?,
-            version: constant(&script, "VERSION")?,
-            commit: constant(&script, "COMMIT")?,
+            repo: repo_constant(&script)?,
             systemd,
         };
 
@@ -105,10 +114,11 @@ impl Installer {
         self.systemd.run(&argv)
     }
 
-    /// `marker` goes into every file of the archive, so a run that installed
-    /// the other publication is a different checksum rather than a guess.
-    fn publish(&self, marker: &str) -> Result<()> {
-        self.release(&["publish", &self.repo, &self.version, &self.commit, marker])?;
+    /// `marker` goes into every file of the archive, units included, so a run
+    /// that installed the other publication is a different checksum rather than
+    /// a guess.
+    fn publish(&self, version: &str, marker: &str) -> Result<()> {
+        self.release(&["publish", &self.repo, version, marker])?;
         Ok(())
     }
 
@@ -119,6 +129,14 @@ impl Installer {
             UNPRIVILEGED,
             &["bash", "-c", "cat /fixture/install.sh | bash"],
         )
+    }
+
+    /// The same run with a version named, which is the override
+    /// `docs/appliance.md` documents and the one path that reads no release
+    /// list.
+    fn install_version(&self, version: &str) -> Result<Output> {
+        let piped = format!("cat /fixture/install.sh | YANTRA_VERSION={version} bash");
+        self.systemd.exec_as(UNPRIVILEGED, &["bash", "-c", &piped])
     }
 
     fn install_ok(&self) -> Result<String> {
@@ -151,24 +169,48 @@ impl Installer {
     fn scratch_dirs(&self) -> Result<String> {
         self.sh("ls -d /tmp/tmp.* 2>/dev/null | wc -l")
     }
+
+    /// Every refusal is ahead of every privileged step, so a box that refused
+    /// is the box the run found: no binaries, no units, no `/etc/yantra` and no
+    /// account.
+    fn nothing_is_installed(&self, because: &str) -> Result<()> {
+        for binary in BINARIES {
+            assert!(
+                !self
+                    .systemd
+                    .exec(&["test", "-e", &format!("/usr/local/bin/{binary}")])?
+                    .status
+                    .success(),
+                "{binary} is installed although {because}"
+            );
+        }
+        for path in ["/etc/yantra", "/etc/systemd/system/yantrad.service"] {
+            assert!(
+                !self.systemd.exec(&["test", "-e", path])?.status.success(),
+                "{path} was written although {because}"
+            );
+        }
+        assert!(
+            !self.systemd.exec(&["id", "yantra"])?.status.success(),
+            "the account outlived a run that installed nothing"
+        );
+        assert_eq!(
+            self.scratch_dirs()?.trim(),
+            "0",
+            "the download outlived the run"
+        );
+        Ok(())
+    }
 }
 
-/// `install.sh`'s own constants, so the fixture serves the URLs the script
-/// builds rather than a second copy of them: bump one and this follows.
-fn constant(script: &str, name: &str) -> Result<String> {
-    let assignment = format!("{name}=");
-    let value = script
+/// The repository `install.sh` fetches from, so the fixture serves the URLs the
+/// script builds rather than a second copy of them.
+fn repo_constant(script: &str) -> Result<String> {
+    Ok(script
         .lines()
-        .find_map(|line| line.strip_prefix(&assignment))
-        .with_context(|| format!("install.sh assigns no {name}"))?
-        .trim_matches('"');
-    let Some(parameter) = value.strip_prefix("${") else {
-        return Ok(value.to_owned());
-    };
-    Ok(parameter
-        .split_once(":-")
-        .and_then(|(_, default)| default.strip_suffix('}'))
-        .with_context(|| format!("{name} is not `${{OVERRIDE:-default}}`"))?
+        .find_map(|line| line.strip_prefix("REPO="))
+        .context("install.sh assigns no REPO")?
+        .trim_matches('"')
         .to_owned())
 }
 
@@ -182,20 +224,37 @@ fn the_fixtures_archive_is_shaped_the_way_release_yml_stages_one() -> Result<()>
         workflow.contains(r#"stage="yantra-${VERSION}-${TARGET}""#),
         "release.yml no longer stages the directory install.sh looks for inside the archive"
     );
+    // The security half of Y-365: a unit outside the archive is outside
+    // SHA256SUMS, and install.sh writes both of them into /etc/systemd/system
+    // as root.
+    for unit in [
+        "crates/yantrad/yantrad.service",
+        "crates/yantra-agent/yantra-agent.service",
+    ] {
+        assert!(
+            workflow.contains(unit),
+            "release.yml no longer stages {unit}, so the archive install.sh verifies would not carry it"
+        );
+    }
     Ok(())
 }
 
 /// The row's evidence, and all of it is about the second run: an `agent.env`
-/// somebody edited is still theirs afterwards, and three binaries are replaced
-/// under an executing one.
+/// somebody edited is still theirs afterwards, three binaries are replaced
+/// under an executing one, and the release the second run installs is a newer
+/// one that nobody wrote into the script (Y-365).
 #[test]
 fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone() -> Result<()> {
     let Some(fixture) = Installer::start()? else {
         return Ok(());
     };
 
-    fixture.publish("first")?;
+    fixture.publish(VERSION, "first")?;
     let first = fixture.install_ok()?;
+    assert!(
+        first.contains(&format!("install: yantra v{VERSION},")),
+        "the version has to come off the release list, since install.sh names none:\n{first}"
+    );
     assert!(
         first.contains("Tailscale is not installed."),
         "the report has to name what this container does not have:\n{first}"
@@ -220,7 +279,7 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
         );
     }
 
-    for unit in ["yantrad.service", "yantra-agent.service"] {
+    for unit in UNITS {
         let verify = fixture.systemd.exec(&[
             "systemd-analyze",
             "verify",
@@ -230,6 +289,13 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
             String::from_utf8_lossy(&verify.stderr).trim(),
             "",
             "systemd has a complaint about the {unit} the script installed"
+        );
+        // Y-365: the unit is the archive's, so SHA256SUMS covered it. Fetched
+        // from anywhere else it would not carry this publication's marker.
+        assert_eq!(
+            fixture.sha(&format!("/etc/systemd/system/{unit}"))?,
+            fixture.sha(&format!("/srv/staging/yantra-*/{unit}"))?,
+            "{unit} is not the one the archive carried"
         );
         assert_eq!(fixture.systemd.property(unit, "LoadState")?, "loaded");
         assert_eq!(
@@ -282,6 +348,10 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
         .iter()
         .map(|binary| fixture.sha(&format!("/usr/local/bin/{binary}")))
         .collect::<Result<_>>()?;
+    let units_before: Vec<String> = UNITS
+        .iter()
+        .map(|unit| fixture.sha(&format!("/etc/systemd/system/{unit}")))
+        .collect::<Result<_>>()?;
 
     fixture.sh(&format!(
         "systemd-run --unit={AGENT_UNIT} --collect /usr/local/bin/yantra-agent infinity"
@@ -304,8 +374,12 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
     fixture.sh("printf '#!/bin/sh\\nexit 1\\n' > /usr/local/bin/tailscale")?;
     fixture.sh("chmod 755 /usr/local/bin/tailscale")?;
 
-    fixture.publish("second")?;
+    fixture.publish(NEXT_VERSION, "second")?;
     let second = fixture.install_ok()?;
+    assert!(
+        second.contains(&format!("install: yantra v{NEXT_VERSION},")),
+        "the second run must follow the release rather than the file, with nothing edited:\n{second}"
+    );
     assert!(
         second.contains("/etc/yantra/agent.env was already here and was left alone."),
         "the second run must say it left the address alone:\n{second}"
@@ -326,6 +400,16 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
             now,
             fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
             "{binary} is not the one the second archive carried"
+        );
+    }
+
+    for (unit, was) in UNITS.iter().zip(&units_before) {
+        let now = fixture.sha(&format!("/etc/systemd/system/{unit}"))?;
+        assert_ne!(&now, was, "{unit} was not replaced by the second run");
+        assert_eq!(
+            now,
+            fixture.sha(&format!("/srv/staging/yantra-*/{unit}"))?,
+            "{unit} is not the one the second archive carried"
         );
     }
 
@@ -376,8 +460,8 @@ fn a_corrupted_archive_is_refused_and_nothing_is_installed() -> Result<()> {
         return Ok(());
     };
 
-    fixture.publish("corrupt")?;
-    fixture.release(&["corrupt", &fixture.repo, &fixture.version])?;
+    fixture.publish(VERSION, "corrupt")?;
+    fixture.release(&["corrupt", &fixture.repo, VERSION])?;
 
     let out = fixture.install()?;
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -387,34 +471,74 @@ fn a_corrupted_archive_is_refused_and_nothing_is_installed() -> Result<()> {
         "the refusal must name what failed:\n{stderr}"
     );
 
-    for binary in BINARIES {
-        assert!(
-            !fixture
-                .systemd
-                .exec(&["test", "-e", &format!("/usr/local/bin/{binary}")])?
-                .status
-                .success(),
-            "{binary} was installed from an archive that did not verify"
-        );
-    }
-    for path in ["/etc/yantra", "/etc/systemd/system/yantrad.service"] {
-        assert!(
-            !fixture
-                .systemd
-                .exec(&["test", "-e", path])?
-                .status
-                .success(),
-            "{path} was written before the archive was checked"
-        );
-    }
+    fixture.nothing_is_installed("the archive did not verify")
+}
+
+/// Every release up to v0.1.0 carries no units in its archive, and `install.sh`
+/// now takes them from there. A version that predates them says so, ahead of
+/// the first privileged step, rather than failing on a missing file.
+#[test]
+fn a_release_whose_archive_carries_no_units_is_refused() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+
+    fixture.publish(VERSION, "unitless")?;
+    fixture.release(&["strip_units", &fixture.repo, VERSION])?;
+
+    let out = fixture.install()?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        !fixture.systemd.exec(&["id", "yantra"])?.status.success(),
-        "the account outlived a run that installed nothing"
+        !out.status.success(),
+        "a release with no units in it installed anyway"
     );
-    assert_eq!(
-        fixture.scratch_dirs()?.trim(),
-        "0",
-        "the download outlived the run"
+    assert!(
+        stderr.contains("carries no units"),
+        "the refusal must name what is missing:\n{stderr}"
     );
+
+    fixture.nothing_is_installed("the archive carried no units")
+}
+
+/// A release list that does not answer resolves no version, and the script
+/// stops there — a `403` from the unauthenticated rate limit takes this same
+/// branch (ADR-0027 §4). `YANTRA_VERSION` is the way past it, and it reads no
+/// release list at all.
+#[test]
+fn an_unresolvable_release_list_installs_nothing_until_a_version_is_named() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+
+    fixture.publish(VERSION, "unresolvable")?;
+    fixture.release(&["unresolvable", &fixture.repo])?;
+
+    let out = fixture.install()?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "a run that resolved no version installed something"
+    );
+    assert!(
+        stderr.contains("404") && stderr.contains("nothing was installed"),
+        "the refusal must name the answer it got and say it installed nothing:\n{stderr}"
+    );
+    fixture.nothing_is_installed("no version resolved")?;
+
+    // The archive was installable the whole time, which is what makes the
+    // refusal above about the release list and nothing else.
+    let named = fixture.install_version(VERSION)?;
+    assert!(
+        named.status.success(),
+        "YANTRA_VERSION must install without reading the release list: {}",
+        String::from_utf8_lossy(&named.stderr).trim()
+    );
+    for binary in BINARIES {
+        assert_eq!(
+            fixture.sha(&format!("/usr/local/bin/{binary}"))?,
+            fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
+            "{binary} is not the one the named release carried"
+        );
+    }
     Ok(())
 }
