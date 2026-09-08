@@ -35,6 +35,10 @@ for (const one of ROUTES) {
       await expect(board.getByText(words).first()).toBeVisible()
     }
     await expect(board.getByRole('button', { name: 'Try again' })).toBeVisible()
+    await expect(board.getByRole('link', { name: 'Open Tailscale' })).toHaveAttribute(
+      'href',
+      'https://login.tailscale.com/admin/machines',
+    )
 
     // Nothing is still loading, and nothing of the fleet is on screen.
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)

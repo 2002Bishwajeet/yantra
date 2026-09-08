@@ -18,3 +18,9 @@ export const DESTINATIONS: readonly {
  *  back arrow and the navigation bar and FAB go. */
 export const isDestination = (pathname: string) =>
   DESTINATIONS.some((one) => one.to === pathname)
+
+/** Where the desktop draws the sessions rail: the dashboard, New session and
+ *  the session screen, which five boards draw beside it (finding 112). Repair
+ *  is under a session and draws none, so the match stops at the name. */
+export const isRailed = (pathname: string) =>
+  pathname === '/' || pathname === '/new' || /^\/w\/[^/]+$/.test(pathname)

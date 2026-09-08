@@ -49,6 +49,10 @@ describe('the screen a dead daemon draws', () => {
     expect(board.getByText(/yantrad down/)).toBeTruthy()
     expect(board.getByText(/retrying every 5 s/)).toBeTruthy()
     expect(board.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    // Finding 131: the board draws the way out beside the retry.
+    expect(board.getByRole('link', { name: 'Open Tailscale' }).getAttribute('href')).toBe(
+      'https://login.tailscale.com/admin/machines',
+    )
 
     // Nothing of the fleet: no Dashboard, and no rail listing sessions.
     expect(screen.queryByRole('heading', { level: 1, name: 'Dashboard' })).toBeNull()

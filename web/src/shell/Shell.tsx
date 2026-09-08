@@ -6,13 +6,14 @@ import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { Fab } from '@/m3/fab/Fab'
 import { IconButton } from '@/m3/icon-button/IconButton'
+import { LiveRegion } from '@/m3/live/Live'
 import { BarDestination, NavigationBar } from '@/m3/navigation-bar/NavigationBar'
 import { NavigationRail, RailDestination } from '@/m3/navigation-rail/NavigationRail'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Text } from '@/m3/text/Text'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
 import { StatusAnnouncer } from './Announce'
-import { DESTINATIONS, isDestination } from './destinations'
+import { DESTINATIONS, isDestination, isRailed } from './destinations'
 import { useFormFactor } from './formFactor'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
@@ -109,13 +110,32 @@ function DesktopBar() {
   )
 }
 
-function TabletRail() {
+// The bell names the sheet, and the sheet is in the tree from the first paint
+// so that the name resolves to something.
+const SHEET = 'shell-notifications'
+
+function TabletRail({ onToggle, open }: { onToggle: () => void; open: boolean }) {
   return (
     <NavigationRail
       fab={
         <Fab label="New session" role="link" render={<Link to="/new" />}>
           <Plus />
         </Fab>
+      }
+      trailing={
+        <>
+          <Guarded title="Notifications could not be drawn">
+            <Bell
+              aria-controls={SHEET}
+              aria-expanded={open}
+              aria-haspopup="dialog"
+              onClick={onToggle}
+            />
+          </Guarded>
+          <Suspense fallback={slot}>
+            <Account />
+          </Suspense>
+        </>
       }
     >
       {DESTINATIONS.map((one) => (
@@ -134,22 +154,6 @@ function TabletRail() {
         </RailDestination>
       ))}
     </NavigationRail>
-  )
-}
-
-function TabletActions({ onToggle, open }: { onToggle: () => void; open: boolean }) {
-  return (
-    <div className="shell__actions">
-      <Guarded title="Search could not be drawn">
-        <Palette />
-      </Guarded>
-      <Guarded title="Notifications could not be drawn">
-        <Bell aria-expanded={open} onClick={onToggle} />
-      </Guarded>
-      <Suspense fallback={slot}>
-        <Account />
-      </Suspense>
-    </div>
   )
 }
 
@@ -249,7 +253,6 @@ export function Shell() {
   const factor = useFormFactor()
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const [touched, setTouched] = useState(false)
   // One screen, owned here: the daemon is down for Settings as much as for the
   // fleet, and seven inline surfaces saying so are seven copies of one fact.
   const { why, since } = useReached()
@@ -276,31 +279,22 @@ export function Shell() {
         {factor === 'desktop' ? (
           <DesktopBar />
         ) : factor === 'tablet' ? (
-          <TabletRail />
+          <TabletRail onToggle={() => setOpen((was) => !was)} open={open} />
         ) : (
           <PhoneBar top={top} />
         )}
         <div className={CONTENTS[factor]}>
-          {factor === 'desktop' && down === null && (pathname === '/' || pathname === '/new') ? (
+          {factor === 'desktop' && down === null && isRailed(pathname) ? (
             <Guarded title="Sessions could not be drawn">
               <SessionsRail />
             </Guarded>
           ) : null}
-          {factor === 'tablet' ? (
-            <TabletActions
-              onToggle={() => {
-                setTouched(true)
-                setOpen((was) => !was)
-              }}
-              open={open}
-            />
-          ) : null}
           <Page down={down} />
         </div>
-        {factor === 'tablet' && touched ? (
+        {factor === 'tablet' ? (
           <Guarded title="Notifications could not be drawn">
             <Suspense fallback={null}>
-              <NotificationsSheet onClose={() => setOpen(false)} open={open} />
+              <NotificationsSheet id={SHEET} onClose={() => setOpen(false)} open={open} />
             </Suspense>
           </Guarded>
         ) : factor === 'phone' && top ? (
@@ -308,6 +302,7 @@ export function Shell() {
         ) : null}
       </div>
       <StatusAnnouncer />
+      <LiveRegion />
     </>
   )
 }

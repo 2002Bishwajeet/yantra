@@ -13,8 +13,9 @@ export type SideSheetProps = ComponentPropsWithRef<'aside'> & {
   children: ReactNode
 }
 
-/** The docked 420 px side sheet: in the flow, never modal, closed with its
- *  own button or Escape. */
+/** The 420 px side sheet, narrower when the window is: never modal, closed
+ *  with its own button or Escape. Where it sits is the caller's — the shell
+ *  floats it over the tablet's page (finding 106). */
 export function SideSheet(props: SideSheetProps) {
   const { title, open, onClose, actions, className, children, ...rest } = props
   const heading = useRef<HTMLHeadingElement>(null)

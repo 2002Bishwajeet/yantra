@@ -138,13 +138,14 @@
   padding: 16px 20px 24px;
 }
 
-[data-shell="tablet"] .shell__actions {
-  justify-content: flex-end;
-}
-
+/* WCAG 1.4.10, and what TabletNotifications.dc.html draws: the sheet floats
+   over the page instead of taking 420 px out of it, so nothing reflows into
+   the 124 px that were left beside it at 200 % zoom. */
 .shell__sheet {
-  align-self: flex-start;
-  margin: 8px 8px 8px 0;
+  position: fixed;
+  inset: 12px 12px 12px auto;
+  z-index: 5;
+  max-width: calc(100vw - 120px);
 }
 
 /* Phone: the app bar is the h1, so the screen's own is not drawn. */

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { isRailed } from './destinations'
 import { mount, unmount } from './harness'
 
 afterEach(() => {
@@ -36,6 +37,15 @@ describe('the desktop shell', () => {
     expect(await screen.findByRole('complementary', { name: 'Sessions' })).toBeTruthy()
   })
 
+  /** Finding 112: five session boards draw the rail beside the screen. That it
+   *  is drawn there is the e2e's, which loads the session screen for it. */
+  it('counts a session screen among the places the rail belongs', () => {
+    for (const path of ['/', '/new', '/w/api']) expect(isRailed(path)).toBe(true)
+    for (const path of ['/fleet', '/machines', '/settings', '/w/api/repair']) {
+      expect(isRailed(path)).toBe(false)
+    }
+  })
+
   it('counts unseen events and GitHub items on the bell', async () => {
     mount('desktop')
     // Four events, none seen, plus one review and one issue.
@@ -57,7 +67,10 @@ describe('the desktop shell', () => {
 })
 
 describe('the tablet shell', () => {
-  it('has a rail with the New FAB on top and no pill group', async () => {
+  /** Finding 129: TabletDashboard.dc.html puts the bell and the avatar at the
+   *  foot of the rail and draws no search, so nothing of the chrome is left
+   *  outside a landmark (finding 121). */
+  it('has a rail with the New FAB on top, the bell and the avatar at its foot, and no search', async () => {
     mount('tablet', '/usage')
     await screen.findByRole('heading', { level: 1, name: 'Usage' })
     const rail = nav()
@@ -66,14 +79,23 @@ describe('the tablet shell', () => {
     expect(rail.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
     expect(document.querySelector('.m3-pill-group')).toBeNull()
     expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Search anything/ })).toBeNull()
+    expect(await rail.findByRole('button', { name: /Notifications/ })).toBeTruthy()
+    expect(await rail.findByRole('button', { name: 'Account' })).toBeTruthy()
   })
 
-  it('opens notifications as a side sheet', async () => {
+  it('opens notifications as a side sheet the bell names', async () => {
     mount('tablet')
     await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
-    // The sheet's chunk loads on the first press; nothing of it is drawn before.
-    expect(document.querySelector('aside[aria-label="Notifications"]')).toBeNull()
-    fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }))
+    const bell = await screen.findByRole('button', { name: /Notifications/ })
+    // Finding 121: the sheet is in the tree from the first paint, so what the
+    // bell says it controls is there to be found, open or closed.
+    const named = () => document.getElementById(bell.getAttribute('aria-controls') ?? '')
+    await waitFor(() => expect(named()?.getAttribute('aria-label')).toBe('Notifications'))
+    expect(bell.getAttribute('aria-expanded')).toBe('false')
+    expect(named()?.hidden).toBe(true)
+    fireEvent.click(bell)
+    expect(bell.getAttribute('aria-expanded')).toBe('true')
     const sheet = await screen.findByRole('complementary', { name: 'Notifications' })
     expect(sheet.hidden).toBe(false)
     expect(await within(sheet).findByText('api is waiting for trust')).toBeTruthy()

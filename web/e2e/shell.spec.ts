@@ -63,6 +63,9 @@ test.describe('the shell on busy', () => {
   })
 
   test('looks like the board', async ({ page, size }) => {
+    // The heading is drawn before the reads land, and a picture of the
+    // skeletons is a picture of no board at all.
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
     // The rail's ages arrive with the sessions read, after the heading.
     if (size === 'desktop') {
       await expect(page.getByRole('complementary', { name: 'Sessions' }).getByText('39m')).toBeVisible()
@@ -71,14 +74,16 @@ test.describe('the shell on busy', () => {
   })
 
   test('opens the palette with ⌘K, finds landing, and never runs a verb', async ({ page, size }) => {
-    test.skip(size === 'phone', 'the phone boards draw no search; the fleet lists everything')
+    test.skip(size !== 'desktop', 'only the desktop board draws a search; the rest list everything')
     await page.keyboard.press('ControlOrMeta+k')
     const dialog = page.getByRole('dialog', { name: 'Search' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('combobox').fill('lan')
     await expect(dialog.getByRole('option', { name: /^landing running/ })).toBeVisible()
     await expect(dialog.getByText('Never runs a verb.')).toBeVisible()
-    await screenshot(page, 'shell-palette', 'busy', size)
+    // The palette is a surface over the page: a full-page shot scrolls the
+    // page under it and sometimes catches the dashboard alone.
+    await screenshot(page, 'shell-palette', 'busy', size, { overlay: true })
 
     // `logs` and `tokens` are reads a person asked for, POSTed by design
     // (ADR-0019); `viewing` is presence. None is a verb.
@@ -95,10 +100,40 @@ test.describe('the shell on busy', () => {
     expect(verbs).toEqual([])
   })
 
+  /** Finding 129: the boards put the bell and the avatar at the foot of the
+   *  rail, inside the one landmark, and draw no search. */
+  test('gives the tablet no search, and its bell a sheet to name', async ({ page, size }) => {
+    test.skip(size !== 'tablet', 'the rail is the tablet shell')
+    await expect(page.getByRole('button', { name: /Search anything/ })).toHaveCount(0)
+    const bell = page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: /^Notifications/ })
+    await expect(bell).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Account' })).toBeVisible()
+    const id = (await bell.getAttribute('aria-controls'))!
+    await expect(page.locator(`#${id}`)).toHaveAttribute('aria-label', 'Notifications')
+    await expect(bell).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  /** Finding 112: five session boards draw the sessions rail beside the
+   *  screen, and the rail marks the one that is open. */
+  test('keeps the sessions rail beside a session', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'the rail is the desktop shell')
+    await page.goto('/w/landing?view=chat')
+    const rail = page.getByRole('complementary', { name: 'Sessions' })
+    await expect(rail).toBeVisible()
+    await expect(rail.getByRole('link', { name: /^landing running/ })).toHaveAttribute('data-tone', 'selected')
+  })
+
   test('opens notifications, and Mark all read empties Unread', async ({ page, size }) => {
     const bell = page.getByRole(size === 'phone' ? 'link' : 'button', { name: /^Notifications/ })
     await expect(bell).toHaveAccessibleName(/unread/)
+    // WCAG 1.4.10: the tablet's sheet floats over the page rather than taking
+    // 420 px out of it, so the page reflows for nobody when it opens.
+    const before = (await page.getByRole('main').boundingBox())!
     await bell.click()
+    if (size === 'tablet') {
+      const after = (await page.getByRole('main').boundingBox())!
+      expect(after.width).toBe(before.width)
+    }
     const list =
       size === 'desktop'
         ? page.getByRole('dialog', { name: 'Notifications' })

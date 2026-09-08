@@ -59,6 +59,7 @@ export function PalettePopup(props: { open: boolean; onOpenChange: (open: boolea
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const listId = useId()
+  const legendId = useId()
   const workspaces = loaded(useWorkspaces())
   const agents = useAgents(workspaces)
   const machines = useMachines()
@@ -134,6 +135,7 @@ export function PalettePopup(props: { open: boolean; onOpenChange: (open: boolea
         <TextField
           aria-activedescendant={flat.length ? `${listId}-${current}` : undefined}
           aria-controls={listId}
+          aria-describedby={legendId}
           aria-expanded="true"
           autoFocus
           label="Search anything"
@@ -172,7 +174,9 @@ export function PalettePopup(props: { open: boolean; onOpenChange: (open: boolea
                     key={entry.key}
                     onClick={() => go(entry.go)}
                     onMouseEnter={() => setActive(index)}
-                    render={<button type="button" role="option" />}
+                    // 4.1.2: the cursor is `aria-activedescendant` on the
+                    // field, so Tab must not walk the list as well.
+                    render={<button type="button" role="option" tabIndex={-1} />}
                     tone={index === current ? 'selected' : 'plain'}
                   >
                     {entry.key.startsWith('w:') ? (
@@ -206,8 +210,10 @@ export function PalettePopup(props: { open: boolean; onOpenChange: (open: boolea
           <span>
             {notes.length ? notes.join(' ') : 'Finds a workspace, a machine or a page. Never runs a verb.'}
           </span>
-          <span className="palette__legend" aria-hidden="true">
-            <Kbd>↑↓</Kbd> move <Kbd>Enter</Kbd> open <Kbd>Esc</Kbd> close
+          <span className="palette__legend" id={legendId}>
+            <Kbd aria-hidden="true">↑↓</Kbd>
+            <span className="m3-sr-only">Up and down arrows</span> move <Kbd>Enter</Kbd> open{' '}
+            <Kbd>Esc</Kbd> close
           </span>
         </div>
       </DialogPopup>
