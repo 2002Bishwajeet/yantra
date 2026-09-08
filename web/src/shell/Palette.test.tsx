@@ -54,6 +54,42 @@ describe('the command palette', () => {
     expect(scrolled.at(-1)).toBe(options[1])
   })
 
+  /** 4.1.2: the cursor is `aria-activedescendant` on the field, so the options
+   *  are not tab stops as well, and the keys the legend draws are named to a
+   *  reader rather than hidden from one. */
+  it('keeps one cursor, and says which keys move it', async () => {
+    mount('desktop')
+    await screen.findByRole('button', { name: /Search anything/ })
+    const dialog = await open()
+    for (const option of await dialog.findAllByRole('option')) {
+      expect(option.getAttribute('tabindex')).toBe('-1')
+    }
+    const described = dialog.getByRole('combobox').getAttribute('aria-describedby')
+    const legend = document.getElementById(described ?? '')
+    expect(legend?.textContent).toContain('Up and down arrows move')
+    expect(legend?.textContent).toContain('Enter open')
+    expect(legend?.textContent).toContain('Esc close')
+    expect(legend?.closest('[aria-hidden="true"]')).toBeNull()
+  })
+
+  /** Finding 122: the pane takes every key it is given, and Ctrl-K in it is
+   *  readline's kill-to-end-of-line rather than a summons. */
+  it('leaves Ctrl-K alone while the terminal pane holds focus', async () => {
+    mount('desktop')
+    await screen.findByRole('button', { name: /Search anything/ })
+    const pane = document.createElement('div')
+    pane.className = 'xterm'
+    const keys = document.createElement('textarea')
+    pane.append(keys)
+    document.body.append(pane)
+    keys.focus()
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull())
+    keys.blur()
+    pane.remove()
+    expect(await open()).toBeTruthy()
+  })
+
   it('lists machines and pages too', async () => {
     mount('desktop')
     await screen.findByRole('button', { name: /Search anything/ })

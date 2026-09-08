@@ -20,6 +20,9 @@ export function Palette() {
   useEffect(() => {
     const pressed = (event: KeyboardEvent) => {
       if (event.key !== 'k' || !(event.metaKey || event.ctrlKey)) return
+      // The terminal pane takes every key it is given, and Ctrl-K there is
+      // readline's kill-to-end-of-line. `.xterm` is the pane's own mark.
+      if (document.activeElement?.closest('.xterm')) return
       event.preventDefault()
       setArmed(true)
       setOpen((was) => !was)

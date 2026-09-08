@@ -511,6 +511,53 @@ duplicate rather than work.
 >    `console.spec.ts` also fails 6 of 8 at `waitForLoadState('networkidle')` on this host, on
 >    `main` as much as on a branch: the app polls, so the state it waits for never comes under load.
 
+> **2026-09-08, Y-360: the shell rows are closed, and one of them changes a screen's shape.**
+> Rows **102, 106, 111, 112, 121, 122, 129** and the shell half of **131**.
+>
+> - **111.** The shell mounts one live region at boot (`m3/live/`), and `ErrorSurface` writes its
+>   title and sentence into it. The region is a **pair** of `aria-live="assertive"` paragraphs that
+>   take turns: the same sentence written into one region twice is not a change, so a second
+>   identical error would go unsaid, and the one that gains the text is the one a reader hears.
+>   `ErrorSurface` keeps `role="alert"` and every one of the 48 assertions that finds it, and carries
+>   `aria-live="off"` so no reader hears the failure twice. `Live.test.tsx` is the second identical
+>   error. The copy is for a reader rather than for a query, so `src/test/setup.ts` has the text
+>   queries skip `[data-live]`; without that a screen's own test finds its error sentence twice.
+> - **102.** The palette's options take `tabIndex={-1}`: the cursor is `aria-activedescendant` on the
+>   field, and Tab no longer walks the list beside it. The legend is the field's `aria-describedby`,
+>   with the arrow glyph hidden and the words *Up and down arrows* in its place.
+> - **106.** `TabletNotifications.dc.html` draws the sheet **over** the page — `position: absolute`,
+>   inset 12 — and the build had it in the flow. It floats now, so the page keeps its width at every
+>   zoom, and `SideSheet` takes `min(420px, 100%)` so a narrow window shrinks it rather than
+>   overflowing. The e2e asserts the main region is the same width with the sheet open.
+> - **112.** The rail is drawn beside `/w/<name>` as the five session boards draw it. It stops at the
+>   name: `Repair.dc.html` and `WorkspaceNotFound.dc.html` draw no rail, and repair is a route under
+>   the session rather than a view of it.
+> - **129 and 121.** The bell and the avatar move to the foot of the rail, and the tablet draws no
+>   search. `NavigationRail` already had the `trailing` slot for them, with the comment naming the
+>   two; the shell had never used it. Nothing of the chrome is outside a landmark now. The sheet is
+>   in the tree from the first paint, so the bell's `aria-controls` names something that is there.
+>   **The cost is ⌘K on the tablet**: the shortcut lives in the search pill's component, and the
+>   boards draw no search there. A tablet with a keyboard loses the palette; the fleet and the rail
+>   list what it found. Say so here rather than keeping a control the boards do not draw.
+> - **122.** Ctrl-K is ignored while focus is inside `.xterm`, where it is readline's
+>   kill-to-end-of-line and the pane's to keep.
+> - **131.** Unreachable offers **Open Tailscale** beside Try again, as the board draws it and as the
+>   dashboard already did. Fleet's stray heading is another agent's half of the row.
+>
+> **Two things the specs got wrong, found by moving the baselines.** `shell.spec.ts` took the
+> palette's picture full page, and a full-page shot scrolls the page under a surface: the baseline
+> on `main` is a dashboard with no palette in it, and it fails against `main`'s own code on this
+> host. It is a viewport shot now. The same spec took the shell's picture before the reads landed,
+> so the first tablet baseline was a page of skeletons; it waits for them to go.
+>
+> **45 baselines moved**: 35 tablet ones, because the action row is gone from every tablet screen;
+> eight desktop ones — the rail beside the five session views, the delete confirm that opens over
+> one, Unreachable's new button and the palette; the phone's Unreachable; and
+> `shell-palette-busy-tablet.png` is deleted with the tablet's search. Each was re-rendered in
+> `mcr.microsoft.com/playwright:v1.63.0-noble` and read as an image. The first load is
+> **151 991 B (148.4 KiB)** against **152 263 B** on `main`: **272 B smaller**, because the tablet's
+> action row and the sheet's mount gate are gone and the live region is small.
+
 ### The 57 differences, and the twelve not worth a task
 
 Twelve of the 57 rows §1 marked *differs* do not become findings, and saying so is the point of a

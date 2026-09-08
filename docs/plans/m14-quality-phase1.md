@@ -23,6 +23,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `170b2a2` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
 | `e9136e2` | Rows 66, 67 and the `m3/` package rows of the boards review: 105, 110, 123, 124, 126, 130 |
 | `531093b` | Rows 101, 115, 125, 137 and the drawn half of 100: Usage's bar and its cached read, Fleet's Idle header, the gallery spec, the hero's tracking, the palette's verb count |
+| `5649eea` | The shell rows of the boards review: 102, 106, 111, 112, 121, 122, 129 and the shell half of 131 |
 
 ## Closed
 
@@ -108,7 +109,15 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 115 | No spec opened `/m3`, so the run that gates a merge never rendered the component gallery | `531093b` |
 | 125 | The dashboard hero assembled its own `font` shorthand and restated the role's tracking | `531093b` |
 | 137 | `Palette.test.tsx`'s *never runs a verb* counted the POSTed reads the e2e version excludes | `531093b` |
-| 84 | `web.yml` carried `continue-on-error: true` on the budget step | Y-370 — the ceiling now comes from a load-time target (200 KiB, [R16](../research/16-what-the-first-load-costs-a-phone.md) §6), `/` is 148.7 KiB against it, and the flag is gone |
+| 84 | `web.yml` carried `continue-on-error: true` on the budget step | Y-370 — the ceiling now comes from a load-time target (200 KiB, [R16](../research/16-what-the-first-load-costs-a-phone.md) §6), `/` is 148.4 KiB against it, and the flag is gone |
+| 102 | The palette's options were tab stops beside the field's `aria-activedescendant`, and the legend was `aria-hidden` | `5649eea` |
+| 106 | The docked 420 px sheet took the tablet's page down to 124 px at 200 % zoom (1.4.10) | `5649eea` |
+| 111 | `role="alert"` mounted with its text, so `ErrorSurface` announced by luck | `5649eea` |
+| 112 | The session screens lost the sessions rail the boards keep beside them | `5649eea` |
+| 121 | The tablet's action row sat outside every landmark, and its bell named no popup | `5649eea` |
+| 122 | Ctrl-K fired while the terminal pane held focus | `5649eea` |
+| 129 | The tablet drew a search the boards have not, and kept the bell and the avatar out of the rail | `5649eea` |
+| 131 | Unreachable offered no **Open Tailscale**; Fleet's stray heading is another row's half | `5649eea` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -118,7 +127,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | Row | Finding | Whose |
 | --- | --- | --- |
 | 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
-| 111 | `role="alert"` mounts with its text, so `ErrorSurface` announces by luck | **Refused in Y-360**: every empty-then-fill form puts the board a commit after the region, which makes 48 assertions in 15 files depend on when that commit lands; the synchronous form is barred by `oxlint`. The [boards ledger](m14-review-boards.md) §4 carries the measurement and names the shell-owned live region as the fix |
 | 138 | *Never runs a verb* opens and closes the palette once per option — about 3.5 s of Vitest's 5 s — so a loaded box times it out. One run in 25. Found while checking 137, and a different defect from it | Testing; it wants its own row |
 | 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |
 | 100 | Usage draws no per-model token counts, because `ModelSpend` carries `model`, `responses` and `cost` and nothing else | API. Y-360 drew the proportion bar and moved the read into the query cache; the counts need `crates/yantrad/src/write.rs:1387` to send them |
