@@ -362,6 +362,32 @@ one word.
 **43 findings. Twenty-three are accessibility failures** — 91 to 96, 99, 102 to 111 and 119 to 124.
 Rows 91 to 98 are what gates the close; everything from 119 down is an afternoon.
 
+### What Y-360 closed on the session screens
+
+`b739843` closes **103, 104, 108, 119, 120** and the `Terminal.css` half of
+**127**, and **133** on the canvas. Each carries a test: `Chat.test.tsx` for the
+status region that empties between two identical sends and for the foot that
+stops pinning, `Terminal.test.tsx` for the toolbar's one tab stop and for Ctrl
+surviving the focus it takes, `verbs.test.ts` and `Session.test.tsx` for the
+reason a disabled verb gives, and `session.spec.ts` for the same three in a
+browser at 390, 834 and 1440.
+
+**99 was closed before this sweep, and the table above never said so.** `72c8dea`
+(Y-352) mounted the terminal's `role="status"` for the life of the pane, and two
+tests already assert the end it now carries — the spent budget in
+`Terminal.test.tsx` and the refused session in `session.spec.ts`. The row is a
+duplicate rather than work.
+
+**127's `Settings.css:323` half is untouched**; another wave owns it.
+
+> **A negative finding, because it cost an e2e run to learn.** `light-dark()`
+> inside a custom property resolves against the **root's** `color-scheme`, not
+> against the element that reads the token. A call site therefore cannot flip a
+> token by declaring `color-scheme: dark` on itself, and cannot reach the other
+> theme's value through a `var()`. A call site that needs a colour no single
+> role gives it writes `light-dark()` over **two roles** in the property itself,
+> which is what `.terminal__pane` does now.
+
 ### The 57 differences, and the twelve not worth a task
 
 Twelve of the 57 rows §1 marked *differs* do not become findings, and saying so is the point of a
