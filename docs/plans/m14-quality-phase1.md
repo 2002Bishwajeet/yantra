@@ -22,6 +22,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | `f1193ec` | Rows 79 and 83: one announcement per error layout, and what the e2e clock freezes |
 | `170b2a2` | Row 136: axe waits for the transitions to end, so a surface is measured settled |
 | `e9136e2` | Rows 66, 67 and the `m3/` package rows of the boards review: 105, 110, 123, 124, 126, 130 |
+| `531093b` | Rows 101, 115, 125, 137 and the drawn half of 100: Usage's bar and its cached read, Fleet's Idle header, the gallery spec, the hero's tracking, the palette's verb count |
 
 ## Closed
 
@@ -103,6 +104,10 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 124 | `Switch`'s `label` was optional, so a nameless switch compiled | `e9136e2` |
 | 126 | Five radii in `m3/` were off the shape scale | `e9136e2` |
 | 130 | `Card[data-surface="inverse"]`, `m3/divider/` and `m3/tab-pills/` were drawn by nothing; `m3/snackbar/` stays, and the boards ledger says why | `e9136e2` |
+| 101 | PhoneFleet's Idle header printed the word twice — `idle IDLE 4` — because `State` supplied its own | `531093b` |
+| 115 | No spec opened `/m3`, so the run that gates a merge never rendered the component gallery | `531093b` |
+| 125 | The dashboard hero assembled its own `font` shorthand and restated the role's tracking | `531093b` |
+| 137 | `Palette.test.tsx`'s *never runs a verb* counted the POSTed reads the e2e version excludes | `531093b` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
@@ -116,6 +121,7 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 137 | `Palette.test.tsx`'s *never runs a verb* counts a POST the e2e version excludes: the transcript's own `/logs` read arrives late under load and the assertion sees it | Found in Y-363's CI; passes 12 of 12 alone and fails only when the box is saturated |
 | 111 | `role="alert"` mounts with its text, so `ErrorSurface` announces by luck | **Refused in Y-360**: every empty-then-fill form puts the board a commit after the region, which makes 48 assertions in 15 files depend on when that commit lands; the synchronous form is barred by `oxlint`. The [boards ledger](m14-review-boards.md) §4 carries the measurement and names the shell-owned live region as the fix |
 | 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |
+| 100 | Usage draws no per-model token counts, because `ModelSpend` carries `model`, `responses` and `cost` and nothing else | API. Y-360 drew the proportion bar and moved the read into the query cache; the counts need `crates/yantrad/src/write.rs:1387` to send them |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
@@ -145,6 +151,15 @@ re-renders it in the Playwright image in the same change.
 > baselines were re-rendered in `mcr.microsoft.com/playwright:v1.63.0-noble` and **not one of the
 > 112 PNGs changed**: `toHaveScreenshot` carries `maxDiffPixelRatio: 0.01`, and 4 px of padding on
 > the buttons of a page is under that. Row 77 stays open.
+> **Y-360 took 101, 115, 125, 137 and half of 100 on 2026-09-08.** The refused half is in
+> [m14-review-boards.md](m14-review-boards.md) §4: the daemon sends no per-model token counts, so
+> the browser has none to draw. Row 137's assertion now excludes the same POSTed reads the e2e
+> version excludes. **What the pass could not reproduce, it says:** 60 runs of `Palette.test.tsx`
+> on a saturated box never recorded a `/logs` POST, so the change rests on reading both tests
+> against ADR-0019 and not on a failure seen twice. Those runs found something else. *Never runs a
+> verb* opens and closes the palette once per option, which is about 3.5 s of Vitest's 5 s, and a
+> loaded box times it out — one run in 25 here, in the same file and for a different reason. That
+> is the timing row 137 said to leave alone, and it wants a row of its own.
 
 **Row 134, and the third diagnosis is the one that held.** The pane opened on the wrong column
 count, and `session-terminal-busy-phone` failed at six workers while passing at one. Two readings

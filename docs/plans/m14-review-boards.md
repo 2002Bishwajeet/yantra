@@ -421,6 +421,18 @@ duplicate rather than work.
 > §6.3 resolved as **S (40) inside a 48 px hit area**. §3 measured that hit area and found it whole,
 > so 2.5.8 is met with room. Raising Chip and Switch to 44 would break the sentence that governs §4
 > to satisfy a number inside it, and Compact's 40 px row is what a density is for.
+> **2026-09-08, Y-360: rows 101, 115 and 125 are closed, and row 100 is half refused.**
+> Usage draws the boards' proportion bar in both breakdowns, against the dearest row and never
+> against a sum, and the fan-out moved from `useState` into the query cache, so a walk to another
+> screen keeps ten ssh round trips. **The per-model token counts are refused, because the daemon
+> does not send them.** `ModelSpend` carries `model`, `responses` and `cost` and nothing else
+> (`crates/yantrad/src/write.rs:1387`), and a workspace's `total` counts the whole transcript, so a
+> workspace that used two models cannot be split. Row 100's *Whose* column already says **API**, and
+> that half is a Rust change this pass did not own. Row 101 draws the mark alone, because the
+> heading beside it is already the word. Row 115 makes `/m3` a spec at all three sizes with axe:
+> `vite build --mode e2e` is the only build that carries the gallery chunk, and that is the build
+> Playwright serves, so what ships still has the route and nothing behind it. Row 125 takes the
+> hero's face, weight and tracking from the role instead of restating them.
 
 ### The 57 differences, and the twelve not worth a task
 
