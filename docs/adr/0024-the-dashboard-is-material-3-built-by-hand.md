@@ -139,10 +139,10 @@ test, not a note.
 > 0.5. The boards' eyebrow must read as a label rather than a small title, and the case is what
 > does that.
 
-> **The number this proposes is 200 KiB (204,800 B), written 2026-09-08 by Y-370, and it is
-> awaiting the owner's pick.** [R16](../research/16-what-the-first-load-costs-a-phone.md) §6 prices
-> two alternatives. If the owner takes one, this blockquote and `web/scripts/budget.mjs` change
-> together and nothing else does.
+> **The owner picked 200 KiB (204,800 B) on 2026-09-08**, on the target *the dashboard is
+> interactive within two seconds on a cold load on Lighthouse's mobile preset*.
+> [R16](../research/16-what-the-first-load-costs-a-phone.md) §6 prices the two alternatives they
+> did not take: 175 KiB at 1.75 s, and 396 KiB for first paint over the relay.
 
 > **2026-09-08, Y-370: §7's first-load ceiling gets a target under it, and counts `index.html`.**
 > §7 holds D3 §9.1's 145 KiB and gives no reason a reader can check. Three premises moved

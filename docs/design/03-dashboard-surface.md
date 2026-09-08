@@ -752,10 +752,10 @@ reconcile. Keep them, and say in
 > Dashboard. So `web.yml` runs the budget with `continue-on-error: true` still, and
 > [Y-357](../../tracker.md#3-task-board) measures the wire rather than the build.
 
-> **The number below is 200 KiB (204,800 B), proposed 2026-09-08 by Y-370 and awaiting the owner's
-> pick.** It is written into `web/scripts/budget.mjs` so the gate is real; if the owner takes one of
-> the two alternatives in [R16](../research/16-what-the-first-load-costs-a-phone.md) §6, that file
-> and this blockquote change together and nothing else does.
+> **The owner picked the number below — 200 KiB (204,800 B) — on 2026-09-08.** The target under it
+> is *interactive within two seconds on a cold load on Lighthouse's mobile preset*, and
+> `web/scripts/budget.mjs` enforces it. [R16](../research/16-what-the-first-load-costs-a-phone.md)
+> §6 prices the two alternatives they did not take.
 >
 > **2026-09-08, Y-370: the ceiling was a ratchet with no target under it, and now it has one.**
 > This section set 145 KiB by measuring the branch it was written on and writing *hold, do not
