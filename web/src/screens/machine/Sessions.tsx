@@ -5,7 +5,7 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { Empty } from '@/screens/fleet/Empty'
@@ -37,10 +37,10 @@ export function Sessions(props: {
 
   return (
     <Card aria-labelledby="machine-sessions" className="machine__card">
-      <div className="machine__eyebrow">
-        <Eyebrow as="h2" id="machine-sessions">
+      <div className="machine__head">
+        <Text as="h2" emphasized id="machine-sessions" scale="title-large">
           Sessions
-        </Eyebrow>
+        </Text>
         {rows.length > 0 ? (
           <Text scale="body-small" tone="variant">
             {rows.length} tmux session{rows.length === 1 ? '' : 's'}

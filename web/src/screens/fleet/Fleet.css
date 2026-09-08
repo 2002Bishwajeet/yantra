@@ -20,6 +20,7 @@
 
 .fleet__looked {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -37,6 +38,7 @@
 
 .fleet__eyebrow > .m3-mono {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
 }
 
 .fleet__spacer {
@@ -115,6 +117,7 @@ a.fleet__machine:hover {
 .fleet__age {
   grid-area: age;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -197,6 +200,7 @@ a.fleet__machine:hover {
 .github__age {
   margin-left: auto;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -222,6 +226,7 @@ a.fleet__machine:hover {
 
 .github__count {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -252,6 +257,7 @@ a.fleet__machine:hover {
   flex: none;
   width: 232px;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
 }
 
 .github__title {
@@ -263,6 +269,7 @@ a.fleet__machine:hover {
   flex: none;
   width: 40px;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   text-align: right;
   color: var(--md-sys-color-on-surface-variant);
 }
@@ -300,6 +307,7 @@ a.fleet__machine:hover {
   padding: 8px 12px;
   border-radius: var(--md-sys-shape-corner-small);
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 60%, transparent);

@@ -15,6 +15,7 @@
 .notifications__count {
   margin-left: 6px;
   font-size: var(--md-sys-typescale-label-medium-size);
+  line-height: var(--md-sys-typescale-label-medium-line-height);
 }
 
 .notifications__label {
@@ -34,6 +35,7 @@
 .notifications__age {
   flex: none;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 

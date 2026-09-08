@@ -14,6 +14,7 @@
 
 .usage__as {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -40,7 +41,7 @@
   gap: 10px;
 }
 
-.usage__eyebrow {
+.usage__head {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -89,15 +90,20 @@
 .usage__name {
   font-size: var(--md-sys-typescale-title-medium-size);
   font-weight: 500;
+  line-height: var(--md-sys-typescale-title-medium-line-height);
+  letter-spacing: var(--md-sys-typescale-title-medium-tracking);
 }
 
 .usage__where {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
 }
 
 .usage__cost {
   font-size: var(--md-sys-typescale-title-medium-size);
+  line-height: var(--md-sys-typescale-title-medium-line-height);
 }
 
 .usage__said {
@@ -118,6 +124,7 @@
 
 .usage__reason {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -135,6 +142,8 @@
   width: 100%;
   border-collapse: collapse;
   font-size: var(--md-sys-typescale-body-medium-size);
+  line-height: var(--md-sys-typescale-body-medium-line-height);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
 }
 
 .usage__table th,
@@ -148,6 +157,7 @@
 .usage__table th {
   font-size: var(--md-sys-typescale-label-small-size);
   font-weight: 500;
+  line-height: var(--md-sys-typescale-label-small-line-height);
   letter-spacing: 0.8px;
   text-transform: uppercase;
   color: var(--md-sys-color-on-surface-variant);

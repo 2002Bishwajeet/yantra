@@ -19,6 +19,7 @@
 
 .repair__path {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
   overflow-wrap: anywhere;
 }
@@ -81,6 +82,7 @@
 
 .repair__count {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 

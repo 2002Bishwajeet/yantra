@@ -9,7 +9,7 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { type FormFactor, useFormFactor } from '@/shell/formFactor'
@@ -50,10 +50,10 @@ function ByWorkspace(props: { rows: Row[] }) {
   const most = spent[0]?.cost ?? 0
   return (
     <Card aria-labelledby="usage-workspaces" className="usage__card">
-      <div className="usage__eyebrow">
-        <Eyebrow as="h2" id="usage-workspaces">
+      <div className="usage__head">
+        <Text as="h2" emphasized id="usage-workspaces" scale="title-large">
           By workspace
-        </Eyebrow>
+        </Text>
         <Text scale="body-small" tone="variant">
           {spent.length} workspace{spent.length === 1 ? '' : 's'} read
         </Text>
@@ -91,10 +91,10 @@ function ByModel(props: { rows: Row[] }) {
   const most = models[0]?.cost ?? 0
   return (
     <Card aria-labelledby="usage-models" className="usage__card">
-      <div className="usage__eyebrow">
-        <Eyebrow as="h2" id="usage-models">
+      <div className="usage__head">
+        <Text as="h2" emphasized id="usage-models" scale="title-large">
           By model
-        </Eyebrow>
+        </Text>
         <Text scale="body-small" tone="variant">
           {models.length} model{models.length === 1 ? '' : 's'}
         </Text>
@@ -176,10 +176,10 @@ function Read(props: { fanned: Fanned; factor: FormFactor }) {
       </div>
       <ErrorBoundary eyebrow="Usage" title="The sessions table could not be drawn">
         <Card aria-labelledby="usage-sessions" className="usage__card">
-          <div className="usage__eyebrow">
-            <Eyebrow as="h2" id="usage-sessions">
+          <div className="usage__head">
+            <Text as="h2" emphasized id="usage-sessions" scale="title-large">
               Sessions
-            </Eyebrow>
+            </Text>
             <Text scale="body-small" tone="variant">
               {table.length} read · most expensive first
             </Text>

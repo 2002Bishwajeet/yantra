@@ -19,7 +19,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { List, ListItem, ListValue } from '@/m3/list/List'
 import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Looked } from '@/screens/fleet/age'
 import { Empty } from '@/screens/fleet/Empty'
@@ -66,10 +66,10 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
   const { rows, pending, machine } = props
   return (
     <Card aria-labelledby="machine-workspaces" className="machine__card">
-      <div className="machine__eyebrow">
-        <Eyebrow as="h2" id="machine-workspaces">
+      <div className="machine__head">
+        <Text as="h2" emphasized id="machine-workspaces" scale="title-large">
           Workspaces on this machine
-        </Eyebrow>
+        </Text>
         {rows.length > 0 ? <Mono>{rows.length}</Mono> : null}
       </div>
       {pending ? (
@@ -194,10 +194,10 @@ export function Machine() {
       <div className="machine__columns">
         <ErrorBoundary eyebrow={name} title="About could not be drawn">
           <Card aria-labelledby="machine-about" className="machine__card">
-            <div className="machine__eyebrow">
-              <Eyebrow as="h2" id="machine-about">
+            <div className="machine__head">
+              <Text as="h2" emphasized id="machine-about" scale="title-large">
                 About
-              </Eyebrow>
+              </Text>
             </div>
             {one ? (
               <About machine={one} />
@@ -212,10 +212,10 @@ export function Machine() {
 
         <ErrorBoundary eyebrow={name} title="Readiness could not be drawn">
           <Card aria-labelledby="machine-readiness" className="machine__card">
-            <div className="machine__eyebrow">
-              <Eyebrow as="h2" id="machine-readiness">
+            <div className="machine__head">
+              <Text as="h2" emphasized id="machine-readiness" scale="title-large">
                 Readiness
-              </Eyebrow>
+              </Text>
               {readiness.looked === 'ok' ? (
                 <Mono>
                   {counted.present} of {counted.total} · asked {readiness.age_seconds}s ago

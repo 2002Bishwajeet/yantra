@@ -74,6 +74,7 @@
 .session__unreachable {
   display: block;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -108,6 +109,7 @@
 
 .session__read {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -164,6 +166,8 @@
   gap: 10px;
   padding: 0 6px;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -244,6 +248,7 @@
 .turns__said {
   display: block;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -334,6 +339,7 @@
 .chat__option-hint {
   flex: none;
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-primary-container);
 }
 
