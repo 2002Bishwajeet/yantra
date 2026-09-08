@@ -115,7 +115,7 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
     <div className="ns__starting">
       <header className="ns__recap">
         <Tile name={plan.name} />
-        <Text as="h2" emphasized scale="title-large">
+        <Text render={<h2 />} emphasized scale="title-large">
           Starting {plan.name}
         </Text>
         <Text scale="body-medium" tone="variant">
@@ -124,7 +124,7 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
       </header>
 
       <Card className="ns__card">
-        <Eyebrow as="h3">Four things, in order</Eyebrow>
+        <Eyebrow render={<h3 />}>Four things, in order</Eyebrow>
         {/* 4.1.3: the stages advance on a poll with no navigation, so the
             board's progress track is also what says they moved. */}
         <div className="ns__progress" role="status">
@@ -157,7 +157,7 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
         </ol>
       </Card>
 
-      <Text as="p" className="ns__note" scale="body-medium" tone="variant">
+      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         {plan.clone
           ? `the clone keeps going on ${plan.machine} if you leave this page; open New session again to finish, and the clone already running is picked up.`
           : 'the session keeps going if you leave this page.'}

@@ -134,7 +134,7 @@ function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => vo
     >
       {logout.error ? (
         <div aria-live="polite" className="settings__outcome">
-          <Text as="p" scale="body-medium" tone="error" emphasized>
+          <Text render={<p />} scale="body-medium" tone="error" emphasized>
             {logout.error.describe()}
           </Text>
           <Mono className="settings__said">{logout.error.said}</Mono>

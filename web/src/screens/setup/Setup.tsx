@@ -174,7 +174,7 @@ export function Setup() {
   return (
     <div className="setup">
       <div className="setup__head">
-        <Text as="h1" emphasized scale="display-small">
+        <Text render={<h1 />} emphasized scale="display-small">
           Set up Yantra
         </Text>
         <Text scale="body-medium" tone="variant">

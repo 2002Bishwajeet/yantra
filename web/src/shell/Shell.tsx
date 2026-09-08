@@ -314,10 +314,10 @@ export function Nowhere() {
   useScreenTitle('Nowhere')
   return (
     <div className="shell__nowhere">
-      <Text as="h1" scale="headline-small">
+      <Text render={<h1 />} scale="headline-small">
         Nowhere
       </Text>
-      <Text as="p" scale="body-medium" tone="variant">
+      <Text render={<p />} scale="body-medium" tone="variant">
         Nothing is at {location.pathname}. The dashboard is where the sessions and machines are.
       </Text>
       <Button role="link" render={<Link to="/" />} variant="tonal">

@@ -38,7 +38,7 @@ export function Sessions(props: {
   return (
     <Card aria-labelledby="machine-sessions" className="machine__card">
       <div className="machine__head">
-        <Text as="h2" emphasized id="machine-sessions" scale="title-large">
+        <Text render={<h2 />} emphasized id="machine-sessions" scale="title-large">
           Sessions
         </Text>
         {rows.length > 0 ? (
@@ -115,7 +115,7 @@ export function Sessions(props: {
         </ul>
       )}
 
-      <Text as="p" className="machine__note" scale="body-small" tone="variant">
+      <Text render={<p />} className="machine__note" scale="body-small" tone="variant">
         Kill asks first; it cannot be undone. A session no workspace claims is not adopted: its
         repository is not on the wire, so a workspace for it starts at New session.
       </Text>

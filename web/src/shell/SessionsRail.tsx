@@ -25,7 +25,7 @@ function Group(props: { label: string; rows: AgentRow[]; sessions: Reading<Machi
   if (rows.length === 0) return null
   return (
     <section className="rail__group" aria-label={label}>
-      <Eyebrow as="h3">{label}</Eyebrow>
+      <Eyebrow render={<h3 />}>{label}</Eyebrow>
       <ul className="rail__list">
         {rows.map((row) => {
           const { mark, words } = phrase(row.status)

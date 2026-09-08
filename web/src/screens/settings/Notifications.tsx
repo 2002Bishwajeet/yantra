@@ -186,10 +186,10 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
         <div aria-live="polite" className="settings__outcome">
           {relay.isSuccess ? (
             <>
-              <Text as="p" scale="body-medium" emphasized>
+              <Text render={<p />} scale="body-medium" emphasized>
                 The test message arrived at the relay.
               </Text>
-              <Text as="p" scale="body-small" tone="variant">
+              <Text render={<p />} scale="body-small" tone="variant">
                 It is written in {FILE}. The daemon reads that file when systemd starts it, so run{' '}
                 <Mono>sudo systemctl restart yantrad</Mono> on the appliance before it notifies you from this relay.
               </Text>
@@ -197,7 +197,7 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
           ) : null}
           {relay.error ? (
             <>
-              <Text as="p" scale="body-medium" tone="error" emphasized>
+              <Text render={<p />} scale="body-medium" tone="error" emphasized>
                 {relay.error.kind === 'network' ? refusal(undefined) : refusal(relay.error.status)}
               </Text>
               {/* The daemon's own words: they name the file or what the relay

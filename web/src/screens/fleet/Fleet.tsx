@@ -73,7 +73,7 @@ export function Fleet() {
   if (nothing) {
     return (
       <>
-        <Text as="h1" emphasized scale="display-small">
+        <Text render={<h1 />} emphasized scale="display-small">
           Fleet
         </Text>
         <ErrorSurface.Page
@@ -91,7 +91,7 @@ export function Fleet() {
     <div className="fleet">
       <div className="fleet__head">
         <div className="fleet__title">
-          <Text as="h1" emphasized scale="display-small">
+          <Text render={<h1 />} emphasized scale="display-small">
             Fleet
           </Text>
           <Looked className="fleet__looked" reads={[machines, listed, sessions, agents]} />
@@ -212,7 +212,7 @@ function Group(props: {
   return (
     <Card aria-labelledby={`fleet-${band}`} className="fleet__card" surface={surface}>
       <div className="fleet__eyebrow">
-        <Eyebrow as="h2" id={`fleet-${band}`}>
+        <Eyebrow render={<h2 />} id={`fleet-${band}`}>
           {title}
         </Eyebrow>
         {count > 0 ? <Mono>{count}</Mono> : null}
@@ -248,7 +248,7 @@ function Idle(props: { rows: WorkRow[]; sessions: Sessions; limit: number; pendi
       <div className="fleet__eyebrow">
         {/* The mark alone: the heading beside it is already the word (D3 §6). */}
         {limit === 0 ? <Mark size="small" state="idle" /> : null}
-        <Eyebrow as="h2" id="fleet-idle">
+        <Eyebrow render={<h2 />} id="fleet-idle">
           Idle
         </Eyebrow>
         {rows.length > 0 ? <Mono>{rows.length}</Mono> : null}

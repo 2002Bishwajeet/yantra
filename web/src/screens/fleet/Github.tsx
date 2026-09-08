@@ -27,7 +27,7 @@ export function Github(props: { attention: Reading<Attention> }) {
   return (
     <section aria-labelledby="fleet-github" className="github">
       <div className="github__head">
-        <Text as="h3" emphasized id="fleet-github" scale="title-small">
+        <Text render={<h3 />} emphasized id="fleet-github" scale="title-small">
           On GitHub
         </Text>
         {attention.looked === 'ok' && attention.data.notifications > 0 ? (
@@ -86,7 +86,7 @@ function Group(props: { items: Item[]; title: string; verb: string }) {
   return (
     <div className="github__group">
       <div className="github__label">
-        <Text as="h4" scale="body-small" tone="variant">
+        <Text render={<h4 />} scale="body-small" tone="variant">
           {title}
         </Text>
         <Mono className="github__count">{items.length}</Mono>

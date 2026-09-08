@@ -32,7 +32,7 @@ export function About() {
     <>
       <section aria-label="Daemon" className="settings__about">
         {facts ? (
-          <Text as="p" className="settings__version" scale="title-large" emphasized>
+          <Text render={<p />} className="settings__version" scale="title-large" emphasized>
             yantrad <Mono>{facts.version}</Mono> · built {built(facts.built)} · running
           </Text>
         ) : (

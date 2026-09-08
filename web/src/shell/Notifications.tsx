@@ -81,7 +81,7 @@ export function NotificationsList(props: { onOpen?: () => void }) {
       {(['today', 'earlier'] as const).map((when) =>
         shown[when].length ? (
           <section aria-label={when === 'today' ? 'Today' : 'Earlier'} key={when}>
-            <Eyebrow as="h3" className="notifications__label">
+            <Eyebrow render={<h3 />} className="notifications__label">
               {when === 'today' ? 'Today' : 'Earlier'}
             </Eyebrow>
             <ul className="notifications__list">

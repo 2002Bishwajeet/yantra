@@ -17,7 +17,7 @@ function About(props: { machine: Machine }) {
   const { machine } = props
   const beat = machine.heartbeat
   return (
-    <Text as="p" className="machines__about" scale="body-small" tone="variant">
+    <Text render={<p />} className="machines__about" scale="body-small" tone="variant">
       {machine.os}
       {beat ? ` · ${beat.arch}` : ''}
       {machine.address ? (
@@ -79,7 +79,7 @@ export function MachineCard(props: MachineCardProps) {
   return (
     <Card aria-labelledby={`machine-${machine.name}`} className="machines__card">
       <div className="machines__head">
-        <Text as="h2" emphasized id={`machine-${machine.name}`} scale="title-large">
+        <Text render={<h2 />} emphasized id={`machine-${machine.name}`} scale="title-large">
           {machine.name}
         </Text>
         <Chip tone={state === 'failed' ? 'error' : 'lowest'}>

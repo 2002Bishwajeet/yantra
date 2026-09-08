@@ -49,7 +49,7 @@ export function StepSource(props: { form: SessionForm; values: Values }) {
   }
   return (
     <Card className="ns__card">
-      <Eyebrow as="h2">Where the code comes from</Eyebrow>
+      <Eyebrow render={<h2 />}>Where the code comes from</Eyebrow>
       <div aria-label="Where the code comes from" className="ns__choices" role="group">
         <Choice
           icon={<GitBranch />}
@@ -76,7 +76,7 @@ export function StepSource(props: { form: SessionForm; values: Values }) {
       </div>
       {values.provider === 'github' ? <GithubRepos form={form} values={values} /> : null}
       {values.provider === 'local' ? <LocalDirs form={form} values={values} /> : null}
-      <Text as="p" className="ns__note" scale="body-medium" tone="variant">
+      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         {values.provider === 'local'
           ? `the session's working directory is this folder on ${values.machine}. Nothing is cloned and nothing is written into it.`
           : 'a repository that is not on the machine is cloned under ~/Github, after the provider it came from. Local directory lets you pick or make any folder instead.'}

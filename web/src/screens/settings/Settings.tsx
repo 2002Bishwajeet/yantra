@@ -62,7 +62,7 @@ function Index() {
       <h1>Settings</h1>
       {GROUPS.map((group) => (
         <section aria-label={group} className="settings__group" key={group}>
-          <Eyebrow as="h2" className="settings__eyebrow">
+          <Eyebrow render={<h2 />} className="settings__eyebrow">
             {group}
           </Eyebrow>
           <List>
@@ -94,10 +94,10 @@ function Pane(props: { category: Category; level: 1 | 2 }) {
   return (
     <section aria-labelledby="settings-category" className="settings__pane" key={category.id}>
       <header className="settings__head">
-        <Text as={level === 1 ? 'h1' : 'h2'} id="settings-category" scale="headline-small" emphasized>
+        <Text render={level === 1 ? <h1 /> : <h2 />} id="settings-category" scale="headline-small" emphasized>
           {label}
         </Text>
-        <Text as="p" scale="body-medium" tone="variant">
+        <Text render={<p />} scale="body-medium" tone="variant">
           {blurb}
         </Text>
       </header>

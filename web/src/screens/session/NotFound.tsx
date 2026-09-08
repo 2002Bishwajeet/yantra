@@ -11,16 +11,16 @@ export function NotFound(props: { name: string }) {
   const { name } = props
   return (
     <>
-      <Text as="h1" scale="display-small" emphasized clip>
+      <Text render={<h1 />} scale="display-small" emphasized clip>
         {name}
       </Text>
       <Card className="session__notfound">
         <State state="unknown">not found</State>
         <div>
-          <Text as="h2" scale="title-large">
+          <Text render={<h2 />} scale="title-large">
             No workspace is called {name}.
           </Text>
-          <Text as="p" scale="body-medium" tone="variant">
+          <Text render={<p />} scale="body-medium" tone="variant">
             The fleet lists the ones there are.
           </Text>
         </div>

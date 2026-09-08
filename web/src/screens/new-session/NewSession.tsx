@@ -84,7 +84,7 @@ export function NewSession() {
       <header className="ns__head">
         <h1 className="ns__title">New session</h1>
         {step === 1 ? (
-          <Text as="p" className="ns__lead" scale="body-medium" tone="variant">
+          <Text render={<p />} className="ns__lead" scale="body-medium" tone="variant">
             a name, a machine, a repository, and what to start in it
           </Text>
         ) : (

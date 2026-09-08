@@ -73,7 +73,7 @@ export function StepName(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
   return (
     <Card className="ns__card">
-      <Eyebrow as="h2">Name</Eyebrow>
+      <Eyebrow render={<h2 />}>Name</Eyebrow>
       <div className="ns__name">
         <Tile className="ns__preview" name={values.name || '?'} />
         <form.Field name="name" validators={{ onChange: ({ value }) => nameError(value) }}>
@@ -114,9 +114,9 @@ export function StepName(props: { form: SessionForm; values: Values }) {
         </form.Field>
       </div>
 
-      <Eyebrow as="h2">Machine</Eyebrow>
+      <Eyebrow render={<h2 />}>Machine</Eyebrow>
       <Machines form={form} values={values} />
-      <Text as="p" className="ns__note" scale="body-medium" tone="variant">
+      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         the session runs here; the repository is looked for on this machine in the next step.
       </Text>
     </Card>

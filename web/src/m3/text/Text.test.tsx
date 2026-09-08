@@ -5,7 +5,7 @@ import { Eyebrow, Mono, Text } from './Text'
 describe('Text', () => {
   it('names its scale on the element and emphasis as an attribute', () => {
     render(
-      <Text scale="title-large" emphasized as="h2">
+      <Text scale="title-large" emphasized render={<h2 />}>
         Running
       </Text>,
     )
@@ -30,7 +30,7 @@ describe('Text', () => {
     render(
       <>
         <Mono>3h 41m</Mono>
-        <Eyebrow as="h2">Needs you</Eyebrow>
+        <Eyebrow render={<h2 />}>Needs you</Eyebrow>
       </>,
     )
     expect(screen.getByText('3h 41m').className).toBe('m3-mono')

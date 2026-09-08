@@ -61,7 +61,7 @@ export function Appearance() {
   return (
     <>
       <section className="settings__group" aria-labelledby="appearance-layout">
-        <Eyebrow as="h3" className="settings__eyebrow" id="appearance-layout">
+        <Eyebrow render={<h3 />} className="settings__eyebrow" id="appearance-layout">
           Layout
         </Eyebrow>
         <div aria-label="Layout" className="settings__choices" role="group">
@@ -92,13 +92,13 @@ export function Appearance() {
             </svg>
           </Choice>
         </div>
-        <Text as="p" className="settings__note" scale="body-small" tone="variant">
+        <Text render={<p />} className="settings__note" scale="body-small" tone="variant">
           rows never drop below 44px in either
         </Text>
       </section>
 
       <section className="settings__group" aria-labelledby="appearance-colour">
-        <Eyebrow as="h3" className="settings__eyebrow" id="appearance-colour">
+        <Eyebrow render={<h3 />} className="settings__eyebrow" id="appearance-colour">
           Colour
         </Eyebrow>
         <div className="settings__seeds">
@@ -147,13 +147,13 @@ export function Appearance() {
             </li>
           ))}
         </ul>
-        <Text as="p" className="settings__note" scale="body-small" tone="variant">
+        <Text render={<p />} className="settings__note" scale="body-small" tone="variant">
           one seed recolours the whole scheme; state marks keep their shapes so nothing depends on colour alone
         </Text>
       </section>
 
       <section className="settings__group" aria-labelledby="appearance-theme">
-        <Eyebrow as="h3" className="settings__eyebrow" id="appearance-theme">
+        <Eyebrow render={<h3 />} className="settings__eyebrow" id="appearance-theme">
           Theme
         </Eyebrow>
         <Segmented label="Theme" onValueChange={(value) => writePrefs({ theme: value as Prefs['theme'] })} value={theme}>
@@ -171,7 +171,7 @@ export function Appearance() {
           <Preview scheme="light" />
           <Preview scheme="dark" />
         </div>
-        <Text as="p" className="settings__note" scale="body-small" tone="variant">
+        <Text render={<p />} className="settings__note" scale="body-small" tone="variant">
           dark follows the same seed · these are the only preferences; everything else is configuration
         </Text>
       </section>
@@ -212,7 +212,7 @@ function Preview(props: { scheme: 'light' | 'dark' }) {
       </Text>
       <Card className="settings__hero" surface="primary">
         <Eyebrow>Needs you</Eyebrow>
-        <Text as="p" className="settings__hero-number" scale="display-medium" emphasized>
+        <Text render={<p />} className="settings__hero-number" scale="display-medium" emphasized>
           3
         </Text>
         <Text scale="body-medium">things are waiting on you</Text>

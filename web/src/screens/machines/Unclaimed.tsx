@@ -22,7 +22,7 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
       surface="tertiary"
     >
       <div className="machines__eyebrow">
-        <Eyebrow as="h2" id="machines-unclaimed">
+        <Eyebrow render={<h2 />} id="machines-unclaimed">
           Worth a look
         </Eyebrow>
         {held.length > 0 ? (
