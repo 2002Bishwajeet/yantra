@@ -16,9 +16,9 @@ M14 closes first. The release is the milestone's proof, not a way around it.
 
 | Gate | Row | State on 2026-09-08 |
 | --- | --- | --- |
-| The first load is under 145 KiB | Y-357 | 147.6 KiB, in progress |
-| The budget is a failing test, not a note | ledger row 84 | rides with Y-357 |
-| The review nits are closed or refused | Y-360 | 4 of 39 closed |
+| The first load is inside its ceiling | Y-370 | 147.6 KiB, and the ceiling is being replaced |
+| The budget is a failing test, not a note | ledger row 84 | rides with Y-370 |
+| The review nits are closed or refused | Y-360 | three sweeps in flight |
 | e2e, axe and the budget green at three sizes | Y-352 | two of three |
 | The whole-system documents say what shipped | Y-369 | not started |
 
