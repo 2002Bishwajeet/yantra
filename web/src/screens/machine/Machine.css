@@ -14,6 +14,7 @@
 
 .machine__looked {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -40,15 +41,16 @@
   gap: 10px;
 }
 
-.machine__eyebrow {
+.machine__head {
   display: flex;
   align-items: baseline;
   gap: 10px;
   padding: 0 4px;
 }
 
-.machine__eyebrow .m3-mono {
+.machine__head .m3-mono {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
 }
 
 .machine__about {
@@ -107,16 +109,20 @@
 .machine__name {
   font-size: var(--md-sys-typescale-title-medium-size);
   font-weight: 500;
+  line-height: var(--md-sys-typescale-title-medium-line-height);
+  letter-spacing: var(--md-sys-typescale-title-medium-tracking);
   color: inherit;
 }
 
 .machine__where {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 
 .machine__age {
   font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 

@@ -627,7 +627,9 @@
   overflow-wrap: anywhere;
 }
 
-/* BRIEF.md: every age, duration, token count and amount is mono. */
+/* BRIEF.md: every age, duration, token count and amount is mono. A role on one
+   of these gives the size and the leading only — `font:` would reset this face
+   and the tabular figures — and the weight and the tracking stay the face's. */
 .m3-mono {
   font-family: var(--md-ref-typeface-mono);
   font-weight: 500;

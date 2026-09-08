@@ -625,6 +625,82 @@ duplicate rather than work.
 > changed, because `maxDiffPixelRatio: 0.01` hides one word. The first load is **151 988 B
 > (148.4 KiB)**, 3 B under what the block above records for `main`.
 
+> **2026-09-09, Y-360: row 116 closes with two sites refused, and row 117 closes seven of its 29
+> and refuses the other 22.** The screens stop inheriting the shell's leading, and the seven cards
+> the boards title take a title again.
+>
+> - **116 — the abstraction the row asks about already exists twice, and neither form fits.**
+>   `tokens.css` ships each role as a `font` shorthand (`--md-sys-typescale-body-small`), and
+>   `m3/text/Text.tsx` already draws one rule per role on those shorthands. **Thirty-one of the 39
+>   sites style a `<Mono>`** — an age, a count, a path, an amount — and the `font` shorthand resets
+>   `font-family` **and** `font-variant-numeric`, so it would take the mono face and the tabular
+>   figures off every one of them. A third abstraction would not change that. So each site takes
+>   the role's `line-height` beside the `font-size` it already read: **33 declarations in ten
+>   files**, and no call site moves to a component.
+> - **116 — the mono face keeps its own tracking, and that is a measurement.** The first pass gave
+>   all 39 the role's `letter-spacing` as well. On the tablet that widened Usage's mono subtitle by
+>   about 24 px and wrapped **Read again** onto a line of its own. `.m3-mono` already overrides the
+>   role's weight, because a weight belongs to a face; so does a tracking, and Material's numbers
+>   are for the plain face. **Eight sites wear the role's own face**: seven take the role's
+>   tracking, and `.usage__table th` keeps the boards' 0.8 px. The thirty-one mono sites take the
+>   size and the leading only, and `tokens.css` says why beside `.m3-mono`.
+> - **116 — six of the 39 needed no leading, and two are refused.** The dashboard's stamp rule and
+>   Setup's two already paired the role's line-height. `.session-terminal__age` declares 18 px of
+>   its own, which is a number off the scale rather than an inherited one, and no row names it.
+>   **The two refusals are the repair editor**: `.repair__gutter span` and `.repair__marker` sit
+>   inside a mirror whose gutter, lines and textarea share one 26 px metric (`--repair-line`), and
+>   a role's 16 px leading is not that metric. The mirror and the textarea have to agree line for
+>   line, so the metric is the editor's to own.
+> - **117 — the boards draw two things, so 29 cannot agree.** `Fleet.dc.html:74,144,200` writes
+>   `<h2 class="eyebrow">Needs you</h2>` — the board itself makes the band label a heading and
+>   draws it at 12 px uppercase. `Main.dc.html:174,265,281`, `Machines.dc.html:322`,
+>   `Settings.dc.html:78,86,98,119`, `NewSession.dc.html:91,114`, `NewSessionSource.dc.html:83` and
+>   `NewSessionStart.dc.html:82,102` draw the same. **A card's own title is the other thing**, and
+>   the boards draw it at 18 px/600 — `Machine.dc.html:90,108,177,206` and `Usage.dc.html:77,106,132`
+>   — which ADR-0024 §4 maps onto **title-large**. So the eyebrow stays a band label at **15 of the
+>   22 sites**, and the seven that head a `Card` take `title-large` emphasized: About, Readiness,
+>   Workspaces on this machine and Sessions on `/m/<name>`, and By workspace, By model and Sessions
+>   on `/usage`. That is §1 row 22's *card titles became eyebrows*, plus the same defect on Usage,
+>   which §1 did not name. The wrapper class each one sat in is `machine__head` and `usage__head`, because
+>   `__eyebrow` had stopped being true.
+> - **117 — the uppercase label is not the screen-reader problem the row expects.** The accessible
+>   name comes from the DOM text, and `.m3-eyebrow` puts the case in CSS, so a reader hears
+>   *Needs you*, not *NEEDS YOU*. That is the practice the guidance asks for. The measured residual
+>   risk is narrow: VoiceOver with Chrome reads a **short** CSS-uppercased string as an initialism
+>   — [Stefan Judis](https://www.stefanjudis.com/today-i-learned/text-transforms-affects-screen-readers-too/)
+>   measured a button labelled *Add* being read *A.D.D.* — and Yantra's eyebrows are two- and
+>   three-word phrases. No WCAG criterion governs a heading's size, and every one of the
+>   22 is already a real `<h2>` with a real `id`, which is more than several boards give. **The
+>   defect row 117 found is visual**, and the seven that changed carry no semantic change at all.
+>
+> **Three things this sweep found that no row holds.**
+>
+> 1. **The shell's lazy chrome is not in the picture.** `--update-snapshots=all` writes ten desktop
+>    baselines with **no bell and no account avatar** — every `/settings/*` pane, `/m/<name>`,
+>    `/w/<name>/repair`, `/new` and the empty dashboard — and the phone's dashboard and the
+>    tablet's repair lose the avatar too. `shell/Shell.tsx:101-107,135-137,176-178`
+>    wrap `lazy(Account)` and `lazy(BellPopover)` in `Suspense`, and on a route with a large chunk
+>    of its own they are still the fallback when the shot is taken. **This reproduces on `main`**:
+>    regenerating `settings-about-busy-desktop.png` from `main`'s own source draws the same empty
+>    corner. No spec ever fails on it — the avatar is 321 dark pixels of 1,474,560, and
+>    `maxDiffPixelRatio: 0.01` is 46 times that — so the committed baselines are the stale ones.
+>    They are kept as the run drew them; the fix is a shell row.
+> 2. **The confirm baselines were stale by a whole word.** `confirm-delete-busy-desktop` and
+>    `-tablet` still pictured `prices as of 2026-08-11`, which the block above changed to
+>    `prices as of 11 Aug` on 2026-09-08. The threshold hid it for a day. The terminal pane's
+>    column count and the dialog's opening focus ring also differ between two runs of the same
+>    code, which is why `confirm-kill-busy-desktop` moved without a line of its own changing.
+> 3. **Twenty-nine sites take the role shorthand and still inherit the shell's tracking.** They
+>    satisfy row 116 — they have the leading — but `font:` carries no `letter-spacing`, so a
+>    `body-small` line drawn with `font: var(--md-sys-typescale-body-small)` keeps `.shell`'s
+>    0.2 px instead of the role's 0.4. Only the ones on the role's own face are wrong, by the rule
+>    above; a row of its own can count them. Not this one — they already have the leading.
+>
+> **62 baselines moved**, each re-rendered in `mcr.microsoft.com/playwright:v1.63.0-noble` and read
+> as an image against its predecessor. Ten more were rewritten and put back, because the only
+> difference was antialiasing. The first load is **152 013 B (148.5 KiB)** against **151 988 B** on
+> `main`: **25 B larger**, and 52 787 B under the 200 KiB ceiling.
+
 ### The 57 differences, and the twelve not worth a task
 
 Twelve of the 57 rows §1 marked *differs* do not become findings, and saying so is the point of a
