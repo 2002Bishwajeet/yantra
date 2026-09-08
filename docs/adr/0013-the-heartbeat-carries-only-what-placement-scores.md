@@ -314,3 +314,22 @@ Recorded so the trade does not quietly expire, per §B0.2. Any of:
   smallest version of the authentication question above.
 - **Whether the daemon persists anything at all** (Y-044). The in-memory row is enough for M4 and M5;
   it is not enough to answer a question about yesterday, and nobody has asked one.
+
+> **The appliance may now pull its own update, recorded 2026-09-08 (Y-366).**
+> [ADR-0027](0027-the-appliance-pulls-its-own-update.md) answers the *Install and update* row above,
+> for one box. **The fleet prohibition holds exactly as written.** No binary, unit or script crosses
+> ssh to any machine; nothing is pushed; the daemon holds no inventory of what version any machine
+> runs; the response to a heartbeat is still `204` and still carries no instruction. What narrows is
+> the phrase *no self-update*, and only for the machine `yantrad` itself runs on.
+>
+> **What changed sits upstream of the reasoning, not inside it.** When this ADR was written there
+> was no release to install: `install.sh` did not exist, the first tag came nine days later, and
+> *how a machine stays current* had no answer to give — which is why the row above left it open.
+> M15 publishes checksummed archives and tags the first release carrying the dashboard, so the
+> question is now answerable for the one box that has an installer.
+>
+> **The daemon still initiates nothing.** It reads a published version number and, when a person
+> asks, touches a file a root unit watches; the unit fetches, verifies and installs. The daemon
+> fetches no executable and writes nothing into `/usr/local/bin`. R-12's mitigation is untouched —
+> this agent stays heartbeat-only — and ADR-0027 §7 says what makes *the box the daemon runs on* a
+> boundary rather than an exception.
