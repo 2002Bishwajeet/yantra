@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentState, MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import type { Reading } from '@/api/hooks'
-import { ending, startedAt, verbs } from './verbs'
+import { ending, startedAt, verbs, whyNot } from './verbs'
 
 const landing: Workspace = {
   name: 'landing',
@@ -51,6 +51,46 @@ describe('the verbs a session offers', () => {
       resume: false,
     })
     expect(verbs(landing, reached({ state: 'no_session' }))).toEqual({ stop: false, resume: false })
+  })
+})
+
+/** **Finding 120.** A disabled verb carries this as its description, so the
+ *  words have to name the verb's rule and what the session is doing now. */
+describe('why a verb is not offered', () => {
+  it('names the rule and the state the session is in', () => {
+    expect(whyNot(landing, reached({ state: 'running' })).resume).toBe(
+      'Resume needs an agent that has ended, and landing is running.',
+    )
+    expect(whyNot(landing, reached({ state: 'finished' })).stop).toBe(
+      'Stop needs a running agent, and landing is finished.',
+    )
+    expect(whyNot(landing, reached({ state: 'crashed', exit_status: 101 })).stop).toBe(
+      'Stop needs a running agent, and landing is crashed, exit 101.',
+    )
+  })
+
+  it('names the workspace that starts a command of its own, since no state changes that', () => {
+    const relay: Workspace = { ...landing, startup: 'npm run dev' }
+
+    expect(whyNot(relay, reached({ state: 'finished' })).resume).toBe(
+      'landing starts a command of its own, so claude has no conversation to resume.',
+    )
+  })
+
+  it('says the same thing about both verbs when nothing was read and when the machine refused', () => {
+    expect(whyNot(landing, null)).toEqual({
+      stop: 'The daemon has not read landing yet.',
+      resume: 'The daemon has not read landing yet.',
+    })
+    const said = 'macbook did not answer, so neither verb can be sent.'
+    expect(
+      whyNot(landing, {
+        workspace: 'landing',
+        machine: 'macbook',
+        reached: 'no',
+        error: 'no route to host',
+      }),
+    ).toEqual({ stop: said, resume: said })
   })
 })
 

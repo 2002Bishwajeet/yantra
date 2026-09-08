@@ -10,10 +10,11 @@
  * it — a port named here is one this machine may already be using.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { ATTEMPTS, PAUSE, type Target } from '@/api/socket'
 import { renderRouted } from '@/test/inRouter'
 import { browser, daemon, type Frame } from './harness'
+import { KeyRow } from './Keys'
 import { Terminal } from './Terminal'
 
 /** Every refusal names its machine and links to it (D5 §7), so the component
@@ -377,5 +378,58 @@ describe('the same terminal on a session no workspace claims', () => {
     expect(screen.getByRole('status').textContent).toContain('refused · tmux scratch on pi')
     // No workspace is invented for a session that has none.
     expect(document.body.textContent).not.toContain('Workspaces row')
+  })
+})
+
+/** **PhoneSessionTerminal's key row.** It is drawn inside the pane's own
+ *  context, so what it sends and what the pane does with it are one test. */
+describe('the phone key row under the pane', () => {
+  const target: Target = { machine: MACHINE, workspace: 'yantra' }
+
+  const openKeys = () =>
+    renderRouted(
+      <Terminal label={label(target)} target={target}>
+        <KeyRow />
+      </Terminal>,
+    )
+
+  const keys = () => within(screen.getByRole('toolbar', { name: 'Keys' })).getAllByRole('button')
+
+  /** **4.1.2, finding 108.** A toolbar is one tab stop with the arrow keys
+   *  moving inside it; seven tab stops is a role the widget did not implement. */
+  it('holds one tab stop, and the arrow keys walk it', async () => {
+    await openKeys()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+
+    const row = screen.getByRole('toolbar', { name: 'Keys' })
+    expect(keys().map((one) => one.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1])
+
+    fireEvent.keyDown(row, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(keys()[1])
+    expect(keys().map((one) => one.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1])
+
+    // The ends meet: Left twice from the second key is the last key.
+    fireEvent.keyDown(row, { key: 'ArrowLeft' })
+    fireEvent.keyDown(row, { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(keys()[6])
+  })
+
+  /** **Finding 119.** Ctrl focuses the pane, and that blurred the button while
+   *  the pane stayed armed — the mark said off and the next key was still a
+   *  control code. The pane clears the mark when it spends the arm. */
+  it('keeps Ctrl marked until the pane spends it', async () => {
+    await openKeys()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    const ctrl = keys()[4]!
+
+    fireEvent.click(ctrl)
+    expect(ctrl.getAttribute('aria-pressed')).toBe('true')
+
+    const area = document.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement
+    press(area, 'a', 65)
+
+    await settled(() => expect(daemonised.heard.length).toBe(2))
+    expect(daemonised.heard[1]).toEqual({ bytes: [0x01] })
+    await settled(() => expect(ctrl.getAttribute('aria-pressed')).toBe('false'))
   })
 })

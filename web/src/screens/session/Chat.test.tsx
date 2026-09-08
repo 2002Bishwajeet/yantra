@@ -4,8 +4,9 @@
  * an option row and the composer both write bytes to the workspace's terminal
  * socket, opened without a screen. Every frame asserted below crossed a socket.
  */
+import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import type { Turn, Workspace } from '@/api'
 import type { Said } from '@/api/hooks'
 import { renderRouted } from '@/test/inRouter'
@@ -142,6 +143,41 @@ describe('the chat view of a live session', () => {
     expect(screen.getByRole('status').textContent).toContain('Typed your message into the pane')
   })
 
+  /** **4.1.3, finding 103.** A live region announces the text that arrived, so
+   *  a second send writing the string React already holds is silent. */
+  it('empties the status line between two identical sends, so both are announced', async () => {
+    await open()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    const field = screen.getByLabelText('Message Claude in yantra-web')
+    const said = () => screen.getByRole('status').textContent
+
+    fireEvent.change(field, { target: { value: 'run it' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(said()).toBe('Typed your message into the pane.'))
+
+    fireEvent.change(field, { target: { value: 'run it' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(said()).toBe('')
+    await settled(() => expect(said()).toBe('Typed your message into the pane.'))
+  })
+
+  /** **Finding 120.** A disabled control that gives no reason reads as broken.
+   *  The boards draw no line for it, so the reason is the description. */
+  it('says why Send is off, and drops the reason once it is on', async () => {
+    await open()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+
+    const off = screen.getByRole('button', { name: 'Send' })
+    await settled(() => expect(off.getAttribute('aria-describedby')).toBeTruthy())
+    const reason = document.getElementById(off.getAttribute('aria-describedby')!)
+    expect(reason?.textContent).toBe('Type a message to send it.')
+
+    fireEvent.change(screen.getByLabelText('Message Claude in yantra-web'), {
+      target: { value: 'run it' },
+    })
+    expect(screen.getByRole('button', { name: 'Send' }).getAttribute('aria-describedby')).toBeNull()
+  })
+
   it('says the pane could not be reached, and offers the Terminal tab, when the socket is refused', async () => {
     await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
@@ -155,6 +191,69 @@ describe('the chat view of a live session', () => {
     expect(screen.getByRole('link', { name: 'Terminal' }).getAttribute('href')).toBe(
       '/w/yantra-web?view=terminal',
     )
+  })
+})
+
+/** **2.2.2, finding 104.** The transcript is re-read about every five seconds,
+ *  and a scroll to the foot on every read takes the page away from whoever
+ *  scrolled up to read an older turn. */
+describe('the chat view scrolling itself to the newest turn', () => {
+  /** The foot's sentinel, watched: `isIntersecting` is the whole of what the
+   *  component reads, and jsdom has no observer of its own. */
+  const bottom = (seen: boolean) => act(() => watching?.([{ isIntersecting: seen }]))
+
+  let watching: ((seen: { isIntersecting: boolean }[]) => void) | null = null
+  let scrolled: ReturnType<typeof vi.fn<Element['scrollIntoView']>>
+  const later: { read: (next: Said) => void } = { read: () => {} }
+
+  /** `said` in state, so a five-second read is one call rather than a remount. */
+  function Reading() {
+    const [current, setCurrent] = useState(held)
+    useEffect(() => {
+      later.read = setCurrent
+    }, [])
+    return (
+      <Chat
+        endActions={null}
+        now={Date.parse('2026-09-06T12:00:00Z')}
+        onRead={read}
+        paneOpen
+        said={current}
+        state={{ state: 'awaiting_trust' }}
+        workspace={web}
+      />
+    )
+  }
+
+  beforeEach(() => {
+    watching = null
+    scrolled = vi.fn<Element['scrollIntoView']>()
+    Element.prototype.scrollIntoView = scrolled
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(handler: (seen: { isIntersecting: boolean }[]) => void) {
+          watching = handler
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+  })
+
+  it('stops pinning the foot once the reader scrolls away, and pins again when they return', async () => {
+    await renderRouted(<Reading />)
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    expect(scrolled).toHaveBeenCalled()
+
+    bottom(false)
+    scrolled.mockClear()
+    act(() => later.read({ ...held, at: '2026-09-06T12:00:48Z' }))
+    expect(scrolled).not.toHaveBeenCalled()
+
+    bottom(true)
+    act(() => later.read({ ...held, at: '2026-09-06T12:01:48Z' }))
+    expect(scrolled).toHaveBeenCalled()
   })
 })
 

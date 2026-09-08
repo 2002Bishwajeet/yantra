@@ -52,7 +52,9 @@ test.describe('the session screen, chat first', () => {
       'aria-current',
       'page',
     )
-    await expect(page.getByText('waiting for trust')).toBeVisible()
+    // The header, because the reason Resume gives for being off names the
+    // state too, and that reason is not on screen.
+    await expect(page.locator('.session__name')).toContainText('waiting for trust')
   })
 
   test("draws the agent's own dialog, and Yantra offers no answer of its own", async ({ page }) => {
@@ -82,6 +84,20 @@ test.describe('the session screen, chat first', () => {
   test('passes axe', async ({ page }) => {
     await expect(asking(page)).toBeVisible()
     await axe(page)
+  })
+
+  /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and
+   *  Send is off until something is typed. Neither may go quiet about it. */
+  test('says why Send and Resume are off', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription(
+      'Type a message to send it.',
+    )
+    await expect(page.getByRole('button', { name: 'Resume' })).toHaveAccessibleDescription(
+      `Resume needs an agent that has ended, and ${NAME} is waiting for trust.`,
+    )
+
+    await page.getByLabel(`Message Claude in ${NAME}`).fill('run the whole crate')
+    await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription('')
   })
 
   /** The walk runs on Transcript rather than Chat: `keyboard.ts` reads the
@@ -144,6 +160,27 @@ test.describe('the session screen, the other three views', () => {
     await page.keyboard.press('Tab')
     await expect(pane).not.toBeFocused()
     await expect(page.locator('.terminal__status')).toBeFocused()
+  })
+
+  /** **4.1.2, finding 108.** The key row calls itself a toolbar, so it owes a
+   *  keyboard one tab stop and the arrow keys inside it. */
+  test('walks the phone key row with the arrow keys, from one tab stop', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the key row is the phone board')
+    await open(page, 'Terminal')
+    const row = page.getByRole('toolbar', { name: 'Keys' })
+    await expect(row).toBeVisible()
+
+    const keys = row.getByRole('button')
+    await keys.first().focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(keys.nth(1)).toBeFocused()
+    await page.keyboard.press('ArrowLeft')
+    await page.keyboard.press('ArrowLeft')
+    await expect(keys.last()).toBeFocused()
+
+    // One stop: Tab leaves the row rather than walking the other six keys.
+    await page.keyboard.press('Tab')
+    await expect(row.locator(':focus')).toHaveCount(0)
   })
 
   test('the Transcript view reads over ssh, on request', async ({ page, size }) => {

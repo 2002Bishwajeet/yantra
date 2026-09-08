@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ArrowUp } from 'lucide-react'
 import type { AgentState, Workspace } from '@/api'
@@ -124,18 +124,39 @@ function LiveChat(props: ChatProps) {
   const [draft, setDraft] = useState('')
   const [typed, setTyped] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
+  const pinned = useRef(true)
+  const why = useId()
 
-  // The newest turn is at the bottom, as a chat is read.
+  // 2.2.2: the newest turn is at the bottom, as a chat is read — but a read
+  // every five seconds must not drag a reader who has scrolled up back down.
+  // The foot leaving the viewport is what unpins it, and returning re-pins.
   useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' })
+    const foot = end.current
+    if (!foot || typeof IntersectionObserver === 'undefined') return
+    const watching = new IntersectionObserver((seen) => {
+      pinned.current = seen[seen.length - 1]?.isIntersecting ?? true
+    })
+    watching.observe(foot)
+    return () => watching.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (pinned.current) end.current?.scrollIntoView({ block: 'end' })
   }, [said])
 
   const refresh = () => onRead(LINES, 0)
   const refused = pane.refused
 
+  // 4.1.3: a live region announces the text that arrived, so two identical
+  // sends are one announcement unless the region is emptied between them.
+  const announce = (words: string) => {
+    setTyped('')
+    requestAnimationFrame(() => setTyped(words))
+  }
+
   const answer = (number: string) => {
     pane.type(`${number}\r`)
-    setTyped(`Typed ${number} and Enter into the pane.`)
+    announce(`Typed ${number} and Enter into the pane.`)
     refresh()
   }
 
@@ -144,9 +165,15 @@ function LiveChat(props: ChatProps) {
     if (text === '') return
     pane.type(`${text}\r`)
     setDraft('')
-    setTyped('Typed your message into the pane.')
+    announce('Typed your message into the pane.')
     refresh()
   }
+
+  const cannotSend = !pane.link.up
+    ? 'The pane is not attached, so nothing can be typed into it.'
+    : draft.trim() === ''
+      ? 'Type a message to send it.'
+      : null
 
   const machine = (
     <Link params={{ machine: workspace.machine }} to="/m/$machine">
@@ -192,13 +219,26 @@ function LiveChat(props: ChatProps) {
             label={`Message Claude in ${workspace.name}`}
             onChange={(event) => setDraft(event.target.value)}
             trailing={
-              <IconButton disabled={draft.trim() === '' || !pane.link.up} label="Send" type="submit" variant="filled">
+              <IconButton
+                aria-describedby={cannotSend ? why : undefined}
+                disabled={cannotSend !== null}
+                label="Send"
+                type="submit"
+                variant="filled"
+              >
                 <ArrowUp />
               </IconButton>
             }
             value={draft}
             variant="filled"
           />
+          {/* The boards draw no line for a Send that is off, so the reason is
+              the button's description rather than a word on the screen. */}
+          {cannotSend ? (
+            <span className="m3-sr-only" id={why}>
+              {cannotSend}
+            </span>
+          ) : null}
         </form>
         <p className="chat__foot" role="status">
           {typed ?? (

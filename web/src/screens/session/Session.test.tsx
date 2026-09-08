@@ -103,6 +103,18 @@ describe('one workspace, four views the URL carries', () => {
     expect(screen.getByRole('button', { name: 'Resume' }).hasAttribute('disabled')).toBe(true)
   })
 
+  /** **Finding 120.** A verb that is off reads as broken unless it says why,
+   *  and the boards draw no line for the reason, so it is the description. */
+  it('gives the verb that is off a reason, and the live one none', async () => {
+    daemon()
+    await open('landing')
+
+    const resume = await screen.findByRole('button', { name: 'Resume' })
+    const said = document.getElementById(resume.getAttribute('aria-describedby') ?? '')
+    expect(said?.textContent).toBe('Resume needs an agent that has ended, and landing is running.')
+    expect(screen.getByRole('button', { name: 'Stop' }).getAttribute('aria-describedby')).toBeNull()
+  })
+
   /** D5 §3.2: a view is navigation, so each pill is a link the browser can
    *  copy and open in a tab. Chat is first (M14 board 13). */
   it('draws the four views as links, chat first, with the open one marked', async () => {
