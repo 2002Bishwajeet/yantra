@@ -62,8 +62,14 @@ pub fn router(dir: &Path) -> Result<Router, NoIndex> {
     let quiet = Arc::new(AtomicBool::new(false));
     // The fallback is what makes a deep link work: the browser asks for
     // `/workspaces/yantra`, no such file exists, and the app routes it itself.
+    // `precompressed_gzip` answers the `.gz` `npm run build` wrote beside each
+    // file, and the identity file when the client did not ask or there is none.
     Ok(Router::new()
-        .fallback_service(ServeDir::new(dir).fallback(ServeFile::new(&index)))
+        .fallback_service(
+            ServeDir::new(dir)
+                .precompressed_gzip()
+                .fallback(ServeFile::new(&index).precompressed_gzip()),
+        )
         .layer(map_response(move |answer| {
             still_there(index.clone(), Arc::clone(&quiet), answer)
         })))
@@ -143,7 +149,7 @@ pub fn advice() -> String {
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{Request, header};
     use tower::ServiceExt;
 
     /// A real directory on a real filesystem — the thing under test is whether
@@ -175,6 +181,65 @@ mod tests {
             .await
             .expect("a body");
         (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// The content-encoding and the bytes, which `get` above does not carry.
+    async fn encoded(router: Router, path: &str, accept: Option<&str>) -> (String, Vec<u8>) {
+        let mut request = Request::builder().uri(path);
+        if let Some(accept) = accept {
+            request = request.header(header::ACCEPT_ENCODING, accept);
+        }
+        let response = router
+            .oneshot(request.body(Body::empty()).expect("a request"))
+            .await
+            .expect("a response");
+        let encoding = response
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("a body");
+        (encoding, body.to_vec())
+    }
+
+    /// `npm run build` writes the `.gz` beside each asset, and a client that
+    /// does not ask for it still gets the file itself.
+    #[tokio::test]
+    async fn a_client_that_asks_for_gzip_gets_the_precompressed_asset() {
+        let dir = temp("gzip");
+        built(&dir);
+        std::fs::write(dir.join("app.js.gz"), "pretend-gzip").expect("the precompressed asset");
+        let router = router(&dir).expect("a directory with an index");
+
+        let (encoding, body) = encoded(router.clone(), "/app.js", Some("gzip, deflate")).await;
+        assert_eq!(encoding, "gzip");
+        assert_eq!(body, b"pretend-gzip".as_slice());
+
+        let (encoding, body) = encoded(router, "/app.js", None).await;
+        assert_eq!(encoding, "");
+        assert_eq!(body, b"console.log(1)".as_slice());
+    }
+
+    /// The deep link is the `ServeFile` fallback rather than the `ServeDir`, so
+    /// it needs the flag of its own that it has.
+    #[tokio::test]
+    async fn a_deep_link_gets_the_precompressed_index() {
+        let dir = temp("gzip-deep-link");
+        built(&dir);
+        std::fs::write(dir.join("index.html.gz"), "pretend-gzip").expect("the precompressed index");
+
+        let (encoding, body) = encoded(
+            router(&dir).expect("a directory with an index"),
+            "/workspaces/yantra",
+            Some("gzip"),
+        )
+        .await;
+
+        assert_eq!(encoding, "gzip");
+        assert_eq!(body, b"pretend-gzip".as_slice());
     }
 
     #[tokio::test]

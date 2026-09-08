@@ -83,10 +83,11 @@ if the daemon is on another machine.
 | | |
 | --- | --- |
 | `npm run dev` | dev server on :5173, proxying `/api` |
-| `npm run build` | `tsc -b`, then Vite, then the compiler check below |
+| `npm run build` | `tsc -b`, then Vite, then the compiler check below, then `npm run gzip` |
 | `npm run lint` | oxlint, with `react/react-compiler` on |
 | `npm test` | vitest |
 | `npm run e2e` | Playwright, on all three form factors |
+| `npm run gzip` | writes the `.gz` yantrad serves beside each `dist` asset |
 | `npm run budget` | builds, then measures the two ceilings below |
 | `npm run fixture` | the e2e fixture daemon on 7790, with no browser |
 
@@ -530,9 +531,10 @@ screen took it to 147.3 (Y-358) and the shell's live region to 147.6 (Y-352);
 what is left is react-dom, TanStack Router, TanStack Query, Base UI, the shell
 and the dashboard screen — there is no single thing to remove.
 
-**The build is not the wire.** `yantrad` serves `dist` through `ServeDir` with
-neither `precompressed_gzip` nor a `CompressionLayer`, so a phone downloads the
-raw bytes. Y-357 is that row; until it lands, the number above is the build.
+**The build is the wire since Y-357.** `npm run gzip` writes a `.gz` beside every
+`.js`, `.css`, `.svg` and `.html` in `dist`, and `yantrad` answers
+`Accept-Encoding: gzip` with it — from the directory through `precompressed_gzip`, and from the embedded
+copy the appliance carries. The appliance compresses nothing per request.
 
 The plan's bundle rules are what hold the line: no barrel files, every route
 lazy except `/`, and Form, Table, Virtual, xterm and the colour engine never in
