@@ -108,7 +108,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 115 | No spec opened `/m3`, so the run that gates a merge never rendered the component gallery | `531093b` |
 | 125 | The dashboard hero assembled its own `font` shorthand and restated the role's tracking | `531093b` |
 | 137 | `Palette.test.tsx`'s *never runs a verb* counted the POSTed reads the e2e version excludes | `531093b` |
-| 84 | `web.yml` carried `continue-on-error: true` on the budget step | Y-370 — the ceiling now comes from a load-time target (200 KiB, [R16](../research/16-what-the-first-load-costs-a-phone.md) §6), `/` is 148.4 KiB against it, and the flag is gone |
+| 84 | `web.yml` carried `continue-on-error: true` on the budget step | Y-370 — the ceiling now comes from a load-time target (200 KiB, [R16](../research/16-what-the-first-load-costs-a-phone.md) §6), `/` is 148.7 KiB against it, and the flag is gone |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.

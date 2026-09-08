@@ -778,13 +778,13 @@ reconcile. Keep them, and say in
 > sizes and matching *bytes ÷ link rate* to within 3%. The 394 ms of headroom is 75 KiB; rounding
 > down to **200 KiB** spends 52 of it and keeps 23 KiB back for a phone slower than the model.
 >
-> **The figure now counts `index.html`** — 859 B on the wire, and every other request waits behind
-> it — so today's build reads **151,961 B**. The fonts keep their own 80 KiB line
+> **The figure now counts `index.html`** — under a kilobyte gzipped, and every other request waits
+> behind it — so today's build reads **152,258 B**, 148.7 KiB. The fonts keep their own 80 KiB line
 > ([ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) §7) and are 78.5 KiB.
 >
-> **The gate still refuses what a person would feel**: xterm in the entry fails by 33,199 B, every
-> screen eager by 47,382 B. It no longer fails on one extra eager screen, which is 3 to 17 KiB and
-> 16 to 89 ms on the link the target names.
+> **The gate still refuses what a person would feel**: xterm in the entry fails by 33,865 B, every
+> screen eager by 48,423 B. It no longer fails on one extra eager screen, the largest of which is
+> 29,597 B and 155 ms on the link the target names.
 >
 > **The evidence is [R16](../research/16-what-the-first-load-costs-a-phone.md)**, measured against a
 > real `yantrad` built with `--features embed-dashboard`. Read its §3 if you read one part: the

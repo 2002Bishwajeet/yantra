@@ -167,9 +167,9 @@ test, not a note.
 > down, 150 ms RTT, 4× CPU. Today that is 1,606 ms; a kilobyte costs 5.25 ms there; 394 ms of
 > headroom is 75 KiB; rounded down, **200 KiB**. R16 §1 has the profiles and §4 the measurements.
 >
-> **The ratchet stays, and it was right.** xterm (86,038 B gzip), the colour engine (19,187 B) and
+> **The ratchet stays, and it was right.** xterm (86,407 B gzip), the colour engine (19,187 B) and
 > nine screens are lazy because something failed when they were not. A 200 KiB ceiling still
-> refuses xterm in the entry by 33,199 B and every screen eager by 47,382 B. It no longer refuses
+> refuses xterm in the entry by 33,865 B and every screen eager by 48,423 B. It no longer refuses
 > the colour engine by arithmetic — **§2's rule keeps that**, and no target between 1.70 s and
 > 2.5 s both leaves the project room and holds that line by byte count.
 >

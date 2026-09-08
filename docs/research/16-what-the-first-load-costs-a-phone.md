@@ -32,7 +32,7 @@ This note supplies the missing half. It does not take the decision.
   `tower-http`'s validators for free, costs **4,941 B** on the second visit. §3 has the runs.
 - **Recommendation: *interactive within 2 s on a cold load on Lighthouse's mobile preset*, which is
   a ceiling of 200 KiB (204,800 B) over the entry, the preloads, the stylesheets and `index.html`.**
-  Today's build is 151,961 B and passes with 51.6 KiB in hand. xterm in the entry still fails by
+  Today's build is 152,258 B and passes with 51.3 KiB in hand. xterm in the entry still fails by
   33 KiB; every screen eager still fails by 47 KiB. §6 prices two other targets and §7 says what
   this one gives up.
 
@@ -310,15 +310,21 @@ that every other request waits behind, and a line to add.
 
 ## 6. Three targets the owner could pick
 
-The figure a ceiling governs becomes **151,961 B — 148.40 KiB**: the 151,102 B `npm run budget`
-counts today, plus `index.html` at 859 B (§5). The sweep's x-axis is the 19 files, so the 859 B is
-a constant that shifts the base and not the slope.
+The figure a ceiling governs becomes the entry, the preloads, the stylesheets **and `index.html`**
+(§5). On the build the timings were taken on — `main` at `8168a63` — that is 151,102 + 859 =
+**151,961 B, or 148.40 KiB**. The sweep's x-axis is the 19 files, so the 859 B shifts the base and
+not the slope.
 
-Three sizes to hold each candidate against, all measured on today's build:
+> This branch then merged `main`, which had moved four commits. The first load is now **152,258 B —
+> 148.7 KiB**, 297 B more, and the figures below are the current build's. The derivation keeps the
+> 148.40 KiB it was measured at; 297 B is 1.5 ms on the profile it is stated against.
 
-- **xterm in the entry: +86,038 B.** The one thing every version of this budget has existed to
+Three sizes to hold each candidate against, measured on the current build:
+
+- **xterm in the entry: +86,407 B.** The one thing every version of this budget has existed to
   refuse.
-- **Every screen eager: +100,221 B.** The eleven route chunks together.
+- **Every screen eager: +100,965 B.** The eleven route chunks together, 1,674 B for
+  `SessionTerminal` up to 29,597 B for `NewSession`.
 - **The colour engine in the entry: +19,187 B.** ADR-0024 §2 says it loads only for a non-sage
   seed.
 
@@ -342,20 +348,20 @@ phone slower than the model. At 200 KiB the predicted interactive time is **1.88
 
 | | bytes | against a 200 KiB ceiling |
 | --- | --- | --- |
-| today | 151,961 | **passes, with 52,839 B in hand** |
-| xterm in the entry | 237,999 | **fails by 33,199 B** |
-| every screen eager | 252,182 | **fails by 47,382 B** |
-| the colour engine in the entry | 171,148 | passes |
-| one more eager screen (3–17 KiB) | up to 169,087 | passes |
+| today | 152,258 | **passes, with 52,542 B in hand** |
+| xterm in the entry | 238,665 | **fails by 33,865 B** |
+| every screen eager | 253,223 | **fails by 48,423 B** |
+| the colour engine in the entry | 171,445 | passes |
+| one more eager screen, even the largest | up to 181,855 | passes |
 
 ### C. "Interactive within one and three-quarter seconds"
 
 The same profile, a stricter clock. 144 ms of headroom is 27.4 KiB, so the ceiling is **175 KiB =
-179,200 B** and today's build has 27,239 B in hand. It refuses xterm by 58,799 B.
+179,200 B** and today's build has 26,942 B in hand. It refuses xterm by 59,465 B.
 
 **It still does not refuse the colour engine**, and nothing between here and B does: a ceiling has
-to be under 171,148 B for that, which is a target of about **1.70 s** — 94 ms above today's
-measured 1,606 ms. **So there is no target in this range that both leaves the project room and keeps
+to be under 171,445 B for that, which is a target of about **1.70 s** — 94 ms above the measured
+1,606 ms. **So there is no target in this range that both leaves the project room and keeps
 the colour engine out by arithmetic.** That rule has to live in ADR-0024 §2, where it already does,
 rather than in a byte count.
 
@@ -367,13 +373,13 @@ entry, every `modulepreload`, every stylesheet and `index.html`. Fonts keep thei
 
 **What it trades.**
 
-- **It hands the project 51.6 KiB it does not have today**, and the build passes for the first time
+- **It hands the project 51.3 KiB it does not have today**, and the build passes for the first time
   since M14 opened. That is the point rather than a side effect: `web.yml` has carried
   `continue-on-error: true` on this step since Y-353, and **a gate that is red and ignored enforces
   nothing**. A green gate that goes red on a real regression enforces everything.
-- **It stops catching small growth.** One more eager screen is 3 to 17 KiB, which is 16 to 89 ms on
-  the profile the target names. Nobody feels that, and a budget that fails on it is measuring
-  tidiness rather than a load time.
+- **It stops catching small growth.** One more eager screen is between 1,674 and 29,597 B, which is
+  9 to 155 ms on the profile the target names, and every one of them still lands inside the two
+  seconds. A budget that fails on that is measuring tidiness rather than a load time.
 - **It keeps catching what a person would feel.** xterm in the entry fails by 33 KiB and every
   screen eager fails by 47 KiB — the two things the route split exists for.
 - **It gives up the colour engine as an arithmetic guarantee.** ADR-0024 §2 keeps it as a rule.

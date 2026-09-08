@@ -45,7 +45,7 @@ jobs:
       # D3 §9.1 and ADR-0024 §7: 200 KiB first load, 80 KiB of fonts, or red.
       # Not advisory any more (Y-370, ledger row 84). The ceiling comes from a
       # target — interactive within 2 s on Lighthouse's mobile preset — rather
-      # than from whatever the build last measured, and `/` is 148.4 KiB against
+      # than from whatever the build last measured, and `/` is 148.7 KiB against
       # it. R16 §6 has the arithmetic and the two alternatives.
       - run: npm run budget -- --no-build
 
