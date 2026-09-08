@@ -22,13 +22,13 @@ biggest reason the codebase is small.
 flowchart TB
     you(["you, at a terminal"])
     browser(["a browser on the tailnet"])
+    gh["GitHub's REST API<br/>read with a grant the daemon holds"]
 
     subgraph host["your machine"]
         cli["yantra<br/>the CLI — renders, picks exit codes,<br/>decides nothing"]
         daemon["yantrad<br/>the daemon — the read model, the dashboard,<br/>and a pty per attached terminal"]
         core["yantra-core<br/>every decision lives here<br/>never prints, never exits"]
         tsd["tailscaled"]
-        gh["gh<br/>your own GitHub login, in its keyring"]
     end
 
     subgraph target["any machine on the tailnet"]
@@ -43,16 +43,17 @@ flowchart TB
     daemon --> core
     core -->|"system ssh<br/>ControlMaster multiplexed"| tmux
     core -->|"tailscale status --json<br/>read-only, advisory"| tsd
-    daemon -->|"gh api, every 300 s<br/>no token reaches Yantra"| gh
+    daemon -->|"REST, every 300 s<br/>an OAuth App token of its own"| gh
     tmux --> claude
     claude --> jsonl
     jsonl -->|"read back by yantra logs"| core
 ```
 
 Nothing in that diagram is dashed any more. The browser edge was drawn planned through M4, and the
-whole of it — the read model, the dashboard, and since M6 a live pane — now exists. The `gh` edge is
-M11's: the work inbox reads the pull requests and issues waiting on you through the `gh` already
-logged in on this machine, so the daemon holds no credential of its own.
+whole of it — the read model, the dashboard, and since M6 a live pane — now exists. The GitHub edge
+is M11's work inbox. It read the `gh` already logged in on this machine until Y-342, and the
+appliance has no `gh` and nobody signed in on it — so the daemon now calls GitHub's REST API with an
+OAuth App token of its own ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md)).
 
 **Four crates, and only one of them thinks.**
 
@@ -166,10 +167,10 @@ flowchart TB
 | Anything that **acts** | `up`, `down`, `resume` and the terminal socket resolve the caller with `tailscale whois` and refuse unless it is the tailnet's owner ([ADR-0016](adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)). A proxied hop is only trusted to name the caller when the hop is ours ([ADR-0017](adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)) | ✅ tested, including a forged `Forwarded` header |
 | Remote command injection | Every command crosses as **base64 decoded by `/bin/sh` on the far side**, so a hostile `repo` path stays an argument. POSIX quoting was tested and breaks on an embedded newline (I-26) | ✅ tested against a real `/bin/sh`, with a hostile path |
 | Host identity | `UserKnownHostsFile` in Yantra's own state dir, `StrictHostKeyChecking=accept-new` | ✅ |
-| Credentials on disk | Yantra stores **none**. It never asks for a password: `BatchMode=yes` means a machine that wants one fails instead of prompting | ✅ |
+| Credentials on disk | Yantra stores **none for the machines it reaches**, and two of its own — the last row names both. It never asks for a password: `BatchMode=yes` means a machine that wants one fails instead of prompting | ✅ |
 | Agent account tokens | Yantra never reads them. `claude auth status` prints an email, an org id and a subscription type; the struct that parses it **names only two fields**, so the rest cannot reach a log line | ✅ a deliberate privacy boundary |
 | Secrets in workspaces | **Policy, not yet code.** The schema has no secrets field at all. When it gains one it holds a *reference* (`op://…`, `pass show …`, a sops path) resolved at launch and never written to disk, logs, the API or a terminal stream | ⬜ not implemented — Q5 |
-| The notifier's relay | The first secret Yantra actually holds (Y-146). A `Relay` is a URL and an optional token, in memory only — never a workspace field, never the API, never a log line. Its `Debug` is written by hand and redacts **both**: the token by §B4, and the URL because on a public relay the topic is the password | ✅ tested — neither survives being printed, and no error carries either. It arrives from the unit's environment (`YANTRA_NTFY_URL`, `YANTRA_NTFY_TOKEN`), and since Y-199 that environment can come from a file the dashboard writes — `/etc/yantra/daemon.env`, `0600`, owned by the daemon's account, holding the token in plain text ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). That is the one place Yantra holds a secret **value**, and the row above is why it is written down as an exception rather than folded in |
+| The notifier's relay, and the GitHub grant | The first secret Yantra actually holds (Y-146). A `Relay` is a URL and an optional token, in memory only — never a workspace field, never the API, never a log line. Its `Debug` is written by hand and redacts **both**: the token by §B4, and the URL because on a public relay the topic is the password | ✅ tested — neither survives being printed, and no error carries either. It arrives from the unit's environment (`YANTRA_NTFY_URL`, `YANTRA_NTFY_TOKEN`), and since Y-199 that environment can come from a file the dashboard writes — `/etc/yantra/daemon.env`, `0600`, owned by the daemon's account, holding the token in plain text ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). That is the one file where Yantra holds a secret **value**, and the row above is why it is written down as an exception rather than folded in. **Since Y-342 the daemon's own GitHub token sits in that same file** under `YANTRA_GITHUB_TOKEN` ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md)): an OAuth App grant from the device flow, which never prints itself and never crosses the wire to a machine. Whoever can read the file has both |
 
 ### The two things to understand before trusting this
 
@@ -249,11 +250,14 @@ Expressive on sixty-five artboards, and [ADR-0024](adr/0024-the-dashboard-is-mat
 superseded ADR-0014's component and styling rows: the visible components are hand-built in
 `web/src/m3/` on Base UI, every Material role is a custom property in `web/src/m3/tokens.css`, and
 TanStack carries routing, reads, forms, the table and the virtual lists. Twelve routes replace the
-one page. Verification is Playwright with axe at 390, 834 and 1440 against a Node fixture daemon,
-beside the Vitest suite. Y-353 deleted the stylesheet and the vendored primitives the old page
-carried. **The milestone is not closed**: the first load of `/` is 2.3 KiB over its 145 KiB ceiling,
-and the owner has not yet opened it on a phone and an iPad. [`web/README.md`](../web/README.md) is
-the map of what shipped.
+one page, under one shell that draws desktop tab pills, a tablet rail or a phone bottom bar.
+Verification is Playwright with axe at 390, 834 and 1440 against a Node fixture daemon, beside the
+Vitest suite. Y-353 deleted the stylesheet and the vendored primitives the old page carried, and
+Y-357 made the build the wire: `npm run build` writes a `.gz` beside every asset, and both halves
+of `yantrad` — the served directory and the copy embedded in the binary — answer
+`Accept-Encoding: gzip` with it. **The milestone is not closed**: the first load of `/` is 2.6 KiB
+over its 145 KiB ceiling, and the owner has not yet opened it on a phone and an iPad.
+[`web/README.md`](../web/README.md) is the map of what shipped.
 
 **M6 and M7 are both open for reasons that are not code.** M6's layers are all built and each is
 tested against something real; what it waits on is one run against
