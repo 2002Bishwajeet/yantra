@@ -42,6 +42,9 @@ web/.vite/
 # Local agent skills - installed via `npx skills add`, not part of the project
 .claude/skills/
 .claude/settings.local.json
+# Agent worktrees and the screenshots agents leave behind
+.claude/worktrees/
+.claude/*.png
 .agents/
 skills-lock.json
 
