@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useId, type ReactElement } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import type { MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import { useDown, useResume } from '@/api/mutations'
@@ -13,7 +13,7 @@ import { Tile } from '@/m3/tile/Tile'
 import { DeleteWorkspace } from '@/screens/fleet/Confirm'
 import { phrase } from '@/shell/phrase'
 import { home } from './format'
-import { startedAt, verbs } from './verbs'
+import { startedAt, verbs, whyNot } from './verbs'
 
 const URL = /^https?:\/\//
 
@@ -58,6 +58,8 @@ export function Header(props: HeaderProps) {
   const { mark, words } = phrase(status)
   const started = startedAt(sessions, workspace)
   const live = verbs(workspace, status)
+  const why = whyNot(workspace, status)
+  const said = useId()
   const stop = useDown()
   const resume = useResume()
   const failed = stop.error ?? resume.error
@@ -94,7 +96,10 @@ export function Header(props: HeaderProps) {
         </div>
       </div>
       <div className="session__verbs">
+        {/* A disabled verb reads as broken unless it says why, and the boards
+            draw no line for the reason, so the reason is the description. */}
         <Button
+          aria-describedby={live.stop ? undefined : `${said}-stop`}
           disabled={!live.stop || stop.isPending}
           onClick={() => stop.mutate(workspace.name)}
           variant="tonal"
@@ -102,12 +107,23 @@ export function Header(props: HeaderProps) {
           {stop.isPending ? 'Stopping…' : 'Stop'}
         </Button>
         <Button
+          aria-describedby={live.resume ? undefined : `${said}-resume`}
           disabled={!live.resume || resume.isPending}
           onClick={() => resume.mutate(workspace.name)}
           variant="tonal"
         >
           {resume.isPending ? 'Resuming…' : 'Resume'}
         </Button>
+        {live.stop ? null : (
+          <span className="m3-sr-only" id={`${said}-stop`}>
+            {why.stop}
+          </span>
+        )}
+        {live.resume ? null : (
+          <span className="m3-sr-only" id={`${said}-resume`}>
+            {why.resume}
+          </span>
+        )}
         <Delete
           status={status}
           trigger={

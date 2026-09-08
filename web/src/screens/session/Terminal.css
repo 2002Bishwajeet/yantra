@@ -10,7 +10,11 @@
   width: 100%;
   padding: 12px;
   border-radius: var(--m3-card-radius);
-  background: #191d18;
+  /* ADR-0024 §2: a role, not the hex it resolves to. A terminal stays dark in
+     both themes, and no single role does — on a light page it is Material's
+     inverse-surface, and on a dark one the page's own low container. Each token
+     is already resolved for the theme, so the branch picks which role to read. */
+  background: light-dark(var(--md-sys-color-inverse-surface), var(--md-sys-color-surface-container-low));
   overflow: hidden;
 }
 

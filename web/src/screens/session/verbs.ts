@@ -1,5 +1,6 @@
 import type { AgentState, MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import type { Reading } from '@/api/hooks'
+import { phrase } from '@/shell/phrase'
 
 /** The tmux session behind a workspace, for its age. */
 export function startedAt(sessions: Reading<MachineSessions[]>, workspace: Workspace): number | null {
@@ -26,6 +27,22 @@ export function verbs(workspace: Workspace, status: WorkspaceStatus | null): { s
       return { stop: false, resume: workspace.startup === null }
     case 'no_session':
       return { stop: false, resume: false }
+  }
+}
+
+/** Why a verb `verbs` withholds is not offered. A disabled button carries this
+ *  as its description, so a reader who cannot see the state still gets it. */
+export function whyNot(workspace: Workspace, status: WorkspaceStatus | null): { stop: string; resume: string } {
+  const both = (said: string) => ({ stop: said, resume: said })
+  if (status === null) return both(`The daemon has not read ${workspace.name} yet.`)
+  if (status.reached === 'no') return both(`${workspace.machine} did not answer, so neither verb can be sent.`)
+  const { words } = phrase(status)
+  return {
+    stop: `Stop needs a running agent, and ${workspace.name} is ${words}.`,
+    resume:
+      workspace.startup === null
+        ? `Resume needs an agent that has ended, and ${workspace.name} is ${words}.`
+        : `${workspace.name} starts a command of its own, so claude has no conversation to resume.`,
   }
 }
 

@@ -68,11 +68,13 @@ function attach(
     onEnd: over,
     onLink: linked,
   })
-  let ctrl = false
+  let arming: (() => void) | null = null
   const typed = xterm.onData((data) => {
-    if (ctrl && data.length === 1) {
-      ctrl = false
+    if (arming && data.length === 1) {
+      const spent = arming
+      arming = null
       link.send(new Uint8Array([data.toUpperCase().charCodeAt(0) & 0x1f]))
+      spent()
     } else link.type(data)
   })
   window.addEventListener('resize', link.resize)
@@ -93,8 +95,8 @@ function attach(
     },
     send: (bytes) => link.send(new Uint8Array(bytes)),
     focus: () => xterm.focus(),
-    ctrl: () => {
-      ctrl = true
+    ctrl: (spent) => {
+      arming = spent
     },
   }
 }

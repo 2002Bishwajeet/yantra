@@ -22,7 +22,7 @@ import { NotFound } from './NotFound'
 import { Spend } from './Spend'
 import { Terminal } from './Terminal'
 import { Transcript } from './Transcript'
-import { startedAt, verbs } from './verbs'
+import { startedAt, verbs, whyNot } from './verbs'
 import './Session.css'
 
 /** `getRouteApi` rather than the route object: this module is loaded *by* the
@@ -140,11 +140,21 @@ function Loaded(props: { workspace: Workspace; view: View }) {
   const paneOpen = startedAt(sessions, workspace) !== null
   const readAt = transcript.said.said === 'held' ? at(transcript.said.at, now) : null
 
+  const live = verbs(workspace, status).resume
   const endActions = (
     <div className="session__end-actions">
-      <Button disabled={!verbs(workspace, status).resume || resume.isPending} onClick={() => resume.mutate(name)}>
+      <Button
+        aria-describedby={live ? undefined : 'session-end-resume'}
+        disabled={!live || resume.isPending}
+        onClick={() => resume.mutate(name)}
+      >
         {resume.isPending ? 'Resuming…' : 'Resume'}
       </Button>
+      {live ? null : (
+        <span className="m3-sr-only" id="session-end-resume">
+          {whyNot(workspace, status).resume}
+        </span>
+      )}
       <Delete
         status={status}
         trigger={
