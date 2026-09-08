@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { elapsed, oldest } from './clock'
+import { elapsed, isAge, oldest } from './clock'
 
 describe('elapsed', () => {
   it('reads seconds, minutes, then hours with minutes, then a date', () => {
@@ -9,6 +9,14 @@ describe('elapsed', () => {
     expect(elapsed(2 * 3600)).toBe('2h')
     expect(elapsed(3 * 86400)).toMatch(/^\d{1,2} \w{3}$/)
     expect(elapsed(-5)).toBe('0s')
+  })
+})
+
+describe('isAge', () => {
+  it('stops where elapsed stops counting, so a date never takes an `ago`', () => {
+    expect(isAge(23 * 3600)).toBe(true)
+    expect(isAge(86400)).toBe(false)
+    expect(isAge(4 * 86400)).toBe(false)
   })
 })
 
