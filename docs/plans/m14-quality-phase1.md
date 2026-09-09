@@ -121,6 +121,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 77 | `Card`, `Text` and `Eyebrow` took `as` where the rest of `m3/` takes `render` | `982bc27` |
 | 139 | `List.css` held the trailing value rigid, so a long one squeezed the headline to two pixels | `e0024a6` |
 | 140 | `/machines` printed `opened 4 Sep ago`, because `elapsed` gives a date past a day | `5dfa148` |
+| 142 | The other four call sites appended `ago` to the same helpers | `d441a0d` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason. Rows 139 and
@@ -134,7 +135,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 | 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |
 | 100 | Usage draws no per-model token counts, because `ModelSpend` carries `model`, `responses` and `cost` and nothing else | API. Y-360 drew the proportion bar and moved the read into the query cache; the counts need `crates/yantrad/src/write.rs:1387` to send them |
 | 141 | `/m/:machine` lays out 418 px wide in a 390 px viewport, so the phone scrolls sideways (1.4.10) | UI; the measurements are in §Row 139 below |
-| 142 | Four call sites still append `ago` to a helper that gives a date past a day | UI; §Row 140 below names all four |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
@@ -287,6 +287,12 @@ has been dark for a week reads `beat 4 Sep ago` today.
 about 350 px of a 795,600 px page, and `maxDiffPixelRatio: 0.01` is 23 times that. The three had to
 be deleted to re-render, and `machines.spec.ts` now asserts the two forms rather than trusting a
 picture to notice.
+
+> **2026-09-09, Y-379: the four are closed, and none of them is a picture's to catch.** Each one
+> guards the word with `isAge`, and each has a test at both bands — `age.test.tsx` for `Looked`,
+> `Machines.test.tsx` for the card's beat, `Dashboard.test.tsx` for the ask, and a first test file
+> for `SessionTerminal`. The fixture is hours old everywhere, so the day band is reached by moving
+> one number in a scenario the harness already loads.
 
 ## Row 136: axe measured a frame, not a page
 
