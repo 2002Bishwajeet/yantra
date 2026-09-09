@@ -105,6 +105,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
   text-decoration: none;
 }
@@ -188,6 +189,7 @@ a.fleet__machine:hover {
   align-items: center;
   gap: 6px;
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: inherit;
   text-decoration: none;
 }
@@ -374,6 +376,7 @@ a.fleet__machine:hover {
   grid-area: meta;
   min-width: 0;
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -387,6 +390,7 @@ a.fleet__machine:hover {
 
 [data-shell="phone"] .fleet__name {
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-primary);
 }
 

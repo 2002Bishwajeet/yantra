@@ -43,6 +43,7 @@
   margin: 0;
   padding: 24px 12px;
   font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
   color: var(--md-sys-color-on-surface-variant);
   text-align: center;
 }
@@ -56,11 +57,13 @@
   padding: 12px 12px 4px;
   border-top: 1px solid var(--md-sys-color-outline-variant);
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
 }
 
 .notifications__foot a {
   font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: var(--md-sys-color-primary);
   text-decoration: none;
 }
