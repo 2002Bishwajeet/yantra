@@ -33,7 +33,7 @@ export type MenuItemProps = Base.Item.Props & {
 export function MenuItem(props: MenuItemProps) {
   const { icon, tone, className, children, ...rest } = props
   return (
-    <Base.Item className={clsx('m3-menu-item', className)} data-tone={tone ?? 'default'} {...rest}>
+    <Base.Item className={clsx('m3-menu-item', 'm3-interactive', className)} data-tone={tone ?? 'default'} {...rest}>
       {icon ? (
         <span className="m3-menu-item__icon" aria-hidden="true">
           {icon}
@@ -53,7 +53,7 @@ export type MenuLinkItemProps = Base.LinkItem.Props & {
 export function MenuLinkItem(props: MenuLinkItemProps) {
   const { icon, className, children, ...rest } = props
   return (
-    <Base.LinkItem className={clsx('m3-menu-item', className)} {...rest}>
+    <Base.LinkItem className={clsx('m3-menu-item', 'm3-interactive', className)} {...rest}>
       {icon ? (
         <span className="m3-menu-item__icon" aria-hidden="true">
           {icon}

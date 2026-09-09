@@ -59,6 +59,26 @@ describe('Menu', () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
+  /** Y-379: the account menu answered neither the pointer nor the arrow keys,
+   *  because `.m3-menu-item` was the one control the shared state layer had
+   *  missed. Both kinds of item wear it now; `settings.spec.ts` paints it. */
+  it('gives both kinds of item the library’s state layer', async () => {
+    await renderRouted(
+      <Menu>
+        <MenuTrigger render={<Button variant="text" />}>Account</MenuTrigger>
+        <MenuPopup>
+          <MenuItem>Rename</MenuItem>
+          <MenuLinkItem render={<Link to="/" />}>Settings</MenuLinkItem>
+        </MenuPopup>
+      </Menu>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }))
+    await screen.findByRole('menu')
+    for (const item of screen.getAllByRole('menuitem')) {
+      expect(item.className).toContain('m3-interactive')
+    }
+  })
+
   it('holds a link item that the router routes', async () => {
     await renderRouted(
       <Menu>

@@ -1,3 +1,4 @@
+import type { Locator, Page } from '@playwright/test'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /** Y-350. `/settings` and `/settings/$category` on the busy fleet and on
@@ -22,6 +23,21 @@ const signedIn = (size: string) =>
 
 /** The list on a desktop and a tablet; a phone pushes the screen instead. */
 const list = (page: Parameters<typeof axe>[0]) => page.getByRole('navigation', { name: 'Settings' })
+
+/** Y-379: every segment one width, and the group no wider than the segments it
+ *  holds plus its own 1 px edges. The face has to land first, and one layout
+ *  read gives both numbers — a swap between two reads reads as a gap. */
+const equalSegments = async (page: Page, group: Locator, count: number) => {
+  await expect(group.getByRole('radio')).toHaveCount(count)
+  await page.evaluate(() => document.fonts.ready)
+  const box = await group.evaluate((el) => ({
+    width: el.getBoundingClientRect().width,
+    segments: [...el.querySelectorAll('[role="radio"]')].map((one) => one.getBoundingClientRect().width),
+  }))
+  expect(new Set(box.segments.map((one) => one.toFixed(2))).size).toBe(1)
+  const sum = box.segments.reduce((a, b) => a + b, 0)
+  expect(Math.abs(box.width - (sum + 2))).toBeLessThan(1)
+}
 
 /** The settings chunk is lazy, so the first heading is a slower wait than the
  *  default; the phone's app bar is the h1 and the screen's own hides under it. */
@@ -156,6 +172,43 @@ test.describe('settings · Appearance recolours everything', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
     await expect(page.locator('html')).toHaveAttribute('data-density', 'compact')
     expect(await page.evaluate(() => localStorage.getItem('yantra.prefs'))).toContain('"density":"compact"')
+  })
+
+  /** Y-379, the owner: *the custom hex colour and text input is colliding*.
+   *  The field passes a `placeholder`, which overrode `TextField`'s `" "` and
+   *  drew `#48674B` under the resting *Custom hex* label. */
+  test('keeps the hex placeholder out of the label’s way', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/settings/appearance')
+    await opened(page, 'Appearance', size)
+
+    const hex = page.getByRole('textbox', { name: 'Custom hex' })
+    const ink = () => hex.evaluate((el) => getComputedStyle(el, '::placeholder').color)
+    await expect.poll(ink).toBe('rgba(0, 0, 0, 0)')
+
+    // The label floats on focus, and the placeholder takes the space it left.
+    await hex.focus()
+    await expect.poll(ink).not.toBe('rgba(0, 0, 0, 0)')
+  })
+
+  /** Y-379, the owner: *the switchbar for system option is too wide*. Material
+   *  gives every segment one width, and the group hugs them. */
+  test('draws the three theme segments at one width', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/settings/appearance')
+    await opened(page, 'Appearance', size)
+    await equalSegments(page, page.getByRole('radiogroup', { name: 'Theme' }), 3)
+  })
+})
+
+test.describe('settings · General', () => {
+  /** Y-379 again, on a group of two: whatever squares three segments has to
+   *  square two, and `Age` carries a check that `Clock` does not. */
+  test('draws the two time-format segments at one width', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/settings/general')
+    await opened(page, 'General', size)
+    await equalSegments(page, page.getByRole('radiogroup', { name: 'Time format' }), 2)
   })
 })
 
