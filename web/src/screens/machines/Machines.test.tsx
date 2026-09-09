@@ -65,6 +65,22 @@ describe('/machines on the busy fleet', () => {
     expect(worth.queryByText('yantra-web')).toBeNull()
   })
 
+  /** Ledger row 142: a machine dark for a week read `beat 4 Sep ago`, because
+   *  the card wrote the word behind a helper that names the day past 24 h. */
+  it('drops `ago` from a beat that has become a date', async () => {
+    const state = scenario('busy')
+    const machines = state.machines!.data as { name: string; heartbeat: { age_seconds: number } }[]
+    machines.find((one) => one.name === 'thinkpad')!.heartbeat = { age_seconds: 7 * 86_400 }
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+
+    const about = (name: string) =>
+      screen.getByRole('region', { name }).querySelector('.machines__about')?.textContent ?? ''
+    expect(about('thinkpad')).toMatch(/· beat \d{1,2} \w{3}$/)
+    // The band under a day is unchanged, and it keeps the word.
+    expect(about('cachyos-g14')).toMatch(/· beat 4s ago$/)
+  })
+
   it('Kill asks first, and the daemon is only told after the answer', async () => {
     const asked = mount('desktop', '/machines')
     await screen.findByText('scratch')

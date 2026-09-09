@@ -8,6 +8,7 @@ import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Ago } from '@/screens/fleet/age'
+import { isAge } from '@/screens/fleet/clock'
 import { Doctor } from './Doctor'
 import { CARD_CHECKS, checkNamed, machineState, markOf, summary, tally, wordOf } from './facts'
 
@@ -29,7 +30,8 @@ function About(props: { machine: Machine }) {
       {beat ? (
         <>
           {' · beat '}
-          <Ago seconds={beat.age_seconds} /> ago
+          <Ago seconds={beat.age_seconds} />
+          {isAge(beat.age_seconds) ? ' ago' : null}
         </>
       ) : (
         ' · no beat has arrived'
