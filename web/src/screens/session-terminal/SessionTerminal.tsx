@@ -6,6 +6,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { KillSession } from '@/screens/fleet/Confirm'
+import { isAge } from '@/screens/fleet/clock'
 import { KeyRow } from '@/screens/session/Keys'
 import { Terminal } from '@/screens/session/Terminal'
 import { useFormFactor } from '@/shell/formFactor'
@@ -55,7 +56,8 @@ export function SessionTerminal() {
               <Skeleton className="session-terminal__age" shape="text" />
             ) : one ? (
               <Mono className="session-terminal__age">
-                started {ago(now / 1000 - one.created_at, now).text} ago · {one.windows} window
+                started {ago(now / 1000 - one.created_at, now).text}
+                {isAge(now / 1000 - one.created_at) ? ' ago' : null} · {one.windows} window
                 {one.windows === 1 ? '' : 's'}
               </Mono>
             ) : null}

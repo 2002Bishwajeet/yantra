@@ -181,6 +181,7 @@
   border-radius: 20px;
   background: var(--md-sys-color-surface-container-lowest);
   font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
   line-height: 22px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -212,6 +213,7 @@
   background: transparent;
   text-align: left;
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -305,6 +307,7 @@
   background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 55%, transparent);
   color: var(--md-sys-color-on-surface);
   font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
   text-align: left;
 }
 
@@ -355,6 +358,8 @@
   margin: 0;
 }
 
+/* Y-380 leaves this one at the shell's tracking: the role's 0.4 px wraps the
+   phone's 53-character line and leaves `s` alone on the second. */
 .chat__foot {
   margin: 0;
   padding: 0 16px;
@@ -505,6 +510,7 @@
 
 .spend__count dt {
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
 }
 
 .spend__count dd {

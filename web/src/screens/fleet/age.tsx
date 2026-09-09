@@ -42,7 +42,8 @@ export function Looked(props: { reads: Reading<unknown>[]; className?: string })
   if (age === null) return null
   return (
     <Mono className={className} data-slot="looked">
-      looked <Ago seconds={age} /> ago
+      looked <Ago seconds={age} />
+      {isAge(age) ? ' ago' : null}
     </Mono>
   )
 }

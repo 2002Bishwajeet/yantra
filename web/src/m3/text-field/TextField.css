@@ -56,6 +56,16 @@
   padding-top: 16px;
 }
 
+/* A caller's placeholder waits until focus floats the label out of its way;
+   `placeholder=" "` still tells `:placeholder-shown` the field is empty. */
+.m3-text-field__input::placeholder {
+  color: transparent;
+}
+
+.m3-text-field__box:focus-within .m3-text-field__input::placeholder {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
 /* The label rests in the box and floats to the top edge when there is a
  *  value or the field has focus. */
 .m3-text-field__label {

@@ -134,6 +134,7 @@
 .dash__hero-empty-title {
   gap: 10px;
   font: var(--md-sys-typescale-emphasized-headline-small);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
 }
 
 .dash__hero-empty-title .m3-mark {
@@ -214,6 +215,7 @@
 .dash__empty-title {
   gap: 8px;
   font: var(--md-sys-typescale-emphasized-body-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-large-tracking);
 }
 
 /* Worth a look: one tertiary line on the desktop, rows on the phone. */
@@ -367,6 +369,7 @@
   min-height: 24px;
   padding: 0 4px;
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
   white-space: nowrap;
 }
 

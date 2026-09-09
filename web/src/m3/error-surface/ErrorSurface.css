@@ -70,6 +70,7 @@
 
 .m3-error[data-layout="page"] .m3-error__title {
   font: var(--md-sys-typescale-emphasized-headline-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-medium-tracking);
 }
 
 .m3-error[data-layout="inline"] .m3-error__title {
@@ -86,10 +87,12 @@
 
 .m3-error[data-layout="page"] .m3-error__sentence {
   font: var(--md-sys-typescale-body-large);
+  letter-spacing: var(--md-sys-typescale-body-large-tracking);
 }
 
 .m3-error[data-layout="inline"] .m3-error__sentence {
   font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
 }
 
 /* The daemon's own words, beneath the sentence (D3 §8.1). */
@@ -122,6 +125,7 @@
 .m3-error__unknowns .m3-state {
   gap: 10px;
   font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
 }
 
 .m3-error__word {

@@ -44,6 +44,7 @@
   border: 1.5px solid var(--md-sys-color-outline-variant);
   border-radius: var(--md-sys-shape-corner-full);
   font: var(--md-sys-typescale-label-medium);
+  letter-spacing: var(--md-sys-typescale-label-medium-tracking);
 }
 
 .m3-step[data-state="current"] .m3-step__number {

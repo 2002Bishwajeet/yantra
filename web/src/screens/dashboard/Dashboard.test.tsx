@@ -54,6 +54,18 @@ describe('the Dashboard on a busy fleet', () => {
     expect(hero.queryByText(/cargo-zig/)).toBeNull()
   })
 
+  /** Ledger row 142: the row wrote `ago` behind a helper that names the day
+   *  past 24 h, so an old ask read `asked 30 Aug ago`. */
+  it('drops `ago` from an ask that has become a date', async () => {
+    const state = scenario('busy')
+    const events = state.notifications!.data as { at: number; kind: string; workspace: string | null }[]
+    events.find((one) => one.kind === 'awaiting_trust' && one.workspace === 'yantra-web')!.at =
+      NOW / 1000 - 7 * 86_400
+    mount('desktop', '/', state)
+    await drawn()
+    expect(reads('Needs you')).toMatch(/asked \d{1,2} \w{3} · Claude wants cargo test/)
+  })
+
   it('gives every running row its elapsed time, a track against the longest, and Open', async () => {
     mount('desktop', '/')
     await drawn()

@@ -1,6 +1,12 @@
+/* Every segment one width. `1fr` columns and not `flex: 1`: a fit-content flex
+   container is its items' sum, so flex-grow has no free space to hand out. */
 .m3-segmented {
-  display: inline-flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   box-sizing: border-box;
+  /* Appearance holds the group in a column flex parent, which stretches it. */
+  width: fit-content;
   /* R14 §7: outline, never outline-variant, is a control's only edge. */
   border: 1px solid var(--md-sys-color-outline);
   border-radius: var(--md-sys-shape-corner-full);

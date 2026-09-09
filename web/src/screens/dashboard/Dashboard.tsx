@@ -43,7 +43,7 @@ import { phrase } from '@/shell/phrase'
 import { usePrefs } from '@/shell/prefs'
 import { useTick } from '@/useTick'
 import { unclaimed, unreachable, work, type WorkRow } from '@/work'
-import { elapsed } from '@/screens/fleet/clock'
+import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
 import './Dashboard.css'
@@ -247,7 +247,8 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
               {asked ? (
                 <>
                   {' '}
-                  · asked <Mono>{ago(now / 1000 - asked.at, now).text}</Mono> ago · {asked.said}
+                  · asked <Mono>{ago(now / 1000 - asked.at, now).text}</Mono>
+                  {isAge(now / 1000 - asked.at) ? ' ago' : null} · {asked.said}
                 </>
               ) : null}
             </State>

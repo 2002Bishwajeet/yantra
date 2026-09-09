@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
@@ -152,5 +153,35 @@ test.describe('the shell on busy', () => {
     await expect(list.getByText('Nothing unread.')).toBeVisible()
     await list.getByRole('radio', { name: 'All', exact: true }).click()
     await expect(list.getByText('yantra-web is waiting for trust')).toBeVisible()
+  })
+
+  /** Y-379, the owner: the account menu answered nothing under the pointer.
+   *  `.m3-menu-item` had no `.m3-interactive`, and the `[data-highlighted]`
+   *  rule it did have mixed a unitless `0.08` into `color-mix`, which is
+   *  invalid, so the browser dropped it. One layer paints now, not two. */
+  test('lights the account menu under the pointer', async ({ page, size }) => {
+    await page.getByRole('button', { name: 'Account' }).click()
+    const about = page.getByRole('menuitem', { name: 'About' })
+    await expect(about).toBeVisible()
+
+    const layer = (one: Locator) =>
+      one.evaluate((el) => Number(getComputedStyle(el, '::before').opacity))
+    // A tap opens on no item and a click opens on the first, so the arrow lands
+    // on a different row at each size. Which one it is does not matter here.
+    const hot = page.locator('[role="menuitem"][data-highlighted]')
+    const cold = page.locator('[role="menuitem"]:not([data-highlighted])')
+
+    await page.keyboard.press('ArrowDown')
+    await expect(hot).toHaveCount(1)
+    await expect.poll(() => layer(hot)).toBeGreaterThan(0)
+    await expect.poll(() => layer(cold.first())).toBe(0)
+    // The layer is the pseudo-element and nothing else: a fill on the item
+    // itself would tint it twice under the pointer (`Menu.css`).
+    await expect(hot).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+
+    test.skip(size !== 'desktop', 'the pointer is the desktop’s')
+    await about.hover()
+    await expect.poll(() => layer(about)).toBeGreaterThan(0)
+    await expect(about).toHaveCSS('cursor', 'pointer')
   })
 })

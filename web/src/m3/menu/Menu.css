@@ -40,18 +40,18 @@
   letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: inherit;
   text-decoration: none;
-  cursor: default;
   user-select: none;
 }
 
 /* Focus roves onto items; the ring sits inside so the popup does not clip it. */
 .m3-menu-item:focus-visible {
-  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-focus-ring-color);
   outline-offset: calc(-1 * var(--md-sys-focus-ring-width));
 }
 
-.m3-menu-item[data-highlighted] {
-  background: color-mix(in srgb, currentColor var(--md-sys-state-hover-state-layer-opacity), transparent);
+/* The arrow keys highlight an item without hovering it, so it borrows the
+   shared hover layer rather than painting a second one. */
+.m3-menu-item[data-highlighted]::before {
+  opacity: var(--md-sys-state-hover-state-layer-opacity);
 }
 
 .m3-menu-item[data-disabled] {

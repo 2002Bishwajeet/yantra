@@ -57,6 +57,7 @@
   width: 56px;
   height: 56px;
   font: var(--md-sys-typescale-headline-small);
+  letter-spacing: var(--md-sys-typescale-headline-small-tracking);
 }
 
 .ns__field {
@@ -180,6 +181,7 @@
 
 .ns__link {
   font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: var(--md-sys-color-primary);
 }
 
@@ -207,6 +209,7 @@
   border: 0;
   border-radius: var(--md-sys-shape-corner-full);
   font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface-container-high);
   cursor: pointer;

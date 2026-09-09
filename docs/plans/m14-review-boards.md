@@ -701,6 +701,76 @@ duplicate rather than work.
 > difference was antialiasing. The first load is **152 013 B (148.5 KiB)** against **151 988 B** on
 > `main`: **25 B larger**, and 52 787 B under the 200 KiB ceiling.
 
+> **2026-09-09, Y-379 and Y-380: the owner found three, and two of them had a different cause than
+> the row records.** Saying which is the point of writing this down.
+>
+> - **The account menu painted nothing at all, and `[data-highlighted]` is why.** The row reads it
+>   as a missing hover rule beside a working highlight. `Menu.css` mixed
+>   `var(--md-sys-state-hover-state-layer-opacity)` into `color-mix()`. That token is `0.08`, a
+>   bare number, because `.m3-interactive` hands it to `opacity`; `color-mix()` needs a
+>   `<percentage>`, so the declaration was invalid and Chromium dropped it. Measured against the
+>   shipped stylesheet: the highlighted item's `background-color` is `rgba(0, 0, 0, 0)` at rest,
+>   under the pointer and under the arrow keys. **The menu answered neither.** `.m3-menu-item`
+>   wears `.m3-interactive` now — the pair `m3/list/List.css` already writes, inward ring offset
+>   and all — and `[data-highlighted]` sets that one layer's opacity rather than painting a second
+>   fill.
+> - **The Appearance field collides with its own placeholder, not with the swatches.** The row
+>   reads it as `.settings__hex`'s `width: 160px` shrinking in a flex row. It does not shrink: all
+>   three committed baselines draw the field at its 160 px, and `.settings__seeds` wraps it onto a
+>   line of its own on a phone. What collides is *Custom hex* and `#48674B`, drawn over each other.
+>   `TextField.tsx:30` writes `placeholder=" "` so `:placeholder-shown` can stand for *empty*, and
+>   a caller's own `placeholder` overrides it through `{...rest}` — so the field draws a
+>   placeholder under a label that has not floated. The placeholder is transparent until
+>   `:focus-within` floats the label, which is M3's own order, and it takes the two
+>   `settings/Notifications.tsx` fields with it.
+> - **`flex: 1` cannot square a segmented button, and the group was stretching as well.** Two
+>   things are wrong where the row names one. The segments size to their text, so *System* draws
+>   wider than *Light*; and `.m3-segmented` is `inline-flex` inside a **column** flex container on
+>   Appearance, so it stretches to the pane — 758 px of border around 283 px of segments on the
+>   desktop board, with the rest empty. **`flex: 1 0 0` does not fix the first**, measured in
+>   Chromium: a flex container sized `fit-content` is the sum of its items' content, so
+>   `flex-grow` has no free space to hand out and the three segments stay 88 | 88 | 105.
+>   `inline-grid` with `grid-auto-flow: column` and `grid-auto-columns: 1fr` does: 105 | 105 | 105,
+>   and 67 | 67 for the two-segment groups on General and in the notifications sheet. Base UI's
+>   hidden radio input is `position: fixed`, so it claims no column. `width: fit-content` holds the
+>   group to its segments in the column.
+>
+> **Y-380 — 34 of 37 sites take the role's tracking, and three do not.** The scan finds **37**
+> sites that read a role through `font:` with no `letter-spacing` beside it, not 29: 28 are under
+> `screens/` and `shell/`, and nine more are in `m3/`. Two are refused by row 116's own rule —
+> **`.fleet__detail` styles a `<Mono>`** (`Fleet.tsx:300,319`) and **`.settings__key` sets the mono
+> family itself**, and Material's tracking is for the plain face. **The third is `.chat__foot`, and
+> that is a measurement**: the role's 0.4 px against the shell's 0.2 px pushes the phone's
+> 53-character status line past 358 px and leaves `s` alone on a second line
+> (`session-chat-busy-phone` grew 16 px). It keeps the shell's tracking with a comment, the way
+> row 116 kept `.usage__table th`'s 0.8 px. The board writes that sentence in full, so shortening
+> it is row 114's and not this one's.
+>
+> **Two things this pass found that no row holds.**
+>
+> 1. **`.fleet__detail` is not drawing in mono, and has not been.** `font:` resets `font-family`,
+>    and `.m3-mono` and `.fleet__detail` are each one class, so order decides: `tokens.css` ships
+>    in the entry stylesheet and `Fleet.css` in a route chunk Vite appends after it, so **the
+>    shorthand wins and the error text on `/fleet` draws in the plain face**. Nothing fails, because
+>    no baseline notices a face at 12 px under `maxDiffPixelRatio: 0.01`. Left alone here: it is
+>    neither row, and it moves a baseline.
+> 2. **A click does not open the account menu on its first item.** `Menu.test.tsx` says it does,
+>    and in jsdom under `fireEvent.click` it does. In Chromium at all three sizes the menu opens
+>    with nothing highlighted, so the first `ArrowDown` lands on *Settings*. `shell.spec.ts` asserts
+>    on whichever item carries `[data-highlighted]` for that reason.
+>
+> **Ledger row 142 closes.** `Looked` in `screens/fleet/age.tsx`, `MachineCard.tsx:32`,
+> `Dashboard.tsx:250` and `SessionTerminal.tsx:58` each guard the word with `isAge`, which is what
+> `SinceAgo` already did. Each is tested at both bands, and `SessionTerminal` gets its first test
+> file for it.
+>
+> **82 baselines moved**, re-rendered in `mcr.microsoft.com/playwright:v1.63.0-noble` with
+> `--update-snapshots=all` and read as images against their predecessors. One changed height and
+> was put back: `session-chat-busy-phone`, which is the `.chat__foot` refusal above. Sixteen of
+> the 82 move only the top-right corner or the rail's foot — the lazy bell and avatar the block
+> above records as finding 1, which reproduces on `main`. The first load is **152 029 B (148.5 KiB)** against
+> **151 993 B** on `main`: **36 B larger**, and 52 771 B under the 200 KiB ceiling.
+
 ### The 57 differences, and the twelve not worth a task
 
 Twelve of the 57 rows §1 marked *differs* do not become findings, and saying so is the point of a

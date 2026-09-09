@@ -23,6 +23,7 @@
   height: 56px;
   padding: 0 24px;
   font: var(--md-sys-typescale-title-medium);
+  letter-spacing: var(--md-sys-typescale-title-medium-tracking);
 }
 
 /* R14 §1.1: the corner morphs on press, one shape per size. */

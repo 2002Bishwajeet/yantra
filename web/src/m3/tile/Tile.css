@@ -7,6 +7,7 @@
   height: var(--m3-tile-size);
   border-radius: var(--m3-tile-radius);
   font: var(--md-sys-typescale-emphasized-title-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-title-medium-tracking);
   font-weight: 700;
   color: #ffffff;
 }
