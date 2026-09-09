@@ -29,7 +29,7 @@ function Asking(props: {
     <Card className="chat__asking" surface="primary">
       <div className="chat__asking-head">
         <Eyebrow>Claude is asking</Eyebrow>
-        <Text as="h3" scale="title-large">
+        <Text render={<h3 />} scale="title-large">
           {prompt.kind === 'Bash command' && prompt.subject ? (
             <>
               Run <Mono>{prompt.subject}</Mono> in <Mono>{home(repo)}</Mono>?
@@ -54,7 +54,7 @@ function Asking(props: {
           </li>
         ))}
       </ol>
-      <Text as="p" scale="body-small">
+      <Text render={<p />} scale="body-small">
         each option types its number into the pane
         {phone ? null : "; the answer is Claude's, not Yantra's"}
       </Text>
@@ -71,14 +71,14 @@ function Ended(props: { workspace: Workspace; state: AgentState; paneOpen: boole
           <State state={state.state === 'finished' || state.state === 'stopped' ? 'idle' : 'failed'}>
             <Text scale="title-medium">{state.state}</Text>
           </State>
-          <Text as="p" scale="body-small" tone="variant">
+          <Text render={<p />} scale="body-small" tone="variant">
             {ending(state)} in tmux {workspace.name} on {workspace.machine}. The transcript above is frozen;{' '}
             {paneOpen ? 'the pane is still open on the Terminal tab.' : 'the tmux session is gone.'}
           </Text>
         </div>
         {actions}
       </Card>
-      <Text as="p" scale="body-small" tone="variant">
+      <Text render={<p />} scale="body-small" tone="variant">
         Resume starts claude again in the same pane and does not ask. Delete removes the workspace and
         asks first.
       </Text>

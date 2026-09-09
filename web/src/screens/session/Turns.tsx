@@ -82,10 +82,10 @@ export function OneTurn(props: { turn: Turn; now: number }) {
 export function Moved(props: { onRefresh: () => void }) {
   return (
     <Card surface="high">
-      <Text as="h3" scale="title-medium">
+      <Text render={<h3 />} scale="title-medium">
         The conversation moved on.
       </Text>
-      <Text as="p" scale="body-medium" tone="variant">
+      <Text render={<p />} scale="body-medium" tone="variant">
         The agent has written more since this page read the transcript, so an older window no longer
         lines up with the turns below.
       </Text>
@@ -110,7 +110,7 @@ export function Turns(props: { said: Said; machine: string; now: number; onRead:
       <div aria-busy="true" className="turns__reading" data-slot="reading">
         <Skeleton shape="text" />
         <Skeleton shape="text" />
-        <Text as="p" scale="body-small" tone="variant">
+        <Text render={<p />} scale="body-small" tone="variant">
           reading the transcript on {machine} over ssh
         </Text>
       </div>
@@ -120,10 +120,10 @@ export function Turns(props: { said: Said; machine: string; now: number; onRead:
   if (said.said === 'nothing') {
     return (
       <Card surface="high">
-        <Text as="h3" scale="title-medium">
+        <Text render={<h3 />} scale="title-medium">
           No agent has written a turn here.
         </Text>
-        <Text as="p" scale="body-medium" tone="variant">
+        <Text render={<p />} scale="body-medium" tone="variant">
           A transcript appears on the agent's first message, not when it launches.
         </Text>
         <Mono className="turns__said">{said.because}</Mono>
@@ -172,7 +172,7 @@ export function Waiting(props: { name: string; subject: string | null }) {
   return (
     <Card className="turns__waiting" surface="primary">
       <State state="needs">waiting for you</State>
-      <Text as="p" scale="body-medium">
+      <Text render={<p />} scale="body-medium">
         {subject ? (
           <>
             Claude asked to run <Mono>{subject}</Mono>

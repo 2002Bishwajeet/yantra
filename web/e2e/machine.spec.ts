@@ -64,6 +64,15 @@ test.describe('one machine on a busy fleet', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0)
   })
 
+  /* Y-360: the trailing value took the row's whole width, so `Tailnet name`
+     read `T…` at every size. */
+  test('keeps a list headline whole beside a long value', async ({ page }) => {
+    const head = card(page, 'About').getByText('Tailnet name')
+    await expect(head).toBeVisible()
+    const cut = await head.evaluate((el) => el.scrollWidth - el.clientWidth)
+    expect(cut).toBeLessThanOrEqual(1)
+  })
+
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
     const h1 = page.locator('h1:visible')
     await expect(h1).toHaveCount(1)

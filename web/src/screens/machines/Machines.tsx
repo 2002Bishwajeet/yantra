@@ -61,7 +61,7 @@ export function Machines() {
   return (
     <div className="machines">
       <div className="machines__title">
-        <Text as="h1" emphasized scale="display-small">
+        <Text render={<h1 />} emphasized scale="display-small">
           Machines
         </Text>
         <Looked className="machines__looked" reads={[machines, readiness, sessions]} />

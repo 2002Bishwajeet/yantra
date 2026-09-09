@@ -67,7 +67,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
   return (
     <Card aria-labelledby="machine-workspaces" className="machine__card">
       <div className="machine__head">
-        <Text as="h2" emphasized id="machine-workspaces" scale="title-large">
+        <Text render={<h2 />} emphasized id="machine-workspaces" scale="title-large">
           Workspaces on this machine
         </Text>
         {rows.length > 0 ? <Mono>{rows.length}</Mono> : null}
@@ -166,7 +166,7 @@ export function Machine() {
   return (
     <div className="machine">
       <div className="machine__title">
-        <Text as="h1" emphasized scale="display-small">
+        <Text render={<h1 />} emphasized scale="display-small">
           {name}
         </Text>
         {state ? (
@@ -195,7 +195,7 @@ export function Machine() {
         <ErrorBoundary eyebrow={name} title="About could not be drawn">
           <Card aria-labelledby="machine-about" className="machine__card">
             <div className="machine__head">
-              <Text as="h2" emphasized id="machine-about" scale="title-large">
+              <Text render={<h2 />} emphasized id="machine-about" scale="title-large">
                 About
               </Text>
             </div>
@@ -213,7 +213,7 @@ export function Machine() {
         <ErrorBoundary eyebrow={name} title="Readiness could not be drawn">
           <Card aria-labelledby="machine-readiness" className="machine__card">
             <div className="machine__head">
-              <Text as="h2" emphasized id="machine-readiness" scale="title-large">
+              <Text render={<h2 />} emphasized id="machine-readiness" scale="title-large">
                 Readiness
               </Text>
               {readiness.looked === 'ok' ? (
@@ -250,7 +250,7 @@ export function Machine() {
                 <Skeleton shape="text" style={{ width: '52%' }} />
               </div>
             )}
-            <Text as="p" className="machine__note" scale="body-small" tone="variant">
+            <Text render={<p />} className="machine__note" scale="body-small" tone="variant">
               Read, not run: the sweep asked this machine. Doctor asks it again now, one ssh round
               trip.
             </Text>

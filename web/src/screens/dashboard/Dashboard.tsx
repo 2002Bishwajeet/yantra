@@ -107,7 +107,7 @@ function Stamp(props: { reads: Parameters<typeof stamp>[0]; now: number; classNa
 function CardHead(props: { id: string; title: string; words: ReactNode }) {
   return (
     <div className="dash__head">
-      <Text as="h2" emphasized id={props.id} scale="title-large">
+      <Text render={<h2 />} emphasized id={props.id} scale="title-large">
         {props.title}
       </Text>
       <Text scale="body-medium" tone="variant">
@@ -307,7 +307,7 @@ function Hero(props: {
   return (
     <Card aria-labelledby="dash-needs" className="dash__hero" surface="primary">
       <div className="dash__hero-head">
-        <Eyebrow as="h2" className="dash__hero-eyebrow" id="dash-needs">
+        <Eyebrow render={<h2 />} className="dash__hero-eyebrow" id="dash-needs">
           Needs you
         </Eyebrow>
         {empty ? null : (
@@ -477,7 +477,7 @@ function Worth(props: {
   return (
     <Card aria-labelledby="dash-worth" className="dash__worth" surface="tertiary">
       <div className="dash__worth-head">
-        <Eyebrow as="h2" id="dash-worth">
+        <Eyebrow render={<h2 />} id="dash-worth">
           Worth a look
         </Eyebrow>
         <Text scale="body-medium">
@@ -594,7 +594,7 @@ function Idle(props: {
     // New is the one verb on it.
     return (
       <div className="dash__line">
-        <Eyebrow as="h2">Idle</Eyebrow>
+        <Eyebrow render={<h2 />}>Idle</Eyebrow>
         <State state="idle">{none}</State>
         {fleetEmpty ? (
           <Button className="dash__new" render={<Link to="/new" />} role="link" variant="text">
@@ -609,7 +609,7 @@ function Idle(props: {
       action="Show"
       summary={
         <>
-          <Eyebrow as="h2">Idle</Eyebrow>
+          <Eyebrow render={<h2 />}>Idle</Eyebrow>
           <State state="idle">
             {words}
             <span className="dash__names"> · {names(rows)}</span>
@@ -712,7 +712,7 @@ export function Dashboard() {
   }
 
   const title = (
-    <Text as="h1" className="dash__title" emphasized scale="headline-medium">
+    <Text render={<h1 />} className="dash__title" emphasized scale="headline-medium">
       Dashboard
     </Text>
   )
@@ -834,7 +834,7 @@ export function Dashboard() {
       ) : null}
       {unread.length > 0 ? (
         <div className="dash__line">
-          <Eyebrow as="h2">Not read yet</Eyebrow>
+          <Eyebrow render={<h2 />}>Not read yet</Eyebrow>
           <State state="unknown">{names(unread)}</State>
         </div>
       ) : null}

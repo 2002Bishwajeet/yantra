@@ -118,18 +118,23 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 122 | Ctrl-K fired while the terminal pane held focus | `5649eea` |
 | 129 | The tablet drew a search the boards have not, and kept the bell and the avatar out of the rail | `5649eea` |
 | 131 | Unreachable offered no **Open Tailscale**; Fleet's stray heading is another row's half | `5649eea` |
+| 77 | `Card`, `Text` and `Eyebrow` took `as` where the rest of `m3/` takes `render` | `982bc27` |
+| 139 | `List.css` held the trailing value rigid, so a long one squeezed the headline to two pixels | `e0024a6` |
+| 140 | `/machines` printed `opened 4 Sep ago`, because `elapsed` gives a date past a day | `5dfa148` |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
-review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason.
+review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason. Rows 139 and
+140 were found on 2026-09-09 and are named here because no review table holds them.
 
 ## Open
 
 | Row | Finding | Whose |
 | --- | --- | --- |
-| 77 | `Card` and `Text` take `as`, while `Row` and `ListItem` take `render`: two polymorphism idioms | Packages; one idiom, and every call site follows |
 | 138 | *Never runs a verb* opens and closes the palette once per option — about 3.5 s of Vitest's 5 s — so a loaded box times it out. One run in 25. Found while checking 137, and a different defect from it | Testing; it wants its own row |
 | 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |
 | 100 | Usage draws no per-model token counts, because `ModelSpend` carries `model`, `responses` and `cost` and nothing else | API. Y-360 drew the proportion bar and moved the read into the query cache; the counts need `crates/yantrad/src/write.rs:1387` to send them |
+| 141 | `/m/:machine` lays out 418 px wide in a 390 px viewport, so the phone scrolls sideways (1.4.10) | UI; the measurements are in §Row 139 below |
+| 142 | Four call sites still append `ago` to a helper that gives a date past a day | UI; §Row 140 below names all four |
 
 
 Rows 66, 67, 77 and 79 are nits the review filed against `web/src/m3/`. This pass left them alone
@@ -205,6 +210,83 @@ nothing was measured while the swap was in flight.
 
 No baseline without a pane moved. The whole suite says so: 513 passed, 171 skipped and none failed
 in the Playwright image, with the three specs green four runs out of four at one worker and at six.
+
+## Row 77: one polymorphism idiom, and it is Base UI's `render`
+
+Hashes below are on `y-360-one-polymorphism-idiom`.
+
+**The row named two components and there were three.** `Card`, `Text` and `Eyebrow` took `as`;
+`Row` and `ListItem` took `render`, and so do `Button`, `Fab`, `IconButton`, `Pill`, `Menu`,
+`Switch`, `NavigationBar` and `NavigationRail`. Ten against three.
+
+**`as` could not have won, whatever the count said.** Base UI supplies `render` on every component
+this library wraps, and on `useRender` for the ones it does not. Choosing `as` means writing a shim
+over Base UI at each of those ten, which is the reinvention §B2 forbids. `render` also fixes what
+[the review](m14-review-phase1.md) row 80 filed beside the idiom count: `as?: ElementType` sits
+beside `ComponentPropsWithRef<'section'>` and lies about the props, so `href` on `as="a"` is a type
+error while a `<section>` attribute on an `h2` is not. `useRender.ComponentProps<'section'>` types
+the element the caller passes.
+
+**119 call sites moved**, in 40 files, from `as="h2"` to `render={<h2 />}`. One was conditional and
+stays one expression: `Settings.tsx` now reads `render={level === 1 ? <h1 /> : <h2 />}`. Two passed
+a tag that carries its own props — `Card render={<form />}` with `onSubmit`, and `Card
+render={<div />}` — and `useRender` merges those the way it merges them for `Button`. No shim
+accepts both spellings: two idioms was the defect and three would be worse.
+
+**It cost nothing and no picture moved.** `useRenderElement` was already in the first load, so the
+whole branch measures **151,993 B against `main`'s 152,013 — 20 B smaller**, and this row carries
+almost all of it. Every rendered tag is the tag `as` rendered, so all 111 baselines matched.
+
+## Row 139: a rigid trailing value squeezed the headline
+
+`.m3-list-item` is `flex: 1`, whose basis is 0, and `.m3-list-item__trailing` was `flex: none`. So
+the value took its content width first and the headline divided what was left. On
+`/m/cachyos-g14` at 390 that left **2 px**, and *Tailnet name* read `T…`.
+
+The fix caps the trailing at three fifths of the row and lets the value break the token that no
+longer fits. **Both halves of that are load-bearing, and four other shapes were measured and
+refused**, in the Playwright image against the busy fixture:
+
+| What was tried | Page width at 390 | The row |
+| --- | --- | --- |
+| `main` | 418 | headline 2 px, value 295 |
+| item basis `auto`, trailing shrinks, value clips | **485** | headline 85, value 295 |
+| the same, plus `.machine__columns: minmax(0, 1fr)` | 390 | headline 60, and every session name fell to one letter |
+| trailing capped, value clips | **485** | headline 133, value 247 |
+| trailing capped, value breaks the word | **418** | headline 107, value 208 over three lines |
+
+**A percentage `max-width` is what keeps the page still.** Percentages do not resolve while a box's
+intrinsic width is computed, so the cap redistributes the row without moving what the row demands.
+`min-width` cannot do this — it is a floor and only ever raises a contribution — and `overflow-wrap:
+anywhere` lowers the contribution so far that the page falls to 390, where `.machine__row` crushes
+every session name. `break-word` breaks the same long token during layout and leaves the intrinsic
+width alone, which is the difference between the two keywords and the reason the value keeps
+`break-word`.
+
+**`/m/:machine` still scrolls sideways on the phone, and that is a row of its own.** The page is
+418 px wide in a 390 px viewport, on `main` and after this change alike — a 1.4.10 failure that
+predates both. The cause is two lines: `.machine__columns` uses `1fr`, so the column floors at the
+cards' min-content, and `.machine__row` cannot fit 390 once it stops. Clamping the grid alone is
+worse, not better: the row above shows what it does to the session names.
+
+## Row 140: a date takes no `ago` after it
+
+`elapsed` counts to a day and names the day after it (D3 §5.7, one clock). `Unclaimed.tsx` appended
+` ago` to the result, so `/machines` printed `opened 4 Sep ago`. The boards draw both forms and
+agree: `PhoneMachines.dc.html` writes `opened 3d ago` on one row and `opened 9 Jun` on the next.
+
+`SinceAgo` in `screens/fleet/age.tsx` writes the word itself and drops it where the reading is a
+day; `clock.ts` exports the one predicate that decides. It is a second component rather than a flag
+on `Since`, because `Since` has two call sites that want the bare age and no word.
+
+**Four more call sites append `ago` to the same helpers and each is another screen's**: `Looked` in
+`age.tsx`, `MachineCard.tsx:32`, `Dashboard.tsx:250` and `SessionTerminal.tsx:58`. A machine that
+has been dark for a week reads `beat 4 Sep ago` today.
+
+**The picture that hid it.** `machines-busy-*.png` passed unchanged with the defect fixed: ` ago` is
+about 350 px of a 795,600 px page, and `maxDiffPixelRatio: 0.01` is 23 times that. The three had to
+be deleted to re-render, and `machines.spec.ts` now asserts the two forms rather than trusting a
+picture to notice.
 
 ## Row 136: axe measured a frame, not a page
 

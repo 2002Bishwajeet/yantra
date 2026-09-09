@@ -13,7 +13,7 @@ export function Empty(props: { state?: MarkState; title: string; children?: Reac
         {title}
       </State>
       {children ? (
-        <Text as="p" className="empty__why" scale="body-small" tone="variant">
+        <Text render={<p />} className="empty__why" scale="body-small" tone="variant">
           {children}
         </Text>
       ) : null}

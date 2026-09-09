@@ -54,47 +54,47 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
     >
       <div className="settings__connect">
         {connected ? (
-          <Text as="p" scale="title-medium" emphasized>
+          <Text render={<p />} scale="title-medium" emphasized>
             Signed in as {connected.login ?? 'someone'}.
           </Text>
         ) : device === undefined || expired ? (
           <>
             {expired ? (
-              <Text as="p" scale="body-medium" tone="error">
+              <Text render={<p />} scale="body-medium" tone="error">
                 The code expired before it was typed.
               </Text>
             ) : null}
             <Button disabled={login.isPending} icon={<LogIn />} onClick={() => login.mutate()} size="m">
               {login.isPending ? 'Asking GitHub…' : 'Sign in with GitHub'}
             </Button>
-            <Text as="p" scale="body-small" tone="variant">
+            <Text render={<p />} scale="body-small" tone="variant">
               device flow · nothing to paste
             </Text>
           </>
         ) : (
           <>
             <Mono className="settings__code">{device.user_code}</Mono>
-            <Text as="p" scale="body-medium">
+            <Text render={<p />} scale="body-medium">
               open{' '}
               <a href={device.verification_uri} rel="noreferrer" target="_blank">
                 {device.verification_uri.replace(/^https?:\/\//, '')}
               </a>{' '}
               and enter the code
             </Text>
-            <Text as="p" aria-live="polite" scale="body-small" tone="variant">
+            <Text render={<p />} aria-live="polite" scale="body-small" tone="variant">
               waiting · the code is good for {Math.ceil(left / 60)}m
             </Text>
           </>
         )}
         {login.error ? (
           <div aria-live="polite" className="settings__outcome">
-            <Text as="p" scale="body-medium" tone="error" emphasized>
+            <Text render={<p />} scale="body-medium" tone="error" emphasized>
               {login.error.describe()}
             </Text>
             <Mono className="settings__said">{login.error.said}</Mono>
           </div>
         ) : null}
-        <Text as="p" scale="body-small" tone="variant">
+        <Text render={<p />} scale="body-small" tone="variant">
           Yantra asks for these scopes and nothing more:
         </Text>
         <List aria-label="Scopes">
@@ -102,7 +102,7 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
             <ListItem headline={<Mono>{scope}</Mono>} key={scope} supporting={why} />
           ))}
         </List>
-        <Text as="p" scale="body-small" tone="variant">
+        <Text render={<p />} scale="body-small" tone="variant">
           Yantra keeps this grant and never sends it to a machine. A clone uses the machine's own git sign-in, which the
           doctor checks.
         </Text>

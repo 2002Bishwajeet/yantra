@@ -35,7 +35,7 @@ export function Transcript(props: TranscriptProps) {
         {state?.state === 'awaiting_trust' ? <Waiting name={workspace.name} subject={null} /> : null}
       </div>
       <footer className="transcript__foot">
-        <Text as="p" scale="body-small" tone="variant">
+        <Text render={<p />} scale="body-small" tone="variant">
           read from the transcript on{' '}
           <Link params={{ machine: workspace.machine }} to="/m/$machine">
             {workspace.machine}

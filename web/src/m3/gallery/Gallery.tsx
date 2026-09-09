@@ -74,7 +74,7 @@ function Broken(): ReactNode {
 function Section(props: { title: string; children: ReactNode }) {
   return (
     <section className="m3-gallery__section" aria-labelledby={`g-${props.title}`}>
-      <Eyebrow as="h3" id={`g-${props.title}`}>
+      <Eyebrow render={<h3 />} id={`g-${props.title}`}>
         {props.title}
       </Eyebrow>
       <div className="m3-gallery__items">{props.children}</div>
@@ -293,7 +293,7 @@ function Catalogue() {
             <Text scale="title-medium">things are waiting on you</Text>
           </Card>
           <Card surface="high">
-            <Text scale="title-large" emphasized as="h4">
+            <Text scale="title-large" emphasized render={<h4 />}>
               Running
             </Text>
             <Text scale="body-medium" tone="variant">
@@ -593,7 +593,7 @@ export function Gallery() {
   return (
     <div className="m3-gallery">
       <header className="m3-gallery__head">
-        <Text scale="headline-small" emphasized as="h1">
+        <Text scale="headline-small" emphasized render={<h1 />}>
           M3 gallery
         </Text>
         <Segmented label="Theme" value={theme} onValueChange={setTheme}>

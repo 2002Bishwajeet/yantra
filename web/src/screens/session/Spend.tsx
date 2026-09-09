@@ -59,7 +59,7 @@ function Hero(props: { spend: Read }) {
         </Text>
       </div>
       {!nothing && (spend.cost === null || unpriced) ? (
-        <Text as="p" scale="body-medium">
+        <Text render={<p />} scale="body-medium">
           {spend.fast > 0
             ? `${responses(spend.fast)} ran in fast mode, which is billed at a rate this price table does not carry. Fast mode withholds dollars: this session shows tokens and no money.`
             : 'Not every model below is priced, so there is no figure to give.'}
@@ -85,7 +85,7 @@ function Hero(props: { spend: Read }) {
             </div>
           ))}
         </dl>
-        <Text as="p" scale="body-small">
+        <Text render={<p />} scale="body-small">
           Four counts, never summed: they are not the same unit of anything. Money is the one figure that
           adds them.
         </Text>
@@ -121,11 +121,11 @@ function Figure(props: { spend: Read }) {
           ))}
         </ul>
       ) : (
-        <Text as="p" scale="body-medium" tone="variant">
+        <Text render={<p />} scale="body-medium" tone="variant">
           no model wrote a response in this transcript
         </Text>
       )}
-      <Card as="div" className="spend__fast" surface="lowest">
+      <Card render={<div />} className="spend__fast" surface="lowest">
         <State state={spend.fast > 0 ? 'needs' : 'idle'}>
           <Text scale="title-medium">Fast mode</Text>
         </State>
@@ -136,7 +136,7 @@ function Figure(props: { spend: Read }) {
       </Card>
       {/* A path is long and a phone is 390 px wide, so it clips rather than
           pushing the page sideways. */}
-      <Text as="p" className="spend__path" scale="body-small" tone="variant">
+      <Text render={<p />} className="spend__path" scale="body-small" tone="variant">
         transcript <Mono clip>{spend.path}</Mono>
       </Text>
     </>
@@ -172,7 +172,7 @@ export function Spend(props: SpendProps) {
         <Button disabled={asked.asked === 'asking'} icon={<RefreshCw />} onClick={onAsk}>
           Read spend
         </Button>
-        <Text as="p" scale="body-small" tone="variant">
+        <Text render={<p />} scale="body-small" tone="variant">
           Reads the agent's transcript on {machine} over ssh, when you ask. Nothing polls it.
           {read ? (
             <>
@@ -193,17 +193,17 @@ export function Spend(props: SpendProps) {
           <div aria-busy="true" className="turns__reading" data-slot="reading">
             <Skeleton shape="text" />
             <Skeleton shape="text" />
-            <Text as="p" scale="body-small" tone="variant">
+            <Text render={<p />} scale="body-small" tone="variant">
               reading the transcript on {workspace.machine} over ssh
             </Text>
           </div>
         ) : null}
         {asked.asked === 'nothing' ? (
           <Card surface="high">
-            <Text as="h3" scale="title-medium">
+            <Text render={<h3 />} scale="title-medium">
               There is nothing to add up yet.
             </Text>
-            <Text as="p" scale="body-medium" tone="variant">
+            <Text render={<p />} scale="body-medium" tone="variant">
               No agent in this workspace has written a turn. A fresh one has not started, and one waiting
               at claude's trust prompt never gets that far.
             </Text>
@@ -225,7 +225,7 @@ export function Spend(props: SpendProps) {
         ) : null}
         {asked.asked === 'read' ? <Figure spend={asked.spend} /> : null}
       </div>
-      <Text as="p" scale="body-small" tone="variant">
+      <Text render={<p />} scale="body-small" tone="variant">
         Per workspace only. There is no fleet total: one would cost an ssh transcript read per workspace
         on open.
       </Text>

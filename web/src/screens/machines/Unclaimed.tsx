@@ -5,7 +5,7 @@ import { State } from '@/m3/mark/Mark'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
-import { Since } from '@/screens/fleet/age'
+import { SinceAgo } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { Empty } from '@/screens/fleet/Empty'
 import type { Held } from './facts'
@@ -22,7 +22,7 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
       surface="tertiary"
     >
       <div className="machines__eyebrow">
-        <Eyebrow as="h2" id="machines-unclaimed">
+        <Eyebrow render={<h2 />} id="machines-unclaimed">
           Worth a look
         </Eyebrow>
         {held.length > 0 ? (
@@ -51,7 +51,7 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
                   <span className="machines__name m3-wrap">{session.name}</span>
                   <span className="machines__where m3-wrap">
                     {machine} · {session.windows} window{session.windows === 1 ? '' : 's'} · opened{' '}
-                    <Since at={session.created_at} /> ago
+                    <SinceAgo at={session.created_at} />
                   </span>
                 </span>
                 <span className="machines__verbs">

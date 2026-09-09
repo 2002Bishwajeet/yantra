@@ -123,11 +123,11 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
         })}
       </ul>
       {matched.length === 0 ? (
-        <Text as="p" className="ns__note" scale="body-medium" tone="variant">
+        <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
           nothing matches {query.trim()}
         </Text>
       ) : matched.length > SHOWN ? (
-        <Text as="p" className="ns__note" scale="body-medium" tone="variant">
+        <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
           {matched.length - SHOWN} more · keep typing to narrow
         </Text>
       ) : null}

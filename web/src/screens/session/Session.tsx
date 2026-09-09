@@ -54,7 +54,7 @@ export function Workspace(props: { name: string; view: View }) {
   if (listed.looked === 'pending') {
     return (
       <>
-        <Text as="h1" scale="headline-medium" emphasized>
+        <Text render={<h1 />} scale="headline-medium" emphasized>
           {name}
         </Text>
         <div aria-busy="true" className="session__pending">
@@ -70,7 +70,7 @@ export function Workspace(props: { name: string; view: View }) {
     // both unknown and offers the one thing that helps.
     return (
       <>
-        <Text as="h1" scale="headline-medium" emphasized>
+        <Text render={<h1 />} scale="headline-medium" emphasized>
           {name}
         </Text>
         <ErrorSurface.Page
@@ -98,11 +98,11 @@ export function Workspace(props: { name: string; view: View }) {
   if (entry.loaded === 'no') {
     return (
       <>
-        <Text as="h1" scale="headline-medium" emphasized>
+        <Text render={<h1 />} scale="headline-medium" emphasized>
           {name}
         </Text>
         <Card className="session__broken" surface="error">
-          <Text as="h2" scale="title-large">
+          <Text render={<h2 />} scale="title-large">
             {name} is not usable.
           </Text>
           <Mono className="session__error">{entry.error}</Mono>
@@ -223,7 +223,7 @@ function Loaded(props: { workspace: Workspace; view: View }) {
         {view === 'terminal' ? (
           <div className="session__terminal">
             {factor === 'phone' ? (
-              <Text as="p" className="session__banner" scale="body-small" tone="variant">
+              <Text render={<p />} className="session__banner" scale="body-small" tone="variant">
                 The terminal is the fallback;{' '}
                 <Link params={{ name }} replace search={{ view: 'chat' }} to="/w/$name">
                   Chat

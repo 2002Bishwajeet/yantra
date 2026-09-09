@@ -85,13 +85,22 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* The item's basis is 0, so the trailing takes its width first and the headline
+   gets what is left. The cap keeps two fifths of the row for the headline, and
+   a percentage never counts towards the row's intrinsic width, so the page is
+   no wider than it was. */
 .m3-list-item__trailing {
   display: inline-flex;
   align-items: center;
   flex: none;
+  max-width: 60%;
 }
 
 .m3-list-value {
+  min-width: 0;
+  /* `break-word` breaks the long token the cap cannot fit, and unlike
+     `anywhere` it leaves the row's intrinsic width alone. */
+  overflow-wrap: break-word;
   padding-right: 8px;
   font: var(--md-sys-typescale-body-medium);
   letter-spacing: var(--md-sys-typescale-body-medium-tracking);

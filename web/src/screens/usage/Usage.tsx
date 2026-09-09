@@ -51,7 +51,7 @@ function ByWorkspace(props: { rows: Row[] }) {
   return (
     <Card aria-labelledby="usage-workspaces" className="usage__card">
       <div className="usage__head">
-        <Text as="h2" emphasized id="usage-workspaces" scale="title-large">
+        <Text render={<h2 />} emphasized id="usage-workspaces" scale="title-large">
           By workspace
         </Text>
         <Text scale="body-small" tone="variant">
@@ -92,7 +92,7 @@ function ByModel(props: { rows: Row[] }) {
   return (
     <Card aria-labelledby="usage-models" className="usage__card">
       <div className="usage__head">
-        <Text as="h2" emphasized id="usage-models" scale="title-large">
+        <Text render={<h2 />} emphasized id="usage-models" scale="title-large">
           By model
         </Text>
         <Text scale="body-small" tone="variant">
@@ -177,7 +177,7 @@ function Read(props: { fanned: Fanned; factor: FormFactor }) {
       <ErrorBoundary eyebrow="Usage" title="The sessions table could not be drawn">
         <Card aria-labelledby="usage-sessions" className="usage__card">
           <div className="usage__head">
-            <Text as="h2" emphasized id="usage-sessions" scale="title-large">
+            <Text render={<h2 />} emphasized id="usage-sessions" scale="title-large">
               Sessions
             </Text>
             <Text scale="body-small" tone="variant">
@@ -224,7 +224,7 @@ export function Usage() {
   return (
     <div className="usage">
       <div className="usage__title">
-        <Text as="h1" emphasized scale="display-small">
+        <Text render={<h1 />} emphasized scale="display-small">
           Usage
         </Text>
         {/* Y-354 brings the Today / 7 days / 30 days window; until it lands
@@ -258,7 +258,7 @@ export function Usage() {
         <Read factor={factor} fanned={fanned} />
       )}
 
-      <Text as="p" className="usage__note" scale="body-small" tone="variant">
+      <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
         Each figure is read from the transcript on the machine that wrote it, over ssh, when you
         ask. Nothing here polls, and there is no fleet total.
       </Text>

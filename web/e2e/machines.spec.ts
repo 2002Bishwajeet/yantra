@@ -44,6 +44,9 @@ test.describe('the machines on a busy fleet', () => {
       'href',
       '/m/cachyos-g14/s/scratch',
     )
+    // Y-360: past a day the age is a date, and a date takes no `ago`.
+    await expect(worth.getByText(/opened \d{1,2} \w{3} ago/)).toHaveCount(0)
+    await expect(worth.getByText(/opened \d{1,2} \w{3}$/).first()).toBeVisible()
   })
 
   test('Kill asks first and repeats the row', async ({ page }) => {

@@ -139,7 +139,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
 
   return (
     <div className="ns__local">
-      <Text as="p" scale="body-medium" tone="variant">
+      <Text render={<p />} scale="body-medium" tone="variant">
         browsing {machine} over the open ssh connection
       </Text>
       {here !== null ? <Breadcrumb here={here} home={root} onGo={setWhere} /> : null}
@@ -164,7 +164,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
         <ul aria-label="Folders" className="ns__list">
           {listing.data.entries.length === 0 ? (
             <li>
-              <Text as="p" className="ns__note" scale="body-medium" tone="variant">
+              <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
                 nothing here but files or hidden directories
               </Text>
             </li>

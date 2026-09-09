@@ -12,7 +12,7 @@ describe('Card', () => {
   })
 
   it.each(['elevated', 'outlined'] as const)('draws %s', (variant) => {
-    render(<Card variant={variant} as="article" data-testid="c" />)
+    render(<Card variant={variant} render={<article />} data-testid="c" />)
     expect(screen.getByTestId('c').dataset.variant).toBe(variant)
     expect(screen.getByTestId('c').tagName).toBe('ARTICLE')
   })

@@ -53,7 +53,7 @@ function Recap(props: { values: Values; home: string | null }) {
   const { source } = values
   return (
     <Card className="ns__card" surface="low">
-      <Eyebrow as="h2">So far</Eyebrow>
+      <Eyebrow render={<h2 />}>So far</Eyebrow>
       <dl className="ns__recap-list">
         <div>
           <dt>Name</dt>
@@ -91,7 +91,7 @@ export function StepStart(props: { form: SessionForm; values: Values }) {
     <>
       {factor === 'phone' ? <Recap home={root} values={values} /> : null}
       <Card className="ns__card">
-        <Eyebrow as="h2">What opens in the session</Eyebrow>
+        <Eyebrow render={<h2 />}>What opens in the session</Eyebrow>
         <div aria-label="What opens in the session" className="ns__choices" role="group">
           <Option
             eyebrow="agent"
@@ -133,7 +133,7 @@ export function StepStart(props: { form: SessionForm; values: Values }) {
         </div>
       </Card>
       <Card className="ns__card" surface="low">
-        <Eyebrow as="h2">What will happen</Eyebrow>
+        <Eyebrow render={<h2 />}>What will happen</Eyebrow>
         <ol className="ns__happen">
           {happenings(values, root).map((line) => (
             <li key={line}>{line}</li>

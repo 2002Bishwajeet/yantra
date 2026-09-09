@@ -39,10 +39,10 @@ export function SessionTerminal() {
           <div className="session-terminal__name">
             {/* The route's own title, so the phone app bar and the page say
                 the same thing (`router.test.tsx`). */}
-            <Text as="h1" className="m3-wrap" scale="headline-medium" emphasized>
+            <Text render={<h1 />} className="m3-wrap" scale="headline-medium" emphasized>
               {session} on {machine}
             </Text>
-            <Text as="p" scale="body-small" tone="variant">
+            <Text render={<p />} scale="body-small" tone="variant">
               <Mono>{session}</Mono> is a tmux session on{' '}
               <Link params={{ machine }} to="/m/$machine">
                 {machine}

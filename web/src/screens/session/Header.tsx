@@ -70,7 +70,7 @@ export function Header(props: HeaderProps) {
         <Tile name={workspace.name} />
         <div className="session__name">
           <div className="session__line">
-            <Text as="h1" className="m3-wrap" scale="headline-medium" emphasized>
+            <Text render={<h1 />} className="m3-wrap" scale="headline-medium" emphasized>
               {workspace.name}
             </Text>
             <State state={mark}>
@@ -78,7 +78,7 @@ export function Header(props: HeaderProps) {
               {started !== null ? <Mono className="session__age"> · {ago(now / 1000 - started, now).text}</Mono> : null}
             </State>
           </div>
-          <Text as="p" scale="body-small" tone="variant" clip>
+          <Text render={<p />} scale="body-small" tone="variant" clip>
             {workspace.machine} · {home(workspace.repo)}
             {URL.test(workspace.repo) ? (
               <>

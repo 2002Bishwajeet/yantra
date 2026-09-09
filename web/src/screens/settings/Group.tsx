@@ -9,7 +9,7 @@ export function Group(props: { label: string; note?: ReactNode; children: ReactN
   const { label, note, children } = props
   return (
     <section className="settings__group" aria-label={label}>
-      <Eyebrow as="h3" className="settings__eyebrow">
+      <Eyebrow render={<h3 />} className="settings__eyebrow">
         {label}
       </Eyebrow>
       <List>{children}</List>
@@ -21,7 +21,7 @@ export function Group(props: { label: string; note?: ReactNode; children: ReactN
 /** A footnote under a group or a category. */
 export function Note(props: { children: ReactNode }) {
   return (
-    <Text as="p" className="settings__note" scale="body-small" tone="variant">
+    <Text render={<p />} className="settings__note" scale="body-small" tone="variant">
       {props.children}
     </Text>
   )

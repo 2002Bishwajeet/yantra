@@ -19,6 +19,12 @@ export function elapsed(seconds: number): string {
   return ago(s).text
 }
 
+/** Whether `elapsed` still counts, or has given the day instead. A date takes
+ *  no `ago` after it: the boards write `opened 3d ago` beside `opened 9 Jun`. */
+export function isAge(seconds: number): boolean {
+  return seconds < DAY
+}
+
 /** D3 §4.3: the page's age is the **oldest** of its reads, never an average.
  *  `null` while any read is still pending or was never made. */
 export function oldest(reads: Reading<unknown>[]): number | null {

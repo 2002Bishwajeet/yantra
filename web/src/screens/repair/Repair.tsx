@@ -97,13 +97,13 @@ function Editor(props: {
             {error}
           </Mono>
         </div>
-        <Text as="p" scale="body-small" className="repair__advice">
+        <Text render={<p />} scale="body-small" className="repair__advice">
           Fix the file below and save. Save refuses bytes that still will not load, so a
           half-finished fix cannot be kept.
         </Text>
       </Card>
 
-      <Card as="form" className="repair__file" onSubmit={submit}>
+      <Card render={<form />} className="repair__file" onSubmit={submit}>
         <div className="repair__file-head">
           <div className="repair__file-name">
             <label className="m3-eyebrow" htmlFor={`${id}-text`}>
@@ -160,7 +160,7 @@ function Editor(props: {
         </div>
 
         <div className="repair__foot">
-          <Text as="p" scale="body-small" tone="variant">
+          <Text render={<p />} scale="body-small" tone="variant">
             Save writes the whole file. If it still will not load, the daemon names the next
             error and writes nothing.
           </Text>
@@ -190,7 +190,7 @@ export function Repair() {
 
   const heading = (
     <div className="repair__head">
-      <Text as="h1" className="repair__title" emphasized scale="display-small">
+      <Text render={<h1 />} className="repair__title" emphasized scale="display-small">
         Repair {name}
       </Text>
       {opened.data ? <Mono className="repair__path">{opened.data.path}</Mono> : null}
