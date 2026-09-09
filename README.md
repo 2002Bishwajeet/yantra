@@ -57,7 +57,7 @@ being worked on, and what is still an open question.
 
 ## Install
 
-**[v0.1.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.1.0)** is the first release — static musl archives for `aarch64` and `x86_64`, plus a `yantra-agent` for macOS on both, all verified against `SHA256SUMS`. **No Windows build**: the probes refuse to compile there while Q4 is open. **The released `yantrad` carries the dashboard inside it**, so the appliance is one file rather than a binary, a directory and a variable. [`install.sh`](install.sh) puts the current release on an always-on Linux box in one command — it reads which release that is, verifies what it fetched against `SHA256SUMS`, enables nothing and enrols nothing ([docs/appliance.md](docs/appliance.md)). To build from source you need
+**[v0.2.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.2.0)** is the current release — static musl archives for `aarch64` and `x86_64`, plus a `yantra-agent` for macOS on both, all verified against `SHA256SUMS`. **No Windows build**: the probes refuse to compile there while Q4 is open. **The released `yantrad` carries the dashboard inside it**, so the appliance is one file rather than a binary, a directory and a variable. It is the Material dashboard M14 built; v0.1.0 carried the one it replaced, and its archive carried no systemd units, so `install.sh` refuses it by name. [`install.sh`](install.sh) puts the current release on an always-on Linux box in one command — it reads which release that is, verifies what it fetched against `SHA256SUMS`, enables nothing and enrols nothing ([docs/appliance.md](docs/appliance.md)). To build from source you need
 [rustup](https://rustup.rs); the toolchain version is pinned by `rust-toolchain.toml`.
 
 ```bash
