@@ -1,10 +1,4 @@
 ---
-/* Self-hosted rather than a system stack, and the reason is the snapshots, not the design:
-   `system-ui` resolves to a different face on the CI runner than on a developer's box, and the
-   mobile baselines failed at 2% of pixels while desktop slipped under the threshold. A bundled
-   face makes the page render identically everywhere. */
-import '@fontsource/ibm-plex-sans/400.css';
-import '@fontsource/ibm-plex-sans/600.css';
 import '../styles/global.css';
 
 interface Props {
@@ -22,7 +16,12 @@ const { title, description } = Astro.props;
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <meta name="color-scheme" content="light dark" />
+    <!-- Dark only. The page is one composition on one ground: the fire, the ember rim and the
+         vajra's five inks are all read against #0C0F0A, and a light inversion of them is a second
+         design rather than a second palette. This reverses Y-208, which honoured the preference
+         because a neutral placeholder had no argument for overriding it. -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0C0F0A" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
   <body>

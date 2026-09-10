@@ -1,13 +1,174 @@
 ---
 import Layout from '../layouts/Layout.astro';
+/* Read at build time from the workspace manifest rather than typed here. Three places on this
+   page name the release, and `Cargo.toml` is the one file a version bump already touches — see
+   Y-364, where changing that single line moved all four crates. `?raw` rather than `readFileSync`:
+   the bundler rewrites `import.meta.url` in the prerender chunk, so a path relative to this file
+   stops being relative to this file. */
+import manifest from '../../../Cargo.toml?raw';
+
+const version = manifest.match(/^version = "([^"]+)"$/m)?.[1];
+if (!version) throw new Error('no [workspace.package] version in Cargo.toml');
 
 const repo = 'https://github.com/2002Bishwajeet/yantra';
+const release = `${repo}/releases/tag/v${version}`;
+const install = 'cargo install --path crates/yantra';
 ---
 
-<Layout title="Yantra — coming soon" description="One control plane for every machine you already own.">
-  <main>
-    <h1>yantra</h1>
-    <p class="say">One control plane for every machine you already own.</p>
-    <p class="soon">Coming soon — <a href={repo}>source on GitHub</a></p>
-  </main>
+<Layout
+  title="Yantra — one workspace, one interface, every machine"
+  description="A personal control plane for the machines you already own. Local-first, over Tailscale."
+>
+  <div class="runway">
+    <div class="frame" data-frame data-beat="0">
+      <div class="weave" aria-hidden="true"></div>
+      <div class="dots" aria-hidden="true"></div>
+      <div class="noise" aria-hidden="true"></div>
+      <div class="sheen sheen--wet" aria-hidden="true"></div>
+      <div class="sheen sheen--gloss" aria-hidden="true"></div>
+      <div class="plate" aria-hidden="true"></div>
+      <canvas class="vajra" data-fx="vajra" aria-hidden="true"></canvas>
+      <canvas class="fire" data-fx="fire" aria-hidden="true"></canvas>
+
+      <div class="stage">
+        <header class="masthead">
+          <div class="wordmark">
+            <span class="wordmark__bindu" aria-hidden="true"></span>
+            <span class="wordmark__names">
+              <span class="wordmark__latin">Yantra</span>
+              <span class="wordmark__deva" lang="sa">यन्त्र</span>
+            </span>
+          </div>
+          <div class="controls">
+            <span class="tag">v{version}</span>
+            <a class="pill" href={repo}>Star on GitHub</a>
+            <a class="pill pill--accent" href={release}>Download v{version}</a>
+          </div>
+        </header>
+
+        <main class="stage__body">
+          <section class="panel" data-panel>
+            <div class="lede">
+              <p class="lede__gloss">
+                <span class="lede__word"><span lang="sa">यन्त्र</span> · machine, instrument, apparatus</span>
+              </p>
+              <h1 class="claim">
+                <span data-clause="0">One workspace.</span>
+                <span data-clause="1">One interface.</span>
+                <span data-clause="2">Every machine.</span>
+              </h1>
+            </div>
+
+            <div class="verses">
+              <p data-verse="0">You name the work, not the machine.<br />Somewhere a laptop still holds your morning.</p>
+              <p data-verse="1">The instrument remembers where it lives.<br />It chooses the machine, and reaches it.</p>
+              <p data-verse="2">The session is still open. The agent goes on.<br />You were only away.</p>
+            </div>
+
+            <div class="doing">
+              <span class="session">
+                <span class="session__mark" aria-hidden="true"></span>
+                <span class="session__name">landing</span>
+                <span class="session__where">running · macbook</span>
+                <span class="session__age">39m</span>
+              </span>
+              <button class="copy" type="button" data-copy data-command={install} aria-label={`Copy ${install}`}>
+                <span><span class="copy__sigil" aria-hidden="true">$</span>{install}</span>
+                <span class="copy__verb" data-copy-verb>Copy</span>
+              </button>
+            </div>
+          </section>
+        </main>
+
+        <footer class="colophon">
+          <span class="colophon__say">Local-first, over Tailscale. SSH, tmux and your agent, conducted.</span>
+          <div class="progress">
+            <span data-pip="0"></span>
+            <span data-pip="1"></span>
+            <span data-pip="2"></span>
+            <span class="progress__hint">Scroll</span>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </div>
 </Layout>
+
+<script>
+  import { createDisplacement, createFlameWrap } from '../lib/canvas-fx.js';
+  import { drawVajra } from '../lib/vajra.js';
+
+  const ACCENT = '#E8734A';
+  const ACCENT01 = [0xe8 / 255, 0x73 / 255, 0x4a / 255];
+
+  const frame = document.querySelector<HTMLElement>('[data-frame]');
+  const panel = document.querySelector<HTMLElement>('[data-panel]');
+  if (!frame || !panel) throw new Error('the frame did not render');
+
+  /* Three beats over three screen-heights. Everything the beat changes is a CSS rule keyed off
+     this attribute, so the page has one piece of state and the stylesheet holds the rest. */
+  let beat = 0;
+
+  const fire = createFlameWrap(document.querySelector('[data-fx="fire"]')!, panel, {
+    color: ACCENT01,
+    intensity: 0.42, height: 120, spread: 14, radius: 32, speed: 0.22,
+    scale: 0.7, sparks: 1.2, sparkSize: 0.3, sparkDensity: 0.9,
+    rim: 1.8, melt: 3, smoke: 0.9, ember: 1.2,
+  });
+
+  const vajra = createDisplacement(
+    document.querySelector('[data-fx="vajra"]')!,
+    (ctx, w, h) => drawVajra(ctx, w, h, ACCENT, beat),
+    {
+      grid: 44, radius: 0.14, strength: 0.16, threshold: 320,
+      relaxation: 0.88, shift: 0.9, aberration: 1.4, grain: 0.12, scramble: 0,
+    },
+  );
+
+  function tick() {
+    const span = Math.max(document.documentElement.scrollHeight - innerHeight, 1);
+    const p = Math.min(Math.max(scrollY / span, 0), 1);
+    frame!.toggleAttribute('data-scrolled', p > 0.03);
+    const next = p < 0.34 ? 0 : p < 0.7 ? 1 : 2;
+    if (next === beat) return;
+    beat = next;
+    frame!.dataset.beat = String(beat);
+    /* The bolt up the sprite lights one segment per beat, so the texture is repainted and the
+       cells are kicked — the shear is what makes the strike read as a strike. */
+    vajra?.refresh();
+    vajra?.jolt(0.55);
+    fire?.setOptions({ intensity: 0.42 + beat * 0.16, height: 120 + beat * 40 });
+  }
+
+  addEventListener('scroll', tick, { passive: true });
+  addEventListener('resize', tick, { passive: true });
+  tick();
+
+  let dryTimer = 0;
+  addEventListener('pointermove', (event) => {
+    const box = frame!.getBoundingClientRect();
+    frame!.style.setProperty('--x', `${event.clientX - box.left}px`);
+    frame!.style.setProperty('--y', `${event.clientY - box.top}px`);
+    frame!.setAttribute('data-wet', '');
+    clearTimeout(dryTimer);
+    dryTimer = setTimeout(() => frame!.removeAttribute('data-wet'), 2500);
+  }, { passive: true });
+  addEventListener('pointerleave', () => frame!.removeAttribute('data-wet'), { passive: true });
+
+  const copy = document.querySelector<HTMLButtonElement>('[data-copy]');
+  const verb = document.querySelector<HTMLElement>('[data-copy-verb]');
+  let verbTimer = 0;
+  copy?.addEventListener('click', async () => {
+    if (!verb) return;
+    try {
+      await navigator.clipboard.writeText(copy.dataset.command ?? '');
+      verb.textContent = 'Copied';
+    } catch {
+      /* Denied permission, or no clipboard on an insecure origin. Say so rather than claiming a
+         copy that did not happen — the command is on screen and can still be selected. */
+      verb.textContent = 'Select it';
+    }
+    clearTimeout(verbTimer);
+    verbTimer = setTimeout(() => { verb.textContent = 'Copy'; }, 1600);
+  });
+</script>
