@@ -136,7 +136,7 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           marker='<!-- landing-preview -->'
-          body=$(printf '%s\n**Landing preview** — `%s`\n\n%s\n\nThe page follows your system theme.' "$marker" "$SHA" "$URL")
+          body=$(printf '%s\n**Landing preview** — `%s`\n\n%s\n\nThe page is dark whatever your system prefers (Y-209).' "$marker" "$SHA" "$URL")
           id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
                  --jq "map(select(.body | contains(\"$marker\"))) | .[0].id // empty")
           if [ -n "$id" ]; then

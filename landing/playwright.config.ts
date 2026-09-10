@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-/* Visual regression for the landing page. Four snapshots: both grounds x desktop and mobile.
+/* Visual regression for the landing page. Four snapshots: the first beat and the last, on
+ * desktop and mobile. There is one ground now (Y-209), so the pair that used to be light and
+ * dark is the pair of scroll positions instead.
  *
  * Snapshots are OS-specific but Playwright's default path template no longer includes the
  * platform, so a Linux and a macOS run collide at one path while rendering fonts differently.
