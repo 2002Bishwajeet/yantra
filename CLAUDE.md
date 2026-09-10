@@ -210,9 +210,12 @@ traits' own implementations must be tested against the real thing.
   assistant, not for `Co-Authored-By`.
 - Task IDs `Y-NNN` from `tracker.md`. Commits: `Y-030: add cargo workspace skeleton`.
   Branches: `y-030-cargo-skeleton`. One branch per issue, one PR per branch. **`Y-2xx` is reserved
-  for the landing page**, which keeps its own tracker on its own branch — it has taken a number this
-  repo had already used three times, and the cost is two rows in two files claiming one identifier,
-  so a commit message stops saying which work it belongs to.
+  for the landing page** — it took a number this repo had already used three times, and the cost is
+  two rows in two files claiming one identifier, so a commit message stops saying which work it
+  belongs to. **The reservation is all that survives of that arrangement** (Y-211, 2026-09-10): the
+  landing has no tracker of its own and no long-lived branch of its own. Its rows are in the root
+  [`tracker.md`](tracker.md) with everything else, `Y-2xx` is allocated from there like any other
+  number, and landing work branches off `main` like any other work.
 - ADRs: `docs/adr/NNNN-kebab-title.md`, Nygard format (Context / Decision / Consequences),
   immutable once accepted. **Immutable does not mean untouchable**: when a premise behind an accepted
   ADR stops holding, append a **dated blockquote** naming the date and the task, and leave the
