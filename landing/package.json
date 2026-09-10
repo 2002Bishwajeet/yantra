@@ -14,7 +14,8 @@
     "test:visual:update": "playwright test --update-snapshots"
   },
   "dependencies": {
-    "@fontsource-variable/google-sans-flex": "^5.3.1",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/noto-serif-devanagari": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",

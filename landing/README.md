@@ -2,36 +2,46 @@
 
 The public page for Yantra. Astro 7 + Tailwind 4, static output, one page, no client framework.
 
-**It is the owner's own design.** Two earlier ones were rejected and `Y-208` stripped the page back
-to a placeholder to wait for a third; the owner drew it in Claude Design as
-[`Yantra Landing B.dc.html`](https://claude.ai/design/p/810a535a-9ea9-4277-a0ce-ebc3b8caa796) and
-`Y-209` built it. What arrives here is one sticky frame over three screen-heights, and everything on
-it is a function of how far you have scrolled: three clauses light one at a time, three verses take
-turns, a bolt climbs the vajra beside them, and the install command appears only at the last beat,
-once the page has said all three things.
+**It is the owner's own design.** Two designs were rejected outright, `Y-208` stripped the page to a
+placeholder to wait for a third, and the owner then drew two in [Claude
+Design](https://claude.ai/design/p/810a535a-9ea9-4277-a0ce-ebc3b8caa796): `Yantra Landing B.dc.html`,
+which `Y-209` built, and `Yantra Landing Painted.dc.html`, which replaced it the same day and is what
+this is. What arrives is one sticky frame over three screen-heights, and everything on it is a
+function of how far you have scrolled: three clauses light one at a time, three verses take turns in
+one box, three pips fill, and the install command appears only at the last beat, once the page has
+said all three things.
 
-**The palette is the dashboard's.** Every colour in `src/styles/global.css` is a Material role from
-[`web/src/m3/tokens.css`](../web/src/m3/tokens.css) read in its **dark** value — the sage palette
-measured in R14 — except the terracotta accent, which the owner added for this page and which no
-dashboard role holds. This is a reversal: the placeholder took no palette at all, precisely so there
-would be nothing here to argue with once the direction was settled. It is settled.
+**The painting is the page.** A Vishvakarma — the divine craftsman, the maker of instruments — fills
+the frame, and Canvas UI's Cloth hangs it as fabric that moves under the cursor and folds harder at
+each beat. `src/lib/canvas-fx.js` holds that one effect and nothing else: the upstream file also
+carries Flame Wrap, Displacement and Canvas Paint, but it is an IIFE assigning to a single object, so
+nothing tree-shakes and an unused shader is bytes a visitor downloads.
+
+**The palette is the painting's, not the dashboard's.** Charcoal ground, aged brass for every rule
+and label, warm ivory for the words, and one terracotta for the things you can act on. This reverses
+`Y-209`, which took the dashboard's Material roles read dark — the sage measured in R14 — so that the
+two surfaces would share an identity. They no longer do, on purpose and for now: `Y-383` is the row
+that moves the dashboard to match, and until it lands the disagreement is the cost of the landing
+going first.
 
 **Dark only, and that is also a reversal.** `Y-208` honoured `prefers-color-scheme` because a neutral
-placeholder had no argument for overriding it. This page does: the fire, the ember rim and the
-vajra's five inks are all read against one ground, and a light inversion of them is a second design
-rather than a second palette. A test asserts it, because that is the kind of decision a later edit
-undoes without noticing.
+placeholder had no argument for overriding it. This page does: it is a dark painting, and a light
+inversion of it is a second design rather than a second palette. A test asserts it, because that is
+the kind of decision a later edit undoes without noticing.
 
-**The page ships JavaScript now**, which the placeholder did not. Two WebGL canvases from
-[`src/lib/canvas-fx.js`](src/lib/canvas-fx.js) — Canvas UI's Flame Wrap around the panel, and its
-Displacement shearing the vajra that `src/lib/vajra.js` paints. Both honour
-`prefers-reduced-motion`, and with no script at all the page still says all three clauses and shows
-the command: see the `scripting: none` block at the bottom of the stylesheet.
+**Four faces, self-hosted**: Fraunces for the display serif, Geist for the interface, IBM Plex Mono
+for the command, and Noto Serif Devanagari for the one word यन्त्र. Self-hosting is a reproducibility
+requirement rather than a preference — a `system-ui` stack renders differently on the CI runner than
+on a developer's box and breaks the baselines, which is what `Y-208` found. Fontsource ships six axis
+cuts of Fraunces; this takes the `opsz` one, because the design asks for optical sizing and the
+`full` cut carries two axes nothing here sets.
 
-**Three faces, self-hosted**: Google Sans Flex, IBM Plex Mono and Noto Serif Devanagari, subset to
-latin and devanagari, declared with the same `@font-face` idiom the dashboard uses. Self-hosting is
-a reproducibility requirement rather than a preference — a `system-ui` stack renders differently on
-the CI runner than on a developer's box and breaks the baselines, which is what `Y-208` found.
+**The two images are exported by the owner, not fetched.** `src/assets/vishvakarma.png` (the
+painting, 1585x992) and `src/assets/yantra-mark.png` (the mandala in the masthead and the colophon,
+1254x1254 with alpha) came over Taildrop by hand: the Claude Design MCP caps a file read at 256 KiB
+of base64, and both are far past it. They go through `astro:assets` rather than `public/`, so the
+build emits sized WebP — the painting is 3.0 MB of PNG and 284 kB served, at quality 68 because at
+1:1 on its busiest region that is indistinguishable from 82 and a third smaller.
 
 **The release the page offers is read from [`Cargo.toml`](../Cargo.toml) at build time**, not typed
 here. Three places name it, and a version bump already touches that one line (`Y-364`). A test
@@ -40,13 +50,14 @@ asserts the page and the manifest agree.
 **This is not the M4 dashboard.** That is `Y-072`, it lives in `web/`, and it is built per
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md).
 
-**The landing does not read [`design/tokens.css`](../design/tokens.css)**, which
-[`docs/design-system.md`](../docs/design-system.md) documents. It reads nothing at build time but the
-manifest; the sage values above are restated in `global.css` with the roles they came from named,
-because the two apps are separate builds and a cross-app CSS import breaks silently.
+**The landing reads no shared stylesheet.** Not [`design/tokens.css`](../design/tokens.css), which
+[`docs/design-system.md`](../docs/design-system.md) documents and which describes a build that no
+longer exists, and not `web/src/m3/tokens.css` either. It reads nothing at build time but the
+manifest: the two apps are separate builds, and a cross-app CSS import breaks silently.
 
-Nothing was lost in the earlier strip. Commit `827d300` on `main` holds the whole Pattachitra
-build, and `tracker.md` rows `Y-206`/`Y-207` record what drawing it taught.
+Nothing was lost in the earlier strips. Commit `827d300` on `main` holds the whole Pattachitra build,
+and `tracker.md` rows `Y-206`/`Y-207` record what drawing it taught; `Y-209`'s vajra and fire are one
+commit back on this branch.
 
 ```sh
 npm install
@@ -64,8 +75,7 @@ Built assets are never committed (R-24).
 
 ## Visual regression
 
-Four baselines: the first beat and the last, on desktop and mobile. They replace the light/dark pair
-the placeholder had, because there is one ground now.
+Four baselines: the first beat and the last, on desktop and mobile.
 
 > **Playwright's `reducedMotion` option is accepted and then dropped.** Set it in `use` — at file,
 > describe or config level — and `matchMedia('(prefers-reduced-motion: reduce)')` still answers
@@ -74,9 +84,24 @@ the placeholder had, because there is one ground now.
 > `page.emulateMedia({ reducedMotion: 'reduce' })` works either way, and `tests/landing.spec.ts`
 > uses that.
 > Every landing test carried the dead option from `Y-204` onward without anyone noticing, because
-> the page it tested had no motion to suppress. This one has two WebGL loops: with the preference
-> genuinely off they animate at about five frames a second under the shell, no two screenshots are
-> ever alike, and each of the four snapshot tests burns its whole timeout before failing.
+> the page it tested had no motion to suppress. `Y-209` had two WebGL loops and burned every
+> snapshot timeout before failing. The Cloth reads the preference itself and parks after one frame,
+> so with `emulateMedia` in place the fabric holds a single still fold and the baselines are stable.
+
+> **A loaded image is not a painted one.** The cloth renders on the frame after `img.decode()`
+> resolves, and `decode()` is asynchronous, so a screenshot taken two frames after the bitmap is
+> complete catches the flat backing colour instead of the fabric — with the `<img>` beneath it
+> perfect and every other assertion on the page passing. The page sets `data-cloth` once the fabric
+> exists and `settle()` waits for that attribute.
+
+Two tests assert the painting, because one was not enough. The first checks the asset is served: a
+build that emits the markup and loses the asset ships a charcoal rectangle nobody notices. The
+second checks it reached the fabric, which is the failure above and is separate. That one needs no
+pixel decoder — PNG compresses this canvas to 449 bytes when it is a flat fill and 1.6 MB when it is
+the painting.
+
+The four baselines are 4.4 MB together. A photographic hero does not compress, and lossless
+recompression buys 6%, so they are left as Playwright writes them.
 
 ## Deploy previews
 

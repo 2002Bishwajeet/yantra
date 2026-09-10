@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
-/* The page is the owner's own prototype (Y-209): one sticky frame over three screen-heights, and
- * everything it does is a function of the scroll position. So the baselines are taken at the two
- * ends of that scroll rather than in two colour schemes — there is only one scheme now. */
+/* The page is the owner's own prototype (Y-212): a painting under a cloth simulation, one sticky
+ * frame over three screen-heights, and everything it says is a function of the scroll position.
+ * So the baselines are taken at the two ends of that scroll rather than in two colour schemes —
+ * there is only one scheme, because there is only one painting. */
 
 const VIEWS = {
   desktop: { width: 1280, height: 800 },
@@ -19,13 +20,19 @@ async function settle(page: Page) {
      false inside the page, and `contextOptions.reducedMotion` is undefined. Measured against
      the headless shell these run on; whether a full chromium behaves is untested and does not
      matter, since this call works on both. Every one of these tests carried the dead option
-     from Y-204 onward, harmlessly, because the page it tested had no motion to suppress. This
-     one has two WebGL loops and never painted the same frame twice. */
+     from Y-204 onward, harmlessly, because the page it tested had no motion to suppress. The
+     cloth reads this preference itself and parks after one frame; with it genuinely off, the
+     fabric never holds still and no two screenshots are alike. */
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await page.waitForFunction(() => document.fonts.status === 'loaded');
-  /* Two frames, not one: the first lets the flame read the panel's box after the webfonts have
-     changed its height, the second is the paint that box produces. */
+  /* The page sets this once the cloth has rendered a frame. Waiting on the <img> instead is not
+     enough and looks like it is: `decode()` resolves asynchronously, so the fabric is still the
+     flat backing colour two frames after the bitmap is complete, and the baseline captures a
+     charcoal rectangle that no assertion here would have caught. */
+  await expect(page.locator('[data-frame]')).toHaveAttribute('data-cloth', /on|off/);
+  /* Two frames, not one: the first is the cloth's parked render, the second is the paint it
+     produces. */
   await page.evaluate(
     () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
   );
@@ -87,16 +94,35 @@ test.describe('content', () => {
 
   /* Y-208 made the placeholder follow the OS preference and asserted it, because that kind of
      reversal is what a later edit silently undoes. This design reverses it deliberately — one
-     ground, one composition — so the assertion is kept and turned around. */
+     painting, one ground — so the assertion is kept and turned around. */
   test('the ground is dark whatever the OS prefers', async ({ page }) => {
     const ground = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
     await page.emulateMedia({ colorScheme: 'light' });
     await settle(page);
-    expect(await ground()).toBe('rgb(12, 15, 10)');
+    expect(await ground()).toBe('rgb(11, 8, 6)');
 
     await page.emulateMedia({ colorScheme: 'dark' });
-    expect(await ground()).toBe('rgb(12, 15, 10)');
+    expect(await ground()).toBe('rgb(11, 8, 6)');
+  });
+
+  /* The painting is the page. A build that emits the markup but loses the asset still passes
+     every other test here, and the result is a charcoal rectangle nobody notices until it ships. */
+  test('the painting is served', async ({ page }) => {
+    await settle(page);
+    const painting = page.locator('.ground');
+    await expect(painting).toHaveJSProperty('complete', true);
+    expect(await painting.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  });
+
+  /* And that it reaches the fabric, which is a separate thing and was separately broken: the cloth
+     drew nothing but its flat backing colour over a perfectly loaded <img>, and every other test
+     here passed. No pixel decoder is needed to tell those apart -- PNG compresses a flat fill to a
+     few kB, and the painting does not compress. */
+  test('the fabric carries the painting', async ({ page }) => {
+    await settle(page);
+    const shot = await page.locator('canvas.cloth').screenshot();
+    expect(shot.byteLength).toBeGreaterThan(200_000);
   });
 });
 
@@ -126,7 +152,7 @@ test.describe('the three beats', () => {
      button that still takes a click is worse than a visible one. */
   test('the install command arrives with the last beat', async ({ page }) => {
     await settle(page);
-    const copy = page.getByRole('button', { name: /Copy cargo install/ });
+    const copy = page.getByRole('button', { name: /cargo install/ });
     await expect(copy).toHaveCSS('pointer-events', 'none');
 
     await scrollToEnd(page);
@@ -144,8 +170,8 @@ test.describe('copying', () => {
   test('the button puts the command on the clipboard', async ({ page }) => {
     await settle(page);
     await scrollToEnd(page);
-    await page.getByRole('button', { name: /Copy cargo install/ }).click();
-    await expect(page.locator('[data-copy-verb]')).toHaveText('Copied');
+    await page.getByRole('button', { name: /cargo install/ }).click();
+    await expect(page.locator('[data-copy-tag]')).toHaveText('Copied');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       'cargo install --path crates/yantra',
     );
