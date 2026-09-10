@@ -1,5 +1,8 @@
 ---
+import { getImage } from 'astro:assets';
 import Layout from '../layouts/Layout.astro';
+import painting from '../assets/vishvakarma.png';
+import mark from '../assets/yantra-mark.png';
 /* Read at build time from the workspace manifest rather than typed here. Three places on this
    page name the release, and `Cargo.toml` is the one file a version bump already touches — see
    Y-364, where changing that single line moved all four crates. `?raw` rather than `readFileSync`:
@@ -10,84 +13,129 @@ import manifest from '../../../Cargo.toml?raw';
 const version = manifest.match(/^version = "([^"]+)"$/m)?.[1];
 if (!version) throw new Error('no [workspace.package] version in Cargo.toml');
 
+/* The painting is the page, so it is worth the pipeline: 3 MB of PNG would be the whole page
+   weight. Quality 68 rather than the default: at 1:1 on the busiest part of the painting it is
+   indistinguishable from 82 and a third smaller, and the vignette and the cloth's own shading sit
+   over most of it anyway. */
+const ground = await getImage({ src: painting, format: 'webp', width: 1585, quality: 68 });
+const sigil = await getImage({ src: mark, format: 'webp', width: 88 });
+
 const repo = 'https://github.com/2002Bishwajeet/yantra';
 const release = `${repo}/releases/tag/v${version}`;
-const install = 'cargo install --path crates/yantra';
+/* `install.sh` rather than `cargo install`, on the owner's call: this puts the current release on
+   an always-on Linux box, verified against `SHA256SUMS`, where the cargo line builds the CLI from
+   a clone. Pinned to the tag the page already names, so the command and the download button
+   cannot drift apart. */
+const install = `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v${version}/install.sh | bash`;
+/* Split after each slash so the URL wraps where a reader expects it to. `<wbr>` adds nothing to
+   the text content, so the clipboard and the accessible name are still the plain command. */
+const installParts = install.split(/(?<=\/)/);
 ---
 
 <Layout
   title="Yantra — one workspace, one interface, every machine"
-  description="A personal control plane for the machines you already own. Local-first, over Tailscale."
+  description="Name the work, not the machine. Yantra conducts ssh, tmux and your agent across your own machines, over Tailscale."
 >
   <div class="runway">
     <div class="frame" data-frame data-beat="0">
-      <div class="weave" aria-hidden="true"></div>
-      <div class="dots" aria-hidden="true"></div>
-      <div class="noise" aria-hidden="true"></div>
-      <div class="sheen sheen--wet" aria-hidden="true"></div>
-      <div class="sheen sheen--gloss" aria-hidden="true"></div>
-      <div class="plate" aria-hidden="true"></div>
-      <canvas class="vajra" data-fx="vajra" aria-hidden="true"></canvas>
-      <canvas class="fire" data-fx="fire" aria-hidden="true"></canvas>
+      <img class="ground" src={ground.src} alt="" fetchpriority="high" decoding="async" />
+      <canvas class="cloth" data-fx="cloth" aria-hidden="true"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+      <div class="grain" aria-hidden="true"></div>
 
-      <div class="stage">
+      <div class="content">
         <header class="masthead">
-          <div class="wordmark">
-            <span class="wordmark__bindu" aria-hidden="true"></span>
-            <span class="wordmark__names">
-              <span class="wordmark__latin">Yantra</span>
-              <span class="wordmark__deva" lang="sa">यन्त्र</span>
-            </span>
-          </div>
-          <div class="controls">
+          <a class="wordmark" href={repo}>
+            <img src={sigil.src} alt="" width="44" height="44" decoding="async" />
+            <span class="wordmark__latin">Yantra</span>
+            <span class="wordmark__deva" lang="sa">यन्त्र</span>
+          </a>
+          <nav class="actions">
             <span class="tag">v{version}</span>
-            <a class="pill" href={repo}>Star on GitHub</a>
-            <a class="pill pill--accent" href={release}>Download v{version}</a>
-          </div>
+            <a class="pill" href={repo} aria-label="Star on GitHub">
+              <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"
+                ><path
+                  d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-2.92-.88-2.92-2.85 0-.58.21-1.07.55-1.45-.05-.13-.24-.66.05-1.37 0 0 .54-.17 1.77.66.51-.14 1.05-.21 1.6-.21.55 0 1.09.07 1.6.21 1.23-.84 1.77-.66 1.77-.66.29.71.1 1.24.05 1.37.34.38.55.86.55 1.45 0 1.98-1.15 2.65-2.93 2.85.31.27.58.79.58 1.6 0 1.15-.01 2.06-.01 2.35 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+                ></path></svg
+              >
+              <span class="pill__label">Star on GitHub</span>
+            </a>
+            <a class="pill pill--accent" href={release}>
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" class="stroke"
+                ><path d="M12 4v11"></path><path d="m7 11 5 5 5-5"></path><path d="M5 20h14"
+                ></path></svg
+              >
+              Download v{version}
+            </a>
+          </nav>
         </header>
 
-        <main class="stage__body">
-          <section class="panel" data-panel>
-            <div class="lede">
-              <p class="lede__gloss">
-                <span class="lede__word"><span lang="sa">यन्त्र</span> · machine, instrument, apparatus</span>
+        <main class="middle">
+          <section class="panel">
+            <div class="panel__inlay" aria-hidden="true"></div>
+            <div class="panel__body">
+              <p class="eyebrow">
+                <span class="eyebrow__rule" aria-hidden="true"></span>
+                <span><span class="deva" lang="sa">यन्त्र</span> · Machine, instrument, apparatus</span>
               </p>
+
               <h1 class="claim">
                 <span data-clause="0">One workspace.</span>
                 <span data-clause="1">One interface.</span>
                 <span data-clause="2">Every machine.</span>
               </h1>
-            </div>
 
-            <div class="verses">
-              <p data-verse="0">You name the work, not the machine.<br />Somewhere a laptop still holds your morning.</p>
-              <p data-verse="1">The instrument remembers where it lives.<br />It chooses the machine, and reaches it.</p>
-              <p data-verse="2">The session is still open. The agent goes on.<br />You were only away.</p>
-            </div>
+              <div class="verses">
+                <p data-verse="0">
+                  You name the work, not the machine.<br />Somewhere a laptop still holds your
+                  morning.
+                </p>
+                <p data-verse="1">
+                  The instrument remembers where it lives.<br />It chooses the machine, and reaches
+                  it.
+                </p>
+                <p data-verse="2">
+                  The session is still open. The agent goes on.<br />You were only away.
+                </p>
+              </div>
 
-            <div class="doing">
-              <span class="session">
-                <span class="session__mark" aria-hidden="true"></span>
-                <span class="session__name">landing</span>
-                <span class="session__where">running · macbook</span>
-                <span class="session__age">39m</span>
-              </span>
-              <button class="copy" type="button" data-copy data-command={install} aria-label={`Copy ${install}`}>
-                <span><span class="copy__sigil" aria-hidden="true">$</span>{install}</span>
-                <span class="copy__verb" data-copy-verb>Copy</span>
-              </button>
+              <div class="doing">
+                <span class="session">
+                  <span class="session__dot" aria-hidden="true"></span>
+                  <span class="session__name">landing</span>
+                  <span class="session__where">running · macbook</span>
+                  <span class="session__age">39m</span>
+                </span>
+                <button class="copy" type="button" data-copy data-command={install}>
+                  <span class="copy__line">
+                    <span class="copy__sigil" aria-hidden="true">$</span>
+                    <span class="copy__command"
+                      >{installParts.map((part) => (
+                        <Fragment>
+                          {part}
+                          <wbr />
+                        </Fragment>
+                      ))}</span
+                    >
+                  </span>
+                  <span class="copy__tag" data-copy-tag>Copy</span>
+                </button>
+              </div>
             </div>
           </section>
         </main>
 
         <footer class="colophon">
-          <span class="colophon__say">Local-first, over Tailscale. SSH, tmux and your agent, conducted.</span>
-          <div class="progress">
-            <span data-pip="0"></span>
-            <span data-pip="1"></span>
-            <span data-pip="2"></span>
-            <span class="progress__hint">Scroll</span>
-          </div>
+          <span class="creed">
+            <img src={sigil.src} alt="" width="20" height="20" decoding="async" />
+            Local-first, over Tailscale. SSH, tmux and your agent, conducted.
+          </span>
+          <span class="progress">
+            <span class="pip" data-pip="0"></span>
+            <span class="pip" data-pip="1"></span>
+            <span class="pip" data-pip="2"></span>
+            <span class="hint" data-hint>Scroll</span>
+          </span>
         </footer>
       </div>
     </div>
@@ -95,36 +143,49 @@ const install = 'cargo install --path crates/yantra';
 </Layout>
 
 <script>
-  import { createDisplacement, createFlameWrap } from '../lib/canvas-fx.js';
-  import { drawVajra } from '../lib/vajra.js';
-
-  const ACCENT = '#E8734A';
-  const ACCENT01 = [0xe8 / 255, 0x73 / 255, 0x4a / 255];
+  import { createCloth } from '../lib/canvas-fx.js';
 
   const frame = document.querySelector<HTMLElement>('[data-frame]');
-  const panel = document.querySelector<HTMLElement>('[data-panel]');
-  if (!frame || !panel) throw new Error('the frame did not render');
-
-  /* Three beats over three screen-heights. Everything the beat changes is a CSS rule keyed off
-     this attribute, so the page has one piece of state and the stylesheet holds the rest. */
+  const canvas = document.querySelector<HTMLCanvasElement>('[data-fx="cloth"]');
+  const ground = document.querySelector<HTMLImageElement>('.ground');
   let beat = 0;
 
-  const fire = createFlameWrap(document.querySelector('[data-fx="fire"]')!, panel, {
-    color: ACCENT01,
-    intensity: 0.42, height: 120, spread: 14, radius: 32, speed: 0.22,
-    scale: 0.7, sparks: 1.2, sparkSize: 0.3, sparkDensity: 0.9,
-    rim: 1.8, melt: 3, smoke: 0.9, ember: 1.2,
+  /* The cloth samples the painting rather than the DOM, so it needs the decoded bitmap and not
+     the element. The <img> below it stays visible either way: it is what a machine with no WebGL2
+     sees, and the fabric composites over it when there is one. */
+  const cloth =
+    canvas && ground
+      ? await ground
+          .decode()
+          .then(() =>
+            createCloth(
+              canvas,
+              (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+                const scale = Math.max(w / ground.naturalWidth, h / ground.naturalHeight);
+                const dw = ground.naturalWidth * scale;
+                const dh = ground.naturalHeight * scale;
+                ctx.drawImage(ground, (w - dw) / 2, (h - dh) / 2, dw, dh);
+              },
+              {
+                pin: 'top', wind: 1.5, speed: 0.42, amplitude: 16, drape: 22,
+                brush: 2, brushSize: 180, damping: 1.1, light: 0.6, sheen: 0.16,
+                shadow: 0, cornerRadius: 0, backing: [0.043, 0.031, 0.024], perspective: 1500,
+              },
+            ),
+          )
+          .catch(() => null)
+      : null;
+
+  /* Say when the fabric exists. `decode()` above is async and the cloth renders on the frame after
+     it is created, so a screenshot taken two frames after load catches the backing colour and not
+     the painting — which is what the visual regression did until it was told to wait. One frame is
+     enough: the cloth queued its own callback first, and rAF runs them in order. */
+  requestAnimationFrame(() => {
+    frame?.setAttribute('data-cloth', cloth ? 'on' : 'off');
   });
 
-  const vajra = createDisplacement(
-    document.querySelector('[data-fx="vajra"]')!,
-    (ctx, w, h) => drawVajra(ctx, w, h, ACCENT, beat),
-    {
-      grid: 44, radius: 0.14, strength: 0.16, threshold: 320,
-      relaxation: 0.88, shift: 0.9, aberration: 1.4, grain: 0.12, scramble: 0,
-    },
-  );
-
+  /* One piece of state. Everything the beat changes is a CSS rule keyed off `[data-beat]`, so the
+     reduced-motion and no-script fallbacks are stylesheet edits rather than branches in here. */
   function tick() {
     const span = Math.max(document.documentElement.scrollHeight - innerHeight, 1);
     const p = Math.min(Math.max(scrollY / span, 0), 1);
@@ -133,42 +194,30 @@ const install = 'cargo install --path crates/yantra';
     if (next === beat) return;
     beat = next;
     frame!.dataset.beat = String(beat);
-    /* The bolt up the sprite lights one segment per beat, so the texture is repainted and the
-       cells are kicked — the shear is what makes the strike read as a strike. */
-    vajra?.refresh();
-    vajra?.jolt(0.55);
-    fire?.setOptions({ intensity: 0.42 + beat * 0.16, height: 120 + beat * 40 });
+    /* Each beat raises the wind and deepens the folds. */
+    cloth?.setOptions({ wind: 1.5 + beat * 0.7, amplitude: 16 + beat * 7 });
   }
 
-  addEventListener('scroll', tick, { passive: true });
-  addEventListener('resize', tick, { passive: true });
-  tick();
-
-  let dryTimer = 0;
-  addEventListener('pointermove', (event) => {
-    const box = frame!.getBoundingClientRect();
-    frame!.style.setProperty('--x', `${event.clientX - box.left}px`);
-    frame!.style.setProperty('--y', `${event.clientY - box.top}px`);
-    frame!.setAttribute('data-wet', '');
-    clearTimeout(dryTimer);
-    dryTimer = setTimeout(() => frame!.removeAttribute('data-wet'), 2500);
-  }, { passive: true });
-  addEventListener('pointerleave', () => frame!.removeAttribute('data-wet'), { passive: true });
+  if (frame) {
+    addEventListener('scroll', tick, { passive: true });
+    addEventListener('resize', tick, { passive: true });
+    tick();
+  }
 
   const copy = document.querySelector<HTMLButtonElement>('[data-copy]');
-  const verb = document.querySelector<HTMLElement>('[data-copy-verb]');
-  let verbTimer = 0;
+  const tag = document.querySelector<HTMLElement>('[data-copy-tag]');
+  let restore = 0;
   copy?.addEventListener('click', async () => {
-    if (!verb) return;
+    if (!tag) return;
     try {
       await navigator.clipboard.writeText(copy.dataset.command ?? '');
-      verb.textContent = 'Copied';
+      tag.textContent = 'Copied';
     } catch {
-      /* Denied permission, or no clipboard on an insecure origin. Say so rather than claiming a
-         copy that did not happen — the command is on screen and can still be selected. */
-      verb.textContent = 'Select it';
+      tag.textContent = 'Select it';
     }
-    clearTimeout(verbTimer);
-    verbTimer = setTimeout(() => { verb.textContent = 'Copy'; }, 1600);
+    clearTimeout(restore);
+    restore = window.setTimeout(() => {
+      tag.textContent = 'Copy';
+    }, 1600);
   });
 </script>

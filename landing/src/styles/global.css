@@ -1,30 +1,28 @@
 @import "tailwindcss";
 
-/* The landing takes the dashboard's identity, at last. Every colour below is a Material role
-   from `web/src/m3/tokens.css` read in its **dark** value — the sage palette measured in R14 —
-   except the terracotta, which the owner added for this page and which no dashboard role holds.
-   Named here rather than imported: the two apps are separate builds, and a cross-app CSS import
-   is a coupling that breaks silently. If a sage role moves, this file is the second place. */
+/* The page is a painting under cloth, so the palette is read off the painting rather than off the
+   dashboard. Charcoal ground, aged brass for every rule and every label, one terracotta for the
+   things you can act on, and warm ivory for the words. This replaces Y-209's sage, which was the
+   dashboard's Material roles read dark; the dashboard has not moved yet, so for now the two
+   surfaces disagree on purpose — see Y-383. */
 
 :root {
-  --ground: #0C0F0A;          /* surface-container-lowest */
-  --panel: #191D18;           /* surface-container-low */
-  --raised: #282C26;          /* surface-container-high */
-  --rule: #2E332C;            /* an unlit pip; below outline-variant on purpose */
-  --ink: #E1E3DB;             /* on-surface */
-  --ink-dim: #C2C9BE;         /* on-surface-variant */
-  --ink-faint: #8C9489;       /* outline */
-  --accent: #E8734A;          /* terracotta — the owner's, not a dashboard role */
-  --accent-lift: #F59B78;
+  --ground: #0B0806;        /* the page, and the cloth's own backing */
+  --plate: 14 11 8;         /* the panel, laid over the painting at 0.9 */
+  --sunk: 6 5 4;            /* the chips, the button and the footer rails */
+  --ink: #F8EEDD;           /* the claim and the wordmark */
+  --ink-body: #EFE2CE;      /* running text */
+  --ink-soft: #E4D6C0;      /* the colophon and the scroll hint */
+  --brass: #D7B98E;         /* every label that is not a sentence */
+  --brass-rule: 184 135 63; /* both of the plate's borders, at two alphas */
+  --accent: #E8734A;        /* terracotta, and the only colour that means "do this" */
+  --accent-lift: #FFC7A8;
   --on-accent: #2A0F04;
-  --brass: #D6C59E;           /* tertiary-fixed-dim */
-  --sage: #AFCFAC;            /* primary */
-  --sage-hold: #324F35;       /* primary-container */
-  --on-sage-hold: #CBE8C6;    /* on-primary-container */
-  --on-sage: #1C3620;         /* on-primary */
+  --live: #8FB98A;          /* a session that is running */
 
-  --sans: 'Google Sans Flex', system-ui, sans-serif;
-  --serif: 'Noto Serif Devanagari', serif;
+  --sans: 'Geist Variable', system-ui, sans-serif;
+  --display: 'Fraunces Variable', Georgia, serif;
+  --deva: 'Noto Serif Devanagari', serif;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
 
   --ease: cubic-bezier(0.05, 0.7, 0.1, 1);
@@ -34,34 +32,30 @@
 
 /* Self-hosted, and the reason is the baselines rather than the design (Y-208): a webfont served
    from fonts.googleapis.com renders on the CI runner only if the runner can reach it, and a
-   `system-ui` fallback resolves to a different face there than on a developer's box. The three
-   families and the subsetting idiom are the dashboard's — `web/src/m3/tokens.css` — so the two
-   surfaces load the same bytes. latin-ext is dropped: nothing on this page reaches into it. */
+   `system-ui` fallback resolves to a different face there than on a developer's box.
+   latin-ext is dropped, and so is the latin cut of the Devanagari face — the only Devanagari on
+   this page is the word यन्त्र, and nothing else asks for that family. */
 
 @font-face {
-  font-family: 'Google Sans Flex';
+  font-family: 'Fraunces Variable';
   font-style: normal;
   font-display: swap;
-  font-weight: 1 1000;
-  src: url("@fontsource-variable/google-sans-flex/files/google-sans-flex-latin-wght-normal.woff2") format('woff2-variations');
+  font-weight: 300 700;
+  font-optical-sizing: auto;
+  src: url("@fontsource-variable/fraunces/files/fraunces-latin-opsz-normal.woff2") format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-display: swap;
-  font-weight: 500;
-  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format('woff2');
-  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
-}
+/* Fontsource ships six axis cuts of Fraunces. This is the `opsz` one: optical size 9-144 plus
+   weight, which is what the design asked for. `standard` is the same bytes under another name,
+   and `full` carries SOFT and WONK that nothing here sets. */
 
 @font-face {
-  font-family: 'Noto Serif Devanagari';
+  font-family: 'Geist Variable';
   font-style: normal;
   font-display: swap;
-  font-weight: 400;
-  src: url("@fontsource/noto-serif-devanagari/files/noto-serif-devanagari-latin-400-normal.woff2") format('woff2');
+  font-weight: 300 600;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format('woff2-variations');
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 
@@ -74,19 +68,29 @@
   unicode-range: U+0900-097F,U+1CD0-1CF9,U+200C-200D,U+20A8,U+20B9,U+20F0,U+25CC,U+A830-A839,U+A8E0-A8FF,U+11B00-11B09;
 }
 
-html { background: var(--ground); }
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+html {
+  background: var(--ground);
+}
 
 body {
   margin: 0;
   background: var(--ground);
-  color: var(--ink);
+  color: var(--ink-body);
   font: 400 14px/20px var(--sans);
-  letter-spacing: 0.2px;
   -webkit-font-smoothing: antialiased;
 }
 
-/* The scroll runway. Three screen-heights of nothing, so the sticky frame below has somewhere to
-   read a position from: the page tells its three clauses by being scrolled, not by a timer. */
+/* Three screen-heights of scroll under one sticky frame. Nothing moves down the page; the frame
+   reads how far you have come and changes what it is saying. */
 .runway {
   position: relative;
   min-height: 300vh;
@@ -97,278 +101,247 @@ body {
   top: 0;
   height: 100dvh;
   overflow: hidden;
+  background: var(--ground);
 }
 
-/* --- the ground it is painted on ------------------------------------------------------------ */
-
-.weave,
-.dots,
-.noise {
+/* The painting, and what a machine with no WebGL2 sees. The cloth composites over it. */
+.ground {
   position: absolute;
   inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.cloth {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 
-.weave {
-  z-index: 1;
-  opacity: 0.85;
-  mix-blend-mode: overlay;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.12) 0 1px, rgba(0, 0, 0, 0.28) 1px 2px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.07) 0 1px, rgba(0, 0, 0, 0.22) 1px 2px);
-}
-
-.dots {
-  z-index: 2;
-  opacity: 0.2;
-  background-image: radial-gradient(rgba(0, 0, 0, 0.95) 1.2px, transparent 1.3px);
-  background-size: 6px 6px;
-}
-
-.noise {
+/* The painting is busy everywhere, so the words need somewhere quiet to sit. */
+.vignette {
+  position: absolute;
+  inset: 0;
   z-index: 3;
-  opacity: 0.15;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 90% at 46% 46%,
+    rgb(11 8 6 / 0) 28%,
+    rgb(11 8 6 / 0.5) 70%,
+    rgb(11 8 6 / 0.88) 100%
+  );
+}
+
+.grain {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0.14;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='180' height='180' filter='url(%23n)'/></svg>");
 }
 
-/* Two lights that follow the pointer. The frame carries the position, so the script sets two
-   custom properties and one attribute rather than reaching into each element's style. */
-.sheen {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate3d(var(--x, 50vw), var(--y, 50vh), 0);
-}
-
-.frame[data-wet] .sheen { opacity: 1; }
-
-.sheen--wet {
-  z-index: 4;
-  width: 420px;
-  height: 420px;
-  margin: -210px 0 0 -210px;
-  transition: opacity 700ms var(--ease);
-  background: radial-gradient(closest-side, rgba(232, 115, 74, 0.18), rgba(175, 207, 172, 0.06) 48%, transparent 74%);
-}
-
-.sheen--gloss {
-  z-index: 5;
-  width: 140px;
-  height: 140px;
-  margin: -70px 0 0 -70px;
-  mix-blend-mode: screen;
-  transition: opacity 500ms var(--ease);
-  background: radial-gradient(closest-side, rgba(255, 246, 236, 0.2), transparent 70%);
-}
-
-.plate {
-  position: absolute;
-  top: 52%;
-  left: clamp(0px, 13vw, 210px);
-  z-index: 6;
-  width: clamp(300px, 30vw, 430px);
-  height: clamp(300px, 30vw, 430px);
-  transform: translate(-50%, -50%);
-  border-radius: 9999px;
-  pointer-events: none;
-  background: radial-gradient(closest-side, rgba(122, 106, 69, 0.30), rgba(122, 106, 69, 0.06) 62%, transparent 78%);
-}
-
-.vajra {
-  position: absolute;
-  top: 50%;
-  left: clamp(24px, 14vw, 225px);
-  z-index: 7;
-  width: min(720px, 58vw);
-  height: min(720px, 86vh);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-
-/* Over the content rather than under it: the fire wraps the panel's box and burns across its
-   edge, which it cannot do from behind. It paints nothing where there is no fire. */
-.fire {
-  position: absolute;
-  inset: -40px -20px -20px;
-  z-index: 9;
-  width: calc(100% + 40px);
-  height: calc(100% + 60px);
-  pointer-events: none;
-}
-
-/* --- the sheet ------------------------------------------------------------------------------ */
-
-.stage {
+.content {
   position: relative;
   z-index: 8;
   display: flex;
   flex-direction: column;
   height: 100%;
   box-sizing: border-box;
-  padding: clamp(18px, 2.8vh, 30px) clamp(20px, 4vw, 60px) clamp(18px, 2.6vh, 30px);
+  padding: clamp(16px, 2.4vh, 26px) clamp(18px, 3vw, 44px) clamp(14px, 2vh, 22px);
 }
+
+/* --- masthead ------------------------------------------------------------ */
 
 .masthead {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  flex: none;
 }
 
 .wordmark {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 13px;
+  text-decoration: none;
 }
 
-.wordmark__bindu {
-  width: 30px;
-  height: 30px;
-  border-radius: 9999px;
-  background: var(--accent);
+.wordmark img {
+  display: block;
+  width: 44px;
+  height: 44px;
 }
 
-.wordmark__names {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
+.wordmark__latin {
+  font: 400 26px/30px var(--display);
+  letter-spacing: 0.2px;
+  color: var(--ink);
 }
-
-.wordmark__latin { font: 500 22px/28px var(--sans); }
 
 .wordmark__deva {
-  font: 400 15px/24px var(--serif);
-  color: var(--ink-faint);
+  font: 400 17px/24px var(--deva);
+  color: var(--brass);
 }
 
-.controls {
+.actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .tag {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
-  padding: 6px 12px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgb(215 185 142 / 0.35);
   border-radius: 9999px;
-  background: var(--panel);
-  color: var(--ink-dim);
+  background: rgb(11 8 6 / 0.55);
+  color: var(--brass);
   font: 500 12px/16px var(--mono);
 }
 
 .pill {
   display: inline-flex;
   align-items: center;
-  height: 44px;
-  padding: 0 20px;
+  gap: 9px;
+  height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgb(239 226 206 / 0.22);
   border-radius: 9999px;
-  background: var(--raised);
+  background: rgb(11 8 6 / 0.66);
   color: var(--ink);
   font: 500 14px/20px var(--sans);
-  letter-spacing: 0.1px;
   text-decoration: none;
+  transition: border-color 200ms var(--ease), background-color 200ms var(--ease);
+}
+
+.pill:hover {
+  border-color: rgb(239 226 206 / 0.4);
+  background: rgb(11 8 6 / 0.82);
 }
 
 .pill--accent {
+  padding: 0 20px;
+  border-color: transparent;
   background: var(--accent);
   color: var(--on-accent);
 }
 
-.pill:hover { background: color-mix(in srgb, var(--raised) 80%, var(--ink)); }
-.pill--accent:hover { background: var(--accent-lift); }
+.pill--accent:hover {
+  border-color: transparent;
+  background: var(--accent-lift);
+}
 
-.stage__body {
+.pill svg {
+  display: block;
+  fill: currentColor;
+}
+
+.pill svg.stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- the plate ----------------------------------------------------------- */
+
+.middle {
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  padding: clamp(8px, 2vh, 24px) 0;
 }
 
 .panel {
-  width: min(620px, 54vw);
+  position: relative;
+  width: min(660px, 52vw);
+  box-sizing: border-box;
+  padding: clamp(20px, 3vh, 34px) clamp(22px, 2.6vw, 38px);
+  border: 1px solid rgb(var(--brass-rule) / 0.55);
+  border-radius: 6px;
+  background: rgb(var(--plate) / 0.9);
+}
+
+/* The second rule inside the first: a plate, not a card. */
+.panel__inlay {
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgb(var(--brass-rule) / 0.28);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.panel__body {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: clamp(16px, 2.6vh, 28px);
-  box-sizing: border-box;
-  padding: clamp(22px, 3.2vh, 34px) clamp(24px, 2.6vw, 36px);
-  border-radius: 32px;
-  background: var(--panel);
+  gap: clamp(14px, 2.2vh, 24px);
 }
 
-.lede { display: flex; flex-direction: column; gap: 10px; }
-
-.lede__gloss {
+.eyebrow {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.lede__gloss::before {
-  content: "";
-  flex: 1;
-  height: 2px;
-  background: var(--brass);
-  opacity: 0.6;
-}
-
-.lede__word {
+  gap: 12px;
+  margin: 0;
   font: 500 12px/16px var(--sans);
-  letter-spacing: 0.8px;
+  letter-spacing: 1.1px;
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--brass);
+}
+
+.eyebrow__rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgb(var(--brass-rule) / 0) 0%, rgb(var(--brass-rule) / 0.6) 100%);
+}
+
+.deva {
+  font-family: var(--deva);
+  text-transform: none;
 }
 
 .claim {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin: 0;
-  font: 500 clamp(30px, 3.9vw, 52px)/1.1 var(--sans);
-  letter-spacing: -0.4px;
+  font: 300 clamp(32px, 4.2vw, 56px)/1.14 var(--display);
+  letter-spacing: -0.5px;
   color: var(--ink);
 }
 
-/* Unlit until the scroll reaches its beat. Cumulative: a clause that has been said stays said. */
 .claim span {
-  opacity: 0.16;
-  transition: opacity 600ms var(--ease);
+  opacity: 0.22;
+  transition: opacity 700ms var(--ease);
 }
 
-.frame[data-beat="0"] [data-clause="0"],
-.frame[data-beat="1"] [data-clause="0"],
-.frame[data-beat="1"] [data-clause="1"],
-.frame[data-beat="2"] [data-clause] { opacity: 1; }
-
+/* The three verses share one box and take turns in it, so the plate never changes height. */
 .verses {
   position: relative;
-  min-height: clamp(64px, 9vh, 92px);
+  min-height: clamp(62px, 8.5vh, 86px);
 }
 
 .verses p {
   position: absolute;
   inset: 0;
   margin: 0;
-  font: 400 clamp(16px, 1.4vw, 20px)/1.5 var(--serif);
-  color: var(--ink-dim);
+  font: 400 clamp(16px, 1.35vw, 19px)/1.6 var(--display);
+  color: var(--ink-body);
   opacity: 0;
-  transform: translateY(14px);
-  transition: opacity 500ms var(--ease), transform 500ms var(--ease);
+  transform: translateY(16px);
+  transition: opacity 600ms var(--ease), transform 600ms var(--ease);
 }
-
-/* A verse that has had its turn leaves upward; one still to come waits below. */
-.frame[data-beat="1"] [data-verse="0"],
-.frame[data-beat="2"] [data-verse="0"],
-.frame[data-beat="2"] [data-verse="1"] { transform: translateY(-14px); }
-
-.frame[data-beat="0"] [data-verse="0"],
-.frame[data-beat="1"] [data-verse="1"],
-.frame[data-beat="2"] [data-verse="2"] { opacity: 1; transform: translateY(0); }
 
 .doing {
   display: flex;
@@ -382,23 +355,27 @@ body {
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
+  border: 1px solid rgb(var(--brass-rule) / 0.22);
   border-radius: 9999px;
-  background: var(--ground);
+  background: rgb(var(--sunk) / 0.85);
 }
 
-.session__mark {
+.session__dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 9999px;
-  background: var(--sage);
+  background: var(--live);
 }
 
-.session__name { font: 500 14px/20px var(--sans); }
+.session__name {
+  font: 500 13px/16px var(--mono);
+  color: var(--ink);
+}
 
 .session__where {
   font: 400 12px/16px var(--sans);
-  color: var(--ink-dim);
+  color: var(--brass);
 }
 
 .session__age {
@@ -406,23 +383,142 @@ body {
   color: var(--brass);
 }
 
-/* Held back until the last beat: the page asks for nothing until it has said all three things. */
+/* Held back until the last beat: the page has to finish saying what it is before it asks for
+   anything. `pointer-events` rather than `visibility` so the button cannot be hit early.
+   Full width and a pill rather than the prototype's chip beside the session line: the command is
+   90 characters and does not fit on one line beside anything. This much is mine, not the design. */
 .copy {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  height: 44px;
-  padding: 0 6px 0 16px;
-  border: 0;
-  border-radius: 9999px;
-  background: var(--sage-hold);
-  color: var(--on-sage-hold);
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 6px 6px 16px;
+  border: 1px solid rgb(var(--brass-rule) / 0.4);
+  border-radius: 24px;
+  background: rgb(var(--sunk) / 0.85);
+  color: var(--ink);
+  font: 500 12px/18px var(--mono);
+  text-align: left;
   cursor: pointer;
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
-  transition: opacity 500ms var(--ease), transform 500ms var(--ease);
-  font: 500 13px/16px var(--mono);
+  transition: opacity 600ms var(--ease), transform 600ms var(--ease);
+}
+
+/* The URL carries its own break points, one after every slash, so `anywhere` is only the fallback
+   for a viewport narrower than the longest segment. */
+.copy__line {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.copy__sigil {
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.copy__tag {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 500 12px/16px var(--sans);
+  letter-spacing: 0.4px;
+}
+
+/* --- colophon ------------------------------------------------------------ */
+
+.colophon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.creed {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px 7px 9px;
+  border-radius: 9999px;
+  background: rgb(8 6 5 / 0.74);
+  font: 400 12px/16px var(--sans);
+  color: var(--ink-soft);
+}
+
+.creed img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  opacity: 0.92;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  background: rgb(8 6 5 / 0.74);
+}
+
+.pip {
+  width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(239 226 206 / 0.22);
+  transition: background-color 500ms linear;
+}
+
+.hint {
+  font: 500 12px/16px var(--sans);
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  transition: opacity 500ms linear;
+}
+
+.frame[data-scrolled] .hint {
+  opacity: 0;
+}
+
+/* --- the three beats ------------------------------------------------------
+   Written out rather than generated: the clauses and the pips light cumulatively, the verses
+   take turns, and three beats is few enough that the selector list is easier to read than the
+   rule that would produce it. The script sets one attribute; everything below is the design. */
+
+.frame[data-beat="0"] [data-clause="0"],
+.frame[data-beat="1"] [data-clause="0"],
+.frame[data-beat="1"] [data-clause="1"],
+.frame[data-beat="2"] [data-clause] {
+  opacity: 1;
+}
+
+.frame[data-beat="0"] [data-verse="0"],
+.frame[data-beat="1"] [data-verse="1"],
+.frame[data-beat="2"] [data-verse="2"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.frame[data-beat="1"] [data-verse="0"],
+.frame[data-beat="2"] [data-verse="0"],
+.frame[data-beat="2"] [data-verse="1"] {
+  transform: translateY(-16px);
+}
+
+.frame[data-beat="0"] [data-pip="0"],
+.frame[data-beat="1"] [data-pip="0"],
+.frame[data-beat="1"] [data-pip="1"],
+.frame[data-beat="2"] .pip {
+  background: var(--accent);
 }
 
 .frame[data-beat="2"] .copy {
@@ -431,148 +527,110 @@ body {
   pointer-events: auto;
 }
 
-.copy__sigil { color: var(--accent); }
-
-.copy__verb {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 9999px;
-  background: var(--sage);
-  color: var(--on-sage);
-  font: 500 12px/16px var(--sans);
-  letter-spacing: 0.5px;
-}
-
-.colophon {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex: none;
-  min-height: 0;
-}
-
-.colophon__say {
-  font: 400 12px/16px var(--sans);
-  color: var(--ink-dim);
-}
-
-.progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.progress span {
-  width: 28px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--rule);
-  transition: background-color 400ms linear;
-}
-
-.frame[data-beat="0"] [data-pip="0"],
-.frame[data-beat="1"] [data-pip="0"],
-.frame[data-beat="1"] [data-pip="1"],
-.frame[data-beat="2"] [data-pip] { background: var(--accent); }
-
-.progress__hint {
-  width: auto;
-  height: auto;
-  padding-left: 8px;
-  background: none;
-  font: 500 12px/16px var(--sans);
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-  transition: opacity 400ms linear;
-}
-
-.frame[data-scrolled] .progress__hint { opacity: 0; }
-
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-lift); }
-
-:where(a, button):focus-visible {
-  outline: 2px solid var(--accent-lift);
-  outline-offset: 3px;
-}
-
-/* --- narrow ---------------------------------------------------------------------------------
-   The prototype is one desktop composition and says nothing about a phone. Two changes, not a
-   second design: the masthead's controls take their own row, and the vajra moves out from
-   behind the panel to the upper third, where there is room for it at 844 px of height. */
+/* --- narrow --------------------------------------------------------------
+   The plate stops being a plate beside the painting and becomes the page over it. The painting
+   is still there and still moving; there is simply no room to sit next to it. */
 
 @media (max-width: 860px) {
-  .masthead { flex-wrap: wrap; gap: 12px; }
-  .controls { flex: 1 1 100%; }
-
-  /* The download button already names the release, and at this width the pill beside it is the
-     difference between the two buttons sharing a row and taking one each. */
-  .tag { display: none; }
-
-  .pill {
-    height: 40px;
-    padding: 0 16px;
-    font-size: 13px;
+  .middle {
+    justify-content: center;
+    align-items: flex-end;
   }
-
-  .plate {
-    top: 28%;
-    left: 50%;
-    width: clamp(240px, 60vw, 320px);
-    height: clamp(240px, 60vw, 320px);
-  }
-
-  .vajra {
-    top: 28%;
-    left: 50%;
-    width: min(560px, 92vw);
-    height: min(340px, 31vh);
-  }
-
-  .stage__body { align-items: flex-end; justify-content: center; }
 
   .panel {
     width: 100%;
-    gap: clamp(12px, 2vh, 20px);
     padding: 20px;
   }
 
-  .claim { font-size: clamp(26px, 7.4vw, 40px); }
-  .verses { min-height: clamp(72px, 11vh, 100px); }
+  .claim {
+    font-size: clamp(26px, 7.4vw, 40px);
+  }
 
-  /* The command is 34 characters and the panel is not that wide, so the button stops being a pill
-     of one line and becomes a block that wraps. The verb keeps the 44 px target on its own. */
+  .verses {
+    min-height: 92px;
+  }
+
+  .wordmark img {
+    width: 36px;
+    height: 36px;
+  }
+
+  .wordmark__latin {
+    font-size: 22px;
+  }
+
+  /* Three things want the top rail and only two fit. The version pill repeats what the download
+     pill already says, the creed is the one line the page can lose, and the Devanagari is said
+     again inside the plate. GitHub keeps its icon and gives up its label — the `aria-label` on
+     the link is what a screen reader was reading anyway. */
+  .tag,
+  .creed,
+  .wordmark__deva,
+  .pill__label {
+    display: none;
+  }
+
+  .pill {
+    height: 40px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .pill--accent {
+    padding: 0 14px;
+  }
+
+  .colophon {
+    justify-content: flex-end;
+  }
+
   .copy {
-    height: auto;
-    align-items: flex-start;
-    padding: 6px 6px 6px 14px;
-    font-size: 12px;
+    padding: 6px 6px 6px 12px;
+    font-size: 11px;
   }
-
-  .colophon { flex-wrap: wrap; gap: 10px; }
-  .colophon__say { font-size: 11px; }
 }
 
-/* Reduced motion kills the transitions here; the two canvases each honour the same preference
-   inside `lib/canvas-fx.js`. The beats still change — they are a scroll position, not an
-   animation, and a reader who suppressed motion still gets all three clauses by scrolling. */
+/* The cloth parks itself when this matches, so the painting holds one still fold. Everything
+   else here is a transition, and a transition is the thing being asked about. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
+  .claim span,
+  .verses p,
+  .copy,
+  .pill,
+  .pip,
+  .hint {
+    transition: none;
   }
 }
 
-/* With no script there is no scroll position to read, so the page is stuck at its first beat and
-   two thirds of what it has to say would never appear. Say all of it at once instead. */
+/* No script, no beats: say all three clauses, stack the verses, and offer the command. The cloth
+   never starts, so the painting is the plain <img> underneath it. */
 @media (scripting: none) {
-  .claim span { opacity: 1; }
-  .verses { min-height: 0; }
-  .verses p { position: static; opacity: 1; transform: none; }
-  .copy { opacity: 1; transform: none; pointer-events: auto; }
-  .progress, .vajra, .fire { display: none; }
+  .cloth,
+  .progress {
+    display: none;
+  }
+
+  .claim span {
+    opacity: 1;
+  }
+
+  .verses {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .verses p {
+    position: static;
+    opacity: 1;
+    transform: none;
+  }
+
+  .copy {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
 }
