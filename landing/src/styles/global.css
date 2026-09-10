@@ -384,18 +384,23 @@ body {
 }
 
 /* Held back until the last beat: the page has to finish saying what it is before it asks for
-   anything. `pointer-events` rather than `visibility` so the button cannot be hit early. */
+   anything. `pointer-events` rather than `visibility` so the button cannot be hit early.
+   Full width and a pill rather than the prototype's chip beside the session line: the command is
+   90 characters and does not fit on one line beside anything. This much is mine, not the design. */
 .copy {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  height: 44px;
-  padding: 0 6px 0 16px;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 6px 6px 16px;
   border: 1px solid rgb(var(--brass-rule) / 0.4);
-  border-radius: 9999px;
+  border-radius: 24px;
   background: rgb(var(--sunk) / 0.85);
   color: var(--ink);
-  font: 500 13px/16px var(--mono);
+  font: 500 12px/18px var(--mono);
+  text-align: left;
   cursor: pointer;
   opacity: 0;
   transform: translateY(8px);
@@ -403,7 +408,16 @@ body {
   transition: opacity 600ms var(--ease), transform 600ms var(--ease);
 }
 
+/* The URL carries its own break points, one after every slash, so `anywhere` is only the fallback
+   for a viewport narrower than the longest segment. */
+.copy__line {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .copy__sigil {
+  margin-right: 8px;
   color: var(--accent);
 }
 
@@ -571,10 +585,8 @@ body {
   }
 
   .copy {
-    height: auto;
-    padding: 6px 6px 6px 14px;
-    flex-wrap: wrap;
-    font-size: 12px;
+    padding: 6px 6px 6px 12px;
+    font-size: 11px;
   }
 }
 

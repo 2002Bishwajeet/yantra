@@ -22,7 +22,14 @@ const sigil = await getImage({ src: mark, format: 'webp', width: 88 });
 
 const repo = 'https://github.com/2002Bishwajeet/yantra';
 const release = `${repo}/releases/tag/v${version}`;
-const install = 'cargo install --path crates/yantra';
+/* `install.sh` rather than `cargo install`, on the owner's call: this puts the current release on
+   an always-on Linux box, verified against `SHA256SUMS`, where the cargo line builds the CLI from
+   a clone. Pinned to the tag the page already names, so the command and the download button
+   cannot drift apart. */
+const install = `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v${version}/install.sh | bash`;
+/* Split after each slash so the URL wraps where a reader expects it to. `<wbr>` adds nothing to
+   the text content, so the clipboard and the accessible name are still the plain command. */
+const installParts = install.split(/(?<=\/)/);
 ---
 
 <Layout
@@ -100,8 +107,17 @@ const install = 'cargo install --path crates/yantra';
                   <span class="session__age">39m</span>
                 </span>
                 <button class="copy" type="button" data-copy data-command={install}>
-                  <span class="copy__sigil" aria-hidden="true">$</span>
-                  <span class="copy__command">{install}</span>
+                  <span class="copy__line">
+                    <span class="copy__sigil" aria-hidden="true">$</span>
+                    <span class="copy__command"
+                      >{installParts.map((part) => (
+                        <Fragment>
+                          {part}
+                          <wbr />
+                        </Fragment>
+                      ))}</span
+                    >
+                  </span>
                   <span class="copy__tag" data-copy-tag>Copy</span>
                 </button>
               </div>

@@ -17,6 +17,17 @@ each beat. `src/lib/canvas-fx.js` holds that one effect and nothing else: the up
 carries Flame Wrap, Displacement and Canvas Paint, but it is an IIFE assigning to a single object, so
 nothing tree-shakes and an unused shader is bytes a visitor downloads.
 
+**Cloth is vendored rather than installed, and packaging is not the reason.**
+[`npx shadcn add @canvas-ui/cloth-react`](https://canvasui.dev/docs/components/cloth) hands you a
+React component, and this page has no client framework — but the real obstacle is that upstream's
+only content path is `drawElementImage`, guarded by `if (!htmlInCanvas) return;`. html-in-canvas
+ships in no browser, so the published component renders its flat backing colour and nothing else.
+The single change here is that one: the fabric is painted through a `draw(ctx, w, h)` callback, so
+the texture is one we paint. The four shaders were diffed against
+[the registry item](https://canvasui.dev/r/cloth-react.json) and are identical to it. The licence is
+MIT + Commons Clause — a page may use it, nobody may resell it "whether alone, in a bundle, or as a
+ported version" — and the copyright notice it asks for is at the top of the vendored file.
+
 **The palette is the painting's, not the dashboard's.** Charcoal ground, aged brass for every rule
 and label, warm ivory for the words, and one terracotta for the things you can act on. This reverses
 `Y-209`, which took the dashboard's Material roles read dark — the sage measured in R14 — so that the
@@ -44,8 +55,16 @@ build emits sized WebP — the painting is 3.0 MB of PNG and 284 kB served, at q
 1:1 on its busiest region that is indistinguishable from 82 and a third smaller.
 
 **The release the page offers is read from [`Cargo.toml`](../Cargo.toml) at build time**, not typed
-here. Three places name it, and a version bump already touches that one line (`Y-364`). A test
-asserts the page and the manifest agree.
+here. Four places name it now, and a version bump already touches that one line (`Y-364`). Two tests
+assert the page and the manifest agree — the download link and the install command, which pins the
+same tag so the two cannot drift apart.
+
+**The command is [`install.sh`](../install.sh)**, on the owner's call, rather than the
+`cargo install --path crates/yantra` the prototype drew. It puts the current release on an always-on
+Linux box and verifies what it fetched against `SHA256SUMS`, where the cargo line builds the CLI
+from a clone. It is 90 characters, which does not fit beside the session chip the way the prototype
+has it, so the button is a full-width pill and the URL carries a `<wbr>` after each slash to wrap
+where a reader expects. That layout is mine, not the design's.
 
 **This is not the M4 dashboard.** That is `Y-072`, it lives in `web/`, and it is built per
 [ADR-0014](../docs/adr/0014-react-with-the-compiler-for-the-web-ui.md).

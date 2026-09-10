@@ -152,7 +152,7 @@ test.describe('the three beats', () => {
      button that still takes a click is worse than a visible one. */
   test('the install command arrives with the last beat', async ({ page }) => {
     await settle(page);
-    const copy = page.getByRole('button', { name: /cargo install/ });
+    const copy = page.getByRole('button', { name: /install\.sh/ });
     await expect(copy).toHaveCSS('pointer-events', 'none');
 
     await scrollToEnd(page);
@@ -170,10 +170,12 @@ test.describe('copying', () => {
   test('the button puts the command on the clipboard', async ({ page }) => {
     await settle(page);
     await scrollToEnd(page);
-    await page.getByRole('button', { name: /cargo install/ }).click();
+    await page.getByRole('button', { name: /install\.sh/ }).click();
     await expect(page.locator('[data-copy-tag]')).toHaveText('Copied');
+    /* Against the manifest, not a literal: the command pins the tag the download button names, so
+       a bump that moves one and not the other fails here. */
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-      'cargo install --path crates/yantra',
+      `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v${version}/install.sh | bash`,
     );
   });
 });

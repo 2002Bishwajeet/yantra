@@ -1,14 +1,18 @@
-/* Canvas UI — Cloth effect, ported to plain JS for a bundler-less page and then vendored here
-   as a module. The GLSL is verbatim from canvasui.dev.
-   The fabric is painted from an image through a draw callback, because html-in-canvas
-   (drawElementImage) ships in no browser yet — the effect never captures the DOM.
+/* Canvas UI — Cloth, vendored. Copyright (c) 2026 David Haz, MIT + Commons Clause: using it in a
+   page is expressly allowed, selling or redistributing the component is not, "whether alone, in a
+   bundle, or as a ported version". This is a page. Y-202 read it the same way in M4.
 
-   Flame Wrap, Displacement and Canvas Paint live in the upstream file and are deliberately not
-   vendored here: the page uses one effect, and an IIFE assigning to a single object is not
-   tree-shakeable, so an unused shader is bytes the visitor downloads.
+   Vendored rather than installed, and the reason is not packaging. `npx shadcn add
+   @canvas-ui/cloth-react` hands you a React component, and this page has no client framework —
+   but the deeper problem is that upstream's only content path is `drawElementImage`, guarded by
+   `if (!htmlInCanvas) return;`. html-in-canvas ships in no browser, so upstream as published
+   renders its flat backing colour and nothing else. The one change here is that change: the
+   fabric is painted through a `draw(ctx, w, h)` callback, so the texture is one we paint.
 
-   canvas-ui is MIT + Commons Clause: adapting it into a page is allowed, redistributing it as a
-   component library is not. This is the former, and Y-202 took the same reading in M4. */
+   The four shaders were diffed against the registry item at https://canvasui.dev/r/cloth-react.json
+   and are identical to it. Flame Wrap, Displacement and Canvas Paint are deliberately left out:
+   the page uses one effect, and an IIFE assigning to a single object does not tree-shake, so an
+   unused shader is bytes the visitor downloads. */
 
 const CanvasFX = (function () {
   'use strict';
