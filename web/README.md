@@ -490,7 +490,9 @@ text, and `errors.ts` maps them by hand.
 every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
 `--md-sys-motion-*` role, and the three faces.
 
-- **Sage light and dark are precomputed and shipped as CSS.** One declaration
+- **Brass light and dark are precomputed and shipped as CSS** (Y-383), from the
+  owner's palette by [`scripts/brass.mjs`](scripts/brass.mjs), which also writes
+  [`palette-brass.json`](../docs/design/palette-brass.json). One declaration
   carries both through `light-dark()`, so there is no second block to keep in
   step. The theme is the root's `color-scheme`: unset follows the OS, and
   `data-theme` pins it in either direction.
@@ -500,12 +502,13 @@ every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
   script and `prefs.ts` in step: preferences are browser-local and the daemon
   persists none of them (ADR-0024 §5).
 - **The colour engine is not on this path.** `m3/theme/scheme.ts` loads only for
-  a seed other than sage, and on Appearance; the first load carries no scheme
-  code. `scheme.test.ts` names the six roles where the fitted scheme and
-  `palette-sage.json` disagree, and by how much (ADR-0024's 2026-09-06
-  amendment).
+  a seed other than brass, and on Appearance; the first load carries no scheme
+  code. Sage is a named seed now. `scheme.test.ts` names the six roles where
+  the fitted sage scheme and `palette-sage.json` disagree, and by how much
+  (ADR-0024's 2026-09-06 amendment).
 - **Call sites pass a role, never a colour.** State is a mark plus a word
-  ([`m3/mark/`](src/m3/mark/Mark.tsx)), never colour alone (D3 §6).
+  ([`m3/mark/`](src/m3/mark/Mark.tsx)), never colour alone (D3 §6). The mark's
+  colours are `--yantra-state-*`, the same under every seed.
 
 **Tailwind v4 stays, and now emits only its preflight reset.** `index.css` is
 `@import "tailwindcss" source(none)` with no `@source`, because no call site
@@ -628,10 +631,10 @@ src/
     types/           the daemon shapes that are not on the swept routes
     README.md        the error table, and what each file owns
   m3/
-    tokens.css       every Material role, sage light and dark. The seam
+    tokens.css       every Material role, brass light and dark. The seam
     <one per        `Button.tsx`, `Button.css`, `Button.test.tsx`, and Base UI
      component>      underneath wherever it has the behaviour
-    theme/           the colour engine, loaded only for a seed that is not sage
+    theme/           the colour engine, loaded only for a seed that is not brass
     gallery/         every component on one page, for the reviewer and
                      Playwright. Dev builds only
   shell/

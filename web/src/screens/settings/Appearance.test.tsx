@@ -22,7 +22,7 @@ describe('Appearance', () => {
 
   it('writes a named seed, and the chips show the scheme the engine made from it', async () => {
     mountSettings('desktop', '/settings/appearance')
-    expect((await screen.findByRole('button', { name: 'sage' })).getAttribute('aria-pressed')).toBe('true')
+    expect((await screen.findByRole('button', { name: 'brass' })).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: 'terracotta' }))
     expect(readPrefs().seed).toBe('#A85B3C')
     expect(screen.getByRole('button', { name: 'terracotta' }).getAttribute('aria-pressed')).toBe('true')
@@ -30,12 +30,23 @@ describe('Appearance', () => {
     await waitFor(() => expect(screen.getAllByText(/^#[0-9A-F]{6}$/)).toHaveLength(5))
     const hexes = screen.getAllByText(/^#[0-9A-F]{6}$/).map((one) => one.textContent)
     expect(hexes).toHaveLength(5)
-    expect(hexes[0]).not.toBe('#48674B')
+    expect(hexes[0]).not.toBe('#9A4523')
     await waitFor(() => expect(document.documentElement.style.getPropertyValue('--md-sys-color-primary')).toContain('light-dark('))
 
-    fireEvent.click(screen.getByRole('button', { name: 'sage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'brass' }))
     expect(readPrefs().seed).toBeNull()
     await waitFor(() => expect(document.documentElement.style.getPropertyValue('--md-sys-color-primary')).toBe(''))
+  })
+
+  it('offers sage as a named seed, drawn by the engine', async () => {
+    mountSettings('desktop', '/settings/appearance')
+    fireEvent.click(await screen.findByRole('button', { name: 'sage' }))
+    expect(readPrefs().seed).toBe('#48674B')
+    expect(screen.getByRole('button', { name: 'sage' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'brass' }).getAttribute('aria-pressed')).toBe('false')
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue('--md-sys-color-primary')).toContain('light-dark('),
+    )
   })
 
   it('takes a custom hex only once it is one', async () => {
@@ -47,8 +58,8 @@ describe('Appearance', () => {
     fireEvent.change(field, { target: { value: '1a2b3c' } })
     expect(readPrefs().seed).toBe('#1A2B3C')
     expect(screen.queryByText('That is not a colour.')).toBeNull()
-    // Typing sage's own value is sage: null, and no engine.
-    fireEvent.change(field, { target: { value: '#48674b' } })
+    // Typing brass's own value is brass: null, and no engine.
+    fireEvent.change(field, { target: { value: '#c49a52' } })
     expect(readPrefs().seed).toBeNull()
   })
 })

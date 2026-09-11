@@ -13,15 +13,15 @@
 
 /* Form first, so a greyscale render still tells the six apart. */
 .m3-mark[data-state="needs"] {
-  background: var(--md-sys-color-primary);
+  background: var(--yantra-state-needs);
 }
 
 .m3-mark[data-state="running"] {
-  background: var(--md-sys-color-tertiary);
+  background: var(--yantra-state-running);
 }
 
 .m3-mark[data-state="idle"] {
-  border: 1.5px solid var(--md-sys-color-outline);
+  border: 1.5px solid var(--yantra-state-idle);
 }
 
 .m3-mark[data-state="unknown"] {
@@ -29,11 +29,11 @@
 }
 
 .m3-mark[data-state="done"] {
-  border: 2.5px solid var(--md-sys-color-primary);
+  border: 2.5px solid var(--yantra-state-done);
 }
 
 .m3-mark[data-state="failed"] {
-  background: var(--md-sys-color-error);
+  background: var(--yantra-state-failed);
 }
 
 .m3-state {

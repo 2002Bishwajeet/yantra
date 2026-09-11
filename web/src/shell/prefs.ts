@@ -10,7 +10,7 @@ export type Prefs = {
   seenAt: number | null
   theme: 'light' | 'dark' | 'system'
   density: 'clean' | 'compact'
-  /** A seed hex other than sage; null is sage, and loads no colour engine. */
+  /** A seed hex other than brass; null is brass, and loads no colour engine. */
   seed: string | null
   /** General's rows, which Y-350 narrows. */
   general: Record<string, unknown>

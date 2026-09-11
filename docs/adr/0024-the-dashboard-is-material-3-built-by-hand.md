@@ -183,3 +183,14 @@ test, not a note.
 > validators for free, costs 4,941 B on the second visit. Four response headers in
 > `crates/yantrad/src/web/embedded.rs` are worth more than every byte this ceiling governs, and they
 > need a row of their own.
+
+> **2026-09-11, Y-383: the default scheme is the brand palette, not sage.** The owner's steer of
+> 2026-09-10 gave a dark palette — charcoal, ivory, aged brass, one terracotta — which the landing
+> took first under Y-212, and asked the dashboard to follow. The scheme is called *brass*.
+> `web/scripts/brass.mjs` builds it: the owner's hexes are used verbatim where a role is one of
+> them, the other roles are tones of palettes built from the same hues, and light mode is the same
+> palettes read light. Sage becomes one named seed in Appearance and reaches the engine like any
+> other. **The mechanism in §2 is unchanged**: brass is precomputed CSS in `tokens.css`, and the
+> colour engine still loads only for a seed that is not the default. One thing is new beside it:
+> machine state has its own `--yantra-state-*` tokens that no seed changes, because the owner named
+> a material for each state and a seed must not repaint what a state means.

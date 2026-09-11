@@ -315,7 +315,7 @@
 }
 
 /* The seed behind the check is a fixed hex in both themes, so no role pairs
-   with it: `on-primary` is #1C3620 in dark, which is 2.1:1 on sage. */
+   with it: a role's value moves with the theme and the swatch does not. */
 .settings__swatch {
   display: inline-flex;
   align-items: center;
@@ -324,6 +324,11 @@
   height: 44px;
   border-radius: var(--md-sys-shape-corner-full);
   color: #fff;
+}
+
+/* White is 2.3:1 on brass; the owner's charcoal is 7.6:1. */
+.settings__swatch[data-light] {
+  color: #151714;
 }
 
 .settings__seed[aria-pressed="true"] .settings__swatch {
