@@ -227,7 +227,7 @@ const CONTENTS = {
   phone: 'shell__contents',
 } as const
 
-// Whether a seed is on the root, so going back to sage clears it once. Outside
+// Whether a seed is on the root, so going back to brass clears it once. Outside
 // the component because the compiler declines a function holding `import()`.
 let seeded = false
 
@@ -258,7 +258,7 @@ export function Shell() {
   const { why, since } = useReached()
 
   // index.html applied these before the first paint; this keeps them live
-  // when Appearance writes. The colour engine loads for a seed other than sage
+  // when Appearance writes. The colour engine loads for a seed other than brass
   // and never otherwise (ADR-0024 §2).
   useEffect(() => {
     const root = document.documentElement

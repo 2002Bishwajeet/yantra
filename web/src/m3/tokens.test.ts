@@ -10,11 +10,50 @@ import { roles } from './theme/scheme'
 const css = readFileSync(resolve(process.cwd(), 'src/m3/tokens.css'), 'utf8')
 
 const palette = JSON.parse(
-  readFileSync(resolve(process.cwd(), '../docs/design/palette-sage.json'), 'utf8'),
-) as { light: Record<string, string>; dark: Record<string, string> }
+  readFileSync(resolve(process.cwd(), '../docs/design/palette-brass.json'), 'utf8'),
+) as {
+  light: Record<string, string>
+  dark: Record<string, string>
+  states: { light: Record<string, string>; dark: Record<string, string> }
+}
 
-const pair = (role: string) =>
-  new RegExp(`--md-sys-color-${role}: light-dark\\((#[0-9A-F]{6}), (#[0-9A-F]{6})\\);`).exec(css)
+const pair = (role: string, prefix = '--md-sys-color-') =>
+  new RegExp(`${prefix}${role}: light-dark\\((#[0-9A-F]{6}), (#[0-9A-F]{6})\\);`).exec(css)
+
+const luminance = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const v = parseInt(hex.slice(i, i + 2), 16) / 255
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+const tiers = [
+  'surface', 'surface-dim', 'surface-bright', 'surface-container-lowest', 'surface-container-low',
+  'surface-container', 'surface-container-high', 'surface-container-highest',
+]
+
+const text: [string, string][] = [
+  ...['primary', 'secondary', 'tertiary', 'error'].flatMap((g): [string, string][] => [
+    [`on-${g}`, g],
+    [`on-${g}-container`, `${g}-container`],
+  ]),
+  ...['primary', 'secondary', 'tertiary'].flatMap((g): [string, string][] => [
+    [`on-${g}-fixed`, `${g}-fixed`],
+    [`on-${g}-fixed-variant`, `${g}-fixed`],
+  ]),
+  ...tiers.flatMap((t): [string, string][] => [['on-surface', t], ['on-surface-variant', t]]),
+  // Text buttons are drawn in `primary` on cards of these two (Y-383, axe on the dark dashboard).
+  ['primary', 'primary-container'],
+  ['primary', 'tertiary-container'],
+  ['on-background', 'background'],
+  ['inverse-on-surface', 'inverse-surface'],
+]
 
 describe('every colour role, both themes', () => {
   it.each(roles)('%s', (role) => {
@@ -32,6 +71,30 @@ describe('every colour role, both themes', () => {
     for (const name of Object.keys(palette.light)) {
       const role = name.toLowerCase().replace(/ /g, '-')
       expect(block).toContain(`--md-sys-color-${role}: ${palette.light[name]};`)
+    }
+  })
+
+  it.each(['light', 'dark'] as const)('%s: every text pair meets AA, 4.5:1', (theme) => {
+    const at = theme === 'light' ? 1 : 2
+    const hex = (role: string) => pair(role)![at]
+    const failing = text
+      .map(([fg, bg]) => [fg, bg, contrast(hex(fg), hex(bg)).toFixed(2)])
+      .filter(([, , ratio]) => Number(ratio) < 4.5)
+    expect(failing).toEqual([])
+  })
+
+  it('carries the five machine states, seed-independent and 3:1 on every tier', () => {
+    for (const [theme, at] of [['light', 1], ['dark', 2]] as const) {
+      for (const [state, hex] of Object.entries(palette.states[theme])) {
+        expect(pair(state, '--yantra-state-')![at]).toBe(hex)
+        for (const tier of [...tiers, 'primary-container']) {
+          expect([state, tier, contrast(hex, pair(tier)![at]) >= 3]).toEqual([state, tier, true])
+        }
+      }
+    }
+    const block = /@supports not \(color: light-dark\(#000, #fff\)\) \{[\s\S]*?\n\}/.exec(css)![0]
+    for (const [state, hex] of Object.entries(palette.states.light)) {
+      expect(block).toContain(`--yantra-state-${state}: ${hex};`)
     }
   })
 

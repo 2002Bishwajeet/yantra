@@ -8,11 +8,12 @@ import type { Role, Scheme } from '@/m3/theme/scheme'
 import { type Prefs, usePrefs, writePrefs } from '@/shell/prefs'
 
 // The engine's own constant, restated so this chunk does not import the
-// engine: sage is null in prefs and loads nothing (ADR-0024 §2).
-const SAGE = '#48674B'
+// engine: brass is null in prefs and loads nothing (ADR-0024 §2).
+const BRASS = '#C49A52'
 
 const SEEDS: { name: string; hex: string | null }[] = [
-  { name: 'sage', hex: null },
+  { name: 'brass', hex: null },
+  { name: 'sage', hex: '#48674B' },
   { name: 'beige', hex: '#7A6A45' },
   { name: 'terracotta', hex: '#A85B3C' },
   { name: 'slate', hex: '#4E6A7A' },
@@ -45,7 +46,7 @@ export function Appearance() {
   useEffect(() => {
     let stale = false
     void loadEngine().then(({ schemeFor }) => {
-      if (!stale) setScheme(schemeFor(seed ?? SAGE, false))
+      if (!stale) setScheme(schemeFor(seed ?? BRASS, false))
     })
     return () => {
       stale = true
@@ -55,7 +56,7 @@ export function Appearance() {
   const type = (value: string) => {
     setTyped(value)
     const hex = asHex(value)
-    if (hex) writePrefs({ seed: hex === SAGE ? null : hex })
+    if (hex) writePrefs({ seed: hex === BRASS ? null : hex })
   }
 
   return (
@@ -114,7 +115,11 @@ export function Appearance() {
                 }}
                 type="button"
               >
-                <span className="settings__swatch" style={{ background: one.hex ?? SAGE }}>
+                <span
+                  className="settings__swatch"
+                  data-light={one.hex === null || undefined}
+                  style={{ background: one.hex ?? BRASS }}
+                >
                   {one.hex === seed ? <Check aria-hidden="true" /> : null}
                 </span>
                 {one.name}
@@ -127,7 +132,7 @@ export function Appearance() {
             error={typed !== '' && asHex(typed) === null ? 'That is not a colour.' : undefined}
             label="Custom hex"
             onChange={(event) => type(event.target.value)}
-            placeholder={SAGE}
+            placeholder={BRASS}
             spellCheck={false}
             supporting="six hex digits"
             value={typed}

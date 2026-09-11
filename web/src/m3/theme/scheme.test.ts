@@ -6,11 +6,17 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { SAGE, applyScheme, clearScheme, roles, schemeFor } from './scheme'
+import { BRASS, OWNER, SAGE, applyScheme, clearScheme, roles, schemeFor, states } from './scheme'
 
-const palette = JSON.parse(
-  readFileSync(resolve(process.cwd(), '../docs/design/palette-sage.json'), 'utf8'),
-) as { light: Record<string, string>; dark: Record<string, string> }
+const read = (file: string) =>
+  JSON.parse(readFileSync(resolve(process.cwd(), '../docs/design', file), 'utf8')) as {
+    light: Record<string, string>
+    dark: Record<string, string>
+    states: { light: Record<string, string>; dark: Record<string, string> }
+  }
+
+const palette = read('palette-sage.json')
+const brass = read('palette-brass.json')
 
 const kebab = (name: string) => name.toLowerCase().replace(/ /g, '-')
 
@@ -44,6 +50,42 @@ describe.each(['light', 'dark'] as const)('sage %s', (theme) => {
 
   it('fills every role, fixed ones included', () => {
     for (const role of roles) expect(scheme[role]).toMatch(/^#[0-9A-F]{6}$/)
+  })
+})
+
+describe.each(['light', 'dark'] as const)('brass %s', (theme) => {
+  const dark = theme === 'dark'
+
+  /** A drift here means scripts/brass.mjs was not rerun after scheme.ts moved. */
+  it('is what palette-brass.json and tokens.css were generated from', () => {
+    const scheme = schemeFor(BRASS, dark)
+    for (const [name, hex] of Object.entries(brass[theme])) expect([name, scheme[kebab(name) as keyof typeof scheme]]).toEqual([name, hex])
+    expect(states(dark)).toEqual(brass.states[theme])
+  })
+})
+
+describe('the owner’s dark palette', () => {
+  const dark = schemeFor(BRASS, true)
+
+  it('is used verbatim where a role is one of its colours', () => {
+    expect(dark.background).toBe(OWNER.charcoal)
+    expect(dark.surface).toBe(OWNER.charcoal)
+    expect(dark['surface-container']).toBe(OWNER.surface)
+    expect(dark['surface-container-high']).toBe(OWNER.elevated)
+    expect(dark['on-surface']).toBe(OWNER.ivory)
+    expect(dark['on-surface-variant']).toBe(OWNER.parchment)
+    expect(dark['outline-variant']).toBe(OWNER.bronze)
+    expect(dark.secondary).toBe(OWNER.brass)
+    expect(dark.primary).toBe(OWNER.ember)
+  })
+
+  it('names the machine states in its own materials', () => {
+    expect(states(true)).toMatchObject({
+      running: OWNER.ember,
+      idle: OWNER.brass,
+      done: OWNER.green,
+      needs: OWNER.ochre,
+    })
   })
 })
 

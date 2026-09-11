@@ -139,7 +139,7 @@ test.describe('the settings shell', () => {
 })
 
 test.describe('settings · Appearance recolours everything', () => {
-  test('a seed changes the scheme with no reload, and sage puts it back', async ({ page, size }) => {
+  test('a seed changes the scheme with no reload, and brass puts it back', async ({ page, size }) => {
     await scenario(page, 'busy')
     await page.goto('/settings/appearance')
     await opened(page, 'Appearance', size)
@@ -148,16 +148,16 @@ test.describe('settings · Appearance recolours everything', () => {
       page.evaluate(() =>
         getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim(),
       )
-    const sage = await primary()
+    const brass = await primary()
 
     await page.getByRole('button', { name: 'terracotta' }).click()
     await expect(page.getByRole('button', { name: 'terracotta' })).toHaveAttribute('aria-pressed', 'true')
-    await expect.poll(primary).not.toBe(sage)
+    await expect.poll(primary).not.toBe(brass)
     // The engine wrote both halves, so System still follows the OS.
     expect(await primary()).toContain('light-dark(')
 
-    await page.getByRole('button', { name: 'sage' }).click()
-    await expect.poll(primary).toBe(sage)
+    await page.getByRole('button', { name: 'brass' }).click()
+    await expect.poll(primary).toBe(brass)
   })
 
   test('holds the choice across a reload, on this device', async ({ page, size }) => {
