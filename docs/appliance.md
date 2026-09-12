@@ -57,7 +57,8 @@ account. The script says so first, because the dashboard cannot exist before the
 
 `curl | bash` makes stdin the script, so the script reads its answers from `/dev/tty`.
 
-1. It says what it will do, and that every device must be on one tailnet.
+1. It draws the Yantra mark, then says what it will do, and that every device must be on one tailnet.
+   With no terminal it draws nothing, so piped output is unchanged.
 2. It resolves the current release from
    `api.github.com/repos/2002Bishwajeet/yantra/releases/latest`, fetches the `aarch64` or `x86_64`
    musl archive and `SHA256SUMS`, and checks one against the other. **A mismatch stops the run
