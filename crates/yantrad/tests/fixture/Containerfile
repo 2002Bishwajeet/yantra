@@ -33,9 +33,14 @@ RUN printf 'auth sufficient pam_permit.so\naccount sufficient pam_permit.so\nses
 # how most desktop Linux ships it, and tmux and git already here so no test
 # fetches a package. `pam_loginuid` cannot write its file in a rootless
 # container, and a required one ends every ssh session before it starts.
+#
+# The account phase is `pam_permit` for the reason sudo's is above: on GitHub's
+# runner `pam_unix` cannot read the shadow entry, and sshd refused `deploy` after
+# accepting its key — "Access denied … by PAM account configuration" (Y-387).
 RUN dnf -y install openssh-server tmux git && dnf clean all && \
     systemctl disable sshd.service && \
-    sed -Ei 's/^(session\s+)required(\s+pam_loginuid\.so)/\1optional\2/' /etc/pam.d/sshd
+    sed -Ei 's/^(session\s+)required(\s+pam_loginuid\.so)/\1optional\2/' /etc/pam.d/sshd && \
+    sed -i '1a account    sufficient   pam_permit.so' /etc/pam.d/sshd
 
 # PID 1 here is systemd, which takes SIGRTMIN+3 as "power off" and ignores SIGTERM.
 STOPSIGNAL SIGRTMIN+3
