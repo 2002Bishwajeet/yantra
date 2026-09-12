@@ -121,12 +121,13 @@ one nobody has walked.
 **What is free.** A machine appears the moment Tailscale sees it. `online` is read from the
 tailnet inventory, not from anything Yantra installs. So the fleet list needs nothing from you.
 
-**What is not free.** Nine checks decide whether that machine is *usable*: `reachable`, `sshd`,
-`tmux`, `agent-cli`, `terminfo`, `provider-cli`, `provider-auth`, `login-session`, `heartbeat`.
+**What is not free.** Ten checks decide whether that machine is *usable*: `reachable`, `sshd`,
+`tmux`, `git`, `agent-cli`, `terminfo`, `provider-cli`, `provider-auth`, `login-session`,
+`heartbeat`. `git` is the tenth since Y-386.
 
 - [ ] The unprepared machine appears in `/machines` on its own, with no checks read.
-- [ ] Press Check. → it reports all nine, and names what is absent rather than saying *failed*.
-- [ ] Read the nine lines. **For each one, ask: does it tell me the command that fixes it?**
+- [ ] Press Check. → it reports all ten, and names what is absent rather than saying *failed*.
+- [ ] Read the ten lines. **For each one, ask: does it tell me the command that fixes it?**
 - [ ] Settings → Access → **Show key** → **Copy**. Paste it into that machine's
       `authorized_keys`. Check again. → `reachable` and `sshd` go green.
 - [ ] Install `tmux` on it. Check again. → one more goes green.

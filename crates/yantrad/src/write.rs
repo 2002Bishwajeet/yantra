@@ -29,6 +29,7 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use yantra_core::github;
+use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
@@ -139,9 +140,20 @@ where
         .route("/relay", post(relay::<I>))
         .route("/github/login", post(login::<I>))
         .route("/github", axum::routing::delete(logout::<I>))
-        .with_state(Remembered { authoriser, fleet });
+        .with_state(Remembered {
+            authoriser: authoriser.clone(),
+            fleet: fleet.clone(),
+        });
 
-    acts.merge(remembered)
+    let installs: Router<S> = Router::new()
+        .route("/machines/{machine}/install", post(put_basics::<I>))
+        .with_state(Installer {
+            authoriser,
+            fleet,
+            running: Running::default(),
+        });
+
+    acts.merge(remembered).merge(installs)
 }
 
 /// The state these two need: who the caller is, and what this daemon holds in
@@ -646,6 +658,76 @@ fn from_clone(error: &clone::Error) -> StatusCode {
     }
 }
 
+/// The machines an install is running on now.
+type Running = Arc<tokio::sync::Mutex<std::collections::BTreeSet<String>>>;
+
+#[derive(Clone)]
+struct Installer<I> {
+    authoriser: Authoriser<I>,
+    fleet: Fleet,
+    running: Running,
+}
+
+/// An install past this is stopped and reported. Dropping the future kills
+/// the local `ssh`; a far-side installer can outlive it (I-27).
+const INSTALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// `yantra install <machine>` on the wire ([ADR-0028] §4). **202, and nothing
+/// here awaits the install**, which can take minutes: a task the daemon owns
+/// runs it, puts the result in the ring (ADR-0025) and then runs the readiness
+/// sweep. **One install per machine at a time**, so a second `POST` while one
+/// runs is a **409**.
+///
+/// [ADR-0028]: ../../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md
+async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Installer<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    if !state.running.lock().await.insert(machine.clone()) {
+        return Err(Refused::Verb {
+            status: StatusCode::CONFLICT,
+            said: format!("an install is already running on {machine}"),
+        });
+    }
+    tracing::info!("install on {machine} for {}", caller.node);
+    tokio::spawn(install_in_background(state.fleet, state.running, machine));
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn install_in_background(fleet: Fleet, running: Running, machine: String) {
+    let event = match tokio::time::timeout(INSTALL_BUDGET, install::install(&machine)).await {
+        Ok(Ok(report)) => Event::install(&report),
+        Ok(Err(error)) => Event::install_failed(
+            &machine,
+            &format!("{}: {}", from_install(&error), chain(&error)),
+        ),
+        Err(_) => Event::install_failed(
+            &machine,
+            &format!(
+                "it ran past {} minutes and was stopped",
+                INSTALL_BUDGET.as_secs() / 60
+            ),
+        ),
+    };
+    events::remember(&fleet.events, event).await;
+    running.lock().await.remove(&machine);
+    crate::refresh::look_at_readiness(&fleet.model).await;
+}
+
+/// No wildcard, per Y-135: ssh, tmux and a lookup decided nothing about the
+/// machine (R-23), and a missing state directory is this daemon's own fault.
+fn from_install(error: &install::Error) -> &'static str {
+    match error {
+        install::Error::Ssh(_) | install::Error::Tmux(_) | install::Error::Agent(_) => {
+            "the machine could not be asked, so what it has is not known"
+        }
+        install::Error::NoStateDir => "this daemon has no directory for ssh control sockets",
+    }
+}
+
 /// `yantra doctor <machine>`, asked now rather than read off the sweep.
 ///
 /// **A read reached over a `POST`, for [`ask`]'s reason** ([ADR-0019]): the
@@ -654,7 +736,7 @@ fn from_clone(error: &clone::Error) -> StatusCode {
 /// person taps it and nothing polls it, which is both halves of the ADR's test.
 ///
 /// **It costs an ssh round trip, and an asleep machine costs all ten seconds of
-/// `ConnectTimeout` before it answers.** What it answers then is nine
+/// `ConnectTimeout` before it answers.** What it answers then is ten
 /// *unknown* checks and never a 500: [`doctor::machine`] cannot fail, because a
 /// machine that could not be asked is not a machine that failed (R-23). A name
 /// nothing answers to reads the same way, and deliberately — ADR-0009 leaves
@@ -2441,6 +2523,50 @@ mod tests {
         let answered = app.oneshot(set).await.expect("the router is infallible");
 
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Y-386: the install route is behind the gate like every write, and a
+    /// machine whose install still runs is a 409 before anything is spawned.
+    #[tokio::test]
+    async fn an_install_is_authorised_and_runs_once_per_machine() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let request = || {
+            let mut request = Request::post("/machines/pi/install")
+                .body(Body::empty())
+                .expect("a request with no body");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            request
+        };
+
+        let fleet = Fleet::default();
+        let refused = router::<Fake, ()>(direct(tailnet(vec![])), fleet.clone())
+            .oneshot(request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+        let running = Running::default();
+        running.lock().await.insert("pi".to_owned());
+        let busy = Router::new()
+            .route("/machines/{machine}/install", post(put_basics::<Fake>))
+            .with_state(Installer {
+                authoriser: direct(tailnet(vec![(address(9), caller(ME, &[]))])),
+                fleet: fleet.clone(),
+                running,
+            })
+            .oneshot(request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(busy.status(), StatusCode::CONFLICT);
+        assert!(
+            fleet.events.read().await.is_empty(),
+            "nothing ran, so nothing is remembered"
+        );
     }
 
     /// Both halves of the grant are behind the gate and refuse before anything

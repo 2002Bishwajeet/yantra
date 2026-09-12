@@ -168,12 +168,12 @@ async fn look_at_sessions(model: &Model) {
     model.write().await.sessions = Some(Arc::new(reading));
 }
 
-/// The dearest look of the five — nine checks over ssh per machine — and the
+/// The dearest look of the five — ten checks over ssh per machine — and the
 /// reason it is a look rather than a handler: `doctor` costs a browser poll far
 /// more than a session list does, and the rule about ssh on the request path is
 /// this module's whole subject. The `term` is [`crate::write::term`]'s, because
-/// nobody is sitting at this one either (I-36).
-async fn look_at_readiness(model: &Model) {
+/// nobody is sitting at this one either (I-36). An install runs it early (Y-386).
+pub(crate) async fn look_at_readiness(model: &Model) {
     let reading = Reading::new(doctor::fleet(crate::write::term()).await);
     model.write().await.readiness = Some(Arc::new(reading));
 }

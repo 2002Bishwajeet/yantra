@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::RwLock;
+use yantra_core::install::{self, Outcome};
 use yantra_core::notify::Notification;
 use yantra_core::status::{Fleet, Verdict};
 
@@ -76,6 +77,73 @@ impl Event {
             said: yantra_core::notify::test_message().body,
         }
     }
+
+    /// ADR-0028 §4: what an install did, and the command for whatever it left
+    /// to a person. `installed` only when every basic is there now.
+    pub fn install(report: &install::Report) -> Self {
+        let mut parts = Vec::new();
+        let mut commands: Vec<&str> = Vec::new();
+        for step in &report.steps {
+            match &step.outcome {
+                Outcome::Present => {}
+                Outcome::Installed => parts.push(format!("{} installed", step.tool)),
+                Outcome::ForYou { because, command } => {
+                    parts.push(format!("{} left for you: {because}", step.tool));
+                    if let Some(command) = command.as_deref()
+                        && !commands.contains(&command)
+                    {
+                        commands.push(command);
+                    }
+                }
+                Outcome::Failed { output } => parts.push(format!(
+                    "{} did not install: {}",
+                    step.tool,
+                    last(output, SAID_OUTPUT)
+                )),
+            }
+        }
+        if parts.is_empty() {
+            parts.push("every basic was already there".to_owned());
+        }
+        let mut said = format!("{}: {}", report.machine, parts.join("; "));
+        for command in commands {
+            said.push_str(&format!(" — run `{command}` on {}", report.machine));
+        }
+        Self {
+            at: now(),
+            kind: if report.complete() {
+                "installed"
+            } else {
+                "install_stopped"
+            },
+            workspace: None,
+            machine: Some(report.machine.clone()),
+            said,
+        }
+    }
+
+    /// An install that could not be asked, or ran out of time.
+    pub fn install_failed(machine: &str, reason: &str) -> Self {
+        Self {
+            at: now(),
+            kind: "install_stopped",
+            workspace: None,
+            machine: Some(machine.to_owned()),
+            said: format!("{machine}: the install did not finish: {reason}"),
+        }
+    }
+}
+
+/// How much of a failed installer's output a notification carries. The
+/// library keeps more; a sentence on a phone needs the last line or two.
+const SAID_OUTPUT: usize = 300;
+
+fn last(text: &str, bytes: usize) -> &str {
+    let mut from = text.len().saturating_sub(bytes);
+    while !text.is_char_boundary(from) {
+        from += 1;
+    }
+    &text[from..]
 }
 
 /// The same spelling as `AgentState` on `/workspaces/{name}/status`, so a
@@ -141,6 +209,56 @@ mod tests {
         assert_eq!(listed.len(), CAPACITY);
         assert_eq!(listed[0], nth(CAPACITY + 2), "newest first");
         assert_eq!(listed[CAPACITY - 1], nth(3), "0, 1 and 2 are gone");
+    }
+
+    /// Two tools share one command, and the sentence names it once. The kind
+    /// is `installed` only when nothing is left for a person.
+    #[test]
+    fn an_install_names_what_it_left_and_the_command_once() {
+        use yantra_core::install::{Because, Report, Step, Tool};
+        let left = Outcome::ForYou {
+            because: Because::NeedsRoot,
+            command: Some("sudo apk add tmux git".to_owned()),
+        };
+        let stopped = Event::install(&Report {
+            machine: "pi".to_owned(),
+            steps: vec![
+                Step {
+                    tool: Tool::Tmux,
+                    outcome: left.clone(),
+                },
+                Step {
+                    tool: Tool::Git,
+                    outcome: left,
+                },
+                Step {
+                    tool: Tool::Claude,
+                    outcome: Outcome::Installed,
+                },
+            ],
+        });
+        assert_eq!(stopped.kind, "install_stopped");
+        assert_eq!(stopped.machine.as_deref(), Some("pi"));
+        assert_eq!(
+            stopped.said.matches("sudo apk add tmux git").count(),
+            1,
+            "{}",
+            stopped.said
+        );
+        assert!(
+            stopped.said.contains("claude installed"),
+            "{}",
+            stopped.said
+        );
+
+        let done = Event::install(&Report {
+            machine: "pi".to_owned(),
+            steps: vec![Step {
+                tool: Tool::Git,
+                outcome: Outcome::Present,
+            }],
+        });
+        assert_eq!(done.kind, "installed");
     }
 
     #[test]

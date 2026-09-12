@@ -420,6 +420,13 @@ export const notifications = {
   "age_seconds": 0,
   "data": [
     {
+      "at": 1785522840,
+      "kind": "install_stopped",
+      "machine": "pi",
+      "said": "pi: claude installed; tmux and git left for you — run `sudo apt-get update && sudo apt-get install -y tmux git` on pi",
+      "workspace": null
+    },
+    {
       "at": 1785522780,
       "kind": "relay-test",
       "machine": null,

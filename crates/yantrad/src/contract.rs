@@ -360,6 +360,15 @@ async fn fleet() -> Fleet {
             machine: None,
             said: "yantra can reach this topic".to_owned(),
         },
+        Event {
+            at: 1_785_522_840,
+            kind: "install_stopped",
+            workspace: None,
+            machine: Some("pi".to_owned()),
+            said: "pi: claude installed; tmux and git left for you — run `sudo apt-get update \
+                   && sudo apt-get install -y tmux git` on pi"
+                .to_owned(),
+        },
     ]);
     drop(events);
     fleet
@@ -411,8 +420,8 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
 /// A file the listing refused. It is in the fixture rather than only in a
 /// hand-written stub for this file's own reason: a state nothing generated is a
 /// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
-/// Three checks rather than the nine `doctor` runs: what a page has to render
-/// is one of three states beside a name and a sentence, and the ninth of those
+/// Three checks rather than the ten `doctor` runs: what a page has to render
+/// is one of three states beside a name and a sentence, and the tenth of those
 /// tells it nothing the third did not.
 fn swept(machine: &str) -> doctor::Report {
     doctor::Report {

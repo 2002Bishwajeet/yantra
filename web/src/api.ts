@@ -365,7 +365,10 @@ export type SshIdentity = {
 export type Event = {
   // Unix seconds, when the daemon saw it.
   at: number
-  // A verdict as `AgentState` spells it, or one of the two of its own.
+  // A verdict as `AgentState` spells it, or one of the daemon's own. The two
+  // install kinds end `POST /api/machines/{machine}/install` (ADR-0028, Y-386):
+  // `installed` when every basic is there, else `install_stopped`, whose
+  // `said` names the command left for a person.
   kind:
     | 'awaiting_trust'
     | 'finished'
@@ -378,6 +381,8 @@ export type Event = {
     | 'no_agent'
     | 'unreachable'
     | 'relay-test'
+    | 'installed'
+    | 'install_stopped'
   workspace: string | null
   machine: string | null
   // The sentence the relay was, or would have been, sent.

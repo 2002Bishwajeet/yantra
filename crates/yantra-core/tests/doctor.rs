@@ -121,13 +121,14 @@ impl Drop for Lab {
     }
 }
 
-/// The nine checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
+/// The ten checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
 /// on every path below, because the list *and its order* are the contract an
 /// installer and an agent read (D2.2).
-const EXPECTED: [&str; 9] = [
+const EXPECTED: [&str; 10] = [
     "reachable",
     "sshd",
     "tmux",
+    "git",
     "agent-cli",
     "terminfo",
     "provider-cli",
@@ -208,8 +209,8 @@ async fn a_machine_that_refuses_the_connection_is_never_reported_as_missing_anyt
 }
 
 /// A machine that answers everything honestly says *no* to: the container has
-/// tmux and ncurses and nothing else, so four checks have a real absence to
-/// report and two have something better to say than absence.
+/// tmux, git and ncurses and nothing else, so three checks have a real absence
+/// to report and two have something better to say than absence.
 #[tokio::test]
 async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
     let Some(lab) = Lab::start("bare")? else {

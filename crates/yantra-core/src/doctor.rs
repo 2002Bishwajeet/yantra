@@ -26,6 +26,7 @@ use crate::workspace;
 const REACHABLE: &str = "reachable";
 const SSHD: &str = "sshd";
 const TMUX: &str = "tmux";
+const GIT: &str = "git";
 const AGENT_CLI: &str = "agent-cli";
 const TERMINFO: &str = "terminfo";
 const PROVIDER_CLI: &str = "provider-cli";
@@ -40,8 +41,9 @@ pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
-const BEHIND_SSH: [&str; 6] = [
+const BEHIND_SSH: [&str; 7] = [
     TMUX,
+    GIT,
     AGENT_CLI,
     TERMINFO,
     PROVIDER_CLI,
@@ -138,7 +140,7 @@ pub async fn fleet(term: &str) -> Result<Vec<Report>, Error> {
 ///
 /// Never fails: a connection that cannot even be built is a report of unknowns
 /// with the reason in it, because a caller asking *what is wrong with this box*
-/// is answered better by nine states than by one error.
+/// is answered better by ten states than by one error.
 pub async fn machine(name: &str, term: &str) -> Report {
     let ssh = ssh::machine_at(name)
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
@@ -177,6 +179,7 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         reachable,
         sshd,
         tmux,
+        git(exec).await,
         agent_cli,
         terminfo(exec, term).await,
         provider_cli,
@@ -252,6 +255,37 @@ async fn tmux<E: Exec>(exec: &E) -> (Check, Option<Tmux>) {
             None,
         ),
         Err(err) => (unknown(TMUX, format!("could not be asked: {err}")), None),
+    }
+}
+
+/// `claude`'s lookup, and one more question where it finds `/usr/bin/git`: on
+/// macOS that is a stub asking for the Command Line Tools, and it is git only
+/// once `xcode-select -p` answers. [`crate::install`] asks this too, so the
+/// two never disagree about what a machine has.
+pub(crate) async fn find_git<E: Exec>(exec: &E) -> Result<Option<String>, agent::Error> {
+    let Some(path) = agent::locate(exec, "git").await? else {
+        return Ok(None);
+    };
+    if path == "/usr/bin/git" {
+        // No `xcode-select` is not macOS, and there is no stub there.
+        let real = exec
+            .exec("! command -v xcode-select >/dev/null 2>&1 || xcode-select -p >/dev/null 2>&1")
+            .await?;
+        if !real.success() {
+            return Ok(None);
+        }
+    }
+    Ok(Some(path))
+}
+
+async fn git<E: Exec>(exec: &E) -> Check {
+    match find_git(exec).await {
+        Ok(Some(path)) => present(GIT, format!("found at {path}")),
+        Ok(None) => absent(
+            GIT,
+            format!("not on PATH or in any of: {}", agent::CANDIDATES.join(", ")),
+        ),
+        Err(err) => unknown(GIT, format!("could not be asked: {err}")),
     }
 }
 
@@ -557,7 +591,7 @@ mod tests {
     #[test]
     fn a_machine_that_cannot_be_asked_is_never_reported_as_missing_anything() {
         let checks = nothing_asked("ssh could not be set up here");
-        assert_eq!(checks.len(), 9);
+        assert_eq!(checks.len(), 10);
         assert!(
             checks.iter().all(|c| c.state == State::Unknown),
             "{checks:?}"

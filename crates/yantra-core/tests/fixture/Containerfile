@@ -11,7 +11,9 @@ FROM docker.io/library/alpine:3.22
 
 # `ncurses` is what puts `tic` and `infocmp` here. Without it the terminfo
 # tests could only ever exercise the fallback, never the install (Y-058).
-RUN apk add --no-cache openssh-server tmux ncurses \
+# `git` and `sudo` are for the install tests (Y-386): each arranges its own
+# sudoers line, and with none, sudo refuses the account.
+RUN apk add --no-cache openssh-server tmux ncurses git sudo \
  && ssh-keygen -A \
  && adduser -D -s /bin/sh yantra \
  && passwd -u yantra \

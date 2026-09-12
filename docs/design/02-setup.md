@@ -146,6 +146,13 @@ credential. Everything else is *unknown*, because `gh auth status` 2.96.0 says *
 is invalid* both for a token GitHub refused and for a GitHub it could not reach `[V]`, and an
 *absent* there would send someone to log in on a box that already is (R-23).
 
+**2026-09-12, [Y-386](../../tracker.md#3-task-board): `git` is a check, after `tmux`.**
+[ADR-0028](../adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) makes `git` part of the
+minimum a machine needs, so the dashboard must be able to say it is missing. The list is now ten
+names, with `git` fourth. The lookup is `agent-cli`'s, with one more question on macOS:
+`/usr/bin/git` there is a stub until the Command Line Tools are installed, so it counts only when
+`xcode-select -p` answers.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor
