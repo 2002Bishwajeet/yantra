@@ -154,7 +154,10 @@ What it does:
 6. installs both units and reloads systemd, **enabling neither**;
 7. writes `/etc/yantra/agent.env` **only if it is absent**, and with no address in it;
 8. writes `/etc/yantra/daemon.env` **only if it is absent** — `0600`, owned by `yantra`, and with no
-   relay in it ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md));
+   relay in it ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The GitHub
+   OAuth App's client id needs no line here: the release build already carries one
+   ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md), Y-389), so `yantra github login`
+   works on a fresh box;
 9. reports whether Tailscale is installed and up, and **never enrols it** — the auth key is the
    owner's ([`CLAUDE.md`](../CLAUDE.md) §B4) and [Q17](../tracker.md#6-open-questions) is not a
    script's to answer.
