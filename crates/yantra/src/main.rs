@@ -201,7 +201,17 @@ enum Command {
         machine: String,
     },
     /// Prepare this account's ssh identity, and print the public key to place
-    SshIdentity,
+    SshIdentity {
+        /// Write this one machine's block, logging in as `--user`. The join
+        /// command does this through the daemon
+        #[arg(long, requires = "user")]
+        machine: Option<String>,
+        /// The account on that machine
+        #[arg(long, requires = "machine")]
+        user: Option<String>,
+    },
+    /// Print the join command's script, which a new machine pipes into `sh`
+    JoinScript,
     /// Say which build this is
     About,
 }
@@ -342,7 +352,12 @@ async fn main() -> ExitCode {
         }) => github_status().await,
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
-        Some(Command::SshIdentity) => ssh_identity(),
+        Some(Command::SshIdentity {
+            machine: Some(machine),
+            user: Some(user),
+        }) => ssh_join(&machine, &user),
+        Some(Command::SshIdentity { .. }) => ssh_identity(),
+        Some(Command::JoinScript) => join_script().await,
         Some(Command::About) => about(),
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
@@ -978,9 +993,88 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
     }
 }
 
-/// D2 §2's ssh row, the *Yantra prepares it, you finish* column. **Invoked and
-/// never automatic**: whether generating the keypair is Yantra's job rather than
-/// the owner's is still unconfirmed, so nothing calls this for them.
+/// `POST /api/join`'s half, for a machine whose account is typed rather than
+/// reported (ADR-0029). The daemon names the machine from the caller; here the
+/// person at this terminal names it.
+fn ssh_join(machine: &str, user: &str) -> ExitCode {
+    match identity::join(machine, user) {
+        Ok(joined) => {
+            if joined.generated {
+                println!("key:    {}, generated", joined.key.display());
+            }
+            let config = joined.config.display();
+            if joined.kept {
+                println!("config: {config} already names {machine}, left as it is");
+            } else {
+                println!("config: {config}, a Host block added for {machine} as {user}");
+            }
+            println!(
+                "\nplace this in ~/.ssh/authorized_keys for {user} on {machine}:\n\n  {}\n",
+                joined.public_key
+            );
+            // ssh takes the first value it finds, so a block above this one wins.
+            match joined.logs_in_as.as_deref() {
+                Some(account) if account == user => ExitCode::SUCCESS,
+                Some(account) => {
+                    eprintln!(
+                        "yantra: ssh logs in to {machine} as {account}, not {user}. A block in {config} \
+                         decides that, and Yantra does not rewrite it (ADR-0009)."
+                    );
+                    ExitCode::FAILURE
+                }
+                None => {
+                    eprintln!(
+                        "yantra: `ssh -G {machine}` could not say which account ssh logs in as"
+                    );
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `GET /join`'s bytes, made from this account's key and this machine's tailnet
+/// address. Only the script goes to stdout, so `> join.sh` is the script.
+async fn join_script() -> ExitCode {
+    use yantra_core::inventory::{Inventory as _, Tailscale};
+    use yantra_core::join;
+
+    let addresses = match Tailscale.addresses().await {
+        Ok(addresses) => addresses,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let prepared = match identity::dir().and_then(|dir| identity::prepare_in(&dir, &[])) {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    if prepared.generated {
+        eprintln!("key: {}, generated", prepared.key.display());
+    }
+    match join::daemon_address(&addresses).and_then(|d| join::script(d, &prepared.public_key)) {
+        Ok(script) => {
+            print!("{script}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// D2 §2's ssh row, the *Yantra prepares it, you finish* column, for every
+/// machine a workspace names. Since ADR-0029 the first join makes the same key
+/// without this verb.
 fn ssh_identity() -> ExitCode {
     match identity::prepare().and_then(|prepared| Ok((identity::describe()?, prepared))) {
         Ok((described, prepared)) => {
@@ -2975,6 +3069,45 @@ mod tests {
             Some(Command::Ls {
                 target: LsTarget::Notifications
             })
+        ));
+    }
+
+    /// Y-387: a block names a machine and an account together or not at all,
+    /// because a `Host` block with no `User` is the bug the join command fixes.
+    #[test]
+    fn ssh_identity_takes_a_machine_and_an_account_together_and_join_script_parses() {
+        let one = Cli::try_parse_from([
+            "yantra",
+            "ssh-identity",
+            "--machine",
+            "laptop",
+            "--user",
+            "biswa",
+        ])
+        .expect("both flags parse");
+        assert!(matches!(
+            one.command,
+            Some(Command::SshIdentity {
+                machine: Some(ref m),
+                user: Some(ref u),
+            }) if m == "laptop" && u == "biswa"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "ssh-identity"])
+                .expect("the bare verb still parses")
+                .command,
+            Some(Command::SshIdentity {
+                machine: None,
+                user: None
+            })
+        ));
+        assert!(Cli::try_parse_from(["yantra", "ssh-identity", "--machine", "laptop"]).is_err());
+        assert!(Cli::try_parse_from(["yantra", "ssh-identity", "--user", "biswa"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "join-script"])
+                .expect("`join-script` parses")
+                .command,
+            Some(Command::JoinScript)
         ));
     }
 
