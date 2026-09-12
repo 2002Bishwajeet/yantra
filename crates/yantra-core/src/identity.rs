@@ -4,9 +4,10 @@
 //! Every machine name is an ssh destination resolved by that file and never by
 //! Yantra (ADR-0009), so an appliance with no config file has workspaces that
 //! name nothing. This prepares the half Yantra knows: the key, and a block per
-//! machine pointing at it. Where the name points and as whom is the owner's,
-//! and so is placing the public key in each `authorized_keys`
-//! ([D2](../../../docs/design/02-setup.md) §2).
+//! machine pointing at it. Where the name points is the owner's
+//! ([D2](../../../docs/design/02-setup.md) §2). **As whom** is learned from the
+//! machine itself since Y-387: [`join_in`] writes the account the join command
+//! ran as ([ADR-0029](../../../docs/adr/0029-a-machine-joins-itself.md)).
 //!
 //! **Nothing here writes a `known_hosts`.** [`crate::ssh`] already gives every
 //! connection its own under Yantra's state directory with
@@ -85,14 +86,30 @@ pub enum Error {
 
     #[error("`{machine}` cannot be one `Host` pattern, so no block is written for it")]
     UnusableMachine { machine: String },
+
+    #[error(
+        "`{user}` is not an account name Yantra writes into ~/.ssh/config: letters, digits, `.`, `_` and `-`, at most 32, not starting with `-` or `.`"
+    )]
+    UnusableUser { user: String },
+}
+
+/// What [`join_in`] found and what it changed, for one machine.
+#[derive(Debug, Clone)]
+pub struct Joined {
+    pub key: PathBuf,
+    pub public_key: String,
+    /// True when this call made the key, which is the first join (ADR-0029).
+    pub generated: bool,
+    pub config: PathBuf,
+    pub machine: String,
+    pub user: String,
+    /// False when the config already named the machine and was left alone.
+    pub configured: bool,
 }
 
 /// Prepares `~/.ssh` for the account this runs as, for every machine a
-/// workspace names.
-///
-/// Invoked, never automatic: whether generating the keypair is Yantra's job at
-/// all is still the owner's to confirm (D2 §2), and a verb survives either
-/// answer.
+/// workspace names. The first join makes the same key without this verb
+/// (ADR-0029); running it by hand is still harmless.
 pub fn prepare() -> Result<Prepared, Error> {
     let listing = workspace::list()?;
     let mut machines: Vec<String> = listing
@@ -177,11 +194,100 @@ pub fn prepare_in(dir: &Path, machines: &[String]) -> Result<Prepared, Error> {
         });
     }
 
+    let (key, public_key, generated) = key_in(dir)?;
+    let config = dir.join("config");
+    let existing = read_config(&config)?;
+
+    let mut appended = String::new();
+    let mut configured = Vec::new();
+    let mut left_alone = Vec::new();
+    for machine in machines {
+        if names(&existing, machine) || names(&appended, machine) {
+            left_alone.push(machine.clone());
+            continue;
+        }
+        appended.push_str(&block(machine, &key, None));
+        configured.push(machine.clone());
+    }
+    append(&config, &existing, &appended)?;
+
+    Ok(Prepared {
+        key,
+        public_key,
+        generated,
+        config,
+        configured,
+        left_alone,
+    })
+}
+
+/// One machine that ran the join command, for the account this runs as.
+pub fn join(machine: &str, user: &str) -> Result<Joined, Error> {
+    join_in(&dir()?, machine, user)
+}
+
+/// Appends `Host <machine>` with `User <user>` and this key, making the key if
+/// there is none (ADR-0029). A config that already names the machine is left
+/// exactly as it is, whoever wrote it (ADR-0009).
+pub fn join_in(dir: &Path, machine: &str, user: &str) -> Result<Joined, Error> {
+    // Both are refused before anything is written: each becomes a config line.
+    if !usable_label(machine) {
+        return Err(Error::UnusableMachine {
+            machine: machine.to_owned(),
+        });
+    }
+    if !usable_user(user) {
+        return Err(Error::UnusableUser {
+            user: user.to_owned(),
+        });
+    }
+
+    let (key, public_key, generated) = key_in(dir)?;
+    let config = dir.join("config");
+    let existing = read_config(&config)?;
+    let configured = !names(&existing, machine);
+    if configured {
+        append(&config, &existing, &block(machine, &key, Some(user)))?;
+    }
+
+    Ok(Joined {
+        key,
+        public_key,
+        generated,
+        config,
+        machine: machine.to_owned(),
+        user: user.to_owned(),
+        configured,
+    })
+}
+
+/// An account name that is one `User` token and nothing more. `%` is out
+/// because ssh expands tokens in `User`, and whitespace would start a new line.
+pub fn usable_user(user: &str) -> bool {
+    (1..=32).contains(&user.len())
+        && !user.starts_with(['-', '.'])
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// A tailnet machine name is a DNS label, and anything else here would be a
+/// `Host` pattern (`*`, `!`) rather than a name.
+fn usable_label(machine: &str) -> bool {
+    (1..=63).contains(&machine.len())
+        && !machine.starts_with('-')
+        && machine
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// The key, made when there is none. Never regenerated: that would orphan
+/// every `authorized_keys` entry it is in.
+fn key_in(dir: &Path) -> Result<(PathBuf, String, bool), Error> {
     let writing = |path: &Path| {
         let path = path.to_owned();
         move |source| Error::Write { path, source }
     };
-
     fs::create_dir_all(dir).map_err(writing(dir))?;
     fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(writing(dir))?;
 
@@ -195,66 +301,54 @@ pub fn prepare_in(dir: &Path, machines: &[String]) -> Result<Prepared, Error> {
         .map_err(writing(&public))?
         .trim()
         .to_owned();
+    Ok((key, public_key, generated))
+}
 
-    let config = dir.join("config");
-    let existing = match fs::read_to_string(&config) {
-        Ok(text) => text,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(source) => {
-            return Err(Error::Write {
-                path: config,
-                source,
-            });
-        }
+fn read_config(config: &Path) -> Result<String, Error> {
+    match fs::read_to_string(config) {
+        Ok(text) => Ok(text),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(source) => Err(Error::Write {
+            path: config.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn append(config: &Path, existing: &str, appended: &str) -> Result<(), Error> {
+    if appended.is_empty() {
+        return Ok(());
+    }
+    let writing = |source| Error::Write {
+        path: config.to_owned(),
+        source,
     };
-
-    let mut appended = String::new();
-    let mut configured = Vec::new();
-    let mut left_alone = Vec::new();
-    for machine in machines {
-        if names(&existing, machine) || names(&appended, machine) {
-            left_alone.push(machine.clone());
-            continue;
-        }
-        appended.push_str(&block(machine, &key));
-        configured.push(machine.clone());
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(config)
+        .map_err(writing)?;
+    // A file that already ended mid-block would swallow the first Host line.
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        file.write_all(b"\n").map_err(writing)?;
     }
-
-    if !appended.is_empty() {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .open(&config)
-            .map_err(writing(&config))?;
-        // A file that already ended mid-block would swallow the first Host line.
-        if !existing.is_empty() && !existing.ends_with('\n') {
-            file.write_all(b"\n").map_err(writing(&config))?;
-        }
-        let appended = match existing.is_empty() {
-            true => appended.trim_start_matches('\n'),
-            false => &appended,
-        };
-        file.write_all(appended.as_bytes())
-            .map_err(writing(&config))?;
-    }
-
-    Ok(Prepared {
-        key,
-        public_key,
-        generated,
-        config,
-        configured,
-        left_alone,
-    })
+    let appended = match existing.is_empty() {
+        true => appended.trim_start_matches('\n'),
+        false => appended,
+    };
+    file.write_all(appended.as_bytes()).map_err(writing)
 }
 
 /// `IdentitiesOnly` so the appliance offers this key and no other: a box that
 /// walks a list of keys gets refused for too many failures before it reaches
-/// the right one.
-fn block(machine: &str, key: &Path) -> String {
+/// the right one. `User` only when a machine said which account ran the join.
+fn block(machine: &str, key: &Path, user: Option<&str>) -> String {
+    let user = user
+        .map(|user| format!("    User {user}\n"))
+        .unwrap_or_default();
     format!(
-        "\nHost {machine}\n    IdentityFile {}\n    IdentitiesOnly yes\n",
+        "\nHost {machine}\n{user}    IdentityFile {}\n    IdentitiesOnly yes\n",
         key.display()
     )
 }
@@ -394,6 +488,94 @@ mod tests {
         assert!(!identity.public_key.contains("PRIVATE"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Y-387: the first join makes the key, and the block names the account
+    /// the join command ran as — the half `prepare` could never know.
+    #[test]
+    fn a_join_makes_the_key_and_names_the_account() {
+        let dir = scratch("join");
+
+        let joined = join_in(&dir, "cachyos-g14", "biswa").expect("joined");
+        assert!(joined.generated, "no key existed, so the join made one");
+        assert!(joined.configured);
+        let config = fs::read_to_string(&joined.config).expect("readable");
+        assert_eq!(
+            config,
+            format!(
+                "Host cachyos-g14\n    User biswa\n    IdentityFile {}\n    IdentitiesOnly yes\n",
+                joined.key.display()
+            )
+        );
+
+        let again = join_in(&dir, "cachyos-g14", "biswa").expect("joined again");
+        assert!(
+            !again.generated && !again.configured,
+            "a second join is a no-op"
+        );
+        assert_eq!(fs::read_to_string(&again.config).expect("readable"), config);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// ADR-0009: whatever the config already says about a name wins, and a
+    /// join does not append a second block for it.
+    #[test]
+    fn a_join_leaves_a_block_the_owner_wrote_alone() {
+        let dir = scratch("join-owner");
+        fs::create_dir_all(&dir).expect("scratch");
+        let owners = "Host laptop\n    User someone-else\n    ProxyJump bastion\n";
+        fs::write(dir.join("config"), owners).expect("an existing config");
+
+        let joined = join_in(&dir, "laptop", "biswa").expect("answered");
+
+        assert!(!joined.configured);
+        assert_eq!(
+            fs::read_to_string(&joined.config).expect("readable"),
+            owners
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The account arrives in a request body and the machine from the tailnet,
+    /// and either one becomes a line in the file every connection reads.
+    #[test]
+    fn a_join_with_an_account_or_a_name_that_writes_its_own_lines_is_refused() {
+        let dir = scratch("join-hostile");
+        for user in [
+            "biswa\nHost *\n    ProxyCommand touch /tmp/pwned",
+            "a b",
+            "%u",
+            "-oProxyCommand=x",
+            ".hidden",
+            "",
+            &"x".repeat(33),
+        ] {
+            assert!(
+                matches!(
+                    join_in(&dir, "laptop", user),
+                    Err(Error::UnusableUser { .. })
+                ),
+                "{user:?}"
+            );
+        }
+        for machine in ["*", "!laptop", "laptop other", "-laptop", ""] {
+            assert!(
+                matches!(
+                    join_in(&dir, machine, "biswa"),
+                    Err(Error::UnusableMachine { .. })
+                ),
+                "{machine:?}"
+            );
+        }
+        assert!(!dir.exists(), "refused before anything was written");
+    }
+
+    #[test]
+    fn an_ordinary_account_name_is_usable() {
+        for user in ["biswa", "bishwajeet.p", "ci_runner-2", "Admin"] {
+            assert!(usable_user(user), "{user}");
+        }
     }
 
     /// `HostName` is not one of them: it defaults to the destination, and a

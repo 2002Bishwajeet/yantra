@@ -23,6 +23,7 @@ pub mod github;
 pub mod heartbeat;
 pub mod identity;
 pub mod inventory;
+pub mod join;
 pub mod logs;
 pub mod notify;
 pub mod price;

@@ -36,7 +36,7 @@ mod terminal;
 mod web;
 mod write;
 
-const PORT: u16 = 7717;
+const PORT: u16 = yantra_core::join::DAEMON_PORT;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -135,6 +135,9 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
 ) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        // Y-387: `curl …/join | sh` is the command a person types, so it sits
+        // beside `/healthz` rather than under `/api`.
+        .merge(write::script(authoriser.clone(), fleet.clone()))
         .nest(
             "/api",
             api::router()

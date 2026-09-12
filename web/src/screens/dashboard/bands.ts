@@ -62,6 +62,7 @@ const happened: Record<Event['kind'], { mark: MarkState; words: string }> = {
   unclear: { mark: 'unknown', words: 'unclear' },
   unreachable: { mark: 'unknown', words: 'unreachable' },
   'relay-test': { mark: 'done', words: 'relay test' },
+  joined: { mark: 'done', words: 'joined' },
 }
 
 export type Recent = { workspace: string; machine: string; mark: MarkState; words: string; at: number }

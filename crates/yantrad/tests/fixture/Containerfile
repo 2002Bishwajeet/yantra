@@ -29,6 +29,14 @@ RUN useradd --create-home deploy && \
 RUN printf 'auth sufficient pam_permit.so\naccount sufficient pam_permit.so\nsession sufficient pam_permit.so\n' \
     > /etc/pam.d/sudo
 
+# Y-387: a bare machine for the join command — sshd installed and off, which is
+# how most desktop Linux ships it, and tmux and git already here so no test
+# fetches a package. `pam_loginuid` cannot write its file in a rootless
+# container, and a required one ends every ssh session before it starts.
+RUN dnf -y install openssh-server tmux git && dnf clean all && \
+    systemctl disable sshd.service && \
+    sed -Ei 's/^(session\s+)required(\s+pam_loginuid\.so)/\1optional\2/' /etc/pam.d/sshd
+
 # PID 1 here is systemd, which takes SIGRTMIN+3 as "power off" and ignores SIGTERM.
 STOPSIGNAL SIGRTMIN+3
 CMD ["/usr/lib/systemd/systemd"]

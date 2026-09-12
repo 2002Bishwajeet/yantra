@@ -19,7 +19,7 @@ use anyhow::{Context, Result, bail};
 
 /// Bump the tag when `tests/fixture/Containerfile` changes; the image is built
 /// once and then reused from the local store.
-const IMAGE: &str = "localhost/yantra-systemd:3";
+const IMAGE: &str = "localhost/yantra-systemd:4";
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const BUILD_ATTEMPTS: u32 = 2;
 const BUILD_RETRY_PAUSE: Duration = Duration::from_secs(2);
@@ -68,6 +68,9 @@ impl Systemd {
             "yantra-fixture=1",
             // The cgroup, /run and /sys/fs/cgroup arrangement systemd needs as PID 1.
             "--systemd=always",
+            // Y-387's test reaches the container's sshd from the host.
+            "-p",
+            "127.0.0.1::22",
             IMAGE,
         ])?;
         if !out.status.success() {
@@ -151,6 +154,18 @@ impl Systemd {
         )?;
         self.run(&["systemctl", "daemon-reload"])?;
         Ok(())
+    }
+
+    /// The host port podman published for the container's port 22.
+    pub fn ssh_port(&self) -> Result<u16> {
+        let out = podman(&["port", &self.container, "22/tcp"])?;
+        let mapping = String::from_utf8(out.stdout)?;
+        mapping
+            .trim()
+            .rsplit(':')
+            .next()
+            .and_then(|port| port.parse().ok())
+            .with_context(|| format!("no host port published for 22/tcp: {mapping:?}"))
     }
 
     pub fn property(&self, unit: &str, name: &str) -> Result<String> {

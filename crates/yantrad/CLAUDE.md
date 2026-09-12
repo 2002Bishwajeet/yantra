@@ -272,6 +272,16 @@ own verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`
 already do, which is what stops it growing a richer API the CLI cannot reach. A new verb here starts
 in the CLI, and `yantra relay` was written before this route was.
 
+**`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
+caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
+under `deny_unknown_fields`, so a `machine` field is a `422`: the name comes from `whois` joined to
+the tailnet list on the stable id (I-5, I-52), and a machine can only join itself. A config that
+already names the machine is left alone and answers `configured: false`. The route adds a `joined`
+event and spawns a readiness re-check that records only a refused reach. **`GET /join` sits beside
+`/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
+`yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
+owner ruled that generation is Yantra's and happens on first use.
+
 **`clone` is one of two writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;
 nothing awaits the clone, progress is that session's terminal socket (ADR-0022) and completion is the

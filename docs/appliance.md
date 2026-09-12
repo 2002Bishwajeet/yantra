@@ -74,12 +74,24 @@ creates the account and scaffolds an addressless `agent.env`; it enrols nothing 
   an existing key is kept, because regenerating it orphans every `authorized_keys` entry it is in,
   and a machine the config already names is left exactly as it is.
 
-  **Two halves stay yours.** Placing that public key in each machine's `authorized_keys`, and the
-  `User`, `HostName`, `Port` or `ProxyJump` that say where a name points — Yantra never resolves a
-  name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)) and cannot know the account on
-  the far side. **Whether generation is Yantra's job at all is still unconfirmed**
-  ([D2 §2](design/02-setup.md)), which is why this is a verb you run rather than something an
-  install does.
+  **The join command does this for you, one machine at a time** (Y-387,
+  [ADR-0029](adr/0029-a-machine-joins-itself.md)). In a terminal on the new machine, as the account
+  Yantra is to log in as:
+
+  ```bash
+  curl -fsSL https://<appliance>.<tailnet>.ts.net/join | sh
+  ```
+
+  The daemon makes its key the first time this is fetched. The script asks before each step that
+  needs root: it turns on `sshd`, places the key in that account's `authorized_keys`, offers `tmux`,
+  `git` and `yantra-agent`, and tells the daemon which account it ran as. The daemon names the
+  machine from the caller's tailnet address and appends its `Host` block, with `User`, to the
+  `yantra` account's config. `sudo -u yantra -H yantra join-script` prints the same script, and
+  `sudo -u yantra -H yantra ssh-identity --machine <m> --user <u>` writes one block by hand.
+
+  **What stays yours:** a `HostName`, `Port` or `ProxyJump` for a name the tailnet does not resolve —
+  Yantra never resolves a name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)). On a
+  Mac, Remote Login is a switch in System Settings → General → Sharing, which no script can flip.
 
   **The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and the alternative is an
   ssh agent — a login session a box nobody logs into does not have. It is readable by the `yantra`
