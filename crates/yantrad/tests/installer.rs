@@ -25,6 +25,13 @@
 //!
 //! Nothing here holds a `tailscaled`, so the Tailscale step is proved by its
 //! report — twice, because a report that never changes is a constant.
+//!
+//! **The questions need a terminal, and `podman exec` without `-t` gives none**,
+//! which is how the runs above stay non-interactive (Y-384). The runs that
+//! answer are driven through a pty, and the `tailscale` they talk to is a stub
+//! that records its calls: a login, a tailnet address and a certificate are
+//! what no container can hold, so this proves which commands the script ran
+//! and never that Tailscale did what they ask.
 
 mod common;
 
@@ -56,6 +63,57 @@ const EDITED_RELAY: &str = "YANTRA_NTFY_URL=https://ntfy.example/a-topic";
 /// real one exits without a daemon it can reach, so a long-running process runs
 /// the installed file instead. Its own unit takes no arguments and cannot.
 const AGENT_UNIT: &str = "agent-under-install";
+
+/// A pty for the script's `/dev/tty`. The answers are typed ahead and end in
+/// ^D, so a question nobody expected takes its default rather than hanging the
+/// test — and still prints the `[Y/n]` a test asserts on.
+const AT_A_TERMINAL: &str = r#"
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp("bash", ["bash", "-c", "cat /fixture/install.sh | bash"])
+os.write(fd, sys.argv[1].encode() + b"\x04")
+out = b""
+while True:
+    try:
+        chunk = os.read(fd, 4096)
+    except OSError:
+        break
+    if not chunk:
+        break
+    out += chunk
+_, status = os.waitpid(pid, 0)
+sys.stdout.buffer.write(out)
+sys.exit(os.waitstatus_to_exitcode(status))
+"#;
+
+/// In `/usr/bin` because `sudo`'s `secure_path` omits `/usr/local/bin`, and
+/// that is where Tailscale's own packages put it. Every call is logged, and the
+/// address is loopback so a stand-in `yantrad` can answer on it.
+const TAILSCALE_STUB: &str = r#"#!/bin/sh
+umask 000
+state=/var/tmp/tailscale-stub
+echo "$*" >> $state/calls
+case "$1" in
+status)
+    [ -e $state/up ] || exit 1
+    [ "$2" = --json ] && printf '{"Self": {"DNSName": "yantra-box.tail0000.ts.net."}, "Peer": {"p": {"DNSName": "peer.tail0000.ts.net."}}}\n'
+    ;;
+up) touch $state/up ;;
+ip)
+    [ -e $state/up ] || exit 1
+    echo 127.0.0.1
+    ;;
+serve)
+    if [ "$2" = status ]; then
+        [ -e $state/serving ] && printf '{"TCP": {"8443": {"HTTPS": true}}}\n'
+    else
+        touch $state/serving
+    fi
+    ;;
+esac
+exit 0
+"#;
 
 /// The container, and the one constant `install.sh` still carries.
 struct Installer {
@@ -137,6 +195,47 @@ impl Installer {
     fn install_version(&self, version: &str) -> Result<Output> {
         let piped = format!("cat /fixture/install.sh | YANTRA_VERSION={version} bash");
         self.systemd.exec_as(UNPRIVILEGED, &["bash", "-c", &piped])
+    }
+
+    /// The same pipe, with a terminal behind it. stdout and stderr arrive
+    /// merged, as they do on a screen.
+    fn install_at_terminal(&self, answers: &str) -> Result<String> {
+        let out = self
+            .systemd
+            .exec_as(UNPRIVILEGED, &["python3", "-c", AT_A_TERMINAL, answers])?;
+        let screen = String::from_utf8(out.stdout)?;
+        if !out.status.success() {
+            bail!(
+                "install.sh failed at a terminal ({}):\n{screen}",
+                out.status
+            );
+        }
+        Ok(screen)
+    }
+
+    /// A `tailscale` that is installed and logged out, and a `yantrad` stand-in
+    /// answering `/healthz` where the stub's address points — the fixture's
+    /// own binaries are `sleep` and answer nothing.
+    fn arrange_tailnet(&self) -> Result<()> {
+        // Not sticky: `protected_regular` refuses root an append to a file
+        // another account created in a sticky directory, and the log would
+        // silently lose every call made through sudo.
+        self.sh("install -d -m 0777 /var/tmp/tailscale-stub")?;
+        self.sh(&format!(
+            "cat > /usr/bin/tailscale <<'STUB'\n{TAILSCALE_STUB}STUB\nchmod 755 /usr/bin/tailscale"
+        ))?;
+        self.sh("mkdir -p /srv/health && echo ok > /srv/health/healthz")?;
+        self.sh("systemd-run --unit=yantrad-stand-in --collect \
+             python3 -m http.server 7717 --bind 127.0.0.1 --directory /srv/health")?;
+        Ok(())
+    }
+
+    fn tailscale_calls(&self) -> Result<Vec<String>> {
+        Ok(self
+            .sh("cat /var/tmp/tailscale-stub/calls 2>/dev/null || true")?
+            .lines()
+            .map(str::to_owned)
+            .collect())
     }
 
     fn install_ok(&self) -> Result<String> {
@@ -539,6 +638,147 @@ fn an_unresolvable_release_list_installs_nothing_until_a_version_is_named() -> R
             fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
             "{binary} is not the one the named release carried"
         );
+    }
+    Ok(())
+}
+
+fn last_line(screen: &str) -> &str {
+    screen
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .unwrap_or("")
+}
+
+/// Y-384's row: a yes logs the box in, turns on HTTPS, writes this box's own
+/// address, starts both units and ends on the dashboard's URL. The second run
+/// is the updater — it asks nothing and leaves every file and setting alone.
+#[test]
+fn at_a_terminal_a_yes_starts_the_dashboard_and_a_second_run_asks_nothing() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+
+    fixture.publish(VERSION, "first")?;
+    let first = fixture.install_at_terminal("y\n")?;
+    assert!(
+        first.contains("Log this box in to Tailscale and turn on HTTPS? [Y/n]"),
+        "a logged-out box must be asked before it is logged in:\n{first}"
+    );
+    assert!(
+        first.contains("certificate log"),
+        "the name going public is said before HTTPS is turned on:\n{first}"
+    );
+    assert!(
+        first.contains("Disable key expiry"),
+        "an untagged node expires unless the owner says otherwise:\n{first}"
+    );
+    let calls = fixture.tailscale_calls()?;
+    assert!(
+        calls.iter().any(|c| c == "up"),
+        "the yes ran no login: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "serve --bg --https=8443 http://127.0.0.1:7717"),
+        "HTTPS goes in front of the daemon's own address, as `just https` does: {calls:?}"
+    );
+
+    let env = fixture.sh("cat /etc/yantra/agent.env")?;
+    assert!(
+        env.lines().any(|l| l == "YANTRA_DAEMON=127.0.0.1:7717"),
+        "an absent agent.env is written with this box's address:\n{env}"
+    );
+    for unit in UNITS {
+        assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
+    }
+    assert_eq!(
+        last_line(&first),
+        "install: open the dashboard at https://yantra-box.tail0000.ts.net:8443",
+        "the run ends on the one line a person needs"
+    );
+
+    // An edited address stands for any configuration a person made afterwards.
+    fixture.sh(&format!(
+        "printf '%s\\n' '{EDITED_ENV}' > /etc/yantra/agent.env"
+    ))?;
+    let edited = fixture.sha("/etc/yantra/agent.env")?;
+    let relay = fixture.sha("/etc/yantra/daemon.env")?;
+    let before = calls.len();
+
+    fixture.publish(NEXT_VERSION, "second")?;
+    let second = fixture.install_at_terminal("")?;
+    assert!(
+        !second.contains("[Y/n]"),
+        "the updater asked something it already had an answer to:\n{second}"
+    );
+    assert!(
+        second.contains(&format!("install: yantra v{NEXT_VERSION},")),
+        "{second}"
+    );
+    let later = &fixture.tailscale_calls()?[before..];
+    assert!(
+        !later
+            .iter()
+            .any(|c| c == "up" || c.starts_with("serve --bg")),
+        "the updater touched Tailscale's settings: {later:?}"
+    );
+    assert_eq!(
+        fixture.sha("/etc/yantra/agent.env")?,
+        edited,
+        "the updater rewrote agent.env"
+    );
+    assert_eq!(
+        fixture.sha("/etc/yantra/daemon.env")?,
+        relay,
+        "the updater rewrote daemon.env"
+    );
+    for binary in BINARIES {
+        assert_eq!(
+            fixture.sha(&format!("/usr/local/bin/{binary}"))?,
+            fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
+            "{binary} is not the one the second archive carried"
+        );
+    }
+    assert_eq!(
+        last_line(&second),
+        "install: open the dashboard at https://yantra-box.tail0000.ts.net:8443"
+    );
+    Ok(())
+}
+
+/// A no to Tailscale installs Yantra and nothing else, and the run ends the way
+/// a run with no terminal does: nothing enabled and the steps named.
+#[test]
+fn at_a_terminal_a_no_to_tailscale_installs_yantra_and_starts_nothing() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+
+    fixture.publish(VERSION, "declined")?;
+    let screen = fixture.install_at_terminal("n\n")?;
+    assert!(
+        screen.contains("Install Tailscale, log this box in and turn on HTTPS? [Y/n]"),
+        "a box with no Tailscale must be asked:\n{screen}"
+    );
+    assert!(
+        !fixture
+            .systemd
+            .exec(&["bash", "-c", "command -v tailscale"])?
+            .status
+            .success(),
+        "a no installed Tailscale anyway"
+    );
+    assert!(screen.contains("Tailscale is not installed."), "{screen}");
+    let env = fixture.sh("cat /etc/yantra/agent.env")?;
+    assert!(
+        env.contains("#YANTRA_DAEMON="),
+        "with no tailnet there is no address to write:\n{env}"
+    );
+    for unit in UNITS {
+        assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "disabled");
     }
     Ok(())
 }

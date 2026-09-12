@@ -4,13 +4,14 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**v0.1.0 is published** ([Y-156](../tracker.md), 2026-08-09) and there are two ways in.
-[`install.sh`](../install.sh) fetches that release onto the box itself and verifies it before it
-installs anything ([Y-157](../tracker.md)); `just appliance-install` builds on the machine that
-already builds everything and copies over ssh, and is also the update. Both put the same three
-binaries and the same two units in the same places. One fact about the artifact matters to the
-first: **the released `yantrad` is built with `embed-dashboard`**, so a fetched binary serves the
-dashboard with no `YANTRA_WEB` and no `web/dist` beside it.
+**[v0.2.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.2.0) is the current release**
+([Y-364](../tracker.md)), and there are two ways in. [`install.sh`](../install.sh) fetches the
+current release onto the box itself, verifies it, and at a terminal takes the box from bare to an
+open dashboard ([Y-384](../tracker.md)). `just appliance-install` builds on the machine that
+already builds everything and copies over ssh. Both put the same three binaries and the same two
+units in the same places. One fact about the artifact matters to the first: **the released
+`yantrad` is built with `embed-dashboard`**, so a fetched binary serves the dashboard with no
+`YANTRA_WEB` and no `web/dist` beside it.
 
 ## Which architecture
 
@@ -26,184 +27,119 @@ just appliance x86_64-unknown-linux-musl         # x86_64: an N100 mini-PC
 `appliance-embedded`, `appliance-size` and `appliance-install` take the same argument. A target other
 than the default needs `rustup target add <target>` once.
 
-## What the box needs before the first install
-
-The recipe copies binaries and units. It creates no accounts, writes no configuration and enrols
-nothing — everything below is a one-time action on the box itself. [`install.sh`](../install.sh)
-creates the account and scaffolds an addressless `agent.env`; it enrols nothing either.
-
-- **Tailscale**, up and logged in. `yantrad` refuses to start until it can ask `tailscaled` which
-  addresses this machine holds, deliberately ([`crates/yantrad/CLAUDE.md`](../crates/yantrad/CLAUDE.md)).
-  Whether the node is enrolled tagged or untagged is **[Q17](../tracker.md#6-open-questions)**, and a
-  tagged one may refuse every write from the dashboard ([the M7 plan](plans/m7-appliance.md) §3.2).
-- **The `yantra` account** the units name, with a home directory — its `~/.config` is where the
-  workspace files go and its `~/.local/share` is where the ssh `ControlPath` lands:
-
-  ```bash
-  sudo useradd --system --create-home --home-dir /home/yantra --shell /usr/sbin/nologin yantra
-  ```
-
-- **An ssh account for the install itself** that can `sudo`, and a key you hold. The recipe runs
-  `ssh <host>` and `scp`, so `<host>` is an `~/.ssh/config` entry like every other machine name
-  ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)).
-- **`/etc/yantra/agent.env`**, which is the agent's whole configuration and is not this repo's to
-  write — an address, never a MagicDNS name
-  ([ADR-0013](adr/0013-the-heartbeat-carries-only-what-placement-scores.md) §4):
-
-  ```bash
-  sudo install -d /etc/yantra
-  printf 'YANTRA_DAEMON=100.x.x.x:7717\n' | sudo tee /etc/yantra/agent.env
-  ```
-
-  **The install deliberately never touches this file.** It holds the address of the daemon *this*
-  box reports to, and an install that rewrote it would be a newer unit overwriting a machine's
-  configuration, which is the thing ADR-0013 §4 keeps out of the unit in the first place.
-
-- **The ssh identity the appliance itself uses** to reach the fleet — a key, a config and a
-  `known_hosts` nobody typed. Without it the daemon starts and every verb that reaches a machine
-  fails. One verb prepares the first two, for the account the units run as
-  ([Y-144](../tracker.md#3-task-board)):
-
-  ```bash
-  sudo -u yantra -H yantra ssh-identity
-  ```
-
-  It generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for
-  every machine a workspace names, and prints the public key. **`-H` matters**: without it `sudo`
-  may leave `HOME` as yours and the verb prepares the wrong account's `~/.ssh`. It is idempotent —
-  an existing key is kept, because regenerating it orphans every `authorized_keys` entry it is in,
-  and a machine the config already names is left exactly as it is.
-
-  **Two halves stay yours.** Placing that public key in each machine's `authorized_keys`, and the
-  `User`, `HostName`, `Port` or `ProxyJump` that say where a name points — Yantra never resolves a
-  name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)) and cannot know the account on
-  the far side. **Whether generation is Yantra's job at all is still unconfirmed**
-  ([D2 §2](design/02-setup.md)), which is why this is a verb you run rather than something an
-  install does.
-
-  **The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and the alternative is an
-  ssh agent — a login session a box nobody logs into does not have. It is readable by the `yantra`
-  account and that account alone, and anyone who can read it can reach every machine that
-  authorised it.
-
-  **`known_hosts` needs nothing.** Yantra keeps its own beside its control sockets and connects with
-  `StrictHostKeyChecking=accept-new`, so first contact records the host key with nobody there to
-  answer a prompt. A machine whose host key later *changes* is then a hard refusal — deliberately,
-  and it is a support call rather than something to configure away.
-
-### The workspace files
-
-The daemon's durable state is three files and only one of them is Yantra's: the workspace TOMLs, an
-ssh key, and `tailscaled`'s node key. Workspaces live in the **`yantra` account's** config directory,
-so they are copied from wherever they are declared today:
-
-```bash
-scp ~/.config/yantra/workspaces/*.toml <host>:/tmp/
-ssh <host> 'sudo install -d -o yantra -g yantra /home/yantra/.config/yantra/workspaces \
-    && sudo install -o yantra -g yantra -m 644 /tmp/*.toml /home/yantra/.config/yantra/workspaces/'
-```
-
-They name machines as **ssh destinations**, resolved by the appliance's own `~/.ssh/config` and never
-by Yantra, so a name that works on your laptop means nothing on the box until `yantra ssh-identity`
-has written its half of that file and you have finished it. `yantra new` on the appliance writes into the same directory — under whichever account runs
-it, which is why the daemon's account is the one that matters.
-
 ## Install from a release
 
-[`install.sh`](../install.sh) is this same install done on the box itself, from a published release
-rather than from a checkout — no toolchain, no zig, no cross build, and nothing that needs the
-developer's machine. It **installs the current release**, which it reads from
-`api.github.com/repos/2002Bishwajeet/yantra/releases/latest` ([Y-365](../tracker.md)). That list
-skips drafts and pre-releases, so a `v0.3.0-rc.1` tag never installs itself. A call GitHub refuses —
-`403`, since 60 an hour per IP is what an unauthenticated one gets — stops the run and says so.
-
-**What resolving gives up is written in the script.** The version and the commit it replaced were a
-person's choice in a reviewed commit; `SHA256SUMS` still proves the archive arrived intact from the
-release it names, and nothing proves that release is the one the owner meant
-([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §4).
-
-Until [Y-159](../tracker.md) serves it from a name that resolves off the tailnet, it is fetched from
-a tag. Take it from the newest one: a copy from v0.1.0 installs v0.1.0 and nothing later.
+One command, on the box, as the account you log in with — **not** as root. The script calls `sudo`
+for the steps that need it.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash
 ```
 
-Read it before running it if you would rather — it is one file, and it is the same file:
+Read it first if you would rather — it is one file:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.1.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh -o install.sh
 less install.sh
 bash install.sh
 ```
 
-Run it as the account you ssh in as, **not** as root: it calls `sudo` for the steps that need one,
-exactly as `just appliance-install` does. It asks nothing — piping a script to a shell makes stdin
-the script, so a prompt would have nowhere to read from. `YANTRA_VERSION=0.2.0 bash install.sh`
-installs a different release.
+**Take it from `main`.** A copy from the v0.2.0 tag is the script before Y-384: it asks nothing and
+starts nothing. [Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until
+then the URL is GitHub's.
 
-What it does:
+**Every device you use with Yantra must be on one tailnet**, logged in with the same Tailscale
+account. The script says so first, because the dashboard cannot exist before the box is on it:
+`yantrad` refuses to start until it can ask `tailscaled` which addresses this machine holds
+([`crates/yantrad/CLAUDE.md`](../crates/yantrad/CLAUDE.md)).
 
-1. reads `uname -m` and picks the `aarch64` or `x86_64` musl archive — there is no other Linux build;
-2. fetches that archive and `SHA256SUMS`, and checks one against the other. **A mismatch stops the
-   run before anything is installed**: what produces one is a corrupted download or a substituted
-   archive, and neither is repaired by fetching again;
-3. takes both units out of that same archive — see below;
-4. creates the `yantra` account if it is absent;
-5. renames each binary into `/usr/local/bin`, for the reason [below](#why-the-rename);
-6. installs both units and reloads systemd, **enabling neither**;
-7. writes `/etc/yantra/agent.env` **only if it is absent**, and with no address in it;
-8. writes `/etc/yantra/daemon.env` **only if it is absent** — `0600`, owned by `yantra`, and with no
-   relay in it ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md));
-9. reports whether Tailscale is installed and up, and **never enrols it** — the auth key is the
-   owner's ([`CLAUDE.md`](../CLAUDE.md) §B4) and [Q17](../tracker.md#6-open-questions) is not a
-   script's to answer.
+### What it does at a terminal
 
-**Steps 2 and 5–8 are the ones a second run has to get right, and
-[`crates/yantrad/tests/installer.rs`](../crates/yantrad/tests/installer.rs) runs it twice against a
-real systemd to say that it does** ([Y-158](../tracker.md#3-task-board)): an edited `agent.env` and
-an edited `daemon.env` both survive, `daemon.env` is `600 yantra`, the binaries replace while one of
-them is executing, and a corrupted archive installs nothing.
+`curl | bash` makes stdin the script, so the script reads its answers from `/dev/tty`.
 
-It ends by printing what is left, which is each thing above it deliberately did not do, plus
-[Y-144](../tracker.md#3-task-board): the box has no ssh identity any fleet machine authorises, so the
-daemon starts and every verb that reaches another machine fails.
+1. It says what it will do, and that every device must be on one tailnet.
+2. It resolves the current release from
+   `api.github.com/repos/2002Bishwajeet/yantra/releases/latest`, fetches the `aarch64` or `x86_64`
+   musl archive and `SHA256SUMS`, and checks one against the other. **A mismatch stops the run
+   before anything is installed** — Tailscale included.
+3. **If Tailscale is not installed**, it asks *"Install Tailscale, log this box in and turn on
+   HTTPS? [Y/n]"*. A yes runs Tailscale's own installer,
+   `curl -fsSL https://tailscale.com/install.sh | sh`.
+4. **If the box is not logged in**, it runs `sudo tailscale up`. That prints a URL: open it on any
+   device and log in with the account the other devices use. The box joins **untagged**, which
+   superseded [Q17](../tracker.md#6-open-questions). **Turn off key expiry for this box once**, or
+   it leaves the tailnet when its key expires: admin console → Machines → the box's menu → *Disable
+   key expiry*.
+5. It turns on HTTPS: `sudo tailscale serve --bg --https=8443 http://<tailnet address>:7717`, the
+   same command as `just https`. **Before it asks, it says that the machine's name goes into a public
+   certificate log** that anyone can read ([Tailscale KB 1153](https://tailscale.com/kb/1153/enabling-https)).
+   On a tailnet that never had HTTPS, `tailscale serve` prints one link to turn it on; open it.
+6. It installs Yantra: the `yantra` account if it is absent, the three binaries renamed into
+   `/usr/local/bin` for the reason [below](#why-the-rename), both units from the archive, and a
+   `systemctl daemon-reload`.
+7. It writes `/etc/yantra/agent.env` **only if it is absent**, with this box's own
+   `YANTRA_DAEMON=<tailnet address>:7717`. It writes `/etc/yantra/daemon.env` **only if it is
+   absent** — `0600`, owned by `yantra`, and with no relay in it
+   ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)).
+8. It runs `systemctl enable --now` for both units and waits up to 30 s for `yantrad` to answer
+   `/healthz`.
+9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
+   `http://<tailnet address>:7717` if HTTPS is not on.
 
-### Then provision it
+A **no** at step 3 installs Yantra and nothing else, and the run ends the way a run with no terminal
+does.
 
-[`provision.sh`](../provision.sh) is the other half ([Y-160](../tracker.md#3-task-board),
-[D2](design/02-setup.md) §4): it does what it can of that list and turns everything else into a
-numbered step with the command that ends it. Run it the same way, after `install.sh`:
+**Everything after that is the dashboard's walkthrough** — the other machines, the appliance's ssh
+key, the AI agents and GitHub ([walk-through](plans/m15-qa-walkthrough.md) §1.5). The script does
+not install `gh`, and `provision.sh` is gone: its fleet half belongs to the dashboard.
+
+### Run it again to update
+
+**A second run is the updater.** It asks nothing it already has an answer to and touches no
+configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon.env` stays as it
+is, and it does not run `tailscale up` or `tailscale serve` again. It replaces the binaries and the
+units, and it ends on the same URL.
+
+**It does not restart what is running.** Applying an update is [Y-368](../tracker.md)'s. Until
+then the script says so and names the command:
 
 ```bash
-bash provision.sh
+sudo systemctl restart yantrad.service yantra-agent.service
 ```
 
-It is **beside** `install.sh` rather than inside it because [Y-158](../tracker.md#3-task-board)
-proves that script against a real systemd in a container, and enrolling a tailnet, logging into `gh`
-and authorising a key on a machine the owner owns are not things a container can prove.
+`YANTRA_VERSION=0.2.0 bash install.sh` installs a named release instead of the current one.
 
-What it does for you, and nothing else: **enables and starts each unit** whose precondition holds —
-`yantrad` once Tailscale is up, `yantra-agent` once `/etc/yantra/agent.env` names an address — and
-**runs `yantra fix-terminfo <machine>`** for a machine that does not know this terminal, which writes
-to a `~/.terminfo` and wants no root.
+### With no terminal
 
-Everything else it names rather than does, each with its command: enrolling Tailscale (the auth key
-is the owner's, and [Q17](../tracker.md#6-open-questions)'s answer is conditional on
-[Y-143](../tracker.md#3-task-board)), the daemon's address
-([ADR-0013](adr/0013-the-heartbeat-carries-only-what-placement-scores.md) §4), running
-`yantra ssh-identity` and placing the key it prints ([Y-144](../tracker.md#3-task-board) — the verb
-is invoked rather than run for you because [D2 §2](design/02-setup.md)'s confirmation that
-generation is Yantra's at all is still outstanding), `gh auth login`, installing tmux or `claude` on a
-fleet machine, and creating the first workspace. **No credential is read, echoed or stored** — §B4
-is why the Tailscale line is `sudo tailscale up` and not an `--authkey` to paste.
+A run with nothing at `/dev/tty` — a container, a CI job, an `ssh host 'curl … | bash'` without
+`-t` — asks nothing and starts nothing. It installs the release, writes both environment files if
+they are absent (`agent.env` with a placeholder rather than an address), enables neither unit, and
+ends with a numbered list of what is left. That is the path
+[`crates/yantrad/tests/installer.rs`](../crates/yantrad/tests/installer.rs) runs twice against a
+real systemd ([Y-158](../tracker.md#3-task-board)).
 
-It reads the fleet through `yantra doctor --json`, asked **as the `yantra` account** the units run
-as, since that account's workspaces and ssh identity are the ones the daemon has. A check that
-answered `unknown` gets its reason and no instruction rather than being folded into the numbered
-list — the two send a reader to different places (R-23). `heartbeat` is the one check that is always
-unknown from here: the beats live in the running daemon's memory, and the dashboard's readiness card
-is what answers it. It exits 0 only when nothing is left, so an installer or an agent can loop on it.
+### What the tests prove, and what they cannot
+
+`installer.rs` runs the script against a real systemd as PID 1 in a podman container, with a release
+served from inside it. **With no terminal**: an edited `agent.env` and an edited `daemon.env`
+survive a second run, `daemon.env` is `600 yantra`, the binaries replace while one of them is
+executing, and a corrupted archive installs nothing. **At a terminal**, through a pty: a yes logs
+in, turns on `serve`, writes the address into an absent `agent.env`, enables both units and ends on
+the URL; a second run asks nothing and changes no file; a no installs Yantra and starts nothing.
+
+**The terminal tests talk to a stub `tailscale`** that records its calls. A login, a tailnet address
+and a certificate are what no container can hold, so the tests prove which commands the script ran,
+not that Tailscale did what they ask. Tailscale's installer, a real `tailscale up` and the HTTPS
+link are proved only on real hardware.
+
+### What resolving the version gives up
+
+**It is written in the script.** The version and the commit it replaced were a person's choice in a
+reviewed commit; `SHA256SUMS` still proves the archive arrived intact from the release it names, and
+nothing proves that release is the one the owner meant
+([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §4). `/releases/latest` skips drafts and
+pre-releases, so a `v0.3.0-rc.1` tag never installs itself. A call GitHub refuses — `403`, since 60
+an hour per IP is what an unauthenticated one gets — stops the run and says so.
 
 ### Where the units come from
 
@@ -221,7 +157,32 @@ The cost is that **an archive published before this carries no units**, which is
 v0.1.0. The script says so and installs nothing rather than failing on a missing file, and
 [`installer.rs`](../crates/yantrad/tests/installer.rs) holds it to that.
 
-## Install, and update
+## Install from a checkout, and update
+
+`just appliance-install` is the path for a box you build for from source. It copies binaries and
+units, and it creates no accounts, writes no configuration and enrols nothing — so the box needs
+these first:
+
+- **Tailscale**, up and logged in, for the reason above.
+- **The `yantra` account** the units name, with a home directory — its `~/.config` is where the
+  workspace files go and its `~/.local/share` is where the ssh `ControlPath` lands:
+
+  ```bash
+  sudo useradd --system --create-home --home-dir /home/yantra --shell /usr/sbin/nologin yantra
+  ```
+
+- **An ssh account for the install itself** that can `sudo`, and a key you hold. The recipe runs
+  `ssh <host>` and `scp`, so `<host>` is an `~/.ssh/config` entry like every other machine name
+  ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)).
+- **`/etc/yantra/agent.env`**, the agent's whole configuration — an address, never a MagicDNS name
+  ([ADR-0013](adr/0013-the-heartbeat-carries-only-what-placement-scores.md) §4):
+
+  ```bash
+  sudo install -d /etc/yantra
+  printf 'YANTRA_DAEMON=100.x.x.x:7717\n' | sudo tee /etc/yantra/agent.env
+  ```
+
+  **The recipe never touches this file**, for the same reason the updater leaves it alone.
 
 Build, then copy. The order matters: `just appliance` builds a `yantrad` with **no** dashboard in it,
 so the embedded one is built last or it is the one that gets overwritten.
@@ -244,14 +205,67 @@ What it does on the far side, all under one `sudo`:
 4. `systemctl try-restart yantrad.service yantra-agent.service`.
 
 **`try-restart`, not `restart`**: an update restarts what was running, and a first install leaves the
-units alone until the box has everything above. Enable them once, by hand:
+units alone until the box has everything above. Enable them once, by hand, and turn on HTTPS on the
+box the way the script does:
 
 ```bash
 ssh <host> 'sudo systemctl enable --now yantrad.service yantra-agent.service'
+ssh <host> 'sudo tailscale serve --bg --https=8443 "http://$(tailscale ip -4):7717"'
 ssh <host> 'journalctl -u yantrad -f'
 ```
 
-### Why the rename
+## The appliance's ssh identity
+
+The ssh identity the appliance uses to reach the fleet — a key, a config and a `known_hosts` nobody
+typed. Without it the daemon starts and every verb that reaches a machine fails. Today one verb
+prepares the first two, for the account the units run as
+([Y-144](../tracker.md#3-task-board)); [Y-387](../tracker.md#3-task-board) moves this into the
+dashboard's join command:
+
+```bash
+sudo -u yantra -H yantra ssh-identity
+```
+
+It generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for every
+machine a workspace names, and prints the public key. **`-H` matters**: without it `sudo` may leave
+`HOME` as yours and the verb prepares the wrong account's `~/.ssh`. It is idempotent — an existing
+key is kept, because regenerating it orphans every `authorized_keys` entry it is in, and a machine
+the config already names is left exactly as it is.
+
+**Two halves stay yours.** Placing that public key in each machine's `authorized_keys`, and the
+`User`, `HostName`, `Port` or `ProxyJump` that say where a name points — Yantra never resolves a
+name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)) and cannot know the account on the
+far side.
+
+**The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and the alternative is an
+ssh agent — a login session a box nobody logs into does not have. It is readable by the `yantra`
+account and that account alone, and anyone who can read it can reach every machine that authorised
+it.
+
+**`known_hosts` needs nothing.** Yantra keeps its own beside its control sockets and connects with
+`StrictHostKeyChecking=accept-new`, so first contact records the host key with nobody there to
+answer a prompt. A machine whose host key later *changes* is then a hard refusal — deliberately, and
+it is a support call rather than something to configure away.
+
+### The workspace files
+
+The daemon's durable state is three files and only one of them is Yantra's: the workspace TOMLs, an
+ssh key, and `tailscaled`'s node key. Workspaces live in the **`yantra` account's** config directory.
+Create them from the dashboard; to copy ones declared elsewhere:
+
+```bash
+scp ~/.config/yantra/workspaces/*.toml <host>:/tmp/
+ssh <host> 'sudo install -d -o yantra -g yantra /home/yantra/.config/yantra/workspaces \
+    && sudo install -o yantra -g yantra -m 644 /tmp/*.toml /home/yantra/.config/yantra/workspaces/'
+```
+
+They name machines as **ssh destinations**, resolved by the appliance's own `~/.ssh/config` and never
+by Yantra, so a name that works on your laptop means nothing on the box until `yantra ssh-identity`
+has written its half of that file and you have finished it. `yantra new` on the appliance writes into
+the same directory — under whichever account runs it, which is why the daemon's account is the one
+that matters.
+
+## Why the rename
 
 **A binary that is currently being executed cannot be opened for writing** — the kernel answers
 `ETXTBSY`, *Text file busy*. That is exactly what `scp` onto `/usr/local/bin/yantrad` does, and
@@ -280,13 +294,10 @@ Two things about that are easy to get wrong:
 
 Not provisioning. Yantra never creates, images or destroys a machine — copying our own binary onto a
 box the owner already has is the same act as installing the agent, which R-12 accepted as permanent
-scope. Not a release either: when there is a version worth tagging, Y-037 is where publishing gets
-decided, and this document gets shorter.
+scope.
 
-`tailscale serve` still has to be set on the appliance for the dashboard to have an HTTPS door
-(`just https` is written for a machine someone is logged into — [the M7 plan](plans/m7-appliance.md)
-§3.9), and the ntfy relay is written by `/settings` or by `sudo yantra relay <url> [--token T]`
-into `/etc/yantra/daemon.env`, which the unit reads with `EnvironmentFile=`
+The ntfy relay is written by `/settings` or by `sudo yantra relay <url> [--token T]` into
+`/etc/yantra/daemon.env`, which the unit reads with `EnvironmentFile=`
 ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The installer creates that
 file empty, `0600` and owned by `yantra`; **leave the owner alone** — the daemon rewrites the file
 in place, so one created by hand as root leaves `/settings` refusing with a 500. `yantrad` reads it
