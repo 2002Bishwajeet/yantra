@@ -309,20 +309,47 @@ pub fn write_client_id(path: &std::path::Path, id: Option<&str>) -> Result<(), N
 ///
 /// It truncates rather than renaming a temporary over: `/etc/yantra` belongs to
 /// root, so the account this runs as cannot create a sibling to rename.
+///
+/// **One file handle, locked, for the whole read-modify-write.** Y-393's
+/// review found the race this closes: the relay, the grant and the client id
+/// are three writers in this daemon plus the CLI verbs in another process,
+/// and a read and a write that are two separate `open` calls let a second
+/// writer land in between and have its line overwritten by the first
+/// writer's stale copy of the file. `File::lock` is a `flock`, which is
+/// scoped to the open file description rather than the process, so it
+/// serialises concurrent callers in this daemon exactly as it does
+/// `yantra relay` running while `yantrad` is mid-write — the daemon's own
+/// [`crate::heartbeat::Fleet::env`] mutex (yantrad's `write.rs`) exists
+/// beside this so a contending task awaits rather than blocking a tokio
+/// worker on the syscall.
 fn rewrite(path: &std::path::Path, changes: &[(&str, Option<&str>)]) -> Result<(), NotWritten> {
-    use std::io::Write as _;
+    use std::io::{Read as _, Seek as _, Write as _};
     use std::os::unix::fs::OpenOptionsExt as _;
 
-    let current = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(source) => {
-            return Err(NotWritten::Read {
-                path: path.to_owned(),
-                source,
-            });
-        }
-    };
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        // Not `truncate(true)`: this reads the file through the same handle
+        // before it writes, so truncating at `open` would lose that read.
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|source| NotWritten::Write {
+            path: path.to_owned(),
+            source,
+        })?;
+    file.lock().map_err(|source| NotWritten::Write {
+        path: path.to_owned(),
+        source,
+    })?;
+
+    let mut current = String::new();
+    file.read_to_string(&mut current)
+        .map_err(|source| NotWritten::Read {
+            path: path.to_owned(),
+            source,
+        })?;
     let mut lines: Vec<String> = current
         .lines()
         .filter(|line| {
@@ -350,21 +377,20 @@ fn rewrite(path: &std::path::Path, changes: &[(&str, Option<&str>)]) -> Result<(
     );
     let body = format!("{}\n", lines.join("\n"));
 
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|source| NotWritten::Write {
-            path: path.to_owned(),
-            source,
-        })?;
+    file.set_len(0).map_err(|source| NotWritten::Write {
+        path: path.to_owned(),
+        source,
+    })?;
+    file.rewind().map_err(|source| NotWritten::Write {
+        path: path.to_owned(),
+        source,
+    })?;
     file.write_all(body.as_bytes())
         .map_err(|source| NotWritten::Write {
             path: path.to_owned(),
             source,
         })
+    // `file` drops here, which releases the lock.
 }
 
 /// What a single-quoted value in an environment file may hold. Refusing is the
@@ -1150,6 +1176,54 @@ mod tests {
             !std::fs::read_to_string(&path)
                 .expect("it is there")
                 .contains("YANTRA_GITHUB_CLIENT_ID")
+        );
+    }
+
+    /// Y-393's review: three writers share this file, and a read and a write
+    /// that were two separate `open` calls let a second writer's line be
+    /// overwritten by the first writer's stale copy. Racing two real writers
+    /// on threads and hoping to hit that window is not a test: both finish
+    /// in microseconds, and it measured as passing even before the fix. So
+    /// this holds the same lock `rewrite` takes — standing in for a grant
+    /// write in progress — and proves a second writer waits for it rather
+    /// than clobbering it, then that both survive once it lets go.
+    #[test]
+    fn a_writer_waits_for_another_writers_lock_and_both_survive() {
+        let path = scratch("lock-wait");
+        write_relay(&path, "https://ntfy.sh/a-topic", None).expect("the grant's neighbour");
+
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open for the test's own lock");
+        held.lock().expect("the test takes the lock first");
+
+        let (started, joined) = std::sync::mpsc::channel();
+        let racing = path.clone();
+        let writer = std::thread::spawn(move || {
+            started.send(()).expect("about to block on the lock");
+            write_client_id(&racing, Some("Iv1.mine")).expect("client id");
+        });
+        joined.recv().expect("the writer thread is running");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !std::fs::read_to_string(&path)
+                .expect("still there")
+                .contains("YANTRA_GITHUB_CLIENT_ID"),
+            "the second writer must still be waiting for the lock"
+        );
+
+        drop(held);
+        writer.join().expect("it finishes once the lock is free");
+
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(
+            written.contains("YANTRA_NTFY_URL='https://ntfy.sh/a-topic'"),
+            "{written}"
+        );
+        assert!(
+            written.contains("YANTRA_GITHUB_CLIENT_ID='Iv1.mine'"),
+            "{written}"
         );
     }
 

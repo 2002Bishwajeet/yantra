@@ -315,6 +315,15 @@ rule (ADR-0021 decision 3), not the token's. The id itself is not a secret (ADR-
 `GET /api/github` says which one is in use rather than hiding it. A value outside the conservative
 charset [`yantra_core::github::valid_client_id`] holds is a `400` naming the rule.
 
+**`Fleet::env` is the lock around every write to `/etc/yantra/daemon.env`**, added when review found
+that `relay`, `logout`, `set_client_id`, `clear_client_id` and `github::sign_in`'s own write are five
+places in this daemon that all reach it, plus the CLI verbs in another process. `notify::rewrite`'s
+own `flock` — one file handle, held from the read to the write — is what makes the read-modify-write
+itself safe against the CLI; `Fleet::env` is what stops that turning into several tokio workers
+blocked on the same syscall, since a task already waiting on it `await`s instead. Any new writer of
+this file must take both: the daemon's `Mutex` for its own workers, and `rewrite`'s `flock` for the
+one it does not control.
+
 **`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
 §13), which no CLI can say truthfully. It is authorised like the rest because it silences

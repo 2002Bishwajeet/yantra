@@ -726,6 +726,22 @@ struct Publish {
     token: Option<String>,
 }
 
+/// [`notify::NotWritten`] named exhaustively, so a variant added there will
+/// not compile here until it is given one: `relay` and `set_client_id`
+/// share it rather than each carrying a wildcard that would quietly send a
+/// new fault — a failed pre-read of `daemon.env`, say — to the wrong side of
+/// the 400/500 line (Y-393's review).
+fn status_of(error: &notify::NotWritten) -> StatusCode {
+    match error {
+        notify::NotWritten::NotAUrl
+        | notify::NotWritten::Unholdable { .. }
+        | notify::NotWritten::InvalidClientId => StatusCode::BAD_REQUEST,
+        notify::NotWritten::Read { .. } | notify::NotWritten::Write { .. } => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
 async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
@@ -736,15 +752,20 @@ async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     tracing::info!("relay written for {}", caller.node);
 
     let file = std::path::Path::new(notify::RELAY_FILE);
-    notify::write_relay(file, &publish.url, publish.token.as_deref()).map_err(|error| {
-        Refused::Verb {
-            status: match error {
-                notify::NotWritten::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-                _ => StatusCode::BAD_REQUEST,
-            },
-            said: chain(&error),
-        }
-    })?;
+    {
+        // Held for the whole read-modify-write: three routes in this daemon
+        // reach this file, and `notify::rewrite`'s own `flock` only keeps a
+        // contending writer from clobbering another — it does not stop a
+        // tokio worker blocking on the syscall while it waits (Y-393's
+        // review).
+        let _write = state.fleet.env.lock().await;
+        notify::write_relay(file, &publish.url, publish.token.as_deref()).map_err(|error| {
+            Refused::Verb {
+                status: status_of(&error),
+                said: chain(&error),
+            }
+        })?;
+    }
 
     let relay = notify::Relay::new(publish.url, publish.token);
     // ADR-0025 §2: remembered before the send, so a 502 is still an event.
@@ -833,6 +854,7 @@ async fn login<I: Inventory + Clone + Send + Sync + 'static>(
         grant.clone(),
         client_id,
         device.clone(),
+        state.fleet.env.clone(),
     ));
     Ok(Json(Device::of(&device)))
 }
@@ -848,12 +870,15 @@ async fn logout<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
-    notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
-        Refused::Verb {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            said: chain(&error),
-        }
-    })?;
+    {
+        let _write = state.fleet.env.lock().await;
+        notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
+            Refused::Verb {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                said: chain(&error),
+            }
+        })?;
+    }
     state.fleet.github.clear().await;
     tracing::info!("github grant removed by {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
@@ -881,13 +906,13 @@ async fn set_client_id<I: Inventory + Clone + Send + Sync + 'static>(
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let file = std::path::Path::new(notify::RELAY_FILE);
-    notify::write_client_id(file, Some(&sent.id)).map_err(|error| Refused::Verb {
-        status: match error {
-            notify::NotWritten::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            _ => StatusCode::BAD_REQUEST,
-        },
-        said: chain(&error),
-    })?;
+    {
+        let _write = state.fleet.env.lock().await;
+        notify::write_client_id(file, Some(&sent.id)).map_err(|error| Refused::Verb {
+            status: status_of(&error),
+            said: chain(&error),
+        })?;
+    }
     tracing::info!("github client id written for {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -901,10 +926,13 @@ async fn clear_client_id<I: Inventory + Clone + Send + Sync + 'static>(
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let file = std::path::Path::new(notify::RELAY_FILE);
-    notify::write_client_id(file, None).map_err(|error| Refused::Verb {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        said: chain(&error),
-    })?;
+    {
+        let _write = state.fleet.env.lock().await;
+        notify::write_client_id(file, None).map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    }
     tracing::info!("github client id cleared by {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
 }
