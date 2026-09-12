@@ -68,19 +68,28 @@ impl Event {
     }
 
     /// Y-387: a machine ran the join command. Recorded when the config is
-    /// written, before anything has tried to reach it.
-    pub fn joined(machine: &str, user: &str, configured: bool) -> Self {
+    /// written, before anything has tried to reach it. When the account ssh
+    /// resolves is not the one that joined, the sentence says so (owner,
+    /// 2026-09-12): the key went into an account Yantra does not log in as.
+    pub fn joined(machine: &str, user: &str, kept: bool, logs_in_as: Option<&str>) -> Self {
+        let said = match logs_in_as {
+            None => format!(
+                "{machine} joined as {user}, and Yantra could not read which account its ssh config logs in as"
+            ),
+            Some(account) if account != user => format!(
+                "{machine} joined as {user}, but the ssh config logs in there as {account}, so Yantra cannot reach it until the owner edits that config"
+            ),
+            Some(_) if kept => format!(
+                "{machine} joined as {user}, and the ssh config already named it with that account, so it was kept"
+            ),
+            Some(_) => format!("{machine} joined, and Yantra logs in there as {user}"),
+        };
         Self {
             at: now(),
             kind: "joined",
             workspace: None,
             machine: Some(machine.to_owned()),
-            said: match configured {
-                true => format!("{machine} joined, and Yantra logs in there as {user}"),
-                false => format!(
-                    "{machine} joined as {user}, and the ssh config already named it, so that was kept"
-                ),
-            },
+            said,
         }
     }
 

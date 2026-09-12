@@ -452,10 +452,13 @@ export type Repo = {
 
 /** `POST /api/join` with `{ user }` — what the join command reads back. The
  *  machine is the caller, named from its tailnet address and never from the
- *  body. `configured: false` is an ssh config that already named the machine
- *  and was kept as it was. */
+ *  body. `kept` is an ssh config that already named the machine and was left
+ *  as it was. `logs_in_as` is the account ssh resolves for it, which the page
+ *  must say when it is not `user` (owner, 2026-09-12); `null` is a config ssh
+ *  could not read. */
 export type Joined = {
   machine: string
   user: string
-  configured: boolean
+  kept: boolean
+  logs_in_as: string | null
 }

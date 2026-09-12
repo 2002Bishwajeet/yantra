@@ -79,14 +79,19 @@ creates the account and scaffolds an addressless `agent.env`; it enrols nothing 
   Yantra is to log in as:
 
   ```bash
-  curl -fsSL https://<appliance>.<tailnet>.ts.net/join | sh
+  curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
   ```
+
+  Where HTTPS is not on, `http://<appliance's tailnet address>:7717/join` serves the same script.
 
   The daemon makes its key the first time this is fetched. The script asks before each step that
   needs root: it turns on `sshd`, places the key in that account's `authorized_keys`, offers `tmux`,
   `git` and `yantra-agent`, and tells the daemon which account it ran as. The daemon names the
   machine from the caller's tailnet address and appends its `Host` block, with `User`, to the
-  `yantra` account's config. `sudo -u yantra -H yantra join-script` prints the same script, and
+  `yantra` account's config. **If a block already names the machine, it is kept**, and the script
+  warns when that block logs in as a different account. A block an earlier `yantra ssh-identity`
+  wrote with no `User` logs in as `yantra`, and stays that way until you edit it. The agent's unit
+  is `DynamicUser=yes`, so a joined machine gains no account for it. `sudo -u yantra -H yantra join-script` prints the same script, and
   `sudo -u yantra -H yantra ssh-identity --machine <m> --user <u>` writes one block by hand.
 
   **What stays yours:** a `HostName`, `Port` or `ProxyJump` for a name the tailnet does not resolve —

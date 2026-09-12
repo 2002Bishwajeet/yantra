@@ -68,6 +68,11 @@ impl Systemd {
             "yantra-fixture=1",
             // The cgroup, /run and /sys/fs/cgroup arrangement systemd needs as PID 1.
             "--systemd=always",
+            // A real machine's systemd holds it, and `DynamicUser=yes` sets up a
+            // mount namespace with it: without it the agent unit fails at step
+            // NAMESPACE (226), measured 2026-09-12. Rootless, so it stays inside
+            // the container's user namespace.
+            "--cap-add=SYS_ADMIN",
             // Y-387's test reaches the container's sshd from the host.
             "-p",
             "127.0.0.1::22",

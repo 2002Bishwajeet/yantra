@@ -42,6 +42,17 @@ name is one more thing to get wrong, and the person must still go to that machin
 
 `yantra ssh-identity --machine <m> --user <u>` writes the same block from a terminal.
 
+**A re-join says which account wins** (owner, 2026-09-12: *"dashboard should say it"*). The reply
+carries `kept` and `logs_in_as`, the account `ssh -G` resolves for the machine. When that is not the
+account that joined, the script warns and exits 1, and the event says the same. The block stays as
+it was. A block `yantra ssh-identity` wrote earlier with no `User` therefore stays wrong until the
+owner edits it.
+
+**`yantra-agent` runs as a systemd `DynamicUser`** (owner, 2026-09-12). Its unit carries
+`DynamicUser=yes`, not `User=yantra`, so no machine gains an account for it. The agent writes
+nothing to disk, and systemd reads `/etc/yantra/agent.env` as root before it drops privileges. The
+appliance keeps its `yantra` account, because `yantrad` runs as it.
+
 ## Consequences
 
 - **The daemon writes a second file.** ADR-0004's amendment says it writes one. That file is
@@ -51,5 +62,7 @@ name is one more thing to get wrong, and the person must still go to that machin
 - **Nothing crosses ssh.** The person runs the script in their own terminal, so ADR-0028 §6 stands.
 - **A machine joined twice under two accounts keeps the first.** The config already names it, so
   the second account is reported and not written. The owner edits the file to change it.
+- **The command is `curl -fsSL https://<name>.<tailnet>.ts.net:8443/join | sh`**, on the port
+  `install.sh` gives `tailscale serve` (Y-384), or `http://<tailnet address>:7717/join`.
 - **The macOS half is not measured.** Remote Login detection and the LaunchAgent for `yantra-agent`
   were written from Apple's documentation, and no Mac has run them yet.

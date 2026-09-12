@@ -889,6 +889,7 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
 ) -> Result<Response, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let dir = state.fleet.facts.ssh_dir.clone();
+    let one_at_a_time = state.fleet.joins.lock().await;
     // `ssh-keygen` is a subprocess, so off the worker (I-13).
     let prepared = tokio::task::spawn_blocking(move || identity::prepare_in(&dir, &[]))
         .await
@@ -900,6 +901,7 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
             status: StatusCode::INTERNAL_SERVER_ERROR,
             said: chain(&error),
         })?;
+    drop(one_at_a_time);
     let bound: Vec<IpAddr> = state
         .fleet
         .facts
@@ -974,6 +976,7 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
 
     let dir = state.fleet.facts.ssh_dir.clone();
     let (named, user) = (machine.clone(), join.user.clone());
+    let one_at_a_time = state.fleet.joins.lock().await;
     let joined = tokio::task::spawn_blocking(move || identity::join_in(&dir, &named, &user))
         .await
         .map_err(|_| Refused::Verb {
@@ -984,11 +987,17 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_identity(&error),
             said: chain(&error),
         })?;
+    drop(one_at_a_time);
     tracing::info!("{machine} joined as {} for {}", joined.user, caller.node);
 
     events::remember(
         &state.fleet.events,
-        Event::joined(&joined.machine, &joined.user, joined.configured),
+        Event::joined(
+            &joined.machine,
+            &joined.user,
+            joined.kept,
+            joined.logs_in_as.as_deref(),
+        ),
     )
     .await;
     // The re-check runs after the answer: the script is still on the person's
@@ -998,7 +1007,8 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(Joined {
         machine: joined.machine,
         user: joined.user,
-        configured: joined.configured,
+        kept: joined.kept,
+        logs_in_as: joined.logs_in_as,
     }))
 }
 
@@ -1031,13 +1041,17 @@ fn from_identity(error: &identity::Error) -> StatusCode {
     }
 }
 
-/// What the join command reads back. `configured: false` is a config that
-/// already named this machine and was kept as it was.
+/// What the join command reads back (owner, 2026-09-12: *"dashboard should
+/// say it"*). `kept` is a config that already named the machine and was left as
+/// it was. `logs_in_as` is what `ssh -G` resolves, which can differ from `user`
+/// — a kept block, or an owner's `Host *` above the new one — and `null` is a
+/// config ssh could not read.
 #[derive(Debug, serde::Serialize)]
 struct Joined {
     machine: String,
     user: String,
-    configured: bool,
+    kept: bool,
+    logs_in_as: Option<String>,
 }
 
 /// What the agent in this workspace has spent — `yantra tokens <workspace>` on
@@ -1801,7 +1815,20 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             of(&Joined {
                 machine: "cachyos-g14".to_owned(),
                 user: "<user>".to_owned(),
-                configured: true,
+                kept: false,
+                logs_in_as: Some("<user>".to_owned()),
+            }),
+        ),
+        // The owner's re-join ruling: a kept block that logs in as someone
+        // else, which the page has to be able to say.
+        (
+            "joinedKept",
+            "Joined",
+            of(&Joined {
+                machine: "cachyos-g14".to_owned(),
+                user: "<user>".to_owned(),
+                kept: true,
+                logs_in_as: Some("yantra".to_owned()),
             }),
         ),
         (
@@ -3365,7 +3392,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&body).expect("JSON"),
-            serde_json::json!({"machine": "joining-box", "user": "biswa", "configured": true})
+            serde_json::json!({
+                "machine": "joining-box",
+                "user": "biswa",
+                "kept": false,
+                "logs_in_as": "biswa"
+            })
         );
         let config = std::fs::read_to_string(dir.join("config")).expect("written");
         assert!(
@@ -3460,6 +3492,108 @@ mod tests {
         assert!(body.contains(&format!("KEY='{}'", public.trim())), "{body}");
         assert!(body.contains("DAEMON='100.64.0.1:7717'"), "{body}");
         assert!(body.starts_with("#!/bin/sh"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two first fetches at once: without the lock both can see no key and
+    /// both run `ssh-keygen` on one path, or one reads a `.pub` not yet there.
+    #[tokio::test]
+    async fn two_first_fetches_at_once_make_one_key() {
+        let dir = join_scratch("race");
+        let fleet = join_fleet(&dir);
+        let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
+
+        let (first, second) = tokio::join!(
+            join_send(script.clone(), "GET", "/join", address(7), ""),
+            join_send(script, "GET", "/join", address(7), ""),
+        );
+
+        assert_eq!(first.0, StatusCode::OK, "{}", first.2);
+        assert_eq!(second.0, StatusCode::OK, "{}", second.2);
+        let public = std::fs::read_to_string(dir.join("id_yantra.pub")).expect("one key");
+        let carried = format!("KEY='{}'", public.trim());
+        assert!(first.2.contains(&carried) && second.2.contains(&carried));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// I-5: an address can move between nodes, so the name is the node whose
+    /// id `whois` answered — never the first node listed at that address.
+    #[tokio::test]
+    async fn the_machine_is_found_by_its_node_id_and_never_by_its_address() {
+        let dir = join_scratch("impostor");
+        let fleet = join_fleet(&dir);
+        let mut tailnet = joining_tailnet();
+        tailnet.machines.insert(
+            0,
+            yantra_core::inventory::MachineInfo {
+                id: "nIMPOSTOR000CNTRL".to_owned(),
+                name: "impostor-box".to_owned(),
+                dns_name: "impostor-box.example.ts.net.".to_owned(),
+                os: yantra_core::inventory::Os::Linux,
+                online: false,
+                last_seen: None,
+                expired: false,
+                addresses: vec![address(7)],
+            },
+        );
+
+        let (status, _, body) = join_send(
+            router::<Fake, ()>(direct(tailnet), fleet.clone()),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""machine":"joining-box""#), "{body}");
+        let config = std::fs::read_to_string(dir.join("config")).expect("written");
+        assert!(!config.contains("impostor-box"), "{config}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The owner's ruling, 2026-09-12: a re-join that keeps a block logging in
+    /// as another account says so, in the reply and in the event, and the
+    /// block is not rewritten (ADR-0009).
+    #[tokio::test]
+    async fn a_rejoin_says_which_account_the_kept_block_logs_in_as() {
+        let dir = join_scratch("kept");
+        std::fs::create_dir_all(&dir).expect("scratch");
+        let owners = "Host joining-box\n    User someone-else\n";
+        std::fs::write(dir.join("config"), owners).expect("an owner's block");
+        let fleet = join_fleet(&dir);
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).expect("JSON"),
+            serde_json::json!({
+                "machine": "joining-box",
+                "user": "biswa",
+                "kept": true,
+                "logs_in_as": "someone-else"
+            })
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config")).expect("readable"),
+            owners
+        );
+        let events = events::newest_first(&fleet.events).await;
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == "joined" && event.said.contains("as someone-else")),
+            "{events:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

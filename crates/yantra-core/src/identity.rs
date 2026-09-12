@@ -103,8 +103,12 @@ pub struct Joined {
     pub config: PathBuf,
     pub machine: String,
     pub user: String,
-    /// False when the config already named the machine and was left alone.
-    pub configured: bool,
+    /// True when the config already named the machine and was left alone.
+    pub kept: bool,
+    /// The account ssh logs in as, which `ssh -G` resolves: a kept block, or
+    /// an owner's `Host *` above the new one, can make it differ from `user`.
+    /// `None` is a config ssh could not read.
+    pub logs_in_as: Option<String>,
 }
 
 /// Prepares `~/.ssh` for the account this runs as, for every machine a
@@ -245,20 +249,44 @@ pub fn join_in(dir: &Path, machine: &str, user: &str) -> Result<Joined, Error> {
     let (key, public_key, generated) = key_in(dir)?;
     let config = dir.join("config");
     let existing = read_config(&config)?;
-    let configured = !names(&existing, machine);
-    if configured {
+    let kept = names(&existing, machine);
+    if !kept {
         append(&config, &existing, &block(machine, &key, Some(user)))?;
     }
 
     Ok(Joined {
+        logs_in_as: logs_in_as_in(dir, machine),
         key,
         public_key,
         generated,
         config,
         machine: machine.to_owned(),
         user: user.to_owned(),
-        configured,
+        kept,
     })
+}
+
+/// `ssh -G`, so the answer is ssh's own reading of every block that matches.
+/// `-F` drops `/etc/ssh/ssh_config`, which a real connection reads, so it is
+/// passed only for a directory that is not this account's own `~/.ssh`.
+fn logs_in_as_in(dir: &Path, machine: &str) -> Option<String> {
+    let mut ssh = Command::new("ssh");
+    ssh.arg("-G");
+    if crate::identity::dir().ok().as_deref() != Some(dir) {
+        ssh.arg("-F").arg(dir.join("config"));
+    }
+    let out = ssh
+        .args(["--", machine])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("user "))
+        .map(str::to_owned)
 }
 
 /// An account name that is one `User` token and nothing more. `%` is out
@@ -298,7 +326,10 @@ fn key_in(dir: &Path) -> Result<(PathBuf, String, bool), Error> {
     }
     let public = key.with_extension("pub");
     let public_key = fs::read_to_string(&public)
-        .map_err(writing(&public))?
+        .map_err(|source| Error::Read {
+            path: public.clone(),
+            source,
+        })?
         .trim()
         .to_owned();
     Ok((key, public_key, generated))
@@ -498,7 +529,12 @@ mod tests {
 
         let joined = join_in(&dir, "cachyos-g14", "biswa").expect("joined");
         assert!(joined.generated, "no key existed, so the join made one");
-        assert!(joined.configured);
+        assert!(!joined.kept);
+        assert_eq!(
+            joined.logs_in_as.as_deref(),
+            Some("biswa"),
+            "ssh's own reading of the block"
+        );
         let config = fs::read_to_string(&joined.config).expect("readable");
         assert_eq!(
             config,
@@ -509,10 +545,7 @@ mod tests {
         );
 
         let again = join_in(&dir, "cachyos-g14", "biswa").expect("joined again");
-        assert!(
-            !again.generated && !again.configured,
-            "a second join is a no-op"
-        );
+        assert!(again.kept && !again.generated, "a second join is a no-op");
         assert_eq!(fs::read_to_string(&again.config).expect("readable"), config);
 
         let _ = fs::remove_dir_all(&dir);
@@ -529,11 +562,32 @@ mod tests {
 
         let joined = join_in(&dir, "laptop", "biswa").expect("answered");
 
-        assert!(!joined.configured);
+        assert!(joined.kept);
+        assert_eq!(
+            joined.logs_in_as.as_deref(),
+            Some("someone-else"),
+            "the reply says which account the kept block logs in as"
+        );
         assert_eq!(
             fs::read_to_string(&joined.config).expect("readable"),
             owners
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// ssh takes the first value it finds, so an owner's `Host *` with a `User`
+    /// above the new block wins over it. The block is still written, and the
+    /// reply names the account that wins.
+    #[test]
+    fn an_owners_wildcard_above_the_new_block_is_what_the_reply_reports() {
+        let dir = scratch("join-wildcard");
+        fs::create_dir_all(&dir).expect("scratch");
+        fs::write(dir.join("config"), "Host *\n    User everywhere\n").expect("a config");
+
+        let joined = join_in(&dir, "laptop", "biswa").expect("joined");
+
+        assert!(!joined.kept, "the wildcard does not name the machine");
+        assert_eq!(joined.logs_in_as.as_deref(), Some("everywhere"));
         let _ = fs::remove_dir_all(&dir);
     }
 

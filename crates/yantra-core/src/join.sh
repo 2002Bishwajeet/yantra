@@ -2,7 +2,9 @@
 #
 # Join this machine to a Yantra fleet (Y-387, docs/adr/0029-a-machine-joins-itself.md).
 #
-#     curl -fsSL https://<appliance>/join | sh
+#     curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
+#
+# or `http://<appliance's tailnet address>:7717/join` where HTTPS is not on.
 #
 # Run it in a terminal on this machine, as the account Yantra is to log in as.
 # It asks before each step that needs root, and your own sudo answers.
@@ -208,7 +210,12 @@ fetch_agent() {
         rm -rf "$work"
         fail "$archive does not match SHA256SUMS, so yantra-agent was not installed and nothing was reported"
     fi
-    tar -C "$work" -xzf "$work/$archive"
+    # Checked by hand: this runs inside `fetch_agent || …`, where `set -e` is off.
+    if ! tar -C "$work" -xzf "$work/$archive"; then
+        rm -rf "$work"
+        say "could not unpack $archive, so yantra-agent was not installed."
+        return 1
+    fi
     staged="$work/yantra-$VERSION-$target"
 }
 
@@ -229,12 +236,14 @@ linux_agent() {
         return 0
         ;;
     esac
-    ask "Install yantra-agent, the heartbeat that tells the dashboard this machine is awake?" || return 0
+    writes="/usr/local/bin/yantra-agent and /etc/systemd/system/yantra-agent.service"
+    [ -e /etc/yantra/agent.env ] || writes="$writes, and /etc/yantra/agent.env naming $DAEMON"
+    say "yantra-agent is the heartbeat that tells the dashboard this machine is awake."
+    say "Installing it writes $writes, then enables and starts yantra-agent.service."
+    say "systemd runs it as a DynamicUser, so it adds no account to this machine."
+    ask "Install yantra-agent?" || return 0
     fetch_agent "$target" || return 0
 
-    # The unit runs as this account, as it does on the appliance.
-    id yantra >/dev/null 2>&1 ||
-        as_root useradd --system --no-create-home --shell /usr/sbin/nologin yantra
     as_root install -d /usr/local/bin
     as_root install -m 755 "$staged/yantra-agent" /usr/local/bin/yantra-agent.new
     as_root mv -f /usr/local/bin/yantra-agent.new /usr/local/bin/yantra-agent
@@ -267,10 +276,12 @@ mac_agent() {
     arm64) target=aarch64-apple-darwin ;;
     *) target=x86_64-apple-darwin ;;
     esac
-    ask "Install yantra-agent, the heartbeat that tells the dashboard this machine is awake?" || return 0
+    bin=$HOME/.local/bin/yantra-agent
+    say "yantra-agent is the heartbeat that tells the dashboard this Mac is awake."
+    say "Installing it writes $bin and $plist, and loads it into your login session. It needs no root."
+    ask "Install yantra-agent?" || return 0
     fetch_agent "$target" || return 0
 
-    bin=$HOME/.local/bin/yantra-agent
     mkdir -p "$HOME/.local/bin" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
     install -m 755 "$staged/yantra-agent" "$bin"
     cat >"$plist" <<PLIST
@@ -301,12 +312,22 @@ report() {
     status=$(printf '%s\n' "$reply" | tail -n 1)
     body=$(printf '%s\n' "$reply" | sed '$d')
     [ "$status" = 200 ] || fail "yantrad answered $status: $body"
-    case "$body" in
-    *'"configured":false'*)
-        say "yantrad's ssh config already named this machine, so it kept what was there."
-        ;;
-    *) say "yantrad now logs in here as $user." ;;
-    esac
+    logs_in_as=$(printf '%s\n' "$body" | sed -n 's/.*"logs_in_as":"\([^"]*\)".*/\1/p')
+    if [ -z "$logs_in_as" ]; then
+        say "yantrad could not read which account its ssh config logs in as here. The dashboard says more."
+    elif [ "$logs_in_as" != "$user" ]; then
+        # The owner's ruling, 2026-09-12: say it. The block is the owner's, so
+        # nothing here or on the appliance rewrites it (ADR-0009).
+        printf 'join: WARNING: yantrad logs in to this machine as %s, not as %s.\n' "$logs_in_as" "$user" >&2
+        printf 'join: The key is in the authorized_keys of %s, so Yantra cannot log in here yet.\n' "$user" >&2
+        printf 'join: The owner changes the Host block in ~/.ssh/config of the yantra account on the appliance.\n' >&2
+        exit 1
+    else
+        case "$body" in
+        *'"kept":true'*) say "yantrad's ssh config already named this machine as $user, and kept that block." ;;
+        *) say "yantrad now logs in here as $user." ;;
+        esac
+    fi
 }
 
 say "this lets the Yantra appliance at $DAEMON log in here as $user."

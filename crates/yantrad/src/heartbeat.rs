@@ -65,6 +65,9 @@ pub struct Fleet {
     pub facts: Arc<Facts>,
     /// The GitHub grant (ADR-0023 §3), here for the same reason again.
     pub github: crate::github::Grant,
+    /// One join at a time (Y-387): two first fetches would both run
+    /// `ssh-keygen` on one path, and two reports would append two blocks.
+    pub joins: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -91,6 +94,7 @@ impl Default for Fleet {
                 ssh_dir: PathBuf::new(),
             }),
             github: crate::github::Grant::default(),
+            joins: Arc::default(),
         }
     }
 }

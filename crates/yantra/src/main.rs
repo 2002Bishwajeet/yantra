@@ -1003,16 +1003,32 @@ fn ssh_join(machine: &str, user: &str) -> ExitCode {
                 println!("key:    {}, generated", joined.key.display());
             }
             let config = joined.config.display();
-            if joined.configured {
-                println!("config: {config}, a Host block added for {machine} as {user}");
-            } else {
+            if joined.kept {
                 println!("config: {config} already names {machine}, left as it is");
+            } else {
+                println!("config: {config}, a Host block added for {machine} as {user}");
             }
             println!(
                 "\nplace this in ~/.ssh/authorized_keys for {user} on {machine}:\n\n  {}\n",
                 joined.public_key
             );
-            ExitCode::SUCCESS
+            // ssh takes the first value it finds, so a block above this one wins.
+            match joined.logs_in_as.as_deref() {
+                Some(account) if account == user => ExitCode::SUCCESS,
+                Some(account) => {
+                    eprintln!(
+                        "yantra: ssh logs in to {machine} as {account}, not {user}. A block in {config} \
+                         decides that, and Yantra does not rewrite it (ADR-0009)."
+                    );
+                    ExitCode::FAILURE
+                }
+                None => {
+                    eprintln!(
+                        "yantra: `ssh -G {machine}` could not say which account ssh logs in as"
+                    );
+                    ExitCode::FAILURE
+                }
+            }
         }
         Err(err) => {
             report_error(&err);

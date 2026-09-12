@@ -276,8 +276,12 @@ in the CLI, and `yantra relay` was written before this route was.
 caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
 under `deny_unknown_fields`, so a `machine` field is a `422`: the name comes from `whois` joined to
 the tailnet list on the stable id (I-5, I-52), and a machine can only join itself. A config that
-already names the machine is left alone and answers `configured: false`. The route adds a `joined`
-event and spawns a readiness re-check that records only a refused reach. **`GET /join` sits beside
+already names the machine is left alone and answers `kept: true`. **`logs_in_as` is what `ssh -G`
+resolves**, and the owner ruled the page must say when it is not `user` — a kept block, or an
+owner's `Host *` above the new one, wins. The route adds a `joined` event that says the same, and
+spawns a readiness re-check that records only a refused reach. **One join at a time**:
+`Fleet::joins` is held around the key-making and the append, because two first fetches would
+both run `ssh-keygen` on one path. **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
 owner ruled that generation is Yantra's and happens on first use.

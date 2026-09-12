@@ -69,6 +69,12 @@ and fails on the machine the developer is sitting at. A value that is not an add
 startup with that reason; a value that is an address but wrong fails per beat, once, and the agent
 keeps running.
 
+**The unit is `DynamicUser=yes`, and no account is made for it** (owner, 2026-09-12,
+[ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md)). That holds only while the agent writes
+nothing to disk. If it ever needs a writable path, use `StateDirectory=` or `RuntimeDirectory=`,
+never an account. It has no home of its own, so a `$HOME` entry in `CANDIDATES` does not reach the
+person's `~/.local/bin` — which was already true under `User=yantra`.
+
 The local agent is **not** a special case: a host dialling its own tailnet address reaches the
 listener and is attributed by that same address (the heartbeat-agent plan §5), so there is no "is this me" branch
 here or in the daemon.

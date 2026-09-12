@@ -30,6 +30,8 @@ use common::{Systemd, UNPRIVILEGED, fixture_dir, repo_root};
 const REPO: &str = "2002Bishwajeet/yantra";
 const DAEMON: &str = "127.0.0.1:7717";
 const REPORTS: &str = "/srv/reports";
+/// When present, `listen.py` answers that a kept block logs in as this account.
+const KEPT_AS: &str = "/srv/kept-as";
 const ALIAS: &str = "fixture-box";
 const EDITED_ENV: &str = "YANTRA_DAEMON=100.64.0.5:7717";
 
@@ -147,9 +149,22 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
             yantra_core::about::VERSION
         ),
     )?;
+    // The published agent is `sleep`, which exits at once with no argument. This
+    // stand-in runs until stopped, and only when systemd handed it the address.
     sh(
         &systemd,
-        &format!("systemd-run --unit=join-listener python3 /fixture/listen.py {REPORTS}"),
+        r#"printf '%s\n' '#!/bin/sh' '[ -n "$YANTRA_DAEMON" ] || exit 1' 'exec sleep infinity' > /srv/staging/yantra-*/yantra-agent"#,
+    )?;
+    sh(
+        &systemd,
+        &format!(
+            "bash /fixture/release.sh pack {REPO} {}",
+            yantra_core::about::VERSION
+        ),
+    )?;
+    sh(
+        &systemd,
+        &format!("systemd-run --unit=join-listener python3 /fixture/listen.py {REPORTS} {KEPT_AS}"),
     )?;
     sh(
         &systemd,
@@ -162,6 +177,8 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         "disabled",
         "the machine has to start bare, or turning sshd on proves nothing"
     );
+
+    let accounts = sh(&systemd, "sha256sum /etc/passwd")?;
 
     // A run with no terminal and no answer takes no step that needs root, and
     // still places the key and reports.
@@ -219,7 +236,40 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
             .any(|line| line == format!("YANTRA_DAEMON={DAEMON}")),
         "the daemon's address is the one the script was served with:\n{env}"
     );
-    sh(&systemd, "id yantra")?;
+
+    // Owner, 2026-09-12: the agent runs as a systemd DynamicUser, so the
+    // machine gains no account and the unit still runs with its address.
+    let mut state = String::new();
+    for _ in 0..50 {
+        state = systemd.property("yantra-agent.service", "ActiveState")?;
+        if state == "active" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    assert_eq!(
+        state,
+        "active",
+        "{}",
+        systemd.journal("yantra-agent.service")
+    );
+    assert!(
+        !systemd.exec(&["id", "yantra"])?.status.success(),
+        "no yantra account may be created on a joined machine"
+    );
+    assert_eq!(
+        sh(&systemd, "sha256sum /etc/passwd")?,
+        accounts,
+        "/etc/passwd gained an entry"
+    );
+    let pid = systemd.property("yantra-agent.service", "MainPID")?;
+    let uid: u32 = sh(&systemd, &format!("stat -c %u /proc/{pid}"))?
+        .trim()
+        .parse()?;
+    assert!(
+        (61184..=65519).contains(&uid),
+        "the agent runs under a dynamic uid, not {uid}"
+    );
 
     // The report: the account the script ran as, and no machine name.
     let reports = sh(&systemd, &format!("cat {REPORTS}"))?;
@@ -250,7 +300,8 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     std::fs::remove_file(appliance.join("known_hosts")).ok();
     let user = body["user"].as_str().context("a user")?;
     let joined = identity::join_in(&appliance, ALIAS, user)?;
-    assert!(joined.configured && !joined.generated);
+    assert!(!joined.kept && !joined.generated);
+    assert_eq!(joined.logs_in_as.as_deref(), Some(UNPRIVILEGED));
     std::fs::write(&config, std::fs::read_to_string(&config)? + &whereabouts)?;
     let out = ssh_by_name(&appliance, "whoami")?;
     if !out.status.success() {
@@ -280,6 +331,19 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     assert!(
         again.contains("already installed"),
         "the agent is installed once:\n{again}"
+    );
+
+    // The owner's re-join ruling: a kept block that logs in as another account
+    // is said on this machine's terminal, and the run does not claim success.
+    sh(&systemd, &format!("printf 'yantra\\n' > {KEPT_AS}"))?;
+    let warned = run_join(&systemd, Some("y"))?;
+    let said = String::from_utf8_lossy(&warned.stderr);
+    assert!(!warned.status.success(), "{said}");
+    assert!(
+        said.contains(&format!(
+            "yantrad logs in to this machine as yantra, not as {UNPRIVILEGED}"
+        )),
+        "{said}"
     );
 
     std::fs::remove_dir_all(&appliance)?;
