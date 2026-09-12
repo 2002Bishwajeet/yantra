@@ -13,14 +13,14 @@ test.describe('one machine on a busy fleet', () => {
     await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
   })
 
-  test('draws About and the nine readiness checks', async ({ page }) => {
+  test('draws About and the ten readiness checks', async ({ page }) => {
     const about = card(page, 'About')
     await expect(about.getByText('linux')).toBeVisible()
     await expect(about.getByText(/beat 4s ago/)).toBeVisible()
 
     const ready = card(page, 'Readiness')
-    await expect(ready.getByText(/^9 of 9 · asked/)).toBeVisible()
-    await expect(ready.getByText('ok')).toHaveCount(9)
+    await expect(ready.getByText(/^10 of 10 · asked/)).toBeVisible()
+    await expect(ready.getByText('ok')).toHaveCount(10)
     await expect(ready.getByText('provider-auth')).toBeVisible()
     await expect(ready.getByRole('button', { name: 'Doctor' })).toHaveCount(0)
   })

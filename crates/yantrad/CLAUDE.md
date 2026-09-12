@@ -120,7 +120,7 @@ the scopes and whether a device flow is pending, read from `github::Grant` in me
 repository list, a class on the same slow clock, and **the search box filters it in the browser** —
 a typed box polls, and a read handler never awaits the network.
 
-**It is a class on the refresh sweep, not a handler that runs `doctor`.** Nine checks over ssh per
+**It is a class on the refresh sweep, not a handler that runs `doctor`.** Ten checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
@@ -136,7 +136,7 @@ installed `tmux` by hand needs the answer before the next sweep, and the `GET` b
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
 type. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
-ssh destinations to refuse one against, and a name nothing answers to is nine *unknown* checks like
+ssh destinations to refuse one against, and a name nothing answers to is ten *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
@@ -268,12 +268,26 @@ directory to walk.
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}`, `POST /api/relay`,
-`POST /api/machines/{machine}/clone`, `POST /api/github/login`, `DELETE /api/github`, and
-`POST`/`DELETE /api/github/client-id` — **the CLI's own verbs and nothing more**, being `yantra new`,
-`edit`, `up`, `down`, `resume`, `tokens`, `logs`, `repair`, `relay`, `clone`, `github login`,
-`github logout` and `github client-id` (Y-393). The daemon may do what `yantra` can already do, which
-is what stops it growing a richer API the CLI cannot reach. A new verb here starts in the CLI, and
-`yantra relay` was written before this route was.
+`POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
+`DELETE /api/github`, and `POST`/`DELETE /api/github/client-id` — **the CLI's own verbs and nothing
+more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`, `repair`, `relay`,
+`clone`, `install`, `github login`, `github logout` and `github client-id` (Y-393). The daemon may do
+what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
+verb here starts in the CLI, and `yantra relay` was written before this route was.
+
+**`install` answers before its work is done too** (Y-386,
+[ADR-0028](../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) §4). It answers
+`202` with no body and runs [`install.rs`](../yantra-core/src/install.rs) in a task the daemon owns.
+Yantra stops waiting after 15 minutes, and the event then says the install may still be running:
+dropping the future kills only the local `ssh` (I-27). The result is an `installed` or
+`install_stopped` event in the ring, whose `commands` carries each command left for a person
+verbatim, and then the readiness sweep runs early. **The name is checked before anything
+else**: dot-separated labels of letters, digits and `-`, none starting with `-`, at most 253
+characters, which is PR #302's label rule with dots allowed. A name outside it is a `400` and
+nothing is spawned, because the name reaches `ssh`'s argv. **One install per machine at a time**,
+keyed on the lowercased name: a second `POST` while one runs is a `409`, and a drop guard gives the machine
+back on every path out of the task. It is not a tmux session, because `tmux` can be the thing being
+installed.
 
 **`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
 caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
@@ -289,7 +303,7 @@ both run `ssh-keygen` on one path. **`GET /join` sits beside
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
 owner ruled that generation is Yantra's and happens on first use.
 
-**`clone` is one of two writes that answer before their work is done** (Y-344). `git clone` runs as the
+**`clone` is one of the writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;
 nothing awaits the clone, progress is that session's terminal socket (ADR-0022) and completion is the
 probe. Both values are checked in [`clone.rs`](../yantra-core/src/clone.rs) before ssh, and a URL

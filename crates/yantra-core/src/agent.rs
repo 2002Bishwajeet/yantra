@@ -154,9 +154,15 @@ pub enum Error {
 /// shell command, so nothing that came out of a config file or a request may
 /// reach it. Yantra's own binary names are the only callers there can be.
 pub async fn locate<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<String>, Error> {
+    let out = exec.exec(&probe(binary)).await?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    Ok((out.success() && path.starts_with('/')).then_some(path))
+}
+
+fn probe(binary: &'static str) -> String {
     // `$HOME` is left unquoted in the loop so the remote shell expands it;
     // every path here is a constant, so there is nothing to inject.
-    let probe = format!(
+    format!(
         "p=$(command -v {binary} 2>/dev/null)\n\
          case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
          for d in {dirs}; do\n\
@@ -164,11 +170,35 @@ pub async fn locate<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<St
          done\n\
          exit 1\n",
         dirs = CANDIDATES.join(" "),
-    );
+    )
+}
 
-    let out = exec.exec(&probe).await?;
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    Ok((out.success() && path.starts_with('/')).then_some(path))
+/// [`Claude::resolve`], and whether the machine's C library is musl, in the one
+/// round trip the launch already made — the musl answer decides one variable
+/// in the start command ([`launch_command`]).
+async fn resolve_with_libc<E: Exec>(exec: &E) -> Result<(Claude, bool), Error> {
+    let script = format!(
+        "({})\ns=$?\nls /lib/ld-musl-* >/dev/null 2>&1 && echo musl\nexit $s\n",
+        probe("claude")
+    );
+    let out = exec.exec(&script).await?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    let musl = said.lines().any(|line| line.trim() == "musl");
+    match said
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with('/'))
+    {
+        Some(path) if out.success() => Ok((
+            Claude {
+                path: path.to_owned(),
+            },
+            musl,
+        )),
+        _ => Err(Error::NotFound {
+            searched: CANDIDATES.join(", "),
+        }),
+    }
 }
 
 impl Claude {
@@ -274,7 +304,7 @@ async fn ready<E: Exec>(
     os: Os,
     mode: Mode,
 ) -> Result<Launch, Error> {
-    let claude = Claude::resolve(exec).await?;
+    let (claude, musl) = resolve_with_libc(exec).await?;
     let auth = claude.auth(exec, tmux, os).await?;
     if !auth.logged_in {
         return Err(Error::NotLoggedIn {
@@ -283,7 +313,7 @@ async fn ready<E: Exec>(
     }
     let session_id = new_session_id()?;
     Ok(Launch {
-        command: launch_command(claude.path(), repo, &session_id, mode),
+        command: launch_command(claude.path(), repo, &session_id, mode, musl),
         session_id,
     })
 }
@@ -297,15 +327,24 @@ async fn ready<E: Exec>(
 ///
 /// It is also what makes [`Mode::Resume`] work at all: `--continue` resolves the
 /// conversation from the **cwd**, so the `cd` is the argument.
-fn launch_command(claude: &str, repo: &str, session_id: &str, mode: Mode) -> String {
+///
+/// `musl` exports `USE_BUILTIN_RIPGREP=0` for the agent alone: the ripgrep it
+/// bundles does not run there, and the vendor's docs name this variable
+/// (ADR-0028 §5's note). Never on glibc, where no system `rg` may exist.
+fn launch_command(claude: &str, repo: &str, session_id: &str, mode: Mode, musl: bool) -> String {
     // Measured on 2.1.220: `--session-id` beside `--continue` is refused outright
     // unless `--fork-session` is there too.
     let resuming = match mode {
         Mode::New => "",
         Mode::Resume => " --continue --fork-session",
     };
+    let ripgrep = if musl {
+        "export USE_BUILTIN_RIPGREP=0 && "
+    } else {
+        ""
+    };
     format!(
-        "cd {} && exec {}{resuming} --session-id {}",
+        "cd {} && {ripgrep}exec {}{resuming} --session-id {}",
         sq(repo),
         sq(claude),
         sq(session_id)
@@ -369,7 +408,8 @@ mod tests {
                 "/usr/bin/claude",
                 "/tmp/x'; rm -rf ~; '",
                 "an-id",
-                Mode::New
+                Mode::New,
+                false
             ),
             r"cd '/tmp/x'\''; rm -rf ~; '\''' && exec '/usr/bin/claude' --session-id 'an-id'"
         );
@@ -378,7 +418,8 @@ mod tests {
                 "/usr/bin/claude",
                 "/tmp/x'; rm -rf ~; '",
                 "an-id",
-                Mode::Resume
+                Mode::Resume,
+                false
             ),
             r"cd '/tmp/x'\''; rm -rf ~; '\''' && exec '/usr/bin/claude' --continue --fork-session --session-id 'an-id'"
         );
@@ -386,9 +427,30 @@ mod tests {
 
     #[test]
     fn the_launch_command_cds_and_execs() {
-        let cmd = launch_command("/home/u/.local/bin/claude", "/srv/repo", "abc", Mode::New);
+        let cmd = launch_command(
+            "/home/u/.local/bin/claude",
+            "/srv/repo",
+            "abc",
+            Mode::New,
+            false,
+        );
         assert!(cmd.starts_with("cd '/srv/repo' && exec "), "{cmd}");
         assert!(cmd.contains("--session-id 'abc'"), "{cmd}");
+    }
+
+    /// ADR-0028 §5's note, both halves: the variable is set at launch on musl,
+    /// and never on glibc, where a machine with no system `rg` would lose
+    /// search. The `exec` still makes the pane's process the agent.
+    #[test]
+    fn only_a_musl_launch_carries_the_ripgrep_variable() {
+        let musl = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New, true);
+        assert_eq!(
+            musl,
+            "cd '/srv/repo' && export USE_BUILTIN_RIPGREP=0 && exec '/usr/bin/claude' \
+             --session-id 'abc'"
+        );
+        let glibc = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New, false);
+        assert!(!glibc.contains("USE_BUILTIN_RIPGREP"), "{glibc}");
     }
 
     /// The three flags are one decision, and each is load-bearing: `--continue`
@@ -402,7 +464,8 @@ mod tests {
                 "/home/u/.local/bin/claude",
                 "/srv/repo",
                 "abc",
-                Mode::Resume
+                Mode::Resume,
+                false
             ),
             "cd '/srv/repo' && exec '/home/u/.local/bin/claude' --continue --fork-session \
              --session-id 'abc'"
@@ -413,7 +476,7 @@ mod tests {
     /// would be the same bug in the other direction.
     #[test]
     fn a_new_launch_carries_none_of_the_resume_flags() {
-        let cmd = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New);
+        let cmd = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New, false);
         assert!(!cmd.contains("--continue"), "{cmd}");
         assert!(!cmd.contains("--fork-session"), "{cmd}");
     }

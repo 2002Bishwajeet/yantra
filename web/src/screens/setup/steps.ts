@@ -87,6 +87,7 @@ export type Line =
 const named: Record<string, string> = {
   sshd: 'sshd',
   tmux: 'tmux',
+  git: 'git',
   'agent-cli': 'claude',
   terminfo: 'terminfo',
   'provider-cli': 'gh',

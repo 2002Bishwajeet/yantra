@@ -62,6 +62,8 @@ const happened: Record<Event['kind'], { mark: MarkState; words: string }> = {
   unclear: { mark: 'unknown', words: 'unclear' },
   unreachable: { mark: 'unknown', words: 'unreachable' },
   'relay-test': { mark: 'done', words: 'relay test' },
+  installed: { mark: 'done', words: 'installed' },
+  install_stopped: { mark: 'needs', words: 'install stopped' },
   joined: { mark: 'done', words: 'joined' },
 }
 

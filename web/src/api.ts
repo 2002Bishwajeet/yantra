@@ -368,7 +368,10 @@ export type SshIdentity = {
 export type Event = {
   // Unix seconds, when the daemon saw it.
   at: number
-  // A verdict as `AgentState` spells it, or one of the two of its own.
+  // A verdict as `AgentState` spells it, or one of the daemon's own. The two
+  // install kinds end `POST /api/machines/{machine}/install` (ADR-0028, Y-386):
+  // `installed` when every basic is there, else `install_stopped`, whose
+  // `said` names the command left for a person.
   kind:
     | 'awaiting_trust'
     | 'finished'
@@ -381,11 +384,16 @@ export type Event = {
     | 'no_agent'
     | 'unreachable'
     | 'relay-test'
+    | 'installed'
+    | 'install_stopped'
     | 'joined'
   workspace: string | null
   machine: string | null
   // The sentence the relay was, or would have been, sent.
   said: string
+  // The exact commands an install left for a person, in order, each to be
+  // run verbatim on `machine` (Y-394). Empty for every other kind.
+  commands: string[]
 }
 
 /** `POST /api/machines/{machine}/clone` with `{ url, path }` — `yantra clone`

@@ -17,6 +17,7 @@ use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::github::{self, Github};
 use yantra_core::identity;
+use yantra_core::install::{self, Outcome};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::notify;
@@ -141,6 +142,11 @@ enum Command {
         /// Where to put it **on that machine**: absolute, or `~/…`
         #[arg(long)]
         into: String,
+    },
+    /// Install what a machine is missing of tmux, git and claude, and nothing else
+    Install {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
     },
     /// Stop a tmux session by machine and name, for one no workspace claims
     Kill {
@@ -309,6 +315,7 @@ async fn main() -> ExitCode {
         Some(Command::Down { workspace }) => down(&workspace).await,
         Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
         Some(Command::Clone { url, machine, into }) => clone_repo(&url, &machine, &into).await,
+        Some(Command::Install { machine }) => install_basics(&machine).await,
         Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
@@ -1205,6 +1212,64 @@ fn render_cloning(cloning: &clone::Cloning, plan: &clone::Plan) -> String {
         cloning.machine,
         plan.path
     )
+}
+
+/// ADR-0028: installs what is missing of tmux, git and claude, and says what it
+/// could not with the command a person runs there. Exit 0 only when every basic
+/// is there afterwards, which is `doctor`'s rule.
+async fn install_basics(machine: &str) -> ExitCode {
+    match install::install(machine).await {
+        Ok(report) => {
+            print!("{}", render_install(&report));
+            if report.complete() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_install(report: &install::Report) -> String {
+    let mut out = format!("{}:\n", report.machine);
+    let mut commands: Vec<&str> = Vec::new();
+    let mut shown: Vec<&str> = Vec::new();
+    for step in &report.steps {
+        let said = match &step.outcome {
+            Outcome::Present => "already there".to_owned(),
+            Outcome::Installed => "installed".to_owned(),
+            Outcome::ForYou { because, command } => {
+                if let Some(command) = command.as_deref()
+                    && !commands.contains(&command)
+                {
+                    commands.push(command);
+                }
+                format!("not installed: {because}")
+            }
+            // Two tools from one package run share one output.
+            Outcome::Failed { output } if shown.contains(&output.as_str()) => {
+                "did not install; the output is above".to_owned()
+            }
+            Outcome::Failed { output } => {
+                shown.push(output);
+                let indented: Vec<String> =
+                    output.lines().map(|line| format!("      {line}")).collect();
+                format!("did not install:\n{}", indented.join("\n"))
+            }
+        };
+        out.push_str(&format!("  {:<7} {said}\n", step.tool.name()));
+    }
+    for command in commands {
+        out.push_str(&format!(
+            "\nrun this on {}, then `yantra install {}` again:\n  {command}\n",
+            report.machine, report.machine
+        ));
+    }
+    out
 }
 
 const IDENTITY_NOTE: &str = "\
@@ -2866,7 +2931,7 @@ mod tests {
     }
 
     /// A fleet with nothing in it is not a clean one — nothing was asked, so the
-    /// output must not look like nine passes, and `doctor` exits non-zero.
+    /// output must not look like ten passes, and `doctor` exits non-zero.
     #[test]
     fn no_machines_says_nothing_was_checked_and_names_the_way_to_check_one() {
         let rendered = render_doctor(&[]);
@@ -3094,6 +3159,58 @@ mod tests {
             ])
             .is_err(),
             "no destination is composed here"
+        );
+    }
+
+    /// Y-386: one machine and nothing else — there is no fleet-wide install
+    /// (ADR-0028 §3).
+    #[test]
+    fn install_takes_one_machine() {
+        let cli = Cli::try_parse_from(["yantra", "install", "pi"]).expect("`install` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Install { ref machine }) if machine == "pi"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "install"]).is_err());
+    }
+
+    /// Two tools left for one reason share one command, and it is printed
+    /// once, after the lines, where a person copies it from.
+    #[test]
+    fn an_install_names_the_command_it_left_once() {
+        let left = Outcome::ForYou {
+            because: install::Because::SudoAsks,
+            command: Some("sudo apt-get update; sudo apt-get install -y tmux git".to_owned()),
+        };
+        let report = install::Report {
+            machine: "pi".to_owned(),
+            steps: vec![
+                install::Step {
+                    tool: install::Tool::Tmux,
+                    outcome: left.clone(),
+                },
+                install::Step {
+                    tool: install::Tool::Git,
+                    outcome: left,
+                },
+                install::Step {
+                    tool: install::Tool::Claude,
+                    outcome: Outcome::Installed,
+                },
+            ],
+        };
+        let rendered = render_install(&report);
+        assert_eq!(
+            rendered
+                .matches("sudo apt-get update; sudo apt-get install -y tmux git")
+                .count(),
+            1,
+            "{rendered}"
+        );
+        assert!(rendered.contains("claude  installed"), "{rendered}");
+        assert!(
+            rendered.contains("then `yantra install pi` again"),
+            "{rendered}"
         );
     }
 
