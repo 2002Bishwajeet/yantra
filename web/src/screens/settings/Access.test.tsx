@@ -33,9 +33,13 @@ describe('Access', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
     const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
     fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
-    expect(await sheet.findByText(/no clipboard, so the text is selected/)).toBeTruthy()
+    // Y-388: read the selection right after the click. Base UI's dialog
+    // restores focus with a rAF once the click leaves it on <body> (jsdom
+    // never focuses a button on a synthetic click), and jsdom, unlike a real
+    // browser, drops the selection on that later focus() call.
     expect(window.getSelection()?.toString()).toMatch(/^ssh-ed25519 /)
     window.getSelection()?.removeAllRanges()
+    expect(await sheet.findByText(/no clipboard, so the text is selected/)).toBeTruthy()
   })
 
   it('says a key the daemon has not made is not created, and how to make it', async () => {
