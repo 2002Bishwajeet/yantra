@@ -24,7 +24,7 @@ So the milestone text is describing either M4 or the endpoint, and the two diffe
 on the ambiguity while `yantrad` was a skeleton that printed its version. M4 makes it load-bearing:
 it is the first line of daemon code that decides which of the two is being built.
 
-The two coherent answers, from [the M4 plan](../plans/m4-web-ui.md) §7.1:
+The two coherent answers, from [the M4 plan](../archive/plans/m4-web-ui.md) §7.1:
 
 **(a) Two callers of one library.** The CLI keeps calling `yantra_core` in-process; `yantrad` becomes
 a second caller of the same functions. "The same API" means the daemon exposes exactly what the CLI

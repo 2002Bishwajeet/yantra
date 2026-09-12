@@ -6,7 +6,7 @@ This is a plan, not a decision record. Where it reaches a fork that deserves to 
 permanently, it says so and defers to an ADR rather than quietly picking. §7 lists every such fork in
 one place, because those are the parts that need a human before code starts.
 
-Milestone claim, from [`tracker.md`](../../tracker.md) §2:
+Milestone claim, from [`tracker.md`](../../../tracker.md) §2:
 
 > Same command targets a *remote* tailnet machine chosen by name. Machine inventory from Tailscale.
 > `yantra ls machines` / `yantra ls sessions` work.
@@ -30,7 +30,7 @@ that machine exists and is reachable.
 ## 2. What is already true
 
 Verified 2026-07-30 against `bishwajeets-macbook-pro` (macOS 26.5.1, Darwin 25.5.0, arm64) — full
-evidence in [`docs/machines.md`](../machines.md).
+evidence in [`docs/machines.md`](../../machines.md).
 
 | Assumption | State |
 | --- | --- |
@@ -340,7 +340,7 @@ for nothing.
 > **Superseded by what Y-052 shipped, on two points.** This paragraph was written while §7.1 was
 > still open.
 >
-> **The `Peer.ID` key is ruled out by [ADR-0009](../adr/0009-machine-names-are-ssh-destinations.md).**
+> **The `Peer.ID` key is ruled out by [ADR-0009](../../adr/0009-machine-names-are-ssh-destinations.md).**
 > `machine` is an ssh destination, and mapping one to a tailnet node is exactly the resolution that
 > ADR declined to do. There is no key at all in the shipped design: `Tmux` holds the path and lives
 > as long as the connection it was found through, so the cache cannot outlive its own validity.
@@ -374,7 +374,7 @@ chasing every package manager's prefix.
 
 ### 7.1 Does Yantra resolve machine names, or does `ssh`? — **decided 2026-07-30: (a)**
 
-**Settled in [ADR-0009](../adr/0009-machine-names-are-ssh-destinations.md).** `machine` reaches `ssh`
+**Settled in [ADR-0009](../../adr/0009-machine-names-are-ssh-destinations.md).** `machine` reaches `ssh`
 verbatim; the inventory observes and never resolves. The ADR adds one constraint this section did not
 anticipate: an unknown name is a **warning, never an error**, because a hard-failing validator makes
 the inventory authoritative over which names are legal, having just declined to make it authoritative
@@ -427,7 +427,7 @@ deriving genuinely fails (Y-044). No Windows (Q4). No `branch` checkout (Y-047).
 ## 9. M3 preview — and one closed finding that should reopen
 
 Re-verified against current official Claude Code docs on 2026-07-30. Claude Code is still v2.1.220,
-the same version [R3](../research/03-ai-agent-clis.md) tested, so nothing has shipped since — but the
+the same version [R3](../../research/03-ai-agent-clis.md) tested, so nothing has shipped since — but the
 re-read turned up several things the note did not cover, and one that matters before M3 starts.
 
 ### 9.1 R-1 was refuted on the wrong operating system
@@ -511,6 +511,6 @@ Everything else in R3 held: `-p` / `--output-format`, `-r` / `-c` / `--session-i
 ## Sources
 
 - Code audit of `8a5a779`, 2026-07-30 — signatures and line numbers quoted inline.
-- [`docs/machines.md`](../machines.md) — the fleet and the 2026-07-30 probe evidence.
-- [`tracker.md`](../../tracker.md) §1b — invariants I-5, I-20, I-21, I-26, I-28, I-33..I-38.
+- [`docs/machines.md`](../../machines.md) — the fleet and the 2026-07-30 probe evidence.
+- [`tracker.md`](../../../tracker.md) §1b — invariants I-5, I-20, I-21, I-26, I-28, I-33..I-38.
 - ADR-0005 (crate split), ADR-0006 (SSH exec transport), ADR-0007 (workspace schema v1).

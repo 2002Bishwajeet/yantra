@@ -357,7 +357,7 @@ never `0`**, a fast-mode session withholds every dollar and keeps every token, a
 has spent nothing has no figure at all. `render_tokens` in the CLI is the list to check against.
 
 **`logs` opens the same file and writes nothing either** (Y-307,
-[D5](../../docs/design/05-workspace-page.md) §9). It is a `POST` for the reason `tokens` is, it sits
+[D5](../../docs/archive/design/05-workspace-page.md) §9). It is a `POST` for the reason `tokens` is, it sits
 on the same authoriser and it shares `from_logs` — so the **two empty cases are `409`** and a machine
 that could not be asked is `503` carrying the ssh chain, which names the machine and what ssh said.
 The body is `{lines, before}` and both are optional; no body is the first fifty **records**, which
@@ -527,7 +527,7 @@ into the 5 s loop.
 
 **Y-300 is the sixth, and it is the cheapest of the three reads.** `POST /api/machines/{machine}/dirs`
 lists **one level** of a machine's filesystem so a form can walk to a directory rather than trust one
-that was typed. [D4](../../docs/design/04-workspace-creation.md) §2 is why it may sit here at all: a
+that was typed. [D4](../../docs/archive/design/04-workspace-creation.md) §2 is why it may sit here at all: a
 whole-home `find` measured 8.5 s on this fleet's Mac and one level measured 0.23 s, which is what the
 probe beside it already costs. **A sweep would have needed an ADR** — eight seconds inside a handler
 is a different decision from a probe's — so the shape is the licence, and widening it to recurse

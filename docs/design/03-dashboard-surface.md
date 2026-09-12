@@ -4,7 +4,7 @@
 need proper dashboard spec planning"* — and settled the same day in a **27-question interview** whose
 answers are recorded inline. Opens no rows (§B0); §16 proposes them and the owner mints them.
 
-**Read [D1](01-dashboard.md) first.** D1 settles the plumbing: routes, endpoints, work units, and
+**Read [D1](../archive/design/01-dashboard.md) first.** D1 settles the plumbing: routes, endpoints, work units, and
 which decisions block which. It says of itself that it *"settles nothing about pigment or type"*
 (D1 §0). This document fills the half D1 named and left open.
 
@@ -689,7 +689,7 @@ reconcile. Keep them, and say in
 > streams lose the dictionary one large one shares.
 
 > **2026-09-03: the `kB` in this table is `KiB`, and the ambiguity had started to cost decisions.**
-> Found while merging [D4](04-workspace-creation.md) (PR #223), where a needed 1,800-byte stylesheet
+> Found while merging [D4](../archive/design/04-workspace-creation.md) (PR #223), where a needed 1,800-byte stylesheet
 > growth was under the ceiling on one reading of the unit and over it on the other.
 >
 > **The evidence is the table's own first number.** Measured on `main` at 144,910 bytes gzip, which is
@@ -1122,10 +1122,10 @@ and 390×844, both colour schemes.
 **Decisions** — 27 taken by the owner on 2026-08-11, in a structured interview. Each is recorded at
 the section it governs, with its cost.
 
-**Yantra internal** — [D1](01-dashboard.md); [D2](02-setup.md);
+**Yantra internal** — [D1](../archive/design/01-dashboard.md); [D2](02-setup.md);
 [R13](../research/13-dashboard-revamp-and-github.md);
 [`docs/design-system.md`](../design-system.md) §§5–7;
-[`docs/plans/m4-dashboard-next.md`](../plans/m4-dashboard-next.md) §"What the design system should be
+[`docs/plans/m4-dashboard-next.md`](../archive/plans/m4-dashboard-next.md) §"What the design system should be
 asked for"; [`docs/brainstorm.md:394`](../brainstorm.md); ADRs
 [0011](../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
 [0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),

@@ -4,8 +4,8 @@
 - **Status:** proposal, awaiting review
 - **Follows:** [m4-web-ui.md](m4-web-ui.md), which planned M4's daemon half and the first dashboard
 
-[Y-072](../../tracker.md) shipped three sections — machines, workspaces, sessions — over the
-read-only API, polling every 5 s, with [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s
+[Y-072](../../../tracker.md) shipped three sections — machines, workspaces, sessions — over the
+read-only API, polling every 5 s, with [ADR-0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s
 token seam in place and nothing painted. This plan covers what comes next.
 
 **The organising constraint is that a design system is arriving from elsewhere** and needs more
@@ -24,7 +24,7 @@ machine has stopped and is waiting for a person** (I-49). Everything else on the
 The dashboard cannot show it at all, because agent status is not in the read model.
 
 This is the highest-value addition and it is also the one with a real cost to think about first.
-[Y-071](../../tracker.md) recorded why: `status::status` opens ssh, so it needs a **fourth refresh
+[Y-071](../../../tracker.md) recorded why: `status::status` opens ssh, so it needs a **fourth refresh
 class**, and it is the first refresh that is per-*workspace* rather than per-fleet. Three classes
 being free at 30 s does not imply N are.
 
@@ -44,8 +44,8 @@ most common case on the page.
 ### 1.2 The page shows state and offers nothing to do about it
 
 Every row is a fact you then act on somewhere else. The API answers **405 to every write**, and
-[Y-071](../../tracker.md) recorded why that is not an oversight: a write route is where
-[Q6](../../tracker.md)'s absent authentication stops being free.
+[Y-071](../../../tracker.md) recorded why that is not an oversight: a write route is where
+[Q6](../../../tracker.md)'s absent authentication stops being free.
 
 **Recommended: the page hands you the command.** Each row carries a copy-pasteable
 `yantra resume api`, exactly as `up` already prints an attach hint you copy. Zero new auth surface,
@@ -126,7 +126,7 @@ dashboard you cannot read. What this page needs from it:
 - **Semantic colour kept separate from the accent.** `Status.tsx` maps a domain state to a `tone`, and
   those tones — running, stopped, crashed, unreachable, stale — must not be the same axis as brand
   accent, or a crashed agent and a hyperlink end up the same colour.
-- **A staleness treatment**, per §1.3 and [ADR-0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md)'s
+- **A staleness treatment**, per §1.3 and [ADR-0013](../../adr/0013-the-heartbeat-carries-only-what-placement-scores.md)'s
   reading ages. This is a real visual state, not a shade of grey.
 - **Density tokens.** Four tables on one page is the whole product surface.
 
@@ -142,7 +142,7 @@ restating because each has become slightly more tempting since:
 - **No telemetry.** The page shows what Tailscale and tmux already know. Whether a machine is *busy*
   needs `yantra-agent`, which is **still a 19-line stub that prints its version** — the largest
   functional gap in the project, and M5's input rather than M4's.
-- **No session store.** Y-044 recedes again: [Y-091](../../tracker.md) found that
+- **No session store.** Y-044 recedes again: [Y-091](../../../tracker.md) found that
   `pane_start_command` already holds the agent's session id and keeps it current across a respawn.
 
 ---

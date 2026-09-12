@@ -236,7 +236,7 @@ export type Counts = {
  *
  *  **409 is not a failure.** A workspace whose agent has written no turn
  *  answers 409 with the daemon's own sentence, which is what
- *  [D5](../../docs/design/05-workspace-page.md) §4.5 draws. */
+ *  [D5](../../docs/archive/design/05-workspace-page.md) §4.5 draws. */
 export type Transcript = {
   // The file that was read, on the machine that wrote it.
   path: string
@@ -283,7 +283,7 @@ export type Probed = {
   origin: string | null
 }
 
-/** [D4](../../docs/design/04-workspace-creation.md) §3: one level of a machine's
+/** [D4](../../docs/archive/design/04-workspace-creation.md) §3: one level of a machine's
  *  filesystem, with the repositories marked. **One level and no recursion** —
  *  a whole-home sweep measured 8.5 s on this fleet's Mac against 0.026 s on its
  *  Linux box, and D4 §2 is that measurement. */
@@ -305,7 +305,7 @@ export type Listing = { machine: string; path: string; entries: Dir[] }
  *  where the daemon runs (Y-173). `refresh.rs` polls it every 300 s rather than
  *  on the fleet's 30 s sweep, so this envelope's age is a different clock and
  *  the band that draws it stamps itself
- *  ([D6](../../docs/design/06-sessions-attention-spend.md) §2). */
+ *  ([D6](../../docs/archive/design/06-sessions-attention-spend.md) §2). */
 export type Attention = {
   reviews: Item[]
   issues: Item[]
