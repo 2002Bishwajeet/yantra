@@ -35,8 +35,10 @@ const KEPT_AS: &str = "/srv/kept-as";
 const ALIAS: &str = "fixture-box";
 const EDITED_ENV: &str = "YANTRA_DAEMON=100.64.0.5:7717";
 
+/// Per process: two runs on one box (`just test` beside `just test-embedded`)
+/// sharing a directory swap the key under each other's container.
 fn scratch(label: &str) -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("yantra-join-{label}"));
+    let dir = std::env::temp_dir().join(format!("yantra-join-{label}-{}", std::process::id()));
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
     }
@@ -305,9 +307,29 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     std::fs::write(&config, std::fs::read_to_string(&config)? + &whereabouts)?;
     let out = ssh_by_name(&appliance, "whoami")?;
     if !out.status.success() {
+        // `LogLevel=ERROR` hides a session the server closed after auth, which
+        // left CI saying nothing. Ask again with `-v`, and read sshd's side.
+        let verbose = Command::new("ssh")
+            .arg("-v")
+            .arg("-F")
+            .arg(appliance.join("config"))
+            .args(["-o", "BatchMode=yes", "-o", "IdentityAgent=none"])
+            .args(["-o", "GlobalKnownHostsFile=/dev/null"])
+            .arg("-o")
+            .arg(format!(
+                "UserKnownHostsFile={}",
+                appliance.join("known_hosts").display()
+            ))
+            .args([ALIAS, "--", "whoami"])
+            .output()?;
         bail!(
-            "the joined machine was not reached with the config the join wrote: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+            "the joined machine was not reached with the config the join wrote ({}): {}\n\
+             --- ssh -v ({}) ---\n{}\n--- sshd's journal ---\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim(),
+            verbose.status,
+            String::from_utf8_lossy(&verbose.stderr).trim(),
+            systemd.journal("sshd.service")
         );
     }
     assert_eq!(String::from_utf8(out.stdout)?.trim(), UNPRIVILEGED);
