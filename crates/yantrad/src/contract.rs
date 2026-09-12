@@ -338,6 +338,7 @@ async fn fleet() -> Fleet {
             workspace: Some("api".to_owned()),
             machine: Some("cachyos-g14".to_owned()),
             said: "api: waiting at claude's trust prompt".to_owned(),
+            commands: Vec::new(),
         },
         Event {
             at: 1_785_522_660,
@@ -345,6 +346,7 @@ async fn fleet() -> Fleet {
             workspace: Some("site".to_owned()),
             machine: Some("bishwajeets-macbook-pro".to_owned()),
             said: "site: crashed (exit 1)".to_owned(),
+            commands: Vec::new(),
         },
         Event {
             at: 1_785_522_720,
@@ -352,6 +354,7 @@ async fn fleet() -> Fleet {
             workspace: None,
             machine: Some("pi".to_owned()),
             said: "pi is no longer online".to_owned(),
+            commands: Vec::new(),
         },
         Event {
             at: 1_785_522_780,
@@ -359,15 +362,18 @@ async fn fleet() -> Fleet {
             workspace: None,
             machine: None,
             said: "yantra can reach this topic".to_owned(),
+            commands: Vec::new(),
         },
         Event {
             at: 1_785_522_840,
             kind: "install_stopped",
             workspace: None,
             machine: Some("pi".to_owned()),
-            said: "pi: claude installed; tmux and git left for you — run `sudo apt-get update \
-                   && sudo apt-get install -y tmux git` on pi"
+            said: "pi: claude installed; tmux left for you: the package manager needs root, and \
+                   sudo asks for a password or a terminal there — run `sudo apt-get update; sudo \
+                   apt-get install -y tmux` on pi"
                 .to_owned(),
+            commands: vec!["sudo apt-get update; sudo apt-get install -y tmux".to_owned()],
         },
     ]);
     drop(events);

@@ -163,6 +163,7 @@
           { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
           { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
           { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
           { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" },
           { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
           { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { Event } from '@/api'
 import { asEvents, grouped, merge, unseen } from './notifications'
 
-const trust: Event = { at: 100, kind: 'awaiting_trust', workspace: 'api', machine: 'pi', said: 'wants cargo test' }
-const relay: Event = { at: 50, kind: 'relay-test', workspace: null, machine: null, said: 'reached' }
-const gone: Event = { at: 75, kind: 'unreachable', workspace: null, machine: 'thinkpad', said: 'no route' }
+const trust: Event = { at: 100, kind: 'awaiting_trust', workspace: 'api', machine: 'pi', said: 'wants cargo test', commands: [] }
+const relay: Event = { at: 50, kind: 'relay-test', workspace: null, machine: null, said: 'reached', commands: [] }
+const gone: Event = { at: 75, kind: 'unreachable', workspace: null, machine: 'thinkpad', said: 'no route', commands: [] }
 
 const attention = {
   reviews: [{ repo: 'o/r', number: 1, title: 'a review', url: 'https://x/1', updated_at: '1970-01-01T00:01:30Z' }],

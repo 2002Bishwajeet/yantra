@@ -258,24 +258,25 @@ async fn tmux<E: Exec>(exec: &E) -> (Check, Option<Tmux>) {
     }
 }
 
-/// `claude`'s lookup, and one more question where it finds `/usr/bin/git`: on
-/// macOS that is a stub asking for the Command Line Tools, and it is git only
-/// once `xcode-select -p` answers. [`crate::install`] asks this too, so the
-/// two never disagree about what a machine has.
+/// [`agent::locate`]'s search in the same one round trip, and one more
+/// question on macOS only: `/usr/bin/git` there is a stub asking for the
+/// Command Line Tools, and it is git once `xcode-select -p` answers.
+/// [`crate::install`] asks this too, so the two never disagree.
 pub(crate) async fn find_git<E: Exec>(exec: &E) -> Result<Option<String>, agent::Error> {
-    let Some(path) = agent::locate(exec, "git").await? else {
-        return Ok(None);
-    };
-    if path == "/usr/bin/git" {
-        // No `xcode-select` is not macOS, and there is no stub there.
-        let real = exec
-            .exec("! command -v xcode-select >/dev/null 2>&1 || xcode-select -p >/dev/null 2>&1")
-            .await?;
-        if !real.success() {
-            return Ok(None);
-        }
-    }
-    Ok(Some(path))
+    let probe = format!(
+        "p=$(command -v git 2>/dev/null)\n\
+         case \"$p\" in /*) ;; *) p=\n\
+         \x20 for d in {dirs}; do [ -x \"$d/git\" ] && {{ p=\"$d/git\"; break; }}; done ;;\n\
+         esac\n\
+         [ -n \"$p\" ] || exit 1\n\
+         if [ \"$p\" = /usr/bin/git ] && [ \"$(uname -s)\" = Darwin ] \
+         && ! xcode-select -p >/dev/null 2>&1; then exit 1; fi\n\
+         printf '%s\\n' \"$p\"\n",
+        dirs = agent::CANDIDATES.join(" "),
+    );
+    let out = exec.exec(&probe).await?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    Ok((out.success() && path.starts_with('/')).then_some(path))
 }
 
 async fn git<E: Exec>(exec: &E) -> Check {

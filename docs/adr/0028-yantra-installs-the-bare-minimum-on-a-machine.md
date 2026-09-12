@@ -92,6 +92,23 @@ every other command.
   Line Tools, whose installer is a dialog on the Mac's own screen, so the dashboard names that step
   rather than starting it.
 
+> **2026-09-12, [Y-386](../../tracker.md):** the vendor's command has prerequisites that are not in
+> §1. It needs `curl` and `bash`. On musl (Alpine), `claude` also needs `libgcc`, `libstdc++` and
+> `ripgrep` at runtime, and `USE_BUILTIN_RIPGREP=0` in `~/.claude/settings.json`
+> ([setup docs](https://code.claude.com/docs/en/setup), read 2026-09-12). Yantra installs them
+> when `claude` is missing, through the same package manager and `sudo -n`, under the owner's
+> *"whatever bare minimum stuff is needed for yantra to work, we install that"*. It writes the
+> setting only where no settings file exists. §1's list of what Yantra is for stays `tmux`, `git`
+> and `claude`.
+
+> **2026-09-12, [Y-394](../../tracker.md), the owner's decision:** when an install step needs sudo
+> and sudo wants a password, the dashboard opens a one-off terminal on that machine. The terminal
+> runs the command the install result names, and the person types the password there. The owner
+> chose this over a password box. The password travels only as keystrokes through the pty, as it
+> does in the browser terminal today (Q5), and Yantra never reads, stores or logs it as a value. So
+> *"no password is ever asked for, passed or stored"* above now reads **no password is ever handled
+> as a value**. The background install is unchanged: it uses `sudo -n` and nothing more.
+
 ### 6. What stays closed
 
 - No Yantra binary crosses ssh, and that includes `yantra-agent`.

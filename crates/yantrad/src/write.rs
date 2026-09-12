@@ -658,8 +658,38 @@ fn from_clone(error: &clone::Error) -> StatusCode {
     }
 }
 
-/// The machines an install is running on now.
-type Running = Arc<tokio::sync::Mutex<std::collections::BTreeSet<String>>>;
+/// The machines an install is running on now, lowercased: ssh reads a name
+/// without regard to case, so `pi` and `PI` are one machine.
+type Running = Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>;
+
+/// A machine's place in [`Running`], given back when this drops — on every
+/// path out of the task that holds it, a panic included.
+struct Claim {
+    running: Running,
+    key: String,
+}
+
+impl Claim {
+    fn take(running: &Running, machine: &str) -> Option<Self> {
+        let key = machine.to_lowercase();
+        let mut held = running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        held.insert(key.clone()).then(|| Self {
+            running: running.clone(),
+            key,
+        })
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        self.running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.key);
+    }
+}
 
 #[derive(Clone)]
 struct Installer<I> {
@@ -668,8 +698,8 @@ struct Installer<I> {
     running: Running,
 }
 
-/// An install past this is stopped and reported. Dropping the future kills
-/// the local `ssh`; a far-side installer can outlive it (I-27).
+/// Yantra stops waiting after this. Dropping the future kills only the local
+/// `ssh`; the far side's installer can go on (I-27), so the event says so.
 const INSTALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 /// `yantra install <machine>` on the wire ([ADR-0028] §4). **202, and nothing
@@ -686,34 +716,28 @@ async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
     Path(machine): Path<String>,
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
-    if !state.running.lock().await.insert(machine.clone()) {
+    let Some(claim) = Claim::take(&state.running, &machine) else {
         return Err(Refused::Verb {
             status: StatusCode::CONFLICT,
             said: format!("an install is already running on {machine}"),
         });
-    }
+    };
     tracing::info!("install on {machine} for {}", caller.node);
-    tokio::spawn(install_in_background(state.fleet, state.running, machine));
+    tokio::spawn(install_in_background(state.fleet, claim, machine));
     Ok(StatusCode::ACCEPTED)
 }
 
-async fn install_in_background(fleet: Fleet, running: Running, machine: String) {
+async fn install_in_background(fleet: Fleet, claim: Claim, machine: String) {
     let event = match tokio::time::timeout(INSTALL_BUDGET, install::install(&machine)).await {
         Ok(Ok(report)) => Event::install(&report),
         Ok(Err(error)) => Event::install_failed(
             &machine,
             &format!("{}: {}", from_install(&error), chain(&error)),
         ),
-        Err(_) => Event::install_failed(
-            &machine,
-            &format!(
-                "it ran past {} minutes and was stopped",
-                INSTALL_BUDGET.as_secs() / 60
-            ),
-        ),
+        Err(_) => Event::install_waited(&machine, INSTALL_BUDGET.as_secs() / 60),
     };
     events::remember(&fleet.events, event).await;
-    running.lock().await.remove(&machine);
+    drop(claim);
     crate::refresh::look_at_readiness(&fleet.model).await;
 }
 
@@ -2525,6 +2549,32 @@ mod tests {
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
     }
 
+    /// The lock an install holds is given back when its task ends, and on a
+    /// panic too, so a machine is never left refusing installs for good.
+    #[tokio::test]
+    #[allow(clippy::panic)]
+    async fn a_claim_is_given_back_on_every_path() {
+        let running = Running::default();
+        let claim = Claim::take(&running, "pi").expect("free");
+        assert!(
+            Claim::take(&running, "Pi").is_none(),
+            "one machine, whatever its case"
+        );
+        drop(claim);
+
+        let held = Claim::take(&running, "pi").expect("given back after a run");
+        let panicked = tokio::spawn(async move {
+            let _held = held;
+            panic!("an install that panics");
+        })
+        .await;
+        assert!(panicked.is_err());
+        assert!(
+            Claim::take(&running, "pi").is_some(),
+            "given back after a panic"
+        );
+    }
+
     /// Y-386: the install route is behind the gate like every write, and a
     /// machine whose install still runs is a 409 before anything is spawned.
     #[tokio::test]
@@ -2551,7 +2601,8 @@ mod tests {
         assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 
         let running = Running::default();
-        running.lock().await.insert("pi".to_owned());
+        // Another case of the same name: ssh would reach one machine.
+        let _held = Claim::take(&running, "PI").expect("nothing holds it yet");
         let busy = Router::new()
             .route("/machines/{machine}/install", post(put_basics::<Fake>))
             .with_state(Installer {

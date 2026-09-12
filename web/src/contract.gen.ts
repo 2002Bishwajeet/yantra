@@ -421,13 +421,17 @@ export const notifications = {
   "data": [
     {
       "at": 1785522840,
+      "commands": [
+        "sudo apt-get update; sudo apt-get install -y tmux"
+      ],
       "kind": "install_stopped",
       "machine": "pi",
-      "said": "pi: claude installed; tmux and git left for you — run `sudo apt-get update && sudo apt-get install -y tmux git` on pi",
+      "said": "pi: claude installed; tmux left for you: the package manager needs root, and sudo asks for a password or a terminal there — run `sudo apt-get update; sudo apt-get install -y tmux` on pi",
       "workspace": null
     },
     {
       "at": 1785522780,
+      "commands": [],
       "kind": "relay-test",
       "machine": null,
       "said": "yantra can reach this topic",
@@ -435,6 +439,7 @@ export const notifications = {
     },
     {
       "at": 1785522720,
+      "commands": [],
       "kind": "unreachable",
       "machine": "pi",
       "said": "pi is no longer online",
@@ -442,6 +447,7 @@ export const notifications = {
     },
     {
       "at": 1785522660,
+      "commands": [],
       "kind": "crashed",
       "machine": "bishwajeets-macbook-pro",
       "said": "site: crashed (exit 1)",
@@ -449,6 +455,7 @@ export const notifications = {
     },
     {
       "at": 1785522600,
+      "commands": [],
       "kind": "awaiting_trust",
       "machine": "cachyos-g14",
       "said": "api: waiting at claude's trust prompt",

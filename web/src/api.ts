@@ -387,6 +387,9 @@ export type Event = {
   machine: string | null
   // The sentence the relay was, or would have been, sent.
   said: string
+  // The exact commands an install left for a person, in order, each to be
+  // run verbatim on `machine` (Y-394). Empty for every other kind.
+  commands: string[]
 }
 
 /** `POST /api/machines/{machine}/clone` with `{ url, path }` — `yantra clone`

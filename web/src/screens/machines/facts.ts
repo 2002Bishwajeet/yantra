@@ -9,7 +9,7 @@ import type {
 } from '@/api'
 import type { MarkState } from '@/m3/mark/Mark'
 
-/** The four a machine card draws; the machine page draws all nine. */
+/** The four a machine card draws; the machine page draws all ten. */
 export const CARD_CHECKS = ['reachable', 'tmux', 'agent-cli', 'terminfo']
 
 const marks: Record<CheckState, MarkState> = {

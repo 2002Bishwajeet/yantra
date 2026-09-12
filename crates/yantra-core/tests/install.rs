@@ -3,8 +3,9 @@
 //! **The one stand-in is `claude`'s installer.** The tests never fetch from
 //! claude.ai: the vendor command is a parameter of `install::of`, and these
 //! pass a script that writes a stub where the real installer puts `claude`.
-//! `tmux` and `git` are the real Alpine packages, fetched by the container's
-//! own `apk`, so the first test needs the Alpine mirror as the image build does.
+//! `tmux`, `git` and the installer's prerequisites are the real Alpine
+//! packages, fetched by the container's own `apk`, so the tests that install
+//! need the Alpine mirror as the image build does.
 
 // `expect` in a test is a deliberate abort with a message.
 #![allow(clippy::expect_used)]
@@ -23,12 +24,16 @@ const STAND_IN: &str = "mkdir -p \"$HOME/.local/bin\" \
     && printf '#!/bin/sh\\nexit 0\\n' > \"$HOME/.local/bin/claude\" \
     && chmod 755 \"$HOME/.local/bin/claude\" && touch /tmp/stand-in-ran";
 
+/// Everything the fixture lacks once `tmux` and `git` are removed: the two
+/// basics, then the vendor installer's prerequisites and musl's runtime ones.
+const EVERYTHING: &str = "apk add tmux git curl bash libgcc libstdc++ ripgrep";
+
 const TERM: &str = "xterm-256color";
 
 struct Lab {
     fixture: SshFixture,
     ssh: Ssh,
-    dir: std::path::PathBuf,
+    dirs: Vec<std::path::PathBuf>,
 }
 
 impl Lab {
@@ -36,17 +41,13 @@ impl Lab {
         let Some(fixture) = SshFixture::start()? else {
             return Ok(None);
         };
-        let dir = std::path::PathBuf::from("/tmp").join(format!("yi-{label}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir)?;
-        let ssh = Ssh::new(Machine {
-            host: fixture.host().to_owned(),
-            user: Some(USER.to_owned()),
-            port: Some(fixture.port()),
-            identity: Some(fixture.key_path()),
-            state_dir: dir.clone(),
-        })?;
-        Ok(Some(Self { fixture, ssh, dir }))
+        let dir = state_dir(label)?;
+        let ssh = connect(&fixture, USER, &dir)?;
+        Ok(Some(Self {
+            fixture,
+            ssh,
+            dirs: vec![dir],
+        }))
     }
 
     /// A machine missing both packages, with a sudoers line of its own.
@@ -57,8 +58,25 @@ impl Lab {
         ))
     }
 
-    async fn checks(&self) -> Vec<Check> {
-        doctor::of(&self.ssh, TERM).await
+    /// The same key, for root: sshd reloads its config on SIGHUP, and it is
+    /// PID 1 in the fixture.
+    async fn as_root(&mut self) -> Result<Ssh> {
+        self.fixture.arrange_as_root(
+            "mkdir -p /root/.ssh && cp /home/yantra/.ssh/authorized_keys /root/.ssh/ \
+             && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys \
+             && sed -i 's/^PermitRootLogin no/PermitRootLogin prohibit-password/' \
+                /etc/ssh/sshd_config && kill -HUP 1",
+        )?;
+        let dir = state_dir("root")?;
+        self.dirs.push(dir.clone());
+        let root = connect(&self.fixture, "root", &dir)?;
+        for _ in 0..50 {
+            if root.exec("true").await.is_ok() {
+                return Ok(root);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        anyhow::bail!("sshd never let root in after the reload")
     }
 
     async fn stand_in_ran(&self) -> Result<bool> {
@@ -68,8 +86,27 @@ impl Lab {
 
 impl Drop for Lab {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        for dir in &self.dirs {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
+}
+
+fn state_dir(label: &str) -> Result<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from("/tmp").join(format!("yi-{label}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn connect(fixture: &SshFixture, user: &str, dir: &std::path::Path) -> Result<Ssh> {
+    Ok(Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(user.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.to_owned(),
+    })?)
 }
 
 fn state(checks: &[Check], name: &str) -> State {
@@ -88,51 +125,54 @@ fn outcomes(report: &Report) -> Vec<(Tool, Outcome)> {
         .collect()
 }
 
+fn all(outcome: &Outcome) -> Vec<(Tool, Outcome)> {
+    [Tool::Tmux, Tool::Git, Tool::Claude]
+        .into_iter()
+        .map(|tool| (tool, outcome.clone()))
+        .collect()
+}
+
 /// ADR-0028's whole promise on the machine it is for: all three missing,
 /// sudo that asks for nothing, one call — and `doctor` agrees afterwards.
-/// Asked twice, the second call finds everything and does nothing.
+/// On musl the vendor's ripgrep setting is written. Asked twice, the second
+/// call finds everything and does nothing.
 #[tokio::test]
 async fn a_bare_machine_with_passwordless_sudo_gets_all_three() -> Result<()> {
     let Some(lab) = Lab::start("bare")? else {
         return Ok(());
     };
     lab.bare("yantra ALL=(ALL) NOPASSWD: ALL")?;
-    let before = lab.checks().await;
+    let before = doctor::of(&lab.ssh, TERM).await;
     for check in ["tmux", "git", "agent-cli"] {
         assert_eq!(state(&before, check), State::Absent, "{check} before");
     }
 
     let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
-    assert_eq!(
-        outcomes(&report),
-        [
-            (Tool::Tmux, Outcome::Installed),
-            (Tool::Git, Outcome::Installed),
-            (Tool::Claude, Outcome::Installed),
-        ],
-        "{report:#?}"
-    );
+    assert_eq!(outcomes(&report), all(&Outcome::Installed), "{report:#?}");
     assert!(report.complete());
 
-    let after = lab.checks().await;
+    let after = doctor::of(&lab.ssh, TERM).await;
     for check in ["tmux", "git", "agent-cli"] {
         assert_eq!(state(&after, check), State::Present, "{check} after");
     }
+    let setting = lab
+        .ssh
+        .exec("grep -q USE_BUILTIN_RIPGREP \"$HOME/.claude/settings.json\"")
+        .await?;
+    assert!(setting.success(), "musl's ripgrep setting is written");
 
     let again = install::of(&lab.ssh, "lab", STAND_IN).await?;
-    assert!(
-        again
-            .steps
-            .iter()
-            .all(|step| step.outcome == Outcome::Present),
-        "a second install attaches to what is there: {again:#?}"
+    assert_eq!(
+        outcomes(&again),
+        all(&Outcome::Present),
+        "a second install finds what is there"
     );
     Ok(())
 }
 
-/// ADR-0028 §5: a sudo that wants a password stops the package step, the
-/// report names the one command to run there, and no package moves. The
-/// `claude` step needs no root, so it still runs.
+/// ADR-0028 §5: a sudo that wants a password stops the package step, and the
+/// report names the one command to run there. `claude` waits on that step for
+/// its installer's prerequisites, so it stops too, and nothing moves.
 #[tokio::test]
 async fn a_sudo_that_wants_a_password_stops_and_names_the_command() -> Result<()> {
     let Some(lab) = Lab::start("password")? else {
@@ -144,23 +184,51 @@ async fn a_sudo_that_wants_a_password_stops_and_names_the_command() -> Result<()
 
     let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
     let left = Outcome::ForYou {
-        because: Because::NeedsRoot,
-        command: Some("sudo apk add tmux git".to_owned()),
+        because: Because::SudoAsks,
+        command: Some(format!("sudo {EVERYTHING}")),
     };
-    assert_eq!(
-        outcomes(&report),
-        [
-            (Tool::Tmux, left.clone()),
-            (Tool::Git, left),
-            (Tool::Claude, Outcome::Installed),
-        ],
-        "{report:#?}"
-    );
+    assert_eq!(outcomes(&report), all(&left), "{report:#?}");
     assert!(!report.complete());
+    assert!(!lab.stand_in_ran().await?, "claude's installer never ran");
 
-    let after = lab.checks().await;
+    let after = doctor::of(&lab.ssh, TERM).await;
     assert_eq!(state(&after, "tmux"), State::Absent);
     assert_eq!(state(&after, "git"), State::Absent);
+    Ok(())
+}
+
+/// Root needs no sudo: the fixture has no sudoers line for anyone, and root
+/// installs everything.
+#[tokio::test]
+async fn a_root_account_installs_without_sudo() -> Result<()> {
+    let Some(mut lab) = Lab::start("root")? else {
+        return Ok(());
+    };
+    lab.fixture.arrange_as_root("apk del -q tmux git")?;
+    let root = lab.as_root().await?;
+
+    let report = install::of(&root, "lab", STAND_IN).await?;
+    assert_eq!(outcomes(&report), all(&Outcome::Installed), "{report:#?}");
+    Ok(())
+}
+
+/// No package manager Yantra knows: every tool, `claude` included for its
+/// installer's prerequisites, is left for a person with no command to name.
+#[tokio::test]
+async fn no_package_manager_names_no_command() -> Result<()> {
+    let Some(lab) = Lab::start("nomanager")? else {
+        return Ok(());
+    };
+    lab.fixture
+        .arrange_as_root("apk del -q tmux git && mv \"$(command -v apk)\" /root/apk.gone")?;
+
+    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let left = Outcome::ForYou {
+        because: Because::NoPackageManager,
+        command: None,
+    };
+    assert_eq!(outcomes(&report), all(&left), "{report:#?}");
+    assert!(!lab.stand_in_ran().await?);
     Ok(())
 }
 
@@ -178,13 +246,7 @@ async fn a_machine_that_has_everything_is_left_alone() -> Result<()> {
     anyhow::ensure!(placed.success(), "placing the claude stub failed");
 
     let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
-    assert!(
-        report
-            .steps
-            .iter()
-            .all(|step| step.outcome == Outcome::Present),
-        "{report:#?}"
-    );
+    assert_eq!(outcomes(&report), all(&Outcome::Present), "{report:#?}");
     assert!(report.complete());
     assert!(!lab.stand_in_ran().await?, "nothing ran for a present tool");
     Ok(())

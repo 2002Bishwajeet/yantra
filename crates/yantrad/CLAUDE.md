@@ -275,10 +275,14 @@ in the CLI, and `yantra relay` was written before this route was.
 
 **`install` answers before its work is done too** (Y-386,
 [ADR-0028](../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) §4). It answers
-`202` with no body and runs [`install.rs`](../yantra-core/src/install.rs) in a task the daemon owns,
-stopped after 15 minutes. The result is an `installed` or `install_stopped` event in the ring, and
-then the readiness sweep runs early. **One install per machine at a time**: a second `POST` while one
-runs is a `409`. It is not a tmux session, because `tmux` can be the thing being installed.
+`202` with no body and runs [`install.rs`](../yantra-core/src/install.rs) in a task the daemon owns.
+Yantra stops waiting after 15 minutes, and the event then says the install may still be running:
+dropping the future kills only the local `ssh` (I-27). The result is an `installed` or
+`install_stopped` event in the ring, whose `commands` carries each command left for a person
+verbatim, and then the readiness sweep runs early. **One install per machine at a time**, keyed on
+the lowercased name: a second `POST` while one runs is a `409`, and a drop guard gives the machine
+back on every path out of the task. It is not a tmux session, because `tmux` can be the thing being
+installed.
 
 **`clone` is one of the writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;

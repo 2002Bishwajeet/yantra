@@ -16,7 +16,7 @@ afterEach(() => {
 const card = (name: string) => within(screen.getByRole('region', { name }))
 
 describe('/m/cachyos-g14 on the busy fleet', () => {
-  it('draws About, the nine checks, and only this machine’s workspaces', async () => {
+  it('draws About, the ten checks, and only this machine’s workspaces', async () => {
     mount('desktop', '/m/cachyos-g14')
     await screen.findByRole('heading', { level: 1, name: 'cachyos-g14' }, { timeout: 2000 })
     await screen.findByText(/^looked /)
@@ -27,8 +27,8 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(about.getByText(/beat 4s ago/)).toBeTruthy()
 
     const ready = card('Readiness')
-    expect(ready.getByText(/^9 of 9 · asked/)).toBeTruthy()
-    expect(ready.getAllByText('ok')).toHaveLength(9)
+    expect(ready.getByText(/^10 of 10 · asked/)).toBeTruthy()
+    expect(ready.getAllByText('ok')).toHaveLength(10)
     expect(ready.getByText('provider-auth')).toBeTruthy()
 
     const here = card('Workspaces on this machine')

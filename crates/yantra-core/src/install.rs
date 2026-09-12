@@ -1,12 +1,13 @@
 //! Installing what a machine needs to run a session, when a person asks
 //! ([ADR-0028]).
 //!
-//! **Only what is missing, and only [`BASICS`].** Each tool is looked for with
-//! the predicate `doctor` reports on, so the two never disagree about what a
-//! machine has. **Root is `sudo -n` and nothing more**: a sudo that wants a
-//! password stops the package step and names the command for a person to run
-//! there. No password is asked for, passed or stored. The `claude` step needs
-//! no root, so it still runs.
+//! **Only what is missing, and only [`BASICS`]** — plus what the vendor's
+//! installer needs to run, under the owner's *bare minimum* ruling (ADR-0028
+//! §5's 2026-09-12 note). Each tool is looked for with the predicate `doctor`
+//! reports on, so the two never disagree about what a machine has. **Root is
+//! `sudo -n` and nothing more**: a sudo that wants a password stops the package
+//! step and names the command for a person to run there. No password is asked
+//! for, passed or stored.
 //!
 //! [ADR-0028]: ../../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md
 
@@ -59,6 +60,39 @@ pub const COMMAND_LINE_TOOLS: &str = "xcode-select --install";
 /// How much of an installer's output a report keeps: the end, where the error is.
 pub const OUTPUT_CAP: usize = 2048;
 
+/// What the vendor's installer needs to run, then what `claude` needs at
+/// runtime on musl (code.claude.com/docs/en/setup, 2026-09-12). Package names:
+/// every manager here spells `curl` and `bash` alike, and the last three are
+/// Alpine's.
+const PREREQUISITES: [&str; 5] = ["curl", "bash", "libgcc", "libstdc++", "ripgrep"];
+
+/// Prints each missing prerequisite on a line of its own, and `musl` on a musl
+/// system.
+const MISSING_PREREQUISITES: &str = r#"command -v curl >/dev/null 2>&1 || echo curl
+command -v bash >/dev/null 2>&1 || echo bash
+if ls /lib/ld-musl-* >/dev/null 2>&1; then
+  echo musl
+  [ -e /usr/lib/libgcc_s.so.1 ] || [ -e /lib/libgcc_s.so.1 ] || echo libgcc
+  [ -e /usr/lib/libstdc++.so.6 ] || echo libstdc++
+  command -v rg >/dev/null 2>&1 || echo ripgrep
+fi"#;
+
+/// On musl `claude` must use the system `rg`, which the vendor's docs set in
+/// `~/.claude/settings.json`. Written where no settings file exists yet; a file
+/// that exists without it exits 1, because Yantra rewrites no one's settings.
+const RIPGREP_SETTING: &str = r#"f="$HOME/.claude/settings.json"
+if [ -e "$f" ]; then
+  grep -q USE_BUILTIN_RIPGREP "$f"
+else
+  mkdir -p "$HOME/.claude" && printf '%s\n' '{"env":{"USE_BUILTIN_RIPGREP":"0"}}' > "$f"
+fi"#;
+
+/// `root`, `none` where there is no sudo, `sudo` where it asks for nothing, and
+/// otherwise `refused` with what sudo said.
+const ROOT: &str = r#"[ "$(id -u)" = 0 ] && { echo root; exit 0; }
+command -v sudo >/dev/null 2>&1 || { echo none; exit 0; }
+if said=$(sudo -n true 2>&1); then echo sudo; else printf 'refused %s\n' "$said"; fi"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Manager {
     AptGet,
@@ -92,7 +126,9 @@ impl Manager {
         }
     }
 
-    /// Every one runs as root except `brew`'s, which refuses root.
+    /// Every one runs as root except `brew`'s, which refuses root. They are
+    /// joined with `;`, so one dead mirror in `apt-get update` does not stop
+    /// the install from the lists already there.
     fn commands(self, names: &str) -> Vec<String> {
         match self {
             Self::AptGet => vec![
@@ -100,7 +136,8 @@ impl Manager {
                 format!("apt-get install -y {names}"),
             ],
             Self::Dnf => vec![format!("dnf install -y {names}")],
-            Self::Pacman => vec![format!("pacman -S --needed --noconfirm {names}")],
+            // `-y`: a stale sync database answers "target not found".
+            Self::Pacman => vec![format!("pacman -Sy --needed --noconfirm {names}")],
             Self::Apk => vec![format!("apk add {names}")],
             Self::Zypper => vec![format!("zypper --non-interactive install {names}")],
             Self::Brew => vec![format!("brew install {names}")],
@@ -119,8 +156,9 @@ pub enum Outcome {
         because: Because,
         command: Option<String>,
     },
-    /// The installer ran and the tool is still not found. `output` is the last
-    /// [`OUTPUT_CAP`] bytes of what it printed.
+    /// The installer ran and the tool is still not found, or is found and does
+    /// not run. `output` is the last [`OUTPUT_CAP`] bytes of what it printed,
+    /// with the terminal's escape sequences taken out.
     Failed {
         output: String,
     },
@@ -128,23 +166,32 @@ pub enum Outcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Because {
-    /// The package manager needs root and `sudo -n` refused: sudo wants a
-    /// password there, or there is no sudo.
-    NeedsRoot,
+    /// sudo wants a password or a terminal; the command works typed there.
+    SudoAsks,
+    /// sudo refused this account, so the command is for root.
+    SudoRefused,
+    /// There is no sudo, so the command is for root.
+    NoSudo,
     NoPackageManager,
     /// macOS, and no Homebrew to install `tmux` with.
     NoHomebrew,
     /// macOS with no Homebrew and no `git`.
     NoCommandLineTools,
+    /// musl, and `~/.claude/settings.json` exists without the setting the
+    /// vendor's docs name.
+    RipgrepSetting,
 }
 
 impl fmt::Display for Because {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::NeedsRoot => {
-                "the package manager needs root, and `sudo -n` was refused: sudo asks for a \
-                 password there, or there is no sudo"
+            Self::SudoAsks => {
+                "the package manager needs root, and sudo asks for a password or a terminal there"
             }
+            Self::SudoRefused => {
+                "the package manager needs root, and sudo refused this account, so run it as root"
+            }
+            Self::NoSudo => "the package manager needs root, and there is no sudo, so run it as root",
             Self::NoPackageManager => {
                 "there is no package manager Yantra knows: apt-get, dnf, pacman, apk, zypper or brew"
             }
@@ -152,6 +199,10 @@ impl fmt::Display for Because {
             Self::NoCommandLineTools => {
                 "it is macOS, and Apple's git comes with the Command Line Tools, whose installer \
                  is a dialog on that Mac's own screen"
+            }
+            Self::RipgrepSetting => {
+                "claude is there, and on musl it needs `\"env\": {\"USE_BUILTIN_RIPGREP\": \"0\"}` \
+                 in ~/.claude/settings.json, which already holds settings Yantra will not rewrite"
             }
         })
     }
@@ -194,6 +245,30 @@ pub enum Error {
     NoStateDir,
 }
 
+/// What the one package-manager run came to.
+enum Packaged {
+    /// Nothing needed a package.
+    Nothing,
+    /// It ran; the end of its output.
+    Ran(String),
+    /// Nothing ran, and a person has to.
+    Stopped {
+        because: Because,
+        command: Option<String>,
+    },
+    /// macOS with no Homebrew.
+    NoHomebrew,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Root {
+    Superuser,
+    Sudo,
+    Asks,
+    Refused,
+    NoSudo,
+}
+
 pub async fn install(machine: &str) -> Result<Report, Error> {
     let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
     of(&ssh, machine, CLAUDE_INSTALLER).await
@@ -209,18 +284,49 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
         }
     }
 
-    let packages: Vec<Tool> = missing
+    let mut names: Vec<&'static str> = missing
         .iter()
-        .copied()
-        .filter(|tool| *tool != Tool::Claude)
+        .filter(|tool| **tool != Tool::Claude)
+        .map(|tool| tool.name())
         .collect();
-    let mut done = Vec::new();
-    if !packages.is_empty() {
-        done.extend(with_packages(exec, &packages).await?);
-    }
+    let tools = names.len();
+    let mut musl = false;
     if missing.contains(&Tool::Claude) {
-        let out = exec.exec(claude_installer).await?;
-        done.push(settle(exec, Tool::Claude, &out).await?);
+        let (needed, is_musl) = prerequisites(exec).await?;
+        musl = is_musl;
+        names.extend(needed);
+    }
+    // Whether the claude step waits on this package run.
+    let claude_waits = names.len() > tools;
+    let packaged = if names.is_empty() {
+        Packaged::Nothing
+    } else {
+        with_packages(exec, &names).await?
+    };
+
+    let mut done = Vec::new();
+    for &tool in &missing {
+        let outcome = match (&packaged, tool) {
+            (Packaged::Stopped { because, command }, Tool::Tmux | Tool::Git) => {
+                for_you(*because, command.as_deref())
+            }
+            (Packaged::Stopped { because, command }, Tool::Claude) if claude_waits => {
+                for_you(*because, command.as_deref())
+            }
+            (Packaged::NoHomebrew, Tool::Git) => {
+                for_you(Because::NoCommandLineTools, Some(COMMAND_LINE_TOOLS))
+            }
+            (Packaged::NoHomebrew, Tool::Tmux) => {
+                for_you(Because::NoHomebrew, Some(HOMEBREW_INSTALLER))
+            }
+            (Packaged::NoHomebrew, Tool::Claude) if claude_waits => {
+                for_you(Because::NoHomebrew, Some(HOMEBREW_INSTALLER))
+            }
+            (_, Tool::Claude) => claude(exec, claude_installer, musl).await?,
+            (Packaged::Ran(output), _) => settled(exec, tool, output).await?,
+            (Packaged::Nothing, _) => settled(exec, tool, "").await?,
+        };
+        done.push(Step { tool, outcome });
     }
 
     let steps = BASICS
@@ -241,6 +347,13 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
     })
 }
 
+fn for_you(because: Because, command: Option<&str>) -> Outcome {
+    Outcome::ForYou {
+        because,
+        command: command.map(str::to_owned),
+    }
+}
+
 async fn found<E: Exec>(exec: &E, tool: Tool) -> Result<bool, Error> {
     Ok(match tool {
         Tool::Tmux => match Tmux::resolve(exec).await {
@@ -253,20 +366,18 @@ async fn found<E: Exec>(exec: &E, tool: Tool) -> Result<bool, Error> {
     })
 }
 
-async fn with_packages<E: Exec>(exec: &E, tools: &[Tool]) -> Result<Vec<Step>, Error> {
-    let for_you = |because: Because, command: Option<&str>| -> Vec<Step> {
-        tools
-            .iter()
-            .map(|&tool| Step {
-                tool,
-                outcome: Outcome::ForYou {
-                    because,
-                    command: command.map(str::to_owned),
-                },
-            })
-            .collect()
-    };
+async fn prerequisites<E: Exec>(exec: &E) -> Result<(Vec<&'static str>, bool), Error> {
+    let out = exec.exec(MISSING_PREREQUISITES).await?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    let said: Vec<&str> = said.lines().map(str::trim).collect();
+    let needed = PREREQUISITES
+        .into_iter()
+        .filter(|name| said.contains(name))
+        .collect();
+    Ok((needed, said.contains(&"musl")))
+}
 
+async fn with_packages<E: Exec>(exec: &E, names: &[&str]) -> Result<Packaged, Error> {
     let mut manager = None;
     for candidate in Manager::ALL {
         if let Some(path) = agent::locate(exec, candidate.binary()).await? {
@@ -276,84 +387,148 @@ async fn with_packages<E: Exec>(exec: &E, tools: &[Tool]) -> Result<Vec<Step>, E
     }
     let Some((manager, path)) = manager else {
         if ssh::os(exec).await? == Os::MacOs {
-            return Ok(tools
-                .iter()
-                .map(|&tool| {
-                    let (because, command) = match tool {
-                        Tool::Git => (Because::NoCommandLineTools, COMMAND_LINE_TOOLS),
-                        _ => (Because::NoHomebrew, HOMEBREW_INSTALLER),
-                    };
-                    Step {
-                        tool,
-                        outcome: Outcome::ForYou {
-                            because,
-                            command: Some(command.to_owned()),
-                        },
-                    }
-                })
-                .collect());
+            return Ok(Packaged::NoHomebrew);
         }
-        return Ok(for_you(Because::NoPackageManager, None));
+        return Ok(Packaged::Stopped {
+            because: Because::NoPackageManager,
+            command: None,
+        });
     };
 
-    let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
     let names = names.join(" ");
     let commands = manager.commands(&names);
+    let stopped = |because, sudo: bool| {
+        let lines: Vec<String> = commands
+            .iter()
+            .map(|c| if sudo { format!("sudo {c}") } else { c.clone() })
+            .collect();
+        Ok(Packaged::Stopped {
+            because,
+            command: Some(lines.join("; ")),
+        })
+    };
     let run = if manager == Manager::Brew {
         // Its path, because `brew` is not on a non-interactive PATH (I-34).
         format!("{} install {names}", sq(&path))
     } else {
-        let Some(prefix) = root(exec).await? else {
-            let asked: Vec<String> = commands.iter().map(|c| format!("sudo {c}")).collect();
-            return Ok(for_you(Because::NeedsRoot, Some(&asked.join(" && "))));
+        let prefix = match root(exec).await? {
+            Root::Superuser => "",
+            Root::Sudo => "sudo -n ",
+            Root::Asks => return stopped(Because::SudoAsks, true),
+            Root::Refused => return stopped(Because::SudoRefused, false),
+            Root::NoSudo => return stopped(Because::NoSudo, false),
         };
         format!(
             "{prefix}env DEBIAN_FRONTEND=noninteractive sh -c {}",
-            sq(&commands.join(" && "))
+            sq(&commands.join("; "))
         )
     };
-
-    let out = exec.exec(&run).await?;
-    let mut steps = Vec::new();
-    for &tool in tools {
-        steps.push(settle(exec, tool, &out).await?);
-    }
-    Ok(steps)
+    Ok(Packaged::Ran(tail(&exec.exec(&run).await?)))
 }
 
-/// `Some("")` as root, `Some("sudo -n ")` where sudo asks for no password, and
-/// `None` otherwise. `-n` is what keeps a password out of this (ADR-0028 §5).
-async fn root<E: Exec>(exec: &E) -> Result<Option<&'static str>, Error> {
-    let out = exec
-        .exec("[ \"$(id -u)\" = 0 ] && echo root || { sudo -n true >/dev/null 2>&1 && echo sudo; }")
-        .await?;
-    Ok(match String::from_utf8_lossy(&out.stdout).trim() {
-        "root" => Some(""),
-        "sudo" => Some("sudo -n "),
-        _ => None,
-    })
+/// `-n` is what keeps a password out of this (ADR-0028 §5).
+async fn root<E: Exec>(exec: &E) -> Result<Root, Error> {
+    let out = exec.exec(ROOT).await?;
+    Ok(classify(String::from_utf8_lossy(&out.stdout).trim()))
+}
+
+fn classify(said: &str) -> Root {
+    match said {
+        "root" => Root::Superuser,
+        "sudo" => Root::Sudo,
+        "none" => Root::NoSudo,
+        _ => {
+            // With `-n`, sudo also says "a password is required" to an account
+            // it would refuse: it authenticates before it reads the policy.
+            let said = said.to_lowercase();
+            if said.contains("password") || said.contains("tty") || said.contains("terminal") {
+                Root::Asks
+            } else {
+                Root::Refused
+            }
+        }
+    }
 }
 
 /// Asked again rather than read off the exit status: an installer that exits
 /// 0 and puts nothing where Yantra looks has not installed anything it can use.
-async fn settle<E: Exec>(exec: &E, tool: Tool, out: &ssh::Output) -> Result<Step, Error> {
-    let outcome = if found(exec, tool).await? {
+async fn settled<E: Exec>(exec: &E, tool: Tool, output: &str) -> Result<Outcome, Error> {
+    Ok(if found(exec, tool).await? {
         Outcome::Installed
     } else {
-        Outcome::Failed { output: tail(out) }
+        Outcome::Failed {
+            output: output.to_owned(),
+        }
+    })
+}
+
+/// A `claude` that is found and does not start — the musl libraries missing,
+/// say — is `Failed`, not `Installed`.
+async fn claude<E: Exec>(exec: &E, installer: &str, musl: bool) -> Result<Outcome, Error> {
+    let out = exec.exec(installer).await?;
+    let Some(path) = agent::locate(exec, "claude").await? else {
+        return Ok(Outcome::Failed { output: tail(&out) });
     };
-    Ok(Step { tool, outcome })
+    let runs = exec
+        .exec(&format!("{} --version >/dev/null 2>&1", sq(&path)))
+        .await?;
+    if !runs.success() {
+        return Ok(Outcome::Failed {
+            output: format!(
+                "{path} is there and `claude --version` exited {}; the installer said {}",
+                runs.status,
+                tail(&out)
+            ),
+        });
+    }
+    if musl && !exec.exec(RIPGREP_SETTING).await?.success() {
+        return Ok(for_you(Because::RipgrepSetting, None));
+    }
+    Ok(Outcome::Installed)
 }
 
 fn tail(out: &ssh::Output) -> String {
     let mut all = out.stdout.clone();
     all.extend_from_slice(&out.stderr);
-    let from = all.len().saturating_sub(OUTPUT_CAP);
-    format!(
-        "exit {}: {}",
-        out.status,
-        String::from_utf8_lossy(&all[from..]).trim()
-    )
+    let text = plain(&String::from_utf8_lossy(&all));
+    let mut from = text.len().saturating_sub(OUTPUT_CAP);
+    while !text.is_char_boundary(from) {
+        from += 1;
+    }
+    format!("exit {}: {}", out.status, text[from..].trim())
+}
+
+/// Without the terminal's escape sequences: a person reads them as noise, and
+/// a phone draws them as boxes. A carriage return is a line of its own.
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{1b}' => match chars.next() {
+                Some('[') => {
+                    for c in chars.by_ref() {
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    for c in chars.by_ref() {
+                        if c == '\u{7}' || c == '\u{1b}' {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\r' => out.push('\n'),
+            '\n' | '\t' => out.push(c),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -363,12 +538,34 @@ mod tests {
     /// Asserted whole: the person pastes it, and the automated half is the
     /// same list with `sudo -n` in front.
     #[test]
-    fn apt_updates_its_lists_before_it_installs() {
+    fn apt_updates_its_lists_and_pacman_syncs_before_they_install() {
         assert_eq!(
             Manager::AptGet.commands("tmux git"),
             ["apt-get update", "apt-get install -y tmux git"]
         );
+        assert_eq!(
+            Manager::Pacman.commands("tmux"),
+            ["pacman -Sy --needed --noconfirm tmux"]
+        );
         assert_eq!(Manager::Apk.commands("tmux"), ["apk add tmux"]);
+    }
+
+    /// Measured on Alpine 3.22's sudo: "a password is required" is also what
+    /// an account with no sudoers line hears under `-n`.
+    #[test]
+    fn what_sudo_said_decides_whose_command_it_is() {
+        assert_eq!(classify("root"), Root::Superuser);
+        assert_eq!(classify("sudo"), Root::Sudo);
+        assert_eq!(classify("none"), Root::NoSudo);
+        assert_eq!(classify("refused sudo: a password is required"), Root::Asks);
+        assert_eq!(
+            classify("refused sudo: sorry, you must have a tty to run sudo"),
+            Root::Asks
+        );
+        assert_eq!(
+            classify("refused yantra is not in the sudoers file."),
+            Root::Refused
+        );
     }
 
     #[test]
@@ -382,13 +579,7 @@ mod tests {
             steps: vec![step(Outcome::Present), step(outcome)],
         };
         assert!(report(Outcome::Installed).complete());
-        assert!(
-            !report(Outcome::ForYou {
-                because: Because::NeedsRoot,
-                command: Some("sudo apk add git".to_owned()),
-            })
-            .complete()
-        );
+        assert!(!report(for_you(Because::SudoAsks, Some("sudo apk add git"))).complete());
         assert!(
             !report(Outcome::Failed {
                 output: String::new()
@@ -398,11 +589,13 @@ mod tests {
     }
 
     #[test]
-    fn the_output_kept_is_the_end_of_it() {
+    fn the_output_kept_is_the_end_of_it_without_escapes() {
+        let mut stdout = vec![b'a'; OUTPUT_CAP * 2];
+        stdout.extend_from_slice(b"\x1b[1;31mE:\x1b[0m Unable\r\x1b]0;title\x07 to locate");
         let out = ssh::Output {
             status: 1,
-            stdout: vec![b'a'; OUTPUT_CAP * 2],
-            stderr: b"E: Unable to locate package tmux".to_vec(),
+            stdout,
+            stderr: b" package tmux".to_vec(),
         };
         let kept = tail(&out);
         assert!(
@@ -410,6 +603,9 @@ mod tests {
             "{}",
             kept.len()
         );
-        assert!(kept.ends_with("Unable to locate package tmux"), "{kept}");
+        assert!(
+            kept.ends_with("E: Unable\n to locate package tmux"),
+            "{kept:?}"
+        );
     }
 }

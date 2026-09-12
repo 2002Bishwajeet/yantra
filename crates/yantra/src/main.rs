@@ -1131,6 +1131,7 @@ async fn install_basics(machine: &str) -> ExitCode {
 fn render_install(report: &install::Report) -> String {
     let mut out = format!("{}:\n", report.machine);
     let mut commands: Vec<&str> = Vec::new();
+    let mut shown: Vec<&str> = Vec::new();
     for step in &report.steps {
         let said = match &step.outcome {
             Outcome::Present => "already there".to_owned(),
@@ -1143,7 +1144,12 @@ fn render_install(report: &install::Report) -> String {
                 }
                 format!("not installed: {because}")
             }
+            // Two tools from one package run share one output.
+            Outcome::Failed { output } if shown.contains(&output.as_str()) => {
+                "did not install; the output is above".to_owned()
+            }
             Outcome::Failed { output } => {
+                shown.push(output);
                 let indented: Vec<String> =
                     output.lines().map(|line| format!("      {line}")).collect();
                 format!("did not install:\n{}", indented.join("\n"))
@@ -3036,8 +3042,8 @@ mod tests {
     #[test]
     fn an_install_names_the_command_it_left_once() {
         let left = Outcome::ForYou {
-            because: install::Because::NeedsRoot,
-            command: Some("sudo apt-get update && sudo apt-get install -y tmux git".to_owned()),
+            because: install::Because::SudoAsks,
+            command: Some("sudo apt-get update; sudo apt-get install -y tmux git".to_owned()),
         };
         let report = install::Report {
             machine: "pi".to_owned(),
@@ -3059,7 +3065,7 @@ mod tests {
         let rendered = render_install(&report);
         assert_eq!(
             rendered
-                .matches("sudo apt-get update && sudo apt-get install -y tmux git")
+                .matches("sudo apt-get update; sudo apt-get install -y tmux git")
                 .count(),
             1,
             "{rendered}"
