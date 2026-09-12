@@ -1125,7 +1125,7 @@ the section it governs, with its cost.
 **Yantra internal** — [D1](../archive/design/01-dashboard.md); [D2](02-setup.md);
 [R13](../research/13-dashboard-revamp-and-github.md);
 [`docs/design-system.md`](../design-system.md) §§5–7;
-[`docs/plans/m4-dashboard-next.md`](../archive/plans/m4-dashboard-next.md) §"What the design system should be
+[`docs/archive/plans/m4-dashboard-next.md`](../archive/plans/m4-dashboard-next.md) §"What the design system should be
 asked for"; [`docs/brainstorm.md:394`](../brainstorm.md); ADRs
 [0011](../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
 [0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),
