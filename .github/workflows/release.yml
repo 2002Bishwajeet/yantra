@@ -167,6 +167,9 @@ jobs:
           PACKAGES: ${{ matrix.packages }}
           ZIGBUILD: ${{ matrix.zigbuild }}
           DASHBOARD: ${{ matrix.dashboard }}
+          # Not a secret (ADR-0023): a repository variable, baked in for
+          # `option_env!` to read (crates/yantra-core/src/github.rs).
+          YANTRA_GITHUB_CLIENT_ID: ${{ vars.YANTRA_GITHUB_CLIENT_ID }}
         run: |
           set -euo pipefail
           pkg_args=()
@@ -177,6 +180,12 @@ jobs:
           # are built from the same command and neither has the feature.
           if [ "$DASHBOARD" = "true" ]; then
             pkg_args+=(--features yantrad/embed-dashboard)
+            # A yantrad with no client id 500s the GitHub step on every fresh
+            # install (G1.8), so a release build refuses rather than ship it.
+            if [ -z "$YANTRA_GITHUB_CLIENT_ID" ]; then
+              echo "::error::YANTRA_GITHUB_CLIENT_ID is not set as a repository variable. Register an OAuth App with the device flow enabled, then: gh variable set YANTRA_GITHUB_CLIENT_ID --body <id>"
+              exit 1
+            fi
           fi
           if [ "$ZIGBUILD" = "true" ]; then
             cargo zigbuild --release --locked --target "$TARGET" "${pkg_args[@]}"

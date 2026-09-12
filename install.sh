@@ -144,6 +144,10 @@ if [ ! -e "$DAEMON_ENV" ]; then
 # this file, and so does /settings in the dashboard.
 #YANTRA_NTFY_URL=https://ntfy.sh/<a-topic-nobody-guesses>
 #YANTRA_NTFY_TOKEN=
+
+# The GitHub OAuth App's client id (ADR-0023). The release build bakes one in;
+# set this only to override it, for example a self-built binary with none.
+#YANTRA_GITHUB_CLIENT_ID=
 ENV
     as_root chown yantra:yantra "$DAEMON_ENV"
     as_root chmod 600 "$DAEMON_ENV"
