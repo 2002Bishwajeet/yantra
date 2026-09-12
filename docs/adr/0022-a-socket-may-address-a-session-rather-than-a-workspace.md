@@ -8,7 +8,7 @@
   as they are written.
 - **Unblocks:** [Y-179](../../tracker.md#3-task-board). The work behind it is **Y-319**
   and **Y-320**.
-- **Design:** [D6](../design/06-sessions-attention-spend.md) §6, which settles the page and hands this
+- **Design:** [D6](../archive/design/06-sessions-attention-spend.md) §6, which settles the page and hands this
   document the direction.
 
 ## Context

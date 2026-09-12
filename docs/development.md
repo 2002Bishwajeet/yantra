@@ -172,6 +172,22 @@ variables in the shell you start `yantrad` from, as above.
 `yantra notify` is the diagnostic for a box with no screen: it proves the topic, the token and egress
 in one command, and every refusal names the variable that would change it without printing its value.
 
+## GitHub sign-in
+
+`yantra github login`, `yantrad`'s own device flow, and the dashboard's connect sheet all need an
+OAuth App's client id ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md)). A release
+build bakes one in (`.github/workflows/release.yml`), but a binary built from source has none, so
+export it before you sign in:
+
+```bash
+export YANTRA_GITHUB_CLIENT_ID=Iv1....
+yantra github login
+```
+
+The environment always wins over what a build baked in
+([`crates/yantra-core/src/github.rs`](../crates/yantra-core/src/github.rs)). With neither set, the
+flow refuses by naming the variable rather than failing at GitHub with no explanation.
+
 ## The dashboard over HTTPS
 
 `yantrad` speaks plain HTTP and will keep doing so. TLS is `tailscale serve`'s job: it already holds

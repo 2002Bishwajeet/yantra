@@ -5,7 +5,7 @@ them and the owner mints them. **The owner ruled §6's scope question on 2026-08
 [Y-160](../../tracker.md#3-task-board) beside Y-157; the DNS blocker on D2.8 was mine and is
 withdrawn. **[Y-163](../../tracker.md#3-task-board) is D2.1 and D2.2**, minted 2026-08-09.
 
-Companion to **[D1 — The dashboard you work in](01-dashboard.md)**. Both read the same probe (§3).
+Companion to **[D1 — The dashboard you work in](../archive/design/01-dashboard.md)**. Both read the same probe (§3).
 
 ---
 
@@ -285,7 +285,7 @@ before the first install*; [`docs/brainstorm.md`](../brainstorm.md) line 394;
 Y-156–Y-159 and questions Q15, Q17; invariants I-34, I-44.
 
 **`[V]` — measured 2026-08-08 and 2026-08-09**, recorded in full in
-[R13](../research/13-dashboard-revamp-and-github.md) and [D1](01-dashboard.md): `cachyos-g14` has no
+[R13](../research/13-dashboard-revamp-and-github.md) and [D1](../archive/design/01-dashboard.md): `cachyos-g14` has no
 sshd; the Mac has no `gh` and an ssh key not registered with the account; `gh` 2.96.0 and `glab`
 1.109.0 are present on `cachyos-g14`, `tea` is not.
 

@@ -420,7 +420,7 @@ number**, and it is not Y-370's to make.
   there is 10 to 25 ms.
 - **HTTPS.** Everything here is plain HTTP straight to `yantrad`. A phone reaches the dashboard
   through `tailscale serve`, which terminates TLS and speaks **HTTP/2**
-  ([`docs/plans/m5-control-from-the-phone.md`](../plans/m5-control-from-the-phone.md)). HTTP/2
+  ([`docs/archive/plans/m5-control-from-the-phone.md`](../archive/plans/m5-control-from-the-phone.md)). HTTP/2
   multiplexes, so a nineteen-file first load should fare *better* there than it does here, and the
   handshake costs one or two extra round trips once. Neither was measured.
 

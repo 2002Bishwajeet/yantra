@@ -2,10 +2,10 @@
 
 **Status:** proposed. Written 2026-08-09 from the owner's spec. Opens no rows (§B0) — §9 proposes
 them and the owner mints them. **The owner minted the first on 2026-08-09**:
-[Y-161](../../tracker.md#3-task-board) is D1.2, and D1.3, D1.5 and [D2](02-setup.md).3 were all
+[Y-161](../../../tracker.md#3-task-board) is D1.2, and D1.3, D1.5 and [D2](../../design/02-setup.md).3 were all
 waiting on it.
 
-**Read [R13](../research/13-dashboard-revamp-and-github.md) first.** It measured what the page is
+**Read [R13](../../research/13-dashboard-revamp-and-github.md) first.** It measured what the page is
 against the founding UI principle and priced a clone against the decisions it collides with. This
 document is the design that follows from it plus what the owner decided after reading it.
 
@@ -22,7 +22,7 @@ document is the design that follows from it plus what the owner decided after re
 That answers the question R13 §6 left open and prices everything below. A terminal you live in
 justifies real investment; a launcher would not have.
 
-**It settles nothing about pigment or type.** [`docs/design-system.md`](../design-system.md) owns
+**It settles nothing about pigment or type.** [`docs/design-system.md`](../../design-system.md) owns
 that, and §8 records the one collision.
 
 ---
@@ -31,7 +31,7 @@ that, and §8 records the one collision.
 
 One URL today. Nothing is bookmarkable and nothing survives a reload — that, not the feature count,
 is what "handle everything via the dashboard" collides with.
-[`crates/yantrad/src/web.rs`](../../crates/yantrad/src/web.rs) already serves any path as the app,
+[`crates/yantrad/src/web.rs`](../../../crates/yantrad/src/web.rs) already serves any path as the app,
 so the router is web-only work blocked on nothing.
 
 | Path | Draws | Needs |
@@ -50,7 +50,7 @@ so the router is web-only work blocked on nothing.
 
 ## 2. The card, and one verb
 
-[`Act.tsx`](../../web/src/components/Act.tsx) shows up/down/resume and makes the reader choose. A
+[`Act.tsx`](../../../web/src/components/Act.tsx) shows up/down/resume and makes the reader choose. A
 card should already know:
 
 | State | The one button |
@@ -62,7 +62,7 @@ card should already know:
 
 Everything else goes in an overflow. Fewer decisions is the whole job.
 
-> **Built 2026-08-09 by [Y-167](../../tracker.md#3-task-board), and the first row's label
+> **Built 2026-08-09 by [Y-167](../../../tracker.md#3-task-board), and the first row's label
 > changed.** *Resume* is already the name of a route that respawns an agent that **ended**, so
 > using the same word for a session that is **alive** would have made one word mean two things in
 > one column. A live session is **Open** — a URL, not a verb the daemon runs — and *Resume* stays
@@ -78,7 +78,7 @@ Everything else goes in an overflow. Fewer decisions is the whole job.
 
 **Keep the staleness honesty.** The page distinguishes *nobody looked* from *a look failed* from *a
 machine did not answer*, and stamps every reading's age
-([`useLooked.ts`](../../web/src/useLooked.ts)). That is rare and correct — never drop it. But four
+([`useLooked.ts`](../../../web/src/useLooked.ts)). That is rare and correct — never drop it. But four
 age lines become one freshness dot per card plus a single global *as of*.
 
 ---
@@ -99,10 +99,10 @@ probe already has a call site.
 
 | Question | Command on the target | Existing call site |
 | --- | --- | --- |
-| is the repo there? | `test -d <path>` | [`up.rs:216`](../../crates/yantra-core/src/up.rs) `exists_command` |
+| is the repo there? | `test -d <path>` | [`up.rs:216`](../../../crates/yantra-core/src/up.rs) `exists_command` |
 | is it *that* repo? | `git -C <path> remote get-url origin` | new, one line |
-| was there a session? | tmux session listing | [`sessions.rs`](../../crates/yantra-core/src/sessions.rs) `list()` |
-| was anything running in it? | the workspace verdict | [`status.rs`](../../crates/yantra-core/src/status.rs) `Verdict` |
+| was there a session? | tmux session listing | [`sessions.rs`](../../../crates/yantra-core/src/sessions.rs) `list()` |
+| was anything running in it? | the workspace verdict | [`status.rs`](../../../crates/yantra-core/src/status.rs) `Verdict` |
 
 ### 3.2 The four outcomes
 
@@ -121,11 +121,11 @@ remote and let the reader choose a new path.
 ### 3.3 Where it lives
 
 `GET /api/machines/{machine}/reconcile?repo=<url>` returning the four readings and the recommended
-outcome. It **awaits ssh**, which [`crates/yantrad/CLAUDE.md`](../../crates/yantrad/CLAUDE.md)
+outcome. It **awaits ssh**, which [`crates/yantrad/CLAUDE.md`](../../../crates/yantrad/CLAUDE.md)
 forbids inside a read handler. Two ways out — pick one in the ADR of §4.4:
 
 - shape it as a **write** (the handler's stated exception), or
-- fold it into [`refresh.rs`](../../crates/yantrad/src/refresh.rs)'s snapshot and read the cache.
+- fold it into [`refresh.rs`](../../../crates/yantrad/src/refresh.rs)'s snapshot and read the cache.
 
 ---
 
@@ -134,7 +134,7 @@ forbids inside a read handler. Two ways out — pick one in the ADR of §4.4:
 ### 4.1 Agent ⇄ shell tabs
 
 `up(name, term, agent: Option<Agent>)` already treats *no agent* as "open a plain shell", so the
-launch-time choice exists ([`up.rs:99`](../../crates/yantra-core/src/up.rs)). What is missing is
+launch-time choice exists ([`up.rs:99`](../../../crates/yantra-core/src/up.rs)). What is missing is
 swapping **within** an open workspace: a second pane, a second tab, one socket each.
 
 ### 4.2 A second agent
@@ -147,7 +147,7 @@ pub enum Agent { Claude }
 
 The owner now wants Codex, Cursor and others. That is an **ADR-0011 amendment**, not a bug — the
 comment invites it. It costs: a second variant, a second `agent::prepare`, and
-[`agent.rs`](../../crates/yantra-core/src/agent.rs)'s `CANDIDATES` (six Claude-shaped install paths)
+[`agent.rs`](../../../crates/yantra-core/src/agent.rs)'s `CANDIDATES` (six Claude-shaped install paths)
 becoming per-agent. Note also that `agent.rs` matches a fragment of Claude's trust dialog to detect
 an inert agent (I-49) — each new agent needs its own equivalent or an honest `Verdict::Unclear`.
 
@@ -155,7 +155,7 @@ an inert agent (I-49) — each new agent needs its own equivalent or an honest `
 
 Claude Code's `/remote-control` (alias **`/rc`**) pairs a **local** session to claude.ai/code and
 the Claude mobile app. The docs' own recommendation for surviving an ssh disconnect is *"start it
-inside `tmux` or `screen`"* — which is [ADR-0011](../adr/0011-claude-code-runs-as-a-tui-in-tmux.md)
+inside `tmux` or `screen`"* — which is [ADR-0011](../../adr/0011-claude-code-runs-as-a-tui-in-tmux.md)
 verbatim. **Every session Yantra starts is already a valid `/rc` host.** It makes outbound HTTPS
 only and opens no inbound ports, so it does not conflict with tailnet-only.
 
@@ -166,7 +166,7 @@ Three constraints it drags in:
 2. **Therefore I-44 applies.** On macOS the credential is in the login keychain and ssh lands in
    launchd's `Background` domain, so `/rc` will work **only in a tmux server started at that Mac's
    own keyboard** — the exact condition
-   [ADR-0018](../adr/0018-the-tmux-server-carries-the-macos-login-session.md) documents. This is the
+   [ADR-0018](../../adr/0018-the-tmux-server-carries-the-macos-login-session.md) documents. This is the
    second feature to land on that constraint and it strengthens the case for its §7 launchd job.
    **Unverified: not yet measured.** One `/rc` in a Yantra-started session on that Mac settles it.
 3. **Its push notifications overlap with ours.** Claude's `/config` offers *Push when Claude decides*
@@ -184,9 +184,9 @@ For agents with no equivalent, fall through to the PWA terminal (§4.5).
 ### 4.4 A free shell, and the decision it needs
 
 `GET /api/machines/{machine}/shell` mirrors
-[`terminal.rs`](../../crates/yantrad/src/terminal.rs) exactly, so the code is cheap. **But it widens
+[`terminal.rs`](../../../crates/yantrad/src/terminal.rs) exactly, so the code is cheap. **But it widens
 what a browser tab reaches** from "a pane inside a workspace's session" to "any command on any
-machine", and [ADR-0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)'s
+machine", and [ADR-0016](../../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)'s
 authoriser is all that stands between that and the tailnet. R13 flags this as decision **D**; the
 owner has made it MVP, so it must be written before the button ships. **Next free ADR number is
 0019.**
@@ -200,7 +200,7 @@ tmux is already the TUI (§B2). It is a requirement that the **browser terminal 
 rather than a log tail. Yantra already tracks this:
 
 - **I-36 / I-43** — forward a `TERM` the far side actually has;
-  [`terminfo.rs`](../../crates/yantra-core/src/terminfo.rs) opens *"Whether the machine you attach to
+  [`terminfo.rs`](../../../crates/yantra-core/src/terminfo.rs) opens *"Whether the machine you attach to
   knows the terminal you sit at."*
 - **`yantra fix-terminfo <machine>`** exists as a verb because this bites.
 - **I-35** — do not glob the tmux path.
@@ -220,9 +220,9 @@ What still needs proving, each a test:
 
 ### 4.6 PWA
 
-Already scaffolded: [`web/public/manifest.webmanifest`](../../web/public/manifest.webmanifest),
-[`web/public/sw.js`](../../web/public/sw.js), 192/512 icons, an apple-touch-icon, and registration at
-[`main.tsx:14`](../../web/src/main.tsx). Cards must survive a narrow screen; wide tables do not.
+Already scaffolded: [`web/public/manifest.webmanifest`](../../../web/public/manifest.webmanifest),
+[`web/public/sw.js`](../../../web/public/sw.js), 192/512 icons, an apple-touch-icon, and registration at
+[`main.tsx:14`](../../../web/src/main.tsx). Cards must survive a narrow screen; wide tables do not.
 
 ---
 
@@ -292,16 +292,16 @@ expressible in `yantra` first."*
 
 **A workspace may need an origin.** Today `Workspace` is `{ name, machine, repo, startup }` and
 `repo` is a path on the far machine — there is no url, origin, remote or provider field. Adding one
-is [ADR-0007](../adr/0007-workspace-schema-v1.md)'s decision **B**, in the shape
-[ADR-0010](../adr/0010-drop-branch-from-the-workspace-schema.md) already used to remove a field.
+is [ADR-0007](../../adr/0007-workspace-schema-v1.md)'s decision **B**, in the shape
+[ADR-0010](../../adr/0010-drop-branch-from-the-workspace-schema.md) already used to remove a field.
 
 ---
 
 ## 6. Notifications are already built
 
-[`crates/yantra-core/src/notify.rs`](../../crates/yantra-core/src/notify.rs), wired through
-[`yantrad/src/refresh.rs`](../../crates/yantrad/src/refresh.rs) and
-[`yantrad/src/notify.rs`](../../crates/yantrad/src/notify.rs). `yantra notify 'hello'` posts to
+[`crates/yantra-core/src/notify.rs`](../../../crates/yantra-core/src/notify.rs), wired through
+[`yantrad/src/refresh.rs`](../../../crates/yantrad/src/refresh.rs) and
+[`yantrad/src/notify.rs`](../../../crates/yantrad/src/notify.rs). `yantra notify 'hello'` posts to
 `YANTRA_NTFY_URL` (`YANTRA_NTFY_TOKEN` optional). Q16 answered it; the M7 plan §3.6 designed it.
 
 "Agents that need attention" is already a named verdict — `AwaitingTrust`, `Crashed`, `Killed`,
@@ -335,12 +335,12 @@ toggle-group.
 **Do not take:** its Effect runtime, ~~TanStack Router~~, zustand, Clerk, its `libghostty-vt` WASM
 terminal (Yantra has xterm.js), its `packages/ssh` (it sets `ControlMaster=no`, the opposite of I-20,
 because its case is one long tunnel and Yantra's is repeated short exec), or its
-`native/resource-monitor` (Yantra's [`probes.rs`](../../crates/yantra-agent/src/probes.rs) is
+`native/resource-monitor` (Yantra's [`probes.rs`](../../../crates/yantra-agent/src/probes.rs) is
 zero-dependency and documents per-platform findings `sysinfo` would discard).
 
 > **TanStack Router struck from that list, 2026-08-09.** The owner ruled for battle-tested packages
-> in `web/` ([CLAUDE.md](../../CLAUDE.md) §B1, [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s
-> amendment), and [Y-162](../../tracker.md#3-task-board) adopted it. What stays refused is T3 Code's
+> in `web/` ([CLAUDE.md](../../../CLAUDE.md) §B1, [ADR-0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s
+> amendment), and [Y-162](../../../tracker.md#3-task-board) adopted it. What stays refused is T3 Code's
 > *runtime* — Effect, zustand, Clerk — which is what this line was really about.
 
 **Attribution.** MIT requires the copyright notice and licence text to ship with any substantial
@@ -351,30 +351,30 @@ URL and the commit taken from, plus a header on anything copied near-verbatim.
 
 ## 8. The design-system collision
 
-[`docs/design-system.md`](../design-system.md) §7 was written to be adopted by the dashboard and
-**never was**: [`web/src/index.css`](../../web/src/index.css) imports `tailwindcss`,
+[`docs/design-system.md`](../../design-system.md) §7 was written to be adopted by the dashboard and
+**never was**: [`web/src/index.css`](../../../web/src/index.css) imports `tailwindcss`,
 `tw-animate-css` and `shadcn/tailwind.css`, and does not import `design/tokens.css`.
 
 This does **not** block §7 above — the ported primitives use the same shadcn CSS-variable names, so
 design-system §7's `--accent` bridge applies to them unchanged. Adopting Pattachitra stays a separate
 piece of work whose diff is `index.css`, exactly as
-[ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md) promised.
+[ADR-0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md) promised.
 
-> **Not quite unchanged, 2026-08-09 ([Y-164](../../tracker.md#3-task-board)).** T3 Code's primitives
+> **Not quite unchanged, 2026-08-09 ([Y-164](../../../tracker.md#3-task-board)).** T3 Code's primitives
 > also name five tokens shadcn's sheet does not have — `--control-radius`, `--destructive-foreground`,
 > `--placeholder` and the two `--app-scrollbar-thumb*`. The port added them to
-> [`index.css`](../../web/src/index.css) at T3's values. The bridge still applies; the swap point is five
+> [`index.css`](../../../web/src/index.css) at T3's values. The bridge still applies; the swap point is five
 > lines larger than this section assumed. Tooltip's opt-in `variant="glass"` was **not** bridged — it
 > wants T3's `dropdown-glass`, which is a glass system rather than a token.
 >
 > **And the overlays made that system compulsory, 2026-08-09
-> ([Y-166](../../tracker.md#3-task-board)).** `dropdown-glass` is not optional for `menu`, `select`
+> ([Y-166](../../../tracker.md#3-task-board)).** `dropdown-glass` is not optional for `menu`, `select`
 > and `combobox`, and `dialog-glass`/`dialog-backdrop` are not optional for `dialog` and `command`:
 > a popup with no rule behind those class names has **no background at all**, not merely a plainer
 > one. All three are now in `index.css`, along with `--glass-blur`, `--glass-opacity`,
 > `--glass-saturation`, `--icon-muted`, `--secondary-label` and the two `--command-*-inset` tokens.
 > T3's `.dark` selector became this repo's `prefers-color-scheme` media query, because
-> [Q6](../../tracker.md#6-open-questions) ruled out a theme switcher. Tooltip's `glass` variant works
+> [Q6](../../../tracker.md#6-open-questions) ruled out a theme switcher. Tooltip's `glass` variant works
 > as a side effect. **A design system replacing this file must replace the three rules too** — they
 > are the first thing in `index.css` that is a surface rather than a token.
 
@@ -389,9 +389,9 @@ before it starts and what makes it done.
 
 | # | Work | Done when | Touches |
 | --- | --- | --- | --- |
-| **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | ✅ **[Y-164](../../tracker.md#3-task-board)** and **[Y-166](../../tracker.md#3-task-board)**, 2026-08-09 — the whole take list, twenty-four files pinned to commit `963ebf5b`. Y-164 took the fifteen that need no icon; Y-166 added `lucide-react` and the seven overlays | `web/src/components/ui/`, `web/src/index.css`, `web/package.json` |
-| **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | ✅ **[Y-161](../../tracker.md#3-task-board)**, 2026-08-09 — the History API, no dependency | `web/src/App.tsx`, `web/src/routes/` |
-| **D1.3** | One computed verb per workspace card (§2) | ✅ **[Y-167](../../tracker.md#3-task-board)**, 2026-08-09 — `chosen()` reads the agent state and the row draws the one button it is for; TERMINAL and EDIT stopped being columns and became overflow items | `web/src/components/Act.tsx`, `Overflow.tsx`, `columns.tsx` |
+| **D1.1** | Port T3 Code's `ui/` primitives, with the attribution file | ✅ **[Y-164](../../../tracker.md#3-task-board)** and **[Y-166](../../../tracker.md#3-task-board)**, 2026-08-09 — the whole take list, twenty-four files pinned to commit `963ebf5b`. Y-164 took the fifteen that need no icon; Y-166 added `lucide-react` and the seven overlays | `web/src/components/ui/`, `web/src/index.css`, `web/package.json` |
+| **D1.2** | Add a router; split `App.tsx` into `/`, `/m/{machine}`, `/w/{name}` | ✅ **[Y-161](../../../tracker.md#3-task-board)**, 2026-08-09 — the History API, no dependency | `web/src/App.tsx`, `web/src/routes/` |
+| **D1.3** | One computed verb per workspace card (§2) | ✅ **[Y-167](../../../tracker.md#3-task-board)**, 2026-08-09 — `chosen()` reads the agent state and the row draws the one button it is for; TERMINAL and EDIT stopped being columns and became overflow items | `web/src/components/Act.tsx`, `Overflow.tsx`, `columns.tsx` |
 | **D1.4** | Collapse four age lines into a freshness dot and one global *as of* (§2) | the three staleness states remain distinguishable | `web/src/useLooked.ts`, `Age.tsx` |
 | **D1.5** | `/w/{name}` lands in a full-height linkable terminal | the URL reopens the same pane after reload | `web/src/components/Terminal.tsx` |
 | **D1.6** | Terminal fidelity tests 1–8 (§4.5) | eight tests, each named for its row, green against a real pty | `web/src/terminal.test.tsx`, `crates/yantra-core/src/pty.rs` |
@@ -402,10 +402,10 @@ before it starts and what makes it done.
 
 | # | Work | Blocked on |
 | --- | --- | --- |
-| **D1.9** | `yantra shell <machine>` and `GET /api/machines/{m}/shell` | **an unwritten ADR** — what a free shell may reach (§4.4). It said *ADR-0019*; that number went to [the probe decision](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md) on 2026-08-11, because numbers are assigned when an ADR is written and never reserved |
+| **D1.9** | `yantra shell <machine>` and `GET /api/machines/{m}/shell` | **an unwritten ADR** — what a free shell may reach (§4.4). It said *ADR-0019*; that number went to [the probe decision](../../adr/0019-a-probe-that-asks-a-machine-is-a-post.md) on 2026-08-11, because numbers are assigned when an ADR is written and never reserved |
 | **D1.10** | The reconcile endpoint and `/launch` (§3) | the read-awaits-ssh question (§3.3) |
 | **D1.11** | `yantra clone` and `POST …/clone` | decision **C**, and **B** if a workspace gains an origin |
-| **D1.12** | `yantra ls repos --machine` and `/m/{m}/repos` | §3.3, and a provider CLI authenticated on that machine (see [D2](02-setup.md)) |
+| **D1.12** | `yantra ls repos --machine` and `/m/{m}/repos` | §3.3, and a provider CLI authenticated on that machine (see [D2](../../design/02-setup.md)) |
 | **D1.13** | A second `Agent` variant (§4.2) | an **ADR-0011 amendment** |
 
 ### Blocked on a measurement
@@ -417,11 +417,11 @@ before it starts and what makes it done.
 
 ### Not engineering
 
-Provisioning and readiness moved to **[D2 — Setting a machine up](02-setup.md)**, which owns
+Provisioning and readiness moved to **[D2 — Setting a machine up](../../design/02-setup.md)**, which owns
 `yantra doctor` — the probe the dashboard, the installer and the agent path all read.
 
 **No milestone claims any of this.** GitHub integration sits under *Future Possibilities* in
-[`brainstorm.md:535`](../brainstorm.md) and *Stretch Goals* in [`vision.md`](../vision.md), and M0–M10
+[`brainstorm.md:535`](../../brainstorm.md) and *Stretch Goals* in [`vision.md`](../../vision.md), and M0–M10
 contain nothing about a router, a repository or a clone. Creating the milestone is the owner's
 (§B0).
 
@@ -447,14 +447,14 @@ Accessed **2026-08-09**.
 config file; `glab auth login --help` showing `--hostname`, `--api-host`, `--api-protocol`;
 `glab repo list --help` showing `-F/--output text|json`, `--jq` and `-P/--per-page`.
 
-**Yantra internal** — [R13](../research/13-dashboard-revamp-and-github.md);
-[`docs/brainstorm.md`](../brainstorm.md) lines 266-302, 394-404, 535;
-[`docs/design-system.md`](../design-system.md) §7; ADRs
-[0004](../adr/0004-rust-for-the-daemon.md), [0007](../adr/0007-workspace-schema-v1.md),
-[0010](../adr/0010-drop-branch-from-the-workspace-schema.md),
-[0011](../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
-[0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md),
-[0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),
-[0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-[0018](../adr/0018-the-tmux-server-carries-the-macos-login-session.md); invariants I-20, I-34, I-35,
+**Yantra internal** — [R13](../../research/13-dashboard-revamp-and-github.md);
+[`docs/brainstorm.md`](../../brainstorm.md) lines 266-302, 394-404, 535;
+[`docs/design-system.md`](../../design-system.md) §7; ADRs
+[0004](../../adr/0004-rust-for-the-daemon.md), [0007](../../adr/0007-workspace-schema-v1.md),
+[0010](../../adr/0010-drop-branch-from-the-workspace-schema.md),
+[0011](../../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
+[0013](../../adr/0013-the-heartbeat-carries-only-what-placement-scores.md),
+[0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md),
+[0016](../../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
+[0018](../../adr/0018-the-tmux-server-carries-the-macos-login-session.md); invariants I-20, I-34, I-35,
 I-36, I-43, I-44, I-49.

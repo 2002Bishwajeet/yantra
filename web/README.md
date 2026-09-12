@@ -145,7 +145,7 @@ A row offers one verb rather than three, so the reader works nothing out.
 `chosen()` in [`verbs.ts`](src/screens/fleet/verbs.ts) reads the agent status and
 [`Verb.tsx`](src/screens/fleet/Verb.tsx) draws what it names — `Start`, `Resume`,
 `Open`, an answer to a trust prompt, or a link to the machine.
-[D1](../docs/design/01-dashboard.md) §2 is the specification.
+[D1](../docs/archive/design/01-dashboard.md) §2 is the specification.
 
 Two of the readings are the ones worth knowing about. **A row that has read
 nothing gets no verb**: `Start` there would be a guess drawn as knowledge, so
@@ -271,7 +271,7 @@ reasonably have gone the other way:
 [`Transcript.tsx`](src/screens/session/Transcript.tsx) draws `POST
 /api/workspaces/{name}/logs` — what the agent said, as turns of `you` and
 `claude` with the tool calls between them.
-[D5](../docs/design/05-workspace-page.md) §4 settles it; four things about the
+[D5](../docs/archive/design/05-workspace-page.md) §4 settles it; four things about the
 code are not obvious from it:
 
 - **The state lives in `useTranscript`, which the page holds and the view calls.**
@@ -314,7 +314,7 @@ Three decisions:
 ## The spend view
 
 `/w/$name?view=spend` is `/usage`'s answer with the picker removed
-([D5](../docs/design/05-workspace-page.md) §6.1): the workspace is the URL, so
+([D5](../docs/archive/design/05-workspace-page.md) §6.1): the workspace is the URL, so
 there is nothing to pick. [`Spend.tsx`](src/screens/session/Spend.tsx) draws it,
 `useSpend` holds the answer in the page for the transcript's reason, and mounting
 the view is the request.
@@ -326,7 +326,7 @@ partly-priced session arrives with a figure that is short of what it spent.
 Drawing it under *this session* is the understatement R-23 refuses per model.
 **The per-model figures stay** — one model's cost understates nothing. See the
 2026-09-04 amendments in D5 §6.2 and
-[D6](../docs/design/06-sessions-attention-spend.md) §5.2.
+[D6](../docs/archive/design/06-sessions-attention-spend.md) §5.2.
 
 ## A machine that cannot be reached (Y-312)
 

@@ -81,7 +81,10 @@ account. The script says so first, because the dashboard cannot exist before the
 7. It writes `/etc/yantra/agent.env` **only if it is absent**, with this box's own
    `YANTRA_DAEMON=<tailnet address>:7717`. It writes `/etc/yantra/daemon.env` **only if it is
    absent** — `0600`, owned by `yantra`, and with no relay in it
-   ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)).
+   ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The GitHub OAuth App's
+   client id needs no line there: the release build already carries one
+   ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md), Y-389), so `yantra github login`
+   works on a fresh box.
 8. It runs `systemctl enable --now` for both units and waits up to 30 s for `yantrad` to answer
    `/healthz`.
 9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
