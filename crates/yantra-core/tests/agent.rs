@@ -364,12 +364,12 @@ async fn on_musl_the_agent_is_launched_with_the_system_ripgrep() -> Result<()> {
     let ws = workspace("rg", "/tmp/rgrepo");
 
     let launch = agent::prepare(&lab.ssh, "/tmp/rgrepo", &lab.tmux, Os::Other).await?;
+    // The message names no command: it carries the session id Yantra chose.
     assert!(
         launch
             .command
             .contains("&& export USE_BUILTIN_RIPGREP=0 && exec "),
-        "{}",
-        launch.command
+        "the start command exports the variable before it execs the agent"
     );
     up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command), Os::Other).await?;
 
