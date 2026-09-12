@@ -44,7 +44,7 @@ on 2026-08-02, and the reasoning is worth keeping: **automatic placement is the 
 in the project and it solves a problem the owner does not have yet.** Two machines, one of which is
 usually the right answer, does not need a scheduler; it needs a list to tap.
 
-The deferral costs nothing already built. [ADR-0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md)'s
+The deferral costs nothing already built. [ADR-0013](../../adr/0013-the-heartbeat-carries-only-what-placement-scores.md)'s
 heartbeat was justified by *"what placement scores"*, and every one of the seven fields is equally
 what a **person** reads when choosing a machine by hand — free RAM, free disk, CPU busy, on battery
 or not. **The consumer changed; the payload did not.** M5's agent work feeds a human picker instead
@@ -54,7 +54,7 @@ of a scorer, and Y-109 renders it either way.
 
 The dashboard is **read-only by construction**, not by omission. The API is five `GET` routes plus
 `POST /heartbeat`, the web UI issues no write of any kind, and
-[`web/src/components/Command.tsx`](../../web/src/components/Command.tsx) says so in a comment:
+[`web/src/components/Command.tsx`](../../../web/src/components/Command.tsx) says so in a comment:
 
 > *"The API answers 405 to every write, so the row hands over the command instead."*
 
@@ -85,7 +85,7 @@ it; no TLS code entered `axum`.
 
 ### 4.2 Waking a sleeping machine is not possible from the phone, and will not be this milestone
 
-[Research note 01 §6](../research/01-tailscale-inventory.md): Tailscale is L3, magic packets are L2
+[Research note 01 §6](../../research/01-tailscale-inventory.md): Tailscale is L3, magic packets are L2
 broadcast, there is **no `tailscale wake`** subcommand, and a sleeping machine's NIC has no IP stack.
 Waking requires an always-on peer on the same L2 segment emitting the packet, plus a hand-maintained
 MAC table, because Tailscale never exposes a MAC.
@@ -105,14 +105,14 @@ That is defensible for reads. It is not defensible for *start a process on my Ma
 the tailnet could launch sessions anywhere in the fleet.
 
 **Owner's decision, 2026-08-02: writes are authorised by Tailscale identity.** The mechanism already
-exists — [Y-105](../../tracker.md) put each peer's tailnet addresses on `MachineInfo` and
-[Y-108](../../tracker.md) attributes a heartbeat by source address. Writes reuse that lookup: the
+exists — [Y-105](../../../tracker.md) put each peer's tailnet addresses on `MachineInfo` and
+[Y-108](../../../tracker.md) attributes a heartbeat by source address. Writes reuse that lookup: the
 daemon resolves the caller to a peer and refuses anyone it cannot name. This wants an ADR (§B5),
 because it is a decision and not an implementation detail.
 
 ### 4.4 There is nothing to open yet
 
-Checked against [`docs/brainstorm.md`](../brainstorm.md) rather than assumed, and it is the one place
+Checked against [`docs/brainstorm.md`](../../brainstorm.md) rather than assumed, and it is the one place
 this plan was out of sync with the vision. UI Philosophy:
 
 > *"Everything should be configurable from the interface. No YAML editing. No configuration files.

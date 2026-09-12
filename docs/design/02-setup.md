@@ -5,7 +5,7 @@ them and the owner mints them. **The owner ruled §6's scope question on 2026-08
 [Y-160](../../tracker.md#3-task-board) beside Y-157; the DNS blocker on D2.8 was mine and is
 withdrawn. **[Y-163](../../tracker.md#3-task-board) is D2.1 and D2.2**, minted 2026-08-09.
 
-Companion to **[D1 — The dashboard you work in](01-dashboard.md)**. Both read the same probe (§3).
+Companion to **[D1 — The dashboard you work in](../archive/design/01-dashboard.md)**. Both read the same probe (§3).
 
 ---
 
@@ -70,8 +70,9 @@ locally is zero-risk and saves a step; only *distributing* the public key is gen
 even generation should be manual, this table is where that changes.
 
 **That confirmation has not happened, and Y-144 shipped a shape that survives either answer.**
-`yantra ssh-identity` is a verb the owner invokes; nothing calls it for them, and `provision.sh`
-still prints it as a numbered step rather than running it. If generation is confirmed as Yantra's,
+`yantra ssh-identity` is a verb the owner invokes; nothing calls it for them, and `install.sh`
+prints it as a numbered step rather than running it (`provision.sh`, which also printed it, was
+retired by [Y-384](../../tracker.md#3-task-board)). If generation is confirmed as Yantra's,
 the installer calls a verb that already exists; if it is not, the verb is simply never called
 automatically and this table is all that changes.
 
@@ -181,7 +182,7 @@ Interactive, step by step, and **it must survive being run twice** (§B4 idempot
 workspace TOML. Scaffold when absent, leave alone when present, and say which it did.
 
 **2026-08-09, [Y-160](../../tracker.md#3-task-board), built:** steps 1–2 are
-[`install.sh`](../../install.sh) and steps 3–5 are [`provision.sh`](../../provision.sh) beside it.
+[`install.sh`](../../install.sh) and steps 3–5 are `provision.sh` beside it.
 Four clauses above turned out narrower than they read. **Nothing asks before each fix**, because
 piping to a shell makes stdin the script — so the two fixes are the ones safe to make unasked
 (`systemctl enable --now` for a unit whose precondition holds, and `fix-terminfo`, which writes to a
@@ -193,6 +194,15 @@ would collect, and a second sweep costs an ssh round trip per machine to learn i
 **`doctor`'s exit status is unreadable to this consumer**, since §3.1's `heartbeat` is never
 *present* from a caller that is not the daemon; the checks are read from `--json` instead, and that
 one is reported as the standing non-answer it is rather than as work.
+
+**2026-09-12, [Y-384](../../tracker.md#3-task-board): one script, and it asks.** The owner ruled
+that `install.sh` is interactive and that `provision.sh` is retired
+([walk-through](../plans/m15-qa-walkthrough.md) §1.5). The script reads its answers from
+`/dev/tty`, so a pipe no longer stops it asking. At a terminal it installs Tailscale after a yes,
+logs the box in, turns on `tailscale serve`, writes the box's own address into an absent
+`agent.env`, starts both units and prints the dashboard's URL. With no terminal it asks nothing and
+starts nothing. **Steps 3–6 moved into the dashboard**: the fleet checks are its walkthrough, not a
+script's.
 
 ---
 
@@ -263,7 +273,7 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 **Y-156…Y-159 already exist** and cover publishing, an installer, exercising it against systemd, and
 hosting it. D2.6–D2.8 are those rows seen through this document. **[Y-160](../../tracker.md#3-task-board)
 is D2.1's consumer** — the §4 steps Y-157 deliberately leaves out — and shipped 2026-08-09 as
-[`provision.sh`](../../provision.sh); what it does rather than prints, and why, is the note in §4.
+`provision.sh`; what it did rather than printed, and why, is the note in §4. Y-384 retired it.
 D2.9 and D2.10 are untouched by it: it prints both of those steps and performs neither.
 
 ---
@@ -282,7 +292,7 @@ before the first install*; [`docs/brainstorm.md`](../brainstorm.md) line 394;
 Y-156–Y-159 and questions Q15, Q17; invariants I-34, I-44.
 
 **`[V]` — measured 2026-08-08 and 2026-08-09**, recorded in full in
-[R13](../research/13-dashboard-revamp-and-github.md) and [D1](01-dashboard.md): `cachyos-g14` has no
+[R13](../research/13-dashboard-revamp-and-github.md) and [D1](../archive/design/01-dashboard.md): `cachyos-g14` has no
 sshd; the Mac has no `gh` and an ssh key not registered with the account; `gh` 2.96.0 and `glab`
 1.109.0 are present on `cachyos-g14`, `tea` is not.
 

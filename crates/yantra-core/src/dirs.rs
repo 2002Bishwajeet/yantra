@@ -12,7 +12,7 @@
 //! reason and on the same ruling ([ADR-0019]): the answer depends on a path
 //! nobody has typed yet, so no snapshot can hold it.
 //!
-//! [D4]: ../../../docs/design/04-workspace-creation.md
+//! [D4]: ../../../docs/archive/design/04-workspace-creation.md
 //! [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 
 use crate::ssh::{self, Exec, Ssh};

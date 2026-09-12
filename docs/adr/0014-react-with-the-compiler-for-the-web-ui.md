@@ -117,7 +117,7 @@ building before it arrives.
 >
 > **"Explicitly not a reason for this decision: bundle size or performance" no longer holds either.**
 > That sentence was written when the page was a read-only dashboard for one person on a tailnet.
-> [D1](../design/01-dashboard.md) makes it the interface the work is done *in*, from a phone, and the
+> [D1](../archive/design/01-dashboard.md) makes it the interface the work is done *in*, from a phone, and the
 > owner asked for it to be fast. Y-162 measured the first load at **170 kB gzip before and 111 kB
 > after** — the router's own weight paid for several times over by splitting xterm.js onto the route
 > that uses it. Weight is now a thing this project measures; R9's finding that it was irrelevant was

@@ -6,7 +6,7 @@ This is a plan, not a decision record. Where it reaches a fork that deserves to 
 permanently, it says so and defers to an ADR rather than quietly picking. §7 lists every such fork in
 one place, because those are the parts that need a human before code starts.
 
-Milestone claim, from [`tracker.md`](../../tracker.md) §2:
+Milestone claim, from [`tracker.md`](../../../tracker.md) §2:
 
 > Read-only dashboard over the same HTTP API the CLI uses: machines, workspaces, sessions, live
 > status. Served over Tailscale.
@@ -43,7 +43,7 @@ The library is done for read purposes. Verified at `485aeef`:
 | Agent transcript | `logs::logs` | **ssh** |
 
 So M4 writes no orchestration. Everything the dashboard shows already exists as a function that
-returns a `Result`, which is exactly the position [ADR-0005](../adr/0005-core-logic-in-a-library-crate.md)
+returns a `Result`, which is exactly the position [ADR-0005](../../adr/0005-core-logic-in-a-library-crate.md)
 was arguing for two milestones before there was a second caller.
 
 **`yantrad` today is 15 lines that print a version.** Its dependency list is `anyhow`. Nothing has to
@@ -103,7 +103,7 @@ Each one closes off a design that would otherwise look reasonable.
 | **Y-054's partial answer** | An endpoint that fails because one machine did. A machine that did not answer is data, not an error. |
 | **Y-044 dropped** | Reaching for `rusqlite`. A read-only dashboard derives everything; nothing needs to survive a restart. |
 
-> **Y-044 is dropped, not deferred, recorded 2026-08-02.** The row above said *still deferred* when it was written, and the guidance under it is what the audit went on to confirm — the dashboard derives everything and nothing needs to survive a restart. What changed is that this stopped being a deferral: five candidate consumers were audited and none needed a store, so `rusqlite` is not waiting for a better moment. See the Y-044 row in [`tracker.md`](../../tracker.md) and the 2026-08-02 amendment to [ADR-0004](../adr/0004-rust-for-the-daemon.md).
+> **Y-044 is dropped, not deferred, recorded 2026-08-02.** The row above said *still deferred* when it was written, and the guidance under it is what the audit went on to confirm — the dashboard derives everything and nothing needs to survive a restart. What changed is that this stopped being a deferral: five candidate consumers were audited and none needed a store, so `rusqlite` is not waiting for a better moment. See the Y-044 row in [`tracker.md`](../../../tracker.md) and the 2026-08-02 amendment to [ADR-0004](../../adr/0004-rust-for-the-daemon.md).
 
 ## 5. The work
 

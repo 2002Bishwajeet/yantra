@@ -17,10 +17,10 @@ still missing are different jobs that were about to be confused with each other.
 
 | Doc | Settles | Left open, deliberately |
 | --- | --- | --- |
-| [D1](01-dashboard.md) | The plumbing: routes, endpoints, work units, which decision blocks which. | *"pigment or type"* — its own words, D1 §0. |
+| [D1](../archive/design/01-dashboard.md) | The plumbing: routes, endpoints, work units, which decision blocks which. | *"pigment or type"* — its own words, D1 §0. |
 | [D2](02-setup.md) | Provisioning: what Yantra does, what it names and refuses to do, and `yantra doctor` as the one probe the dashboard, the installer and an agent all read. | — |
 | [D3](03-dashboard-surface.md) | The **structure** of the surface: navigation, grouping by who must act next, density, four type sizes, four state marks, words, failure states, the weight and motion budget. Settled in a 27-question interview. | *"pigment, type or motif"* — D3 §0, restated as a rule and not an oversight. |
-| [D4](04-workspace-creation.md) | How a directory becomes a choice on `/new`: what Yantra asks a machine, how often, and what it does with an answer it could not get. | Pigment and type again, under D3 §0's split. |
+| [D4](../archive/design/04-workspace-creation.md) | How a directory becomes a choice on `/new`: what Yantra asks a machine, how often, and what it does with an answer it could not get. | Pigment and type again, under D3 §0's split. |
 
 **D4 is the precedent that sets the depth of everything below.** D3 gave `/new` two sentences
 (§14). D4 spent 442 lines on it and found the measurement that changed its shape — a whole-home
@@ -124,7 +124,7 @@ between those two facts is the same gap D4 filled.
 
 **Gate:** none. It can be written today.
 
-> **2026-09-03: written, as [D5](05-workspace-page.md).** All six questions above are settled in it,
+> **2026-09-03: written, as [D5](../archive/design/05-workspace-page.md).** All six questions above are settled in it,
 > and one of them turned out to be already answered — D3 §4.5 had ruled that the trust prompt is the
 > pane itself rather than a picture of one, so D5 §5.2 records that and asks only for the height prop
 > the component lacks.
@@ -160,7 +160,7 @@ three smaller than they were, and each is small enough that three documents woul
 
 **Gate:** Y-179's part waits on that ADR. The rest does not.
 
-> **2026-09-03: written, as [D6](06-sessions-attention-spend.md), and the split above was kept.**
+> **2026-09-03: written, as [D6](../archive/design/06-sessions-attention-spend.md), and the split above was kept.**
 > All four questions are settled in it, and Y-179's is settled as far as a design document can settle
 > it: the owner gave the ADR its direction — any session on their own fleet is reachable — and D6 §6.1
 > writes the reasoning down for whoever drafts it.

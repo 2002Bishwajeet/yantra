@@ -25,7 +25,7 @@ is exactly the component that would quietly start rewriting `Machine.host`. If t
 happen it should be a decision; if it is not, the inventory needs a stated boundary before it is
 written, not after.
 
-The two coherent answers, from [the M2 plan](../plans/m2-real-machines.md) §7.1:
+The two coherent answers, from [the M2 plan](../archive/plans/m2-real-machines.md) §7.1:
 
 **(a) `ssh` resolves; the inventory only observes.** `machine` keeps reaching `ssh` untouched.
 Tailscale data is used to list machines and to say something useful when a name looks wrong.

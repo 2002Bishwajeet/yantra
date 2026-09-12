@@ -55,10 +55,10 @@ The first release `install.sh` can install. It has been inert since #282 by desi
 - [ ] It creates the `yantra` account and installs three binaries to `/usr/local/bin`.
 - [ ] `/etc/systemd/system/yantrad.service` and `yantra-agent.service` are there.
       → **these came out of the archive, not off the internet.** That is Y-365's whole point.
-- [ ] It enables nothing and starts nothing. → it ends with a numbered list of what is left.
-- [ ] Run it a second time. → it says `/etc/yantra/agent.env` was already there and left alone.
+- [ ] It asks before it installs Tailscale, logs the box in and turns on HTTPS (Y-384).
+      → it ends on one line: the dashboard's URL.
+- [ ] Run it a second time. → it asks nothing and changes no configuration.
 - [ ] `YANTRA_VERSION=v0.1.0 … | bash` → it refuses by name: *"carries no units"*. Nothing installs.
-- [ ] Now run `provision.sh`. → it starts what it can and prints the rest as numbered steps.
 - [ ] `systemctl status yantrad` → active, running as `yantra`.
 - [ ] `sudo -u yantra -H /usr/local/bin/yantra ssh-identity` → it prints a public key to place.
 
