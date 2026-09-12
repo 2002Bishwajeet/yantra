@@ -148,11 +148,11 @@ Times you had to look something up: ____ · Minutes: ____
 **Then the design question, and answer it honestly.** How many of the nine checks could you fix
 **without leaving the dashboard**? ____ / 9.
 
-If the answer is zero, that is [ADR-0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md)
-working exactly as written — no binary, unit or script crosses ssh to a machine, ever. The
-prohibition is not up for review. **What is up for review is whether the dashboard makes the
-manual path pleasant**: the right command, on the right machine, ready to copy, in the place you
-are already looking. Say which of the nine fell short of that.
+Since [ADR-0028](../adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) (2026-09-12) the
+answer should not be zero: once the key is placed, one Install press puts `tmux`, `git` and `claude`
+on the machine ([Y-386](../../tracker.md) builds it). Logins, `gh`, `yantra-agent` and a sudo that
+asks for a password stay manual. **Judge whether the dashboard makes that manual rest pleasant**:
+the right command, on the right machine, ready to copy, in the place you are already looking. Say which of the nine fell short of that.
 
 **Feel /5** ____ · **The step that made you want to give up:** ____________________
 
@@ -427,8 +427,10 @@ Twelve open rows. Finding one again costs you time and tells us nothing new.
 **Known and by design, so weigh it rather than report it:**
 
 - **No preference follows you between devices** (§9.2). ADR-0024 §5.
-- **Nothing Yantra installs crosses ssh to a machine** (§3). ADR-0013. Every fleet-wide action is
-  refused by that ADR, not missing by oversight.
+- **Yantra installs only the basics, one machine per press, and updates nothing** (§3).
+  [ADR-0028](../adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md). Every fleet-wide action
+  and every update is refused by that ADR and ADR-0027, not missing by oversight. Until
+  [Y-386](../../tracker.md) ships, there is no Install button.
 - **There is no login.** The tailnet is the door.
 
 ---

@@ -251,7 +251,7 @@ Sized to be picked up one at a time. **Proposed, not opened** (§B0).
 | # | Work | Blocked on |
 | --- | --- | --- |
 | **D2.9** | The Tailscale enrolment step | **Y-143** — Q17 is answered *tagged*, and the measurement it is conditional on decides what the `tailscale up` line says |
-| **D2.10** | Generate the appliance's ssh identity and print its public key | **still blocked on confirmation that generation is Yantra's rather than the owner's** (§2). [Y-144](../../tracker.md#3-task-board) landed the verb — `yantra ssh-identity`, invoked and never automatic, proved against a real sshd from a keypair made at test time — so what is left here is the decision, not the code |
+| **D2.10** | Generate the appliance's ssh identity and print its public key | **still blocked on confirmation that generation is Yantra's rather than the owner's** (§2). [Y-144](../../tracker.md#3-task-board) landed the verb — `yantra ssh-identity`, invoked and never automatic, proved against a real sshd from a keypair made at test time — so what is left here is the decision, not the code. **Confirmed 2026-09-12:** generating the key is Yantra's, and the daemon makes it the first time a machine joins ([Y-387](../../tracker.md#3-task-board), [walk-through](../plans/m15-qa-walkthrough.md) §2.5) |
 
 **Y-156…Y-159 already exist** and cover publishing, an installer, exercising it against systemd, and
 hosting it. D2.6–D2.8 are those rows seen through this document. **[Y-160](../../tracker.md#3-task-board)
