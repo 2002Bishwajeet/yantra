@@ -18,6 +18,8 @@
     "connected": false,
     "login": null,
     "scopes": [],
-    "pending": false
+    "pending": false,
+    "client_id": null,
+    "client_id_custom": false
   }
 }
