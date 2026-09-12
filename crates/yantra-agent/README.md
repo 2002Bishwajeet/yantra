@@ -37,5 +37,5 @@ it only when it is absent, and with no address in it. macOS still has neither un
 run it from a terminal there.
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
-seven fields are and why; [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) measures how each
+seven fields are and why; [the heartbeat-agent plan](../../docs/archive/plans/the-heartbeat-agent.md) measures how each
 is read on Linux and macOS. What earlier research settled is in [tracker.md](tracker.md).

@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-02
 - **Status:** proposal, awaiting review
-- **Implements:** [ADR-0013](../adr/0013-the-heartbeat-carries-only-what-placement-scores.md), which was
+- **Implements:** [ADR-0013](../../adr/0013-the-heartbeat-carries-only-what-placement-scores.md), which was
   still `proposed` when this was written — see §6
 - **Follows:** [m4-dashboard-next.md](m4-dashboard-next.md), whose §4 named `yantra-agent` *"still a
   19-line stub that prints its version — the largest functional gap in the project"*
@@ -44,7 +44,7 @@ built outside the repo and deleted; **no `crates/` or `Cargo.toml` change is pro
 ## 1. Decision 1 — the wire type lives in `yantra-core`, and the agent depends on it
 
 The payload struct is serialised by `yantra-agent` and deserialised, strictly, by `yantrad`.
-[ADR-0012](../adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md) makes `yantra-core`
+[ADR-0012](../../adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md) makes `yantra-core`
 the one library; R-12's whole mitigation is that this agent stays tiny. The two pull opposite ways
 only if depending on `yantra-core` is expensive. **It is not, and that is the finding.**
 
@@ -439,7 +439,7 @@ percentage, from whatever the platform's mains and battery sources are**, and ev
   entry at all"*. **This fleet contains no desktop.** `cachyos-g14` is a laptop with `AC0` and `BAT0`;
   the MacBook is a laptop. R5's Linux column was executed on this same machine, which means the
   desktop half of I-9 was never executed either — I-9 is marked **[V]** in
-  [`crates/yantra-agent/tracker.md`](../../crates/yantra-agent/tracker.md) and, on the evidence
+  [`crates/yantra-agent/tracker.md`](../../../crates/yantra-agent/tracker.md) and, on the evidence
   available here, at least half of it is **[D]**. **This is the loudest finding in the plan.** It does
   not make I-9 wrong — it is the well-documented sysfs behaviour, and ADR-0013 is right to design for
   it — but the tracker claims execution that this fleet cannot supply, and a fabricated `[V]` is

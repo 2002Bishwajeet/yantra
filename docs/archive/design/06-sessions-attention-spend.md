@@ -1,10 +1,10 @@
 # D6 — Sessions, attention and spend
 
-**Status:** proposed. Written 2026-09-03 against the plan [D0](00-plan.md) §6 set, and settled in a
+**Status:** proposed. Written 2026-09-03 against the plan [D0](../../design/00-plan.md) §6 set, and settled in a
 four-question interview whose answers are recorded inline. Opens no rows (§B0); §9 proposes them and
 the owner mints them.
 
-**Read [D3](03-dashboard-surface.md) §14 first.** It made three of these four rows *smaller* — an
+**Read [D3](../../design/03-dashboard-surface.md) §14 first.** It made three of these four rows *smaller* — an
 attention band rather than an eighth card, an unclaimed session on `/machines` rather than a table on
 `/`, and `/usage` rather than a page of spend. This document settles what is left of them.
 
@@ -42,7 +42,7 @@ Measured 2026-09-03 on `main`, after PR #222 and #223 landed.
 | --- | --- | --- |
 | the GitHub queue | `GET /api/attention`, polled on its own 300 s clock | **no file references `/api/attention`** |
 | whether `gh` can answer at all | `GET /api/readiness/github` | **no file references it** |
-| killing an unclaimed session | `DELETE /api/machines/{machine}/sessions/{session}` | `Kill` is exported from [`Act.tsx`](../../web/src/components/Act.tsx) and **nothing renders it** |
+| killing an unclaimed session | `DELETE /api/machines/{machine}/sessions/{session}` | `Kill` is exported from [`Act.tsx`](../../../web/src/components/Act.tsx) and **nothing renders it** |
 | listing unclaimed sessions | `GET /api/sessions` | **built** — `/machines` draws them through `unclaimed()` |
 | a workspace's spend | `POST /api/workspaces/{name}/tokens` | **built** — `/usage` |
 
@@ -50,7 +50,7 @@ Measured 2026-09-03 on `main`, after PR #222 and #223 landed.
 draws MACHINE, SESSION, WINDOWS, ATTACHED, CREATED and COMMAND, and has no ACT column — that one
 missing column is most of Y-180.
 
-**What the fleet page's model already supports.** [`work.ts`](../../web/src/work.ts) has four bands —
+**What the fleet page's model already supports.** [`work.ts`](../../../web/src/work.ts) has four bands —
 `needs`, `running`, `idle`, `unknown` — and a `WorkRow` of three kinds: `workspace`, `machine`,
 `unusable`. D3 §14 puts attention *inside* `Needs you` under its own `h3`, so it is a fourth kind or
 a sibling block, and §3.1 chooses.
@@ -168,7 +168,7 @@ one sentence and it stays exactly as it is.
 **Nothing about where these live changes.** They are not on `/`, and D3 §14 settled that: a claimed
 session **is** its workspace row.
 
-> **2026-09-03, [Y-317](../../tracker.md#3-task-board): `sessionColumns` has two call sites, and this
+> **2026-09-03, [Y-317](../../../tracker.md#3-task-board): `sessionColumns` has two call sites, and this
 > section reasoned about one.** `Machines.tsx` passes `unclaimed(answers, workspaces)`, so the ACT
 > column §4.2 adds reaches only unclaimed rows there. `OneMachine.tsx` passes every session the
 > machine reported, claimed ones included, so `/m/{machine}` draws `Kill` on a session a workspace
@@ -194,7 +194,7 @@ to kill* rather than reporting a failure.
 
 The same column holds a **Terminal** link once §6's ADR lands. Until then the column holds one verb.
 
-> **2026-09-04, [Y-179](../../tracker.md#3-task-board): the link goes to a route, which §8's table
+> **2026-09-04, [Y-179](../../../tracker.md#3-task-board): the link goes to a route, which §8's table
 > did not list.** §8 named a `plan`, a daemon route and the ADR, and it read the browser's half as
 > one column. The link needs somewhere to land: `/m/{machine}/s/{session}`, split, drawing
 > `Terminal.tsx` on the session address. **`/machines` is eager**, so a terminal in its own column
@@ -250,7 +250,7 @@ that fetches nothing.
 **D5 §6.1 moves `Answer` and `Figure` into a shared module** so `/w/{name}`'s `spend` tab draws the
 same figure. `/usage` keeps the picker and loses nothing. That is D5's row, not one of §9's.
 
-> **2026-09-04, [Y-311](../../tracker.md#3-task-board): one line of that list changed rather than
+> **2026-09-04, [Y-311](../../../tracker.md#3-task-board): one line of that list changed rather than
 > stayed.** *An unpriced model showing tokens and no money* is what `/usage` draws now. It is not
 > what `/usage` drew when this was written: the headline was the word *unpriced*, and a session with
 > one unpriced model among priced ones showed a dollar figure.
@@ -271,8 +271,8 @@ same figure. `/usage` keeps the picker and loses nothing. That is D5's row, not 
 The reasoning to write into the ADR:
 
 - **The boundary is already the tailnet plus Tailscale identity**
-  ([ADR-0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-  [ADR-0017](../adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)). A socket that
+  ([ADR-0016](../../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
+  [ADR-0017](../../adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)). A socket that
   reaches an unclaimed session crosses no boundary a workspace's socket does not.
 - **A workspace's pane is a shell too.** Treating a workspace session as safe and an unclaimed one as
   dangerous would be a distinction with nothing behind it — both are `tmux attach` on a machine the
@@ -287,7 +287,7 @@ machine-plus-session, so a mistyped address lands in a *different* live shell ra
 
 ### 6.2 The socket needs one function, not a second terminal
 
-**The workspace is used for exactly two facts.** [`attach.rs`](../../crates/yantra-core/src/attach.rs)'s
+**The workspace is used for exactly two facts.** [`attach.rs`](../../../crates/yantra-core/src/attach.rs)'s
 `plan(name, term)` loads a workspace and then reads `workspace.machine` for the ssh destination and
 `workspace.name` for the tmux session. **`remote_command(tmux, session, term)` below it is already
 session-addressed**, and so is `Tmux::pane`.
@@ -369,8 +369,8 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 **D6.1 through D6.4 are unblocked and independent of each other.** D6.5 gates D6.6 and D6.7.
 
 > **2026-09-03: the owner minted all eight**, as **Y-314**…**Y-321** in the order above.
-> [Y-174](../../tracker.md#3-task-board) is D6.1–D6.3's parent, [Y-180](../../tracker.md#3-task-board)
-> is D6.4's, and [Y-179](../../tracker.md#3-task-board) is D6.5–D6.7's. [Y-183](../../tracker.md#3-task-board)
+> [Y-174](../../../tracker.md#3-task-board) is D6.1–D6.3's parent, [Y-180](../../../tracker.md#3-task-board)
+> is D6.4's, and [Y-179](../../../tracker.md#3-task-board) is D6.5–D6.7's. [Y-183](../../../tracker.md#3-task-board)
 > mints nothing, because §5 settled it as a refusal.
 
 **One thing worth doing that is not a row.** Re-measure §5.1's fan-out once a workspace exists on
@@ -384,20 +384,20 @@ reopening the question will ask for.
 Measured **2026-09-03** on `main`, after PR #222 and #223 landed. Code read rather than run: this
 document adds no reading, so there was nothing new to time.
 
-- `GET /api/attention` is served by [`api.rs`](../../crates/yantrad/src/api.rs) and **no file under
+- `GET /api/attention` is served by [`api.rs`](../../../crates/yantrad/src/api.rs) and **no file under
   `web/src` references it**. The same is true of `GET /api/readiness/github`.
-- `Kill` is exported from [`Act.tsx`](../../web/src/components/Act.tsx) and **no component renders
-  it**. `sessionColumns` in [`columns.tsx`](../../web/src/columns.tsx) has six columns and no ACT.
-- [`refresh.rs`](../../crates/yantrad/src/refresh.rs): `EVERY` is 30 s, `ATTENTION` is 300 s, and its
+- `Kill` is exported from [`Act.tsx`](../../../web/src/components/Act.tsx) and **no component renders
+  it**. `sessionColumns` in [`columns.tsx`](../../../web/src/columns.tsx) has six columns and no ACT.
+- [`refresh.rs`](../../../crates/yantrad/src/refresh.rs): `EVERY` is 30 s, `ATTENTION` is 300 s, and its
   comment names attention as the only reading off the common clock.
-- [`attention.rs`](../../crates/yantra-core/src/attention.rs): `gh` is asked for
+- [`attention.rs`](../../../crates/yantra-core/src/attention.rs): `gh` is asked for
   `number,title,url,repository,updatedAt`; `Item` holds those five; `notifications` is a `u32` with
   the reason written beside it; `Error` has `NotInstalled`, `LoggedOut`, `Unreachable`, `Command` and
   `Parse`.
-- [`attach.rs`](../../crates/yantra-core/src/attach.rs): `plan` reads `workspace.machine` and
+- [`attach.rs`](../../../crates/yantra-core/src/attach.rs): `plan` reads `workspace.machine` and
   `workspace.name` and nothing else off the workspace; `remote_command(tmux, session, term)` and
   `Tmux::pane` are already session-addressed.
-- [`tmux.rs`](../../crates/yantra-core/src/tmux.rs): `Summary` is `name`, `windows`, `attached`,
+- [`tmux.rs`](../../../crates/yantra-core/src/tmux.rs): `Summary` is `name`, `windows`, `attached`,
   `created` — **no repo**, which is what §4.4 turns on.
 - **Not measured:** the fan-out cost of a fleet spend total. `~/.config/yantra/workspaces/` holds no
   workspace on this machine today, so there was nothing to fan out to. §5.1 says so rather than
@@ -407,12 +407,12 @@ document adds no reading, so there was nothing new to time.
 with no adoption, naming the reason `gh` cannot answer, refusing a fleet total, and making any session
 on the owner's own fleet reachable. Each is recorded at the section it governs, with its cost.
 
-**Yantra internal** — [D0](00-plan.md) §6; [D3](03-dashboard-surface.md) §4.7, §5.7, §7.1, §9.1, §14;
+**Yantra internal** — [D0](../../design/00-plan.md) §6; [D3](../../design/03-dashboard-surface.md) §4.7, §5.7, §7.1, §9.1, §14;
 [D4](04-workspace-creation.md) §1; [D5](05-workspace-page.md) §2.2, §6.1;
-[R13](../research/13-dashboard-revamp-and-github.md) §2.2, §6; ADRs
-[0005](../adr/0005-core-logic-in-a-library-crate.md),
-[0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-[0017](../adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md);
-[`work.ts`](../../web/src/work.ts), [`Machines.tsx`](../../web/src/routes/Machines.tsx),
-[`sessions.rs`](../../crates/yantra-core/src/sessions.rs); I-30; Q20; Y-172, Y-173, Y-174, Y-179,
+[R13](../../research/13-dashboard-revamp-and-github.md) §2.2, §6; ADRs
+[0005](../../adr/0005-core-logic-in-a-library-crate.md),
+[0016](../../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
+[0017](../../adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md);
+[`work.ts`](../../../web/src/work.ts), [`Machines.tsx`](../../../web/src/routes/Machines.tsx),
+[`sessions.rs`](../../../crates/yantra-core/src/sessions.rs); I-30; Q20; Y-172, Y-173, Y-174, Y-179,
 Y-180, Y-181, Y-183.

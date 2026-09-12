@@ -1,11 +1,11 @@
 # D5 — The workspace page
 
-**Status:** proposed. Written 2026-09-03 against the plan [D0](00-plan.md) §5 set, and settled in a
+**Status:** proposed. Written 2026-09-03 against the plan [D0](../../design/00-plan.md) §5 set, and settled in a
 seven-question interview whose answers are recorded inline. Opens no rows (§B0); §10 proposes them
 and the owner mints them.
 
-**Read [D3](03-dashboard-surface.md) §11 first.** It gives `/w/{name}` three tabs, a transcript and a
-spend figure in about a hundred lines. [Y-198](../../tracker.md#3-task-board) is one row pointing at
+**Read [D3](../../design/03-dashboard-surface.md) §11 first.** It gives `/w/{name}` three tabs, a transcript and a
+spend figure in about a hundred lines. [Y-198](../../../tracker.md#3-task-board) is one row pointing at
 all of it. This document settles what that row builds, and **the measurement in §2 changes one thing
 D3 promised.**
 
@@ -29,7 +29,7 @@ redesign it.
 
 **It adds nothing to the viewing beacon.** D3 §13's *the page says it is being looked at, and the
 daemon stops pushing what the page is already showing* is `useViewing`, called once in
-[`Shell.tsx`](../../web/src/routes/Shell.tsx) for every route. This page inherits it and needs no
+[`Shell.tsx`](../../../web/src/routes/Shell.tsx) for every route. This page inherits it and needs no
 beacon of its own.
 
 ---
@@ -39,7 +39,7 @@ beacon of its own.
 Measured 2026-09-03 on `m13-dashboard-surface`, which is where `/w/{name}` lives — `main` does not
 have it.
 
-[`OneWorkspace.tsx`](../../web/src/routes/OneWorkspace.tsx) is 91 lines and draws four branches:
+[`OneWorkspace.tsx`](../../../web/src/routes/OneWorkspace.tsx) is 91 lines and draws four branches:
 
 | Branch | What it draws |
 | --- | --- |
@@ -74,7 +74,7 @@ this repository's own, which is the largest on the machine.
 
 ### 2.1 The tool inputs already cross the wire, and the parse throws them away
 
-[`logs.rs`](../../crates/yantra-core/src/logs.rs) selects on the far side with `grep`, and its
+[`logs.rs`](../../../crates/yantra-core/src/logs.rs) selects on the far side with `grep`, and its
 pipeline drops **tool results** by name:
 
 ```sh
@@ -113,8 +113,8 @@ the daemon picks one string per call rather than forwarding the object**, and §
 sleeping machine costs whatever it costs to wake it.** That ratio is the whole reason §4.3 reads on
 request and never polls.
 
-> **2026-09-03, [Y-306](../../tracker.md#3-task-board): measured against a real machine, half of this
-> table holds and the header does not.** [`tests/logs.rs`](../../crates/yantra-core/tests/logs.rs)
+> **2026-09-03, [Y-306](../../../tracker.md#3-task-board): measured against a real machine, half of this
+> table holds and the header does not.** [`tests/logs.rs`](../../../crates/yantra-core/tests/logs.rs)
 > built a 17.8 MB transcript of 60,000 selectable records in the container fixture and timed the read
 > against a bare ssh round trip: **0.52 s against 0.017 s**. Broken down, the shipped pipeline costs
 > 277 ms and **the windowed one costs 278 ms — the window is free, exactly as this section says**.
@@ -162,7 +162,7 @@ The broken file already draws as a full-page alert with a link, and that stays e
 ### 3.2 The tab bar is links, and that is forced
 
 **There is no `ui/tabs`.** The ported set has `toggle-group`, `toggle` and `table`, and
-[ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s first rule says never edit
+[ADR-0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md)'s first rule says never edit
 `components/ui/`. So the control is composed rather than adopted.
 
 **Compose it from `Link`, not from `toggle-group`.** A tab here changes the URL, and something that
@@ -229,11 +229,11 @@ alternative is holding a pty open for a tab nobody is looking at.
 ### 4.1 A turn
 
 Who spoke, when, and what they said, in normal type. `who` is *you* or *claude* — the CLI's own two
-words in [`main.rs`](../../crates/yantra/src/main.rs)'s `render_logs`, and there is no reason for the
+words in [`main.rs`](../../../crates/yantra/src/main.rs)'s `render_logs`, and there is no reason for the
 browser to invent two more.
 
 **The timestamps are instants and may be printed as ages.** Claude Code writes
-`2026-08-11T18:09:33.178Z`, measured; [`lib/time.ts`](../../web/src/lib/time.ts) refuses a stamp that
+`2026-08-11T18:09:33.178Z`, measured; [`lib/time.ts`](../../../web/src/lib/time.ts) refuses a stamp that
 names no zone and this one names `Z`. A turn with no timestamp — a few records carry none — prints
 none. It does not print *unknown*.
 
@@ -272,7 +272,7 @@ whole would cost 19 kB more over 200 records and would carry a `Write`'s file co
 and to what `yantra logs` prints. It sends no more bytes over ssh — §2.1 — and adds 36% to the
 daemon's own projection.
 
-> **[D0](00-plan.md) §5 calls this read `yantra logs --json`. There is no such flag.** `Logs` takes a
+> **[D0](../../design/00-plan.md) §5 calls this read `yantra logs --json`. There is no such flag.** `Logs` takes a
 > workspace and a line count, and `render_logs` prints text. `doctor` is the verb that has `--json`.
 > Nothing depends on the mistake, and the JSON shape D5 needs is the daemon's, not the CLI's.
 
@@ -321,7 +321,7 @@ and offers a re-read rather than stitching a window that no longer lines up. Sil
 shifted window is the failure this avoids, and it is the one a reader could never detect.
 
 **Rejected: fetching only what is new.** The file is append-only, but a `resume` forks it
-([ADR-0015](../adr/0015-resume-forks-the-conversation.md)) and records have no index that survives
+([ADR-0015](../../adr/0015-resume-forks-the-conversation.md)) and records have no index that survives
 across reads. An incremental protocol would be guessing about someone else's file format, which is
 the guess `logs.rs` already stopped making.
 
@@ -365,7 +365,7 @@ and takes `{ name, onClose }`. Nothing on this page needs a different height —
 
 ### 5.2 The trust prompt is settled, and it is not this page's
 
-[D3](03-dashboard-surface.md) §4.5 already answered D0 §5's question: the trust prompt is **the pane
+[D3](../../design/03-dashboard-surface.md) §4.5 already answered D0 §5's question: the trust prompt is **the pane
 itself at twelve rows on the existing socket**, not a picture of one and not Yantra's own buttons.
 Yantra renders the question and forwards the keystroke, because reading the options and drawing
 matching controls would spend I-49's fragility budget on a control and could answer the wrong thing.
@@ -390,7 +390,7 @@ naming the machine, 409 drawn as *nothing to add up* rather than as a failure, t
 403/404/503, `AS_OF` printed verbatim as the day it is, and the page's own arrival stamp on a clock
 that fetches nothing.
 
-**So `Answer` and `Figure` move out of [`Usage.tsx`](../../web/src/routes/Usage.tsx) into a module
+**So `Answer` and `Figure` move out of [`Usage.tsx`](../../../web/src/routes/Usage.tsx) into a module
 both routes import.** `/usage` keeps the picker and loses nothing.
 
 ### 6.2 Unpriced shows tokens, and no money at all
@@ -409,9 +409,9 @@ The cost: two sessions that cost very different amounts of money can show the sa
 the headline is tokens. That is the honest answer, and the model name underneath is what makes it
 actionable.
 
-> **2026-09-04, [Y-311](../../tracker.md#3-task-board): the premise is false and the rule still
+> **2026-09-04, [Y-311](../../../tracker.md#3-task-board): the premise is false and the rule still
 > stands.** *This is what the daemon already does* is wrong.
-> [`write.rs`](../../crates/yantrad/src/write.rs)'s `Spend::of` nulls `cost` when **every** model is
+> [`write.rs`](../../../crates/yantrad/src/write.rs)'s `Spend::of` nulls `cost` when **every** model is
 > unpriced, in fast mode, and for a session that spent nothing — not when **any** model is. It sums
 > the models the price table carries and leaves the rest `null`, so `contract.gen.ts`'s own `spend`
 > fixture arrives as `cost: 5.4633115` beside a `model: "unknown"` with `cost: null`.
@@ -488,9 +488,9 @@ transcript is text and three links. Against D3 §9.1's *≤ 145 kB, hold and do 
 proposes nothing that touches the first load.
 
 > **One thing found while measuring, and it is not this document's to fix (§A3).**
-> [`Usage.tsx`](../../web/src/routes/Usage.tsx)'s header says *"This route is eager, and a
+> [`Usage.tsx`](../../../web/src/routes/Usage.tsx)'s header says *"This route is eager, and a
 > `lazyRouteComponent` here fails a test this row may not edit"*, and
-> [`router.ts`](../../web/src/router.ts) makes `/usage` a `lazyRouteComponent` with a measurement
+> [`router.ts`](../../../web/src/router.ts) makes `/usage` a `lazyRouteComponent` with a measurement
 > beside it. On one branch tip, one of the two is wrong. Y-194 split the route after Y-199 wrote the
 > comment, so the comment is the likely stale half — but `router.test.tsx` is the thing to check
 > before believing that, and §10 carries it as a line rather than an assumption.
@@ -516,7 +516,7 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 **D5.1, D5.2 and D5.3 come first**, and the page is worth nothing without them.
 
 > **2026-09-03: the owner minted all nine**, as **Y-305**…**Y-313** in the order above.
-> [Y-198](../../tracker.md#3-task-board) stays as their parent and closes when they do.
+> [Y-198](../../../tracker.md#3-task-board) stays as their parent and closes when they do.
 
 **Two things are worth doing that this document does not propose as rows.** Check whether
 `Usage.tsx`'s header comment or `router.ts` is the stale one (§9). And reconsider rendering the
@@ -554,14 +554,14 @@ inputs, reading on request, windowing the read, landing as a request, three tabs
 per-tab refusals, and tokens as the headline where a model is unpriced. Each is recorded at the
 section it governs, with its cost.
 
-**Yantra internal** — [D0](00-plan.md) §5; [D1](01-dashboard.md) §4.5;
-[D3](03-dashboard-surface.md) §4.5, §9.1, §11, §13; [D4](04-workspace-creation.md) Sources; ADRs
-[0011](../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
-[0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md),
-[0015](../adr/0015-resume-forks-the-conversation.md),
-[0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md), and ADR-0020,
+**Yantra internal** — [D0](../../design/00-plan.md) §5; [D1](01-dashboard.md) §4.5;
+[D3](../../design/03-dashboard-surface.md) §4.5, §9.1, §11, §13; [D4](04-workspace-creation.md) Sources; ADRs
+[0011](../../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
+[0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md),
+[0015](../../adr/0015-resume-forks-the-conversation.md),
+[0016](../../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md), and ADR-0020,
 which is named rather than linked because it lands with PR #222 and does not resolve on this branch;
-[`logs.rs`](../../crates/yantra-core/src/logs.rs), [`tokens.rs`](../../crates/yantra-core/src/tokens.rs),
-[`OneWorkspace.tsx`](../../web/src/routes/OneWorkspace.tsx), [`Usage.tsx`](../../web/src/routes/Usage.tsx),
-[`Terminal.tsx`](../../web/src/components/Terminal.tsx), [`router.ts`](../../web/src/router.ts),
-[`lib/time.ts`](../../web/src/lib/time.ts); I-36, I-49; Y-129, Y-132, Y-181, Y-194, Y-198, Y-199.
+[`logs.rs`](../../../crates/yantra-core/src/logs.rs), [`tokens.rs`](../../../crates/yantra-core/src/tokens.rs),
+[`OneWorkspace.tsx`](../../../web/src/routes/OneWorkspace.tsx), [`Usage.tsx`](../../../web/src/routes/Usage.tsx),
+[`Terminal.tsx`](../../../web/src/components/Terminal.tsx), [`router.ts`](../../../web/src/router.ts),
+[`lib/time.ts`](../../../web/src/lib/time.ts); I-36, I-49; Y-129, Y-132, Y-181, Y-194, Y-198, Y-199.

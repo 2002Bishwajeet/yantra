@@ -4,9 +4,9 @@
 filling, more selecting"* — and settled in a four-question interview whose answers are recorded
 inline. Opens no rows (§B0); §8 proposes them and the owner mints them.
 
-**Read [D3](03-dashboard-surface.md) §14 first.** It gives `/new` its route and says the form
+**Read [D3](../../design/03-dashboard-surface.md) §14 first.** It gives `/new` its route and says the form
 *"selects with `ui/select` and `ui/combobox` and confirms the directory through `yantra probe`
-(Y-184)"*. [Y-185](../../tracker.md#3-task-board) is that row, and its page half landed in M13. This
+(Y-184)"*. [Y-185](../../../tracker.md#3-task-board) is that row, and its page half landed in M13. This
 document settles the half that is left, and **one measurement changes the shape of it.**
 
 ---
@@ -27,7 +27,7 @@ written against tokens.
 
 ## 1. What is wrong today
 
-[`NewWorkspace.tsx`](../../web/src/components/NewWorkspace.tsx) is three free-text fields and one
+[`NewWorkspace.tsx`](../../../web/src/components/NewWorkspace.tsx) is three free-text fields and one
 optional fourth. It checks none of them against the machine they name.
 
 | Field | Today | What goes wrong |
@@ -92,7 +92,7 @@ one, and a relative path is the caller's error rather than something to resolve.
 **One round trip, for `probe`'s reason.** Whether an entry is a repository, and what origin it
 holds, only matter for entries you are being shown right now, and a person is waiting on all of it.
 The command is one loop, and its shape is
-[`probe.rs`](../../crates/yantra-core/src/probe.rs)'s widened by one level:
+[`probe.rs`](../../../crates/yantra-core/src/probe.rs)'s widened by one level:
 
 ```sh
 for d in "$PATH"/*/; do
@@ -108,13 +108,13 @@ done
 `git`'s own failure is swallowed exactly as `probe` swallows it: *not a repository* and *a repository
 with no origin* are both "no origin here", and neither is a reason to fail a listing.
 
-**It is a `POST`**, on [ADR-0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md)'s precedent
+**It is a `POST`**, on [ADR-0019](../../adr/0019-a-probe-that-asks-a-machine-is-a-post.md)'s precedent
 and for its reasons unchanged. The answer depends on a path nobody typed until now, so the snapshot
 is structurally unable to hold it; and `crates/yantrad/CLAUDE.md`'s *never `await` ssh inside a
 handler* is not being softened, it is the write exception that already exists being used a fourth
 time. **The ADR needs no amendment** — it classified the case, and this is the case.
 
-> **2026-08-11, [Y-300](../../tracker.md#3-task-board): the snippet above is wrong in five ways,
+> **2026-08-11, [Y-300](../../../tracker.md#3-task-board): the snippet above is wrong in five ways,
 > and each one is a bug it would have shipped.** The shape survives; the bytes did not.
 >
 > 1. **`"$PATH"` is the shell's executable search path.** Pasted as written, the loop lists `/usr/bin`
@@ -188,7 +188,7 @@ is worse than typing four characters. This is `ui/combobox`'s job and is why D3 
 **Where it starts.** `$HOME`, because that is the only directory Yantra can name without asking. Any
 memory of where you were last would be daemon state, and the daemon persists nothing.
 
-> **2026-08-11, [Y-304](../../tracker.md#3-task-board): one box, holding the path.** The owner's
+> **2026-08-11, [Y-304](../../../tracker.md#3-task-board): one box, holding the path.** The owner's
 > instruction of the same day — *"do like what vscode does properly"* — and it is the shape above
 > with the controls taken out rather than a different design. Everything §4.2 decides survives: one
 > level per ask, `$HOME` to start, and typing as a first-class way in.
@@ -284,7 +284,7 @@ readable rather than contradictory.
 
 ## 7. What this needs that does not exist
 
-[`crates/yantrad/CLAUDE.md`](../../crates/yantrad/CLAUDE.md): *anything the web UI can do must be
+[`crates/yantrad/CLAUDE.md`](../../../crates/yantrad/CLAUDE.md): *anything the web UI can do must be
 expressible in `yantra` first.*
 
 | Need | § | CLI first | Decision needed |
@@ -301,7 +301,7 @@ it would have needed an ADR, because eight seconds inside a handler is a differe
 ### 7.1 The path reaches a shell, and that is not new
 
 The listing interpolates a caller-supplied path into a shell command, exactly as `probe` does, and
-it is quoted the same way — [`tmux::sq`](../../crates/yantra-core/src/tmux.rs). **The tests are the
+it is quoted the same way — [`tmux::sq`](../../../crates/yantra-core/src/tmux.rs). **The tests are the
 quoting**, which is this crate's convention: a path holding a quote, a `$`, a backtick and a newline
 must come back as that path or as nothing.
 
@@ -332,14 +332,14 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 >
 > **A workspace holds a startup *command*, not an agent choice.** `startup: null` means it runs
 > nothing of its own, and it is the dashboard's Start button that then passes `agent: 'claude'`
-> ([`Act.tsx`](../../web/src/components/Act.tsx)). So *claude* and *a plain shell* are **the same
+> ([`Act.tsx`](../../../web/src/components/Act.tsx)). So *claude* and *a plain shell* are **the same
 > file**, told apart at `up` time rather than in it — and writing the string `"claude"` would have
 > made it a workspace that starts its own thing: no Resume under
-> [ADR-0015](../adr/0015-resume-forks-the-conversation.md), and `—` in the agent column. The form
+> [ADR-0015](../../adr/0015-resume-forks-the-conversation.md), and `—` in the agent column. The form
 > offers two: claude, which sends no `startup` at all, and a command.
 >
 > **§4.2's combobox arrived with two constraints of its own**, both in the ported primitive that
-> [ADR-0014](../adr/0014-react-with-the-compiler-for-the-web-ui.md) forbids editing. `ui/combobox`
+> [ADR-0014](../../adr/0014-react-with-the-compiler-for-the-web-ui.md) forbids editing. `ui/combobox`
 > **Omits `onOpenChange`**, so a caller may say when the list is open and can never be told when the
 > primitive wants it shut — focus and Escape are the call site's, and a click outside is nobody's.
 > And **a `Combobox` with nothing in `items` stops reporting what is typed into it**, which is
@@ -351,7 +351,7 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 > and does not say what origin it holds, and §4.3's name is derived from that — so the one round trip
 > buys the origin and §5's answer together, which is `probe`'s own reason for asking both at once.
 
-> **2026-08-11, [Y-304](../../tracker.md#3-task-board): the two constraints above are not real, and
+> **2026-08-11, [Y-304](../../../tracker.md#3-task-board): the two constraints above are not real, and
 > the paragraph that reported them is wrong.** Both were misreadings of the same declaration, and
 > both were load-bearing — §4.2's second text field existed because of them.
 >
@@ -380,7 +380,7 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 > A fifth was ours. **The box filled itself in with `$HOME` on top of what a person had already
 > typed**, because the answer to that first question arrives about 0.3 s after the field does.
 
-> **2026-08-11, [Y-304](../../tracker.md#3-task-board): the owner drove it and it broke, so it was
+> **2026-08-11, [Y-304](../../../tracker.md#3-task-board): the owner drove it and it broke, so it was
 > driven by a real browser.** 238 jsdom tests were green and the page was unusable. Both faults are
 > ones jsdom is structurally unable to see, and neither is subtle once a pointer is involved.
 >
@@ -433,10 +433,10 @@ the Mac's per-directory cost may not be representative, and §8 says to re-measu
 over a probe-on-submit, blocking only a proven absence, deriving the name, and making startup a
 choice. Each is recorded at the section it governs, with its cost.
 
-**Yantra internal** — [D1](01-dashboard.md) §3.3, §4.2; [D3](03-dashboard-surface.md) §3, §8, §14;
-[R13](../research/13-dashboard-revamp-and-github.md) §5; ADRs
-[0009](../adr/0009-machine-names-are-ssh-destinations.md),
-[0011](../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
-[0016](../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
-[0019](../adr/0019-a-probe-that-asks-a-machine-is-a-post.md);
-[`probe.rs`](../../crates/yantra-core/src/probe.rs); R-23; I-63; Y-126, Y-184, Y-185.
+**Yantra internal** — [D1](01-dashboard.md) §3.3, §4.2; [D3](../../design/03-dashboard-surface.md) §3, §8, §14;
+[R13](../../research/13-dashboard-revamp-and-github.md) §5; ADRs
+[0009](../../adr/0009-machine-names-are-ssh-destinations.md),
+[0011](../../adr/0011-claude-code-runs-as-a-tui-in-tmux.md),
+[0016](../../adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
+[0019](../../adr/0019-a-probe-that-asks-a-machine-is-a-post.md);
+[`probe.rs`](../../../crates/yantra-core/src/probe.rs); R-23; I-63; Y-126, Y-184, Y-185.
