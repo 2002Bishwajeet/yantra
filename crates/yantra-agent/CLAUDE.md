@@ -40,7 +40,7 @@ the other side).
 `hyper` + `tokio` +87 %, `tokio` alone +28 % for one timer, and `reqwest` **cannot cross-build to
 musl at all** — default features resolve `native-tls` → `openssl-sys` and the build script exits 101,
 which would take Y-037's five-target release pipeline down while looking like a CI problem
-([the heartbeat-agent plan §2](../../docs/plans/the-heartbeat-agent.md)). §B2's *orchestrate, don't reinvent*
+([the heartbeat-agent plan §2](../../docs/archive/plans/the-heartbeat-agent.md)). §B2's *orchestrate, don't reinvent*
 is about SSH clients and terminal multiplexers; this is a fixed-shape POST to a known port with no
 redirects, no keep-alive, no chunked encoding and no TLS. **If it ever needs one of those, this
 decision is wrong and the answer is `ureq`** — so if the request starts growing content negotiation,
@@ -89,7 +89,7 @@ test the mock (root §B3).
 The probes' parsers are exercised against output recorded from both fleet machines, which is not a
 substitute for §B3 but the only way to reach the states this fleet has not produced: a desktop with
 no battery, and an unplugged Linux machine. **A fixture is not evidence about a platform** — run the
-binary on both machines ([the heartbeat-agent plan §9](../../docs/plans/the-heartbeat-agent.md), I-32).
+binary on both machines ([the heartbeat-agent plan §9](../../docs/archive/plans/the-heartbeat-agent.md), I-32).
 
 `PMSET_BATTERY` was hand-written until Y-110 unplugged the Mac, and the guess was wrong twice: the
 real line reads **100 % while discharging** — the same percentage the AC fixture carries — and macOS
@@ -99,7 +99,7 @@ fixtures now.
 ## What binds the probes
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles the
-payload and [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) §3 measures every probe on both
+payload and [the heartbeat-agent plan](../../docs/archive/plans/the-heartbeat-agent.md) §3 measures every probe on both
 fleet machines, verbatim. It is the probes' specification; read it before touching `probes.rs`.
 
 Four rules, each earned by a measurement that would otherwise ship as a bug:

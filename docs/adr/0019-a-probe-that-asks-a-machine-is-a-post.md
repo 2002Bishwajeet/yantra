@@ -24,7 +24,7 @@ The rule also refuses, in advance, to be softened:
 > Do not generalise the exception — a *read* that awaits ssh is still the bug that rule exists to
 > prevent.
 
-[D1 §3.3](../design/01-dashboard.md) offered two ways out and asked for one to be picked. **One of
+[D1 §3.3](../archive/design/01-dashboard.md) offered two ways out and asked for one to be picked. **One of
 them is not available, and that is the finding that settles this.** Folding the probe into
 `refresh.rs`'s snapshot cannot work: the snapshot is per-machine and computed on a timer, while a
 probe is per *(machine, path)* — an unbounded space. Nothing can pre-compute an answer for a

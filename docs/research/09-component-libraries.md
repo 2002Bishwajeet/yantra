@@ -790,5 +790,5 @@ diff is `index.css` and nothing else.
 - [TanStack/table](https://github.com/TanStack/table) · [TanStack Table docs](https://tanstack.com/table/latest/docs/introduction)
 - [bundlephobia.com](https://bundlephobia.com/) — all gzip figures
 
-**Yantra internal** — `docs/plans/m4-web-ui.md` §5.2–5.5, §7.2; `tracker.md` rows Y-071, Y-072,
+**Yantra internal** — `docs/archive/plans/m4-web-ui.md` §5.2–5.5, §7.2; `tracker.md` rows Y-071, Y-072,
 Y-084 and Q14; `CLAUDE.md` §B1, §B5, §B6.

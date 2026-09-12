@@ -32,13 +32,14 @@ starts it at boot (Y-142), `just appliance-install <host>` copies the binary and
 machine (Y-145), and [`install.sh`](../../install.sh) fetches both from a published release on the
 box itself (Y-157, [`docs/appliance.md`](../../docs/appliance.md)). **Neither writes over an
 environment file that exists**: it names the daemon *that* box reports to, and an install that
-rewrote it would be exactly the overwrite ADR-0013 §4 keeps out of the unit — the script scaffolds
-it only when it is absent, and with no address in it. **The join command installs it on any other
+rewrote it would be exactly the overwrite ADR-0013 §4 keeps out of the unit — the script writes it
+only when it is absent. At a terminal on a box that is on the tailnet it writes the box's own address
+there; otherwise it writes a placeholder (Y-384). **The join command installs it on any other
 Linux machine** (Y-387, [ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md)) and writes an
 address it was served with. The unit is `DynamicUser=yes` (owner, 2026-09-12), so no machine gains
 an account for it. On a Mac the join command installs a LaunchAgent in the person's own login
 session, which no Mac has run yet.
 
 [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md) settles what the
-seven fields are and why; [the heartbeat-agent plan](../../docs/plans/the-heartbeat-agent.md) measures how each
+seven fields are and why; [the heartbeat-agent plan](../../docs/archive/plans/the-heartbeat-agent.md) measures how each
 is read on Linux and macOS. What earlier research settled is in [tracker.md](tracker.md).
