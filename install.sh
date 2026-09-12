@@ -55,7 +55,8 @@ fi
 ask() {
     local reply
     printf 'install: %s [Y/n] ' "$1" >/dev/tty
-    read -r reply </dev/tty || reply=
+    # An empty line takes the default; ^D is not a yes.
+    read -r reply </dev/tty || return 1
     case "$reply" in [Nn]*) return 1 ;; esac
 }
 
@@ -144,7 +145,7 @@ if [ "$interactive" = yes ]; then
         echo "install: HTTPS puts this machine's name in a public certificate log that anyone can read."
         if ask "$question"; then
             if ! command -v tailscale >/dev/null 2>&1; then
-                curl -fsSL https://tailscale.com/install.sh | sh ||
+                curl -fsSL --proto '=https' --tlsv1.2 https://tailscale.com/install.sh | sh ||
                     fail "Tailscale's installer failed — nothing of Yantra was installed"
             fi
             if ! up; then
@@ -154,9 +155,16 @@ if [ "$interactive" = yes ]; then
                 echo "install: turn off key expiry for this box, or it leaves the tailnet when its key expires:"
                 echo "install: admin console → Machines → this box's menu → Disable key expiry."
             fi
-            echo "install: on a tailnet that never had HTTPS, tailscale prints a link to turn it on."
-            as_root tailscale serve --bg --https="$HTTPS_PORT" "http://$(tailscale ip -4 | head -n 1):$PORT" </dev/tty ||
+            # `serve` blocks on that link until HTTPS is on. Run as root, a Ctrl-C
+            # there reaches this script too, and would end it before Yantra installs.
+            trap 'echo' INT
+            echo "install: on a tailnet that never had HTTPS, tailscale prints a link to turn it on. Ctrl-C skips HTTPS."
+            ip=$(tailscale ip -4 2>/dev/null | head -n 1) || true
+            if [ -z "$ip" ] ||
+                ! as_root tailscale serve --bg --https="$HTTPS_PORT" "http://$ip:$PORT" </dev/tty; then
                 echo "install: tailscale serve failed, so the dashboard is on plain HTTP."
+            fi
+            trap - INT
         fi
     fi
 fi
@@ -180,7 +188,10 @@ as_root systemctl daemon-reload
 
 address=
 if [ "$interactive" = yes ] && up; then
-    address="$(tailscale ip -4 | head -n 1):$PORT"
+    ip=$(tailscale ip -4 2>/dev/null | head -n 1) || true
+    if [ -n "$ip" ]; then
+        address="$ip:$PORT"
+    fi
 fi
 
 # The installer provisions and the updater touches no configuration (D2 §1): an
@@ -218,7 +229,10 @@ fi
 
 if [ -n "$address" ]; then
     running=no
-    systemctl is-active --quiet yantrad.service && running=yes
+    if systemctl is-active --quiet yantrad.service ||
+        systemctl is-active --quiet yantra-agent.service; then
+        running=yes
+    fi
     as_root systemctl enable --now yantrad.service
     if grep -q '^YANTRA_DAEMON=' "$AGENT_ENV"; then
         as_root systemctl enable --now yantra-agent.service
@@ -229,7 +243,8 @@ if [ -n "$address" ]; then
     # The unit's RestartSec is 10 s, so this outlasts two refusals while
     # tailscaled is still learning its address.
     ready=no
-    for _ in $(seq 30); do
+    deadline=$((SECONDS + 30))
+    while [ "$SECONDS" -lt "$deadline" ]; do
         if curl -fsS --max-time 2 -o /dev/null "http://$address/healthz" 2>/dev/null; then
             ready=yes
             break
@@ -279,6 +294,7 @@ What is left, none of which this script does for you:
      it prints: \`sudo -u yantra -H $BIN_DIR/yantra ssh-identity\`. Until it has
      one the daemon starts and every verb that reaches another machine fails.
 
-Run this script again at a terminal and it does 2 and 3 for you, then prints
-the dashboard's address.
+Run this script again at a terminal and it does 2, starts yantrad and prints
+the dashboard's address. Step 1 stays yours: it never rewrites an agent.env
+that exists, and yantra-agent starts once that file names the daemon.
 REPORT

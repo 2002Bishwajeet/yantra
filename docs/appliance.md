@@ -73,7 +73,8 @@ account. The script says so first, because the dashboard cannot exist before the
 5. It turns on HTTPS: `sudo tailscale serve --bg --https=8443 http://<tailnet address>:7717`, the
    same command as `just https`. **Before it asks, it says that the machine's name goes into a public
    certificate log** that anyone can read ([Tailscale KB 1153](https://tailscale.com/kb/1153/enabling-https)).
-   On a tailnet that never had HTTPS, `tailscale serve` prints one link to turn it on; open it.
+   On a tailnet that never had HTTPS, `tailscale serve` prints one link to turn it on and waits;
+   open it. Ctrl-C there skips HTTPS, and the install goes on to finish on plain HTTP.
 6. It installs Yantra: the `yantra` account if it is absent, the three binaries renamed into
    `/usr/local/bin` for the reason [below](#why-the-rename), both units from the archive, and a
    `systemctl daemon-reload`.
@@ -86,8 +87,10 @@ account. The script says so first, because the dashboard cannot exist before the
 9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
    `http://<tailnet address>:7717` if HTTPS is not on.
 
-A **no** at step 3 installs Yantra and nothing else, and the run ends the way a run with no terminal
-does.
+**What a no does depends on the question.** A no to installing Tailscale or to logging in installs
+Yantra and nothing else, and the run ends the way a run with no terminal does. On a box that is
+already logged in, the only question is HTTPS. A no there still starts both units and ends on
+`http://<tailnet address>:7717`. A `^D` at any question counts as a no.
 
 **Everything after that is the dashboard's walkthrough** — the other machines, the appliance's ssh
 key, the AI agents and GitHub ([walk-through](plans/m15-qa-walkthrough.md) §1.5). The script does
@@ -125,7 +128,9 @@ served from inside it. **With no terminal**: an edited `agent.env` and an edited
 survive a second run, `daemon.env` is `600 yantra`, the binaries replace while one of them is
 executing, and a corrupted archive installs nothing. **At a terminal**, through a pty: a yes logs
 in, turns on `serve`, writes the address into an absent `agent.env`, enables both units and ends on
-the URL; a second run asks nothing and changes no file; a no installs Yantra and starts nothing.
+the URL; a second run asks nothing and changes no file; a no installs Yantra and starts nothing. On
+a box that is already logged in, a no to HTTPS still starts both units. A `serve` that refuses, and
+a Ctrl-C while `serve` waits on its link, both end on the `http://` URL.
 
 **The terminal tests talk to a stub `tailscale`** that records its calls. A login, a tailnet address
 and a certificate are what no container can hold, so the tests prove which commands the script ran,

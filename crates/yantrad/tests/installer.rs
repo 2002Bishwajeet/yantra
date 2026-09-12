@@ -65,10 +65,12 @@ const EDITED_RELAY: &str = "YANTRA_NTFY_URL=https://ntfy.example/a-topic";
 const AGENT_UNIT: &str = "agent-under-install";
 
 /// A pty for the script's `/dev/tty`. The answers are typed ahead and end in
-/// ^D, so a question nobody expected takes its default rather than hanging the
-/// test — and still prints the `[Y/n]` a test asserts on.
+/// ^D, so a question nobody expected is a no rather than a hang — and still
+/// prints the `[Y/n]` a test asserts on. A second argument types ^C once the
+/// screen shows it, which the line discipline turns into a real SIGINT.
 const AT_A_TERMINAL: &str = r#"
 import os, pty, sys
+interrupt = sys.argv[2].encode()
 pid, fd = pty.fork()
 if pid == 0:
     os.execvp("bash", ["bash", "-c", "cat /fixture/install.sh | bash"])
@@ -82,6 +84,9 @@ while True:
     if not chunk:
         break
     out += chunk
+    if interrupt and interrupt in out:
+        os.write(fd, b"\x03")
+        interrupt = b""
 _, status = os.waitpid(pid, 0)
 sys.stdout.buffer.write(out)
 sys.exit(os.waitstatus_to_exitcode(status))
@@ -108,6 +113,12 @@ serve)
     if [ "$2" = status ]; then
         [ -e $state/serving ] && printf '{"TCP": {"8443": {"HTTPS": true}}}\n'
     else
+        [ -e $state/serve-fails ] && exit 1
+        # What tailscale does on a tailnet that never had HTTPS: a link, then a wait.
+        if [ -e $state/serve-waits ]; then
+            echo "Serve is not enabled on your tailnet. To enable, visit: https://login.tailscale.com/f/serve"
+            exec sleep 60
+        fi
         touch $state/serving
     fi
     ;;
@@ -200,9 +211,21 @@ impl Installer {
     /// The same pipe, with a terminal behind it. stdout and stderr arrive
     /// merged, as they do on a screen.
     fn install_at_terminal(&self, answers: &str) -> Result<String> {
+        self.at_terminal(UNPRIVILEGED, answers, "")
+    }
+
+    /// The same, as root, with a Ctrl-C typed once `after` is on the screen.
+    /// Root because `sudo` puts the terminal in raw mode and relays ^C to its
+    /// own pty, so through it only `tailscale` would see the SIGINT; as root it
+    /// reaches the script too, which is the case the script's trap is for.
+    fn install_interrupted(&self, answers: &str, after: &str) -> Result<String> {
+        self.at_terminal("root", answers, after)
+    }
+
+    fn at_terminal(&self, user: &str, answers: &str, after: &str) -> Result<String> {
         let out = self
             .systemd
-            .exec_as(UNPRIVILEGED, &["python3", "-c", AT_A_TERMINAL, answers])?;
+            .exec_as(user, &["python3", "-c", AT_A_TERMINAL, answers, after])?;
         let screen = String::from_utf8(out.stdout)?;
         if !out.status.success() {
             bail!(
@@ -648,6 +671,81 @@ fn last_line(screen: &str) -> &str {
         .map(str::trim)
         .rfind(|line| !line.is_empty())
         .unwrap_or("")
+}
+
+const HTTP_URL: &str = "install: open the dashboard at http://127.0.0.1:7717";
+
+/// HTTPS is the one step that may fail without stopping the install: a
+/// `serve` that refuses, and one a person Ctrl-Cs while it waits on its link,
+/// both end on an installed box answering plain HTTP.
+#[test]
+fn at_a_terminal_a_serve_that_fails_or_is_interrupted_still_ends_on_http() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+    fixture.sh("touch /var/tmp/tailscale-stub/serve-fails")?;
+
+    fixture.publish(VERSION, "unserved")?;
+    let refused = fixture.install_at_terminal("y\n")?;
+    assert!(
+        refused.contains("tailscale serve failed"),
+        "a refused serve must be said:\n{refused}"
+    );
+    for unit in UNITS {
+        assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
+    }
+    assert_eq!(last_line(&refused), HTTP_URL);
+
+    // A SIGINT reaches the whole foreground group, the script included.
+    fixture.sh(
+        "rm /var/tmp/tailscale-stub/serve-fails && touch /var/tmp/tailscale-stub/serve-waits",
+    )?;
+    let interrupted = fixture.install_interrupted("y\n", "To enable, visit")?;
+    assert!(
+        interrupted.contains("Turn on HTTPS for the dashboard? [Y/n]"),
+        "a logged-in box with no HTTPS is asked about HTTPS alone:\n{interrupted}"
+    );
+    assert!(
+        interrupted.contains("tailscale serve failed"),
+        "{interrupted}"
+    );
+    assert_eq!(
+        last_line(&interrupted),
+        HTTP_URL,
+        "a Ctrl-C at the HTTPS link must not end the install"
+    );
+    Ok(())
+}
+
+/// Already logged in, so the one question is HTTPS — and a no to it is still
+/// an install that starts the dashboard.
+#[test]
+fn at_a_terminal_a_no_to_https_on_a_logged_in_box_still_starts_the_dashboard() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+    fixture.sh("touch /var/tmp/tailscale-stub/up")?;
+
+    fixture.publish(VERSION, "plain")?;
+    let screen = fixture.install_at_terminal("n\n")?;
+    assert!(
+        screen.contains("Turn on HTTPS for the dashboard? [Y/n]"),
+        "{screen}"
+    );
+    let calls = fixture.tailscale_calls()?;
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c == "up" || c.starts_with("serve --bg")),
+        "a no changed Tailscale's settings: {calls:?}"
+    );
+    for unit in UNITS {
+        assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
+    }
+    assert_eq!(last_line(&screen), HTTP_URL);
+    Ok(())
 }
 
 /// Y-384's row: a yes logs the box in, turns on HTTPS, writes this box's own
