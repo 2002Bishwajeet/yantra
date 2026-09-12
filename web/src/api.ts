@@ -378,6 +378,7 @@ export type Event = {
     | 'no_agent'
     | 'unreachable'
     | 'relay-test'
+    | 'joined'
   workspace: string | null
   machine: string | null
   // The sentence the relay was, or would have been, sent.
@@ -444,4 +445,20 @@ export type Repo = {
   pushed_at: string | null
   clone_url: string
   default_branch: string
+}
+
+// Y-387: the join command (ADR-0029). Appended as one block so a merge with
+// edits above it is trivial.
+
+/** `POST /api/join` with `{ user }` — what the join command reads back. The
+ *  machine is the caller, named from its tailnet address and never from the
+ *  body. `kept` is an ssh config that already named the machine and was left
+ *  as it was. `logs_in_as` is the account ssh resolves for it, which the page
+ *  must say when it is not `user` (owner, 2026-09-12); `null` is a config ssh
+ *  could not read. */
+export type Joined = {
+  machine: string
+  user: string
+  kept: boolean
+  logs_in_as: string | null
 }

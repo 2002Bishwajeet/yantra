@@ -62,6 +62,7 @@ import type {
   Connection,
   Device,
   Event,
+  Joined,
   Listed,
   Listing,
   Looked,

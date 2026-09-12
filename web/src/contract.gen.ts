@@ -13,6 +13,7 @@ import type {
   Connection,
   Device,
   Event,
+  Joined,
   Listed,
   Listing,
   Looked,
@@ -599,6 +600,20 @@ export const logs = {
     }
   ]
 } satisfies Transcript
+
+export const joined = {
+  "kept": false,
+  "logs_in_as": "<user>",
+  "machine": "cachyos-g14",
+  "user": "<user>"
+} satisfies Joined
+
+export const joinedKept = {
+  "kept": true,
+  "logs_in_as": "yantra",
+  "machine": "cachyos-g14",
+  "user": "<user>"
+} satisfies Joined
 
 export const cloning = {
   "machine": "cachyos-g14",

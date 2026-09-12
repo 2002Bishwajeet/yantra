@@ -98,9 +98,9 @@ fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
     Some(tailnet.to_owned())
 }
 
-/// `yantra ssh-identity`'s read half. **A 404 and never a key**: the CLI verb
-/// generates one when there is none, and a route a browser opens must not —
-/// `identity.rs` says invoked, never automatic. The private half is not read.
+/// `yantra ssh-identity`'s read half. **A 404 and never a key**: a route a
+/// browser polls must not make one. `GET /join` and the CLI verb do, on first
+/// use (ADR-0029). The private half is not read.
 async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
     let dir = fleet.facts.ssh_dir.clone();
     // `ssh-keygen -l` is a subprocess, so off the worker (I-13).
@@ -110,7 +110,7 @@ async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
         Ok(Ok(None)) => (
             StatusCode::NOT_FOUND,
             Json(Missing {
-                error: "no ssh identity yet — `yantra ssh-identity` on the daemon's machine prepares one"
+                error: "no ssh identity yet — the first join makes one, and so does `yantra ssh-identity` on the daemon's machine"
                     .to_owned(),
             }),
         )
