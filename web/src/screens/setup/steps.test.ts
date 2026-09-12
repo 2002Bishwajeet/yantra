@@ -2,7 +2,19 @@ import { describe, expect, it } from 'vitest'
 import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
-import { github, line, machines, ready, remedy, sshKey, tailnet } from './steps'
+import {
+  apart,
+  github,
+  joinCommand,
+  joinUrl,
+  line,
+  machines,
+  push,
+  ready,
+  runsSessions,
+  sshKey,
+  tailnet,
+} from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -33,16 +45,17 @@ describe('the step each read makes', () => {
     expect(tailnet(got({ ...contract.about, tailnet: null }), 'http:').status).toBe('todo')
   })
 
-  /** A key the daemon has not made is a 404, which is a state of the step and
-   *  not a failure of the read (api.ts). */
-  it('reads a 404 on the identity as a key not created', () => {
+  /** The daemon makes its key on the first join (ADR-0029), so a 404 is a
+   *  step that waits and names no command to run. */
+  it('reads a 404 on the identity as a key the first join makes', () => {
     const missing = sshKey(broke(new ApiError('missing', 'no identity', { status: 404 })))
-    expect(missing.status).toBe('todo')
-    expect(missing.words).toContain('yantra ssh-identity')
+    expect(missing).toEqual({ status: 'todo', words: 'made when the first machine joins' })
+    expect(missing.words).not.toMatch(/yantra|`/)
     expect(sshKey(got(contract.sshIdentity))).toEqual({
       status: 'done',
       words: 'created on the appliance · SHA256:<fingerprint>',
     })
+    expect(sshKey(broke(new ApiError('refused', 'boom', { status: 503 }))).status).toBe('failed')
   })
 
   it('says who GitHub is signed in as, and that a flow is waiting', () => {
@@ -52,6 +65,41 @@ describe('the step each read makes', () => {
       status: 'progress',
       words: 'a sign-in is waiting at github.com',
     })
+  })
+
+  /** ADR-0021: a relay saved in Settings is the next start's, so the step
+   *  reads what the running daemon holds. */
+  it('reads the relay the daemon holds, and fails with the daemon words', () => {
+    expect(push(got({ ...contract.about, relay: true }))).toEqual({
+      status: 'done',
+      words: 'the daemon holds a relay and pushes to it',
+    })
+    const none = push(got({ ...contract.about, relay: false }))
+    expect(none.status).toBe('todo')
+    expect(none.words).toContain('after yantrad restarts')
+    expect(push(reading)).toEqual({ status: 'todo', words: 'reading…' })
+    const failed = push(broke(new ApiError('network', 'down')))
+    expect(failed.status).toBe('failed')
+  })
+})
+
+describe('what a node is', () => {
+  it('runs a session on Linux and macOS only', () => {
+    expect(runsSessions({ os: 'linux' })).toBe(true)
+    expect(runsSessions({ os: 'macOS' })).toBe(true)
+    for (const os of ['iOS', 'android', 'windows', 'freebsd', '']) {
+      expect(runsSessions({ os })).toBe(false)
+    }
+  })
+
+  /** Owner, 2026-09-12: phones and tablets open the dashboard, and Windows
+   *  is coming. */
+  it('says what each other node is, and never hides one', () => {
+    expect(apart({ os: 'iOS' })).toBe('opens the dashboard · runs no session')
+    expect(apart({ os: 'android' })).toBe('opens the dashboard · runs no session')
+    expect(apart({ os: 'windows' })).toContain('coming soon')
+    expect(apart({ os: 'freebsd' })).toBe('freebsd · runs no session')
+    expect(apart({ os: '' })).toBe('an unnamed system · runs no session')
   })
 })
 
@@ -69,7 +117,7 @@ describe("a machine's line", () => {
   })
 
   /** `doctor::diagnose()` separates these, and the remedy differs: a refused
-   *  key is one line to paste, an unanswered host is not. */
+   *  key is the join command, an unanswered host is not. */
   it('separates a refused key from a host that did not answer', () => {
     const refused = report([check('reachable', 'absent', 'Permission denied (publickey)')])
     expect(line(machine(), refused, null)).toEqual({ kind: 'refused' })
@@ -109,9 +157,13 @@ describe("a machine's line", () => {
 
 describe('the machines step', () => {
   const named = (kind: string, name: string) => ({ machine: name, line: { kind } as never })
+  const up = (name: string) => ({
+    machine: name,
+    line: { kind: 'ready', present: 2, total: 2, words: 'tmux' } as const,
+  })
 
-  it('has nothing to check when the tailnet lists no machine', () => {
-    expect(machines([]).words).toContain('nothing to check')
+  it('has nothing to check when the tailnet lists no machine that runs a session', () => {
+    expect(machines([])).toEqual({ status: 'todo', words: 'this tailnet lists no machine that runs Linux or macOS' })
   })
 
   it('waits while every machine is unchecked', () => {
@@ -121,24 +173,39 @@ describe('the machines step', () => {
     })
   })
 
-  it('counts the ready ones and names the rest', () => {
-    const some = machines([
-      { machine: 'pi-5', line: { kind: 'ready', present: 2, total: 2, words: 'tmux' } },
-      named('refused', 'nas'),
-    ])
-    expect(some).toEqual({
+  it('is in progress while checked machines are none of them ready', () => {
+    expect(machines([named('refused', 'nas'), named('unreachable', 'pi-5')])).toEqual({
       status: 'progress',
-      words: '1 of 2 machines ready · nas does not yet',
+      words: '0 of 2 machines ready · one ready machine finishes this step',
     })
-    const all = machines([
-      { machine: 'pi-5', line: { kind: 'ready', present: 2, total: 2, words: 'tmux' } },
-    ])
-    expect(all).toEqual({ status: 'done', words: '1 of 1 machines ready' })
+  })
+
+  /** Walk-through Q2.3: an asleep laptop does not hold back a first session. */
+  it('is done at one ready machine, and lists the rest without waiting on them', () => {
+    expect(machines([up('pi-5'), named('refused', 'nas'), named('unchecked', 'macbook')])).toEqual({
+      status: 'done',
+      words: '1 of 3 machines ready · one is enough to start',
+    })
+    expect(machines([up('pi-5')])).toEqual({ status: 'done', words: '1 of 1 machines ready' })
   })
 })
 
-it('puts the real key in the line a refused machine needs run on it', () => {
-  expect(remedy('ssh-ed25519 AAAA yantra')).toBe(
-    "echo 'ssh-ed25519 AAAA yantra' >> ~/.ssh/authorized_keys",
-  )
+describe('the join command', () => {
+  /** On HTTPS the page came through `tailscale serve` on 8443, which forwards
+   *  `/join` as well (ADR-0029, consequences). */
+  it('is the page origin on HTTPS', () => {
+    const page = { protocol: 'https:', origin: 'https://yantra.tail3a1b.ts.net:8443' }
+    expect(joinUrl(page, undefined)).toBe('https://yantra.tail3a1b.ts.net:8443/join')
+  })
+
+  it("is the daemon's bound address on HTTP, and nothing until that is read", () => {
+    const page = { protocol: 'http:', origin: 'http://100.64.0.1:7717' }
+    expect(joinUrl(page, contract.about)).toBe('http://100.64.0.1:7717/join')
+    expect(joinUrl(page, undefined)).toBeNull()
+    expect(joinUrl(page, { ...contract.about, listening_on: [] })).toBeNull()
+  })
+
+  it('pipes the script to sh', () => {
+    expect(joinCommand('http://100.64.0.1:7717/join')).toBe('curl -fsSL http://100.64.0.1:7717/join | sh')
+  })
 })

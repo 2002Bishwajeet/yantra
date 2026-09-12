@@ -160,16 +160,17 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
     });
+    let relay = yantra_core::notify::from_env();
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
             started: std::time::Instant::now(),
             listening_on: addresses.clone(),
             ssh_dir,
+            relay: relay.is_some(),
         }),
         github: github::Grant::from_env(),
         ..heartbeat::Fleet::default()
     };
-    let relay = yantra_core::notify::from_env();
 
     // The unit's environment is not the shell's, so a headless box needs the
     // journal to say which of the two it got.

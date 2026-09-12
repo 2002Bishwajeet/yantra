@@ -125,9 +125,18 @@
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line-height);
   background: var(--md-sys-color-surface-container);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* A command piped to `sh` is read before it is run, so none of it is cut. */
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.setup__hint {
+  display: block;
+  margin-top: 4px;
+}
+
+.setup__hint:empty {
+  margin-top: 0;
 }
 
 .setup__foot {

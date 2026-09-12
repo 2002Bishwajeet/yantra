@@ -3303,6 +3303,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: vec![SocketAddr::new(address(1), 7717)],
                 ssh_dir: dir.to_owned(),
+                relay: false,
             }),
             ..Fleet::default()
         }

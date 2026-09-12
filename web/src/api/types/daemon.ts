@@ -12,6 +12,8 @@ export type About = {
   uptime_seconds: number
   listening_on: string[]
   tailnet: string | null
+  // Y-388: whether this process started with a relay; never the URL or token.
+  relay: boolean
 }
 
 /** `GET /api/ssh-identity`, from `identity::prepare_in`. The public half only. */

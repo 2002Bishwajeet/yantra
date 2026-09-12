@@ -199,6 +199,12 @@ describe('the Dashboard on the first run', () => {
     expect(screen.queryByRole('heading', { name: 'Set up Yantra' })).toBeNull()
     expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
   })
+
+  /** Y-388: a phone runs no session, so one online is not a machine answering. */
+  it('stays the checklist while only a phone or a tablet is online', async () => {
+    mount('desktop', '/', firstRun([aMachine({ os: 'iOS', online: true }), aMachine({ name: 'nas', online: false })]))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+  })
 })
 
 describe('the Dashboard with nothing reachable', () => {

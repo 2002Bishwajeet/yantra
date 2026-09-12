@@ -46,6 +46,7 @@ import { unclaimed, unreachable, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
+import { runsSessions } from '@/screens/setup/steps'
 import './Dashboard.css'
 
 const UNREACHABLE =
@@ -750,8 +751,9 @@ export function Dashboard() {
 
   // D3 §4.8, amended 2026-09-07: the first run is a fleet with no workspace and
   // no machine answering, and the checklist is the page until one answers. It
-  // draws its own h1, so this one is not also rendered.
-  if (fleetEmpty && machines.looked === 'ok' && !machines.data.some((one) => one.online)) {
+  // draws its own h1, so this one is not also rendered. A phone runs no session
+  // (Y-388), so one online does not end the first run.
+  if (fleetEmpty && machines.looked === 'ok' && !machines.data.some((one) => one.online && runsSessions(one))) {
     return (
       <Suspense fallback={<Pending />}>
         <Setup />
