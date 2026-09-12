@@ -94,11 +94,13 @@ every other command.
 
 > **2026-09-12, [Y-386](../../tracker.md):** the vendor's command has prerequisites that are not in
 > §1. It needs `curl` and `bash`. On musl (Alpine), `claude` also needs `libgcc`, `libstdc++` and
-> `ripgrep` at runtime, and `USE_BUILTIN_RIPGREP=0` in `~/.claude/settings.json`
-> ([setup docs](https://code.claude.com/docs/en/setup), read 2026-09-12). Yantra installs them
-> when `claude` is missing, through the same package manager and `sudo -n`, under the owner's
-> *"whatever bare minimum stuff is needed for yantra to work, we install that"*. It writes the
-> setting only where no settings file exists. §1's list of what Yantra is for stays `tmux`, `git`
+> `ripgrep` at runtime, and `USE_BUILTIN_RIPGREP=0` in its environment
+> ([setup docs](https://code.claude.com/docs/en/setup), read 2026-09-12). Yantra installs the
+> packages when `claude` is missing, through the same package manager and `sudo -n`, under the
+> owner's *"whatever bare minimum stuff is needed for yantra to work, we install that"*. **The
+> variable is set at launch, and no file is written** (owner, 2026-09-13): Yantra puts it in the
+> agent's start command on a musl machine only. It is never set on glibc, where a machine with no
+> system `rg` would lose search. §1's list of what Yantra is for stays `tmux`, `git`
 > and `claude`.
 
 > **2026-09-12, [Y-394](../../tracker.md), the owner's decision:** when an install step needs sudo

@@ -134,8 +134,8 @@ fn all(outcome: &Outcome) -> Vec<(Tool, Outcome)> {
 
 /// ADR-0028's whole promise on the machine it is for: all three missing,
 /// sudo that asks for nothing, one call — and `doctor` agrees afterwards.
-/// On musl the vendor's ripgrep setting is written. Asked twice, the second
-/// call finds everything and does nothing.
+/// No settings file is written: on musl the agent gets its ripgrep setting at
+/// launch. Asked twice, the second call finds everything and does nothing.
 #[tokio::test]
 async fn a_bare_machine_with_passwordless_sudo_gets_all_three() -> Result<()> {
     let Some(lab) = Lab::start("bare")? else {
@@ -155,11 +155,14 @@ async fn a_bare_machine_with_passwordless_sudo_gets_all_three() -> Result<()> {
     for check in ["tmux", "git", "agent-cli"] {
         assert_eq!(state(&after, check), State::Present, "{check} after");
     }
-    let setting = lab
+    let written = lab
         .ssh
-        .exec("grep -q USE_BUILTIN_RIPGREP \"$HOME/.claude/settings.json\"")
+        .exec("test -e \"$HOME/.claude/settings.json\"")
         .await?;
-    assert!(setting.success(), "musl's ripgrep setting is written");
+    assert!(
+        !written.success(),
+        "no settings file is written (owner, 2026-09-13)"
+    );
 
     let again = install::of(&lab.ssh, "lab", STAND_IN).await?;
     assert_eq!(

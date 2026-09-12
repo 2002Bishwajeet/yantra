@@ -36,6 +36,10 @@ const INSTALLED_AT: &str = "/home/yantra/.local/bin/claude";
 /// ignores `-p`, and answers nothing at all rather than failing.
 const FORKED_BY: &str = "/tmp/claude-auth-forked-by";
 
+/// Where the stub records `USE_BUILTIN_RIPGREP` as its own process saw it, or
+/// `unset`.
+const RIPGREP_SEEN: &str = "/tmp/claude-ripgrep";
+
 struct Lab {
     _fixture: SshFixture,
     ssh: Ssh,
@@ -98,6 +102,7 @@ impl Lab {
              dir=$HOME/.claude/projects/$slug\n\
              mkdir -p \"$dir\"\n\
              printf '{{\"cwd\":\"%s\",\"sessionId\":\"%s\"}}\\n' \"$PWD\" \"$id\" > \"$dir/$id.jsonl\"\n\
+             printf '%s\\n' \"${{USE_BUILTIN_RIPGREP-unset}}\" > {RIPGREP_SEEN}\n\
              exec sleep 300\n"
         );
 
@@ -343,6 +348,46 @@ async fn a_hostile_repo_path_never_executes_on_the_far_side() -> Result<()> {
         "the payload in a repo path must stay an argument: {}",
         launch.command
     );
+    Ok(())
+}
+
+/// ADR-0028 §5's note: on musl the agent runs with `USE_BUILTIN_RIPGREP=0`,
+/// set in its start command and written to no file. The fixture is Alpine, so
+/// this is the musl half; the glibc half is `launch_command`'s unit test.
+#[tokio::test]
+async fn on_musl_the_agent_is_launched_with_the_system_ripgrep() -> Result<()> {
+    let Some(lab) = Lab::start("ripgrep").await? else {
+        return Ok(());
+    };
+    lab.install_claude(true).await?;
+    lab.ssh.exec("mkdir -p /tmp/rgrepo").await?;
+    let ws = workspace("rg", "/tmp/rgrepo");
+
+    let launch = agent::prepare(&lab.ssh, "/tmp/rgrepo", &lab.tmux, Os::Other).await?;
+    assert!(
+        launch
+            .command
+            .contains("&& export USE_BUILTIN_RIPGREP=0 && exec "),
+        "{}",
+        launch.command
+    );
+    up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command), Os::Other).await?;
+
+    let mut seen = String::new();
+    for _ in 0..50 {
+        let out = lab
+            .ssh
+            .exec(&format!("cat {RIPGREP_SEEN} 2>/dev/null || true"))
+            .await?;
+        seen = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if !seen.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(seen, "0", "the agent's own environment carries it");
+    let written = lab.ssh.exec("test -e ~/.claude/settings.json").await?;
+    assert!(!written.success(), "no settings file is written");
     Ok(())
 }
 

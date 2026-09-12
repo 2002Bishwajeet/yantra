@@ -279,8 +279,11 @@ in the CLI, and `yantra relay` was written before this route was.
 Yantra stops waiting after 15 minutes, and the event then says the install may still be running:
 dropping the future kills only the local `ssh` (I-27). The result is an `installed` or
 `install_stopped` event in the ring, whose `commands` carries each command left for a person
-verbatim, and then the readiness sweep runs early. **One install per machine at a time**, keyed on
-the lowercased name: a second `POST` while one runs is a `409`, and a drop guard gives the machine
+verbatim, and then the readiness sweep runs early. **The name is checked before anything
+else**: dot-separated labels of letters, digits and `-`, none starting with `-`, at most 253
+characters, which is PR #302's label rule with dots allowed. A name outside it is a `400` and
+nothing is spawned, because the name reaches `ssh`'s argv. **One install per machine at a time**,
+keyed on the lowercased name: a second `POST` while one runs is a `409`, and a drop guard gives the machine
 back on every path out of the task. It is not a tmux session, because `tmux` can be the thing being
 installed.
 

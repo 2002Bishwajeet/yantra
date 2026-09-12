@@ -716,6 +716,11 @@ async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
     Path(machine): Path<String>,
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    // The name is a request value, and it reaches `ssh`'s argv (ADR-0009).
+    install::check_machine(&machine).map_err(|error| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: error.to_string(),
+    })?;
     let Some(claim) = Claim::take(&state.running, &machine) else {
         return Err(Refused::Verb {
             status: StatusCode::CONFLICT,
@@ -749,6 +754,8 @@ fn from_install(error: &install::Error) -> &'static str {
             "the machine could not be asked, so what it has is not known"
         }
         install::Error::NoStateDir => "this daemon has no directory for ssh control sockets",
+        // `put_basics` refuses it with a 400 first; this arm keeps the map whole.
+        install::Error::InvalidMachine { .. } => "the name is not one Yantra passes to ssh",
     }
 }
 
@@ -2547,6 +2554,52 @@ mod tests {
         let answered = app.oneshot(set).await.expect("the router is infallible");
 
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// A name that is not a hostname never reaches ssh: an allowed caller gets
+    /// a 400 before the machine is claimed or anything is spawned.
+    #[tokio::test]
+    async fn a_hostile_machine_name_is_refused_before_ssh() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let running = Running::default();
+        let app = Router::new()
+            .route("/machines/{machine}/install", post(put_basics::<Fake>))
+            .with_state(Installer {
+                authoriser: direct(tailnet(vec![(address(9), caller(ME, &[]))])),
+                fleet: fleet.clone(),
+                running: running.clone(),
+            });
+        // Percent-encoded where a path cannot carry the byte: a space, a newline.
+        for hostile in [
+            "-oProxyCommand=id",
+            "a%20b",
+            "pi%0Aid",
+            "pi;id",
+            "user@pi",
+            "%2A",
+        ] {
+            let mut request = Request::post(format!("/machines/{hostile}/install"))
+                .body(Body::empty())
+                .expect("a request with no body");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            let answered = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(answered.status(), StatusCode::BAD_REQUEST, "{hostile}");
+        }
+        assert!(
+            running.lock().expect("unpoisoned").is_empty(),
+            "nothing was claimed"
+        );
+        assert!(fleet.events.read().await.is_empty(), "nothing ran");
     }
 
     /// The lock an install holds is given back when its task ends, and on a

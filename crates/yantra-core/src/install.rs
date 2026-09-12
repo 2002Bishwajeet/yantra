@@ -63,28 +63,17 @@ pub const OUTPUT_CAP: usize = 2048;
 /// What the vendor's installer needs to run, then what `claude` needs at
 /// runtime on musl (code.claude.com/docs/en/setup, 2026-09-12). Package names:
 /// every manager here spells `curl` and `bash` alike, and the last three are
-/// Alpine's.
+/// Alpine's. The docs' `USE_BUILTIN_RIPGREP=0` is no package and no file:
+/// [`agent`] sets it in the agent's start command on musl.
 const PREREQUISITES: [&str; 5] = ["curl", "bash", "libgcc", "libstdc++", "ripgrep"];
 
-/// Prints each missing prerequisite on a line of its own, and `musl` on a musl
-/// system.
+/// Prints each missing prerequisite on a line of its own.
 const MISSING_PREREQUISITES: &str = r#"command -v curl >/dev/null 2>&1 || echo curl
 command -v bash >/dev/null 2>&1 || echo bash
 if ls /lib/ld-musl-* >/dev/null 2>&1; then
-  echo musl
   [ -e /usr/lib/libgcc_s.so.1 ] || [ -e /lib/libgcc_s.so.1 ] || echo libgcc
   [ -e /usr/lib/libstdc++.so.6 ] || echo libstdc++
   command -v rg >/dev/null 2>&1 || echo ripgrep
-fi"#;
-
-/// On musl `claude` must use the system `rg`, which the vendor's docs set in
-/// `~/.claude/settings.json`. Written where no settings file exists yet; a file
-/// that exists without it exits 1, because Yantra rewrites no one's settings.
-const RIPGREP_SETTING: &str = r#"f="$HOME/.claude/settings.json"
-if [ -e "$f" ]; then
-  grep -q USE_BUILTIN_RIPGREP "$f"
-else
-  mkdir -p "$HOME/.claude" && printf '%s\n' '{"env":{"USE_BUILTIN_RIPGREP":"0"}}' > "$f"
 fi"#;
 
 /// `root`, `none` where there is no sudo, `sudo` where it asks for nothing, and
@@ -177,9 +166,6 @@ pub enum Because {
     NoHomebrew,
     /// macOS with no Homebrew and no `git`.
     NoCommandLineTools,
-    /// musl, and `~/.claude/settings.json` exists without the setting the
-    /// vendor's docs name.
-    RipgrepSetting,
 }
 
 impl fmt::Display for Because {
@@ -199,10 +185,6 @@ impl fmt::Display for Because {
             Self::NoCommandLineTools => {
                 "it is macOS, and Apple's git comes with the Command Line Tools, whose installer \
                  is a dialog on that Mac's own screen"
-            }
-            Self::RipgrepSetting => {
-                "claude is there, and on musl it needs `\"env\": {\"USE_BUILTIN_RIPGREP\": \"0\"}` \
-                 in ~/.claude/settings.json, which already holds settings Yantra will not rewrite"
             }
         })
     }
@@ -243,6 +225,12 @@ pub enum Error {
 
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
+
+    #[error(
+        "`{machine}` is not a machine name Yantra passes to ssh: dot-separated labels of letters, \
+         digits and `-`, none starting with `-`, each at most 63 characters and 253 in all"
+    )]
+    InvalidMachine { machine: String },
 }
 
 /// What the one package-manager run came to.
@@ -269,7 +257,26 @@ enum Root {
     NoSudo,
 }
 
+/// A name is a request value, and it becomes `ssh`'s destination argument
+/// (ADR-0009), so it must be a hostname and nothing more: PR #302's label
+/// rule, with dots between labels.
+pub fn check_machine(machine: &str) -> Result<(), Error> {
+    let label = |label: &str| {
+        (1..=63).contains(&label.len())
+            && !label.starts_with('-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    };
+    if machine.len() <= 253 && machine.split('.').all(label) {
+        Ok(())
+    } else {
+        Err(Error::InvalidMachine {
+            machine: machine.to_owned(),
+        })
+    }
+}
+
 pub async fn install(machine: &str) -> Result<Report, Error> {
+    check_machine(machine)?;
     let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
     of(&ssh, machine, CLAUDE_INSTALLER).await
 }
@@ -290,11 +297,8 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
         .map(|tool| tool.name())
         .collect();
     let tools = names.len();
-    let mut musl = false;
     if missing.contains(&Tool::Claude) {
-        let (needed, is_musl) = prerequisites(exec).await?;
-        musl = is_musl;
-        names.extend(needed);
+        names.extend(prerequisites(exec).await?);
     }
     // Whether the claude step waits on this package run.
     let claude_waits = names.len() > tools;
@@ -322,7 +326,7 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
             (Packaged::NoHomebrew, Tool::Claude) if claude_waits => {
                 for_you(Because::NoHomebrew, Some(HOMEBREW_INSTALLER))
             }
-            (_, Tool::Claude) => claude(exec, claude_installer, musl).await?,
+            (_, Tool::Claude) => claude(exec, claude_installer).await?,
             (Packaged::Ran(output), _) => settled(exec, tool, output).await?,
             (Packaged::Nothing, _) => settled(exec, tool, "").await?,
         };
@@ -366,15 +370,14 @@ async fn found<E: Exec>(exec: &E, tool: Tool) -> Result<bool, Error> {
     })
 }
 
-async fn prerequisites<E: Exec>(exec: &E) -> Result<(Vec<&'static str>, bool), Error> {
+async fn prerequisites<E: Exec>(exec: &E) -> Result<Vec<&'static str>, Error> {
     let out = exec.exec(MISSING_PREREQUISITES).await?;
     let said = String::from_utf8_lossy(&out.stdout);
     let said: Vec<&str> = said.lines().map(str::trim).collect();
-    let needed = PREREQUISITES
+    Ok(PREREQUISITES
         .into_iter()
         .filter(|name| said.contains(name))
-        .collect();
-    Ok((needed, said.contains(&"musl")))
+        .collect())
 }
 
 async fn with_packages<E: Exec>(exec: &E, names: &[&str]) -> Result<Packaged, Error> {
@@ -464,7 +467,7 @@ async fn settled<E: Exec>(exec: &E, tool: Tool, output: &str) -> Result<Outcome,
 
 /// A `claude` that is found and does not start — the musl libraries missing,
 /// say — is `Failed`, not `Installed`.
-async fn claude<E: Exec>(exec: &E, installer: &str, musl: bool) -> Result<Outcome, Error> {
+async fn claude<E: Exec>(exec: &E, installer: &str) -> Result<Outcome, Error> {
     let out = exec.exec(installer).await?;
     let Some(path) = agent::locate(exec, "claude").await? else {
         return Ok(Outcome::Failed { output: tail(&out) });
@@ -480,9 +483,6 @@ async fn claude<E: Exec>(exec: &E, installer: &str, musl: bool) -> Result<Outcom
                 tail(&out)
             ),
         });
-    }
-    if musl && !exec.exec(RIPGREP_SETTING).await?.success() {
-        return Ok(for_you(Because::RipgrepSetting, None));
     }
     Ok(Outcome::Installed)
 }
@@ -566,6 +566,35 @@ mod tests {
             classify("refused yantra is not in the sudoers file."),
             Root::Refused
         );
+    }
+
+    /// The name reaches `ssh`'s argv, so anything that could be read as an
+    /// option, a second word or a `Host` pattern is refused.
+    #[test]
+    fn a_machine_name_is_a_hostname_and_nothing_more() {
+        for good in ["pi", "a", "cachyos-g14", "pi.tailnet.ts.net"] {
+            assert!(check_machine(good).is_ok(), "{good}");
+        }
+        let long = "a".repeat(64);
+        for bad in [
+            "",
+            "-oProxyCommand=id",
+            "a b",
+            "pi\nid",
+            "pi;id",
+            "user@pi",
+            "*",
+            "pi..x",
+            "pi.",
+            ".pi",
+            "pi_x",
+            long.as_str(),
+        ] {
+            assert!(
+                matches!(check_machine(bad), Err(Error::InvalidMachine { .. })),
+                "{bad:?} must be refused"
+            );
+        }
     }
 
     #[test]
