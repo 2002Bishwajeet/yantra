@@ -22,6 +22,7 @@ pub mod edit;
 pub mod github;
 pub mod heartbeat;
 pub mod identity;
+pub mod install;
 pub mod inventory;
 pub mod join;
 pub mod logs;
