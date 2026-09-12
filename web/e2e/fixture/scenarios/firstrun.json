@@ -57,7 +57,44 @@
         "expired": false,
         "last_seen": "2026-09-06T11:00:00Z",
         "heartbeat": null
+      },
+      {
+        "name": "iphone",
+        "dns_name": "iphone.yantra.tail3a1b.ts.net.",
+        "os": "iOS",
+        "online": true,
+        "expired": false,
+        "last_seen": null,
+        "heartbeat": null
+      },
+      {
+        "name": "pixel-tablet",
+        "dns_name": "pixel-tablet.yantra.tail3a1b.ts.net.",
+        "os": "android",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "gaming-pc",
+        "dns_name": "gaming-pc.yantra.tail3a1b.ts.net.",
+        "os": "windows",
+        "online": false,
+        "expired": false,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
       }
     ]
+  },
+  "sshIdentity": null,
+  "about": {
+    "built": "2026-09-06",
+    "listening_on": ["100.64.0.1:7717", "[fd7a:115c:a1e0::1]:7717"],
+    "tailnet": "<tailnet>.ts.net",
+    "target": "aarch64-unknown-linux-musl",
+    "uptime_seconds": 86412,
+    "version": "0.1.0",
+    "relay": false
   }
 }

@@ -20,9 +20,22 @@ describe('Access', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show key' }))
     const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
     expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeTruthy()
-    fireEvent.click(sheet.getByRole('button', { name: 'Copy' }))
+    fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
     expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh-ed25519 /))
-    expect(await sheet.findByRole('button', { name: 'Copied' })).toBeTruthy()
+    expect(await sheet.findByRole('button', { name: 'Copied the public key' })).toBeTruthy()
+  })
+
+  /** Y-388: plain HTTP to a tailnet address has no clipboard, and Copy used
+   *  to do nothing there. */
+  it('selects the key and says how to copy it where there is no clipboard', async () => {
+    vi.stubGlobal('navigator', { userAgent: navigator.userAgent })
+    mountSettings('desktop', '/settings/access')
+    fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
+    fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
+    expect(await sheet.findByText(/no clipboard, so the text is selected/)).toBeTruthy()
+    expect(window.getSelection()?.toString()).toMatch(/^ssh-ed25519 /)
+    window.getSelection()?.removeAllRanges()
   })
 
   it('says a key the daemon has not made is not created, and how to make it', async () => {

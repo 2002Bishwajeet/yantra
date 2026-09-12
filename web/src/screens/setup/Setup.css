@@ -111,25 +111,6 @@
   color: var(--md-sys-color-on-error-container);
 }
 
-.setup__copy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.setup__code {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  background: var(--md-sys-color-surface-container);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .setup__foot {
   display: flex;
   align-items: center;

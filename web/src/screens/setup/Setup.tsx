@@ -1,15 +1,17 @@
-import { useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, Check, Copy, GitBranch, Plus, Radio } from 'lucide-react'
+import { ArrowRight, Check, GitBranch, Plus, Radio } from 'lucide-react'
 import type { Machine, Readiness } from '@/api'
 import { useScreenTitle } from '@/shell/title'
 import { fromReading } from '@/api/client'
 import { useAbout, useGithub, useMachines, useReadiness, useSshIdentity } from '@/api/hooks'
 import { useRecheckReadiness } from '@/api/mutations'
 import { machineReadinessQuery } from '@/api/queries'
+import { apart, runsSessions } from '@/lib/platform'
 import { ago, at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
+import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { List, ListItem } from '@/m3/list/List'
@@ -21,11 +23,13 @@ import { useTick } from '@/useTick'
 import { stamp } from '../dashboard/bands'
 import {
   github,
+  joinCommand,
+  joinUrl,
   line,
   machines as machinesStep,
   marks,
+  push,
   ready,
-  remedy,
   sshKey,
   statusWord,
   tailnet,
@@ -35,27 +39,6 @@ import {
 import './Setup.css'
 
 const STEPS = 6
-
-function Copyable(props: { text: string }) {
-  const { text } = props
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-    } catch {
-      // No clipboard here; the text is still on screen to select.
-    }
-  }
-  return (
-    <div className="setup__copy">
-      <Mono className="setup__code">{text}</Mono>
-      <Button icon={copied ? <Check /> : <Copy />} onClick={copy} variant="text">
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
-    </div>
-  )
-}
 
 const tones = { done: 'primary', progress: 'tertiary', todo: 'high', failed: 'error' } as const
 
@@ -75,8 +58,23 @@ function Item(props: { title: string; step: Step; lead: ReactNode; trailing?: Re
   )
 }
 
-function MachineLine(props: { machine: Machine; line: Line; report: Readiness | null; publicKey: string | null }) {
-  const { machine, line: said, report, publicKey } = props
+/** The join command where it can be built, and why not where it cannot. */
+function Join(props: { url: string | null; about: { error: Error | null; data: unknown }; what: string }) {
+  const { url, about, what } = props
+  if (url) return <Copyable text={joinCommand(url)} what={what} />
+  return (
+    <Text scale="body-small" tone="variant">
+      {about.error
+        ? "the daemon's address could not be read, so the join command cannot be built"
+        : about.data
+          ? 'the daemon reports no tailnet address, so the join command cannot be built · check that Tailscale is up on the appliance, then restart yantrad'
+          : "reading the daemon's address…"}
+    </Text>
+  )
+}
+
+function MachineLine(props: { machine: Machine; line: Line; report: Readiness | null; join: ReactNode }) {
+  const { machine, line: said, report, join } = props
   const recheck = useRecheckReadiness()
   const mark = said.kind === 'ready' ? 'done' : said.kind === 'unreachable' ? 'unknown' : 'idle'
   return (
@@ -96,15 +94,9 @@ function MachineLine(props: { machine: Machine; line: Line; report: Readiness | 
         ) : said.kind === 'refused' ? (
           <>
             <Text scale="body-small" tone="variant">
-              key not placed · the key is refused · run this once on {machine.name}:
+              key refused · run the join command once in a terminal on {machine.name}:
             </Text>
-            {publicKey ? (
-              <Copyable text={remedy(publicKey)} />
-            ) : (
-              <Text scale="body-small" tone="variant">
-                create the key first, step 2
-              </Text>
-            )}
+            {join}
           </>
         ) : (
           <Text scale="body-small" tone="variant">
@@ -132,8 +124,11 @@ export function Setup() {
   const machines = useMachines()
   const sweep = useReadiness()
   const now = useTick(true)
+  const devices = useId()
 
-  const list = machines.looked === 'ok' ? machines.data : []
+  const all = machines.looked === 'ok' ? machines.data : []
+  const list = all.filter(runsSessions)
+  const others = all.filter((one) => !runsSessions(one))
   // A recheck answers into the per-machine key; nothing here reads that key
   // over the wire, so an unasked machine draws as unasked rather than as a 404.
   const asked = useQueries({
@@ -152,13 +147,14 @@ export function Setup() {
   })
   const readyCount = lines.filter((one) => ready(one.line)).length
   const publicKey = identity.data?.public_key ?? null
+  const join = joinUrl(location, about.data)
 
   const steps = {
     tailnet: tailnet(about, location.protocol),
     ssh: sshKey(identity),
     machines: machinesStep(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
     github: github(connection),
-    push: { status: 'todo', words: 'an ntfy topic, saved once, tested once' } satisfies Step,
+    push: push(about),
     first: {
       status: 'todo',
       words: `needs one ready machine, you have ${readyCount === 0 ? 'none yet' : readyCount}`,
@@ -218,19 +214,48 @@ export function Setup() {
             <Item lead={<Check />} step={steps.ssh} title="This account's ssh key" />
             {publicKey ? (
               <li className="setup__sub">
-                <Copyable text={publicKey} />
+                <Copyable text={publicKey} what="the public key" />
               </li>
             ) : null}
             <Item lead={<Check />} step={steps.machines} title="Machines" />
-            {machines.looked === 'failed' ? (
-              <li className="setup__sub">
+            <li className="setup__sub">
+              {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
-              </li>
-            ) : lines.length > 0 ? (
-              <li className="setup__sub">
+              ) : lines.length > 0 ? (
                 <ul className="setup__lines">
                   {lines.map((one) => (
-                    <MachineLine key={one.machine.name} line={one.line} machine={one.machine} publicKey={publicKey} report={one.report} />
+                    <MachineLine
+                      join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
+                      key={one.machine.name}
+                      line={one.line}
+                      machine={one.machine}
+                      report={one.report}
+                    />
+                  ))}
+                </ul>
+              ) : null}
+              {/* Y-390's guided Add a device starts here. */}
+              <Text scale="body-small" tone="variant">
+                To add a machine, run this once in a terminal on it. It turns on sshd, places this appliance's key
+                and tells the daemon which account ran it.
+              </Text>
+              <div aria-live="polite">
+                <Join about={about} url={join} what="the join command" />
+              </div>
+            </li>
+            {others.length > 0 ? (
+              <li className="setup__sub">
+                <Text id={devices} scale="label-large" tone="variant">
+                  Devices that open the dashboard
+                </Text>
+                <ul aria-labelledby={devices} className="setup__lines">
+                  {others.map((one) => (
+                    <li className="setup__line" data-kind="apart" key={one.name}>
+                      <span className="setup__machine">{one.name}</span>
+                      <Text className="setup__said" scale="body-small" tone="variant">
+                        {apart(one)}
+                      </Text>
+                    </li>
                   ))}
                 </ul>
               </li>
@@ -274,7 +299,8 @@ export function Setup() {
 
       <div className="setup__foot">
         <Text scale="body-medium" tone="variant">
-          Nothing here needs a terminal. Each step re-checks itself every few seconds.
+          One step runs in a terminal: the join command, once on each new machine. Each step here re-checks itself
+          every few seconds.
         </Text>
         <Button className="setup__skip" render={<Link to="/fleet" />} role="link" variant="text">
           Skip for now

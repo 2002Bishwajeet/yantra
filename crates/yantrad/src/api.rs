@@ -76,6 +76,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
             .map(ToString::to_string)
             .collect(),
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
+        relay: fleet.facts.relay,
     })
 }
 
@@ -473,6 +474,8 @@ pub(crate) struct About {
     /// `None` until the machines look has run, or when no node holds a bound
     /// address — never a guess.
     pub(crate) tailnet: Option<String>,
+    /// Whether this process holds a relay. Never the URL or the token (§B4).
+    pub(crate) relay: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -694,6 +697,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     "[fd7a:115c:a1e0::1]:7717".to_owned(),
                 ],
                 tailnet: Some("<tailnet>.ts.net".to_owned()),
+                relay: true,
             }),
         ),
         (
@@ -1889,6 +1893,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
                 ssh_dir: std::path::PathBuf::new(),
+                relay: true,
             }),
             ..looking_at_machines(vec![
                 MachineInfo {
@@ -1912,10 +1917,16 @@ mod tests {
         assert!(body["uptime_seconds"].as_u64().is_some(), "{body}");
         assert_eq!(body["listening_on"], json!(["100.64.0.1:7717"]));
         assert_eq!(body["tailnet"], json!("example.ts.net"));
+        assert_eq!(body["relay"], json!(true));
 
         let unlooked = get_json(holding(Snapshot::default()), "/about").await;
         assert_eq!(unlooked["tailnet"], Value::Null, "no look, no guess");
         assert_eq!(unlooked["listening_on"], json!([]));
+        assert_eq!(
+            unlooked["relay"],
+            json!(false),
+            "no relay at start is false, never absent"
+        );
     }
 
     fn looking_at_machines(machines: Vec<MachineInfo>) -> Fleet {
@@ -1938,6 +1949,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: dir.to_owned(),
+                relay: false,
             }),
             ..Fleet::default()
         };

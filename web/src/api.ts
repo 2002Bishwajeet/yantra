@@ -341,6 +341,9 @@ export type About = {
   // `listen_on`'s set exactly, as `host:port`.
   listening_on: string[]
   tailnet: string | null
+  // Whether this process started with a relay. A relay saved since is the
+  // next start's (ADR-0021). Never the URL or the token.
+  relay: boolean
 }
 
 /** `GET /api/ssh-identity` — the public half of the daemon's key and the
