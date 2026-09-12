@@ -191,7 +191,9 @@ process still takes both values out of its environment once, in `main.rs`. So a 
 reaches the daemon at its **next start**, and both surfaces say so rather than implying it is live.
 That ADR bends §B4 and Y-044 on purpose and says what the exposure is; read it before moving either
 value anywhere else. **The token is still never logged and never served** — no route reads the file
-back, and `tracing` names the caller and never the topic.
+back, and `tracing` names the caller and never the topic. `GET /api/about` says only whether this
+process started with a relay, as `relay: bool` (Y-388), so the setup checklist can tell a relay the
+daemon uses from one saved for its next start.
 
 **Nothing is pushed while a dashboard is open** (D3 §13). `notify::Viewers` is a last-seen-a-viewer
 timestamp beside the snapshot, `POST /api/viewing` writes it, and `refresh` hands the notifier a
