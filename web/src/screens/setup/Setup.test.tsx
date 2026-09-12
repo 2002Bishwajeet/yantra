@@ -155,6 +155,17 @@ describe('push to your phone', () => {
 })
 
 describe('the join command and Copy', () => {
+  /** `listen_on` refuses to start without an address, so this is rare, but a
+   *  line that says "reading…" forever would be a lie. */
+  it('says the daemon reports no tailnet address, and what to check, when it lists none', async () => {
+    await draw({ ...base(), 'GET /api/about': [200, { ...contract.about, relay: false, listening_on: [] }] })
+    expect(
+      await screen.findByText(/the daemon reports no tailnet address, so the join command cannot be built · check that Tailscale is up/),
+    ).toBeTruthy()
+    expect(screen.queryByText(/reading the daemon's address/)).toBeNull()
+    expect(screen.queryByText(/curl -fsSL/)).toBeNull()
+  })
+
   it("is built from the daemon's bound address on HTTP, and the footer says it runs in a terminal", async () => {
     await draw(base())
     expect(screen.getByText(COMMAND)).toBeTruthy()

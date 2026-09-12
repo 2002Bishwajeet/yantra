@@ -46,7 +46,7 @@ import { unclaimed, unreachable, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
-import { runsSessions } from '@/screens/setup/steps'
+import { runsSessions } from '@/lib/platform'
 import './Dashboard.css'
 
 const UNREACHABLE =

@@ -111,34 +111,6 @@
   color: var(--md-sys-color-on-error-container);
 }
 
-.setup__copy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.setup__code {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  background: var(--md-sys-color-surface-container);
-  /* A command piped to `sh` is read before it is run, so none of it is cut. */
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-
-.setup__hint {
-  display: block;
-  margin-top: 4px;
-}
-
-.setup__hint:empty {
-  margin-top: 0;
-}
-
 .setup__foot {
   display: flex;
   align-items: center;

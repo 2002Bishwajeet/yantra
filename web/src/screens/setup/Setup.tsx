@@ -1,15 +1,17 @@
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, Check, Copy, GitBranch, Plus, Radio } from 'lucide-react'
+import { ArrowRight, Check, GitBranch, Plus, Radio } from 'lucide-react'
 import type { Machine, Readiness } from '@/api'
 import { useScreenTitle } from '@/shell/title'
 import { fromReading } from '@/api/client'
 import { useAbout, useGithub, useMachines, useReadiness, useSshIdentity } from '@/api/hooks'
 import { useRecheckReadiness } from '@/api/mutations'
 import { machineReadinessQuery } from '@/api/queries'
+import { apart, runsSessions } from '@/lib/platform'
 import { ago, at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
+import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { List, ListItem } from '@/m3/list/List'
@@ -20,7 +22,6 @@ import { Track } from '@/m3/track/Track'
 import { useTick } from '@/useTick'
 import { stamp } from '../dashboard/bands'
 import {
-  apart,
   github,
   joinCommand,
   joinUrl,
@@ -29,7 +30,6 @@ import {
   marks,
   push,
   ready,
-  runsSessions,
   sshKey,
   statusWord,
   tailnet,
@@ -39,43 +39,6 @@ import {
 import './Setup.css'
 
 const STEPS = 6
-
-function Copyable(props: { text: string; what: string }) {
-  const { text, what } = props
-  const code = useRef<HTMLSpanElement>(null)
-  const [said, setSaid] = useState<'copied' | 'selected' | null>(null)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setSaid('copied')
-    } catch {
-      // No clipboard outside a secure context, and plain http://100.x:7717 is
-      // not one: select the text so the person can copy it themselves.
-      if (code.current) window.getSelection()?.selectAllChildren(code.current)
-      setSaid('selected')
-    }
-  }
-  return (
-    <div className="setup__copyable">
-      <div className="setup__copy">
-        <Mono className="setup__code" ref={code} translate="no">
-          {text}
-        </Mono>
-        <Button
-          aria-label={`${said === 'copied' ? 'Copied' : 'Copy'} ${what}`}
-          icon={said === 'copied' ? <Check /> : <Copy />}
-          onClick={copy}
-          variant="text"
-        >
-          {said === 'copied' ? 'Copied' : 'Copy'}
-        </Button>
-      </div>
-      <Text aria-live="polite" className="setup__hint" scale="body-small" tone="variant">
-        {said === 'selected' ? 'this page has no clipboard, so the text is selected · copy it with Ctrl+C, ⌘C or a long press' : ''}
-      </Text>
-    </div>
-  )
-}
 
 const tones = { done: 'primary', progress: 'tertiary', todo: 'high', failed: 'error' } as const
 
@@ -96,14 +59,16 @@ function Item(props: { title: string; step: Step; lead: ReactNode; trailing?: Re
 }
 
 /** The join command where it can be built, and why not where it cannot. */
-function Join(props: { url: string | null; unread: boolean; what: string }) {
-  const { url, unread, what } = props
+function Join(props: { url: string | null; about: { error: Error | null; data: unknown }; what: string }) {
+  const { url, about, what } = props
   if (url) return <Copyable text={joinCommand(url)} what={what} />
   return (
     <Text scale="body-small" tone="variant">
-      {unread
+      {about.error
         ? "the daemon's address could not be read, so the join command cannot be built"
-        : "reading the daemon's address…"}
+        : about.data
+          ? 'the daemon reports no tailnet address, so the join command cannot be built · check that Tailscale is up on the appliance, then restart yantrad'
+          : "reading the daemon's address…"}
     </Text>
   )
 }
@@ -260,7 +225,7 @@ export function Setup() {
                 <ul className="setup__lines">
                   {lines.map((one) => (
                     <MachineLine
-                      join={<Join unread={!!about.error} url={join} what={`the join command for ${one.machine.name}`} />}
+                      join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
                       key={one.machine.name}
                       line={one.line}
                       machine={one.machine}
@@ -274,7 +239,9 @@ export function Setup() {
                 To add a machine, run this once in a terminal on it. It turns on sshd, places this appliance's key
                 and tells the daemon which account ran it.
               </Text>
-              <Join unread={!!about.error} url={join} what="the join command" />
+              <div aria-live="polite">
+                <Join about={about} url={join} what="the join command" />
+              </div>
             </li>
             {others.length > 0 ? (
               <li className="setup__sub">
