@@ -278,3 +278,15 @@ once the moved-tag problem bites.
   the answer changes what `/usr/local/bin/yantra-update` was fetched from, not what it does.
 - **A release cadence.** A tag is cut when there is something worth installing
   ([the M15 plan](../plans/m15-the-first-release.md) §7).
+
+> **§1 and §7 narrowed, recorded 2026-09-12 (Y-385).**
+> [ADR-0028](0028-yantra-installs-the-bare-minimum-on-a-machine.md) lets the daemon install `tmux`,
+> `git` and `claude` on a machine it reaches over ssh, when a person asks. It runs the vendor's
+> command or the machine's package manager and ships no Yantra binary. **What this ADR keeps closed
+> still holds:** no update and no update instruction crosses ssh, the daemon holds no inventory of
+> versions, and only the appliance stays current. §7's last sentence stands exactly — *if Yantra
+> ever updates a second machine it is a fleet-management product* — because ADR-0028 installs and
+> never updates.
+>
+> **What changed is upstream of the reasoning:** the QA walk-through measured the manual path on
+> 2026-09-11, and the owner judged it too costly.

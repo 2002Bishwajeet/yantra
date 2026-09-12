@@ -333,3 +333,16 @@ Recorded so the trade does not quietly expire, per §B0.2. Any of:
 > fetches no executable and writes nothing into `/usr/local/bin`. R-12's mitigation is untouched —
 > this agent stays heartbeat-only — and ADR-0027 §7 says what makes *the box the daemon runs on* a
 > boundary rather than an exception.
+
+> **Yantra may now install the bare minimum on a machine, recorded 2026-09-12 (Y-385).**
+> [ADR-0028](0028-yantra-installs-the-bare-minimum-on-a-machine.md) narrows the fleet clause of the
+> non-goals above. When a person presses Install on one machine, the daemon runs the vendor's
+> installer or the machine's package manager for `tmux`, `git` and `claude`, over ssh. **What
+> holds:** no Yantra binary crosses ssh, `yantra-agent` included; nothing is updated; the daemon
+> keeps no inventory of versions; the heartbeat's reply is still `204`; this agent stays
+> heartbeat-only.
+>
+> **What changed sits upstream of the reasoning.** When this ADR was written, nobody had taken a
+> bare machine to a working one. The QA walk-through did on 2026-09-11, and the owner judged a
+> command per missing piece per machine too costly. R-12's worry stands, which is why ADR-0028
+> installs three things and updates none.
