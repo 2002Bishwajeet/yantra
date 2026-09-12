@@ -404,6 +404,8 @@ export const repos = {
 } satisfies Looked<Repo[]>
 
 export const github = {
+  "client_id": null,
+  "client_id_custom": false,
   "connected": true,
   "login": "2002Bishwajeet",
   "pending": false,
@@ -411,6 +413,8 @@ export const github = {
 } satisfies Connection
 
 export const disconnected = {
+  "client_id": null,
+  "client_id_custom": false,
   "connected": false,
   "login": null,
   "pending": false,

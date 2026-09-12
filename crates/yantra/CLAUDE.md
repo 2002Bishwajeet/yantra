@@ -42,6 +42,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `edit --machine` when that machine cannot be reached | 1 | it cannot be *known* that no session is being stranded, and a check that cannot know must refuse rather than allow (R-23) |
 | `github status`, unless GitHub accepts the grant | 1 | `doctor`'s rule on the one check about this host, so an installer can loop on it. No grant in this shell is 1 and names `YANTRA_GITHUB_TOKEN` |
 | `github logout` when no grant line is there | **0** | absence is the state asked for — `down`'s rule |
+| `github client-id --clear` when no client id line is there | **0** | absence is the state asked for — `down`'s rule |
 | `ssh-identity --machine m --user u` when ssh logs in to `m` as someone else | 1 | a block already in the config, or an owner's `Host *` above the new one, wins, so the verb did not do what it says. It names the account that wins, and it rewrites nothing (ADR-0009, ADR-0029) |
 | `ls repos` with nothing matching `--search` | **0** | a reading: the count under the table says `0 of N`, which is a filter that kept nothing and not an empty account |
 | `attach`, once it has something to attach to | **none** | see below |
@@ -81,6 +82,10 @@ a supervising parent would have to forward `SIGWINCH`, relay signals and reap a 
   a `{:?}` cannot leak it either. `ls attention`, `ls repos` and `github status` read the grant from
   `YANTRA_GITHUB_TOKEN` and nowhere else, because a terminal cannot read the daemon's `0600` file
   back, and each refusal names that variable and the verb that writes the file.
+- **`github client-id` writes a third line to that file, and it is safe to print** (Y-393): a
+  client id is not a secret (ADR-0023), unlike the two `relay` and `github login` write. It says
+  the change takes effect at yantrad's next restart, the same note `relay` prints, because
+  `client_id()` rereads the environment rather than a value this process holds.
 - `report_error` walks the `source()` chain — the useful detail is usually a level or two down, so
   never flatten an error to its top line.
 - Multi-line string constants: Rust's `\` line-continuation eats leading whitespace, so an indented
