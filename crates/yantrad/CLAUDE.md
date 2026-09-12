@@ -266,11 +266,12 @@ directory to walk.
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}`, `POST /api/relay`,
-`POST /api/machines/{machine}/clone`, `POST /api/github/login` and `DELETE /api/github` — **the CLI's
-own verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair`, `relay`, `clone`, `github login` and `github logout`. The daemon may do what `yantra` can
-already do, which is what stops it growing a richer API the CLI cannot reach. A new verb here starts
-in the CLI, and `yantra relay` was written before this route was.
+`POST /api/machines/{machine}/clone`, `POST /api/github/login`, `DELETE /api/github`, and
+`POST`/`DELETE /api/github/client-id` — **the CLI's own verbs and nothing more**, being `yantra new`,
+`edit`, `up`, `down`, `resume`, `tokens`, `logs`, `repair`, `relay`, `clone`, `github login`,
+`github logout` and `github client-id` (Y-393). The daemon may do what `yantra` can already do, which
+is what stops it growing a richer API the CLI cannot reach. A new verb here starts in the CLI, and
+`yantra relay` was written before this route was.
 
 **`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
 caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
@@ -306,6 +307,13 @@ returns it, and the line in `/etc/yantra/daemon.env` is for the next start. **On
 a second `POST` while a code is waiting is a `409`, since two would race for one file. A daemon with
 no `YANTRA_GITHUB_CLIENT_ID` is a `500` naming it — this deployment's own fault — and a GitHub that
 refused or could not be reached is a `502`.
+
+**`github client-id` is not live the way `github login` is** (Y-393): `client_id()` rereads the
+process environment on every call, and nothing here holds an override in memory, so a value this
+writes reaches a sign-in only once systemd restarts the unit and hands it a new one — the relay's
+rule (ADR-0021 decision 3), not the token's. The id itself is not a secret (ADR-0023), so
+`GET /api/github` says which one is in use rather than hiding it. A value outside the conservative
+charset [`yantra_core::github::valid_client_id`] holds is a `400` naming the rule.
 
 **`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3

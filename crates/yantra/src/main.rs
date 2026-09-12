@@ -231,6 +231,15 @@ enum GithubAction {
     Logout,
     /// Say whether this shell holds a grant, and whom GitHub says it is
     Status,
+    /// Use your own OAuth App's client id instead of the one this build carries
+    ClientId {
+        /// The app's client id, from github.com/settings/developers
+        #[arg(required_unless_present = "clear")]
+        id: Option<String>,
+        /// Remove it, falling back to the build's own id
+        #[arg(long, conflicts_with = "id")]
+        clear: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -350,6 +359,9 @@ async fn main() -> ExitCode {
         Some(Command::Github {
             action: GithubAction::Status,
         }) => github_status().await,
+        Some(Command::Github {
+            action: GithubAction::ClientId { id, clear },
+        }) => github_client_id(id.as_deref(), clear),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity {
@@ -1647,6 +1659,37 @@ async fn github_status() -> ExitCode {
     match Github::default().login_name(&token).await {
         Ok(login) => {
             println!("signed in as {login}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `yantra github client-id <id>` and `--clear`, `/settings`' own field
+/// on a keyboard (Y-393). The id is not a secret (ADR-0023), so unlike
+/// `relay` and `github login` it is safe to print back. **This takes effect
+/// at yantrad's next start**, exactly like the relay: `client_id()` rereads
+/// the process environment, and nothing holds an override live in between.
+fn github_client_id(id: Option<&str>, clear: bool) -> ExitCode {
+    let path = std::path::Path::new(notify::RELAY_FILE);
+    let write = if clear { None } else { id };
+    match notify::write_client_id(path, write) {
+        Ok(()) => {
+            if clear {
+                println!("removed the client id from {}", notify::RELAY_FILE);
+                println!("  note: yantrad falls back to its own build's id at its next start —");
+            } else {
+                println!(
+                    "wrote the client id {} to {}",
+                    write.unwrap_or_default(),
+                    notify::RELAY_FILE
+                );
+                println!("  note: yantrad reads that file when systemd starts it —");
+            }
+            println!("        `sudo systemctl restart yantrad` for this to reach the daemon.");
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -3246,6 +3289,36 @@ mod tests {
             }) if q == "yan"
         ));
         assert!(Cli::try_parse_from(["yantra", "ls", "repos"]).is_ok());
+    }
+
+    /// Y-393: one of `<id>` or `--clear` is required, and never both.
+    #[test]
+    fn github_client_id_takes_an_id_or_clear_and_never_neither_or_both() {
+        let cli = Cli::try_parse_from(["yantra", "github", "client-id", "Iv1.abc"])
+            .expect("an id parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Github {
+                action: GithubAction::ClientId { id: Some(ref id), clear: false }
+            }) if id == "Iv1.abc"
+        ));
+
+        let cli = Cli::try_parse_from(["yantra", "github", "client-id", "--clear"])
+            .expect("--clear parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Github {
+                action: GithubAction::ClientId {
+                    id: None,
+                    clear: true
+                }
+            })
+        ));
+
+        assert!(Cli::try_parse_from(["yantra", "github", "client-id"]).is_err());
+        assert!(
+            Cli::try_parse_from(["yantra", "github", "client-id", "Iv1.abc", "--clear"]).is_err()
+        );
     }
 
     fn repo(full_name: &str, private: bool) -> github::Repo {

@@ -31,7 +31,7 @@ use std::net::{IpAddr, SocketAddr};
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
-use yantra_core::{about, doctor, identity};
+use yantra_core::{about, doctor, github, identity};
 
 use crate::events::{self, Event};
 use crate::github::Grant;
@@ -311,8 +311,15 @@ async fn github(State(model): State<Model>) -> impl IntoResponse {
 /// holds, so it awaits no network: whether `GET /user` still accepts the grant
 /// is `/readiness/github`'s, on the sweep. **The token is not in it** — the
 /// login is the one thing about the account that is shown.
+///
+/// `client_id` and `client_id_custom` are read fresh here rather than held:
+/// they answer *which app is in use*, and a client id is not a secret
+/// (ADR-0023), so nothing stops this route from saying so (Y-393).
 async fn connection(State(grant): State<Grant>) -> impl IntoResponse {
-    Json(Connection::of(&grant.read().await))
+    Json(Connection::of(
+        &grant.read().await,
+        github::client_id_and_source(),
+    ))
 }
 
 /// `yantra ls repos` on the wire, without the filter: the search box filters
@@ -751,21 +758,33 @@ impl Item {
 /// `scopes` is GitHub's own list from the grant that made it, and empty for a
 /// grant read from the environment — nothing asks GitHub what a token may do.
 /// `pending` is a device flow waiting for its code to be typed.
+///
+/// `client_id` and `client_id_custom` say which OAuth App a sign-in would use
+/// — `null`/`false` is a deployment with none configured — and never what the
+/// running daemon holds live: a value just written takes effect at the next
+/// start (Y-393), same as the relay.
 #[derive(Debug, serde::Serialize)]
 struct Connection {
     connected: bool,
     login: Option<String>,
     scopes: Vec<String>,
     pending: bool,
+    client_id: Option<String>,
+    client_id_custom: bool,
 }
 
 impl Connection {
-    fn of(held: &crate::github::Held) -> Self {
+    fn of(held: &crate::github::Held, client_id: Option<(String, github::ClientIdSource)>) -> Self {
         Self {
             connected: held.token.is_some(),
             login: held.login.clone(),
             scopes: held.scopes.clone(),
             pending: held.pending,
+            client_id: client_id.as_ref().map(|(id, _)| id.clone()),
+            client_id_custom: matches!(
+                client_id.map(|(_, source)| source),
+                Some(github::ClientIdSource::Env)
+            ),
         }
     }
 }
@@ -1593,10 +1612,18 @@ mod tests {
     #[tokio::test]
     async fn the_connection_says_whether_a_grant_is_held_and_never_what_it_is() {
         let none = get_json(holding(Snapshot::default()), "/github").await;
-        assert_eq!(
-            none,
-            json!({"connected": false, "login": null, "scopes": [], "pending": false})
-        );
+        assert_eq!(none["connected"], false, "{none}");
+        assert_eq!(none["login"], Value::Null, "{none}");
+        assert_eq!(none["scopes"], json!([]), "{none}");
+        assert_eq!(none["pending"], false, "{none}");
+        // `client_id` mirrors this process's own environment (Y-393), which a
+        // test does not control — so it is compared to itself, not a fixed
+        // value, to stay green on a machine that happens to export it.
+        let expected = match yantra_core::github::client_id() {
+            Some(id) => Value::String(id),
+            None => Value::Null,
+        };
+        assert_eq!(none["client_id"], expected, "{none}");
 
         let fleet = Fleet {
             github: Grant::holding(Some(yantra_core::github::Token::new(

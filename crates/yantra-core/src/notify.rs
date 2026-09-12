@@ -231,6 +231,9 @@ pub enum NotWritten {
     )]
     Unholdable { field: &'static str },
 
+    #[error("a client id may only hold letters, digits, `.`, `_` and `-`, up to 64 characters")]
+    InvalidClientId,
+
     #[error("{path} could not be read before being rewritten: {source}")]
     Read {
         path: std::path::PathBuf,
@@ -279,9 +282,27 @@ pub fn write_github(
     rewrite(path, &[(crate::github::TOKEN, token)])
 }
 
+/// A self-hoster's own OAuth App id, beside the grant and the relay
+/// ([ADR-0023](../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md),
+/// dated 2026-09-13). `None` removes the line, which falls back to whatever
+/// id the build carries, if any ([`crate::github::client_id`]).
+///
+/// **This takes effect at the daemon's next start**, exactly like the relay
+/// (ADR-0021 decision 3): unlike the grant's token, `yantrad` did not just
+/// obtain this value itself, so nothing here holds it live before systemd
+/// rereads the file.
+pub fn write_client_id(path: &std::path::Path, id: Option<&str>) -> Result<(), NotWritten> {
+    if let Some(id) = id
+        && !crate::github::valid_client_id(id)
+    {
+        return Err(NotWritten::InvalidClientId);
+    }
+    rewrite(path, &[(crate::github::CLIENT_ID, id)])
+}
+
 /// Replaces the lines for `changes`' keys and keeps every other line verbatim,
-/// because two writers share this file (ADR-0023) and an operator may have put
-/// `YANTRA_GITHUB_CLIENT_ID` in it by hand. `0600` applies when this creates
+/// because three writers share this file (ADR-0021, ADR-0023) and an operator
+/// may still put a line in it by hand. `0600` applies when this creates
 /// the file; an existing one keeps the mode and the owner the installer gave
 /// it, which is what lets the daemon's own account rewrite a file `systemd`
 /// reads as root.
@@ -314,9 +335,10 @@ fn rewrite(path: &std::path::Path, changes: &[(&str, Option<&str>)]) -> Result<(
         .collect();
     if lines.is_empty() {
         lines.extend(
-            "# Written by `yantra relay`, `yantra github login` and the dashboard (ADR-0021,\n\
-             # ADR-0023). yantrad reads this through the unit's `EnvironmentFile=` at start,\n\
-             # and the GitHub grant is also live the moment its sign-in completes."
+            "# Written by `yantra relay`, `yantra github login`, `yantra github client-id` and\n\
+             # the dashboard (ADR-0021, ADR-0023). yantrad reads this through the unit's\n\
+             # `EnvironmentFile=` at start, and the GitHub grant is also live the moment its\n\
+             # sign-in completes."
                 .lines()
                 .map(str::to_owned),
         );
@@ -1065,6 +1087,80 @@ mod tests {
             written.contains("YANTRA_NTFY_TOKEN='tk_notarealtoken'"),
             "{written}"
         );
+    }
+
+    /// Y-393: a self-hoster's own app id, set and then replaced, with the
+    /// grant and the relay both left alone.
+    #[test]
+    fn a_client_id_is_written_and_replaced_without_touching_the_other_lines() {
+        let path = scratch("client-id");
+        write_relay(&path, "https://ntfy.sh/a-topic", None).expect("relay");
+        write_github(&path, Some(&github_token())).expect("grant");
+
+        write_client_id(&path, Some("Iv1.abc123def456")).expect("written");
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(
+            written.contains("YANTRA_GITHUB_CLIENT_ID='Iv1.abc123def456'"),
+            "{written}"
+        );
+
+        write_client_id(&path, Some("Iv1.zzz999")).expect("replaced");
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(
+            written.contains("YANTRA_GITHUB_CLIENT_ID='Iv1.zzz999'"),
+            "{written}"
+        );
+        assert!(!written.contains("abc123def456"), "{written}");
+        assert!(
+            written.contains("YANTRA_NTFY_URL='https://ntfy.sh/a-topic'"),
+            "{written}"
+        );
+        assert!(
+            written.contains("YANTRA_GITHUB_TOKEN='gho_notarealtoken'"),
+            "{written}"
+        );
+    }
+
+    /// `--clear` is the line gone and nothing else moved.
+    #[test]
+    fn clearing_the_client_id_removes_only_that_line() {
+        let path = scratch("client-id-clear");
+        write_relay(&path, "https://ntfy.sh/a-topic", None).expect("relay");
+        write_client_id(&path, Some("Iv1.abc123def456")).expect("written");
+
+        write_client_id(&path, None).expect("cleared");
+
+        let written = std::fs::read_to_string(&path).expect("it is there");
+        assert!(!written.contains("YANTRA_GITHUB_CLIENT_ID"), "{written}");
+        assert!(
+            written.contains("YANTRA_NTFY_URL='https://ntfy.sh/a-topic'"),
+            "{written}"
+        );
+    }
+
+    /// Clearing a client id that was never written succeeds — absence is the
+    /// state asked for, `logout`'s rule.
+    #[test]
+    fn clearing_a_client_id_that_is_not_there_still_succeeds() {
+        let path = scratch("client-id-clear-absent");
+
+        write_client_id(&path, None).expect("nothing to remove is not a failure");
+
+        assert!(
+            !std::fs::read_to_string(&path)
+                .expect("it is there")
+                .contains("YANTRA_GITHUB_CLIENT_ID")
+        );
+    }
+
+    #[test]
+    fn a_client_id_outside_the_conservative_charset_is_refused() {
+        let path = scratch("client-id-invalid");
+
+        let refused = write_client_id(&path, Some("has a space")).expect_err("refused");
+
+        assert!(matches!(refused, NotWritten::InvalidClientId), "{refused}");
+        assert!(!path.exists(), "nothing is written on a refusal");
     }
 
     /// A rewrite reads the file first, and the mode is asserted after the

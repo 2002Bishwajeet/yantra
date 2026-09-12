@@ -198,6 +198,25 @@ export function useGithubLogout() {
   })
 }
 
+/** Y-393: a self-hoster's own OAuth App instead of the one this build
+ *  carries. Same shape as `useSetRelay` and for the same reason — the daemon
+ *  takes it at its next restart, so nothing here is invalidated: a refetch
+ *  now would still read the id `yantrad` started with. */
+export function useSetGithubClientId() {
+  return useMutation<void, ApiError, { id: string }>({
+    mutationFn: (body) =>
+      fetchJson<void>('/api/github/client-id', { method: 'POST', ...json(body) }),
+  })
+}
+
+/** Removes the override, falling back to the build's own id at the next
+ *  restart. Nothing invalidated, for the reason above. */
+export function useClearGithubClientId() {
+  return useMutation<void, ApiError, void>({
+    mutationFn: () => fetchJson<void>('/api/github/client-id', { method: 'DELETE' }),
+  })
+}
+
 // ---- Y-349: clone and mkdir, for New session (Y-344's routes) ----
 
 /** `POST /api/machines/{m}/clone` → 202 with the tmux session `git clone`

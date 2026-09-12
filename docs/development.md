@@ -188,6 +188,13 @@ The environment always wins over what a build baked in
 ([`crates/yantra-core/src/github.rs`](../crates/yantra-core/src/github.rs)). With neither set, the
 flow refuses by naming the variable rather than failing at GitHub with no explanation.
 
+**On the appliance, the same override is a write rather than an export**: `yantra github client-id
+<id>` (or `--clear`) writes `YANTRA_GITHUB_CLIENT_ID` to `/etc/yantra/daemon.env`, beside the relay
+and the grant, and Settings → Providers has the same field (Y-393). A client id is not a secret
+(ADR-0023), so `GET /api/github` says which one is in use. It reaches a sign-in only once `yantrad`
+restarts, the relay's own rule — `client_id()` rereads the environment rather than holding a value
+live.
+
 ## The dashboard over HTTPS
 
 `yantrad` speaks plain HTTP and will keep doing so. TLS is `tailscale serve`'s job: it already holds
