@@ -60,6 +60,45 @@ ask() {
     case "$reply" in [Nn]*) return 1 ;; esac
 }
 
+# The landing page's mark, traced from its PNG into braille. A terminal that is not
+# UTF-8 would draw boxes, so it gets the wordmark alone. Drawn at a terminal only.
+mark() {
+    local on='' off=''
+    if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+        on=$'\033[38;5;208m' off=$'\033[0m'
+    fi
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *[Uu][Tt][Ff]-8* | *[Uu][Tt][Ff]8*)
+        printf '%s' "$on"
+        cat <<'MARK'
+
+                  ⢠⡄
+                  ⣸⣇
+              ⢀⣤⣰⣦⣿⣿⣴⡆⣤⡀
+            ⣤⣤⣿⠿⣿⣿⣾⢷⣿⣿⠻⣿⣤⣤
+          ⢠⣲⡿⠋⡶⣶⣶⣾⣷⣽⣷⣶⢶⣶⠙⢿⣖⡄
+          ⣧⣿⢧ ⣯⡿⣯⣷⣾⣷⣾⣽⢿⣼⢠⡾⣿⡼
+      ⣀⣀⣤⣴⢿⣹⡟⠖⣿⣹⣿⢏⣾⣷⡙⣿⣏⣿⠺⢻⣏⣿⣦⣤⣀⣀
+      ⠉⠉⠛⠻⣿⢹⣷⠦⣿⡹⣿⣾⣻⣟⣷⣿⢏⣿⢶⣽⣏⣿⠟⠛⠉⠉
+         ⢀⣟⣿⡚ ⡟⣷⣟⣟⢿⡿⣛⣻⣾⣻⠘⢓⣿⢳
+          ⠘⠽⣷⣄⠛⠓⢛⣻⣟⢻⣟⡛⠚⠛⣠⣾⠿⠃
+            ⠛⠛⣿⣦⣿⡿⢶⡾⢿⣿⣴⣿⠛⠛
+              ⠘⠛⠹⠝⣿⣿⠫⠏⠛⠁
+                  ⢹⡏
+                  ⠘⠃
+
+             Yantra  यन्त्र
+MARK
+        ;;
+    *) printf '%s\n                YANTRA\n' "$on" ;;
+    esac
+    printf '%s\n' "$off"
+}
+
+if [ "$interactive" = yes ]; then
+    mark
+fi
+
 echo "install: this installs Yantra — three binaries, two systemd units and a yantra account."
 echo "install: every device you use with Yantra must be on one tailnet, logged in to the same Tailscale account."
 if [ "$interactive" = yes ]; then
@@ -294,9 +333,9 @@ What is left, none of which this script does for you:
   1. $env_step
   2. $tailscale_step
   3. Start them: \`sudo systemctl enable --now yantrad.service yantra-agent.service\`
-  4. Give this box an ssh identity the fleet authorises, and place the public key
-     it prints: \`sudo -u yantra -H $BIN_DIR/yantra ssh-identity\`. Until it has
-     one the daemon starts and every verb that reaches another machine fails.
+  4. Add each machine. In a terminal on it, as the account Yantra is to log in as:
+     \`curl -fsSL http://<this box's tailnet address>:7717/join | sh\`. The daemon
+     makes its ssh key the first time a machine joins.
 
 Run this script again at a terminal and it does 2, starts yantrad and prints
 the dashboard's address. Step 1 stays yours: it never rewrites an agent.env

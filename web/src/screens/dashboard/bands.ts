@@ -64,6 +64,7 @@ const happened: Record<Event['kind'], { mark: MarkState; words: string }> = {
   'relay-test': { mark: 'done', words: 'relay test' },
   installed: { mark: 'done', words: 'installed' },
   install_stopped: { mark: 'needs', words: 'install stopped' },
+  joined: { mark: 'done', words: 'joined' },
 }
 
 export type Recent = { workspace: string; machine: string; mark: MarkState; words: string; at: number }

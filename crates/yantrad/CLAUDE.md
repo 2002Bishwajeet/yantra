@@ -191,7 +191,9 @@ process still takes both values out of its environment once, in `main.rs`. So a 
 reaches the daemon at its **next start**, and both surfaces say so rather than implying it is live.
 That ADR bends §B4 and Y-044 on purpose and says what the exposure is; read it before moving either
 value anywhere else. **The token is still never logged and never served** — no route reads the file
-back, and `tracing` names the caller and never the topic.
+back, and `tracing` names the caller and never the topic. `GET /api/about` says only whether this
+process started with a relay, as `relay: bool` (Y-388), so the setup checklist can tell a relay the
+daemon uses from one saved for its next start.
 
 **Nothing is pushed while a dashboard is open** (D3 §13). `notify::Viewers` is a last-seen-a-viewer
 timestamp beside the snapshot, `POST /api/viewing` writes it, and `refresh` hands the notifier a
@@ -286,6 +288,20 @@ nothing is spawned, because the name reaches `ssh`'s argv. **One install per mac
 keyed on the lowercased name: a second `POST` while one runs is a `409`, and a drop guard gives the machine
 back on every path out of the task. It is not a tmux session, because `tmux` can be the thing being
 installed.
+
+**`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
+caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
+under `deny_unknown_fields`, so a `machine` field is a `422`: the name comes from `whois` joined to
+the tailnet list on the stable id (I-5, I-52), and a machine can only join itself. A config that
+already names the machine is left alone and answers `kept: true`. **`logs_in_as` is what `ssh -G`
+resolves**, and the owner ruled the page must say when it is not `user` — a kept block, or an
+owner's `Host *` above the new one, wins. The route adds a `joined` event that says the same, and
+spawns a readiness re-check that records only a refused reach. **One join at a time**:
+`Fleet::joins` is held around the key-making and the append, because two first fetches would
+both run `ssh-keygen` on one path. **`GET /join` sits beside
+`/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
+`yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
+owner ruled that generation is Yantra's and happens on first use.
 
 **`clone` is one of the writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;

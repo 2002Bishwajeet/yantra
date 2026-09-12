@@ -8,7 +8,9 @@ After=tailscaled.service
 # out of this file so installing a new unit cannot overwrite the address.
 EnvironmentFile=/etc/yantra/agent.env
 ExecStart=/usr/local/bin/yantra-agent
-User=yantra
+# Owner, 2026-09-12 (ADR-0029): no account on any machine for the agent. It
+# writes nothing to disk, and systemd reads the EnvironmentFile as root first.
+DynamicUser=yes
 Restart=on-failure
 # Written for a start that keeps failing — an unreadable environment file, an
 # address that is not one. At the default 100 ms, five of those land inside

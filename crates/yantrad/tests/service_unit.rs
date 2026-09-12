@@ -203,7 +203,7 @@ fn the_agent_unit_enables_and_refuses_without_the_address_it_reports_to() -> Res
     let Some(fixture) = Systemd::start()? else {
         return Ok(());
     };
-    fixture.arrange_account()?;
+    // No `yantra` account is made: the unit is `DynamicUser=yes` (ADR-0029).
     fixture.install_unit("yantra-agent.service")?;
 
     let verify = fixture.exec(&[

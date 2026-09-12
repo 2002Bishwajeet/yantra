@@ -34,6 +34,8 @@ yantra relay <url> [--token T]   # write that relay down for yantrad, and test i
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
+yantra ssh-identity --machine <m> --user <u>  # one machine's Host block, logging in as <u>
+yantra join-script               # the script a new machine pipes into sh (GET /join)
 yantra about                     # version, target and build date of this binary
 ```
 

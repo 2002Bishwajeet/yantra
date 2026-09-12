@@ -73,6 +73,46 @@ impl Event {
         }
     }
 
+    /// Y-387: a machine ran the join command. Recorded when the config is
+    /// written, before anything has tried to reach it. When the account ssh
+    /// resolves is not the one that joined, the sentence says so (owner,
+    /// 2026-09-12): the key went into an account Yantra does not log in as.
+    pub fn joined(machine: &str, user: &str, kept: bool, logs_in_as: Option<&str>) -> Self {
+        let said = match logs_in_as {
+            None => format!(
+                "{machine} joined as {user}, and Yantra could not read which account its ssh config logs in as"
+            ),
+            Some(account) if account != user => format!(
+                "{machine} joined as {user}, but the ssh config logs in there as {account}, so Yantra cannot reach it until the owner edits that config"
+            ),
+            Some(_) if kept => format!(
+                "{machine} joined as {user}, and the ssh config already named it with that account, so it was kept"
+            ),
+            Some(_) => format!("{machine} joined, and Yantra logs in there as {user}"),
+        };
+        Self {
+            at: now(),
+            kind: "joined",
+            workspace: None,
+            machine: Some(machine.to_owned()),
+            said,
+            commands: Vec::new(),
+        }
+    }
+
+    /// The re-check after a join, when ssh said no. `unreachable` because the
+    /// page already draws that kind as a machine it cannot reach.
+    pub fn not_reached(machine: &str, detail: &str) -> Self {
+        Self {
+            at: now(),
+            kind: "unreachable",
+            workspace: None,
+            machine: Some(machine.to_owned()),
+            said: format!("{machine} joined, and Yantra could not reach it: {detail}"),
+            commands: Vec::new(),
+        }
+    }
+
     pub fn relay_test() -> Self {
         Self {
             at: now(),

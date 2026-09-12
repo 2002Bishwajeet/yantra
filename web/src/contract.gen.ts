@@ -13,6 +13,7 @@ import type {
   Connection,
   Device,
   Event,
+  Joined,
   Listed,
   Listing,
   Looked,
@@ -481,6 +482,7 @@ export const about = {
     "100.64.0.1:7717",
     "[fd7a:115c:a1e0::1]:7717"
   ],
+  "relay": true,
   "tailnet": "<tailnet>.ts.net",
   "target": "aarch64-unknown-linux-musl",
   "uptime_seconds": 86412,
@@ -613,6 +615,20 @@ export const logs = {
     }
   ]
 } satisfies Transcript
+
+export const joined = {
+  "kept": false,
+  "logs_in_as": "<user>",
+  "machine": "cachyos-g14",
+  "user": "<user>"
+} satisfies Joined
+
+export const joinedKept = {
+  "kept": true,
+  "logs_in_as": "yantra",
+  "machine": "cachyos-g14",
+  "user": "<user>"
+} satisfies Joined
 
 export const cloning = {
   "machine": "cachyos-g14",

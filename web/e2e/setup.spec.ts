@@ -15,9 +15,11 @@ const STEPS = [
   'Your first session',
 ]
 
-// D3 §4.8: `/` draws the checklist while the machine list says nothing is on
-// the tailnet, and the EmptyDashboard board once a machine is. `firstrun` is
-// the fleet with no workspace and no machine online.
+const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+
+// D3 §4.8: `/` draws the checklist while the machine list says nothing that
+// runs a session is online. `firstrun` is the fleet with no workspace, no
+// key yet, no relay, six machines asleep and an iPhone online (Y-388).
 test.describe('the first run', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'firstrun')
@@ -45,6 +47,31 @@ test.describe('the first run', () => {
     await ask.click()
     await expect(ask).toBeEnabled()
     await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('lists phones, tablets and Windows apart, where they block nothing', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(6)
+    const apart = page.getByRole('list', { name: 'Devices that open the dashboard' })
+    for (const name of ['iphone', 'pixel-tablet', 'gaming-pc']) {
+      await expect(apart.getByText(name, { exact: true })).toBeVisible()
+    }
+    await expect(apart.getByText(/Windows · coming soon/)).toBeVisible()
+  })
+
+  test('says the key is made by the first join, and reads the relay', async ({ page }) => {
+    await expect(page.getByText(/made when the first machine joins/)).toBeVisible()
+    await expect(page.getByText(/yantra ssh-identity/)).toHaveCount(0)
+    await expect(page.getByText(/no relay yet/)).toBeVisible()
+    await expect(page.getByText(/One step runs in a terminal: the join command/)).toBeVisible()
+  })
+
+  test('selects the join command where the page has no clipboard', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }))
+    await page.reload()
+    await expect(page.getByText(COMMAND)).toBeVisible()
+    await page.getByRole('button', { name: 'Copy the join command' }).click()
+    await expect(page.getByText(/this page has no clipboard, so the text is selected/)).toBeVisible()
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(COMMAND)
   })
 
   test('passes axe', async ({ page }) => {

@@ -65,6 +65,9 @@ pub struct Fleet {
     pub facts: Arc<Facts>,
     /// The GitHub grant (ADR-0023 §3), here for the same reason again.
     pub github: crate::github::Grant,
+    /// One join at a time (Y-387): two first fetches would both run
+    /// `ssh-keygen` on one path, and two reports would append two blocks.
+    pub joins: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -76,6 +79,9 @@ pub struct Facts {
     pub listening_on: Vec<SocketAddr>,
     /// This account's `~/.ssh`, a parameter so a test names a scratch one.
     pub ssh_dir: PathBuf,
+    /// Whether this process started with a relay (Y-388). ADR-0021: a relay
+    /// saved since reaches the next start, so this is what a push uses now.
+    pub relay: bool,
 }
 
 impl Default for Fleet {
@@ -89,8 +95,10 @@ impl Default for Fleet {
                 started: Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: PathBuf::new(),
+                relay: false,
             }),
             github: crate::github::Grant::default(),
+            joins: Arc::default(),
         }
     }
 }

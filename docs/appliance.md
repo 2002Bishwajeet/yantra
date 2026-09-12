@@ -57,7 +57,8 @@ account. The script says so first, because the dashboard cannot exist before the
 
 `curl | bash` makes stdin the script, so the script reads its answers from `/dev/tty`.
 
-1. It says what it will do, and that every device must be on one tailnet.
+1. It draws the Yantra mark, then says what it will do, and that every device must be on one tailnet.
+   With no terminal it draws nothing, so piped output is unchanged.
 2. It resolves the current release from
    `api.github.com/repos/2002Bishwajeet/yantra/releases/latest`, fetches the `aarch64` or `x86_64`
    musl archive and `SHA256SUMS`, and checks one against the other. **A mismatch stops the run
@@ -225,25 +226,45 @@ ssh <host> 'journalctl -u yantrad -f'
 ## The appliance's ssh identity
 
 The ssh identity the appliance uses to reach the fleet — a key, a config and a `known_hosts` nobody
-typed. Without it the daemon starts and every verb that reaches a machine fails. Today one verb
-prepares the first two, for the account the units run as
-([Y-144](../tracker.md#3-task-board)); [Y-387](../tracker.md#3-task-board) moves this into the
-dashboard's join command:
+typed. Without it the daemon starts and every verb that reaches a machine fails.
+
+**The join command prepares it, one machine at a time** (Y-387,
+[ADR-0029](adr/0029-a-machine-joins-itself.md)). In a terminal on the new machine, as the account
+Yantra is to log in as:
+
+```bash
+curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
+```
+
+Where HTTPS is not on, `http://<appliance's tailnet address>:7717/join` serves the same script.
+
+The daemon makes its key the first time this is fetched. The script asks before each step that
+needs root: it turns on `sshd`, places the key in that account's `authorized_keys`, offers `tmux`,
+`git` and `yantra-agent`, and tells the daemon which account it ran as. The daemon names the machine
+from the caller's tailnet address and appends its `Host` block, with `User`, to the `yantra`
+account's config. **If a block already names the machine, it is kept**, and the script warns when
+that block logs in as a different account. The agent's unit is `DynamicUser=yes`, so a joined
+machine gains no account for it.
+
+**By hand**, for the account the units run as ([Y-144](../tracker.md#3-task-board)):
 
 ```bash
 sudo -u yantra -H yantra ssh-identity
+sudo -u yantra -H yantra ssh-identity --machine <m> --user <u>
+sudo -u yantra -H yantra join-script
 ```
 
-It generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for every
-machine a workspace names, and prints the public key. **`-H` matters**: without it `sudo` may leave
-`HOME` as yours and the verb prepares the wrong account's `~/.ssh`. It is idempotent — an existing
-key is kept, because regenerating it orphans every `authorized_keys` entry it is in, and a machine
-the config already names is left exactly as it is.
+The first generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for
+every machine a workspace names, and prints the public key. The second writes one block, with its
+`User`. The third prints the join script. **`-H` matters**: without it `sudo` may leave `HOME` as
+yours and the verb prepares the wrong account's `~/.ssh`. Each is idempotent — an existing key is
+kept, because regenerating it orphans every `authorized_keys` entry it is in, and a machine the
+config already names is left exactly as it is. A block the first verb wrote has no `User`, so it
+logs in as `yantra` until you edit it.
 
-**Two halves stay yours.** Placing that public key in each machine's `authorized_keys`, and the
-`User`, `HostName`, `Port` or `ProxyJump` that say where a name points — Yantra never resolves a
-name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)) and cannot know the account on the
-far side.
+**What stays yours:** a `HostName`, `Port` or `ProxyJump` for a name the tailnet does not resolve —
+Yantra never resolves a name ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)). On a Mac,
+Remote Login is a switch in System Settings → General → Sharing, which no script can flip.
 
 **The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and the alternative is an
 ssh agent — a login session a box nobody logs into does not have. It is readable by the `yantra`

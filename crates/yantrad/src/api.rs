@@ -76,6 +76,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
             .map(ToString::to_string)
             .collect(),
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
+        relay: fleet.facts.relay,
     })
 }
 
@@ -98,9 +99,9 @@ fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
     Some(tailnet.to_owned())
 }
 
-/// `yantra ssh-identity`'s read half. **A 404 and never a key**: the CLI verb
-/// generates one when there is none, and a route a browser opens must not —
-/// `identity.rs` says invoked, never automatic. The private half is not read.
+/// `yantra ssh-identity`'s read half. **A 404 and never a key**: a route a
+/// browser polls must not make one. `GET /join` and the CLI verb do, on first
+/// use (ADR-0029). The private half is not read.
 async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
     let dir = fleet.facts.ssh_dir.clone();
     // `ssh-keygen -l` is a subprocess, so off the worker (I-13).
@@ -110,7 +111,7 @@ async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
         Ok(Ok(None)) => (
             StatusCode::NOT_FOUND,
             Json(Missing {
-                error: "no ssh identity yet — `yantra ssh-identity` on the daemon's machine prepares one"
+                error: "no ssh identity yet — the first join makes one, and so does `yantra ssh-identity` on the daemon's machine"
                     .to_owned(),
             }),
         )
@@ -466,6 +467,8 @@ pub(crate) struct About {
     /// `None` until the machines look has run, or when no node holds a bound
     /// address — never a guess.
     pub(crate) tailnet: Option<String>,
+    /// Whether this process holds a relay. Never the URL or the token (§B4).
+    pub(crate) relay: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -687,6 +690,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     "[fd7a:115c:a1e0::1]:7717".to_owned(),
                 ],
                 tailnet: Some("<tailnet>.ts.net".to_owned()),
+                relay: true,
             }),
         ),
         (
@@ -1862,6 +1866,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
                 ssh_dir: std::path::PathBuf::new(),
+                relay: true,
             }),
             ..looking_at_machines(vec![
                 MachineInfo {
@@ -1885,10 +1890,16 @@ mod tests {
         assert!(body["uptime_seconds"].as_u64().is_some(), "{body}");
         assert_eq!(body["listening_on"], json!(["100.64.0.1:7717"]));
         assert_eq!(body["tailnet"], json!("example.ts.net"));
+        assert_eq!(body["relay"], json!(true));
 
         let unlooked = get_json(holding(Snapshot::default()), "/about").await;
         assert_eq!(unlooked["tailnet"], Value::Null, "no look, no guess");
         assert_eq!(unlooked["listening_on"], json!([]));
+        assert_eq!(
+            unlooked["relay"],
+            json!(false),
+            "no relay at start is false, never absent"
+        );
     }
 
     fn looking_at_machines(machines: Vec<MachineInfo>) -> Fleet {
@@ -1911,6 +1922,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: dir.to_owned(),
+                relay: false,
             }),
             ..Fleet::default()
         };

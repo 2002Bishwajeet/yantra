@@ -42,10 +42,11 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
   }
 }
 
-/** A 404 is a key not made, which is the daemon's own reading (api.ts). */
+/** A 404 is a key not made (api.ts). The daemon makes it on the first join
+ *  (ADR-0029), so there is nothing here for a person to run. */
 export function sshKey(identity: Asked<SshIdentity>): Step {
   if (identity.error && asApiError(identity.error).kind === 'missing') {
-    return { status: 'todo', words: 'not created yet · run `yantra ssh-identity` on the appliance' }
+    return { status: 'todo', words: 'made when the first machine joins' }
   }
   if (identity.error) return failed(identity.error)
   if (identity.isPending || !identity.data) return reading()
@@ -64,6 +65,15 @@ export function github(connection: Asked<Grant>): Step {
   }
   if (connection.data.pending) return { status: 'progress', words: 'a sign-in is waiting at github.com' }
   return { status: 'todo', words: 'not connected · reviews, issues and repositories come through it' }
+}
+
+/** ADR-0021: a relay saved in Settings reaches the daemon at its next start,
+ *  so `relay` is what a push uses now and not what was last saved. */
+export function push(about: Asked<About>): Step {
+  if (about.error) return failed(about.error)
+  if (about.isPending || !about.data) return reading()
+  if (about.data.relay) return { status: 'done', words: 'the daemon holds a relay and pushes to it' }
+  return { status: 'todo', words: 'no relay yet · one saved in Settings is used after yantrad restarts' }
 }
 
 /** What a machine's checks say, in the board's words. */
@@ -121,18 +131,28 @@ export function line(machine: Machine, report: Readiness | null, since: string |
 
 export const ready = (one: Line) => one.kind === 'ready'
 
+/** Done at one ready machine: an asleep laptop does not hold back a first
+ *  session (walk-through Q2.3). */
 export function machines(lines: { machine: string; line: Line }[]): Step {
-  if (lines.length === 0) return { status: 'todo', words: 'this tailnet lists no machine, so there is nothing to check' }
+  if (lines.length === 0) return { status: 'todo', words: 'this tailnet lists no machine that runs Linux or macOS' }
   const checked = lines.filter((one) => one.line.kind !== 'unchecked')
   if (checked.length === 0) return { status: 'todo', words: 'not checked yet · Check asks a machine over ssh' }
-  const done = lines.filter((one) => ready(one.line))
-  const not = lines.filter((one) => !ready(one.line)).map((one) => one.machine)
-  if (done.length === lines.length) return { status: 'done', words: `${done.length} of ${lines.length} machines ready` }
+  const done = lines.filter((one) => ready(one.line)).length
+  if (done === 0) {
+    return { status: 'progress', words: `0 of ${lines.length} machines ready · one ready machine finishes this step` }
+  }
   return {
-    status: 'progress',
-    words: `${done.length} of ${lines.length} machines ready · ${not.join(', ')} ${not.length === 1 ? 'does' : 'do'} not yet`,
+    status: 'done',
+    words: `${done} of ${lines.length} machines ready${done < lines.length ? ' · one is enough to start' : ''}`,
   }
 }
 
-/** The remedy for a refused key: the board's line, with the real key in it. */
-export const remedy = (publicKey: string) => `echo '${publicKey}' >> ~/.ssh/authorized_keys`
+/** Where `GET /join` answers. On HTTPS the page came through `tailscale serve`,
+ *  which forwards `/join` too; on HTTP it is the daemon's own bound address. */
+export function joinUrl(page: { protocol: string; origin: string }, about: About | undefined): string | null {
+  if (page.protocol === 'https:') return `${page.origin}/join`
+  const bound = about?.listening_on[0]
+  return bound ? `http://${bound}/join` : null
+}
+
+export const joinCommand = (url: string) => `curl -fsSL ${url} | sh`

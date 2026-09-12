@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Check, Copy, KeyRound, Network, Shield } from 'lucide-react'
+import { KeyRound, Network, Shield } from 'lucide-react'
 import { isApiError } from '@/api/errors'
 import { useAbout, useSshIdentity } from '@/api/hooks'
 import { Button } from '@/m3/button/Button'
+import { Copyable } from '@/m3/copyable/Copyable'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono } from '@/m3/text/Text'
@@ -100,31 +101,19 @@ export function Access() {
 
 function KeySheet(props: { open: boolean; onOpenChange: (open: boolean) => void; publicKey: string }) {
   const { open, onOpenChange, publicKey } = props
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    void navigator.clipboard?.writeText(publicKey).then(() => setCopied(true))
-  }
   return (
     <Sheet
       actions={
-        <>
-          <Button onClick={() => onOpenChange(false)} variant="text">
-            Close
-          </Button>
-          <Button icon={copied ? <Check /> : <Copy />} onClick={copy} variant="tonal">
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </>
+        <Button onClick={() => onOpenChange(false)} variant="text">
+          Close
+        </Button>
       }
       description="Paste this line into ~/.ssh/authorized_keys on a machine the daemon should reach."
-      onOpenChange={(next) => {
-        if (!next) setCopied(false)
-        onOpenChange(next)
-      }}
+      onOpenChange={onOpenChange}
       open={open}
       title="Public key"
     >
-      <pre className="settings__key">{publicKey}</pre>
+      <Copyable text={publicKey} what="the public key" />
     </Sheet>
   )
 }

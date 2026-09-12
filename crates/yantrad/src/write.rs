@@ -36,6 +36,7 @@ use yantra_core::{
     agent, clone, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
     terminfo, tmux, tokens, up, workspace,
 };
+use yantra_core::{identity, join};
 
 use crate::api::Answer;
 use crate::events::{self, Event};
@@ -140,6 +141,7 @@ where
         .route("/relay", post(relay::<I>))
         .route("/github/login", post(login::<I>))
         .route("/github", axum::routing::delete(logout::<I>))
+        .route("/join", post(join_as::<I>))
         .with_state(Remembered {
             authoriser: authoriser.clone(),
             fleet: fleet.clone(),
@@ -154,6 +156,18 @@ where
         });
 
     acts.merge(remembered).merge(installs)
+}
+
+/// `GET /join`, the script a person pipes into `sh` on a new machine (Y-387).
+/// Apart from [`router`] because it is not under `/api`.
+pub fn script<I, S>(authoriser: Authoriser<I>, fleet: Fleet) -> Router<S>
+where
+    I: Inventory + Clone + Send + Sync + 'static,
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route("/join", get(serve_script::<I>))
+        .with_state(Remembered { authoriser, fleet })
 }
 
 /// The state these two need: who the caller is, and what this daemon holds in
@@ -975,6 +989,184 @@ async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `yantra join-script` on the wire ([ADR-0029]). **A `GET` that may write**,
+/// once: the owner ruled that the daemon makes its key on the first join, and
+/// the script is where the key is first needed. Authorised like a write for
+/// that reason, though what it serves is a public key and an address.
+///
+/// [ADR-0029]: ../../../docs/adr/0029-a-machine-joins-itself.md
+async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Response, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let dir = state.fleet.facts.ssh_dir.clone();
+    let one_at_a_time = state.fleet.joins.lock().await;
+    // `ssh-keygen` is a subprocess, so off the worker (I-13).
+    let prepared = tokio::task::spawn_blocking(move || identity::prepare_in(&dir, &[]))
+        .await
+        .map_err(|_| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: "making the ssh key did not finish".to_owned(),
+        })?
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    drop(one_at_a_time);
+    let bound: Vec<IpAddr> = state
+        .fleet
+        .facts
+        .listening_on
+        .iter()
+        .map(SocketAddr::ip)
+        .collect();
+    let script = join::daemon_address(&bound)
+        .and_then(|daemon| join::script(daemon, &prepared.public_key))
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    if prepared.generated {
+        tracing::info!("made {} for the first join", prepared.key.display());
+    }
+    tracing::info!("join script served to {}", caller.node);
+    // Plain text, so a person who opens the URL in a browser reads it first.
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; charset=utf-8",
+        )],
+        script,
+    )
+        .into_response())
+}
+
+/// What the join command reports: the account it ran as, and nothing else.
+/// **There is no `machine` field** and `deny_unknown_fields` makes one a
+/// refusal — the machine is the caller, named by the tailnet (ADR-0016 §2).
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Join {
+    user: String,
+}
+
+/// `yantra ssh-identity --machine <m> --user <u>` on the wire, with the
+/// machine taken from the caller's address rather than typed (ADR-0029). A
+/// machine can therefore only join itself.
+async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(join): Json<Join>,
+) -> Result<Json<Joined>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    if !identity::usable_user(&join.user) {
+        return Err(Refused::Verb {
+            status: StatusCode::BAD_REQUEST,
+            said: identity::Error::UnusableUser { user: join.user }.to_string(),
+        });
+    }
+    // I-5 and I-52: `whois` spells the stable id `StableID`, which is what
+    // `status` calls `ID`, so the two join on it.
+    let machine = state
+        .authoriser
+        .inventory
+        .machines()
+        .await
+        .map_err(Refused::CannotAsk)?
+        .into_iter()
+        .find(|machine| machine.id == caller.node)
+        .map(|machine| machine.name)
+        .ok_or_else(|| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said: format!(
+                "tailscale knows the caller as {} but does not list it, so there is no machine name to write",
+                caller.node
+            ),
+        })?;
+
+    let dir = state.fleet.facts.ssh_dir.clone();
+    let (named, user) = (machine.clone(), join.user.clone());
+    let one_at_a_time = state.fleet.joins.lock().await;
+    let joined = tokio::task::spawn_blocking(move || identity::join_in(&dir, &named, &user))
+        .await
+        .map_err(|_| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: "writing the ssh config did not finish".to_owned(),
+        })?
+        .map_err(|error| Refused::Verb {
+            status: from_identity(&error),
+            said: chain(&error),
+        })?;
+    drop(one_at_a_time);
+    tracing::info!("{machine} joined as {} for {}", joined.user, caller.node);
+
+    events::remember(
+        &state.fleet.events,
+        Event::joined(
+            &joined.machine,
+            &joined.user,
+            joined.kept,
+            joined.logs_in_as.as_deref(),
+        ),
+    )
+    .await;
+    // The re-check runs after the answer: the script is still on the person's
+    // screen, and ssh back into that machine can take `ConnectTimeout`.
+    tokio::spawn(check_joined(state.fleet.events.clone(), machine));
+
+    Ok(Json(Joined {
+        machine: joined.machine,
+        user: joined.user,
+        kept: joined.kept,
+        logs_in_as: joined.logs_in_as,
+    }))
+}
+
+/// `doctor` on the machine that just joined. Only a *refused* reach is an
+/// event: an unknown one decided nothing (R-23), and a reached one is what the
+/// `joined` event already implied.
+async fn check_joined(events: events::Events, machine: String) {
+    let report = doctor::machine(&machine, term()).await;
+    if let Some(check) = report
+        .checks
+        .iter()
+        .find(|check| check.check == "reachable" && check.state == doctor::State::Absent)
+    {
+        events::remember(&events, Event::not_reached(&machine, &check.detail)).await;
+    }
+}
+
+/// No wildcard, per Y-135. A tailnet name that cannot be one `Host` pattern is
+/// a **409**: the person renames the machine in Tailscale, and nothing here can.
+fn from_identity(error: &identity::Error) -> StatusCode {
+    match error {
+        identity::Error::UnusableUser { .. } => StatusCode::BAD_REQUEST,
+        identity::Error::UnusableMachine { .. } => StatusCode::CONFLICT,
+        identity::Error::Workspaces(_)
+        | identity::Error::NoHome
+        | identity::Error::Write { .. }
+        | identity::Error::Read { .. }
+        | identity::Error::Spawn(_)
+        | identity::Error::Keygen(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// What the join command reads back (owner, 2026-09-12: *"dashboard should
+/// say it"*). `kept` is a config that already named the machine and was left as
+/// it was. `logs_in_as` is what `ssh -G` resolves, which can differ from `user`
+/// — a kept block, or an owner's `Host *` above the new one — and `null` is a
+/// config ssh could not read.
+#[derive(Debug, serde::Serialize)]
+struct Joined {
+    machine: String,
+    user: String,
+    kept: bool,
+    logs_in_as: Option<String>,
+}
+
 /// What the agent in this workspace has spent — `yantra tokens <workspace>` on
 /// the wire.
 ///
@@ -1730,6 +1922,28 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         ("spend", "Spend", of(&Spend::of(&transcript(0)))),
         ("spendFast", "Spend", of(&Spend::of(&transcript(3)))),
         ("logs", "Transcript", of(&Transcript::of(&conversation()))),
+        (
+            "joined",
+            "Joined",
+            of(&Joined {
+                machine: "cachyos-g14".to_owned(),
+                user: "<user>".to_owned(),
+                kept: false,
+                logs_in_as: Some("<user>".to_owned()),
+            }),
+        ),
+        // The owner's re-join ruling: a kept block that logs in as someone
+        // else, which the page has to be able to say.
+        (
+            "joinedKept",
+            "Joined",
+            of(&Joined {
+                machine: "cachyos-g14".to_owned(),
+                user: "<user>".to_owned(),
+                kept: true,
+                logs_in_as: Some("yantra".to_owned()),
+            }),
+        ),
         (
             "cloning",
             "Cloning",
@@ -3303,5 +3517,314 @@ mod tests {
             idle.cost, None,
             "a session that has spent nothing has no figure, which is not $0.00"
         );
+    }
+
+    const JOINING: &str = "nJOIN0000000CNTRL";
+
+    fn join_scratch(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("yantra-write-join-{label}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn join_fleet(dir: &std::path::Path) -> Fleet {
+        Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: vec![SocketAddr::new(address(1), 7717)],
+                ssh_dir: dir.to_owned(),
+                relay: false,
+            }),
+            ..Fleet::default()
+        }
+    }
+
+    /// `address(7)` is the owner's node the tailnet calls `joining-box`, and
+    /// `address(8)` is a node that belongs to somebody else.
+    fn joining_tailnet() -> Fake {
+        Fake {
+            machines: vec![yantra_core::inventory::MachineInfo {
+                id: JOINING.to_owned(),
+                name: "joining-box".to_owned(),
+                dns_name: "joining-box.example.ts.net.".to_owned(),
+                os: yantra_core::inventory::Os::Linux,
+                online: true,
+                last_seen: None,
+                expired: false,
+                addresses: vec![address(7)],
+            }],
+            addresses: vec![address(1)],
+            callers: [
+                (
+                    address(7),
+                    Caller {
+                        node: JOINING.to_owned(),
+                        user: ME,
+                        tags: Vec::new(),
+                    },
+                ),
+                (address(8), caller(ME + 1, &[])),
+            ]
+            .into_iter()
+            .collect(),
+            owner: ME,
+        }
+    }
+
+    async fn join_send(
+        router: Router,
+        method: &str,
+        path: &str,
+        from: IpAddr,
+        body: &str,
+    ) -> (StatusCode, String, String) {
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .extension(ConnectInfo(SocketAddr::new(from, 50_000)))
+            .body(axum::body::Body::from(body.to_owned()))
+            .expect("a request");
+        let response = router.oneshot(request).await.expect("infallible");
+        let status = response.status();
+        let kind = response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("a body");
+        (status, kind, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    fn joins(fleet: &Fleet) -> Router {
+        router::<Fake, ()>(direct(joining_tailnet()), fleet.clone())
+    }
+
+    /// Y-387's row, in one request: the body carries the account, the tailnet
+    /// supplies the machine, and the block carries both.
+    #[tokio::test]
+    async fn a_machine_joins_itself_under_the_name_the_tailnet_gives_it() {
+        let dir = join_scratch("itself");
+        let fleet = join_fleet(&dir);
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).expect("JSON"),
+            serde_json::json!({
+                "machine": "joining-box",
+                "user": "biswa",
+                "kept": false,
+                "logs_in_as": "biswa"
+            })
+        );
+        let config = std::fs::read_to_string(dir.join("config")).expect("written");
+        assert!(
+            config.starts_with("Host joining-box\n    User biswa\n    IdentityFile "),
+            "{config}"
+        );
+        let events = events::newest_first(&fleet.events).await;
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == "joined"
+                    && event.machine.as_deref() == Some("joining-box")),
+            "{events:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR-0016 §2 again: a body that names a machine could name someone
+    /// else's, so the field does not exist and sending it is refused.
+    #[tokio::test]
+    async fn a_body_that_names_a_machine_is_refused_and_nothing_is_written() {
+        let dir = join_scratch("named");
+        let fleet = join_fleet(&dir);
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa","machine":"someone-elses-box"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert!(!dir.exists(), "refused before anything was written");
+    }
+
+    #[tokio::test]
+    async fn an_account_that_would_write_its_own_config_lines_is_refused() {
+        let dir = join_scratch("hostile");
+        let fleet = join_fleet(&dir);
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa\nHost *\n    ProxyCommand touch /tmp/pwned"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(!dir.exists(), "refused before anything was written");
+        assert!(events::newest_first(&fleet.events).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_node_that_is_not_the_owners_cannot_join_or_fetch_the_script() {
+        let dir = join_scratch("stranger");
+        let fleet = join_fleet(&dir);
+
+        let (status, _, _) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join",
+            address(8),
+            r#"{"user":"biswa"}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
+        let (status, _, _) = join_send(script, "GET", "/join", address(8), "").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!dir.exists(), "a refused caller made no key");
+    }
+
+    /// The owner's ruling that the key is made on first use: the first `GET`
+    /// makes it, and the script carries its public half and this daemon's
+    /// own address.
+    #[tokio::test]
+    async fn the_script_makes_the_key_and_names_this_daemon() {
+        let dir = join_scratch("script");
+        let fleet = join_fleet(&dir);
+
+        let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
+        let (status, kind, body) = join_send(script, "GET", "/join", address(7), "").await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(kind.starts_with("text/plain"), "{kind}");
+        let public = std::fs::read_to_string(dir.join("id_yantra.pub")).expect("the key was made");
+        assert!(body.contains(&format!("KEY='{}'", public.trim())), "{body}");
+        assert!(body.contains("DAEMON='100.64.0.1:7717'"), "{body}");
+        assert!(body.starts_with("#!/bin/sh"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two first fetches at once: without the lock both can see no key and
+    /// both run `ssh-keygen` on one path, or one reads a `.pub` not yet there.
+    #[tokio::test]
+    async fn two_first_fetches_at_once_make_one_key() {
+        let dir = join_scratch("race");
+        let fleet = join_fleet(&dir);
+        let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
+
+        let (first, second) = tokio::join!(
+            join_send(script.clone(), "GET", "/join", address(7), ""),
+            join_send(script, "GET", "/join", address(7), ""),
+        );
+
+        assert_eq!(first.0, StatusCode::OK, "{}", first.2);
+        assert_eq!(second.0, StatusCode::OK, "{}", second.2);
+        let public = std::fs::read_to_string(dir.join("id_yantra.pub")).expect("one key");
+        let carried = format!("KEY='{}'", public.trim());
+        assert!(first.2.contains(&carried) && second.2.contains(&carried));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// I-5: an address can move between nodes, so the name is the node whose
+    /// id `whois` answered — never the first node listed at that address.
+    #[tokio::test]
+    async fn the_machine_is_found_by_its_node_id_and_never_by_its_address() {
+        let dir = join_scratch("impostor");
+        let fleet = join_fleet(&dir);
+        let mut tailnet = joining_tailnet();
+        tailnet.machines.insert(
+            0,
+            yantra_core::inventory::MachineInfo {
+                id: "nIMPOSTOR000CNTRL".to_owned(),
+                name: "impostor-box".to_owned(),
+                dns_name: "impostor-box.example.ts.net.".to_owned(),
+                os: yantra_core::inventory::Os::Linux,
+                online: false,
+                last_seen: None,
+                expired: false,
+                addresses: vec![address(7)],
+            },
+        );
+
+        let (status, _, body) = join_send(
+            router::<Fake, ()>(direct(tailnet), fleet.clone()),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""machine":"joining-box""#), "{body}");
+        let config = std::fs::read_to_string(dir.join("config")).expect("written");
+        assert!(!config.contains("impostor-box"), "{config}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The owner's ruling, 2026-09-12: a re-join that keeps a block logging in
+    /// as another account says so, in the reply and in the event, and the
+    /// block is not rewritten (ADR-0009).
+    #[tokio::test]
+    async fn a_rejoin_says_which_account_the_kept_block_logs_in_as() {
+        let dir = join_scratch("kept");
+        std::fs::create_dir_all(&dir).expect("scratch");
+        let owners = "Host joining-box\n    User someone-else\n";
+        std::fs::write(dir.join("config"), owners).expect("an owner's block");
+        let fleet = join_fleet(&dir);
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join",
+            address(7),
+            r#"{"user":"biswa"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).expect("JSON"),
+            serde_json::json!({
+                "machine": "joining-box",
+                "user": "biswa",
+                "kept": true,
+                "logs_in_as": "someone-else"
+            })
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config")).expect("readable"),
+            owners
+        );
+        let events = events::newest_first(&fleet.events).await;
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == "joined" && event.said.contains("as someone-else")),
+            "{events:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
