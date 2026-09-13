@@ -259,4 +259,58 @@ describe('the Readiness card', () => {
     expect(card().getByText('gh auth login')).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
+
+  it('draws readiness it could not read, and Try again asks the machine now', async () => {
+    const asked = daemon()
+    await draw({ looked: 'failed', age_seconds: 0, error: 'yantrad was not reached: HTTP 503' })
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('The checks could not be read')
+    expect(alert.textContent).toContain('yantrad was not reached: HTTP 503')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(asked).toContain('POST /api/machines/pi/readiness'))
+  })
+
+  it('says so when readiness cannot be asked again after an install lands', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string) => {
+        if (path.endsWith('/install')) return Promise.resolve(answer(202))
+        if (path.endsWith('/readiness')) {
+          return Promise.resolve(answer(503, 'ssh to pi failed before the command reported a status: Connection timed out'))
+        }
+        if (path === '/api/about') return Promise.resolve(answer(200, ABOUT))
+        return Promise.resolve(answer(200, ring([earlier])))
+      }),
+    )
+    const client = await draw(report(checks(['git'])))
+    fireEvent.click(card().getByRole('button', { name: 'Install' }))
+    await card().findByRole('heading', { name: 'Installing git' })
+    const done: Event = { ...stopped, at: 300, kind: 'installed', said: 'pi: git installed', commands: [] }
+    act(() => client.setQueryData(keys.notifications(), ring([done, earlier])))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Readiness could not be asked again')
+    expect(alert.textContent).toContain('Connection timed out')
+  })
+
+  it('says a key Tailscale expired, and offers nothing to press', async () => {
+    daemon()
+    await draw(report(checks()), [earlier], { machine: machine({ expired: true }) })
+    expect(card().getByRole('heading', { name: 'pi’s Tailscale key expired' })).toBeTruthy()
+    expect(card().getByText(/logs in to Tailscale on it again/)).toBeTruthy()
+    expect(card().queryByRole('button')).toBeNull()
+  })
+
+  it('holds Install until the first notifications read, so an older result cannot pass as the answer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string) =>
+        path === '/api/notifications' ? new Promise(() => {}) : Promise.resolve(answer(200, ABOUT)),
+      ),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(keys.readiness('pi'), report(checks(['tmux'])))
+    await renderInApp(<Page machine={machine()} />, client)
+    const install = card().getByRole('button', { name: 'Install' })
+    expect(install.hasAttribute('disabled') || install.getAttribute('aria-disabled') === 'true').toBe(true)
+  })
 })

@@ -235,6 +235,7 @@ export function ReadinessCard(props: {
         lastSeen={lastSeen}
         name={name}
         readiness={readiness}
+        retry={() => ask(name)}
         verdict={verdict}
       />
 
@@ -258,7 +259,9 @@ export function ReadinessCard(props: {
         ) : null}
         {verdict.kind === 'missing' || verdict.kind === 'sudo' ? (
           <Button
-            disabled={install.isPending}
+            // Until the first read, the newest result is unknown, and an older
+            // one would be taken for this press's answer.
+            disabled={install.isPending || notifications.isPending}
             onClick={press}
             variant={verdict.kind === 'sudo' ? 'tonal' : 'filled'}
           >
@@ -306,8 +309,9 @@ function Body(props: {
   readiness: Reading<Report>
   lastSeen: string | null
   join: string | null
+  retry: () => void
 }) {
-  const { verdict, name, checks, readiness, lastSeen, join } = props
+  const { verdict, name, checks, readiness, lastSeen, join, retry } = props
   switch (verdict.kind) {
     case 'pending':
       return (
@@ -335,7 +339,7 @@ function Body(props: {
         </Text>
       )
     case 'unread':
-      return <ErrorSurface.Inline error={fromReading(readiness)!} title="The checks could not be read" />
+      return <ErrorSurface.Inline error={fromReading(readiness)!} reset={retry} title="The checks could not be read" />
     case 'refused':
       return (
         <div className="readiness__left">

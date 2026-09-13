@@ -20,8 +20,10 @@ export function newestInstall(events: Event[], machine: string): Event | undefin
 }
 
 /** What this page pressed: the newest result it had already seen, so the next
- *  one is the answer, and the browser's own instant for the lost-result
- *  check. Event times are the daemon's clock and are never compared to it. */
+ *  one is the answer, and the browser's own instant for the lost-result check.
+ *  The answer is found by comparing event times with each other, so the two
+ *  clocks need not agree; the age the card prints does mix them, as every age
+ *  in the dashboard does. */
 export type Watch = { since: number; pressed: number }
 
 /** The result that answers this page's press, or null while it runs. */
