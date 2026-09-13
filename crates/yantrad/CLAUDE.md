@@ -451,7 +451,9 @@ narrowing it — a check on whether a workspace claims the session is the altern
 ([ADR-0030](../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md), Y-394).
 `GET /api/machines/{machine}/install/{index}/terminal` names a place in the `commands` the latest
 install on that machine left, which `Fleet::left` holds in memory, and never a command: nothing a
-caller writes can run. It calls `allowed()` first, refuses a name outside the ssh-destination rule
+caller writes can run. **It also names the install it read, as `?at=` the event's time**, and a newer
+install on the machine is refused by name, so the page never names one command while this runs
+another. It calls `allowed()` first, refuses a name outside the ssh-destination rule
 with a `400` before the upgrade (I-63), and refuses an index outside the list by name after it. The
 pty runs `ssh -tt <machine> 'TERM=… /bin/sh -c …'` with no tmux, because `tmux` can be what the step
 installs. **It ends when the command does**: the daemon sends `{"exit": n}` as a text frame and

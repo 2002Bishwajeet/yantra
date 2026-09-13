@@ -118,6 +118,8 @@ export type TerminalProps = {
   label: string
   /** A one-off terminal's command ended, with this status (ADR-0030). */
   onExit?: (exit: number | null) => void
+  /** A one-off terminal ended with no status: refused, or dropped mid-command. */
+  onEnd?: () => void
   /** Drawn under the pane, inside `KeysContext`: the phone's key row. */
   children?: ReactNode
 }
@@ -130,10 +132,11 @@ export type TerminalProps = {
  *  install left, ends when the command does, and is never reopened, because
  *  reopening would run the command again. */
 export function Terminal(props: TerminalProps) {
-  const { target, height, label, onExit, children } = props
+  const { target, height, label, onExit, onEnd, children } = props
   const host = useRef<HTMLDivElement>(null)
   const wired = useRef<ReturnType<typeof attach> | null>(null)
   const told = useRef(onExit)
+  const toldEnd = useRef(onEnd)
   const [end, setEnd] = useState<Ended>({ ended: 'no' })
   const [link, setLink] = useState<Wire>({ up: false, attempt: 0 })
   const [size, setSize] = useState<Size | null>(null)
@@ -148,6 +151,7 @@ export function Terminal(props: TerminalProps) {
   // moment the command ends rather than captured when the pane opened.
   useEffect(() => {
     told.current = onExit
+    toldEnd.current = onEnd
   })
 
   // The daemon's reason arrives before the close that follows it, so the first
@@ -172,7 +176,10 @@ export function Terminal(props: TerminalProps) {
       live = attach(
         url,
         host.current!,
-        (refused) => setEnd((before) => (before.ended === 'no' ? { ended: 'yes', refused } : before)),
+        (refused) => {
+          setEnd((before) => (before.ended === 'no' ? { ended: 'yes', refused } : before))
+          if (once) toldEnd.current?.()
+        },
         setLink,
         setSize,
         hint,

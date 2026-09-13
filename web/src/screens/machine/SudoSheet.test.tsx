@@ -18,7 +18,7 @@ import { useVerdict } from './useVerdict'
 const opened: Target[] = []
 
 vi.mock('@/screens/session/Terminal', () => ({
-  Terminal: (props: { target: Target; onExit?: (exit: number | null) => void }) => {
+  Terminal: (props: { target: Target; onExit?: (exit: number | null) => void; onEnd?: () => void }) => {
     opened.push(props.target)
     return (
       <div>
@@ -28,6 +28,9 @@ vi.mock('@/screens/session/Terminal', () => ({
         </button>
         <button onClick={() => props.onExit?.(1)} type="button">
           the command fails
+        </button>
+        <button onClick={() => props.onEnd?.()} type="button">
+          the socket drops
         </button>
       </div>
     )
@@ -50,13 +53,10 @@ const stopped = (commands: string[]): Event => ({
   commands,
 })
 
-let width = 1440
-
 beforeEach(() => {
   opened.length = 0
-  width = 1440
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
+    matches: 1440 >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
     media: query,
     addEventListener: () => {},
     removeEventListener: () => {},
@@ -68,14 +68,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function daemon() {
+/** `after` is what a re-check finds once the step has run. */
+function daemon(after: string[] = ['agent-cli']) {
   const asked: string[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
       asked.push(`${init?.method ?? 'GET'} ${path}`)
       if (path.endsWith('/install')) return Promise.resolve(answer(202))
-      if (path.endsWith('/readiness')) return Promise.resolve(answer(200, report(checks(['agent-cli']))))
+      if (path.endsWith('/readiness')) return Promise.resolve(answer(200, report(checks(after))))
       return Promise.resolve(answer(200, ring([])))
     }),
   )
@@ -100,7 +101,7 @@ async function draw(events: Event[]) {
 const sheet = () => within(screen.getByRole('complementary', { name: 'Run it on pi' }))
 
 describe('the one-off terminal for a sudo step', () => {
-  it('sits beside a sudo command only, and opens that step by its place', async () => {
+  it('sits beside a sudo command only, and opens that step by its place and its install', async () => {
     daemon()
     await draw([stopped(['xcode-select --install', 'sudo apk add tmux'])])
     const open = screen.getAllByRole('button', { name: 'Open a terminal' })
@@ -109,7 +110,7 @@ describe('the one-off terminal for a sudo step', () => {
     expect(sheet().getByText('sudo apk add tmux')).toBeTruthy()
     expect(sheet().getByText(/Your password goes to pi as keystrokes; Yantra does not keep it./)).toBeTruthy()
     await sheet().findByText('the command ends')
-    expect(opened.at(-1)).toEqual({ machine: 'pi', step: 1 })
+    expect(opened.at(-1)).toEqual({ machine: 'pi', step: 1, at: 200 })
   })
 
   it('asks readiness again when the command ends, and says it finished', async () => {
@@ -118,6 +119,14 @@ describe('the one-off terminal for a sudo step', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open a terminal' }))
     fireEvent.click(await sheet().findByText('the command ends'))
     expect(sheet().getByText('It finished on pi. Readiness asks pi again now.')).toBeTruthy()
+    await waitFor(() => expect(asked).toContain('POST /api/machines/pi/readiness'))
+  })
+
+  it('asks readiness again when the socket drops mid-command', async () => {
+    const asked = daemon()
+    await draw([stopped(['sudo apk add tmux'])])
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal' }))
+    fireEvent.click(await sheet().findByText('the socket drops'))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi/readiness'))
   })
 
@@ -139,6 +148,19 @@ describe('the one-off terminal for a sudo step', () => {
     fireEvent.click(sheet().getByRole('button', { name: 'Close Run it on pi' }))
     // Closed is hidden, so the sheet is no longer in the accessibility tree.
     expect(screen.queryByRole('complementary', { name: 'Run it on pi' })).toBeNull()
+  })
+
+  /** The step's button goes with the verdict the command changed, so focus
+   *  goes to the card's title rather than falling to the page's body. */
+  it('puts focus on the card’s title when the step’s own button is gone', async () => {
+    daemon([])
+    await draw([stopped(['sudo apk add tmux'])])
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal' }))
+    fireEvent.click(await sheet().findByText('the command ends'))
+    const ready = await screen.findByRole('heading', { name: 'Ready for sessions' })
+    expect(screen.queryByRole('button', { name: 'Open a terminal' })).toBeNull()
+    fireEvent.click(sheet().getByRole('button', { name: 'Close Run it on pi' }))
+    await waitFor(() => expect(document.activeElement).toBe(ready))
   })
 
   it('offers no terminal for a command meant for root', async () => {

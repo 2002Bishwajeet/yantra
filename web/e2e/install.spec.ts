@@ -63,6 +63,9 @@ test.describe('install from the machine page', () => {
     await axe(page)
 
     await sheet.locator('.xterm-helper-textarea').focus()
+    // Escape is the terminal's inside the sheet: closing on it would stop sudo.
+    await page.keyboard.press('Escape')
+    await expect(sheet).toBeVisible()
     await page.keyboard.type('hunter2')
     await page.keyboard.press('Enter')
 

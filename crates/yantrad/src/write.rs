@@ -755,23 +755,45 @@ async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
 /// and nothing else. Memory only, so a restart forgets them.
 ///
 /// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
-pub type Left = Arc<std::sync::Mutex<std::collections::BTreeMap<String, Vec<String>>>>;
+/// Each list sits beside the `at` of the event that carried it, so a socket
+/// that names an older install is refused rather than run under its name.
+pub type Left = Arc<std::sync::Mutex<std::collections::BTreeMap<String, (u64, Vec<String>)>>>;
 
 /// The next result on a machine replaces its list, and one that left nothing
 /// empties it.
-fn remember_left(left: &Left, machine: &str, commands: &[String]) {
+fn remember_left(left: &Left, machine: &str, at: u64, commands: &[String]) {
     left.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(machine.to_lowercase(), commands.to_vec());
+        .insert(machine.to_lowercase(), (at, commands.to_vec()));
 }
 
-/// The command at `index` in what the latest install on `machine` left.
-pub(crate) fn left_command(left: &Left, machine: &str, index: usize) -> Option<String> {
-    left.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&machine.to_lowercase())
-        .and_then(|commands| commands.get(index))
-        .cloned()
+/// Why no command came back for a step.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Missed {
+    /// Nothing is remembered at that place: a restart, or an index past the end.
+    Nothing,
+    /// A newer install on that machine replaced the list the caller read.
+    Newer,
+}
+
+/// The command at `index` in what the install whose event is `at` left on
+/// `machine`, while that install is still the latest one there.
+pub(crate) fn left_command(
+    left: &Left,
+    machine: &str,
+    index: usize,
+    at: u64,
+) -> Result<String, Missed> {
+    let held = left
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some((latest, commands)) = held.get(&machine.to_lowercase()) else {
+        return Err(Missed::Nothing);
+    };
+    if *latest != at {
+        return Err(Missed::Newer);
+    }
+    commands.get(index).cloned().ok_or(Missed::Nothing)
 }
 
 async fn install_in_background(fleet: Fleet, claim: Claim, machine: String) {
@@ -784,7 +806,7 @@ async fn install_in_background(fleet: Fleet, claim: Claim, machine: String) {
         Err(_) => Event::install_waited(&machine, INSTALL_BUDGET.as_secs() / 60),
     };
     // Before the event, so a page that reads it can open any step it names.
-    remember_left(&fleet.left, &machine, &event.commands);
+    remember_left(&fleet.left, &machine, event.at, &event.commands);
     events::remember(&fleet.events, event).await;
     drop(claim);
     crate::refresh::look_at_readiness(&fleet.model).await;

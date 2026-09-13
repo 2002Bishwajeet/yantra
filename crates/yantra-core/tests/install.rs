@@ -264,6 +264,18 @@ async fn a_password_sudo_step_completes_in_a_one_off_terminal() -> Result<()> {
     use std::time::Duration;
     use yantra_core::pty;
 
+    // Every thread's log, for this whole test binary: the pty's reader is a
+    // thread of its own, and a per-thread capture would not see it.
+    let capture = Capture::default();
+    let writer = capture.clone();
+    let _ = tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish(),
+    );
+
     let Some(lab) = Lab::start("terminal")? else {
         return Ok(());
     };
@@ -321,5 +333,33 @@ async fn a_password_sudo_step_completes_in_a_one_off_terminal() -> Result<()> {
     let after = doctor::of(&lab.ssh, TERM).await;
     assert_eq!(state(&after, "tmux"), State::Present);
     assert_eq!(state(&after, "git"), State::Present);
+
+    // Q5: neither the password nor what the terminal printed is in any log.
+    let logged = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+    assert!(
+        !logged.contains("typed-as-keys"),
+        "the password reached a log: {logged}"
+    );
+    for line in seen.lines().map(str::trim).filter(|line| line.len() > 12) {
+        assert!(
+            !logged.contains(line),
+            "a printed line reached a log: {line}"
+        );
+    }
     Ok(())
+}
+
+/// A log that a test reads back.
+#[derive(Clone, Default)]
+struct Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Capture {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("the log").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }

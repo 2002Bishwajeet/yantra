@@ -64,7 +64,7 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use tokio::time::MissedTickBehavior;
@@ -72,7 +72,7 @@ use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
 
-use crate::write::{Authoriser, Left, Refused, allowed, chain, left_command};
+use crate::write::{Authoriser, Left, Missed, Refused, allowed, chain, left_command};
 
 /// Long enough that a socket nobody is typing at costs one frame a browser
 /// answers in microseconds; short enough that what a vanished peer holds is
@@ -149,10 +149,12 @@ async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
 }
 
-/// Y-394, [ADR-0030] §2: a step an install left, by its place in the list, so
-/// nothing a caller writes can run. The name is checked before the upgrade
-/// because it reaches `ssh`'s argv (I-63); a step that is not there is refused
-/// by name after it, as a session that is not there is.
+/// Y-394, [ADR-0030] §2: a step an install left, by its place in the list and
+/// the `at` of the install event the caller read, so nothing a caller writes
+/// can run and a newer install is never run under an older one's name. The
+/// name is checked before the upgrade because it reaches `ssh`'s argv (I-63);
+/// a step that is not there, or no longer the latest, is refused by name after
+/// it, as a session that is not there is.
 ///
 /// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
 async fn step<I: Inventory + Clone + Send + Sync + 'static>(
@@ -160,6 +162,7 @@ async fn step<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path((machine, index)): Path<(String, usize)>,
+    uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
@@ -167,14 +170,29 @@ async fn step<I: Inventory + Clone + Send + Sync + 'static>(
         status: StatusCode::BAD_REQUEST,
         said: error.to_string(),
     })?;
+    let at = read_at(&uri).ok_or_else(|| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: "a step names the install it was read from, as ?at=".to_owned(),
+    })?;
     let target = Target::Step {
         machine,
         index,
+        at,
         left: state.left,
     };
     tracing::info!("terminal {target} for {}", caller.node);
 
     Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+}
+
+/// The install a caller read its step from, as `?at=` its event's time.
+/// Read by hand, as `write.rs` reads `?force=true`.
+fn read_at(uri: &Uri) -> Option<u64> {
+    uri.query()?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("at="))?
+        .parse()
+        .ok()
 }
 
 /// What a socket attaches to: a workspace this daemon looks up, a machine and a
@@ -188,6 +206,7 @@ enum Target {
     Step {
         machine: String,
         index: usize,
+        at: u64,
         left: Left,
     },
 }
@@ -202,12 +221,19 @@ impl Target {
             Self::Step {
                 machine,
                 index,
+                at,
                 left,
             } => {
                 let command =
-                    left_command(left, machine, *index).ok_or_else(|| Unopened::NoStep {
-                        machine: machine.clone(),
-                        index: *index,
+                    left_command(left, machine, *index, *at).map_err(|missed| match missed {
+                        Missed::Nothing => Unopened::NoStep {
+                            machine: machine.clone(),
+                            index: *index,
+                        },
+                        Missed::Newer => Unopened::Newer {
+                            machine: machine.clone(),
+                            index: *index,
+                        },
                     })?;
                 pty::run(machine, &command, term, size).await?
             }
@@ -241,6 +267,11 @@ enum Unopened {
     /// A restart empties the list, and the next install replaces it.
     #[error("no install on {machine} left a step {index}; press Install again")]
     NoStep { machine: String, index: usize },
+
+    /// The page read an older install than the daemon holds, so the command it
+    /// shows is not the one this step would run.
+    #[error("a newer install on {machine} replaced step {index}; read the page again")]
+    Newer { machine: String, index: usize },
 }
 
 /// The browser's window and the terminal it is, which are the facts about the
@@ -467,7 +498,10 @@ mod tests {
     /// The three addresses one bridge serves (ADR-0022, ADR-0030).
     const WORKSPACE: &str = "/api/workspaces/api/terminal";
     const SESSION: &str = "/api/machines/fixture/sessions/scratch/terminal";
-    const STEP: &str = "/api/machines/fixture/install/0/terminal";
+    const STEP: &str = "/api/machines/fixture/install/0/terminal?at=100";
+
+    /// The `at` of the install event every test here remembers.
+    const AT: u64 = 100;
 
     const WINDOW: &str = r#"{"rows":24,"cols":80,"term":"xterm-256color"}"#;
 
@@ -495,7 +529,7 @@ mod tests {
         let left = Left::default();
         left.lock().expect("a fresh lock").insert(
             machine.to_owned(),
-            commands.iter().map(|one| (*one).to_owned()).collect(),
+            (AT, commands.iter().map(|one| (*one).to_owned()).collect()),
         );
         left
     }
@@ -679,7 +713,7 @@ mod tests {
     async fn a_name_that_is_not_an_ssh_destination_is_refused_before_the_upgrade() {
         let status = handshake(
             direct(Some(caller(ME, &[]))),
-            "/api/machines/-oProxyCommand=id/install/0/terminal",
+            "/api/machines/-oProxyCommand=id/install/0/terminal?at=100",
             "",
         )
         .await;
@@ -691,7 +725,16 @@ mod tests {
     /// that is not there is.
     #[tokio::test]
     async fn a_step_outside_what_the_install_left_is_refused_by_name() {
-        let path = "/api/machines/fixture/install/3/terminal";
+        let said = refusal("/api/machines/fixture/install/3/terminal?at=100").await;
+        assert_eq!(
+            said,
+            "no install on fixture left a step 3; press Install again"
+        );
+    }
+
+    /// The first text frame a step socket answers once it is sized: how it was
+    /// refused.
+    async fn refusal(path: &str) -> String {
         let mut socket = upgraded_at(
             direct(Some(caller(ME, &[]))),
             left("fixture", &["sudo apk add tmux"]),
@@ -699,8 +742,7 @@ mod tests {
         )
         .await;
         send(&mut socket, TEXT, WINDOW.as_bytes()).await;
-
-        let said = loop {
+        loop {
             let (opcode, payload) = timeout(PING_EVERY * 10, frame(&mut socket))
                 .await
                 .expect("an answer")
@@ -710,12 +752,33 @@ mod tests {
                 continue;
             }
             assert_eq!(opcode, TEXT, "the refusal is a text frame");
-            break String::from_utf8_lossy(&payload).into_owned();
-        };
+            return String::from_utf8_lossy(&payload).into_owned();
+        }
+    }
+
+    /// ADR-0030 §2: the page names the install it read. A newer one replaced
+    /// that list, so the command the page shows is not the one at this place,
+    /// and the step is refused by name rather than run under the wrong one.
+    #[tokio::test]
+    async fn a_step_from_an_install_that_is_no_longer_the_latest_is_refused_by_name() {
+        let said = refusal("/api/machines/fixture/install/0/terminal?at=99").await;
         assert_eq!(
             said,
-            "no install on fixture left a step 3; press Install again"
+            "a newer install on fixture replaced step 0; read the page again"
         );
+    }
+
+    /// A socket that names no install cannot be matched to one, so it is
+    /// refused before the upgrade.
+    #[tokio::test]
+    async fn a_step_socket_that_names_no_install_is_refused_before_the_upgrade() {
+        let status = handshake(
+            direct(Some(caller(ME, &[]))),
+            "/api/machines/fixture/install/0/terminal",
+            "",
+        )
+        .await;
+        assert!(status.starts_with("HTTP/1.1 400"), "{status}");
     }
 
     /// A restart forgets what was left, and a later install on the same
@@ -724,12 +787,16 @@ mod tests {
     fn what_an_install_left_is_found_by_its_place_and_nothing_else() {
         let left = left("pi", &["sudo apt-get update; sudo apt-get install -y tmux"]);
         assert_eq!(
-            left_command(&left, "PI", 0).as_deref(),
-            Some("sudo apt-get update; sudo apt-get install -y tmux")
+            left_command(&left, "PI", 0, AT).as_deref(),
+            Ok("sudo apt-get update; sudo apt-get install -y tmux")
         );
-        assert_eq!(left_command(&left, "pi", 1), None);
-        assert_eq!(left_command(&left, "mac", 0), None);
-        assert_eq!(left_command(&Left::default(), "pi", 0), None);
+        assert_eq!(left_command(&left, "pi", 1, AT), Err(Missed::Nothing));
+        assert_eq!(left_command(&left, "mac", 0, AT), Err(Missed::Nothing));
+        assert_eq!(left_command(&left, "pi", 0, AT + 1), Err(Missed::Newer));
+        assert_eq!(
+            left_command(&Left::default(), "pi", 0, AT),
+            Err(Missed::Nothing)
+        );
     }
 
     #[derive(Clone, Default)]
@@ -746,12 +813,13 @@ mod tests {
         }
     }
 
-    /// **Q5 on the route that carries a password.** The lifecycle is logged
-    /// and no byte of the stream is, in either direction, at any level. A real
-    /// `ssh` under a real pty, to a name that cannot resolve, so it prints and
-    /// exits with no network: what it printed reaches the socket and not the
-    /// log, what was typed reaches neither, and the terminal ends on `ssh`'s
-    /// own status.
+    /// **Q5 on the route that carries a password, as far as a unit test
+    /// reaches.** A real `ssh` under a real pty, to a name that cannot resolve,
+    /// prints and exits with no network: what it printed reaches the socket and
+    /// not this thread's log, and the terminal ends on `ssh`'s own status. The
+    /// typed frame is sent, but `ssh` may exit before it is written, so the
+    /// password half is `yantra-core/tests/install.rs`'s: it captures every
+    /// thread's log while a real password goes through the pty.
     #[tokio::test]
     async fn a_one_off_terminal_logs_its_lifecycle_and_never_its_stream() {
         let capture = Capture::default();
@@ -766,7 +834,7 @@ mod tests {
         let mut socket = upgraded_at(
             direct(Some(caller(ME, &[]))),
             left("nowhere.invalid", &["sudo apk add tmux"]),
-            "/api/machines/nowhere.invalid/install/0/terminal",
+            "/api/machines/nowhere.invalid/install/0/terminal?at=100",
         )
         .await;
         send(&mut socket, TEXT, WINDOW.as_bytes()).await;

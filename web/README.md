@@ -338,6 +338,9 @@ tablet, and the full height on the phone. Three rules:
 
 - **It never reopens.** A reopened socket runs the command again, so `attachTerminal` gets no
   reopen budget for it.
+- **It names the install it read.** The step carries the event's `at`, and the daemon refuses a
+  step whose install is no longer the latest, so the sheet cannot show one command while another
+  runs.
 - **The daemon's `{"exit": n}` is the one text frame that is not a refusal.** `exitOf` tells the
   two apart, and the pane says `exited n`.
 - **Escape stays with the terminal** inside the sheet. The sheet closing on it would stop sudo in

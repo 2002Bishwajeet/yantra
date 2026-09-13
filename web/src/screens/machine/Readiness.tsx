@@ -91,7 +91,7 @@ function Commands(props: {
           <li className="readiness__command" key={command}>
             <Copyable text={command} what={`the command for ${machine}`} />
             {needsSudo(command) ? (
-              <Button onClick={() => onTerminal({ index, command })} variant={emphasis}>
+              <Button data-sudo-opener="" onClick={() => onTerminal({ index, command, at: result.at })} variant={emphasis}>
                 Open a terminal
               </Button>
             ) : null}
@@ -116,6 +116,7 @@ export function ReadinessCard(props: {
   const { name, readiness, lastSeen, state } = props
   const { verdict, events, watch, setWatch, notifications } = state
   const eyebrow = useId()
+  const heading = useId()
   const install = useInstall()
   const recheck = useRecheckReadiness()
   const about = useAbout()
@@ -164,7 +165,15 @@ export function ReadinessCard(props: {
         <div className="readiness__titles">
           <Eyebrow id={eyebrow}>Readiness</Eyebrow>
           {/* Polite: the verdict changes on its own when an install lands. */}
-          <Text aria-live="polite" render={<h2 />} className="readiness__title" emphasized scale="title-large">
+          <Text
+            aria-live="polite"
+            className="readiness__title"
+            emphasized
+            id={heading}
+            render={<h2 />}
+            scale="title-large"
+            tabIndex={-1}
+          >
             {titleOf(verdict, name)}
           </Text>
           {readiness.looked === 'ok' && checks.length > 0 && verdict.kind !== 'asleep' ? (
@@ -278,9 +287,10 @@ export function ReadinessCard(props: {
 
       {/* The command ended: what is missing now is readiness's to say. */}
       <SudoSheet
+        fallback={heading}
         machine={name}
         onClose={() => setStep(null)}
-        onExit={() => {
+        onDone={() => {
           setWatch(null)
           ask(name)
         }}

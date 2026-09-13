@@ -34,7 +34,7 @@ export const PAUSE = 500
 export type Target =
   | { workspace: string; machine: string }
   | { machine: string; session: string }
-  | { machine: string; step: number }
+  | { machine: string; step: number; at: number }
 
 export function terminalAddress(target: Target): string {
   const daemon = location.origin.replace(/^http/, 'ws')
@@ -43,7 +43,8 @@ export function terminalAddress(target: Target): string {
   if ('session' in target) {
     return `${daemon}/api/machines/${machine}/sessions/${encodeURIComponent(target.session)}/terminal`
   }
-  return `${daemon}/api/machines/${machine}/install/${target.step}/terminal`
+  // `at` names the install event the step was read from (ADR-0030 §2).
+  return `${daemon}/api/machines/${machine}/install/${target.step}/terminal?at=${target.at}`
 }
 
 /** Whether the socket is up, and which attempt is in flight while it is not —

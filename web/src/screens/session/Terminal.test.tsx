@@ -442,7 +442,7 @@ describe('the phone key row under the pane', () => {
  *  addressed by the step's place, ends on the command's status, and is never
  *  reopened, because a reopened socket runs the command again. */
 describe('a one-off terminal for an install step', () => {
-  const step: Target = { machine: MACHINE, step: 0 }
+  const step: Target = { machine: MACHINE, step: 0, at: 100 }
 
   it('opens the step by its place, and ends on the command’s status', async () => {
     let told: number | null | undefined
@@ -456,7 +456,7 @@ describe('a one-off terminal for an install step', () => {
       />,
     )
     await settled(() => expect(daemonised.heard.length).toBe(1))
-    expect(daemonised.asked).toEqual(['/api/machines/cachyos-g14/install/0/terminal'])
+    expect(daemonised.asked).toEqual(['/api/machines/cachyos-g14/install/0/terminal?at=100'])
 
     daemonised.print('[sudo] password for yantra: ')
     await settled(() => expect(screenText()).toContain('password for yantra'))

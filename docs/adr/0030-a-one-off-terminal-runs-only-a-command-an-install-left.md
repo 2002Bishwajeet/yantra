@@ -33,7 +33,9 @@ That leaves one question open: **what may such a terminal run?** Three facts bou
    forgets the events (ADR-0025).
 2. **The socket takes an index into that list, and nothing else can run.**
    `GET /api/machines/{machine}/install/{index}/terminal` calls `allowed()` before the upgrade, as
-   every terminal route does. A name outside the ssh-destination rule is a `400` before the
+   every terminal route does. **The socket also names the install it read, as `?at=` the event's
+   time**, and the daemon keeps that time beside the list: a newer install on the machine is refused
+   by name, so the page never names one command while the daemon runs another. A name outside the ssh-destination rule is a `400` before the
    upgrade. An index outside the list, or a machine with no remembered result, is refused by name
    in a text frame after the upgrade, as ADR-0022 §5 refuses a session that is not there.
 3. **It is `ssh -tt <machine> <command>` under `pty.rs`**: the system `ssh`, the same multiplexed
@@ -55,10 +57,10 @@ That leaves one question open: **what may such a terminal run?** Three facts bou
 - **It narrows one route, not the authoriser.** A caller `allowed()` admits can still attach to
   any shell on the fleet (ADR-0022). What this adds is that the one-off route cannot be steered
   into running a command Yantra did not write.
-- **An index can go stale in one narrow window.** The list changes when another install on that
-  machine ends, and the page reads the new event within one poll (5 s). An index can point at a
-  command the page has not drawn yet only if a second install ended in that window. The daemon
-  runs what it holds, and the pane shows it running.
+- **A stale index is refused, not run.** The list changes when another install on that machine
+  ends, and the page reads the new event within one poll (5 s). A socket opened in that window
+  names the older install's `at`, and the daemon refuses it by name rather than run a command the
+  page did not show.
 - **A restart empties the list.** The refusal says so, and pressing Install again fills it.
 - **Closing the sheet stops the command.** Dropping the pty hangs up the far side (I-27's
   terminal half), so a person who closes it mid-install stops sudo there.

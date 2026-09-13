@@ -23,8 +23,8 @@ describe('a one-off terminal’s frames', () => {
 
   it('addresses a step by its place in what the install left, never by its command', () => {
     vi.stubGlobal('location', new URL('https://yantra.tail3a1b.ts.net/'))
-    expect(terminalAddress({ machine: 'pi 5', step: 2 })).toBe(
-      'wss://yantra.tail3a1b.ts.net/api/machines/pi%205/install/2/terminal',
+    expect(terminalAddress({ machine: 'pi 5', step: 2, at: 1788696000 })).toBe(
+      'wss://yantra.tail3a1b.ts.net/api/machines/pi%205/install/2/terminal?at=1788696000',
     )
   })
 })

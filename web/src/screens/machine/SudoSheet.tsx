@@ -10,12 +10,14 @@ import './SudoSheet.css'
 // xterm.js is a third of a chunk, and only a sudo step needs it on this page.
 const Terminal = lazy(() => import('@/screens/session/Terminal').then((module) => ({ default: module.Terminal })))
 
-/** A step an install left: its place in the list, which is what the socket
- *  names, and the command, which is what the person reads. */
-export type Step = { index: number; command: string }
+/** A step an install left: its place in the list and the `at` of the install
+ *  event it came from, which are what the socket names, and the command, which
+ *  is what the person reads. The daemon refuses a step whose install is no
+ *  longer the latest, so the two cannot disagree (ADR-0030 §2). */
+export type Step = { index: number; command: string; at: number }
 
-function Run(props: { machine: string; step: Step; height: string; onExit: (exit: number | null) => void }) {
-  const { machine, step, height, onExit } = props
+function Run(props: { machine: string; step: Step; height: string; onDone: () => void }) {
+  const { machine, step, height, onDone } = props
   const [exit, setExit] = useState<number | null | undefined>(undefined)
   return (
     <div className="sudo-sheet__body">
@@ -38,11 +40,12 @@ function Run(props: { machine: string; step: Step; height: string; onExit: (exit
           <Terminal
             height={height}
             label={`install step on ${machine}`}
+            onEnd={onDone}
             onExit={(code) => {
               setExit(code)
-              onExit(code)
+              onDone()
             }}
-            target={{ machine, step: step.index }}
+            target={{ machine, step: step.index, at: step.at }}
           />
         </Suspense>
       </div>
@@ -60,18 +63,33 @@ function Run(props: { machine: string; step: Step; height: string; onExit: (exit
 /** Y-394, ADR-0030: a sudo-blocked step, run in a terminal of its own. A side
  *  sheet beside the page on the desktop and the tablet, and the full height on
  *  the phone (D7 §4.3). The terminal is mounted only while the sheet is open,
- *  so closing it closes the socket and stops the command. */
+ *  so closing it closes the socket and stops the command.
+ *
+ *  `onDone` is the command ending, or its socket dropping. `fallback` is the id
+ *  focus goes to when the step's own button went with the verdict it changed. */
 export function SudoSheet(props: {
   machine: string
   step: Step | null
+  fallback: string
   onClose: () => void
-  onExit: (exit: number | null) => void
+  onDone: () => void
 }) {
-  const { machine, step, onClose, onExit } = props
+  const { machine, step, fallback, onClose, onDone } = props
   const factor = useFormFactor()
   const title = `Run it on ${machine}`
-  const close: ReactNode = (
-    <Button onClick={onClose} variant="text">
+  const back = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('[data-sudo-opener]') ?? document.getElementById(fallback)
+  const close = () => {
+    onClose()
+    // The side sheet gives focus back only to an opener still on the page; with
+    // none, focus is on the body or still on the now-hidden sheet's title.
+    setTimeout(() => {
+      const active = document.activeElement
+      if (active === null || active === document.body || active.closest('[hidden]')) back()?.focus()
+    }, 0)
+  }
+  const closer: ReactNode = (
+    <Button onClick={close} variant="text">
       Close
     </Button>
   )
@@ -81,19 +99,19 @@ export function SudoSheet(props: {
       <BottomSheet
         open={step !== null}
         onOpenChange={(open) => {
-          if (!open) onClose()
+          if (!open) close()
         }}
       >
-        <BottomSheetPopup actions={close} className="sudo-sheet sudo-sheet--phone" title={title}>
-          {step ? <Run height="45dvh" key={step.index} machine={machine} onExit={onExit} step={step} /> : null}
+        <BottomSheetPopup actions={closer} className="sudo-sheet sudo-sheet--phone" finalFocus={back} title={title}>
+          {step ? <Run height="45dvh" key={step.index} machine={machine} onDone={onDone} step={step} /> : null}
         </BottomSheetPopup>
       </BottomSheet>
     )
   }
 
   return (
-    <SideSheet actions={null} className="sudo-sheet sudo-sheet--side" onClose={onClose} open={step !== null} title={title}>
-      {step ? <Run height="55vh" key={step.index} machine={machine} onExit={onExit} step={step} /> : null}
+    <SideSheet actions={null} className="sudo-sheet sudo-sheet--side" onClose={close} open={step !== null} title={title}>
+      {step ? <Run height="55vh" key={step.index} machine={machine} onDone={onDone} step={step} /> : null}
     </SideSheet>
   )
 }

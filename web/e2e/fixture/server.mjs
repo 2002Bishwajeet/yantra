@@ -540,7 +540,7 @@ const sockets = new WebSocketServer({ noServer: true })
  *  install event for that machine. It asks for a password as sudo does, takes
  *  what is typed without echoing it, then ends on the command's status and
  *  marks present what the scenario's `typed` says the step fixes. */
-function oneOff(state, request, socket, head, machine, index) {
+function oneOff(state, request, socket, head, machine, index, at) {
   if (state.refuse) {
     socket.end(
       `HTTP/1.1 ${state.refuse.status} Refused\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${state.refuse.text}`,
@@ -550,7 +550,9 @@ function oneOff(state, request, socket, head, machine, index) {
   const newest = (state.notifications.data ?? []).find(
     (one) => (one.kind === 'installed' || one.kind === 'install_stopped') && one.machine === machine,
   )
-  const command = newest?.commands?.[index]
+  // terminal.rs: a newer install than the one the page read is refused by name.
+  const stale = newest !== undefined && newest.at !== at
+  const command = stale ? undefined : newest?.commands?.[index]
   sockets.handleUpgrade(request, socket, head, (ws) => {
     let sized = false
     ws.on('message', (data, binary) => {
@@ -558,7 +560,12 @@ function oneOff(state, request, socket, head, machine, index) {
         if (binary) return
         sized = true
         if (!command) {
-          ws.send(`no install on ${machine} left a step ${index}; press Install again`, { binary: false })
+          ws.send(
+            stale
+              ? `a newer install on ${machine} replaced step ${index}; read the page again`
+              : `no install on ${machine} left a step ${index}; press Install again`,
+            { binary: false },
+          )
           ws.close()
           return
         }
@@ -588,7 +595,7 @@ server.on('upgrade', (request, socket, head) => {
   const session = url.pathname.match(/^\/api\/machines\/([^/]+)\/sessions\/([^/]+)\/terminal$/)
   const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
   if (step) {
-    oneOff(state, request, socket, head, decodeURIComponent(step[1]), Number(step[2]))
+    oneOff(state, request, socket, head, decodeURIComponent(step[1]), Number(step[2]), Number(url.searchParams.get('at')))
     return
   }
   if (!workspace && !session) {
