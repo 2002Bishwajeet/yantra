@@ -208,6 +208,31 @@ impl Installer {
         self.systemd.exec_as(UNPRIVILEGED, &["bash", "-c", &piped])
     }
 
+    /// `--uninstall`, piped the same way `docs/appliance.md` gives it
+    /// (Y-407).
+    fn uninstall(&self) -> Result<Output> {
+        self.systemd.exec_as(
+            UNPRIVILEGED,
+            &[
+                "bash",
+                "-c",
+                "cat /fixture/install.sh | bash -s -- --uninstall",
+            ],
+        )
+    }
+
+    fn uninstall_ok(&self) -> Result<String> {
+        let out = self.uninstall()?;
+        if !out.status.success() {
+            bail!(
+                "install.sh --uninstall failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8(out.stdout)?)
+    }
+
     /// The same pipe, with a terminal behind it. stdout and stderr arrive
     /// merged, as they do on a screen.
     fn install_at_terminal(&self, answers: &str) -> Result<String> {
@@ -878,5 +903,74 @@ fn at_a_terminal_a_no_to_tailscale_installs_yantra_and_starts_nothing() -> Resul
     for unit in UNITS {
         assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "disabled");
     }
+    Ok(())
+}
+
+/// Y-407: `--uninstall` always removes the units and the binaries; with no
+/// terminal it keeps `/etc/yantra` and the `yantra` account, and a second run
+/// succeeds even though there is nothing left to remove.
+#[test]
+fn uninstall_removes_units_and_binaries_and_keeps_the_rest_with_no_terminal() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+
+    fixture.publish(VERSION, "uninstall")?;
+    fixture.install_ok()?;
+    fixture.sh("id yantra")?;
+
+    let first = fixture.uninstall_ok()?;
+    assert!(
+        first.contains("removed:") && first.contains("kept:"),
+        "the closing message must say both:\n{first}"
+    );
+    assert!(
+        first.contains("no terminal"),
+        "a run with no terminal must say nothing was asked:\n{first}"
+    );
+
+    for binary in BINARIES {
+        assert!(
+            !fixture
+                .systemd
+                .exec(&["test", "-e", &format!("/usr/local/bin/{binary}")])?
+                .status
+                .success(),
+            "{binary} survived --uninstall"
+        );
+    }
+    for unit in UNITS {
+        assert!(
+            !fixture
+                .systemd
+                .exec(&["test", "-e", &format!("/etc/systemd/system/{unit}")])?
+                .status
+                .success(),
+            "{unit} survived --uninstall"
+        );
+    }
+
+    assert!(
+        fixture
+            .systemd
+            .exec(&["test", "-e", "/etc/yantra"])?
+            .status
+            .success(),
+        "the default kept /etc/yantra with no terminal to ask"
+    );
+    assert!(
+        fixture.systemd.exec(&["id", "yantra"])?.status.success(),
+        "the default kept the yantra account with no terminal to ask"
+    );
+    assert!(
+        first.contains("/etc/yantra") && first.contains("yantra account"),
+        "the kept line must name what it kept:\n{first}"
+    );
+
+    let second = fixture.uninstall_ok()?;
+    assert!(
+        second.contains("removed:") && second.contains("kept:"),
+        "a second run over nothing left must still succeed and say so:\n{second}"
+    );
     Ok(())
 }
