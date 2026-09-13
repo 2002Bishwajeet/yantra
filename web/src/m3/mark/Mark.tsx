@@ -10,7 +10,7 @@ export type MarkProps = ComponentPropsWithRef<'span'> & {
   size?: 'default' | 'small'
 }
 
-/** The dot alone. Decorative: the word beside it is what a reader gets, so
+/** The mark alone. Decorative: the word beside it is what a reader gets, so
  *  render it through State unless the word is already in the text. */
 export function Mark(props: MarkProps) {
   const { state, size, className, ...rest } = props
