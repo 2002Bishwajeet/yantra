@@ -30,12 +30,30 @@ const install = `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yan
 /* Split after each slash so the URL wraps where a reader expects it to. `<wbr>` adds nothing to
    the text content, so the clipboard and the accessible name are still the plain command. */
 const installParts = install.split(/(?<=\/)/);
+
+const title = 'Yantra — one workspace, one interface, every machine';
+const description =
+  'Name the work, not the machine. Yantra conducts ssh, tmux and your agent across your own machines, over Tailscale.';
+const software = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Yantra',
+  description,
+  url: Astro.site!.href,
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'Linux, macOS',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  license: `${repo}/blob/main/LICENSE`,
+  softwareVersion: version,
+  downloadUrl: release,
+  codeRepository: repo,
+  sameAs: [repo],
+  image: new URL('/og.jpg', Astro.site).href,
+};
 ---
 
-<Layout
-  title="Yantra — one workspace, one interface, every machine"
-  description="Name the work, not the machine. Yantra conducts ssh, tmux and your agent across your own machines, over Tailscale."
->
+<Layout title={title} description={description}>
+  <script type="application/ld+json" slot="head" set:html={JSON.stringify(software)} />
   <div class="runway">
     <div class="frame" data-frame data-beat="0">
       <img class="ground" src={ground.src} alt="" fetchpriority="high" decoding="async" />

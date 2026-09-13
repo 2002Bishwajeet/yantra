@@ -7,6 +7,10 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+const card = new URL('/og.jpg', Astro.site).href;
+const cardAlt =
+  'Vishvakarma, the divine craftsman, at work on a gear, beside the words: Name the work, not the machine.';
 ---
 
 <html lang="en">
@@ -22,7 +26,28 @@ const { title, description } = Astro.props;
          because a neutral placeholder had no argument for overriding it. -->
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0B0806" />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Yantra" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={card} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:alt" content={cardAlt} />
+    <meta property="og:locale" content="en" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={card} />
+    <meta name="twitter:image:alt" content={cardAlt} />
+    <slot name="head" />
   </head>
   <body>
     <slot />
