@@ -1,12 +1,22 @@
 import { useQueries } from '@tanstack/react-query'
 import type { Machine, Readiness } from '@/api'
-import { useAbout, useGithub, useMachines, useReadiness, useSshIdentity, useWorkspaces } from '@/api/hooks'
+import {
+  useAbout,
+  useGithub,
+  useMachines,
+  useNotifications,
+  useReadiness,
+  useSshIdentity,
+  useWorkspaces,
+} from '@/api/hooks'
 import { machineReadinessQuery } from '@/api/queries'
 import { runsSessions } from '@/lib/platform'
 import { at } from '@/lib/time'
-import { firstSession, github, isReady, line, machines as machinesStep, push, sshKey, tailnet } from './steps'
+import { asEvents } from '@/shell/notifications'
+import { added, firstSession, github, isReady, line, machines as readied, push, tailnet } from './steps'
 
-export const STEPS = 6
+/** D7 §4.1: four steps are required; GitHub and push wait for later. */
+export const REQUIRED = 4
 
 /** Each machine's newest report: a re-check where one was asked, else the
  *  sweep's. Nothing here reads a machine's key over the wire, so an unasked
@@ -34,7 +44,10 @@ export function useSetupGate(machines: Machine[]) {
   return { key, passed: key === 'made' && ready > 0 } as const
 }
 
-/** The six steps, as the checklist and the Finish setup card both read them. */
+/** The next required thing, which is the page's one filled action (D7 §3.1). */
+export type Next = 'add' | 'install' | 'session' | null
+
+/** The checklist, as the page and the Finish setup card both read it. */
 export function useChecklist(now: number) {
   const about = useAbout()
   const identity = useSshIdentity()
@@ -42,6 +55,8 @@ export function useChecklist(now: number) {
   const machines = useMachines()
   const listed = useWorkspaces()
   const sweep = useReadiness()
+  const notifications = useNotifications()
+  const events = asEvents(notifications.data)
 
   const all = machines.looked === 'ok' ? machines.data : []
   const list = all.filter(runsSessions)
@@ -51,41 +66,57 @@ export function useChecklist(now: number) {
     const since = machine.last_seen ? (at(machine.last_seen, now)?.text ?? null) : null
     return { machine, report, line: line(machine, report, since) }
   })
+  // A join is its event, or ssh already getting in after a restart forgot it.
+  const joined = lines
+    .filter(
+      ({ machine, report }) =>
+        events.some((one) => one.kind === 'joined' && one.machine === machine.name) ||
+        report?.checks.some((one) => one.check === 'reachable' && one.state === 'present'),
+    )
+    .map((one) => one.machine.name)
   const readyCount = lines.filter((one) => one.line.kind === 'ready').length
+
   const steps = {
     tailnet: tailnet(about, location.protocol),
-    ssh: sshKey(identity),
-    machines: machinesStep(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
-    github: github(connection),
-    push: push(about),
+    machine: added(joined),
+    ready: readied(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
     first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount),
   }
+  const later = { github: github(connection), push: push(about) }
   const done = Object.values(steps).filter((one) => one.status === 'done').length
+  const target =
+    lines.find((one) => one.line.kind === 'missing' && one.line.installable)?.machine.name ?? null
+  const next: Next =
+    steps.machine.status !== 'done'
+      ? 'add'
+      : steps.ready.status !== 'done'
+        ? target
+          ? 'install'
+          : null
+        : steps.first.status !== 'done'
+          ? 'session'
+          : null
   const settled =
     !about.isPending &&
     !identity.isPending &&
     !connection.isPending &&
     machines.looked !== 'pending' &&
     listed.looked !== 'pending'
-  return { about, identity, machines, sweep, all, lines, steps, done, readyCount, settled }
-}
-
-// Browser-local, like every preference (ADR-0024 §5), and under its own key
-// because it is one fact and no screen edits it.
-const DISMISSED = 'yantra.finish-setup'
-
-export function dismissed(): boolean {
-  try {
-    return localStorage.getItem(DISMISSED) === 'dismissed'
-  } catch {
-    return false
-  }
-}
-
-export function dismiss() {
-  try {
-    localStorage.setItem(DISMISSED, 'dismissed')
-  } catch {
-    // A private window keeps it for this page only, which the card's state does.
+  return {
+    about,
+    identity,
+    machines,
+    sweep,
+    notifications,
+    events,
+    all,
+    lines,
+    steps,
+    later,
+    done,
+    readyCount,
+    next,
+    target,
+    settled,
   }
 }

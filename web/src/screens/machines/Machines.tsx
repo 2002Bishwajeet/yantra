@@ -68,7 +68,7 @@ export function Machines() {
           Machines
         </Text>
         <Looked className="machines__looked" reads={[machines, readiness, sessions]} />
-        <Button className="machines__add" icon={<Plus />} render={<Link to="/add" />} role="link" variant="tonal">
+        <Button className="machines__add" icon={<Plus />} render={<Link to="/machines/add" />} role="link" variant="tonal">
           Add a device
         </Button>
       </div>

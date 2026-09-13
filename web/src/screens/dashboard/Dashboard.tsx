@@ -46,6 +46,7 @@ import { unclaimed, unreachable, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
+import { runsSessions } from '@/lib/platform'
 import { useSetupGate } from '@/screens/setup/progress'
 import { FinishSetup } from './FinishSetup'
 import './Dashboard.css'
@@ -156,15 +157,21 @@ function Strip(props: {
       </div>
     )
   }
-  const { up, down } = online(machines.data, now)
-  // A machine the tailnet sees and ssh did not reach is down for this page too.
+  // D7 §3.4: only a machine that runs sessions is counted; a phone never is.
+  const counted = machines.data.filter(runsSessions)
+  const { up, down } = online(counted, now)
+  // D7 §3.3: off is asleep, which is normal; online and not answering ssh is
+  // the one that needs a look.
   const named = new Set(down.map((one) => one.name))
-  const all = [...down, ...notAnswering.filter((name) => !named.has(name)).map((name) => ({ name, since: null }))]
+  const all = [
+    ...down.map((one) => ({ ...one, asleep: true })),
+    ...notAnswering.filter((name) => !named.has(name)).map((name) => ({ name, since: null, asleep: false })),
+  ]
   return (
     <div className="dash__strip">
       <div className="dash__facts">
         <State state="running">
-          {up} of {machines.data.length}
+          {up} of {counted.length}
           <span className="dash__long"> machines</span> online
         </State>
         {all.map((one) => (
@@ -172,14 +179,15 @@ function Strip(props: {
             <span aria-hidden="true" className="dash__dot">
               ·
             </span>
-            <State className="dash__down" state="unknown">
-              {one.name} unreachable{one.since ? <span className="dash__long"> {one.since}</span> : null}
+            <State className={one.asleep ? undefined : 'dash__down'} state="unknown">
+              {one.name} {one.asleep ? 'asleep' : 'not answering'}
+              {one.since ? <span className="dash__long"> {one.since}</span> : null}
             </State>
             <span aria-hidden="true" className="dash__dot">
               ·
             </span>
             <Link className="dash__fix" params={{ machine: one.name }} to="/m/$machine">
-              Fix<span className="dash__long"> →</span>
+              Open<span className="dash__long"> →</span>
             </Link>
           </span>
         ))}
@@ -418,7 +426,12 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
   const timed = live.map((row) => ({ row, started: startedAt(sessions, row.workspace) }))
   const longest = Math.max(0, ...timed.flatMap((one) => (one.started === null ? [] : [now / 1000 - one.started])))
   return (
-    <Card aria-labelledby="dash-running" className="dash__running" surface="high">
+    <Card
+      aria-labelledby="dash-running"
+      className="dash__running"
+      data-empty={live.length === 0 ? '' : undefined}
+      surface="high"
+    >
       <CardHead
         id="dash-running"
         title="Running"
@@ -477,6 +490,17 @@ function Worth(props: {
   }
   const rows = sessions.looked === 'ok' ? unclaimed(sessions.data, workspaces) : []
   const unknown = sessions.looked === 'never' || workspaces.looked !== 'ok'
+  // D7 S13: an empty band is one quiet line, not the loudest block on the page.
+  if (!unknown && rows.length === 0) {
+    return (
+      <section aria-labelledby="dash-worth" className="dash__line">
+        <Eyebrow render={<h2 />} id="dash-worth">
+          Worth a look
+        </Eyebrow>
+        <State state="idle">every tmux session on the machines that answered belongs to a workspace</State>
+      </section>
+    )
+  }
   return (
     <Card aria-labelledby="dash-worth" className="dash__worth" surface="tertiary">
       <div className="dash__worth-head">

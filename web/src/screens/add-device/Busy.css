@@ -1,0 +1,36 @@
+.add-device__busy {
+  position: relative;
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+.add-device__busy > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--md-sys-color-tertiary);
+  animation: add-device-busy 1.4s ease-in-out infinite;
+}
+
+@keyframes add-device-busy {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* D7 §3.7: no travel under reduced motion; the bar still says it is running. */
+@media (prefers-reduced-motion: reduce) {
+  .add-device__busy > span {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+}

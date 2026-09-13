@@ -14,7 +14,7 @@ import type {
   Stopped,
   Workspace,
 } from '@/api'
-import { fetchJson, json, request } from '@/api/client'
+import { fetchJson, json } from '@/api/client'
 import type { ApiError } from '@/api/errors'
 import { keys } from '@/api/keys'
 
@@ -171,20 +171,6 @@ export function useRecheckReadiness() {
       ),
     onSuccess: (answer, machine) =>
       client.setQueryData(keys.readiness(machine), answer),
-  })
-}
-
-/** `POST /api/machines/{m}/install` answers `202` and nothing else
- *  (ADR-0028 §4). What it did arrives later as an `installed` or
- *  `install_stopped` event, so the ring is what is asked again. A `409` is an
- *  install already running on that machine. */
-export function useInstall() {
-  const client = useQueryClient()
-  return useMutation<void, ApiError, string>({
-    mutationFn: async (machine) => {
-      await request(`/api/machines/${encodeURIComponent(machine)}/install`, { method: 'POST' })
-    },
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.notifications() }),
   })
 }
 

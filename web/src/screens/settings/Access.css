@@ -1,0 +1,15 @@
+/* D7 §4.5: on a phone these rows wrap rather than cut a name off. */
+.access__wrap .m3-list-item__headline,
+.access__wrap .m3-list-item__supporting {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.access__addresses {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}

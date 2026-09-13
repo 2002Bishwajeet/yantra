@@ -68,3 +68,68 @@
 .m3-step__label {
   white-space: nowrap;
 }
+
+.m3-step[data-state="stuck"] .m3-step__number {
+  border-color: transparent;
+  color: var(--md-sys-color-on-error-container);
+  background: var(--md-sys-color-error-container);
+}
+
+/* The vertical form (D7 §5): a column of steps, each number joined to the
+   next by a line down its left edge, and the content beside it. */
+.m3-stepper[data-orientation="vertical"] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step {
+  position: relative;
+  flex: none;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 24px;
+  color: var(--md-sys-color-on-surface);
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step + .m3-step::before {
+  content: none;
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 36px;
+  bottom: 4px;
+  left: 15px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--md-sys-color-outline-variant);
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step[data-state="done"]:not(:last-child)::after {
+  background: var(--md-sys-color-primary);
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step__number {
+  width: 32px;
+  height: 32px;
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step__number > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.m3-step__content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.m3-stepper[data-orientation="vertical"] .m3-step__label {
+  white-space: normal;
+}

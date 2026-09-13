@@ -84,6 +84,11 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* D7 N3: "as of 0s" is one fact and never two lines. */
+.dash__stamp {
+  white-space: nowrap;
+}
+
 /* The hero. */
 
 .dash__hero-head {
@@ -200,6 +205,11 @@
   flex: 1;
 }
 
+/* D7 N5: an empty band takes its content height. */
+.dash__running[data-empty] {
+  flex: none;
+}
+
 .dash__empty {
   display: flex;
   flex-direction: column;
@@ -299,6 +309,8 @@
   padding: 4px 24px;
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 22px;
+  /* D7 N7: a 1.47:1 outline alone does not make an edge in the dark. */
+  background: var(--md-sys-color-surface-container);
 }
 
 .dash__line .m3-eyebrow,
@@ -482,14 +494,38 @@
   padding-bottom: 56px;
 }
 
-/* The owner's ruling (b): small, above the bands, until done or dismissed.
-   Two classes, because `.m3-card` is a column and order would decide a tie. */
-.m3-card.dash__setup {
-  flex-direction: row;
+/* D7 §4.9: above Needs you until the steps for later are done or it is hidden. */
+.dash__setup {
+  gap: 12px;
+}
+
+.dash__setup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dash__setup-track {
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+.dash__setup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash__setup-list > li {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px 16px;
+  gap: 8px 16px;
+  min-height: 48px;
 }
 
 .dash__setup-text {
@@ -497,10 +533,4 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-}
-
-.dash__setup-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }

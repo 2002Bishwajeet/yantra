@@ -1,9 +1,8 @@
 # yantra web — the dashboard
 
-Fourteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+Thirteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every workspace and machine at `/fleet`, the machines compared at
-`/machines`, the guided Add a device at `/add`, the setup checklist at `/setup`
-once `/` has stopped being it, one machine at `/m/$machine`, one tmux session's terminal at
+`/machines`, the guided Add a device at `/machines/add`, one machine at `/m/$machine`, one tmux session's terminal at
 `/m/$machine/s/$session`, one workspace's chat, terminal, transcript and spend
 at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
 spend at `/usage`, the preferences at `/settings` and `/settings/$category`, and
@@ -69,7 +68,7 @@ proxies `/api` to the daemon.
 to this machine's Tailscale address, so a Mac or a phone opens
 `http://<this machine>.<tailnet>.ts.net:5173` (the MagicDNS name is allowed in `vite.config.ts`).
 With no `yantrad` running, `npm run fixture` starts the e2e fixture daemon on 7790 with the
-`busy` scenario (`FIXTURE_SCENARIO=` picks any of the eleven below), and
+`busy` scenario (`FIXTURE_SCENARIO=` picks any of the twelve below), and
 `npm run dev:fixture` proxies `/api` to it instead, so every screen draws with fleet data. Plain
 HTTP: the service worker and the PWA install need HTTPS and are for the daemon's own build.
 
@@ -572,8 +571,8 @@ measures, and the reading belongs to no frame a reader sees (Y-363).
 **The fixture daemon is Node, not `yantrad`.**
 [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the
 dashboard calls from `src/contract.gen.ts`, plus both terminal sockets, under one
-of eleven scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
-`contract`, `broken`, `repair`, `firstrun`, `adding`. A test picks one with a cookie
+of twelve scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
+`contract`, `broken`, `repair`, `firstrun`, `adding`, `setup`. A test picks one with a cookie
 carrying its own key, so a write in one worker is not a row in another, and
 `page.clock` pins the instant so an age reads the same on every run.
 
@@ -610,7 +609,7 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  router.ts          TanStack Router: fourteen routes and a dev-only gallery, one
+  router.ts          TanStack Router: thirteen routes and a dev-only gallery, one
                      of them eager, each with a loader that warms its reads
   work.ts            D3 §4's bands — who must act next, and the fourth state
                      that is nobody having read yet
@@ -660,14 +659,14 @@ src/
     settings/        `/settings` and `/settings/$category`
     usage/           `/usage`
     setup/           the checklist: `/` until the key and a ready machine
-                     exist, then `/setup` and the dashboard's Finish setup card
-    add/             `/add` — Add a device, one flow per platform, each beat
-                     seen by the appliance (walk-through §3)
+                     exist, then the dashboard's Finish setup card (D7 §4.1)
+    add-device/      `/machines/add` — one flow per platform, each beat seen
+                     by the appliance (D7 §4.2, walk-through §3)
   test/              the unit harnesses: `daemon.ts`, `inQuery`, `inRouter`,
                      `inApp`, and the vitest setup
 e2e/
   lib/               sizes, scenario, axe, screenshot, keyboard, routes
-  fixture/           the Node daemon and its eleven scenarios
+  fixture/           the Node daemon and its twelve scenarios
   __screenshots__/   one baseline per screen, scenario and size
 design/              Y-330's options round. A second Vite root; ships nothing
 ```

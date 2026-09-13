@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import type { Machine, Readiness } from '@/api'
 import { aMachine, looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
-import { writePrefs } from '@/shell/prefs'
+import { readPrefs, writePrefs } from '@/shell/prefs'
 import { mount, scenario, unmount, type Scenario } from '@/screens/fleet/harness'
 
 /* The e2e fixture's own instant, so an age here reads as it does in a
@@ -18,7 +18,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  writePrefs({ density: 'clean' })
+  writePrefs({ density: 'clean', general: {} })
   cleanup()
   unmount()
 })
@@ -34,8 +34,10 @@ describe('the Dashboard on a busy fleet', () => {
     mount('desktop', '/')
     await drawn()
     expect(screen.getByText(/5 of 6/).textContent).toBe('5 of 6 machines online')
-    expect(screen.getByText(/thinkpad unreachable/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: /^Fix/ }).getAttribute('href')).toBe('/m/thinkpad')
+    // D7 §3.3: a machine the tailnet sees off is asleep, and Open replaces Fix.
+    expect(screen.getByText(/thinkpad asleep/)).toBeTruthy()
+    const open = screen.getAllByRole('link').find((one) => one.getAttribute('href') === '/m/thinkpad')
+    expect(open?.textContent).toMatch(/^Open/)
   })
 
   it('counts the hero over the workspaces that wait and the GitHub queue', async () => {
@@ -221,14 +223,16 @@ describe('the Dashboard on the first run', () => {
     expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
   })
 
-  it('then shows Finish setup with what is left, until it is dismissed', async () => {
+  /** D7 §4.9: the steps for later, until they are done or the card is hidden. */
+  it('then shows Finish setup with the steps for later, until it is hidden', async () => {
     mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
     const card = within(await screen.findByRole('region', { name: 'Finish setup' }))
-    expect(card.getByText(/of 6 done · .*your first session left/)).toBeTruthy()
-    expect(card.getByRole('link', { name: 'Open the checklist' }).getAttribute('href')).toBe('/setup')
-    fireEvent.click(card.getByRole('button', { name: 'Dismiss Finish setup' }))
+    expect(card.getByRole('progressbar')).toBeTruthy()
+    expect(card.getByText('GitHub')).toBeTruthy()
+    expect(card.getByRole('link', { name: 'Add another device' }).getAttribute('href')).toBe('/machines/add')
+    fireEvent.click(card.getByRole('button', { name: 'Hide Finish setup' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Finish setup' })).toBeNull())
-    expect(localStorage.getItem('yantra.finish-setup')).toBe('dismissed')
+    expect(readPrefs().general.finishSetup).toBe('hidden')
   })
 
   /** Y-388: a phone runs no session, so one online is not a machine answering. */

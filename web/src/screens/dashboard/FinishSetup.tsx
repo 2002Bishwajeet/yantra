@@ -1,65 +1,71 @@
-import { useId, useState } from 'react'
+import { useId } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
+import { State } from '@/m3/mark/Mark'
 import { Text } from '@/m3/text/Text'
-import { dismiss, dismissed, STEPS, useChecklist } from '@/screens/setup/progress'
+import { Track } from '@/m3/track/Track'
+import { readPrefs, usePrefs, writePrefs } from '@/shell/prefs'
+import { REQUIRED, useChecklist } from '@/screens/setup/progress'
+import { marks, statusWord } from '@/screens/setup/steps'
 
-const left = {
-  tailnet: 'the tailnet',
-  ssh: 'the ssh key',
-  machines: 'a ready machine',
-  github: 'GitHub',
-  push: 'push to your phone',
-  first: 'your first session',
-} as const
+// ADR-0024 §5's one preferences key; `general` holds what no settings row edits.
+const HIDDEN = 'finishSetup'
+const hide = () => writePrefs({ general: { ...readPrefs().general, [HIDDEN]: 'hidden' } })
 
-const joined = (names: string[]) =>
-  names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-
-function Unfinished(props: { now: number; onDismiss: () => void }) {
-  const { now, onDismiss } = props
+function Unfinished(props: { now: number }) {
   const heading = useId()
-  const { steps, done, settled } = useChecklist(now)
-  // Unsettled, the steps say *not yet* for what is only unread.
-  if (!settled || done === STEPS) return null
-  const open = (Object.keys(steps) as (keyof typeof steps)[])
-    .filter((one) => steps[one].status !== 'done')
-    .map((one) => left[one])
+  const { later, done, settled } = useChecklist(props.now)
+  // Unsettled, a step says *not yet* for what is only unread.
+  if (!settled) return null
+  const open = [
+    { key: 'github', title: 'GitHub', step: later.github, action: 'Connect', category: 'providers' },
+    { key: 'push', title: 'Push to your phone', step: later.push, action: 'Set up', category: 'notifications' },
+  ].filter((one) => one.step.status !== 'done')
+  if (open.length === 0) return null
+  const total = REQUIRED + 2
+  const all = done + 2 - open.length
   return (
-    <Card aria-labelledby={heading} className="dash__setup">
-      <div className="dash__setup-text">
-        <Text emphasized id={heading} render={<h2 />} scale="title-medium">
+    <Card aria-labelledby={heading} className="dash__setup" surface="high">
+      <div className="dash__setup-head">
+        <Text emphasized id={heading} render={<h2 />} scale="title-large">
           Finish setup
         </Text>
-        <Text scale="body-medium" tone="variant">
-          {done} of {STEPS} done · {joined(open)} left
-        </Text>
-      </div>
-      <div className="dash__setup-actions">
-        <Button render={<Link to="/setup" />} role="link" variant="tonal">
-          Open the checklist
-        </Button>
-        <Button aria-label="Dismiss Finish setup" onClick={onDismiss} variant="text">
-          Dismiss
+        <Button aria-label="Hide Finish setup" onClick={hide} variant="text">
+          Hide
         </Button>
       </div>
+      <Track className="dash__setup-track" label={`${all} of ${total} setup steps done`} value={all / total} />
+      <ul className="dash__setup-list">
+        {open.map((one) => (
+          <li key={one.key}>
+            <div className="dash__setup-text">
+              <Text emphasized scale="body-medium">
+                {one.title}
+              </Text>
+              <State size="small" state={marks[one.step.status]}>
+                {statusWord[one.step.status]} · {one.step.words}
+              </State>
+            </div>
+            <Button render={<Link params={{ category: one.category }} to="/settings/$category" />} role="link" variant="tonal">
+              {one.action}
+            </Button>
+          </li>
+        ))}
+        <li>
+          <Button render={<Link to="/machines/add" />} role="link" variant="text">
+            Add another device
+          </Button>
+        </li>
+      </ul>
     </Card>
   )
 }
 
-/** The owner's ruling (b), 2026-09-13: once the checklist stops being `/`, a
- *  small card says what is left, until it is done or dismissed. */
+/** D7 §4.9 and the owner's ruling (b): once the checklist stops being `/`,
+ *  this card holds the steps for later until they are done or it is hidden. */
 export function FinishSetup(props: { now: number }) {
-  const [gone, setGone] = useState(dismissed)
-  if (gone) return null
-  return (
-    <Unfinished
-      now={props.now}
-      onDismiss={() => {
-        dismiss()
-        setGone(true)
-      }}
-    />
-  )
+  const { general } = usePrefs()
+  if (general[HIDDEN] === 'hidden') return null
+  return <Unfinished now={props.now} />
 }

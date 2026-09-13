@@ -476,6 +476,31 @@ const routes = [
       return [202]
     },
   ],
+  // ADR-0029: the machine is the caller, named by `whois`. The fixture has no
+  // caller, so `x-fixture-machine` names it (D7 T9).
+  [
+    'POST',
+    /^\/api\/join$/,
+    (s, _, sent, request) => {
+      const machine = request.headers['x-fixture-machine']
+      if (!machine) return [503, 'tailscale knows the caller as a node it does not list, so there is no machine name to write']
+      if (!sent.user) return [400, 'a join names the account it ran as']
+      const joined = { machine, user: sent.user, kept: false, logs_in_as: sent.user }
+      if (s.notifications.looked === 'ok') {
+        const at = Math.max(0, ...s.notifications.data.map((one) => one.at)) + 60
+        s.notifications.data.unshift({
+          at,
+          kind: 'joined',
+          workspace: null,
+          machine,
+          said: `${machine} joined, and Yantra logs in there as ${sent.user}`,
+          commands: [],
+          joined,
+        })
+      }
+      return [200, joined]
+    },
+  ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
   ['POST', /^\/api\/viewing$/, () => [204]],
   ['POST', /^\/api\/heartbeat$/, () => [204]],

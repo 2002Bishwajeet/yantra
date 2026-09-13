@@ -1,4 +1,4 @@
-import type { About, Machine, Readiness, SshIdentity } from '@/api'
+import type { About, Machine, Readiness } from '@/api'
 import { asApiError } from '@/api/errors'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -42,13 +42,11 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
   }
 }
 
-/** `null` is a key not made (queries.ts). The daemon makes it on the first
- *  join (ADR-0029), so there is nothing here for a person to run. */
-export function sshKey(identity: Asked<SshIdentity | null>): Step {
-  if (identity.data === null) return { status: 'todo', words: 'made when the first machine joins' }
-  if (identity.error) return failed(identity.error)
-  if (identity.isPending || !identity.data) return reading()
-  return { status: 'done', words: `created on the appliance · ${identity.data.fingerprint}` }
+/** D7 §4.1 step 2: a machine has joined. The key is a line under it, since
+ *  the first join makes it (ADR-0029). */
+export function added(joined: string[]): Step {
+  if (joined.length === 0) return { status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' }
+  return { status: 'done', words: `${joined.join(', ')} joined` }
 }
 
 /** The grant, read as narrowly as this step needs it: the api layer still
@@ -74,13 +72,15 @@ export function push(about: Asked<About>): Step {
   return { status: 'todo', words: 'no relay yet · one saved in Settings is used after yantrad restarts' }
 }
 
-/** What a machine's checks say, in the board's words. */
+/** What a machine's checks say, in the board's words. Off is `asleep`, which
+ *  is normal and never an error (D7 §3.3). */
 export type Line =
+  | { kind: 'asleep'; since: string | null }
   | { kind: 'unreachable'; words: string }
   | { kind: 'unchecked' }
   | { kind: 'refused' }
-  | { kind: 'ready'; present: number; total: number; words: string }
-  | { kind: 'missing'; present: number; total: number; words: string }
+  | { kind: 'ready'; present: number; total: number }
+  | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 
 const named: Record<string, string> = {
   sshd: 'sshd',
@@ -97,32 +97,25 @@ const named: Record<string, string> = {
 
 export const word = (check: string) => named[check] ?? check
 
-/** What a session needs, so what *ready* means here and in Add a device:
- *  walk-through §3.2's beat 4 and ADR-0028 §1's minimum, behind ssh. */
-export const MINIMUM = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli'] as const
+/** What Install puts there (ADR-0028 §1). A person fixes the rest on the
+ *  machine itself (D7 §3.5). */
+export const INSTALLED: readonly string[] = ['tmux', 'git', 'agent-cli']
 
+/** D7 §4.1: ready is every check present, all ten, here and in Add a device. */
 export const isReady = (report: Readiness | null) =>
-  report !== null && MINIMUM.every((name) => report.checks.some((one) => one.check === name && one.state === 'present'))
+  report !== null && report.checks.length > 0 && report.checks.every((one) => one.state === 'present')
 
 export function line(machine: Machine, report: Readiness | null, since: string | null): Line {
-  if (!machine.online) {
-    return {
-      kind: 'unreachable',
-      words: `unreachable${since ? ` · last seen ${since} ago` : ''} · nothing behind ssh could be asked`,
-    }
-  }
+  if (!machine.online) return { kind: 'asleep', since }
   if (!report) return { kind: 'unchecked' }
   const reachable = report.checks.find((one) => one.check === 'reachable')
   if (reachable && reachable.state !== 'present') {
     if (/permission denied/i.test(reachable.detail)) return { kind: 'refused' }
-    return { kind: 'unreachable', words: `unreachable · ${reachable.detail}` }
+    return { kind: 'unreachable', words: `ssh did not answer · ${reachable.detail}` }
   }
-  const present = report.checks.filter((one) => one.state === 'present')
+  const present = report.checks.filter((one) => one.state === 'present').length
   const total = report.checks.length
-  if (isReady(report)) {
-    const listed = present.filter((one) => ['sshd', 'tmux', 'agent-cli', 'terminfo', 'provider-auth'].includes(one.check))
-    return { kind: 'ready', present: present.length, total, words: listed.map((one) => word(one.check)).join(', ') }
-  }
+  if (isReady(report)) return { kind: 'ready', present, total }
   const absent = report.checks.filter((one) => one.state === 'absent').map((one) => word(one.check))
   const unknown = report.checks.filter((one) => one.state === 'unknown').map((one) => word(one.check))
   const words = [
@@ -131,13 +124,14 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   ]
     .filter(Boolean)
     .join(' · ')
-  return { kind: 'missing', present: present.length, total, words }
+  const installable = report.checks.some((one) => INSTALLED.includes(one.check) && one.state === 'absent')
+  return { kind: 'missing', present, total, words, installable }
 }
 
 export const ready = (one: Line) => one.kind === 'ready'
 
-/** Done at one ready machine: an asleep laptop does not hold back a first
- *  session (walk-through Q2.3). */
+/** D7 §4.1 step 3: done at one ready machine, since an asleep laptop does not
+ *  hold back a first session (walk-through Q2.3). */
 export function machines(lines: { machine: string; line: Line }[]): Step {
   if (lines.length === 0) return { status: 'todo', words: 'this tailnet lists no machine that runs Linux or macOS' }
   const checked = lines.filter((one) => one.line.kind !== 'unchecked')

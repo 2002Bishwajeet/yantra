@@ -1,25 +1,15 @@
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
 
-/** Y-351, inventory group 29: the first run. `/` draws the checklist instead
- *  of a Dashboard while no workspace exists (D3 §4.8), so the Setup,
- *  TabletSetup and PhoneSetup boards are this route on the `empty` scenario.
- *  The screen is Y-350's; the six steps and their words are asserted here. */
+/** Y-351, inventory group 29, reshaped by D7 §4.1 (Y-390): the first run. `/`
+ *  draws the checklist until the appliance has its key and one machine is
+ *  ready, so the Setup, TabletSetup and PhoneSetup boards are this route on
+ *  `firstrun`: no workspace, no key yet, no relay, six machines asleep and an
+ *  iPhone online. */
 
-const STEPS = [
-  'The appliance is on your tailnet',
-  "This account's ssh key",
-  'Machines',
-  'GitHub',
-  'Push to your phone',
-  'Your first session',
-]
+const REQUIRED = ['The appliance is on your tailnet', 'Add a machine', 'Get it ready', 'Your first session']
+const LATER = ['GitHub', 'Push to your phone']
 
-const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
-
-// D3 §4.8: `/` draws the checklist while the machine list says nothing that
-// runs a session is online. `firstrun` is the fleet with no workspace, no
-// key yet, no relay, six machines asleep and an iPhone online (Y-388).
 test.describe('the first run', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'firstrun')
@@ -29,28 +19,28 @@ test.describe('the first run', () => {
     await expect(page.locator('h1', { hasText: 'Set up Yantra' }).first()).toBeAttached()
   })
 
-  test('draws six steps, how far along they are, and what each one is waiting on', async ({ page }) => {
-    for (const step of STEPS) {
+  test('draws four required steps, two for later, and how far along they are', async ({ page }) => {
+    for (const step of [...REQUIRED, ...LATER]) {
       await expect(page.getByText(step, { exact: true }).first()).toBeVisible()
     }
-    await expect(page.getByText(/\d of 6 done/)).toBeVisible()
+    await expect(page.getByText(/\d of 4 done/)).toBeVisible()
     await expect(page.getByRole('progressbar')).toBeVisible()
-    await expect(page.getByText('waiting on you')).toBeVisible()
-    await expect(page.getByRole('link', { name: 'New session' }).first()).toBeVisible()
     await expect(page.getByRole('link', { name: 'Skip for now' })).toBeVisible()
   })
 
-  test('asks a machine for its checks only when told to', async ({ page }) => {
-    const ask = page.getByRole('button', { name: /^Check/ }).first()
-    await expect(ask).toBeVisible()
-    await expect(page.getByText('0 of 6 machines ready')).toBeVisible()
-    await ask.click()
-    await expect(ask).toBeEnabled()
-    await expect(page.getByRole('alert')).toHaveCount(0)
+  /** D7 §3.1: one filled button, and before any join it is Add a device. */
+  test('fills only Add a device, which opens the guided flow', async ({ page }) => {
+    await expect(page.locator('main [data-variant="filled"]')).toHaveCount(1)
+    await expect(page.getByRole('link', { name: 'Add a device' })).toHaveAttribute('href', '/machines/add')
+  })
+
+  /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
+  test('draws asleep machines as asleep, with nothing to press', async ({ page }) => {
+    await expect(page.getByText(/^asleep · last seen/).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(0)
   })
 
   test('lists phones, tablets and Windows apart, where they block nothing', async ({ page }) => {
-    await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(6)
     const apart = page.getByRole('list', { name: 'Devices that open the dashboard' })
     for (const name of ['iphone', 'pixel-tablet', 'gaming-pc']) {
       await expect(apart.getByText(name, { exact: true })).toBeVisible()
@@ -59,16 +49,10 @@ test.describe('the first run', () => {
   })
 
   test('says the key is made by the first join, and reads the relay', async ({ page }) => {
-    await expect(page.getByText(/made when the first machine joins/)).toBeVisible()
+    await expect(page.getByText('the key is made when the first machine joins')).toBeVisible()
     await expect(page.getByText(/yantra ssh-identity/)).toHaveCount(0)
     await expect(page.getByText(/no relay yet/)).toBeVisible()
     await expect(page.getByText(/One step runs in a terminal: the join command/)).toBeVisible()
-  })
-
-  /** Y-390: the join command moved into the guided flow (add.spec.ts). */
-  test('opens Add a device where the join command was', async ({ page }) => {
-    await expect(page.getByText(COMMAND)).toHaveCount(0)
-    await expect(page.getByRole('link', { name: 'Add a device' })).toHaveAttribute('href', '/add')
   })
 
   test('passes axe', async ({ page }) => {

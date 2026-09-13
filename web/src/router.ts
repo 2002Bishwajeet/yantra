@@ -182,23 +182,11 @@ const settingsCategory = createRoute({
   head: ({ params }) => titled(params.category.charAt(0).toUpperCase() + params.category.slice(1)),
 })
 
-// The checklist, once `/` has stopped being it (the owner's ruling (b)).
-const setup = createRoute({
+// D7 §4.2: a route and not a sheet, so the flow opens on the new device from a
+// link. `machine` is the device it follows, through a reload and on that device.
+const addDevice = createRoute({
   getParentRoute: () => root,
-  path: '/setup',
-  component: lazyRouteComponent(() => import('@/screens/setup/Setup'), 'Setup'),
-  loader: ({ context: { client } }) => {
-    void client.prefetchQuery(machinesQuery())
-    void client.prefetchQuery(readinessQuery())
-  },
-  head: () => titled('Set up Yantra'),
-})
-
-// Walk-through §3. `machine` is the device the flow follows, so a reload and
-// the link opened on that device follow it too.
-const add = createRoute({
-  getParentRoute: () => root,
-  path: '/add',
+  path: '/machines/add',
   validateSearch: (search: Record<string, unknown>): { platform?: Platform; machine?: string } => ({
     platform: asPlatform(search.platform),
     // The search parser reads `123` as a number, and a tailnet name can be one.
@@ -209,7 +197,7 @@ const add = createRoute({
           ? String(search.machine)
           : undefined,
   }),
-  component: lazyRouteComponent(() => import('@/screens/add/AddDevice'), 'AddDevice'),
+  component: lazyRouteComponent(() => import('@/screens/add-device/AddDevice'), 'AddDevice'),
   loader: ({ context: { client } }) => {
     void client.prefetchQuery(machinesQuery())
     void client.prefetchQuery(notificationsQuery())
@@ -259,8 +247,7 @@ export const routeTree = root.addChildren([
   newSession,
   settings,
   settingsCategory,
-  setup,
-  add,
+  addDevice,
   notifications,
   gallery,
 ])

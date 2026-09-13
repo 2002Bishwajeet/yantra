@@ -394,8 +394,9 @@ export type Event = {
   // The exact commands an install left for a person, in order, each to be
   // run verbatim on `machine` (Y-394). Empty for every other kind.
   commands: string[]
-  // What `POST /api/join` answered, on a `joined` event only (Y-390).
-  joined: Joined | null
+  // What `POST /api/join` answered, on a `joined` event only (Y-390). The
+  // daemon always sends it; optional so an event written by hand need not.
+  joined?: Joined | null
 }
 
 /** `POST /api/machines/{machine}/clone` with `{ url, path }` — `yantra clone`

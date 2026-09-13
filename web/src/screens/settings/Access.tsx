@@ -1,22 +1,15 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { KeyRound, Network, Plus, Shield } from 'lucide-react'
+import { KeyRound, Network, Shield } from 'lucide-react'
 import { useAbout, useSshIdentity } from '@/api/hooks'
-import { joinUrl } from '@/lib/join'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono } from '@/m3/text/Text'
-import { Join } from '@/screens/setup/Join'
 import { Group, Note } from './Group'
 import { Sheet } from './Sheet'
-
-const addDevice = (
-  <Button icon={<Plus />} render={<Link to="/add" />} role="link" variant="tonal">
-    Add a device
-  </Button>
-)
+import './Access.css'
 
 export function Access() {
   const identity = useSshIdentity()
@@ -24,7 +17,6 @@ export function Access() {
   const [open, setOpen] = useState(false)
   // `null` is a key not yet made, which is a state of the row; an error is
   // the boundary's.
-  const missing = identity.data === null
   if (identity.error) throw identity.error
   if (about.error) throw about.error
   const key = identity.data
@@ -54,19 +46,27 @@ export function Access() {
           />
         ) : (
           <ListItem
+            className="access__wrap"
             headline="SSH identity"
             leading={
               <Lead>
                 <KeyRound />
               </Lead>
             }
-            supporting={missing ? 'not created yet · the first machine that joins makes it' : 'asking the daemon'}
-            trailing={missing ? addDevice : undefined}
+            supporting={key === null ? 'Made when the first machine joins' : 'asking the daemon'}
+            trailing={
+              key === null ? (
+                <Button render={<Link to="/machines/add" />} role="link" variant="text">
+                  Add a device
+                </Button>
+              ) : undefined
+            }
           />
         )}
       </Group>
       <Group label="Who may open the dashboard">
         <ListItem
+          className="access__wrap"
           headline={tailnet ? `Anyone on the tailnet ${tailnet}` : 'Anyone on the tailnet'}
           leading={
             <Lead>
@@ -81,6 +81,7 @@ export function Access() {
           trailing={<ListValue>tailscale · on</ListValue>}
         />
         <ListItem
+          className="access__wrap"
           headline={listening.length === 1 ? 'Listen address' : 'Listen addresses'}
           leading={
             <Lead>
@@ -88,41 +89,44 @@ export function Access() {
             </Lead>
           }
           supporting="tailnet addresses only · not on the LAN and not on a public port"
-          trailing={<ListValue>{listening.length ? <Mono>{listening.join(' · ')}</Mono> : '…'}</ListValue>}
+          trailing={
+            <ListValue>
+              {listening.length ? (
+                <span className="access__addresses">
+                  {listening.map((one) => (
+                    <Mono key={one}>{one}</Mono>
+                  ))}
+                </span>
+              ) : (
+                '…'
+              )}
+            </ListValue>
+          }
         />
       </Group>
       <Note>
         The daemon itself keeps two credentials, the relay token and the GitHub grant, in one file on the appliance. They
         are under Notifications and Providers.
       </Note>
-      {key ? <KeySheet about={about} onOpenChange={setOpen} open={open} publicKey={key.public_key} /> : null}
+      {key ? <KeySheet onOpenChange={setOpen} open={open} publicKey={key.public_key} /> : null}
     </>
   )
 }
 
-function KeySheet(props: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  publicKey: string
-  about: { error: Error | null; data: Parameters<typeof joinUrl>[1] }
-}) {
-  const { open, onOpenChange, publicKey, about } = props
+function KeySheet(props: { open: boolean; onOpenChange: (open: boolean) => void; publicKey: string }) {
+  const { open, onOpenChange, publicKey } = props
   return (
     <Sheet
       actions={
-        <>
-          {addDevice}
-          <Button onClick={() => onOpenChange(false)} variant="text">
-            Close
-          </Button>
-        </>
+        <Button onClick={() => onOpenChange(false)} variant="text">
+          Close
+        </Button>
       }
-      description="A new machine takes this key through the join command. Run it once in a terminal on that machine; Add a device shows the steps for each platform."
+      description="The join command places this key for you. To place it by hand, add it to ~/.ssh/authorized_keys on the machine."
       onOpenChange={onOpenChange}
       open={open}
       title="Public key"
     >
-      <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
       <Copyable text={publicKey} what="the public key" />
     </Sheet>
   )
