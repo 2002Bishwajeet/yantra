@@ -143,7 +143,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
             api::router()
                 .with_state(fleet.clone())
                 .merge(write::router(authoriser.clone(), fleet.clone()))
-                .merge(terminal::router(authoriser)),
+                .merge(terminal::router(authoriser, fleet.left.clone())),
         )
         .merge(heartbeat::router())
         .with_state(fleet)
