@@ -447,6 +447,18 @@ session that went away between the list and the tap is refused by name. Read tha
 narrowing it — a check on whether a workspace claims the session is the alternative it refuses, and
 `allowed()` is deliberately the whole of the protection.
 
+**A third address is a one-off terminal, and it runs only what an install left**
+([ADR-0030](../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md), Y-394).
+`GET /api/machines/{machine}/install/{index}/terminal` names a place in the `commands` the latest
+install on that machine left, which `Fleet::left` holds in memory, and never a command: nothing a
+caller writes can run. It calls `allowed()` first, refuses a name outside the ssh-destination rule
+with a `400` before the upgrade (I-63), and refuses an index outside the list by name after it. The
+pty runs `ssh -tt <machine> 'TERM=… /bin/sh -c …'` with no tmux, because `tmux` can be what the step
+installs. **It ends when the command does**: the daemon sends `{"exit": n}` as a text frame and
+closes, and the browser never reopens it, because a reopened socket runs the command again. **A
+password is typed there**, so Q5's rule below binds hardest on this route: a test drives a real
+`ssh` under a real pty and asserts that neither what was typed nor what was printed reaches the log.
+
 **The frames carry no envelope, because the protocol already carries two kinds.** Binary is terminal
 bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…,"term":…}`,
 and it must arrive **before** anything else, because a pty is opened with a window and a terminal and

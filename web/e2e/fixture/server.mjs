@@ -536,6 +536,48 @@ const server = createServer(async (request, response) => {
 // frame is `{rows, cols, term}`, and a text frame from here is a refusal.
 const sockets = new WebSocketServer({ noServer: true })
 
+/** ADR-0030's socket: a step an install left, by its place in the newest
+ *  install event for that machine. It asks for a password as sudo does, takes
+ *  what is typed without echoing it, then ends on the command's status and
+ *  marks present what the scenario's `typed` says the step fixes. */
+function oneOff(state, request, socket, head, machine, index) {
+  if (state.refuse) {
+    socket.end(
+      `HTTP/1.1 ${state.refuse.status} Refused\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${state.refuse.text}`,
+    )
+    return
+  }
+  const newest = (state.notifications.data ?? []).find(
+    (one) => (one.kind === 'installed' || one.kind === 'install_stopped') && one.machine === machine,
+  )
+  const command = newest?.commands?.[index]
+  sockets.handleUpgrade(request, socket, head, (ws) => {
+    let sized = false
+    ws.on('message', (data, binary) => {
+      if (!sized) {
+        if (binary) return
+        sized = true
+        if (!command) {
+          ws.send(`no install on ${machine} left a step ${index}; press Install again`, { binary: false })
+          ws.close()
+          return
+        }
+        ws.send(Buffer.from('[sudo] password for yantra: '), { binary: true })
+        return
+      }
+      if (!binary || !data.toString().includes('\r')) return
+      ws.send(Buffer.from('\r\n(1/2) Installing tmux\r\nOK: 2 packages installed\r\n'), { binary: true })
+      const typed = state.installs?.[machine]?.typed ?? []
+      const report = state.readiness.data?.find((one) => one.machine === machine)
+      for (const check of report?.checks ?? []) {
+        if (typed.includes(check.check)) Object.assign(check, { state: 'present', detail: 'installed from the terminal' })
+      }
+      ws.send(JSON.stringify({ exit: 0 }), { binary: false })
+      ws.close()
+    })
+  })
+}
+
 server.on('upgrade', (request, socket, head) => {
   const { state, url } = select(request)
   if (state.down) {
@@ -544,6 +586,11 @@ server.on('upgrade', (request, socket, head) => {
   }
   const workspace = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/terminal$/)
   const session = url.pathname.match(/^\/api\/machines\/([^/]+)\/sessions\/([^/]+)\/terminal$/)
+  const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
+  if (step) {
+    oneOff(state, request, socket, head, decodeURIComponent(step[1]), Number(step[2]))
+    return
+  }
   if (!workspace && !session) {
     socket.destroy()
     return

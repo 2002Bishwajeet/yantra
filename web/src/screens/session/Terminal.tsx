@@ -12,11 +12,18 @@ import { Mono } from '@/m3/text/Text'
 import { type Keys, KeysContext } from './keysContext'
 import './Terminal.css'
 
-type Ended = { ended: 'no' } | { ended: 'yes'; refused: ApiError | null }
+type Ended =
+  | { ended: 'no' }
+  | { ended: 'yes'; refused: ApiError | null }
+  // ADR-0030 §5: a one-off terminal's command ended it, and said how.
+  | { ended: 'exited'; exit: number | null }
 
 type Size = { cols: number; rows: number }
 
 type Wired = Keys & { close: () => void }
+
+/** How the socket ends: a session's reopens, a one-off's never does. */
+type Ending = { attempts: number; exited?: (exit: number | null) => void }
 
 const SIZE = 13
 const FAMILY = '"IBM Plex Mono", ui-monospace, monospace'
@@ -34,6 +41,7 @@ function attach(
   sized: (size: Size) => void,
   hint: string,
   leave: () => void,
+  ending: Ending,
 ): Wired {
   const xterm = new Xterm({ cursorBlink: false, fontSize: SIZE, fontFamily: FAMILY })
   const fit = new FitAddon()
@@ -67,6 +75,8 @@ function attach(
     onBytes: (bytes) => xterm.write(bytes),
     onEnd: over,
     onLink: linked,
+    onExit: ending.exited,
+    attempts: ending.attempts,
   })
   let arming: (() => void) | null = null
   const typed = xterm.onData((data) => {
@@ -106,17 +116,24 @@ export type TerminalProps = {
   height?: string
   /** The status line's subject: "tmux yantra-web on cachyos-g14". */
   label: string
+  /** A one-off terminal's command ended, with this status (ADR-0030). */
+  onExit?: (exit: number | null) => void
   /** Drawn under the pane, inside `KeysContext`: the phone's key row. */
   children?: ReactNode
 }
 
 /** The session, live (Y-129, Y-132). Nothing here keeps the stream: xterm.js
  *  holds the scrollback and it goes with the element (Q5). Key it on the
- *  target — a different target is a different socket and a different screen. */
+ *  target — a different target is a different socket and a different screen.
+ *
+ *  **A step target is a one-off terminal** (Y-394): it runs a command an
+ *  install left, ends when the command does, and is never reopened, because
+ *  reopening would run the command again. */
 export function Terminal(props: TerminalProps) {
-  const { target, height, label, children } = props
+  const { target, height, label, onExit, children } = props
   const host = useRef<HTMLDivElement>(null)
   const wired = useRef<ReturnType<typeof attach> | null>(null)
+  const told = useRef(onExit)
   const [end, setEnd] = useState<Ended>({ ended: 'no' })
   const [link, setLink] = useState<Wire>({ up: false, attempt: 0 })
   const [size, setSize] = useState<Size | null>(null)
@@ -124,7 +141,14 @@ export function Terminal(props: TerminalProps) {
   const status = useRef<HTMLParagraphElement>(null)
   const hint = useId()
   const url = terminalAddress(target)
+  const once = 'step' in target
   const refused = end.ended === 'yes' ? end.refused : null
+
+  // The socket outlives any one render, so the newest callback is read at the
+  // moment the command ends rather than captured when the pane opened.
+  useEffect(() => {
+    told.current = onExit
+  })
 
   // The daemon's reason arrives before the close that follows it, so the first
   // answer is the one that says anything.
@@ -148,11 +172,20 @@ export function Terminal(props: TerminalProps) {
       live = attach(
         url,
         host.current!,
-        (refused) => setEnd((before) => (before.ended === 'yes' ? before : { ended: 'yes', refused })),
+        (refused) => setEnd((before) => (before.ended === 'no' ? { ended: 'yes', refused } : before)),
         setLink,
         setSize,
         hint,
         () => status.current?.focus(),
+        once
+          ? {
+              attempts: 0,
+              exited: (exit) => {
+                setEnd({ ended: 'exited', exit })
+                told.current?.(exit)
+              },
+            }
+          : { attempts: ATTEMPTS },
       )
       wired.current = live
     })
@@ -161,7 +194,7 @@ export function Terminal(props: TerminalProps) {
       wired.current = null
       live?.close()
     }
-  }, [url, opened, hint])
+  }, [url, opened, hint, once])
 
   const again = () => {
     setEnd({ ended: 'no' })
@@ -176,21 +209,38 @@ export function Terminal(props: TerminalProps) {
           the whole life of the pane rather than replaced by what ended it. It
           is also where Escape-then-Tab puts focus: the first stop past it. */}
       <p className="terminal__status" ref={status} role="status" tabIndex={-1}>
-        <Mark size="small" state={end.ended === 'no' ? (link.up ? 'running' : 'unknown') : refused ? 'failed' : 'idle'} />
+        <Mark
+          size="small"
+          state={
+            end.ended === 'exited'
+              ? end.exit === 0
+                ? 'done'
+                : 'failed'
+              : end.ended === 'no'
+                ? link.up
+                  ? 'running'
+                  : 'unknown'
+                : refused
+                  ? 'failed'
+                  : 'idle'
+          }
+        />
         <Mono clip>
-          {end.ended === 'yes'
-            ? `${refused ? 'refused' : 'ended'} · ${label}`
-            : link.up
-              ? `attached · ${label}${size ? ` · ${size.cols}×${size.rows}` : ''}`
-              : link.attempt === 0
-                ? `connecting · ${label}`
-                : `reconnecting · attempt ${link.attempt} of ${ATTEMPTS} · ${label}`}
+          {end.ended === 'exited'
+            ? `exited ${end.exit ?? 'with no status'} · ${label}`
+            : end.ended === 'yes'
+              ? `${refused ? 'refused' : 'ended'} · ${label}`
+              : link.up
+                ? `attached · ${label}${size ? ` · ${size.cols}×${size.rows}` : ''}`
+                : link.attempt === 0
+                  ? `connecting · ${label}`
+                  : `reconnecting · attempt ${link.attempt} of ${ATTEMPTS} · ${label}`}
         </Mono>
       </p>
       <p className="terminal__escape" id={hint}>
         Esc then Tab leaves the pane. Tab on its own goes to the shell in it.
       </p>
-      {end.ended === 'no' ? null : refused ? (
+      {end.ended === 'no' || end.ended === 'exited' ? null : refused ? (
         // D5 §7: this tab's own refusal names the machine, and the name stays
         // the link to where its heartbeat is.
         <ErrorSurface.Inline
@@ -204,6 +254,15 @@ export function Terminal(props: TerminalProps) {
           reset={again}
           title={`${label} has no terminal to attach to`}
         />
+      ) : once ? (
+        <p className="terminal__over">
+          The terminal on{' '}
+          <Link params={{ machine: target.machine }} to="/m/$machine">
+            {target.machine}
+          </Link>{' '}
+          closed before the command said how it went. Nothing reopens it, because that would run the command
+          again.
+        </p>
       ) : (
         <p className="terminal__over">
           The terminal on{' '}

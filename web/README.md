@@ -327,6 +327,24 @@ Three decisions:
   without an ssh. A session is known only to its machine, so this attaches and
   lets the daemon refuse a name that is not there (ADR-0022 §5).
 
+## A one-off terminal for a sudo step (Y-394)
+
+`Target` has a third variant, `{ machine, step }`: a place in the commands the newest install on
+that machine left
+([ADR-0030](../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)).
+[`SudoSheet.tsx`](src/screens/machine/SudoSheet.tsx) opens it from the Readiness card, beside a
+command `install.rs` put `sudo` in front of: a side sheet beside the page on the desktop and the
+tablet, and the full height on the phone. Three rules:
+
+- **It never reopens.** A reopened socket runs the command again, so `attachTerminal` gets no
+  reopen budget for it.
+- **The daemon's `{"exit": n}` is the one text frame that is not a refusal.** `exitOf` tells the
+  two apart, and the pane says `exited n`.
+- **Escape stays with the terminal** inside the sheet. The sheet closing on it would stop sudo in
+  the middle of a password.
+
+When the command ends, the card drops its install watch and asks readiness again.
+
 ## The spend view
 
 `/w/$name?view=spend` is `/usage`'s answer with the picker removed

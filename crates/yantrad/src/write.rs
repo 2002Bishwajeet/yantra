@@ -750,6 +750,30 @@ async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// [ADR-0030]: the commands the latest install on each machine left for a
+/// person, keyed as [`Running`] is. The one-off terminal runs these by index
+/// and nothing else. Memory only, so a restart forgets them.
+///
+/// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
+pub type Left = Arc<std::sync::Mutex<std::collections::BTreeMap<String, Vec<String>>>>;
+
+/// The next result on a machine replaces its list, and one that left nothing
+/// empties it.
+fn remember_left(left: &Left, machine: &str, commands: &[String]) {
+    left.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(machine.to_lowercase(), commands.to_vec());
+}
+
+/// The command at `index` in what the latest install on `machine` left.
+pub(crate) fn left_command(left: &Left, machine: &str, index: usize) -> Option<String> {
+    left.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&machine.to_lowercase())
+        .and_then(|commands| commands.get(index))
+        .cloned()
+}
+
 async fn install_in_background(fleet: Fleet, claim: Claim, machine: String) {
     let event = match tokio::time::timeout(INSTALL_BUDGET, install::install(&machine)).await {
         Ok(Ok(report)) => Event::install(&report),
@@ -759,6 +783,8 @@ async fn install_in_background(fleet: Fleet, claim: Claim, machine: String) {
         ),
         Err(_) => Event::install_waited(&machine, INSTALL_BUDGET.as_secs() / 60),
     };
+    // Before the event, so a page that reads it can open any step it names.
+    remember_left(&fleet.left, &machine, &event.commands);
     events::remember(&fleet.events, event).await;
     drop(claim);
     crate::refresh::look_at_readiness(&fleet.model).await;

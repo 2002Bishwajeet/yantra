@@ -10,7 +10,9 @@
 //! tmux path for that host (I-34), the session spelled so a login `zsh` cannot
 //! glob it (I-35) and a `TERM` the far side has (I-36, I-43); this runs what
 //! [`attach::remote_command`] renders from those, over the same multiplexed
-//! socket as every other ssh Yantra opens (I-20, I-28).
+//! socket as every other ssh Yantra opens (I-20, I-28). [`run`] is the one
+//! exception, and it runs a command an install left rather than one it writes
+//! (ADR-0030).
 //!
 //! **Reconnecting is opening another one.** tmux draws the pane's current
 //! contents for every client that attaches — measured, alternate screen
@@ -25,12 +27,15 @@
 
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::mpsc;
 
 use crate::attach::{self, Plan};
 use crate::ssh::{self, Ssh};
+use crate::terminfo;
+use crate::tmux;
 
 /// Chunks that may wait for a caller before the far side is made to wait. A
 /// terminal nobody is draining slows down; it does not grow (Q5 — the stream is
@@ -53,6 +58,9 @@ pub enum Error {
 
     #[error(transparent)]
     Ssh(#[from] ssh::Error),
+
+    #[error(transparent)]
+    Terminfo(#[from] terminfo::Error),
 
     #[error("could not open a pseudo-terminal: {0}")]
     Open(String),
@@ -119,7 +127,32 @@ fn started(plan: Plan, size: Size) -> Result<Terminal, Error> {
 /// The testable half — everything after the plan is resolved.
 pub fn on(ssh: &Ssh, plan: &Plan, size: Size) -> Result<Terminal, Error> {
     let remote = attach::remote_command(plan.tmux.path(), &plan.session, plan.term.term());
-    let argv = ssh.tty_argv(&remote)?;
+    spawned(ssh, &remote, plan.term.term(), size)
+}
+
+/// Y-394 ([ADR-0030]): `command` on `machine` under a terminal of its own, with
+/// no tmux — `tmux` can be the thing the command installs. It is the terminal a
+/// sudo password is typed into, so the command is one an install left and
+/// never one a caller wrote.
+///
+/// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
+pub async fn run(machine: &str, command: &str, term: &str, size: Size) -> Result<Terminal, Error> {
+    let machine = ssh::machine_at(machine).ok_or(attach::Error::NoStateDir)?;
+    let ssh = Ssh::new(machine)?;
+    let chosen = terminfo::choose(&ssh, term).await?;
+    run_on(&ssh, command, chosen.term(), size)
+}
+
+/// The testable half of [`run`]. The far login shell is handed `/bin/sh -c`
+/// and the command in single quotes, so a login `zsh` or `fish` parses none of
+/// it (I-35).
+pub fn run_on(ssh: &Ssh, command: &str, term: &str, size: Size) -> Result<Terminal, Error> {
+    let remote = format!("TERM={term} /bin/sh -c {}", tmux::sq(command));
+    spawned(ssh, &remote, term, size)
+}
+
+fn spawned(ssh: &Ssh, remote: &str, term: &str, size: Size) -> Result<Terminal, Error> {
+    let argv = ssh.tty_argv(remote)?;
 
     let pair = native_pty_system()
         .openpty(window(size))
@@ -130,7 +163,7 @@ pub fn on(ssh: &Ssh, plan: &Plan, size: Size) -> Result<Terminal, Error> {
     // `CommandBuilder` clears the environment and resolves the program through
     // its own `PATH` rather than the caller's (Y-127).
     command.env("PATH", std::env::var("PATH").unwrap_or_default());
-    command.env("TERM", plan.term.term());
+    command.env("TERM", term);
 
     let child = pair
         .slave
@@ -196,6 +229,21 @@ impl Terminal {
             cols: size.cols,
             reason: format!("{e:#}"),
         })
+    }
+
+    /// The far command's exit status once [`read`](Self::read) has ended,
+    /// which `ssh` reports as its own — 255 is `ssh`'s. `None` when none could
+    /// be read.
+    pub async fn exited(&mut self) -> Option<i32> {
+        // The pty hangs up as `ssh` exits, so the status is a moment behind it.
+        for _ in 0..100 {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return i32::try_from(status.exit_code()).ok(),
+                Ok(None) => tokio::time::sleep(Duration::from_millis(20)).await,
+                Err(_) => return None,
+            }
+        }
+        None
     }
 }
 

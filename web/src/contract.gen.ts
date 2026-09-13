@@ -26,6 +26,7 @@ import type {
   Spend,
   SshIdentity,
   Stopped,
+  TerminalExit,
   TerminalSize,
   Transcript,
   Workspace,
@@ -663,3 +664,7 @@ export const terminalSize = {
   "rows": 40,
   "term": "xterm-256color"
 } satisfies TerminalSize
+
+export const terminalExit = {
+  "exit": 0
+} satisfies TerminalExit

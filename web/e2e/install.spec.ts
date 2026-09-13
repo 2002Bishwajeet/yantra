@@ -50,6 +50,32 @@ test.describe('install from the machine page', () => {
     await screenshot(page, 'machine-install-stopped', 'install', size)
   })
 
+  /* Y-394, ADR-0030: the password step in a terminal of its own. */
+  test('sudo: the step runs in a one-off terminal, and the password is only keystrokes', async ({ page, size }) => {
+    await open(page, 'nas')
+    await ready(page).getByRole('button', { name: 'Install' }).click()
+    await ready(page).getByRole('button', { name: 'Open a terminal' }).click({ timeout: 15_000 })
+
+    const sheet = size === 'phone' ? page.getByRole('dialog', { name: 'Run it on nas' }) : page.getByRole('complementary', { name: 'Run it on nas' })
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByText(/Your password goes to nas as keystrokes; Yantra does not keep it./)).toBeVisible()
+    await expect(sheet.locator('.xterm-rows')).toContainText('password for yantra', { timeout: 15_000 })
+    await axe(page)
+
+    await sheet.locator('.xterm-helper-textarea').focus()
+    await page.keyboard.type('hunter2')
+    await page.keyboard.press('Enter')
+
+    await expect(sheet.getByText('It finished on nas. Readiness asks nas again now.')).toBeVisible({ timeout: 15_000 })
+    await expect(sheet.getByRole('status').first()).toContainText('exited 0')
+    await expect(sheet.locator('.xterm-rows')).not.toContainText('hunter2')
+    // The step installed tmux, so claude is what is left, and Install asks for it.
+    await expect(ready(page).getByRole('heading', { name: 'claude is missing' })).toBeVisible({ timeout: 15_000 })
+
+    await sheet.getByRole('button', { name: size === 'phone' ? 'Close' : 'Close Run it on nas' }).click()
+    await expect(sheet).toBeHidden()
+  })
+
   test('running: a second press is the 409, and the page waits', async ({ page, size }) => {
     await open(page, 'hetzner-1')
     await ready(page).getByRole('button', { name: 'Install' }).click()

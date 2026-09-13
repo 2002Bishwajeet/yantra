@@ -111,6 +111,10 @@ every other command.
 > *"no password is ever asked for, passed or stored"* above now reads **no password is ever handled
 > as a value**. The background install is unchanged: it uses `sudo -n` and nothing more.
 
+> **2026-09-13, [Y-394](../../tracker.md):** built as
+> [ADR-0030](0030-a-one-off-terminal-runs-only-a-command-an-install-left.md). The terminal runs the
+> command at a place in what the latest install left, never one the browser sends.
+
 ### 6. What stays closed
 
 - No Yantra binary crosses ssh, and that includes `yantra-agent`.

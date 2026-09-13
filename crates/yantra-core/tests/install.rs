@@ -254,3 +254,72 @@ async fn a_machine_that_has_everything_is_left_alone() -> Result<()> {
     assert!(!lab.stand_in_ran().await?, "nothing ran for a present tool");
     Ok(())
 }
+
+/// Y-394, ADR-0030: the step a password-wanting sudo stopped runs in a one-off
+/// terminal, the password goes in as keystrokes, and the install completes.
+/// There is no tmux on the machine and none is needed: it is one of the things
+/// being installed.
+#[tokio::test]
+async fn a_password_sudo_step_completes_in_a_one_off_terminal() -> Result<()> {
+    use std::time::Duration;
+    use yantra_core::pty;
+
+    let Some(lab) = Lab::start("terminal")? else {
+        return Ok(());
+    };
+    lab.bare("yantra ALL=(ALL) ALL")?;
+    lab.fixture
+        .arrange_as_root("echo 'yantra:typed-as-keys' | chpasswd")?;
+
+    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let command = report
+        .steps
+        .iter()
+        .find_map(|step| match &step.outcome {
+            Outcome::ForYou {
+                because: Because::SudoAsks,
+                command: Some(command),
+            } => Some(command.clone()),
+            _ => None,
+        })
+        .expect("sudo asked for a password, so a step was left for a person");
+
+    let mut terminal = pty::run_on(
+        &lab.ssh,
+        &command,
+        TERM,
+        pty::Size {
+            rows: 30,
+            cols: 100,
+        },
+    )?;
+    let mut seen = String::new();
+    // Nothing is typed until sudo has asked, on the terminal.
+    let asked = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !seen.to_lowercase().contains("password") {
+        let bytes = tokio::time::timeout_at(asked, terminal.read())
+            .await
+            .map_err(|_| anyhow::anyhow!("sudo never asked: {seen}"))?
+            .ok_or_else(|| anyhow::anyhow!("the terminal ended before sudo asked: {seen}"))?;
+        seen.push_str(&String::from_utf8_lossy(&bytes));
+    }
+    terminal.write(b"typed-as-keys\r".to_vec()).await?;
+    // `apk` fetches from the Alpine mirror, as the image build does.
+    let done = tokio::time::Instant::now() + Duration::from_secs(300);
+    while let Some(bytes) = tokio::time::timeout_at(done, terminal.read())
+        .await
+        .map_err(|_| anyhow::anyhow!("the command never ended: {seen}"))?
+    {
+        seen.push_str(&String::from_utf8_lossy(&bytes));
+    }
+
+    assert_eq!(terminal.exited().await, Some(0), "{seen}");
+    assert!(
+        !seen.contains("typed-as-keys"),
+        "sudo does not echo a password: {seen}"
+    );
+    let after = doctor::of(&lab.ssh, TERM).await;
+    assert_eq!(state(&after, "tmux"), State::Present);
+    assert_eq!(state(&after, "git"), State::Present);
+    Ok(())
+}
