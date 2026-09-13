@@ -81,6 +81,7 @@ fn content_type(path: &str) -> &'static str {
         Some("css") => "text/css; charset=utf-8",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
         Some("woff2") => "font/woff2",
         Some("webmanifest") => "application/manifest+json",
         Some("json") => "application/json",
@@ -212,6 +213,14 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(content_type, "text/javascript; charset=utf-8");
         assert_eq!(body, asset.contents());
+    }
+
+    #[tokio::test]
+    async fn it_serves_the_favicon_as_an_icon() {
+        let (status, content_type, _) = get("/favicon.ico").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(content_type, "image/x-icon");
     }
 
     /// The directory half's `an_unknown_path_gets_the_app_rather_than_a_404`,
