@@ -15,6 +15,7 @@ export type Scenario =
   | 'install'
   | 'notifications'
   | 'adding'
+  | 'stranger'
   | 'setup'
 
 /** Every stamp in the scenarios is aged against this instant, so an age reads

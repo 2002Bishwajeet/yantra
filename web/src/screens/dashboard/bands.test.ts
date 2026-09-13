@@ -12,6 +12,7 @@ const machine = (name: string, up: boolean, seen: string | null = null): Machine
   os: 'linux',
   online: up,
   expired: false,
+  ownership: 'yours',
   last_seen: seen,
   heartbeat: null,
 })

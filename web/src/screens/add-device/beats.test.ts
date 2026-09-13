@@ -3,7 +3,7 @@ import type { Check, Event, Readiness } from '@/api'
 import { aMachine, looked } from '@/api/fixtures'
 import { ApiError } from '@/api/errors'
 import { guessPlatform, platformOf } from '@/lib/platform'
-import { joined, lastAsk, lastInstall, newDevice, onTailnet, password, reachable, ready, type Beat } from './beats'
+import { joined, lastAsk, lastInstall, newDevice, newStranger, onTailnet, password, reachable, ready, type Beat } from './beats'
 
 const NAME = 'laptop'
 const done: Beat = { state: 'done', words: '' }
@@ -106,6 +106,37 @@ describe('beat 1, on the tailnet', () => {
     expect(newDevice(list, ['old'], 'linux')).toBe('new')
     expect(newDevice(list, ['old'], 'mobile')).toBe('phone')
     expect(newDevice(list, ['old', 'new', 'phone'], 'linux')).toBeUndefined()
+  })
+})
+
+/** Y-404, owner 2026-09-13: only a node the appliance's account owns counts. */
+describe('beat 1, and whose node it is', () => {
+  const shared = aMachine({ name: 'friend', ownership: 'shared' })
+  const tagged = aMachine({ name: 'ci', ownership: 'tagged' })
+
+  it('never takes a node another owner holds as the device, and names it apart', () => {
+    const list = [aMachine({ name: 'old' }), shared, aMachine({ name: 'mine' })]
+    expect(newDevice(list, ['old'], 'linux')).toBe('mine')
+    expect(newDevice([aMachine({ name: 'old' }), shared], ['old'], 'linux')).toBeUndefined()
+    expect(newStranger(list, ['old'], 'linux')?.name).toBe('friend')
+    expect(newStranger(list, null, 'linux')).toBeUndefined()
+    expect(newStranger([tagged], [], 'mobile')).toBeUndefined()
+  })
+
+  it('is stuck with the reason when only a stranger arrived', () => {
+    expect(onTailnet(looked.ok([shared]), undefined, 'linux', false, shared)).toMatchObject({
+      state: 'stuck',
+      words: "friend is on the tailnet and shared from another account · not supported yet · log in to Tailscale there with the appliance's account",
+      machine: null,
+    })
+    expect(onTailnet(looked.ok([tagged]), undefined, 'linux', false, tagged).words).toMatch(
+      /^ci is on the tailnet and tagged, so the tailnet owns it and not your account/,
+    )
+  })
+
+  it('never ticks for a named node you do not own, even online', () => {
+    expect(onTailnet(looked.ok([shared]), 'friend', 'linux', false)).toMatchObject({ state: 'stuck' })
+    expect(onTailnet(looked.ok([tagged]), 'ci', 'linux', false).words).toMatch(/not supported yet/)
   })
 })
 

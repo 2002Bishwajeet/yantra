@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Event, Machine, Readiness } from '@/api'
 import { aListed, aMachine, looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
 import { answer } from '@/test/daemon'
 import { renderRouted } from '@/test/inRouter'
+import { useSetupGate } from './progress'
 import { Setup } from './Setup'
 
 /* The checklist on its own, so every line state is drawn and asserted — the
@@ -169,6 +170,50 @@ describe('the steps', () => {
   })
 })
 
+/** The home gate (owner's ruling (b)), which the dashboard reads: one ready
+ *  machine you own passes it, and a ready one shared in never does (Y-404). */
+describe('the setup gate', () => {
+  function Gate(props: { machines: Machine[] }) {
+    const gate = useSetupGate(props.machines)
+    return <p>{gate.key === 'reading' ? 'reading' : gate.passed ? 'passed' : 'held'}</p>
+  }
+
+  async function gate(machine: Machine) {
+    const routes: Routes = {
+      ...base([machine]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks(tools)])],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        const [status, body] = routes[`${init?.method ?? 'GET'} ${path.split('?')[0]}`] ?? [404, 'no']
+        return Promise.resolve(answer(status, body))
+      }),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Gate machines={[machine]} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.queryByText('reading')).toBeNull())
+    // The readiness sweep lands after the key, so wait for the gate to settle on it.
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    return screen.getByRole('paragraph').textContent
+  }
+
+  it('passes on a ready machine you own', async () => {
+    expect(await gate(up)).toBe('passed')
+  })
+
+  it('holds on a ready machine another account shares, or the tailnet owns', async () => {
+    expect(await gate({ ...up, ownership: 'shared' })).toBe('held')
+    cleanup()
+    expect(await gate({ ...up, ownership: 'tagged' })).toBe('held')
+  })
+})
+
 describe('the machine lines', () => {
   it('lists only the machines that run a session, and shows the rest apart', async () => {
     await draw(base())
@@ -273,6 +318,22 @@ describe('the machine lines', () => {
     expect(screen.getByText(/1 of 2 machines ready · one is enough to start/)).toBeTruthy()
     expect(screen.getByText('ready · 7 of 7')).toBeTruthy()
     expect(filled()).toEqual(['New session'])
+  })
+
+  /** Y-404, owner 2026-09-13: a node another account owns is listed with the
+   *  reason and never counts, even when every check is present. */
+  it('lists a node your account does not own apart, and never counts it ready', async () => {
+    const shared = { ...up, ownership: 'shared' as const }
+    await draw({
+      ...base([shared, aMachine({ name: 'ci', os: 'linux', ownership: 'tagged' })]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks(tools)])],
+    })
+    const foreign = within(screen.getByRole('list', { name: 'Devices your account does not own' }))
+    expect(foreign.getByText('shared from another account · not supported yet')).toBeTruthy()
+    expect(foreign.getByText(/tagged, so the tailnet owns it/)).toBeTruthy()
+    expect(screen.queryByText('ready · 7 of 7')).toBeNull()
+    expect(filled()).not.toEqual(['New session'])
   })
 
   /** GitHub is optional (coordinator's ruling, 2026-09-13). */

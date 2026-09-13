@@ -6,7 +6,7 @@ import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { joinUrl } from '@/lib/join'
-import { apart, runsSessions } from '@/lib/platform'
+import { apart, notYours, runsSessions } from '@/lib/platform'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -176,12 +176,15 @@ function MachineLine(props: {
 export function Setup() {
   const now = useTick(true)
   const devices = useId()
+  const strangers = useId()
   const later = useId()
   const { about, identity, machines, sweep, notifications, events, all, lines, steps, later: optional, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
 
-  const others = all.filter((one) => !runsSessions(one))
+  const others = all.filter((one) => one.ownership === 'yours' && !runsSessions(one))
+  // Y-404: listed with the reason, never counted.
+  const foreign = all.filter((one) => one.ownership !== 'yours')
   const join = joinUrl(location, about.data)
   const read = stamp([
     { name: 'machines', reading: machines },
@@ -307,6 +310,23 @@ export function Setup() {
                         <span className="setup__machine">{one.name}</span>
                         <Text className="setup__said" scale="body-small" tone="variant">
                           {apart(one)}
+                        </Text>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {foreign.length > 0 ? (
+                <>
+                  <Text id={strangers} scale="label-large" tone="variant">
+                    Devices your account does not own
+                  </Text>
+                  <ul aria-labelledby={strangers} className="setup__lines">
+                    {foreign.map((one) => (
+                      <li className="setup__line" data-kind="apart" key={one.name}>
+                        <span className="setup__machine">{one.name}</span>
+                        <Text className="setup__said" scale="body-small" tone="variant">
+                          {notYours(one)}
                         </Text>
                       </li>
                     ))}

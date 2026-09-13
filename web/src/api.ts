@@ -47,6 +47,9 @@ export type Machine = {
   last_seen: string | null
   // null is "never heard from" and is not a beat that reports zero (I-47).
   heartbeat: Beat | null
+  // Y-404: only `yours` counts or runs a session. `shared` is another Tailscale
+  // account's node; `tagged` is the tailnet's, and wins over a matching owner.
+  ownership: 'yours' | 'shared' | 'tagged'
 }
 
 // ADR-0013 §2: two variants, so unknown power cannot be spelled. A string and

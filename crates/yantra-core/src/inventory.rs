@@ -53,6 +53,34 @@ pub struct MachineInfo {
     /// from, and one v6 address has more than one spelling. Empty is a peer
     /// nothing can be attributed to, never a peer whose addresses are unknown.
     pub addresses: Vec<IpAddr>,
+    /// Whose node this is, measured against this node's own owner. The numbers
+    /// and tag names it was read from stay here (Y-404).
+    pub ownership: Ownership,
+}
+
+/// ADR-0016's two refusals, applied to the whole tailnet rather than to one
+/// caller. Tagged wins over a matching owner, exactly as `write::allowed` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ownership {
+    Yours,
+    /// Owned by another Tailscale user, which is a node shared in.
+    Shared,
+    /// Owned by the tailnet rather than a person.
+    Tagged,
+}
+
+impl Ownership {
+    /// A node with no readable owner, or a `Self` with none, is `Shared`: an
+    /// owner that cannot be proved is not this one.
+    fn of(node: &Node, owner: Option<u64>) -> Self {
+        if node.tags.as_ref().is_some_and(|tags| !tags.is_empty()) {
+            Self::Tagged
+        } else if owner.is_some() && node.user == owner {
+            Self::Yours
+        } else {
+            Self::Shared
+        }
+    }
 }
 
 /// Go's `GOOS` with darwin split in two, in Tailscale's own casing — which is
@@ -248,11 +276,22 @@ fn parse_whois(json: &[u8]) -> Result<Caller, Error> {
 
 fn parse(json: &[u8]) -> Result<Vec<MachineInfo>, Error> {
     let status: Status = serde_json::from_slice(json).map_err(Error::Parse)?;
-    let mut machines: Vec<MachineInfo> = status
-        .self_node
+    let owner = status.self_node.as_ref().and_then(|node| node.user);
+    // This node is the reference, so it is yours unless the tailnet owns it.
+    let this = status.self_node.map(|node| {
+        let ownership = if node.tags.as_ref().is_some_and(|tags| !tags.is_empty()) {
+            Ownership::Tagged
+        } else {
+            Ownership::Yours
+        };
+        MachineInfo::of(node, ownership)
+    });
+    let mut machines: Vec<MachineInfo> = this
         .into_iter()
-        .chain(status.peers.unwrap_or_default().into_values())
-        .map(MachineInfo::from)
+        .chain(status.peers.unwrap_or_default().into_values().map(|node| {
+            let ownership = Ownership::of(&node, owner);
+            MachineInfo::of(node, ownership)
+        }))
         .collect();
     machines.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(machines)
@@ -292,6 +331,9 @@ struct Node {
     /// names, in two documents from the same binary.
     #[serde(rename = "UserID", default)]
     user: Option<u64>,
+    /// Absent on an untagged node rather than empty, as in `whois`.
+    #[serde(rename = "Tags", default)]
+    tags: Option<Vec<String>>,
 }
 
 /// `tailscale whois --json` — `UserProfile` and `CapMap` are deliberately not
@@ -320,8 +362,8 @@ struct WhoisNode {
     tags: Option<Vec<String>>,
 }
 
-impl From<Node> for MachineInfo {
-    fn from(node: Node) -> Self {
+impl MachineInfo {
+    fn of(node: Node, ownership: Ownership) -> Self {
         let label = node
             .dns_name
             .trim_end_matches('.')
@@ -343,6 +385,7 @@ impl From<Node> for MachineInfo {
             expired: node.expired,
             dns_name: node.dns_name,
             addresses: node.tailscale_ips.unwrap_or_default(),
+            ownership,
         }
     }
 }
@@ -574,6 +617,73 @@ mod tests {
         let machines = parse(json).expect("unknown fields are tolerated");
         assert_eq!(machines.len(), 1);
         assert_eq!(machines[0].name, "solo");
+    }
+
+    /// Y-404: a peer counts as yours only when this node's owner owns it and
+    /// no tag hands it to the tailnet.
+    #[test]
+    fn a_peer_is_yours_shared_or_tagged_against_this_nodes_owner() {
+        let json = br#"{
+            "Self": {
+                "ID": "n1", "DNSName": "appliance.example.ts.net.", "OS": "linux",
+                "Online": true, "UserID": 7
+            },
+            "Peer": {
+                "nodekey:01": {"ID": "n2", "DNSName": "mine.example.ts.net.", "OS": "linux",
+                               "Online": true, "UserID": 7},
+                "nodekey:02": {"ID": "n3", "DNSName": "friend.example.ts.net.", "OS": "linux",
+                               "Online": true, "UserID": 9},
+                "nodekey:03": {"ID": "n4", "DNSName": "ci.example.ts.net.", "OS": "linux",
+                               "Online": true, "UserID": 7, "Tags": ["tag:ci"]},
+                "nodekey:04": {"ID": "n5", "DNSName": "anon.example.ts.net.", "OS": "linux",
+                               "Online": true}
+            }
+        }"#;
+        let machines = parse(json).expect("parses");
+        let of = |name: &str| {
+            machines
+                .iter()
+                .find(|m| m.name == name)
+                .map(|m| m.ownership)
+                .unwrap_or_else(|| panic!("no machine called {name}"))
+        };
+
+        assert_eq!(of("appliance"), Ownership::Yours);
+        assert_eq!(of("mine"), Ownership::Yours);
+        assert_eq!(of("friend"), Ownership::Shared);
+        assert_eq!(
+            of("ci"),
+            Ownership::Tagged,
+            "a tag wins over a matching owner"
+        );
+        assert_eq!(
+            of("anon"),
+            Ownership::Shared,
+            "an owner nobody named is not yours"
+        );
+    }
+
+    #[test]
+    fn a_tagged_appliance_reads_as_tagged_and_an_empty_tag_list_does_not() {
+        let json = br#"{"Self": {
+            "ID": "n1", "DNSName": "solo.example.ts.net.", "OS": "linux",
+            "Online": true, "UserID": 7, "Tags": ["tag:server"]
+        }, "Peer": {"nodekey:01": {
+            "ID": "n2", "DNSName": "empty.example.ts.net.", "OS": "linux",
+            "Online": true, "UserID": 7, "Tags": []
+        }}}"#;
+        let machines = parse(json).expect("parses");
+
+        assert_eq!(machines[1].ownership, Ownership::Tagged, "{machines:?}");
+        assert_eq!(machines[0].ownership, Ownership::Yours, "{machines:?}");
+    }
+
+    #[test]
+    fn every_node_in_the_real_fixture_is_yours() {
+        assert!(
+            machines().iter().all(|m| m.ownership == Ownership::Yours),
+            "one account owns this tailnet"
+        );
     }
 
     #[test]

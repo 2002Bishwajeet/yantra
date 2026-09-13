@@ -55,7 +55,8 @@ export const machines = {
       "last_seen": null,
       "name": "cachyos-g14",
       "online": true,
-      "os": "linux"
+      "os": "linux",
+      "ownership": "yours"
     },
     {
       "address": null,
@@ -80,7 +81,8 @@ export const machines = {
       "last_seen": "2026-07-07T09:00:00Z",
       "name": "bishwajeets-macbook-pro",
       "online": false,
-      "os": "linux"
+      "os": "linux",
+      "ownership": "yours"
     },
     {
       "address": null,
@@ -90,7 +92,8 @@ export const machines = {
       "last_seen": null,
       "name": "pi",
       "online": true,
-      "os": "linux"
+      "os": "linux",
+      "ownership": "yours"
     }
   ],
   "looked": "ok"

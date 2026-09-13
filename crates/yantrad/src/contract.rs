@@ -434,6 +434,7 @@ fn holding(snapshot: Snapshot) -> Fleet {
 /// carries both spellings of `address` (Y-343).
 fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> MachineInfo {
     MachineInfo {
+        ownership: yantra_core::inventory::Ownership::Yours,
         id: id.into(),
         name: name.into(),
         dns_name: format!("{name}.<tailnet>.ts.net."),

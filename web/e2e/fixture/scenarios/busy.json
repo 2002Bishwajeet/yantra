@@ -5,6 +5,7 @@
     "data": [
       {
         "name": "cachyos-g14",
+        "ownership": "yours",
         "dns_name": "cachyos-g14.yantra.tail3a1b.ts.net.",
         "os": "linux",
         "online": true,
@@ -22,6 +23,7 @@
       },
       {
         "name": "macbook",
+        "ownership": "yours",
         "dns_name": "macbook.yantra.tail3a1b.ts.net.",
         "os": "macOS",
         "online": true,
@@ -39,6 +41,7 @@
       },
       {
         "name": "pi-5",
+        "ownership": "yours",
         "dns_name": "pi-5.yantra.tail3a1b.ts.net.",
         "os": "linux",
         "online": true,
@@ -56,6 +59,7 @@
       },
       {
         "name": "hetzner-1",
+        "ownership": "yours",
         "dns_name": "hetzner-1.yantra.tail3a1b.ts.net.",
         "os": "linux",
         "online": true,
@@ -73,6 +77,7 @@
       },
       {
         "name": "nas",
+        "ownership": "yours",
         "dns_name": "nas.yantra.tail3a1b.ts.net.",
         "os": "linux",
         "online": true,
@@ -82,6 +87,7 @@
       },
       {
         "name": "thinkpad",
+        "ownership": "yours",
         "dns_name": "thinkpad.yantra.tail3a1b.ts.net.",
         "os": "linux",
         "online": false,

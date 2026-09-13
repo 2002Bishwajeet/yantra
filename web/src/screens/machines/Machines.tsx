@@ -4,7 +4,7 @@ import { Plus } from 'lucide-react'
 import { fromReading } from '@/api/client'
 import { Button } from '@/m3/button/Button'
 import { loaded, useMachines, useReadiness, useSessions, useWorkspaces } from '@/api/hooks'
-import { apart, runsSessions } from '@/lib/platform'
+import { apart, notYours, runsSessions } from '@/lib/platform'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
@@ -65,7 +65,9 @@ export function Machines() {
   // D7 §3.4: a phone, a tablet and a Windows PC open the dashboard; they
   // never get a card, a check or a count.
   const runs = list.filter(runsSessions)
-  const devices = list.filter((one) => !runsSessions(one))
+  const devices = list.filter((one) => one.ownership === 'yours' && !runsSessions(one))
+  // Y-404: listed with the reason, never counted.
+  const foreign = list.filter((one) => one.ownership !== 'yours')
   const checks = readiness.looked === 'ok' ? readiness.data : []
   const held =
     sessions.looked === 'ok' && workspaces.looked === 'ok'
@@ -133,6 +135,26 @@ export function Machines() {
                   key={device.name}
                   supporting={apart(device)}
                   trailing={device.os === 'windows' ? <Chip>coming soon</Chip> : null}
+                />
+              ))}
+            </List>
+          </Card>
+        </ErrorBoundary>
+      ) : null}
+
+      {machines.looked === 'ok' && foreign.length > 0 ? (
+        <ErrorBoundary eyebrow="Another account" title="The other account's devices could not be drawn">
+          <Card aria-labelledby="machines-foreign">
+            <Eyebrow id="machines-foreign" render={<h2 />}>
+              Devices your account does not own
+            </Eyebrow>
+            <List>
+              {foreign.map((device) => (
+                <ListItem
+                  headline={device.name}
+                  key={device.name}
+                  supporting={notYours(device)}
+                  trailing={<Chip>{device.ownership}</Chip>}
                 />
               ))}
             </List>
