@@ -36,4 +36,13 @@ test.describe('the component gallery', () => {
       await axe(page)
     })
   }
+
+  // Y-398, D7 §3.2: a greyscale render must still tell the six states apart.
+  test('tells the six marks apart in greyscale', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'one size is enough for six marks')
+    await prefer(page, 'light')
+    await scenario(page, 'busy')
+    await page.goto('/m3')
+    await expect(page.getByTestId('marks-greyscale').first()).toHaveScreenshot('marks-greyscale.png')
+  })
 })

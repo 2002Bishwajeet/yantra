@@ -120,6 +120,15 @@ function Catalogue() {
         {marks.map((state) => (
           <Mark key={state} state={state} size="small" />
         ))}
+        <Chip tone="error">
+          <Mark state="failed" size="small" />
+          key refused
+        </Chip>
+        <div className="m3-gallery__pair m3-gallery__greyscale" data-testid="marks-greyscale">
+          {marks.map((state) => (
+            <State key={state} state={state} />
+          ))}
+        </div>
       </Section>
 
       <Section title="Button">

@@ -11,9 +11,11 @@
   height: 8px;
 }
 
-/* Form first, so a greyscale render still tells the six apart. */
+/* Y-398: six forms, so a greyscale render tells the six apart and no state
+   rests on colour alone. Needs and running share a hue (1.01:1). */
 .m3-mark[data-state="needs"] {
   background: var(--yantra-state-needs);
+  clip-path: polygon(50% 6.7%, 100% 93.3%, 0 93.3%);
 }
 
 .m3-mark[data-state="running"] {
@@ -34,15 +36,33 @@
 
 .m3-mark[data-state="failed"] {
   background: var(--yantra-state-failed);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 
+/* A polygon inside the box covers less than the disc, so the box grows by
+   2px and the margin gives it back: same footprint, same weight. */
+.m3-mark:is([data-state="needs"], [data-state="failed"]) {
+  width: 12px;
+  height: 12px;
+  margin: -1px;
+  border-radius: 0;
+}
+
+.m3-mark[data-size="small"]:is([data-state="needs"], [data-state="failed"]) {
+  width: 10px;
+  height: 10px;
+}
+
+/* The failed hex is 2.49:1 on a dark error container; the shape carries the
+   state, so the container's own text colour can paint it. */
+[data-tone="error"] .m3-mark[data-state="failed"] {
+  background: currentColor;
+}
+
+/* No colour here: the words take the colour of where they sit (D7 §3.2). */
 .m3-state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-
-.m3-state[data-state="failed"] {
-  color: var(--md-sys-color-on-error-container);
 }
