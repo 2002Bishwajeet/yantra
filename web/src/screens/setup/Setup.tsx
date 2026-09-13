@@ -143,7 +143,13 @@ function MachineLine(props: {
       <State size="small" state={mark[view]}>
         <span className="setup__machine">{name}</span>
       </State>
-      <div aria-live="polite" className="setup__said">
+      {/* Where focus goes when the FAB's Install goes away under a reader. */}
+      <div
+        aria-live="polite"
+        className="setup__said"
+        data-fab-return={target ? '' : undefined}
+        tabIndex={target ? -1 : undefined}
+      >
         <Text
           className={said.kind === 'refused' || said.kind === 'unreachable' ? 'setup__bad' : undefined}
           scale="body-small"

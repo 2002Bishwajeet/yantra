@@ -15,6 +15,7 @@ import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
 import { useSetupHome } from '@/screens/setup/progress'
 import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination, isRailed } from './destinations'
+import { useFabFocus, type FabFocus } from './fabFocus'
 import { useFormFactor } from './formFactor'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
@@ -60,7 +61,8 @@ function RouteAction() {
  *  reached the daemon, the one screen that says so in its place. */
 function Page({ down }: { down: ReactNode }) {
   return (
-    <main className="shell__main">
+    // Focusable, not tabbable: where focus lands when a focused FAB goes away.
+    <main className="shell__main" tabIndex={-1}>
       <ErrorBoundary layout="page" {...useResetOnRouteChange()}>
         {down ?? (
           <>
@@ -74,8 +76,11 @@ function Page({ down }: { down: ReactNode }) {
 }
 
 /** The page's one next action. Extended on the phone, where it has the width;
- *  in the rail on the tablet, where the label is the button's name. */
-function PrimaryFab({ action, extended }: { action: Primary; extended: boolean }) {
+ *  in the rail on the tablet, where the label is the button's name. It is not
+ *  keyed by its action, so a swap keeps the element and the focus on it;
+ *  `beat` replays the grow-in instead. */
+function PrimaryFab(props: { action: Primary; extended: boolean; beat: string; focus: FabFocus }) {
+  const { action, extended, beat, focus } = props
   const label =
     action.kind === 'new-session'
       ? 'New session'
@@ -91,12 +96,35 @@ function PrimaryFab({ action, extended }: { action: Primary; extended: boolean }
     ) : undefined
   const press = action.kind === 'install' ? action.press : undefined
   const role = link ? 'link' : undefined
+  // WCAG 2.5.3: the name starts with the words on screen, and still differs
+  // from the page's own copy of the action.
+  const name = `${label}, quick action`
   return extended ? (
-    <ExtendedFab className="shell__fab" icon={icon} onClick={press} render={link} role={role}>
+    <ExtendedFab
+      aria-label={name}
+      className="shell__fab"
+      data-beat={beat}
+      icon={icon}
+      onBlur={focus.onBlur}
+      onClick={press}
+      onFocus={focus.onFocus}
+      render={link}
+      role={role}
+    >
       <span className="shell__fab-label">{label}</span>
     </ExtendedFab>
   ) : (
-    <Fab className="shell__rail-fab" label={label} onClick={press} render={link} role={role}>
+    <Fab
+      aria-label={name}
+      className="shell__rail-fab"
+      data-beat={beat}
+      label={label}
+      onBlur={focus.onBlur}
+      onClick={press}
+      onFocus={focus.onFocus}
+      render={link}
+      role={role}
+    >
       {icon}
     </Fab>
   )
@@ -157,17 +185,13 @@ function DesktopBar() {
 // so that the name resolves to something.
 const SHEET = 'shell-notifications'
 
-function TabletRail(props: { action: Primary | null; onToggle: () => void; open: boolean }) {
-  const { action, onToggle, open } = props
+function TabletRail(props: { fab: ReactNode; onToggle: () => void; open: boolean }) {
+  const { fab, onToggle, open } = props
   return (
     <NavigationRail
       // The slot stays when a route has no action, so the destinations under
       // it never move between routes.
-      fab={
-        <div className="shell__rail-slot">
-          {action ? <PrimaryFab action={action} extended={false} key={keyOf(action)} /> : null}
-        </div>
-      }
+      fab={<div className="shell__rail-slot">{fab}</div>}
       trailing={
         <>
           <Guarded title="Notifications could not be drawn">
@@ -237,10 +261,10 @@ function PhoneBar({ top }: { top: boolean }) {
   )
 }
 
-function PhoneBottom({ action }: { action: Primary | null }) {
+function PhoneBottom({ fab }: { fab: ReactNode }) {
   return (
     <>
-      {action ? <PrimaryFab action={action} extended key={keyOf(action)} /> : null}
+      {fab}
       <NavigationBar>
         {DESTINATIONS.map((one) => (
           <BarDestination
@@ -327,6 +351,13 @@ export function Shell() {
   const primary = usePrimary()
   const fab = down === null && (factor === 'tablet' || (factor === 'phone' && top)) ? primary : null
   usePublishDrawn(fab !== null)
+  const key = keyOf(fab)
+  const focus = useFabFocus(key)
+  const [beat, setBeat] = useState({ key, odd: false })
+  if (beat.key !== key) setBeat({ key, odd: !beat.odd })
+  const button = fab ? (
+    <PrimaryFab action={fab} beat={beat.odd ? 'b' : 'a'} extended={factor === 'phone'} focus={focus} />
+  ) : null
   return (
     <>
       <HeadContent />
@@ -334,7 +365,7 @@ export function Shell() {
         {factor === 'desktop' ? (
           <DesktopBar />
         ) : factor === 'tablet' ? (
-          <TabletRail action={fab} onToggle={() => setOpen((was) => !was)} open={open} />
+          <TabletRail fab={button} onToggle={() => setOpen((was) => !was)} open={open} />
         ) : (
           <PhoneBar top={top} />
         )}
@@ -353,7 +384,7 @@ export function Shell() {
             </Suspense>
           </Guarded>
         ) : factor === 'phone' && top ? (
-          <PhoneBottom action={fab} />
+          <PhoneBottom fab={button} />
         ) : null}
       </div>
       <StatusAnnouncer />

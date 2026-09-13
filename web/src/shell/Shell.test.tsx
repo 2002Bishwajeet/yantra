@@ -102,7 +102,7 @@ describe('the tablet shell', () => {
     const rail = nav()
     for (const label of DESTINATIONS) expect(rail.getByRole('link', { name: label })).toBeTruthy()
     expect(rail.getByRole('link', { name: 'Fleet' }).getAttribute('aria-current')).toBe('page')
-    expect(rail.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
+    expect(rail.getByRole('link', { name: 'New session, quick action' }).getAttribute('href')).toBe('/new')
     expect(document.querySelector('.m3-pill-group')).toBeNull()
     expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Search anything/ })).toBeNull()
@@ -178,7 +178,9 @@ describe('the FAB', () => {
       }
       await waitFor(() => expect(named(fab())).toBe(label))
       expect(fab()!.getAttribute('href')).toBe(href)
-      expect(fab()!.getAttribute('role')).toBe('link')
+      // WCAG 2.5.3: the name starts with the words on screen, and differs
+      // from the page's own copy of the action.
+      expect(screen.getByRole('link', { name: `${label}, quick action` })).toBe(fab())
     })
   }
 
@@ -193,6 +195,19 @@ describe('the FAB', () => {
     expect(fab()).toBeNull()
     // The rail keeps the FAB's place, so the destinations never move.
     expect(document.querySelector('.shell__rail-slot')).toBeTruthy()
+  })
+
+  /** A swap under a keyboard reader keeps the element, so focus stays on it. */
+  it('keeps focus on the FAB when the next route swaps its action', async () => {
+    mount('phone', '/')
+    await waitFor(() => expect(named(fab())).toBe('New session'))
+    const before = fab()!
+    before.focus()
+    // fireEvent does not move focus, so the FAB keeps it through the navigation.
+    fireEvent.click(nav().getByRole('link', { name: 'Machines' }))
+    await waitFor(() => expect(named(fab())).toBe('Add a device'))
+    expect(fab()).toBe(before)
+    expect(document.activeElement).toBe(before)
   })
 
   it('draws none on the desktop, where the action stays in the page', async () => {
@@ -224,11 +239,16 @@ describe('the FAB', () => {
       expect(main.getByRole('button', { name: 'Install on cachyos-g14' }).dataset.variant).toBe('tonal')
       expect(screen.getByRole('main').querySelector('[data-variant="filled"]')).toBeNull()
 
+      fab()!.focus()
       fireEvent.click(fab()!)
       await waitFor(() => expect(asked).toContain('POST /api/machines/cachyos-g14/install'))
       // The line's track says it is running; there is nothing left to press.
       expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
       await waitFor(() => expect(fab()).toBeNull())
+      // Focus goes to the line that says what happened, not to the body.
+      const said = document.activeElement as HTMLElement
+      expect(said.hasAttribute('data-fab-return')).toBe(true)
+      expect(within(said).getByText('installing on cachyos-g14…')).toBeTruthy()
     })
 
     it('carries Add a device before any machine has joined', async () => {

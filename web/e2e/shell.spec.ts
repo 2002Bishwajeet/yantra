@@ -36,8 +36,7 @@ test.describe('the FAB on the first run', () => {
       await expect(add).toHaveAttribute('data-variant', 'filled')
       await expect(fab(page)).toHaveCount(0)
     } else {
-      await expect(fab(page)).toHaveAccessibleName('Add a device')
-      await expect(fab(page)).toHaveAttribute('href', '/machines/add')
+      await expect(page.getByRole('link', { name: 'Add a device, quick action' })).toHaveAttribute('href', '/machines/add')
       await expect(add).toHaveAttribute('data-variant', 'tonal')
     }
     // D7 §3.1: one filled action in the view, and it is the next thing.
@@ -214,7 +213,7 @@ test.describe('the shell on busy', () => {
       await page.goto(path)
       await expect(heading(page, title)).toBeVisible()
       if (size === 'desktop' || label === null) await expect(fab(page)).toHaveCount(0)
-      else await expect(fab(page)).toHaveAccessibleName(label)
+      else await expect(page.getByRole('link', { name: `${label}, quick action` })).toBeVisible()
     }
   })
 
