@@ -141,6 +141,10 @@ where
         .route("/relay", post(relay::<I>))
         .route("/github/login", post(login::<I>))
         .route("/github", axum::routing::delete(logout::<I>))
+        .route(
+            "/github/client-id",
+            post(set_client_id::<I>).delete(clear_client_id::<I>),
+        )
         .route("/join", post(join_as::<I>))
         .with_state(Remembered {
             authoriser: authoriser.clone(),
@@ -835,6 +839,22 @@ struct Publish {
     token: Option<String>,
 }
 
+/// [`notify::NotWritten`] named exhaustively, so a variant added there will
+/// not compile here until it is given one: `relay` and `set_client_id`
+/// share it rather than each carrying a wildcard that would quietly send a
+/// new fault — a failed pre-read of `daemon.env`, say — to the wrong side of
+/// the 400/500 line (Y-393's review).
+fn status_of(error: &notify::NotWritten) -> StatusCode {
+    match error {
+        notify::NotWritten::NotAUrl
+        | notify::NotWritten::Unholdable { .. }
+        | notify::NotWritten::InvalidClientId => StatusCode::BAD_REQUEST,
+        notify::NotWritten::Read { .. } | notify::NotWritten::Write { .. } => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
 async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
@@ -845,15 +865,20 @@ async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     tracing::info!("relay written for {}", caller.node);
 
     let file = std::path::Path::new(notify::RELAY_FILE);
-    notify::write_relay(file, &publish.url, publish.token.as_deref()).map_err(|error| {
-        Refused::Verb {
-            status: match error {
-                notify::NotWritten::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-                _ => StatusCode::BAD_REQUEST,
-            },
-            said: chain(&error),
-        }
-    })?;
+    {
+        // Held for the whole read-modify-write: three routes in this daemon
+        // reach this file, and `notify::rewrite`'s own `flock` only keeps a
+        // contending writer from clobbering another — it does not stop a
+        // tokio worker blocking on the syscall while it waits (Y-393's
+        // review).
+        let _write = state.fleet.env.lock().await;
+        notify::write_relay(file, &publish.url, publish.token.as_deref()).map_err(|error| {
+            Refused::Verb {
+                status: status_of(&error),
+                said: chain(&error),
+            }
+        })?;
+    }
 
     let relay = notify::Relay::new(publish.url, publish.token);
     // ADR-0025 §2: remembered before the send, so a 502 is still an event.
@@ -942,6 +967,7 @@ async fn login<I: Inventory + Clone + Send + Sync + 'static>(
         grant.clone(),
         client_id,
         device.clone(),
+        state.fleet.env.clone(),
     ));
     Ok(Json(Device::of(&device)))
 }
@@ -957,14 +983,70 @@ async fn logout<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
-    notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
-        Refused::Verb {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            said: chain(&error),
-        }
-    })?;
+    {
+        let _write = state.fleet.env.lock().await;
+        notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
+            Refused::Verb {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                said: chain(&error),
+            }
+        })?;
+    }
     state.fleet.github.clear().await;
     tracing::info!("github grant removed by {}", caller.node);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `yantra github client-id <id>` on the wire (Y-393): a self-hoster's own
+/// OAuth App instead of the one this build carries. Same file, same writer
+/// ADR-0021 built — the id is not a secret (ADR-0023), so it goes down beside
+/// the two that are.
+///
+/// **This takes effect at `yantrad`'s next start**, exactly like the relay:
+/// [`github::client_id`] rereads the process environment, and nothing here
+/// holds a value live in between.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClientId {
+    id: String,
+}
+
+async fn set_client_id<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(sent): Json<ClientId>,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let file = std::path::Path::new(notify::RELAY_FILE);
+    {
+        let _write = state.fleet.env.lock().await;
+        notify::write_client_id(file, Some(&sent.id)).map_err(|error| Refused::Verb {
+            status: status_of(&error),
+            said: chain(&error),
+        })?;
+    }
+    tracing::info!("github client id written for {}", caller.node);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `yantra github client-id --clear`: the line leaves the file. Absence is
+/// the state asked for (I-30), so this succeeds whether or not one was there.
+async fn clear_client_id<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let file = std::path::Path::new(notify::RELAY_FILE);
+    {
+        let _write = state.fleet.env.lock().await;
+        notify::write_client_id(file, None).map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    }
+    tracing::info!("github client id cleared by {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2884,11 +2966,12 @@ mod tests {
     /// Both halves of the grant are behind the gate and refuse before anything
     /// is asked of GitHub or written: this tailnet holds nobody. The `DELETE`
     /// shares its path with `api.rs`'s `GET`, so the 403 also says the merge
-    /// kept both methods.
+    /// kept both methods. The client id's own `POST`/`DELETE` share that gate
+    /// too (Y-393) — refused before `/etc/yantra/daemon.env` is opened.
     #[tokio::test]
     async fn signing_in_and_out_are_authorised_before_anything_happens() {
         use axum::body::Body;
-        use axum::http::Request;
+        use axum::http::{Request, header};
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -2899,6 +2982,10 @@ mod tests {
         for request in [
             Request::post("/github/login").body(Body::empty()),
             Request::delete("/github").body(Body::empty()),
+            Request::post("/github/client-id")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"id":"Iv1.abc"}"#)),
+            Request::delete("/github/client-id").body(Body::empty()),
         ] {
             let mut request = request.expect("a request with no body");
             request
@@ -2954,6 +3041,15 @@ mod tests {
 
         serde_json::from_str::<Publish>(r#"{"url":"https://ntfy.sh/a","tokken":"tk_x"}"#)
             .expect_err("a typo is refused");
+    }
+
+    /// The client id's body denies what it does not name, same as the relay's.
+    #[test]
+    fn the_client_id_body_takes_one_field_and_refuses_a_typo() {
+        let sent: ClientId = serde_json::from_str(r#"{"id":"Iv1.abc"}"#).expect("an id");
+        assert_eq!(sent.id, "Iv1.abc");
+
+        serde_json::from_str::<ClientId>(r#"{"idd":"Iv1.abc"}"#).expect_err("a typo is refused");
     }
 
     /// A body is optional, and an unknown field is a typo the caller should

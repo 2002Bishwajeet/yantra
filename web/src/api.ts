@@ -426,12 +426,20 @@ export type Cloning = {
  *  Never the token: `login` is the one thing about the account that is
  *  shown, and it is `null` until the grant's first `GET /user` has answered.
  *  `scopes` is empty for a grant read from the environment. `pending` is a
- *  device flow waiting for its code to be typed at github.com. */
+ *  device flow waiting for its code to be typed at github.com.
+ *
+ *  `client_id` is the OAuth App a sign-in would use — `null` is none
+ *  configured — and `client_id_custom` says it came from a self-hoster's own
+ *  (Y-393) rather than the one this build carries. Neither is what the
+ *  running daemon holds live if `client-id` was just written: that reaches
+ *  it only once yantrad restarts. */
 export type Connection = {
   connected: boolean
   login: string | null
   scopes: string[]
   pending: boolean
+  client_id: string | null
+  client_id_custom: boolean
 }
 
 /** `POST /api/github/login` — step 1 of the device flow: the code to type and
