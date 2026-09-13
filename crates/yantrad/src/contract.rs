@@ -341,6 +341,9 @@ async fn fleet() -> Fleet {
             machine: Some("cachyos-g14".to_owned()),
             said: "api: waiting at claude's trust prompt".to_owned(),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         },
         Event {
             at: 1_785_522_660,
@@ -349,6 +352,9 @@ async fn fleet() -> Fleet {
             machine: Some("bishwajeets-macbook-pro".to_owned()),
             said: "site: crashed (exit 1)".to_owned(),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         },
         Event {
             at: 1_785_522_720,
@@ -357,6 +363,9 @@ async fn fleet() -> Fleet {
             machine: Some("pi".to_owned()),
             said: "pi is no longer online".to_owned(),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         },
         Event {
             at: 1_785_522_780,
@@ -365,6 +374,9 @@ async fn fleet() -> Fleet {
             machine: None,
             said: "yantra can reach this topic".to_owned(),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         },
         Event {
             at: 1_785_522_840,
@@ -376,6 +388,20 @@ async fn fleet() -> Fleet {
                    apt-get install -y tmux` on pi"
                 .to_owned(),
             commands: vec!["sudo apt-get update; sudo apt-get install -y tmux".to_owned()],
+            user: None,
+            kept: None,
+            logs_in_as: None,
+        },
+        Event {
+            at: 1_785_522_900,
+            kind: "joined",
+            workspace: None,
+            machine: Some("pi".to_owned()),
+            said: "pi joined, and Yantra logs in there as biswa".to_owned(),
+            commands: Vec::new(),
+            user: Some("biswa".to_owned()),
+            kept: Some(false),
+            logs_in_as: Some("biswa".to_owned()),
         },
     ]);
     drop(events);

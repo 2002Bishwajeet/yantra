@@ -402,6 +402,13 @@ export type Event = {
   // The exact commands an install left for a person, in order, each to be
   // run verbatim on `machine` (Y-394). Empty for every other kind.
   commands: string[]
+  // The account that joined, what `ssh -G` resolves for it, and whether a
+  // config that already named the machine was left alone. Present only for
+  // `kind: 'joined'` (Y-399) — a page must read these rather than infer them
+  // from `said`, which a reworded sentence would silently change.
+  user?: string
+  kept?: boolean
+  logs_in_as?: string
 }
 
 /** `POST /api/machines/{machine}/clone` with `{ url, path }` — `yantra clone`

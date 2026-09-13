@@ -5,7 +5,7 @@ import { useGithub, useReadiness } from '@/api/hooks'
 import { useClearGithubClientId, useGithubLogout, useSetGithubClientId } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
-import { ListItem } from '@/m3/list/List'
+import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
@@ -18,6 +18,7 @@ export function Providers() {
   const github = useGithub()
   const readiness = useReadiness()
   const [sheet, setSheet] = useState<'connect' | 'manage' | 'client-id' | null>(null)
+  const [appPending, setAppPending] = useState<AppPending>(null)
   // The phone row is 390 px less a lead and a chevron, and `.m3-clip` cuts
   // rather than wraps, so the phone takes the boards' shorter strings.
   const phone = useFormFactor() === 'phone'
@@ -56,13 +57,13 @@ export function Providers() {
           }
         />
         <ListItem
-          headline="Use your own GitHub app"
+          headline="GitHub app"
           leading={
             <Lead>
               <KeyRound />
             </Lead>
           }
-          supporting={clientIdSupporting(connection, phone)}
+          supporting={githubAppSupporting(connection, phone, resolvePending(appPending, connection))}
           trailing={
             <Button onClick={() => setSheet('client-id')} variant="text">
               Edit
@@ -77,11 +78,7 @@ export function Providers() {
             </Lead>
           }
           supporting="not connected"
-          trailing={
-            <Button disabled variant="text">
-              Connect
-            </Button>
-          }
+          trailing={<ListValue>Later</ListValue>}
         />
       </Group>
       <Group label="LLM">
@@ -105,12 +102,8 @@ export function Providers() {
               <Box />
             </Lead>
           }
-          supporting={phone ? 'Later · nothing uses it yet' : 'not set up · for a future agent, nothing uses it yet'}
-          trailing={
-            <Button disabled variant="text">
-              Connect
-            </Button>
-          }
+          supporting={phone ? 'nothing uses it yet' : 'not set up · for a future agent, nothing uses it yet'}
+          trailing={<ListValue>Later</ListValue>}
         />
       </Group>
       <Note>
@@ -122,20 +115,35 @@ export function Providers() {
       <ClientIdSheet
         current={connection?.client_id_custom ? connection.client_id : null}
         onOpenChange={(open) => setSheet(open ? 'client-id' : null)}
+        onSaved={setAppPending}
         open={sheet === 'client-id'}
       />
     </>
   )
 }
 
+/** D7 §4.6: a save is not read back (Y-393, same as the relay), so the row
+ *  holds what the sheet just wrote until a poll of `/api/github` shows it —
+ *  `kind: 'custom'` compares the id, `'own'` just waits for the flag to drop. */
+type AppPending = { kind: 'custom'; id: string } | { kind: 'own' } | null
+
+function resolvePending(pending: AppPending, connection: Connection | undefined): AppPending {
+  if (!pending || !connection) return pending
+  if (pending.kind === 'custom' && connection.client_id_custom && connection.client_id === pending.id) return null
+  if (pending.kind === 'own' && !connection.client_id_custom) return null
+  return pending
+}
+
 /** What the row says without inventing a value: asking, none configured, the
  *  build's own, or a self-hoster's own (Y-393). The phone board takes the
  *  same shorter strings the GitHub row above it does (row 114). */
-function clientIdSupporting(connection: Connection | undefined, phone: boolean): string {
+function githubAppSupporting(connection: Connection | undefined, phone: boolean, pending: AppPending): string {
+  if (pending?.kind === 'custom') return 'Your own · after yantrad restarts'
+  if (pending?.kind === 'own') return "Yantra's own · after yantrad restarts"
   if (connection === undefined) return 'asking the daemon'
   if (connection.client_id === null) return phone ? 'None set up' : 'None configured'
-  if (connection.client_id_custom) return phone ? 'Your own app' : `Your own app · ${connection.client_id}`
-  return phone ? "Yantra's own app" : `Yantra's own app · ${connection.client_id}`
+  if (connection.client_id_custom) return phone ? 'Your own' : `Your own · ${connection.client_id}`
+  return phone ? "Yantra's own" : `Yantra's own · ${connection.client_id}`
 }
 
 function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => void; login: string | null }) {
@@ -179,8 +187,13 @@ function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => vo
  *  next restart, exactly like the relay's own sheet, so a success is a note
  *  rather than a refetch that would still show the old id. `current` is the
  *  custom id in use now, if any — `Clear` is disabled with nothing to remove. */
-function ClientIdSheet(props: { open: boolean; onOpenChange: (open: boolean) => void; current: string | null }) {
-  const { open, onOpenChange, current } = props
+function ClientIdSheet(props: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  current: string | null
+  onSaved: (pending: AppPending) => void
+}) {
+  const { open, onOpenChange, current, onSaved } = props
   const set = useSetGithubClientId()
   const clear = useClearGithubClientId()
   const [saved, setSaved] = useState<'set' | 'cleared' | null>(null)
@@ -188,7 +201,15 @@ function ClientIdSheet(props: { open: boolean; onOpenChange: (open: boolean) => 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const id = String(new FormData(event.currentTarget).get('id') ?? '').trim()
-    set.mutate({ id }, { onSuccess: () => setSaved('set') })
+    set.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          setSaved('set')
+          onSaved({ kind: 'custom', id })
+        },
+      },
+    )
   }
 
   const close = (next: boolean) => {
@@ -246,7 +267,14 @@ function ClientIdSheet(props: { open: boolean; onOpenChange: (open: boolean) => 
           </Button>
           <Button
             disabled={pending || current === null}
-            onClick={() => clear.mutate(undefined, { onSuccess: () => setSaved('cleared') })}
+            onClick={() =>
+              clear.mutate(undefined, {
+                onSuccess: () => {
+                  setSaved('cleared')
+                  onSaved({ kind: 'own' })
+                },
+              })
+            }
             tone="error"
             type="button"
             variant="tonal"
