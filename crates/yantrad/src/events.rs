@@ -36,6 +36,20 @@ pub struct Event {
     /// The exact commands an install left for a person, in order, each to be
     /// run verbatim on `machine` (Y-394). Empty for every other kind.
     pub commands: Vec<String>,
+    /// The account the machine joined as. `Some` only for `kind: "joined"`
+    /// (Y-399): a page must not infer this from `said`, which a reworded
+    /// sentence would silently change underneath it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// Whether the join found a config that already named the machine and
+    /// left it alone. `Some` only for `kind: "joined"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept: Option<bool>,
+    /// What `ssh -G` resolves for the machine. Omitted both for every other
+    /// kind and for a `joined` event where ssh could not be read — a page
+    /// already knows which, from `kind` and the event's own `user`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs_in_as: Option<String>,
 }
 
 impl Event {
@@ -59,6 +73,9 @@ impl Event {
             machine,
             said: notification.to_string(),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -70,6 +87,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine} is no longer online"),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -97,6 +117,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said,
             commands: Vec::new(),
+            user: Some(user.to_owned()),
+            kept: Some(kept),
+            logs_in_as: logs_in_as.map(str::to_owned),
         }
     }
 
@@ -110,6 +133,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine} joined, and Yantra could not reach it: {detail}"),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -121,6 +147,9 @@ impl Event {
             machine: None,
             said: yantra_core::notify::test_message().body,
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -174,6 +203,9 @@ impl Event {
             machine: Some(report.machine.clone()),
             said,
             commands,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -186,6 +218,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine}: the install did not finish: {reason}"),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -202,6 +237,9 @@ impl Event {
                  running on {machine}"
             ),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 }
@@ -268,6 +306,9 @@ mod tests {
             machine: None,
             said: format!("w{n}: finished"),
             commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -327,6 +368,29 @@ mod tests {
         });
         assert_eq!(done.kind, "installed");
         assert!(done.commands.is_empty());
+    }
+
+    /// Y-399: a page must not infer the warning from `said` — a reworded
+    /// sentence would silently change what it draws. `user`, `kept` and
+    /// `logs_in_as` carry the same facts as structured fields.
+    #[test]
+    fn joined_carries_the_account_kept_and_logs_in_as_as_fields() {
+        let normal = Event::joined("pi", "biswa", false, Some("biswa"));
+        assert_eq!(normal.user.as_deref(), Some("biswa"));
+        assert_eq!(normal.kept, Some(false));
+        assert_eq!(normal.logs_in_as.as_deref(), Some("biswa"));
+
+        let kept = Event::joined("pi", "biswa", true, Some("biswa"));
+        assert_eq!(kept.kept, Some(true));
+        assert_eq!(kept.logs_in_as.as_deref(), Some("biswa"));
+
+        let differs = Event::joined("pi", "biswa", false, Some("someone-else"));
+        assert_eq!(differs.user.as_deref(), Some("biswa"));
+        assert_eq!(differs.logs_in_as.as_deref(), Some("someone-else"));
+
+        let unknown = Event::joined("pi", "biswa", false, None);
+        assert_eq!(unknown.user.as_deref(), Some("biswa"));
+        assert_eq!(unknown.logs_in_as, None);
     }
 
     /// One package run failing for two tools is said once.

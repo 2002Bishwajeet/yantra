@@ -425,6 +425,17 @@ export const notifications = {
   "age_seconds": 0,
   "data": [
     {
+      "at": 1785522900,
+      "commands": [],
+      "kept": false,
+      "kind": "joined",
+      "logs_in_as": "biswa",
+      "machine": "pi",
+      "said": "pi joined, and Yantra logs in there as biswa",
+      "user": "biswa",
+      "workspace": null
+    },
+    {
       "at": 1785522840,
       "commands": [
         "sudo apt-get update; sudo apt-get install -y tmux"
