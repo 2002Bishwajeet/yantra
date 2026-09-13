@@ -48,13 +48,6 @@
   text-align: center;
 }
 
-/* S7: the warning must wrap, never clip, so a person can read all of it. */
-.notifications__list .m3-row[data-wrap="true"] .m3-row__headline,
-.notifications__list .m3-row[data-wrap="true"] .m3-row__supporting {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .notifications__commands {
   display: flex;
   flex-direction: column;

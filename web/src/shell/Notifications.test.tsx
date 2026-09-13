@@ -22,6 +22,9 @@ const joined: Event = {
   machine: 'pi-5',
   said: 'pi-5 joined as biswa, but the ssh config logs in there as someone-else, so Yantra cannot reach it until the owner edits that config',
   commands: [],
+  user: 'biswa',
+  kept: false,
+  logs_in_as: 'someone-else',
 }
 const installStopped: Event = {
   at: 1785522850,
@@ -56,7 +59,8 @@ describe('notifications on the desktop', () => {
     // The GitHub items still count: they have no read state of their own.
     await waitFor(() => expect(screen.getByRole('button', { name: /Notifications\s*2 unread/ })).toBeTruthy())
     fireEvent.click(popover.getByRole('radio', { name: 'All' }))
-    expect((await popover.findAllByRole('listitem')).length).toBe(7)
+    // Y-399's fixture `joined` event is the eighth (contract.gen.ts).
+    expect((await popover.findAllByRole('listitem')).length).toBe(8)
   })
 })
 
@@ -71,7 +75,7 @@ describe('install and join rows (Y-399)', () => {
     const joinedItem = items.find((item) => item.textContent?.includes('as another account'))
     expect(joinedItem).toBeTruthy()
     expect(joinedItem!.textContent).toContain(joined.said)
-    expect(joinedItem!.querySelector('.m3-row')!.getAttribute('data-wrap')).toBe('true')
+    expect(joinedItem!.querySelector('.m3-row__supporting')!.classList.contains('m3-wrap')).toBe(true)
     expect(joinedItem!.querySelector('.m3-tile--icon')).toBeTruthy()
     expect(within(joinedItem!).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/pi-5')
 
@@ -86,6 +90,7 @@ describe('install and join rows (Y-399)', () => {
     const plain: Event = {
       ...joined,
       said: 'pi-5 joined, and Yantra logs in there as biswa',
+      logs_in_as: 'biswa',
     }
     mount('desktop', '/', {
       overrides: { '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [plain] } } },
@@ -113,6 +118,12 @@ describe('the footer reads the relay (Y-399)', () => {
     mount('desktop', '/', { overrides: { '/api/about': { body: { ...contract.about, relay: false } } } })
     const popover = await open()
     expect(await popover.findByText('Push to your phone is off')).toBeTruthy()
+  })
+
+  it('says unknown while about has not answered', async () => {
+    mount('desktop', '/', { overrides: { '/api/about': { status: 503, body: 'not now' } } })
+    const popover = await open()
+    expect(await popover.findByText('Push to your phone is unknown')).toBeTruthy()
   })
 })
 

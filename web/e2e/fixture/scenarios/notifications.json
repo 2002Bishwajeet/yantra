@@ -27,7 +27,10 @@
         "workspace": null,
         "machine": "thinkpad",
         "said": "thinkpad joined as biswa, but the ssh config logs in there as someone-else, so Yantra cannot reach it until the owner edits that config",
-        "commands": []
+        "commands": [],
+        "user": "biswa",
+        "kept": false,
+        "logs_in_as": "someone-else"
       },
       {
         "at": 1788699240,
@@ -43,7 +46,10 @@
         "workspace": null,
         "machine": "macbook",
         "said": "macbook joined, and Yantra logs in there as biswa",
-        "commands": []
+        "commands": [],
+        "user": "biswa",
+        "kept": false,
+        "logs_in_as": "biswa"
       },
       { "at": 1788695760, "kind": "awaiting_trust", "workspace": "yantra-web", "machine": "cachyos-g14", "said": "Claude wants cargo test", "commands": [] },
       { "at": 1788516000, "kind": "relay-test", "workspace": null, "machine": null, "said": "yantra can reach this topic · ntfy.sh", "commands": [] }

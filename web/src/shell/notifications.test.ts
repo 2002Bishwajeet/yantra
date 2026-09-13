@@ -6,7 +6,8 @@ const trust: Event = { at: 100, kind: 'awaiting_trust', workspace: 'api', machin
 const relay: Event = { at: 50, kind: 'relay-test', workspace: null, machine: null, said: 'reached', commands: [] }
 const gone: Event = { at: 75, kind: 'unreachable', workspace: null, machine: 'thinkpad', said: 'no route', commands: [] }
 
-// `events.rs::joined`'s four sentences (§ notifications.ts, `NORMAL_JOIN`).
+// `events.rs::joined`'s four cases, as the structured fields carry them
+// (Y-399) rather than as `said`'s wording, which a page must not parse.
 const joinedNormal: Event = {
   at: 200,
   kind: 'joined',
@@ -14,6 +15,9 @@ const joinedNormal: Event = {
   machine: 'pi',
   said: 'pi joined, and Yantra logs in there as biswa',
   commands: [],
+  user: 'biswa',
+  kept: false,
+  logs_in_as: 'biswa',
 }
 const joinedDiffers: Event = {
   at: 210,
@@ -23,6 +27,9 @@ const joinedDiffers: Event = {
   said:
     'pi joined as biswa, but the ssh config logs in there as someone-else, so Yantra cannot reach it until the owner edits that config',
   commands: [],
+  user: 'biswa',
+  kept: false,
+  logs_in_as: 'someone-else',
 }
 const joinedKept: Event = {
   at: 220,
@@ -31,6 +38,20 @@ const joinedKept: Event = {
   machine: 'pi',
   said: 'pi joined as biswa, and the ssh config already named it with that account, so it was kept',
   commands: [],
+  user: 'biswa',
+  kept: true,
+  logs_in_as: 'biswa',
+}
+const joinedUnknown: Event = {
+  at: 225,
+  kind: 'joined',
+  workspace: null,
+  machine: 'pi',
+  said: 'pi joined as biswa, and Yantra could not read which account its ssh config logs in as',
+  commands: [],
+  user: 'biswa',
+  kept: false,
+  logs_in_as: undefined,
 }
 const installed: Event = {
   at: 230,
@@ -115,6 +136,12 @@ describe('join and install rows (Y-399)', () => {
     const [entry] = merge([joinedKept], null)
     expect(entry.mark).toBe('needs')
     expect(entry.supporting).toBe(joinedKept.said)
+  })
+
+  it('an unreadable ssh config is the same warning, not the happy path', () => {
+    const [entry] = merge([joinedUnknown], null)
+    expect(entry.mark).toBe('needs')
+    expect(entry.supporting).toBe(joinedUnknown.said)
   })
 
   it('an install with nothing left for a person is done', () => {

@@ -34,11 +34,6 @@ export function asEvents(data: unknown): Event[] {
   return []
 }
 
-// `events.rs::joined`'s only sentence that names no problem. The other three
-// (kept, differs, unreadable) all read "{machine} joined as {user}, …" —
-// distinct enough that matching this one line is the whole of the check.
-const NORMAL_JOIN = / joined, and Yantra logs in there as (.+)$/
-
 function ofEvent(event: Event, index: number): Entry {
   const who = event.workspace ?? event.machine ?? 'the daemon'
   const tile: Entry['tile'] = event.workspace
@@ -49,9 +44,12 @@ function ofEvent(event: Event, index: number): Entry {
   const base = { id: `event-${event.at}-${index}`, at: event.at, tile }
 
   if (event.kind === 'joined' && event.machine) {
-    const normal = NORMAL_JOIN.exec(event.said)
+    // Structured, not parsed from `said` (Y-399): a reworded sentence in
+    // `events.rs` must not silently flip this. `kept` is always sent for a
+    // `joined` event; `logs_in_as` is absent when ssh could not be read.
+    const normal = event.kept === false && event.logs_in_as === event.user
     return normal
-      ? { ...base, headline: `${event.machine} joined`, supporting: `as ${normal[1]}`, mark: 'done', open: event.machine }
+      ? { ...base, headline: `${event.machine} joined`, supporting: `as ${event.user}`, mark: 'done', open: event.machine }
       : {
           ...base,
           headline: `${event.machine} joined, as another account`,

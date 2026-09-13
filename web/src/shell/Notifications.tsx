@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { GitPullRequest, Laptop, Radio } from 'lucide-react'
 import { asApiError } from '@/api/errors'
@@ -26,6 +26,19 @@ function EntryTile(props: { tile: Entry['tile'] }) {
   return <IconTile>{tile.kind === 'github' ? <GitPullRequest /> : <Radio />}</IconTile>
 }
 
+/** `RowText` always clips (finding S7): a warning that must stay whole uses
+ *  the shared `.m3-wrap` utility on plain spans instead. */
+function EntryText(props: { entry: Entry; supporting: ReactNode }) {
+  const { entry, supporting } = props
+  if (!entry.wrap) return <RowText headline={entry.headline} supporting={supporting} />
+  return (
+    <div className="m3-row__text">
+      <span className="m3-row__headline m3-wrap">{entry.headline}</span>
+      <span className="m3-row__supporting m3-wrap">{supporting}</span>
+    </div>
+  )
+}
+
 function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
   const { entry, now, onOpen } = props
   const commands = entry.commands ?? []
@@ -38,13 +51,9 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
   )
   return (
     <li>
-      <Row
-        data-wrap={entry.wrap ? 'true' : undefined}
-        render={entry.href ? <a href={entry.href} rel="noreferrer" target="_blank" /> : undefined}
-        tone="lowest"
-      >
+      <Row render={entry.href ? <a href={entry.href} rel="noreferrer" target="_blank" /> : undefined} tone="lowest">
         <EntryTile tile={entry.tile} />
-        <RowText headline={entry.headline} supporting={supporting} />
+        <EntryText entry={entry} supporting={supporting} />
         {entry.answer ? (
           <Button
             onClick={onOpen}
@@ -140,7 +149,13 @@ export function NotificationsList(props: { onOpen?: () => void }) {
         ) : null,
       )}
       <p className="notifications__foot">
-        <span>{about.data?.relay ? 'Push to your phone is on' : 'Push to your phone is off'}</span>
+        <span>
+          {about.data
+            ? about.data.relay
+              ? 'Push to your phone is on'
+              : 'Push to your phone is off'
+            : 'Push to your phone is unknown'}
+        </span>
         <Link params={{ category: 'notifications' }} to="/settings/$category">
           Settings
         </Link>
