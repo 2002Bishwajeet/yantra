@@ -161,6 +161,119 @@ test.describe('the three beats', () => {
   });
 });
 
+/* What a crawler and a link preview read. Nothing here is visible, so no screenshot catches a tag
+   that goes missing. */
+test.describe('the head', () => {
+  const site = 'https://yantra.cloudx.run';
+  const repo = 'https://github.com/2002Bishwajeet/yantra';
+  const title = 'Yantra — one workspace, one interface, every machine';
+  const description =
+    'Name the work, not the machine. Yantra conducts ssh, tmux and your agent across your own machines, over Tailscale.';
+  const alt =
+    'Vishvakarma, the divine craftsman, at work on a gear, beside the words: Name the work, not the machine.';
+
+  test('it names the page, the card and the icons', async ({ page }) => {
+    await page.goto('/');
+    const tags: [string, string][] = [
+      ['link[rel="canonical"]', `${site}/`],
+      ['meta[property="og:type"]', 'website'],
+      ['meta[property="og:site_name"]', 'Yantra'],
+      ['meta[property="og:title"]', title],
+      ['meta[property="og:description"]', description],
+      ['meta[property="og:url"]', `${site}/`],
+      ['meta[property="og:image"]', `${site}/og.jpg`],
+      ['meta[property="og:image:width"]', '1200'],
+      ['meta[property="og:image:height"]', '630'],
+      ['meta[property="og:image:type"]', 'image/jpeg'],
+      ['meta[property="og:image:alt"]', alt],
+      ['meta[property="og:locale"]', 'en'],
+      ['meta[name="twitter:card"]', 'summary_large_image'],
+      ['meta[name="twitter:title"]', title],
+      ['meta[name="twitter:description"]', description],
+      ['meta[name="twitter:image"]', `${site}/og.jpg`],
+      ['meta[name="twitter:image:alt"]', alt],
+      ['meta[name="color-scheme"]', 'dark'],
+      ['meta[name="theme-color"]', '#0B0806'],
+      ['link[rel="icon"][sizes="32x32"]', '/favicon.ico'],
+      ['link[rel="icon"][type="image/svg+xml"]', '/favicon.svg'],
+      ['link[rel="apple-touch-icon"]', '/apple-touch-icon.png'],
+      ['link[rel="manifest"]', '/site.webmanifest'],
+    ];
+    for (const [selector, value] of tags) {
+      const tag = page.locator(`head ${selector}`);
+      await expect(tag, selector).toHaveCount(1);
+      await expect(tag, selector).toHaveAttribute(selector.startsWith('link') ? 'href' : 'content', value);
+    }
+  });
+
+  /* Against the manifest, like the download button: a bump that forgets the landing fails here. */
+  test('it describes the software, at the version in Cargo.toml', async ({ page }) => {
+    await page.goto('/');
+    const scripts = page.locator('head script[type="application/ld+json"]');
+    await expect(scripts).toHaveCount(1);
+    const software = JSON.parse((await scripts.textContent())!);
+    expect(software).toEqual({
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'Yantra',
+      description,
+      url: `${site}/`,
+      applicationCategory: 'DeveloperApplication',
+      operatingSystem: 'Linux, macOS',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      license: `${repo}/blob/main/LICENSE`,
+      softwareVersion: version,
+      downloadUrl: `${repo}/releases/tag/v${version}`,
+      codeRepository: repo,
+      sameAs: [repo],
+      image: `${site}/og.jpg`,
+    });
+  });
+
+  /* A tag that names a file the build lost is worse than no tag: the preview shows a broken card. */
+  test('every file the head names is served', async ({ request }) => {
+    for (const path of [
+      '/og.jpg',
+      '/favicon.ico',
+      '/favicon.svg',
+      '/apple-touch-icon.png',
+      '/icon-192.png',
+      '/icon-512.png',
+      '/icon-maskable-512.png',
+      '/site.webmanifest',
+      '/robots.txt',
+      '/sitemap.xml',
+    ]) {
+      expect((await request.get(path)).status(), path).toBe(200);
+    }
+  });
+
+  test('the manifest lists the three icons', async ({ request }) => {
+    const manifest = await (await request.get('/site.webmanifest')).json();
+    expect(manifest).toMatchObject({
+      name: 'Yantra',
+      short_name: 'Yantra',
+      theme_color: '#0B0806',
+      background_color: '#0B0806',
+      display: 'browser',
+    });
+    expect(manifest.icons).toEqual([
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ]);
+  });
+
+  test('robots.txt allows everything and names the sitemap', async ({ request }) => {
+    const robots = await (await request.get('/robots.txt')).text();
+    expect(robots).toContain('User-agent: *\nAllow: /');
+    expect(robots).toContain(`Sitemap: ${site}/sitemap.xml`);
+    expect(robots).not.toContain('Disallow');
+    const sitemap = await (await request.get('/sitemap.xml')).text();
+    expect(sitemap).toContain(`<loc>${site}/</loc>`);
+  });
+});
+
 test.describe('copying', () => {
   test.use({
     viewport: VIEWS.desktop,

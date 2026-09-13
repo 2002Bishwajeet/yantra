@@ -178,6 +178,23 @@ visual regression still gate every PR regardless. A fork PR gets no secrets on
 build, privileged deploy), never `pull_request_target`, which would run with secrets against
 unreviewed code.
 
-`site` is deliberately unset in `astro.config.mjs`. Set it once there is a stable domain —
-leave it fixed at the production URL rather than the per-PR preview, or throwaway preview
-domains start self-canonicalising into search results.
+`site` in `astro.config.mjs` is the production URL, `https://yantra.cloudx.run`, and it
+stays fixed there rather than following the per-PR preview. The canonical URL and `og:url`
+are built from it, so a preview domain never canonicalises itself into search results.
+
+## The head, the sitemap and the icons
+
+`Layout.astro` gives the page a canonical URL, Open Graph and X card tags, and the icon
+links. The link preview is `public/og.jpg`, 1200x630. `index.astro` adds one JSON-LD
+`SoftwareApplication`, which carries the version it reads from `Cargo.toml`. A test asserts
+each tag, and a second test asserts that every file the head names answers 200.
+
+The sitemap is a static `public/sitemap.xml` with one URL, not `@astrojs/sitemap`. The site
+has one page, and the integration adds a dependency and a sitemap index to say the same
+thing. Add a page and you add a `<url>` by hand. `public/robots.txt` allows everything and
+names the sitemap.
+
+The owner approved the icon set on 2026-09-13: `favicon.svg`, `favicon.ico` (16, 32 and 48),
+`apple-touch-icon.png` and the three icons in `site.webmanifest`. The manifest says
+`display: browser`, because this is a page and not an app. Their source SVGs live in
+`design/brand/`, which a separate PR adds.
