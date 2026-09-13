@@ -197,7 +197,22 @@ function entriesOf(state, path) {
  *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
  *  for an empty body. */
 const routes = [
-  ['GET', /^\/api\/machines$/, (s) => [200, s.machines]],
+  // `arrives` is a node that joins the tailnet a while after the first look,
+  // which is what Add a device's first beat waits for (Y-390).
+  [
+    'GET',
+    /^\/api\/machines$/,
+    (s) => {
+      if (s.arrives && s.machines.looked === 'ok') {
+        s.firstLook ??= Date.now()
+        const { after, machine } = s.arrives
+        if (Date.now() - s.firstLook >= after && !s.machines.data.some((one) => one.name === machine.name)) {
+          s.machines.data.push(machine)
+        }
+      }
+      return [200, s.machines]
+    },
+  ],
   ['GET', /^\/api\/workspaces$/, (s) => [200, s.workspaces]],
   ['GET', /^\/api\/sessions$/, (s) => [200, s.sessions]],
   ['GET', /^\/api\/readiness$/, (s) => [200, s.readiness]],
@@ -254,6 +269,9 @@ const routes = [
     /^\/api\/machines\/([^/]+)\/readiness$/,
     (s, [machine], _, request) => {
       if (s.readiness.looked !== 'ok') return [200, s.readiness]
+      // A machine no workspace names answers a re-check (write.rs `recheck`
+      // takes any name), and `asked` is what it answers.
+      if (request.method === 'POST' && s.asked?.[machine]) return [200, ok(s.asked[machine])]
       const one = s.readiness.data.find((r) => r.machine === machine)
       if (one) return [200, ok(one)]
       // The GET is api.rs's (JSON); the POST is a verb in write.rs (a string).
@@ -452,6 +470,31 @@ const routes = [
       if (s.installing[machine]) return [409, `an install is already running on ${machine}`]
       s.installing[machine] = Date.now() + plan.after
       return [202]
+    },
+  ],
+  // ADR-0029: the machine is the caller, named by `whois`. The fixture has no
+  // caller, so `x-fixture-machine` names it (D7 T9).
+  [
+    'POST',
+    /^\/api\/join$/,
+    (s, _, sent, request) => {
+      const machine = request.headers['x-fixture-machine']
+      if (!machine) return [503, 'tailscale knows the caller as a node it does not list, so there is no machine name to write']
+      if (!sent.user) return [400, 'a join names the account it ran as']
+      const reply = { user: sent.user, kept: false, logs_in_as: sent.user }
+      if (s.notifications.looked === 'ok') {
+        const at = Math.max(0, ...s.notifications.data.map((one) => one.at)) + 60
+        s.notifications.data.unshift({
+          at,
+          kind: 'joined',
+          workspace: null,
+          machine,
+          said: `${machine} joined, and Yantra logs in there as ${sent.user}`,
+          commands: [],
+          ...reply,
+        })
+      }
+      return [200, { machine, ...reply }]
     },
   ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],

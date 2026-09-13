@@ -11,6 +11,11 @@
   min-width: 0;
 }
 
+.machines__add {
+  align-self: center;
+  margin-left: auto;
+}
+
 .machines__looked {
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line-height);

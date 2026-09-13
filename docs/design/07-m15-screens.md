@@ -217,7 +217,14 @@ Components are from `web/src/m3/` unless the text names them as **new**.
 ### 4.1 The setup checklist — `/` on first run
 
 **When it is the page:** while there is no workspace, and either the key does not exist or no
-machine is *ready* (all ten checks present). This is ruling (b), and B1 is the fix.
+machine is *ready*. This is ruling (b), and B1 is the fix.
+
+> **2026-09-13, Y-390 review:** *ready* is the seven checks a session needs, all present:
+> `reachable`, `sshd`, `tmux`, `git`, `agent-cli`, `terminfo` and `login-session`. GitHub and
+> `yantra-agent` are optional, so `provider-cli`, `provider-auth` and `heartbeat` do not hold it
+> back. The coordinator ruled this by the owner's delegation. One function holds it,
+> `web/src/lib/ready.ts`, and the home gate and beat 4 below both use it. Where this document says
+> *all ten checks*, read these seven.
 
 **The words at the top.**
 

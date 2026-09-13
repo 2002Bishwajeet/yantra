@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
-import { github, joinCommand, joinUrl, line, machines, push, ready, sshKey, tailnet } from './steps'
+import { joinCommand, joinUrl } from '@/lib/join'
+import { added, github, line, machines, push, ready, tailnet } from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -16,6 +17,10 @@ const machine = (over: Partial<Machine> = {}): Machine => ({
 const report = (checks: Readiness['checks']): Readiness => ({ machine: 'pi-5', checks })
 const check = (name: string, state: string, detail = '') =>
   ({ check: name, state, detail }) as Readiness['checks'][number]
+
+/** The seven checks a session needs (`lib/ready`), each in the state given. */
+const needs = (over: Record<string, string> = {}) =>
+  ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((name) => check(name, over[name] ?? 'present'))
 
 describe('the step each read makes', () => {
   it('reads while nothing has answered, and fails with the daemon words', () => {
@@ -33,17 +38,22 @@ describe('the step each read makes', () => {
     expect(tailnet(got({ ...contract.about, tailnet: null }), 'http:').status).toBe('todo')
   })
 
-  /** The daemon makes its key on the first join (ADR-0029), so a 404 is a
-   *  step that waits and names no command to run. */
-  it('reads a 404 on the identity as a key the first join makes', () => {
-    const missing = sshKey(broke(new ApiError('missing', 'no identity', { status: 404 })))
-    expect(missing).toEqual({ status: 'todo', words: 'made when the first machine joins' })
-    expect(missing.words).not.toMatch(/yantra|`/)
-    expect(sshKey(got(contract.sshIdentity))).toEqual({
-      status: 'done',
-      words: 'created on the appliance · SHA256:<fingerprint>',
+  /** D7 §4.1 step 2: a join, which also makes the key (ADR-0029). */
+  it('is done at the first machine that joined, and names no command before it', () => {
+    const none = added([])
+    expect(none).toEqual({ status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' })
+    expect(none.words).not.toMatch(/yantra|`/)
+    expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined' })
+  })
+
+  /** With no key made, ssh that gets in used the account's own keys. */
+  it("says a machine ssh reaches without Yantra's key is not joined, and what to run", () => {
+    expect(added([], ['pi-5'])).toEqual({
+      status: 'todo',
+      words: "pi-5 reached without Yantra's key · run the join command on it once",
     })
-    expect(sshKey(broke(new ApiError('refused', 'boom', { status: 503 }))).status).toBe('failed')
+    expect(added([], ['pi-5', 'nas']).words).toBe("pi-5, nas reached without Yantra's key · run the join command on each once")
+    expect(added(['pi-5'], ['nas']).status).toBe('done')
   })
 
   it('says who GitHub is signed in as, and that a flow is waiting', () => {
@@ -72,12 +82,9 @@ describe('the step each read makes', () => {
 })
 
 describe("a machine's line", () => {
-  it('is unreachable before ssh, with the age of the last sighting', () => {
-    const off = line(machine({ online: false }), null, '3h')
-    expect(off).toEqual({
-      kind: 'unreachable',
-      words: 'unreachable · last seen 3h ago · nothing behind ssh could be asked',
-    })
+  /** D7 §3.3: off is asleep, which is normal and never an error. */
+  it('is asleep before ssh, with the age of the last sighting', () => {
+    expect(line(machine({ online: false }), null, '3h')).toEqual({ kind: 'asleep', since: '3h' })
   })
 
   it('is unchecked while no report exists, because a check costs a round trip', () => {
@@ -92,43 +99,46 @@ describe("a machine's line", () => {
     const silent = report([check('reachable', 'absent', 'No route to host')])
     expect(line(machine(), silent, null)).toEqual({
       kind: 'unreachable',
-      words: 'unreachable · No route to host',
+      words: 'ssh did not answer · No route to host',
     })
   })
 
-  it('is ready when every check is present, and names the ones that matter', () => {
-    const all = report([
-      check('reachable', 'present'),
-      check('sshd', 'present'),
-      check('tmux', 'present'),
-      check('agent-cli', 'present'),
-    ])
-    const one = line(machine(), all, null)
-    expect(one).toEqual({ kind: 'ready', present: 4, total: 4, words: 'sshd, tmux, claude' })
+  it('is ready when the seven checks a session needs are present', () => {
+    const one = line(machine(), report(needs()), null)
+    expect(one).toEqual({ kind: 'ready', present: 7, total: 7 })
     expect(ready(one)).toBe(true)
   })
 
-  it('names what is missing and what could not be asked, in the board words', () => {
-    const some = report([
-      check('reachable', 'present'),
-      check('tmux', 'absent'),
-      check('provider-auth', 'unknown'),
-    ])
+  /** GitHub and `yantra-agent` are optional, so neither holds ready back. */
+  it('is ready with gh missing and no heartbeat, and counts every check it shows', () => {
+    const optional = report([...needs(), check('provider-auth', 'absent'), check('heartbeat', 'absent')])
+    expect(line(machine(), optional, null)).toEqual({ kind: 'ready', present: 7, total: 9 })
+  })
+
+  /** Install is not what fixes terminfo (D7 §3.5). */
+  it('is not ready while a check a session needs is missing, and says whether Install fixes it', () => {
+    expect(line(machine(), report(needs({ terminfo: 'absent' })), null)).toMatchObject({
+      kind: 'missing',
+      words: 'missing terminfo',
+      installable: false,
+    })
+  })
+
+  it('names only the checks that hold ready back, and whether Install fixes them', () => {
+    const some = report([...needs({ tmux: 'absent', 'login-session': 'unknown' }), check('provider-auth', 'unknown')])
     expect(line(machine(), some, null)).toEqual({
       kind: 'missing',
-      present: 1,
-      total: 3,
-      words: 'missing tmux · could not ask about gh signed in',
+      present: 5,
+      total: 8,
+      words: 'missing tmux · could not ask about claude signed in',
+      installable: true,
     })
   })
 })
 
-describe('the machines step', () => {
+describe('the ready step', () => {
   const named = (kind: string, name: string) => ({ machine: name, line: { kind } as never })
-  const up = (name: string) => ({
-    machine: name,
-    line: { kind: 'ready', present: 2, total: 2, words: 'tmux' } as const,
-  })
+  const up = (name: string) => ({ machine: name, line: { kind: 'ready', present: 2, total: 2 } as const })
 
   it('has nothing to check when the tailnet lists no machine that runs a session', () => {
     expect(machines([])).toEqual({ status: 'todo', words: 'this tailnet lists no machine that runs Linux or macOS' })
@@ -141,8 +151,8 @@ describe('the machines step', () => {
     })
   })
 
-  it('is in progress while checked machines are none of them ready', () => {
-    expect(machines([named('refused', 'nas'), named('unreachable', 'pi-5')])).toEqual({
+  it('is in progress while the machines it knows are none of them ready', () => {
+    expect(machines([named('refused', 'nas'), named('asleep', 'pi-5')])).toEqual({
       status: 'progress',
       words: '0 of 2 machines ready · one ready machine finishes this step',
     })

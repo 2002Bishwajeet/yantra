@@ -27,7 +27,10 @@ test.describe('the dashboard on a busy fleet', () => {
 
   test('draws the strip, the hero, Running and Worth a look', async ({ page }) => {
     await expect(page.getByText('5 of 6 machines online')).toBeVisible()
-    await expect(page.getByRole('link', { name: /^Fix/ })).toHaveAttribute('href', '/m/thinkpad')
+    // D7 §3.3 and §4.9: a machine the tailnet sees off is asleep, and Open
+    // replaces Fix.
+    await expect(page.getByText(/thinkpad asleep/)).toBeVisible()
+    await expect(page.getByRole('link', { name: /^Open/ }).and(page.locator('[href="/m/thinkpad"]'))).toBeVisible()
 
     const hero = region(page, 'Needs you')
     await expect(hero.getByText('things are waiting on you')).toBeVisible()

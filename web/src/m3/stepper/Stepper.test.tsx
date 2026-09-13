@@ -16,3 +16,27 @@ describe('Stepper', () => {
     expect(items[3].textContent).toBe('4Start')
   })
 })
+
+describe('Stepper, vertical', () => {
+  it('says each state, and folds a done step to its title and line', () => {
+    render(
+      <Stepper
+        items={[
+          { title: 'On the tailnet', state: 'done', words: 'pi is on the tailnet', body: 'install Tailscale' },
+          { title: 'Joined', state: 'stuck', words: 'ssh logs in as another account', body: 'the join command' },
+          { title: 'Reachable', state: 'current', words: 'checking', body: 'Check again' },
+          { title: 'Ready', state: 'ahead' },
+        ]}
+        orientation="vertical"
+      />,
+    )
+    const items = screen.getAllByRole('listitem')
+    expect(screen.getByRole('list').dataset.orientation).toBe('vertical')
+    expect(items[0].textContent).toBe('On the tailnet, donepi is on the tailnet')
+    expect(items[1].textContent).toContain('Joined, stuck')
+    expect(items[1].textContent).toContain('the join command')
+    expect(items[2].getAttribute('aria-current')).toBe('step')
+    expect(items[2].textContent).toContain('Check again')
+    expect(items[3].textContent).toBe('4Ready')
+  })
+})

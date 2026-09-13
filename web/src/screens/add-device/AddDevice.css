@@ -1,0 +1,133 @@
+/* D7 §4.2: one column, 720 at most, at every size. */
+.add-device {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  margin: 0 auto;
+  padding-top: 8px;
+}
+
+.add-device__head,
+.add-device__pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.add-device__pick {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.add-device__pick .m3-segmented {
+  max-width: 100%;
+}
+
+.add-device__beats {
+  padding: 0 4px;
+}
+
+.add-device__card {
+  gap: 12px;
+}
+
+.add-device__actions,
+.add-device__candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A tailnet name can be 63 characters, wider than a phone. */
+.add-device__candidates > li {
+  max-width: 100%;
+}
+
+.add-device__candidates .m3-button {
+  max-width: 100%;
+  height: auto;
+  overflow-wrap: anywhere;
+}
+
+/* The command and the QR code side by side above a phone (D7 §4.2). */
+.add-device__join {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+
+.add-device__join-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* A scanner wants dark on light in either theme. */
+.add-device__qr {
+  flex: none;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff;
+  line-height: 0;
+}
+
+.add-device__qr-wait {
+  width: 112px;
+  height: 112px;
+}
+
+.add-device__link {
+  color: var(--md-sys-color-primary);
+  text-underline-offset: 2px;
+}
+
+.add-device__link:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* A plain link is not `.m3-interactive`, so it draws its own ring. */
+.add-device__link:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+[data-shell="phone"] .add-device {
+  gap: 16px;
+}
+
+[data-shell="phone"] .add-device__join {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Four segments are wider than a phone: two rows of two inside one outline.
+   Base UI puts an input between the segments, so `nth-of-type` counts only
+   them. */
+[data-shell="phone"] .add-device__pick .m3-segmented {
+  width: 100%;
+  grid-auto-flow: row;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+[data-shell="phone"] .add-device__pick .m3-segment {
+  border-radius: 0;
+}
+
+[data-shell="phone"] .add-device__pick .m3-segment:nth-of-type(3) {
+  border-left: 0;
+}
+
+[data-shell="phone"] .add-device__pick .m3-segment:nth-of-type(n + 3) {
+  border-top: 1px solid var(--md-sys-color-outline);
+}

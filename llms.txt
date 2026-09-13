@@ -31,7 +31,7 @@ the repo.
 
 ## The dashboard
 
-- [web/README.md](web/README.md): the browser half — twelve routes on TanStack Router over the JSON `yantrad` serves at `/api`. React 19 with the compiler, TanStack Router, Query, Form, Table and Virtual, Base UI for behaviour, and Material 3 Expressive hand-built in `web/src/m3/` with every role a custom property in `m3/tokens.css`. Tested with Vitest and with Playwright plus axe at 390, 834 and 1440 against a Node fixture daemon built from `web/src/contract.gen.ts`. The first load of `/` has a 145 KiB ceiling and the fonts an 80 KiB one, both measured by `npm run budget`. The fonts hold; the first load does not, so `web.yml` runs the budget advisory until it does.
+- [web/README.md](web/README.md): the browser half — thirteen routes on TanStack Router over the JSON `yantrad` serves at `/api`. React 19 with the compiler, TanStack Router, Query, Form, Table and Virtual, Base UI for behaviour, and Material 3 Expressive hand-built in `web/src/m3/` with every role a custom property in `m3/tokens.css`. Tested with Vitest and with Playwright plus axe at 390, 834 and 1440 against a Node fixture daemon built from `web/src/contract.gen.ts`. The first load of `/` has a 145 KiB ceiling and the fonts an 80 KiB one, both measured by `npm run budget`. The fonts hold; the first load does not, so `web.yml` runs the budget advisory until it does.
 - [docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md](docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md): why the components are ours rather than a library's, and it supersedes [ADR-0014](docs/adr/0014-react-with-the-compiler-for-the-web-ui.md)'s component and styling rows. Read it before proposing a UI package.
 
 ## Decisions

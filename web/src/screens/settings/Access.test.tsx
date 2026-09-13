@@ -20,6 +20,8 @@ describe('Access', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show key' }))
     const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
     expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeTruthy()
+    // D7 §4.5: the join command places the key, and by hand is the fallback.
+    expect(sheet.getByText(/The join command places this key for you/)).toBeTruthy()
     fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
     expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh-ed25519 /))
     expect(await sheet.findByRole('button', { name: 'Copied the public key' })).toBeTruthy()
@@ -42,12 +44,14 @@ describe('Access', () => {
     expect(await sheet.findByText(/no clipboard, so the text is selected/)).toBeTruthy()
   })
 
-  it('says a key the daemon has not made is not created, and how to make it', async () => {
+  /** ADR-0029: the first join makes the key, so there is nothing to run. */
+  it('says a key the daemon has not made is made by the first join, and opens Add a device', async () => {
     mountSettings('desktop', '/settings/access', {
       'GET /api/ssh-identity': [404, { error: 'no identity: run `yantra ssh-identity`' }],
     })
-    expect(await screen.findByText(/not created · run/)).toBeTruthy()
-    expect(screen.getByText('yantra ssh-identity')).toBeTruthy()
+    expect(await screen.findByText('Made when the first machine joins')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Add a device' }).getAttribute('href')).toBe('/machines/add')
+    expect(screen.queryByText(/yantra ssh-identity/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Show key' })).toBeNull()
   })
 
@@ -55,6 +59,8 @@ describe('Access', () => {
     mountSettings('desktop', '/settings/access')
     expect(await screen.findByText('Anyone on the tailnet <tailnet>.ts.net')).toBeTruthy()
     expect(screen.getByText('Listen addresses')).toBeTruthy()
-    expect(screen.getByText('100.64.0.1:7717 · [fd7a:115c:a1e0::1]:7717')).toBeTruthy()
+    // D7 §4.5: one address per line, so a phone does not cut one off.
+    expect(screen.getByText('100.64.0.1:7717')).toBeTruthy()
+    expect(screen.getByText('[fd7a:115c:a1e0::1]:7717')).toBeTruthy()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fixOf, nameOf } from './checks'
+import { CHECK_IDS, fixOf, nameOf, sessionNeeds } from './checks'
 
 describe('the check name table', () => {
   it('names each of doctor’s ten checks the way a person says it', () => {
@@ -29,5 +29,12 @@ describe('the check name table', () => {
     expect(fixOf('agent-cli', 'pi')).toEqual({ by: 'install' })
     expect(fixOf('terminfo', 'pi')).toEqual({ by: 'command', command: 'yantra fix-terminfo pi', where: 'appliance' })
     expect(fixOf('provider-auth', 'pi')).toEqual({ by: 'command', command: 'gh auth login', where: 'machine' })
+  })
+
+  /** Y-390 review: GitHub and `yantra-agent` are optional for a session. */
+  it('lists doctor’s ids in order, and says which of them a session needs', () => {
+    expect(CHECK_IDS).toHaveLength(10)
+    expect(CHECK_IDS.filter(sessionNeeds)).toEqual(['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'])
+    expect(sessionNeeds('docker')).toBe(false)
   })
 })

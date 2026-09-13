@@ -14,6 +14,8 @@ export type Scenario =
   | 'firstrun'
   | 'install'
   | 'notifications'
+  | 'adding'
+  | 'setup'
 
 /** Every stamp in the scenarios is aged against this instant, so an age reads
  *  the same on every run and in every screenshot. */
