@@ -491,7 +491,7 @@ crashed agent and a hyperlink end up the same colour*.
 > running at 1.01:1 and running and failed at 1.2:1, so two filled dots could not be told apart.
 > Needs is now a filled triangle and failed a filled diamond. Running stays a disc, idle a thin ring,
 > unknown a dashed ring and done a thick ring. The words beside a mark take the colour of where they
-> sit. D7 §3.2 decided the diamond; the triangle applies the same rule to needs.
+> sit. [D7](07-m15-screens.md) §3.2 decided the diamond; the triangle applies the same rule to needs.
 
 ---
 
