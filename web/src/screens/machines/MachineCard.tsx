@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import type { Check, Machine } from '@/api'
-import { useAbout } from '@/api/hooks'
-import { useInstall } from '@/api/mutations'
+import { useAbout, useNotifications } from '@/api/hooks'
+import { useInstall, useRecheckReadiness } from '@/api/mutations'
 import { nameOf } from '@/lib/checks'
 import { joinCommand, joinUrl } from '@/lib/join'
 import { at } from '@/lib/time'
@@ -15,6 +15,8 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Ago } from '@/screens/fleet/age'
 import { isAge } from '@/screens/fleet/clock'
+import { answer, newestInstall, type Watch } from '@/screens/machine/install'
+import { asEvents } from '@/shell/notifications'
 import { Doctor } from './Doctor'
 import { CARD_CHECKS, cardChip, cardVerdict, checkNamed, markOf, summary, tally, wordOf } from './facts'
 
@@ -63,22 +65,49 @@ function CheckLine(props: { check: Check }) {
   )
 }
 
-/** D7 §4.4: a basic is missing, and Install (`yantra install`) can fix it. */
+/** D7 §4.4: a basic is missing, and Install (`yantra install`) can fix it.
+ *  Watches for the result the way the machine page's Readiness card does
+ *  (`Watch`, `answer`, `newestInstall` from `screens/machine/install`), so a
+ *  press here shows running and asks readiness again once it lands, rather
+ *  than a second watch of its own. */
 function Install(props: { machine: string }) {
   const { machine } = props
+  const notifications = useNotifications()
+  const events = asEvents(notifications.data)
   const install = useInstall()
+  const recheck = useRecheckReadiness()
+  const [watch, setWatch] = useState<Watch | null>(null)
+  const fresh = watch ? answer(events, machine, watch) : null
+  const running = watch !== null && !fresh
+
+  const answered = fresh?.at
+  const { mutate: ask } = recheck
+  useEffect(() => {
+    if (answered !== undefined) ask(machine)
+  }, [answered, machine, ask])
+
+  const press = () => {
+    const since = newestInstall(events, machine)?.at ?? 0
+    const waiting = () => setWatch({ since, pressed: Date.now() })
+    install.mutate(machine, {
+      onSuccess: waiting,
+      // One is running already, and its result is the one to wait for.
+      onError: (error) => {
+        if (error.status === 409) waiting()
+      },
+    })
+  }
+
+  const already = install.error?.status === 409
+  const refused = install.error && !already ? install.error : null
+
   return (
     <>
-      <Button disabled={install.isPending} onClick={() => install.mutate(machine)} variant="tonal">
-        {install.isPending ? 'Installing…' : 'Install'}
+      <Button disabled={install.isPending || running} onClick={press} variant="tonal">
+        {running ? 'Installing…' : 'Install'}
       </Button>
-      {install.error ? (
-        <ErrorSurface.Inline
-          className="machines__said"
-          error={install.error}
-          reset={() => install.mutate(machine)}
-          title="Install did not start"
-        />
+      {refused ? (
+        <ErrorSurface.Inline className="machines__said" error={refused} reset={press} title="Install did not start" />
       ) : null}
     </>
   )
@@ -175,7 +204,7 @@ export function MachineCard(props: MachineCardProps) {
           Open
         </Button>
         {verdict.kind === 'needs' ? <Install machine={machine.name} /> : null}
-        {verdict.kind === 'failed' ? <CopyJoin /> : null}
+        {verdict.kind === 'refused' ? <CopyJoin /> : null}
         {verdict.kind === 'unchecked' ? <Doctor machine={machine.name} /> : null}
       </div>
     </Card>

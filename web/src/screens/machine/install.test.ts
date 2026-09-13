@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { Check, Event } from '@/api'
-import { answer, listed, missingBasics, needsSudo, newestInstall } from './install'
-
-const check = (name: string, state: Check['state']): Check => ({ check: name, state, detail: '' })
+import type { Event } from '@/api'
+import { answer, listed, needsSudo, newestInstall } from './install'
 
 const event = (at: number, kind: Event['kind'], machine: string | null): Event => ({
   at,
@@ -11,22 +9,6 @@ const event = (at: number, kind: Event['kind'], machine: string | null): Event =
   machine,
   said: `${machine}: ${kind}`,
   commands: [],
-})
-
-describe('missingBasics', () => {
-  it('names the tool, not the check, and only for an absent one', () => {
-    const checks = [
-      check('tmux', 'absent'),
-      check('git', 'present'),
-      check('agent-cli', 'absent'),
-      check('provider-cli', 'absent'),
-    ]
-    expect(missingBasics(checks)).toEqual(['tmux', 'claude'])
-  })
-
-  it('never counts unknown as missing (R-23)', () => {
-    expect(missingBasics([check('tmux', 'unknown'), check('git', 'unknown')])).toEqual([])
-  })
 })
 
 describe('the install result', () => {

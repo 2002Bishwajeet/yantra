@@ -1,6 +1,6 @@
 import type { About, Check, Machine, Readiness } from '@/api'
 import { asApiError } from '@/api/errors'
-import { CHECK_IDS, fixOf, nameOf } from '@/lib/checks'
+import { INSTALLABLE, nameOf } from '@/lib/checks'
 import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -91,10 +91,6 @@ export type Line =
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 
-/** What Install puts there (ADR-0028 §1), from the one check table. A person
- *  fixes the rest on the machine itself (D7 §3.5). */
-export const INSTALLED: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
-
 /** The checks that hold ready back, by the names every screen uses. */
 export function lacking(needs: Check[]): string {
   const absent = needs.filter((one) => one.state === 'absent').map((one) => nameOf(one.check))
@@ -116,7 +112,7 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   const total = report.checks.length
   const needs = blocking(report)
   if (needs.length === 0) return { kind: 'ready', present, total }
-  const installable = needs.some((one) => INSTALLED.includes(one.check) && one.state === 'absent')
+  const installable = needs.some((one) => INSTALLABLE.includes(one.check) && one.state === 'absent')
   return { kind: 'missing', present, total, words: lacking(needs), installable }
 }
 

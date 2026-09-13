@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { mount, scenario, unmount } from '@/screens/fleet/harness'
 
@@ -8,9 +8,16 @@ beforeAll(async () => {
   await import('./Machines')
 }, 60_000)
 
+const clipboard = (writeText: ((text: string) => Promise<void>) | undefined) =>
+  Object.defineProperty(navigator, 'clipboard', {
+    value: writeText ? { writeText } : undefined,
+    configurable: true,
+  })
+
 afterEach(() => {
   cleanup()
   unmount()
+  clipboard(undefined)
 })
 
 const card = (name: string) => within(screen.getByRole('region', { name }))
@@ -184,6 +191,52 @@ describe('/machines with devices that open the dashboard', () => {
     const asleep = card('asleep-laptop')
     expect(asleep.getByText(/^asleep · /)).toBeTruthy()
     expect(asleep.queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('copies the join command where a clipboard exists', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    clipboard(writeText)
+    mount('desktop', '/machines', scenario('setup'))
+    await screen.findByText(/^looked /)
+    // The join URL comes from `GET /api/about`, a second read the button
+    // waits on before it can be pressed.
+    const button = await card('refused-box').findByRole('button', { name: 'Copy join command' })
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(button)
+    expect(await card('refused-box').findByRole('button', { name: 'Copied' })).toBeTruthy()
+    expect(writeText).toHaveBeenCalled()
+  })
+
+  it('says the page has no clipboard, rather than silently doing nothing', async () => {
+    clipboard(undefined)
+    mount('desktop', '/machines', scenario('setup'))
+    await screen.findByText(/^looked /)
+    const button = await card('refused-box').findByRole('button', { name: 'Copy join command' })
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(button)
+    expect(await card('refused-box').findByText(/This page has no clipboard/)).toBeTruthy()
+    expect(card('refused-box').getByRole('button', { name: 'Copy join command' })).toBeTruthy()
+  })
+})
+
+describe('/machines when ssh fails for a reason the join command cannot fix', () => {
+  /** A changed host key reads as `unreachable`, never `refused` — the join
+   *  command places a key and cannot fix that (`reachableFailure`, Y-402
+   *  review). Only a refused key offers Copy join command. */
+  it('reads ssh failing on a neutral-tone chip, and offers nothing to press', async () => {
+    const state = scenario('busy')
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const cachy = data.find((one) => one.machine === 'cachyos-g14')!
+    cachy.checks = cachy.checks.map((one) =>
+      one.check === 'reachable' ? { ...one, state: 'absent', detail: 'No route to host' } : one,
+    )
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+
+    const failing = card('cachyos-g14')
+    expect(failing.getByText('ssh failing')).toBeTruthy()
+    expect(failing.queryByRole('button', { name: 'Copy join command' })).toBeNull()
+    expect(failing.queryAllByRole('button')).toHaveLength(0)
   })
 })
 

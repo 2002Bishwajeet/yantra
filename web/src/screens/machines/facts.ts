@@ -7,7 +7,8 @@ import type {
   Session,
   Workspace,
 } from '@/api'
-import { blocking } from '@/lib/ready'
+import { reachableFailure } from '@/lib/checks'
+import { missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** The four a machine card draws; the machine page draws all ten. */
@@ -68,12 +69,16 @@ export const checkNamed = (checks: Check[], name: string): Check | undefined =>
   checks.find((one) => one.check === name)
 
 /** D7 §3.3, for the grid card's chip. A closed lid is asleep, not failed —
- *  only a machine that answered and then failed gets the error tone. */
+ *  only a machine that answered and then failed gets the error tone.
+ *  `refused` and `unreachable` split the way the machine page does
+ *  (`reachableFailure`, Y-402 review): a changed host key is not the join
+ *  command's to fix, so only `refused` offers Copy join command. */
 export type CardVerdict =
   | { kind: 'asleep' }
   | { kind: 'expired' }
   | { kind: 'unchecked' }
-  | { kind: 'failed' }
+  | { kind: 'refused' }
+  | { kind: 'unreachable' }
   | { kind: 'needs'; missing: number }
   | { kind: 'ready' }
 
@@ -81,8 +86,13 @@ export function cardVerdict(machine: Machine, checks: Check[]): CardVerdict {
   if (machine.expired) return { kind: 'expired' }
   if (!machine.online) return { kind: 'asleep' }
   if (checks.length === 0) return { kind: 'unchecked' }
-  if (checkNamed(checks, 'reachable')?.state === 'absent') return { kind: 'failed' }
-  const missing = blocking({ machine: machine.name, checks })
+  const reachable = checkNamed(checks, 'reachable')
+  if (reachable?.state === 'absent') {
+    return reachableFailure(reachable.detail) === 'refused' ? { kind: 'refused' } : { kind: 'unreachable' }
+  }
+  // `lib/ready`'s `missingBasics`: the same answer the machine page's
+  // Readiness card reads, so the two cannot disagree on one report.
+  const missing = missingBasics({ machine: machine.name, checks })
   return missing.length > 0 ? { kind: 'needs', missing: missing.length } : { kind: 'ready' }
 }
 
@@ -96,8 +106,10 @@ export function cardChip(verdict: CardVerdict, seen: string | null): { state: Ma
       return { state: 'failed', word: 'key expired', error: true }
     case 'unchecked':
       return { state: 'idle', word: 'not checked', error: false }
-    case 'failed':
+    case 'refused':
       return { state: 'failed', word: 'key refused', error: true }
+    case 'unreachable':
+      return { state: 'failed', word: 'ssh failing', error: true }
     case 'needs':
       return { state: 'needs', word: `${verdict.missing} missing`, error: false }
     case 'ready':

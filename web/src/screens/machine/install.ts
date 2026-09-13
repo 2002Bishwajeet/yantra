@@ -1,16 +1,4 @@
-import type { Check, Event } from '@/api'
-import { nameOf } from '@/lib/checks'
-
-/** ADR-0028 §1's list, by `doctor`'s ids. */
-const BASICS = ['tmux', 'git', 'agent-cli']
-
-/** The basics that are absent, by name. `unknown` is never missing: it sends
- *  nobody to install anything (R-23). */
-export function missingBasics(checks: Check[]): string[] {
-  return BASICS.flatMap((id) =>
-    checks.some((one) => one.check === id && one.state === 'absent') ? [nameOf(id)] : [],
-  )
-}
+import type { Event } from '@/api'
 
 const isInstall = (event: Event) => event.kind === 'installed' || event.kind === 'install_stopped'
 

@@ -154,3 +154,16 @@ test.describe('the machines list with devices that open the dashboard', () => {
     await screenshot(page, 'machines', 'setup', size)
   })
 })
+
+test.describe('the machines list with no clipboard', () => {
+  test('selects nothing, but says so, rather than doing nothing silently', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }))
+    await scenario(page, 'setup')
+    await page.goto('/machines')
+    await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
+    const button = card(page, 'refused-box').getByRole('button', { name: 'Copy join command' })
+    await button.click()
+    await expect(page.getByText(/This page has no clipboard/)).toBeVisible()
+    await expect(button).toBeVisible()
+  })
+})
