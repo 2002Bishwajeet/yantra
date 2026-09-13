@@ -16,20 +16,28 @@ afterEach(() => {
 const card = (name: string) => within(screen.getByRole('region', { name }))
 
 describe('/m/cachyos-g14 on the busy fleet', () => {
-  it('draws About, the ten checks, and only this machine’s workspaces', async () => {
+  it('leads with a ready verdict, and draws About and only this machine’s workspaces', async () => {
     mount('desktop', '/m/cachyos-g14')
     await screen.findByRole('heading', { level: 1, name: 'cachyos-g14' }, { timeout: 2000 })
     await screen.findByText(/^looked /)
+
+    const ready = card('Readiness')
+    expect(ready.getByRole('heading', { level: 2, name: 'Ready for sessions' })).toBeTruthy()
+    expect(ready.getByText(/^10 of 10 · asked/)).toBeTruthy()
+    expect(ready.getByRole('link', { name: 'New session' })).toBeTruthy()
+    expect(ready.getByRole('button', { name: 'Check again' })).toBeTruthy()
+    expect(screen.getAllByText('ready').length).toBeGreaterThan(0)
+
+    // The ten are folded to one line until asked for, by the names D7 §3.5 gives them.
+    fireEvent.click(ready.getByRole('button', { name: /^Show/ }))
+    expect(ready.getAllByText('ok')).toHaveLength(10)
+    expect(ready.getByText('gh signed in')).toBeTruthy()
+    expect(ready.getByText('claude signed in')).toBeTruthy()
 
     const about = card('About')
     expect(about.getByText('linux')).toBeTruthy()
     expect(about.getByText('online')).toBeTruthy()
     expect(about.getByText(/beat 4s ago/)).toBeTruthy()
-
-    const ready = card('Readiness')
-    expect(ready.getByText(/^10 of 10 · asked/)).toBeTruthy()
-    expect(ready.getAllByText('ok')).toHaveLength(10)
-    expect(ready.getByText('provider-auth')).toBeTruthy()
 
     const here = card('Workspaces on this machine')
     expect(here.getByRole('link', { name: 'yantra-web' })).toBeTruthy()
@@ -37,6 +45,14 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(here.getByText('waiting for trust')).toBeTruthy()
     // `landing` lives on macbook, so it is not drawn here.
     expect(here.queryByText('landing')).toBeNull()
+  })
+
+  it('puts Readiness first', async () => {
+    mount('desktop', '/m/cachyos-g14')
+    await screen.findByText(/^looked /)
+    const titles = screen.getAllByRole('region').map((one) => one.getAttribute('aria-labelledby'))
+    expect(screen.getAllByRole('region')[0]!.textContent).toContain('Readiness')
+    expect(titles.length).toBeGreaterThanOrEqual(4)
   })
 
   it('gives one verb a row, and Resume never asks first', async () => {
@@ -76,16 +92,50 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
       expect(asked).toContain('DELETE /api/machines/cachyos-g14/sessions/yantra-web'),
     )
   })
+
+  it('reads a report the daemon has not taken yet as Not checked yet, never as a failure', async () => {
+    const busy = scenario('busy')
+    const readiness = busy.readiness as { looked: string; data: { machine: string }[] }
+    const state = {
+      ...busy,
+      readiness: { ...readiness, data: readiness.data.filter((one) => one.machine !== 'cachyos-g14') },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: 'Not checked yet' })).toBeTruthy()
+    expect(ready.getByRole('button', { name: 'Check again' })).toBeTruthy()
+    expect(screen.queryByText(/yantrad was not reached/)).toBeNull()
+  })
 })
 
-describe('/m/thinkpad, which did not answer', () => {
-  it('draws the machine’s own words in place of its sessions', async () => {
+describe('/m/pi-5, which is missing claude', () => {
+  it('offers Install and no New session, and the press starts it', async () => {
+    const asked = mount('desktop', '/m/pi-5')
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: 'claude is missing' })).toBeTruthy()
+    expect(ready.queryByRole('link', { name: 'New session' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'New session' })).toBeNull()
+    fireEvent.click(ready.getByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/install'))
+    expect(await ready.findByRole('heading', { name: 'Installing claude' })).toBeTruthy()
+    expect(ready.getByRole('progressbar', { name: 'Installing on pi-5' })).toBeTruthy()
+  })
+})
+
+describe('/m/thinkpad, which is off', () => {
+  it('is asleep, not failed, and asks nothing', async () => {
     mount('desktop', '/m/thinkpad')
     await screen.findByRole('heading', { level: 1, name: 'thinkpad' }, { timeout: 2000 })
+    const ready = card('Readiness')
+    expect(await ready.findByRole('heading', { name: 'thinkpad is asleep' })).toBeTruthy()
+    expect(ready.getByText(/Yantra asks again when it comes back/)).toBeTruthy()
+    expect(ready.queryByRole('button', { name: 'Check again' })).toBeNull()
+    expect(screen.getByText(/^asleep/)).toBeTruthy()
     const sessions = card('Sessions')
     expect(await sessions.findByText('the machine did not answer')).toBeTruthy()
     expect(sessions.getByText(/No route to host/)).toBeTruthy()
-    expect(card('Readiness').getAllByText('unknown').length).toBeGreaterThan(0)
+    // N2: no Kill here, so nothing says how Kill behaves.
+    expect(sessions.queryByText(/Kill asks first/)).toBeNull()
   })
 })
 

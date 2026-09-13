@@ -31,13 +31,13 @@ describe('/machines on the busy fleet', () => {
     expect(good.getAllByText('ok')).toHaveLength(4)
     expect(good.getByText('4 of 4 checks')).toBeTruthy()
     // Everything passes, so nothing asks the machine again.
-    expect(good.queryByRole('button', { name: 'Doctor' })).toBeNull()
+    expect(good.queryByRole('button', { name: 'Check again' })).toBeNull()
 
     const short = card('pi-5')
     expect(short.getByText('missing')).toBeTruthy()
     expect(short.getByText('no `claude` on PATH there')).toBeTruthy()
     expect(short.getByText('1 failing')).toBeTruthy()
-    expect(short.getByRole('button', { name: 'Doctor' })).toBeTruthy()
+    expect(short.getByRole('button', { name: 'Check again' })).toBeTruthy()
 
     const gone = card('thinkpad')
     expect(gone.getByText('unreachable')).toBeTruthy()
@@ -45,10 +45,10 @@ describe('/machines on the busy fleet', () => {
     expect(gone.getByText('1 failing · 3 unknown')).toBeTruthy()
   })
 
-  it('asks the machine again when Doctor is pressed', async () => {
+  it('asks the machine again when Check again is pressed', async () => {
     const asked = mount('desktop', '/machines')
     await screen.findByText(/^looked /)
-    fireEvent.click(card('pi-5').getByRole('button', { name: 'Doctor' }))
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/readiness'))
   })
 

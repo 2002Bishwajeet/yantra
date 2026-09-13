@@ -1,0 +1,92 @@
+.readiness__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.readiness__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.readiness__title {
+  margin: 0;
+  text-wrap: balance;
+}
+
+.readiness__count {
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.readiness__said,
+.readiness__line {
+  margin: 0;
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.readiness__detail {
+  display: block;
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.readiness__running,
+.readiness__result,
+.readiness__left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.readiness__running .m3-track {
+  flex: none;
+  margin: 0 4px;
+}
+
+.readiness__left > p {
+  margin: 0;
+  padding: 0 4px;
+}
+
+.readiness__commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.readiness__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.readiness__actions:empty {
+  display: none;
+}
+
+/* D7 §4.3: the card's action is full width at its foot on the phone. */
+[data-shell='phone'] .readiness__actions > * {
+  flex: 1 1 100%;
+}
+
+.readiness__snackbar {
+  position: fixed;
+  inset-inline: 16px;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  z-index: 20;
+  max-width: 480px;
+  margin-inline: auto;
+}

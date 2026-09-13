@@ -174,6 +174,19 @@ export function useRecheckReadiness() {
   })
 }
 
+/** `POST …/install` is `yantra install <machine>`: 202 and no body, and the
+ *  install runs in the background (ADR-0028 §4). Its result is an `installed`
+ *  or `install_stopped` event in `/api/notifications`, so nothing is
+ *  invalidated here. A 409 is an install already running on that machine. */
+export function useInstall() {
+  return useMutation<void, ApiError, string>({
+    mutationFn: (machine) =>
+      fetchJson<void>(`/api/machines/${encodeURIComponent(machine)}/install`, {
+        method: 'POST',
+      }),
+  })
+}
+
 /** Step 1 of the device flow: the code to type and where. The daemon polls
  *  GitHub itself, so there is no poll write; `useGithub()` says when the
  *  grant is held. A 409 is a flow already waiting for its code. */

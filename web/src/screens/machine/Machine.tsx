@@ -11,9 +11,11 @@ import {
   useSessions,
   useWorkspaces,
 } from '@/api/hooks'
+import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { List, ListItem, ListValue } from '@/m3/list/List'
@@ -25,10 +27,14 @@ import { Looked } from '@/screens/fleet/age'
 import { Empty } from '@/screens/fleet/Empty'
 import { Verb } from '@/screens/fleet/Verb'
 import { stateOf } from '@/screens/fleet/verbs'
-import { Doctor } from '@/screens/machines/Doctor'
-import { machineState, markOf, tally, wordOf } from '@/screens/machines/facts'
+import { machineState } from '@/screens/machines/facts'
+import { useFormFactor } from '@/shell/formFactor'
+import { useTick } from '@/useTick'
 import { unreachable } from '@/work'
+import { ReadinessCard } from './Readiness'
+import { useVerdict } from './useVerdict'
 import { Sessions } from './Sessions'
+import { chipOf, startable } from './verdict'
 import './Machine.css'
 
 /** ADR-0013 §2: power is a string or an object, so neither can be misread as
@@ -62,8 +68,8 @@ function About(props: { machine: OneMachine }) {
   )
 }
 
-function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string }) {
-  const { rows, pending, machine } = props
+function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string; ready: boolean }) {
+  const { rows, pending, machine, ready } = props
   return (
     <Card aria-labelledby="machine-workspaces" className="machine__card">
       <div className="machine__head">
@@ -79,7 +85,14 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
         </div>
       ) : rows.length === 0 ? (
         <Empty title="No workspace lives here">
-          <Link to="/new">New session</Link> puts one on {machine}
+          {/* D7 B3: offered only where a session can start. */}
+          {ready ? (
+            <>
+              <Link to="/new">New session</Link> puts one on {machine}
+            </>
+          ) : (
+            `A session can start on ${machine} once Readiness says it is ready`
+          )}
         </Empty>
       ) : (
         <ul className="machine__rows">
@@ -111,9 +124,13 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
   )
 }
 
+/** D7 §4.3: header, then Readiness — whose verdict decides the one action —
+ *  then Workspaces, Sessions and About. */
 export function Machine() {
   const { machine: name } = useParams({ from: '/m/$machine' })
   const client = useQueryClient()
+  const factor = useFormFactor()
+  const now = useTick(false)
   const machines = useMachines()
   const readiness = useMachineReadiness(name)
   const sessions = useSessions()
@@ -123,6 +140,8 @@ export function Machine() {
       ? { ...listed, data: listed.data.filter((one) => one.machine === name) }
       : listed
   const agents = useAgents(here)
+  const one = machines.looked === 'ok' ? machines.data.find((m) => m.name === name) : undefined
+  const verdicted = useVerdict(name, one, readiness)
 
   const nothing = unreachable([machines, readiness, sessions, listed])
   if (nothing) {
@@ -137,7 +156,6 @@ export function Machine() {
     )
   }
 
-  const one = machines.looked === 'ok' ? machines.data.find((m) => m.name === name) : undefined
   if (machines.looked === 'ok' && !one) {
     return (
       <ErrorSurface.Page
@@ -158,29 +176,23 @@ export function Machine() {
     )
   }
 
-  const checks = readiness.looked === 'ok' ? readiness.data.checks : []
-  const counted = tally(checks)
-  const state = one ? machineState(one) : null
+  const lastSeen = one?.last_seen ? (at(one.last_seen, now)?.text ?? null) : null
+  const chip = one ? chipOf(verdicted.verdict, lastSeen) : null
   const rows = agents.looked === 'ok' ? agents.data : []
 
   return (
     <div className="machine">
       <div className="machine__title">
-        <Text render={<h1 />} emphasized scale="display-small">
+        <Text render={<h1 />} className="machine__h1" emphasized scale="display-small">
           {name}
         </Text>
-        {state ? (
-          <Chip tone={state.state === 'failed' ? 'error' : 'lowest'}>
-            <Mark size="small" state={state.state} />
-            {state.word}
+        {chip ? (
+          <Chip tone={chip.error ? 'error' : 'lowest'}>
+            <Mark size="small" state={chip.state} />
+            {chip.word}
           </Chip>
         ) : null}
         <Looked className="machine__looked" reads={[machines, readiness, sessions]} />
-        <span className="machine__spacer" />
-        <Doctor machine={name} variant="outlined" />
-        <Button render={<Link to="/new" />} role="link" variant="tonal">
-          New session
-        </Button>
       </div>
 
       {machines.looked === 'failed' ? (
@@ -192,6 +204,23 @@ export function Machine() {
       ) : null}
 
       <div className="machine__columns">
+        <ErrorBoundary eyebrow={name} title="Readiness could not be drawn">
+          <ReadinessCard lastSeen={lastSeen} name={name} readiness={readiness} state={verdicted} />
+        </ErrorBoundary>
+
+        <ErrorBoundary eyebrow={name} title="The workspaces could not be drawn">
+          <Workspaces
+            machine={name}
+            pending={agents.looked === 'pending'}
+            ready={startable(verdicted.verdict)}
+            rows={rows}
+          />
+        </ErrorBoundary>
+
+        <ErrorBoundary eyebrow={name} title="The sessions could not be drawn">
+          <Sessions machine={name} sessions={sessions} workspaces={here} />
+        </ErrorBoundary>
+
         <ErrorBoundary eyebrow={name} title="About could not be drawn">
           <Card aria-labelledby="machine-about" className="machine__card">
             <div className="machine__head">
@@ -200,7 +229,13 @@ export function Machine() {
               </Text>
             </div>
             {one ? (
-              <About machine={one} />
+              factor === 'phone' ? (
+                <Disclosure summary={`${one.os} · ${machineState(one).word}`}>
+                  <About machine={one} />
+                </Disclosure>
+              ) : (
+                <About machine={one} />
+              )
             ) : (
               <div aria-busy="true" className="machine__pending">
                 <Skeleton shape="text" style={{ width: '56%' }} />
@@ -208,61 +243,6 @@ export function Machine() {
               </div>
             )}
           </Card>
-        </ErrorBoundary>
-
-        <ErrorBoundary eyebrow={name} title="Readiness could not be drawn">
-          <Card aria-labelledby="machine-readiness" className="machine__card">
-            <div className="machine__head">
-              <Text render={<h2 />} emphasized id="machine-readiness" scale="title-large">
-                Readiness
-              </Text>
-              {readiness.looked === 'ok' ? (
-                <Mono>
-                  {counted.present} of {counted.total} · asked {readiness.age_seconds}s ago
-                </Mono>
-              ) : null}
-            </div>
-            {readiness.looked === 'failed' ? (
-              <ErrorSurface.Inline
-                error={fromReading(readiness)!}
-                reset={() => void client.invalidateQueries()}
-                title="The checks could not be read"
-              />
-            ) : readiness.looked === 'ok' ? (
-              <ul className="machine__checks">
-                {checks.map((check) => (
-                  <li className="machine__check" key={check.check}>
-                    <State size="small" state={markOf(check.state)}>
-                      {check.check}
-                    </State>
-                    <Text className="machine__word" scale="label-small">
-                      {wordOf(check.state)}
-                    </Text>
-                    <Text className="machine__detail m3-clip" scale="body-small" tone="variant">
-                      {check.detail}
-                    </Text>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div aria-busy="true" className="machine__pending">
-                <Skeleton shape="text" style={{ width: '64%' }} />
-                <Skeleton shape="text" style={{ width: '52%' }} />
-              </div>
-            )}
-            <Text render={<p />} className="machine__note" scale="body-small" tone="variant">
-              Read, not run: the sweep asked this machine. Doctor asks it again now, one ssh round
-              trip.
-            </Text>
-          </Card>
-        </ErrorBoundary>
-
-        <ErrorBoundary eyebrow={name} title="The workspaces could not be drawn">
-          <Workspaces machine={name} pending={agents.looked === 'pending'} rows={rows} />
-        </ErrorBoundary>
-
-        <ErrorBoundary eyebrow={name} title="The sessions could not be drawn">
-          <Sessions machine={name} sessions={sessions} workspaces={here} />
         </ErrorBoundary>
       </div>
     </div>

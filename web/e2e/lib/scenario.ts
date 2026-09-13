@@ -12,6 +12,7 @@ export type Scenario =
   | 'broken'
   | 'repair'
   | 'firstrun'
+  | 'install'
   | 'notifications'
 
 /** Every stamp in the scenarios is aged against this instant, so an age reads

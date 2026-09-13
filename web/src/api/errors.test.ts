@@ -168,6 +168,12 @@ describe('no query rejects with a bare error', () => {
         expect(reading).toBe('missing')
         return
       }
+      // One machine's report answers 404 before the sweep has asked it, and
+      // that is nobody having looked yet (D7 S4).
+      if (kind === 'missing' && options.queryKey[0] === 'readiness' && options.queryKey.length === 2) {
+        expect(reading).toEqual({ looked: 'never' })
+        return
+      }
       expect(reading).toMatchObject({ looked: 'failed' })
     })
   })

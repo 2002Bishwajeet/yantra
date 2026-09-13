@@ -16,3 +16,26 @@
   transform-origin: left;
   transition: transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
 }
+
+.m3-track[data-indeterminate] .m3-track__fill {
+  width: 40%;
+  transform: none;
+  animation: m3-track-sweep 1.6s linear infinite;
+}
+
+@keyframes m3-track-sweep {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 250% 0;
+  }
+}
+
+/* Still says "working" in one frame: a half bar that does not move. */
+@media (prefers-reduced-motion: reduce) {
+  .m3-track[data-indeterminate] .m3-track__fill {
+    animation: none;
+    translate: 60% 0;
+  }
+}
