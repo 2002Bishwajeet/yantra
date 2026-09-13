@@ -48,6 +48,7 @@ something else.
 
 ## Optional
 
+- [design/brand/README.md](design/brand/README.md): the brand sources — icon SVGs, the mark, the README banner, the GitHub social preview, and the template and script that render them.
 - [docs/development.md](docs/development.md): local setup and daily commands.
 - [docs/appliance.md](docs/appliance.md): installing and updating the always-on box — what it needs first, and why the replacement is a rename. [install.sh](install.sh) is the whole install: the current release onto a fresh box, resolved from GitHub rather than pinned (Y-365). At a terminal it asks before it installs Tailscale, logs the box in, turns on `tailscale serve`, starts both units and prints the dashboard's URL; with no terminal it asks nothing and enables nothing, and a second run is the updater (Y-384). [crates/yantrad/tests/installer.rs](crates/yantrad/tests/installer.rs) runs it against a real systemd, both ways. Everything after the install is the dashboard's walkthrough.
 - [docs/machines.md](docs/machines.md): the actual fleet this is developed against.

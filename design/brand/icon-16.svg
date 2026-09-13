@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Yantra">
+  <defs><linearGradient id="t" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#B3482A"/><stop offset="1" stop-color="#6E2412"/></linearGradient></defs>
+  <rect width="16" height="16" rx="3.5" fill="#0B0806"/>
+  <path d="M3.5 3.5 H6.5 V1.5 H9.5 V3.5 H12.5 V6.5 H14.5 V9.5 H12.5 V12.5 H9.5 V14.5 H6.5 V12.5 H3.5 V9.5 H1.5 V6.5 H3.5 Z" fill="url(#t)" stroke="#D7B98E" stroke-width="1" stroke-linejoin="round"/>
+  <circle cx="8" cy="8" r="1.6" fill="#FFF4E2"/>
+</svg>

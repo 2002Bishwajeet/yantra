@@ -1,10 +1,6 @@
 <div align="center">
 
-# यन्त्र · Yantra
-
-**A personal developer control plane.**
-
-*One workspace. One interface. Every machine.*
+<img src="design/brand/readme-banner.png" alt="Yantra यन्त्र — One workspace. One interface. Every machine." width="1280">
 
 [![CI](https://github.com/2002Bishwajeet/yantra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/2002Bishwajeet/yantra/actions/workflows/ci.yml?query=branch%3Amain)
 

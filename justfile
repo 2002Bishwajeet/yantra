@@ -205,6 +205,17 @@ landing-build:
 landing-visual:
     cd landing && npm ci && npx playwright install --only-shell chromium && npm run test:visual
 
+# Re-renders the README banner and the GitHub social preview from
+# design/brand/cards.html, in the same pinned image the web e2e baselines use
+# (web/README.md), so a developer's own fonts never enter one.
+brand:
+    cd web && npm ci
+    cd landing && npm ci
+    podman run --rm -v "{{justfile_directory()}}:/work" \
+        -v "{{justfile_directory()}}/web/node_modules:/nm:ro" \
+        -w /work mcr.microsoft.com/playwright:v1.63.0-noble \
+        node design/brand/render.mjs
+
 # Size and startup are quality targets carried over from ADR-0003's
 # measurement discipline; the appliance milestone (M7) reports both.
 appliance-size target=appliance_target: (appliance target)
