@@ -68,9 +68,16 @@ function relaySupporting(relay: boolean | undefined, saved: boolean): string {
 
 export function Notifications() {
   const about = useAbout()
-  const [saved, setSaved] = useState(false)
+  const [savedAtUptime, setSavedAtUptime] = useState<number | null>(null)
   const [open, setOpen] = useState(false)
   if (about.error) throw about.error
+
+  // uptime_seconds only grows while yantrad runs and resets on a restart, so
+  // a read lower than the value at save time proves the restart happened —
+  // the daemon is now running with whatever this page last wrote, and the
+  // note has done its job. A steady climb (still the same process) never
+  // triggers it, including a save that changes nothing (on -> on).
+  const saved = savedAtUptime !== null && (about.data === undefined || about.data.uptime_seconds >= savedAtUptime)
 
   return (
     <>
@@ -117,7 +124,7 @@ export function Notifications() {
         />
       </Group>
       <Note>An open dashboard tells the daemon so every 20 seconds, and the push stops while one is.</Note>
-      <RelaySheet onOpenChange={setOpen} onSaved={() => setSaved(true)} open={open} />
+      <RelaySheet onOpenChange={setOpen} onSaved={() => setSavedAtUptime(about.data?.uptime_seconds ?? 0)} open={open} />
     </>
   )
 }

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { focusManager } from '@tanstack/react-query'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { type Answers, mountSettings, sent, unmountSettings } from './harness'
@@ -6,6 +7,7 @@ import { type Answers, mountSettings, sent, unmountSettings } from './harness'
 afterEach(() => {
   cleanup()
   unmountSettings()
+  vi.useRealTimers()
 })
 
 const relay = (status: number, said = ''): Answers => ({ 'POST /api/relay': [status, said] })
@@ -89,6 +91,42 @@ describe('the relay sheet', () => {
     expect(
       await screen.findByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
     ).toBeTruthy()
+  })
+
+  /** `uptime_seconds` resets on a real restart, which is the only evidence
+   *  this page ever gets that its write is the one now running (§B4: nothing
+   *  reads the relay itself back). */
+  it('clears the note once a read proves yantrad restarted', async () => {
+    let uptime = contract.about.uptime_seconds
+    const asked = mountSettings('desktop', '/settings/notifications', {
+      'GET /api/about': () => [200, { ...contract.about, uptime_seconds: uptime }],
+      'POST /api/relay': [204],
+    })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    await sheet.findByText('The test message arrived at the relay.')
+    fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
+    expect(
+      await screen.findByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
+    ).toBeTruthy()
+
+    const before = asked.filter((one) => one === 'GET /api/about').length
+    // yantrad restarts: uptime resets far below what it was at save time.
+    // `about`'s 30 s staleTime is what keeps this page from re-asking on its
+    // own, so a page in front of a person again — a refocus, past that
+    // window — is what a real restart would be caught by.
+    uptime = 5
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + 31_000)
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+    // The client's own focus handler awaits `resumePausedMutations()` before
+    // it asks again, so the ask lands a tick after this call returns.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(asked.filter((one) => one === 'GET /api/about').length).toBeGreaterThan(before))
+    expect(await screen.findByText('On · the daemon holds a relay and pushes to it')).toBeTruthy()
   })
 
   it("draws a refusal with the daemon's own words, and the row says nothing was saved", async () => {

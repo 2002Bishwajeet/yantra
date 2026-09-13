@@ -163,6 +163,25 @@ describe('Providers', () => {
       expect(screen.queryByText('None configured')).toBeNull()
     })
 
+    it('reverts to the plain reading once a poll confirms the saved id', async () => {
+      let polled = 0
+      const asked = mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': () =>
+          [200, ++polled < 2 ? contract.github : { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
+        'POST /api/github/client-id': [204],
+      })
+      await screen.findByText('None configured')
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: 'Iv1.mine' } })
+      fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(asked).toContain('POST /api/github/client-id'))
+      expect(await screen.findByText('Your own · after yantrad restarts')).toBeTruthy()
+      // The connection polls every 5 s; the next answer matches what was saved.
+      expect(await screen.findByText('Your own · Iv1.mine', undefined, { timeout: 8_000 })).toBeTruthy()
+    }, 10_000)
+
     it('draws a refused id in the sheet', async () => {
       mountSettings('desktop', '/settings/providers', {
         'POST /api/github/client-id': [
@@ -194,6 +213,24 @@ describe('Providers', () => {
       expect(await sheet.findByText(/falls back to its own app/)).toBeTruthy()
       expect(await screen.findByText("Yantra's own · after yantrad restarts")).toBeTruthy()
     })
+
+    it('reverts to the plain reading once a poll confirms the reset', async () => {
+      let polled = 0
+      const asked = mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': () =>
+          [200, ++polled < 2 ? { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true } : contract.github],
+        'DELETE /api/github/client-id': [204],
+      })
+      await screen.findByText('Your own · Iv1.mine')
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
+
+      await waitFor(() => expect(asked).toContain('DELETE /api/github/client-id'))
+      expect(await screen.findByText("Yantra's own · after yantrad restarts")).toBeTruthy()
+      // The connection polls every 5 s; the next answer confirms the reset.
+      expect(await screen.findByText('None configured', undefined, { timeout: 8_000 })).toBeTruthy()
+    }, 10_000)
 
     it('has nothing to clear when the id is not custom', async () => {
       mountSettings('desktop', '/settings/providers')
