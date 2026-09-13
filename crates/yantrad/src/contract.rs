@@ -75,6 +75,7 @@ import type {
   Spend,
   SshIdentity,
   Stopped,
+  TerminalExit,
   TerminalSize,
   Transcript,
   Workspace,

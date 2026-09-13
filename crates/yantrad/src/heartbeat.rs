@@ -77,6 +77,9 @@ pub struct Fleet {
     /// waiting on this awaits rather than blocking a tokio worker on that
     /// syscall.
     pub env: Arc<tokio::sync::Mutex<()>>,
+    /// ADR-0030: what the latest install on each machine left for a person,
+    /// the only commands the one-off terminal runs.
+    pub left: crate::write::Left,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -109,6 +112,7 @@ impl Default for Fleet {
             github: crate::github::Grant::default(),
             joins: Arc::default(),
             env: Arc::default(),
+            left: Arc::default(),
         }
     }
 }

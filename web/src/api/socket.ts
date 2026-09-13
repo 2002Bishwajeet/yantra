@@ -1,4 +1,4 @@
-import type { TerminalSize } from '@/api'
+import type { TerminalExit, TerminalSize } from '@/api'
 import { ApiError } from '@/api/errors'
 
 /** What xterm.js is in terminfo's vocabulary, and the one thing this page tells
@@ -21,23 +21,30 @@ const TERM = 'xterm-256color'
 export const ATTEMPTS = 5
 export const PAUSE = 500
 
-/** What a socket attaches to: a workspace the daemon looks up, or a machine and
- *  a session it is handed
- *  ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)).
+/** What a socket attaches to: a workspace the daemon looks up, a machine and a
+ *  session it is handed
+ *  ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)),
+ *  or a step an install left on a machine, by its place in the list
+ *  ([ADR-0030](../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)).
  *  It mirrors the daemon's own `Target`, addresses and all.
  *
- *  **Both variants carry the machine**, which the daemon's does not need and a
+ *  **Every variant carries the machine**, which the daemon's does not need and a
  *  refusal does: D5 §7 has every tab name the machine it could not reach, and a
  *  workspace's is not in its address. */
 export type Target =
   | { workspace: string; machine: string }
   | { machine: string; session: string }
+  | { machine: string; step: number; at: number }
 
 export function terminalAddress(target: Target): string {
   const daemon = location.origin.replace(/^http/, 'ws')
-  return 'workspace' in target
-    ? `${daemon}/api/workspaces/${encodeURIComponent(target.workspace)}/terminal`
-    : `${daemon}/api/machines/${encodeURIComponent(target.machine)}/sessions/${encodeURIComponent(target.session)}/terminal`
+  const machine = encodeURIComponent(target.machine)
+  if ('workspace' in target) return `${daemon}/api/workspaces/${encodeURIComponent(target.workspace)}/terminal`
+  if ('session' in target) {
+    return `${daemon}/api/machines/${machine}/sessions/${encodeURIComponent(target.session)}/terminal`
+  }
+  // `at` names the install event the step was read from (ADR-0030 §2).
+  return `${daemon}/api/machines/${machine}/install/${target.step}/terminal?at=${target.at}`
 }
 
 /** Whether the socket is up, and which attempt is in flight while it is not —
@@ -55,7 +62,21 @@ export type Attached = {
   close: () => void
 }
 
-/** The browser's half of either terminal socket, and nothing that renders.
+/** ADR-0030 §5: the one text frame from the daemon that is not a refusal. A
+ *  refusal is a sentence, and a sentence does not parse as this. */
+export function exitOf(text: string): TerminalExit | null {
+  let said: unknown
+  try {
+    said = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (typeof said !== 'object' || said === null || !('exit' in said)) return null
+  const { exit } = said
+  return exit === null || typeof exit === 'number' ? { exit } : null
+}
+
+/** The browser's half of every terminal socket, and nothing that renders.
  *
  *  A pty is opened with a window, so the size frame is what *starts* the
  *  terminal and every later one resizes it — a reopened socket needs it again,
@@ -67,6 +88,9 @@ export type Attached = {
  *  403 or 503, which a browser hides), and it ends as `refused` at once:
  *  reopening it is five more round trips to the same answer.
  *
+ *  **A one-off terminal passes `attempts: 0` and `onExit`.** Its command ends
+ *  it, and a reopened socket would run the command again (ADR-0030 §5).
+ *
  *  **The screen is not lost with the socket.** tmux draws the pane's contents
  *  for whichever client attaches next, so reopening is the whole of replay and
  *  nothing on this side keeps the stream (Q5). */
@@ -77,11 +101,15 @@ export function attachTerminal(
     onBytes,
     onEnd,
     onLink,
+    onExit,
+    attempts: budget = ATTEMPTS,
   }: {
     size: () => { rows: number; cols: number }
     onBytes: (bytes: Uint8Array<ArrayBuffer>) => void
     onEnd: (refused: ApiError | null) => void
     onLink: (link: Link) => void
+    onExit?: (exit: number | null) => void
+    attempts?: number
   },
 ): Attached {
   let socket: WebSocket | undefined
@@ -119,7 +147,9 @@ export function attachTerminal(
       attempts = 0
       if (typeof frame.data === 'string') {
         finished = true
-        onEnd(new ApiError('socket', frame.data))
+        const ended = onExit ? exitOf(frame.data) : null
+        if (ended && onExit) onExit(ended.exit)
+        else onEnd(new ApiError('socket', frame.data))
       } else onBytes(new Uint8Array(frame.data))
     }
     live.onclose = () => {
@@ -129,7 +159,8 @@ export function attachTerminal(
         onEnd(new ApiError('refused', 'the daemon refused the terminal'))
         return
       }
-      if (attempts >= ATTEMPTS) {
+      if (attempts >= budget) {
+        finished = true
         onEnd(null)
         return
       }

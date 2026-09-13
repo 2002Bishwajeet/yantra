@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient } from '@tanstack/react-query'
 import type { Check, Event, Looked, Machine, Readiness } from '@/api'
@@ -8,6 +8,16 @@ import { answer } from '@/test/daemon'
 import { renderInApp } from '@/test/inApp'
 import { ReadinessCard } from './Readiness'
 import { useVerdict } from './useVerdict'
+
+// The sudo sheet reads the form factor, and jsdom has no `matchMedia`.
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: 1440 >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+})
 
 afterEach(() => {
   cleanup()

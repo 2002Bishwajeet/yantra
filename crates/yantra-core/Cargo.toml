@@ -23,6 +23,10 @@ ureq.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+# The one-off terminal's podman test captures every thread's log while a
+# real password goes through the pty (Y-394, ADR-0030).
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 # `build.rs` stamps the build date; `time` is already in the tree.
 [build-dependencies]

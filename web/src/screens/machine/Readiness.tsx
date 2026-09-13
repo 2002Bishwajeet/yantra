@@ -21,7 +21,8 @@ import { Doctor } from '@/screens/machines/Doctor'
 import { tally, wordOf } from '@/screens/machines/facts'
 import { joinCommand, joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
-import { answer, LOST_MS, newestInstall } from './install'
+import { answer, LOST_MS, needsSudo, newestInstall } from './install'
+import { type Step, SudoSheet } from './SudoSheet'
 import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
 import './Readiness.css'
@@ -69,8 +70,16 @@ function Checks(props: { checks: Check[]; machine: string }) {
   )
 }
 
-function Commands(props: { result: Event; machine: string }) {
-  const { result, machine } = props
+/** Each command left for a person, with Copy. A step sudo stopped also
+ *  opens in a terminal of its own (Y-394); `emphasis` is filled where that is
+ *  the card's one next thing. */
+function Commands(props: {
+  result: Event
+  machine: string
+  onTerminal: (step: Step) => void
+  emphasis: 'filled' | 'tonal'
+}) {
+  const { result, machine, onTerminal, emphasis } = props
   if (result.commands.length === 0) return null
   return (
     <div className="readiness__left">
@@ -78,9 +87,14 @@ function Commands(props: { result: Event; machine: string }) {
         {result.commands.length === 1 ? 'Left for you to run' : 'Left for you to run, in order'} on {machine}
       </Text>
       <ul className="readiness__commands">
-        {result.commands.map((command) => (
-          <li key={command}>
+        {result.commands.map((command, index) => (
+          <li className="readiness__command" key={command}>
             <Copyable text={command} what={`the command for ${machine}`} />
+            {needsSudo(command) ? (
+              <Button data-sudo-opener="" onClick={() => onTerminal({ index, command, at: result.at })} variant={emphasis}>
+                Open a terminal
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -102,6 +116,7 @@ export function ReadinessCard(props: {
   const { name, readiness, lastSeen, state } = props
   const { verdict, events, watch, setWatch, notifications } = state
   const eyebrow = useId()
+  const heading = useId()
   const install = useInstall()
   const recheck = useRecheckReadiness()
   const about = useAbout()
@@ -109,6 +124,7 @@ export function ReadinessCard(props: {
   const now = useTick(running)
   const fresh = watch ? answer(events, name, watch) : null
   const [dismissed, setDismissed] = useState<number | null>(null)
+  const [step, setStep] = useState<Step | null>(null)
 
   const answered = fresh?.at
   const { mutate: ask } = recheck
@@ -149,7 +165,15 @@ export function ReadinessCard(props: {
         <div className="readiness__titles">
           <Eyebrow id={eyebrow}>Readiness</Eyebrow>
           {/* Polite: the verdict changes on its own when an install lands. */}
-          <Text aria-live="polite" render={<h2 />} className="readiness__title" emphasized scale="title-large">
+          <Text
+            aria-live="polite"
+            className="readiness__title"
+            emphasized
+            id={heading}
+            render={<h2 />}
+            scale="title-large"
+            tabIndex={-1}
+          >
             {titleOf(verdict, name)}
           </Text>
           {readiness.looked === 'ok' && checks.length > 0 && verdict.kind !== 'asleep' ? (
@@ -186,7 +210,7 @@ export function ReadinessCard(props: {
             sudo on {name} asks for a password, so Yantra stopped before the package step. Run this on {name}, then
             Install again for anything still missing.
           </Text>
-          <Commands machine={name} result={verdict.result} />
+          <Commands emphasis="filled" machine={name} onTerminal={setStep} result={verdict.result} />
         </>
       ) : null}
 
@@ -201,7 +225,7 @@ export function ReadinessCard(props: {
           <Text render={<p />} className="readiness__said" scale="body-small" tone="variant">
             {verdict.result.said}
           </Text>
-          <Commands machine={name} result={verdict.result} />
+          <Commands emphasis="tonal" machine={name} onTerminal={setStep} result={verdict.result} />
         </div>
       ) : null}
 
@@ -260,6 +284,18 @@ export function ReadinessCard(props: {
           </Button>
         ) : null}
       </div>
+
+      {/* The command ended: what is missing now is readiness's to say. */}
+      <SudoSheet
+        fallback={heading}
+        machine={name}
+        onClose={() => setStep(null)}
+        onDone={() => {
+          setWatch(null)
+          ask(name)
+        }}
+        step={step}
+      />
 
       {cheer !== null ? (
         <Snackbar className="readiness__snackbar" onClose={() => setDismissed(cheer)}>

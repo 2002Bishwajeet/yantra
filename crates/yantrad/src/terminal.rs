@@ -1,5 +1,6 @@
-//! `GET /api/workspaces/{name}/terminal` and
-//! `GET /api/machines/{machine}/sessions/{session}/terminal` —
+//! `GET /api/workspaces/{name}/terminal`,
+//! `GET /api/machines/{machine}/sessions/{session}/terminal` and
+//! `GET /api/machines/{machine}/install/{index}/terminal` —
 //! [`yantra_core::pty::Terminal`] on a WebSocket.
 //!
 //! **Two addresses, one bridge.** A workspace is read for the machine and the
@@ -8,6 +9,11 @@
 //! The second route is the first one's `allowed()`, protocol and ping,
 //! unchanged — what differs is the [`Target`] a socket carries and the name a
 //! refusal says.
+//!
+//! **The third is a one-off terminal, and it runs a command it is handed by
+//! index** ([ADR-0030]). An install whose sudo wanted a password left the
+//! command; the socket names its place in what the daemon remembers, never the
+//! command itself, and the terminal ends when the command does, saying how.
 //!
 //! **An upgrade is a `GET`, so it does not inherit the write check, and this is
 //! the route that most needs one.** [`crate::write::allowed`] is called by name
@@ -26,7 +32,8 @@
 //!
 //! **Q5 closed *reference-only, always* and names a terminal stream in the
 //! sentence, so nothing here logs a byte of one** — not truncated, not at
-//! debug. The lifecycle is logged; the payload never is.
+//! debug. The lifecycle is logged; the payload never is. On the one-off route
+//! the payload is a sudo password.
 //!
 //! The frames need no envelope, because the protocol already carries two kinds.
 //! **Binary is terminal bytes**, in both directions. **Text is control**: from
@@ -34,7 +41,8 @@
 //! because a pty is opened with a window and a terminal, and nothing else tells
 //! the daemon how big a browser is or which one it is; from the daemon it is the
 //! reason a terminal could not be opened, which a close frame cannot carry —
-//! that reason is capped at 123 bytes and an ssh diagnosis is longer.
+//! that reason is capped at 123 bytes and an ssh diagnosis is longer — or, on
+//! the one-off route alone, the [`Exit`] it ended with.
 //!
 //! **The daemon originates the ping, because nothing else here is on a timer**
 //! (Y-134). A [`pty::Terminal`] owns the local `ssh`, the pty master and the
@@ -46,6 +54,8 @@
 //! direction of the stream says anything about whether the peer is there. The
 //! pong RFC 6455 requires does, and it is a protocol frame rather than the
 //! stream, so Q5's line above still holds — nothing reads what is on it.
+//!
+//! [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -54,14 +64,15 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use tokio::time::MissedTickBehavior;
+use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
 
-use crate::write::{Authoriser, Refused, allowed, chain};
+use crate::write::{Authoriser, Left, Missed, Refused, allowed, chain, left_command};
 
 /// Long enough that a socket nobody is typing at costs one frame a browser
 /// answers in microseconds; short enough that what a vanished peer holds is
@@ -75,11 +86,22 @@ const PING_EVERY: Duration = Duration::from_millis(200);
 /// in a row is a peer that is not there.
 const MISSES: u8 = 2;
 
-pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
+pub fn router<I, S>(authoriser: Authoriser<I>, left: Left) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
+    // A handler takes one state, and the one-off route also reads what an
+    // install left.
+    let once: Router<S> = Router::new()
+        .route(
+            "/machines/{machine}/install/{index}/terminal",
+            get(step::<I>),
+        )
+        .with_state(OneOff {
+            authoriser: authoriser.clone(),
+            left,
+        });
     Router::new()
         .route("/workspaces/{name}/terminal", get(attach::<I>))
         .route(
@@ -87,6 +109,13 @@ where
             get(tap::<I>),
         )
         .with_state(authoriser)
+        .merge(once)
+}
+
+#[derive(Clone)]
+struct OneOff<I> {
+    authoriser: Authoriser<I>,
+    left: Left,
 }
 
 async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
@@ -120,33 +149,129 @@ async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
 }
 
-/// What a socket attaches to: a workspace this daemon looks up, or a machine and
-/// a session it is handed.
+/// Y-394, [ADR-0030] §2: a step an install left, by its place in the list and
+/// the `at` of the install event the caller read, so nothing a caller writes
+/// can run and a newer install is never run under an older one's name. The
+/// name is checked before the upgrade because it reaches `ssh`'s argv (I-63);
+/// a step that is not there, or no longer the latest, is refused by name after
+/// it, as a session that is not there is.
+///
+/// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
+async fn step<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<OneOff<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((machine, index)): Path<(String, usize)>,
+    uri: Uri,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    install::check_machine(&machine).map_err(|error| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: error.to_string(),
+    })?;
+    let at = read_at(&uri).ok_or_else(|| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: "a step names the install it was read from, as ?at=".to_owned(),
+    })?;
+    let target = Target::Step {
+        machine,
+        index,
+        at,
+        left: state.left,
+    };
+    tracing::info!("terminal {target} for {}", caller.node);
+
+    Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+}
+
+/// The install a caller read its step from, as `?at=` its event's time.
+/// Read by hand, as `write.rs` reads `?force=true`.
+fn read_at(uri: &Uri) -> Option<u64> {
+    uri.query()?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("at="))?
+        .parse()
+        .ok()
+}
+
+/// What a socket attaches to: a workspace this daemon looks up, a machine and a
+/// session it is handed, or a step an install left on a machine.
 enum Target {
     Workspace(String),
-    Session { machine: String, session: String },
+    Session {
+        machine: String,
+        session: String,
+    },
+    Step {
+        machine: String,
+        index: usize,
+        at: u64,
+        left: Left,
+    },
 }
 
 impl Target {
-    async fn open(&self, term: &str, size: pty::Size) -> Result<pty::Terminal, pty::Error> {
-        match self {
-            Self::Workspace(name) => pty::open(name, term, size).await,
+    async fn open(&self, term: &str, size: pty::Size) -> Result<pty::Terminal, Unopened> {
+        Ok(match self {
+            Self::Workspace(name) => pty::open(name, term, size).await?,
             Self::Session { machine, session } => {
-                pty::open_session(machine, session, term, size).await
+                pty::open_session(machine, session, term, size).await?
             }
-        }
+            Self::Step {
+                machine,
+                index,
+                at,
+                left,
+            } => {
+                let command =
+                    left_command(left, machine, *index, *at).map_err(|missed| match missed {
+                        Missed::Nothing => Unopened::NoStep {
+                            machine: machine.clone(),
+                            index: *index,
+                        },
+                        Missed::Newer => Unopened::Newer {
+                            machine: machine.clone(),
+                            index: *index,
+                        },
+                    })?;
+                pty::run(machine, &command, term, size).await?
+            }
+        })
+    }
+
+    /// A one-off terminal ends when its command does, and says how; the other
+    /// two end when the person leaves.
+    fn reports_exit(&self) -> bool {
+        matches!(self, Self::Step { .. })
     }
 }
 
 /// What every log line on this route says, and the whole of what Q5 lets it
-/// say about a stream.
+/// say about a stream. A step is named by its place, never by its command.
 impl std::fmt::Display for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Workspace(name) => write!(f, "{name}"),
             Self::Session { machine, session } => write!(f, "{session} on {machine}"),
+            Self::Step { machine, index, .. } => write!(f, "install step {index} on {machine}"),
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum Unopened {
+    #[error(transparent)]
+    Pty(#[from] pty::Error),
+
+    /// A restart empties the list, and the next install replaces it.
+    #[error("no install on {machine} left a step {index}; press Install again")]
+    NoStep { machine: String, index: usize },
+
+    /// The page read an older install than the daemon holds, so the command it
+    /// shows is not the one this step would run.
+    #[error("a newer install on {machine} replaced step {index}; read the page again")]
+    Newer { machine: String, index: usize },
 }
 
 /// The browser's window and the terminal it is, which are the facts about the
@@ -170,6 +295,13 @@ impl From<&Size> for pty::Size {
             cols: size.cols,
         }
     }
+}
+
+/// The text frame a one-off terminal ends on (ADR-0030 §5). `None` is a status
+/// that could not be read.
+#[derive(Debug, serde::Serialize)]
+struct Exit {
+    exit: Option<i32>,
 }
 
 async fn bridge(mut socket: WebSocket, target: Target) {
@@ -223,10 +355,33 @@ async fn bridge(mut socket: WebSocket, target: Target) {
                     break;
                 }
             }
-            Either::Printed(None) | Either::Typed(None | Some(Err(_))) => break,
+            Either::Printed(None) => {
+                if target.reports_exit() {
+                    exited(&mut socket, &mut terminal, &target).await;
+                }
+                break;
+            }
+            Either::Typed(None | Some(Err(_))) => break,
         }
     }
     tracing::info!("terminal {target} ended");
+}
+
+/// The command's status, then a close: a one-off terminal is over, and a
+/// reopened socket would run the command again.
+async fn exited(socket: &mut WebSocket, terminal: &mut Option<pty::Terminal>, target: &Target) {
+    let exit = match terminal.as_mut() {
+        Some(open) => open.exited().await,
+        None => None,
+    };
+    match exit {
+        Some(code) => tracing::info!("terminal {target} exited {code}"),
+        None => tracing::info!("terminal {target} exited with no status to read"),
+    }
+    if let Ok(said) = serde_json::to_string(&Exit { exit }) {
+        let _ = socket.send(Message::Text(said.into())).await;
+    }
+    let _ = socket.send(Message::Close(None)).await;
 }
 
 enum Either {
@@ -296,21 +451,28 @@ fn resize(terminal: &pty::Terminal, target: &Target, text: &str) {
     }
 }
 
-/// The one shape on this seam that the *browser* writes, for the check in
-/// [`crate::contract`].
+/// The shapes on this seam that the browser writes or reads outside the
+/// stream, for the check in [`crate::contract`].
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
-    vec![(
-        "terminalSize",
-        "TerminalSize",
-        serde_json::to_value(Size {
-            rows: 40,
-            cols: 120,
-            term: "xterm-256color".to_owned(),
-        })
-        .expect("two numbers and a name"),
-    )]
+    vec![
+        (
+            "terminalSize",
+            "TerminalSize",
+            serde_json::to_value(Size {
+                rows: 40,
+                cols: 120,
+                term: "xterm-256color".to_owned(),
+            })
+            .expect("two numbers and a name"),
+        ),
+        (
+            "terminalExit",
+            "TerminalExit",
+            serde_json::to_value(Exit { exit: Some(0) }).expect("a number"),
+        ),
+    ]
 }
 
 #[cfg(test)]
@@ -319,6 +481,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::time::timeout;
@@ -328,11 +491,19 @@ mod tests {
 
     const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
+    const TEXT: u8 = 0x1;
+    const BINARY: u8 = 0x2;
     const PING: u8 = 0x9;
 
-    /// The two addresses one bridge serves (ADR-0022).
+    /// The three addresses one bridge serves (ADR-0022, ADR-0030).
     const WORKSPACE: &str = "/api/workspaces/api/terminal";
     const SESSION: &str = "/api/machines/fixture/sessions/scratch/terminal";
+    const STEP: &str = "/api/machines/fixture/install/0/terminal?at=100";
+
+    /// The `at` of the install event every test here remembers.
+    const AT: u64 = 100;
+
+    const WINDOW: &str = r#"{"rows":24,"cols":80,"term":"xterm-256color"}"#;
 
     fn tailnet(callers: Vec<(IpAddr, Caller)>) -> Fake {
         Fake {
@@ -353,6 +524,16 @@ mod tests {
         )
     }
 
+    /// What an install on `machine` left.
+    fn left(machine: &str, commands: &[&str]) -> Left {
+        let left = Left::default();
+        left.lock().expect("a fresh lock").insert(
+            machine.to_owned(),
+            (AT, commands.iter().map(|one| (*one).to_owned()).collect()),
+        );
+        left
+    }
+
     /// A real listener, because `oneshot` never gives axum the upgrade it
     /// extracts: the peer address a refusal turns on is the one the kernel
     /// reports, so the tailnet is faked at loopback rather than at 100.64/10.
@@ -361,7 +542,16 @@ mod tests {
         path: &str,
         forwarded: &str,
     ) -> BufReader<TcpStream> {
-        let app = Router::new().nest("/api", router(authoriser));
+        connect_with(authoriser, Left::default(), path, forwarded).await
+    }
+
+    async fn connect_with(
+        authoriser: Authoriser<Fake>,
+        left: Left,
+        path: &str,
+        forwarded: &str,
+    ) -> BufReader<TcpStream> {
+        let app = Router::new().nest("/api", router(authoriser, left));
 
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
         let address = listener.local_addr().expect("it is bound");
@@ -405,7 +595,15 @@ mod tests {
 
     /// Past the handshake and onto the frames, which is where a ping is.
     async fn upgraded(authoriser: Authoriser<Fake>) -> BufReader<TcpStream> {
-        let mut socket = connect(authoriser, WORKSPACE, "").await;
+        upgraded_at(authoriser, Left::default(), WORKSPACE).await
+    }
+
+    async fn upgraded_at(
+        authoriser: Authoriser<Fake>,
+        left: Left,
+        path: &str,
+    ) -> BufReader<TcpStream> {
+        let mut socket = connect_with(authoriser, left, path, "").await;
         let mut line = String::new();
         loop {
             line.clear();
@@ -418,24 +616,36 @@ mod tests {
         }
     }
 
-    /// Server frames are unmasked, and nothing the daemon sends before a pty
-    /// exists is longer than a control frame may be, so the header is two bytes.
+    /// Server frames are unmasked. The length is seven bits, or sixteen after
+    /// a 126; nothing here sends a frame longer than that.
     async fn frame(socket: &mut BufReader<TcpStream>) -> std::io::Result<(u8, Vec<u8>)> {
         let mut head = [0u8; 2];
         socket.read_exact(&mut head).await?;
-        let mut payload = vec![0u8; usize::from(head[1] & 0x7f)];
+        let length = match head[1] & 0x7f {
+            126 => usize::from(socket.read_u16().await?),
+            short => usize::from(short),
+        };
+        let mut payload = vec![0u8; length];
         socket.read_exact(&mut payload).await?;
         Ok((head[0] & 0x0f, payload))
     }
 
     /// A client frame must be masked or the far side is entitled to drop the
-    /// socket, which would prove liveness detection works by breaking it.
-    async fn pong(socket: &mut BufReader<TcpStream>) {
+    /// socket; a zero mask leaves the payload as it is.
+    async fn send(socket: &mut BufReader<TcpStream>, opcode: u8, payload: &[u8]) {
+        let length = u8::try_from(payload.len()).expect("a short frame");
+        assert!(length < 126, "a frame this helper can send");
+        let mut out = vec![0x80 | opcode, 0x80 | length, 0, 0, 0, 0];
+        out.extend_from_slice(payload);
         socket
             .get_mut()
-            .write_all(&[0x8a, 0x80, 0, 0, 0, 0])
+            .write_all(&out)
             .await
-            .expect("a pong is written");
+            .expect("a frame is written");
+    }
+
+    async fn pong(socket: &mut BufReader<TcpStream>) {
+        send(socket, 0xa, &[]).await;
     }
 
     fn caller(user: u64, tags: &[&str]) -> Caller {
@@ -481,6 +691,198 @@ mod tests {
 
         let owner = handshake(direct(Some(caller(ME, &[]))), SESSION, "").await;
         assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
+    }
+
+    /// **ADR-0030's route sits on it too**, and it is the one a password is
+    /// typed into.
+    #[tokio::test]
+    async fn a_one_off_terminal_sits_on_the_same_authoriser() {
+        let tagged = handshake(direct(Some(caller(ME, &["tag:ci"]))), STEP, "").await;
+        assert!(tagged.starts_with("HTTP/1.1 403"), "{tagged}");
+
+        let stranger = handshake(direct(None), STEP, "").await;
+        assert!(stranger.starts_with("HTTP/1.1 403"), "{stranger}");
+
+        let owner = handshake(direct(Some(caller(ME, &[]))), STEP, "").await;
+        assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
+    }
+
+    /// I-63 on the one-off route: the name reaches `ssh`'s argv, so one that
+    /// could be read as an option is a 400 before any upgrade.
+    #[tokio::test]
+    async fn a_name_that_is_not_an_ssh_destination_is_refused_before_the_upgrade() {
+        let status = handshake(
+            direct(Some(caller(ME, &[]))),
+            "/api/machines/-oProxyCommand=id/install/0/terminal?at=100",
+            "",
+        )
+        .await;
+        assert!(status.starts_with("HTTP/1.1 400"), "{status}");
+    }
+
+    /// ADR-0030 §2: the socket names a place in what the install left, and a
+    /// place with nothing in it runs nothing — refused by name, as a session
+    /// that is not there is.
+    #[tokio::test]
+    async fn a_step_outside_what_the_install_left_is_refused_by_name() {
+        let said = refusal("/api/machines/fixture/install/3/terminal?at=100").await;
+        assert_eq!(
+            said,
+            "no install on fixture left a step 3; press Install again"
+        );
+    }
+
+    /// The first text frame a step socket answers once it is sized: how it was
+    /// refused.
+    async fn refusal(path: &str) -> String {
+        let mut socket = upgraded_at(
+            direct(Some(caller(ME, &[]))),
+            left("fixture", &["sudo apk add tmux"]),
+            path,
+        )
+        .await;
+        send(&mut socket, TEXT, WINDOW.as_bytes()).await;
+        loop {
+            let (opcode, payload) = timeout(PING_EVERY * 10, frame(&mut socket))
+                .await
+                .expect("an answer")
+                .expect("a frame");
+            if opcode == PING {
+                pong(&mut socket).await;
+                continue;
+            }
+            assert_eq!(opcode, TEXT, "the refusal is a text frame");
+            return String::from_utf8_lossy(&payload).into_owned();
+        }
+    }
+
+    /// ADR-0030 §2: the page names the install it read. A newer one replaced
+    /// that list, so the command the page shows is not the one at this place,
+    /// and the step is refused by name rather than run under the wrong one.
+    #[tokio::test]
+    async fn a_step_from_an_install_that_is_no_longer_the_latest_is_refused_by_name() {
+        let said = refusal("/api/machines/fixture/install/0/terminal?at=99").await;
+        assert_eq!(
+            said,
+            "a newer install on fixture replaced step 0; read the page again"
+        );
+    }
+
+    /// A socket that names no install cannot be matched to one, so it is
+    /// refused before the upgrade.
+    #[tokio::test]
+    async fn a_step_socket_that_names_no_install_is_refused_before_the_upgrade() {
+        let status = handshake(
+            direct(Some(caller(ME, &[]))),
+            "/api/machines/fixture/install/0/terminal",
+            "",
+        )
+        .await;
+        assert!(status.starts_with("HTTP/1.1 400"), "{status}");
+    }
+
+    /// A restart forgets what was left, and a later install on the same
+    /// machine replaces it; the key is the lowercased name, as the lock's is.
+    #[test]
+    fn what_an_install_left_is_found_by_its_place_and_nothing_else() {
+        let left = left("pi", &["sudo apt-get update; sudo apt-get install -y tmux"]);
+        assert_eq!(
+            left_command(&left, "PI", 0, AT).as_deref(),
+            Ok("sudo apt-get update; sudo apt-get install -y tmux")
+        );
+        assert_eq!(left_command(&left, "pi", 1, AT), Err(Missed::Nothing));
+        assert_eq!(left_command(&left, "mac", 0, AT), Err(Missed::Nothing));
+        assert_eq!(left_command(&left, "pi", 0, AT + 1), Err(Missed::Newer));
+        assert_eq!(
+            left_command(&Left::default(), "pi", 0, AT),
+            Err(Missed::Nothing)
+        );
+    }
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("the log").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// **Q5 on the route that carries a password, as far as a unit test
+    /// reaches.** A real `ssh` under a real pty, to a name that cannot resolve,
+    /// prints and exits with no network: what it printed reaches the socket and
+    /// not this thread's log, and the terminal ends on `ssh`'s own status. The
+    /// typed frame is sent, but `ssh` may exit before it is written, so the
+    /// password half is `yantra-core/tests/install.rs`'s: it captures every
+    /// thread's log while a real password goes through the pty.
+    #[tokio::test]
+    async fn a_one_off_terminal_logs_its_lifecycle_and_never_its_stream() {
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let mut socket = upgraded_at(
+            direct(Some(caller(ME, &[]))),
+            left("nowhere.invalid", &["sudo apk add tmux"]),
+            "/api/machines/nowhere.invalid/install/0/terminal?at=100",
+        )
+        .await;
+        send(&mut socket, TEXT, WINDOW.as_bytes()).await;
+        send(&mut socket, BINARY, b"typed-as-keystrokes\r").await;
+
+        let mut printed = Vec::new();
+        let exit = loop {
+            let (opcode, payload) = timeout(Duration::from_secs(30), frame(&mut socket))
+                .await
+                .expect("the terminal ends")
+                .expect("a frame");
+            match opcode {
+                PING => pong(&mut socket).await,
+                BINARY => printed.extend_from_slice(&payload),
+                _ => {
+                    // A close here is a terminal that ended with no exit frame.
+                    assert_eq!(opcode, TEXT, "the terminal ends on its exit frame");
+                    break String::from_utf8_lossy(&payload).into_owned();
+                }
+            }
+        };
+        assert_eq!(exit, r#"{"exit":255}"#, "ssh's own status");
+
+        let printed = String::from_utf8_lossy(&printed).into_owned();
+        assert!(
+            printed.contains("nowhere.invalid"),
+            "ssh printed its diagnosis: {printed:?}"
+        );
+
+        let logged = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        assert!(
+            logged.contains("install step 0 on nowhere.invalid"),
+            "{logged}"
+        );
+        assert!(logged.contains("exited 255"), "{logged}");
+        assert!(
+            !logged.contains("typed-as-keystrokes"),
+            "what was typed was logged: {logged}"
+        );
+        let line = printed
+            .lines()
+            .find(|line| line.contains("nowhere.invalid"))
+            .unwrap_or_default()
+            .trim();
+        assert!(
+            !line.is_empty() && !logged.contains(line),
+            "what was printed was logged: {logged}"
+        );
     }
 
     /// **ADR-0017 on the route that hands over a shell.** Loopback is declared

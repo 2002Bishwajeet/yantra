@@ -66,6 +66,18 @@
   list-style: none;
 }
 
+.readiness__command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.readiness__command > .m3-copyable {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
 .readiness__actions {
   display: flex;
   flex-wrap: wrap;
