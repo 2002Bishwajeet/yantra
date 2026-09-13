@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import type { Machine } from '@/api'
+import type { Machine, Readiness } from '@/api'
 import { aMachine, looked } from '@/api/fixtures'
+import * as contract from '@/contract.gen'
 import { writePrefs } from '@/shell/prefs'
 import { mount, scenario, unmount, type Scenario } from '@/screens/fleet/harness'
 
@@ -158,9 +159,18 @@ describe('the Dashboard on a phone', () => {
   })
 })
 
+/** The daemon's key, which the unit scenarios leave out: the harness answers
+ *  a read by its path's last part. */
+const keyed = (state: Scenario): Scenario => Object.assign(state, { 'ssh-identity': contract.sshIdentity as never })
+
+const ready = (machine: string): Readiness => ({
+  machine,
+  checks: ['reachable', 'sshd', 'tmux', 'git', 'agent-cli'].map((check) => ({ check, state: 'present', detail: '' })),
+})
+
 describe('the Dashboard on an empty fleet', () => {
   it('draws each block saying what would be there, and one New session', async () => {
-    mount('desktop', '/', scenario('empty'))
+    mount('desktop', '/', keyed(scenario('empty')))
     await drawn()
     expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
     expect(region('Running').getByText('Nothing is running')).toBeTruthy()
@@ -175,10 +185,10 @@ describe('the Dashboard on an empty fleet', () => {
 describe('the Dashboard on the first run', () => {
   /** No workspace, and the sweep asks no machine because none is named, so
    *  readiness is blank and the machine list is the only signal. */
-  const firstRun = (machines: Machine[]): Scenario =>
+  const firstRun = (machines: Machine[], reports: Readiness[] = []): Scenario =>
     Object.assign(scenario('empty'), {
       machines: looked.ok(machines),
-      readiness: looked.ok<never[]>([]),
+      readiness: looked.ok(reports),
     })
 
   it('is the setup checklist while no machine is online', async () => {
@@ -193,11 +203,32 @@ describe('the Dashboard on the first run', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
   })
 
-  it('gives way to the empty board as soon as one machine answers', async () => {
-    mount('desktop', '/', firstRun([aMachine({ online: true })]))
+  /** The owner's ruling (b), 2026-09-13: a machine answering is not enough. */
+  it('stays the checklist while a machine is online and none is ready', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })])))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+  })
+
+  it('stays the checklist until the appliance has its key', async () => {
+    mount('desktop', '/', firstRun([aMachine({ online: true })], [ready('cachyos-g14')]))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+  })
+
+  it('gives way to the empty board once the key is made and one machine is ready', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
     await drawn()
     expect(screen.queryByRole('heading', { name: 'Set up Yantra' })).toBeNull()
     expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
+  })
+
+  it('then shows Finish setup with what is left, until it is dismissed', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
+    const card = within(await screen.findByRole('region', { name: 'Finish setup' }))
+    expect(card.getByText(/of 6 done · .*your first session left/)).toBeTruthy()
+    expect(card.getByRole('link', { name: 'Open the checklist' }).getAttribute('href')).toBe('/setup')
+    fireEvent.click(card.getByRole('button', { name: 'Dismiss Finish setup' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Finish setup' })).toBeNull())
+    expect(localStorage.getItem('yantra.finish-setup')).toBe('dismissed')
   })
 
   /** Y-388: a phone runs no session, so one online is not a machine answering. */

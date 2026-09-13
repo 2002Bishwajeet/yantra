@@ -481,3 +481,26 @@
 [data-shell="phone"] .dash {
   padding-bottom: 56px;
 }
+
+/* The owner's ruling (b): small, above the bands, until done or dismissed.
+   Two classes, because `.m3-card` is a column and order would decide a tie. */
+.m3-card.dash__setup {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.dash__setup-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dash__setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

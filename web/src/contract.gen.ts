@@ -425,6 +425,7 @@ export const notifications = {
       "commands": [
         "sudo apt-get update; sudo apt-get install -y tmux"
       ],
+      "joined": null,
       "kind": "install_stopped",
       "machine": "pi",
       "said": "pi: claude installed; tmux left for you: the package manager needs root, and sudo asks for a password or a terminal there — run `sudo apt-get update; sudo apt-get install -y tmux` on pi",
@@ -433,6 +434,7 @@ export const notifications = {
     {
       "at": 1785522780,
       "commands": [],
+      "joined": null,
       "kind": "relay-test",
       "machine": null,
       "said": "yantra can reach this topic",
@@ -441,6 +443,7 @@ export const notifications = {
     {
       "at": 1785522720,
       "commands": [],
+      "joined": null,
       "kind": "unreachable",
       "machine": "pi",
       "said": "pi is no longer online",
@@ -449,6 +452,7 @@ export const notifications = {
     {
       "at": 1785522660,
       "commands": [],
+      "joined": null,
       "kind": "crashed",
       "machine": "bishwajeets-macbook-pro",
       "said": "site: crashed (exit 1)",
@@ -457,6 +461,7 @@ export const notifications = {
     {
       "at": 1785522600,
       "commands": [],
+      "joined": null,
       "kind": "awaiting_trust",
       "machine": "cachyos-g14",
       "said": "api: waiting at claude's trust prompt",
@@ -629,6 +634,21 @@ export const joinedKept = {
   "machine": "cachyos-g14",
   "user": "<user>"
 } satisfies Joined
+
+export const joinedEvent = {
+  "at": 1785522900,
+  "commands": [],
+  "joined": {
+    "kept": true,
+    "logs_in_as": "yantra",
+    "machine": "cachyos-g14",
+    "user": "<user>"
+  },
+  "kind": "joined",
+  "machine": "cachyos-g14",
+  "said": "cachyos-g14 joined as <user>, but the ssh config logs in there as yantra, so Yantra cannot reach it until the owner edits that config",
+  "workspace": null
+} satisfies Event
 
 export const cloning = {
   "machine": "cachyos-g14",

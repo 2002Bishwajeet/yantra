@@ -152,9 +152,14 @@ describe('no query rejects with a bare error', () => {
     it.each(asked)('%s rejects with an ApiError', async (_, options) => {
       vi.stubGlobal('fetch', daemon())
       const error = await call(options).then(
-        () => null,
+        (answered) => answered,
         (cause: unknown) => cause,
       )
+      // The identity's 404 is a key not made yet, which is an answer (Y-390).
+      if (kind === 'missing' && options.queryKey[0] === 'ssh-identity') {
+        expect(error).toBeNull()
+        return
+      }
       expect(error).toBeInstanceOf(ApiError)
       expect((error as ApiError).kind).toBe(kind)
     })
@@ -193,6 +198,15 @@ describe('no query rejects with a bare error', () => {
     expect(await call(machinesQuery())).toEqual(machines)
     expect(await call(attentionQuery())).toEqual(attention)
     expect(await call(sessionsQuery())).toEqual(notLooked)
+  })
+
+  /** Y-390: a key not made is asked again until the first join makes it, and
+   *  never after; a refetch of an error would flip the page back to pending. */
+  it('asks for the identity again only while the daemon has no key', () => {
+    const every = sshIdentityQuery().refetchInterval as (query: { state: { data: unknown } }) => number | false
+    expect(every({ state: { data: null } })).toBe(5_000)
+    expect(every({ state: { data: { public_key: 'ssh-ed25519 AAAA' } } })).toBe(false)
+    expect(every({ state: { data: undefined } })).toBe(false)
   })
 
   it('reads a real body from a read a person asked for', async () => {

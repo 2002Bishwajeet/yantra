@@ -24,6 +24,7 @@ import {
   POLL_MS,
   SWEEP_MS,
 } from '@/api/client'
+import { isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
 import type { About, Notification, SshIdentity } from '@/api/types/daemon'
 import type { Connection, Repo } from '@/api/types/github'
@@ -216,11 +217,21 @@ export const aboutQuery = () =>
     staleTime: SWEEP_MS,
   })
 
-/** Y-343. A key on disk changes with a restart and not before. */
+/** Y-343. The 404 is a key not made yet, and the first join makes it
+ *  (ADR-0029), so `null` is an answer rather than an error: a refetch then
+ *  keeps it on screen, where an error would flip back to pending (Y-390). It
+ *  is asked again until the key exists, and never after. */
 export const sshIdentityQuery = () =>
   queryOptions({
     queryKey: keys.sshIdentity(),
-    queryFn: ({ signal }) =>
-      fetchJson<SshIdentity>('/api/ssh-identity', { signal }),
+    queryFn: async ({ signal }): Promise<SshIdentity | null> => {
+      try {
+        return await fetchJson<SshIdentity>('/api/ssh-identity', { signal })
+      } catch (cause) {
+        if (isApiError(cause) && cause.kind === 'missing') return null
+        throw cause
+      }
+    },
     staleTime: Infinity,
+    refetchInterval: (query) => (query.state.data === null ? POLL_MS : false),
   })

@@ -36,6 +36,23 @@ pub struct Event {
     /// The exact commands an install left for a person, in order, each to be
     /// run verbatim on `machine` (Y-394). Empty for every other kind.
     pub commands: Vec<String>,
+    /// What `POST /api/join` answered, on a `joined` event and no other: the
+    /// add-a-device flow reads a wrong account or a kept block from it rather
+    /// than from `said` (Y-390).
+    pub joined: Option<Joined>,
+}
+
+/// What the join command reads back (owner, 2026-09-12: *"dashboard should
+/// say it"*). `kept` is a config that already named the machine and was left as
+/// it was. `logs_in_as` is what `ssh -G` resolves, which can differ from `user`
+/// — a kept block, or an owner's `Host *` above the new one — and `null` is a
+/// config ssh could not read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Joined {
+    pub machine: String,
+    pub user: String,
+    pub kept: bool,
+    pub logs_in_as: Option<String>,
 }
 
 impl Event {
@@ -59,6 +76,7 @@ impl Event {
             machine,
             said: notification.to_string(),
             commands: Vec::new(),
+            joined: None,
         }
     }
 
@@ -70,6 +88,7 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine} is no longer online"),
             commands: Vec::new(),
+            joined: None,
         }
     }
 
@@ -77,15 +96,21 @@ impl Event {
     /// written, before anything has tried to reach it. When the account ssh
     /// resolves is not the one that joined, the sentence says so (owner,
     /// 2026-09-12): the key went into an account Yantra does not log in as.
-    pub fn joined(machine: &str, user: &str, kept: bool, logs_in_as: Option<&str>) -> Self {
-        let said = match logs_in_as {
+    pub fn joined(joined: &Joined) -> Self {
+        let Joined {
+            machine,
+            user,
+            kept,
+            logs_in_as,
+        } = joined;
+        let said = match logs_in_as.as_deref() {
             None => format!(
                 "{machine} joined as {user}, and Yantra could not read which account its ssh config logs in as"
             ),
             Some(account) if account != user => format!(
                 "{machine} joined as {user}, but the ssh config logs in there as {account}, so Yantra cannot reach it until the owner edits that config"
             ),
-            Some(_) if kept => format!(
+            Some(_) if *kept => format!(
                 "{machine} joined as {user}, and the ssh config already named it with that account, so it was kept"
             ),
             Some(_) => format!("{machine} joined, and Yantra logs in there as {user}"),
@@ -94,9 +119,10 @@ impl Event {
             at: now(),
             kind: "joined",
             workspace: None,
-            machine: Some(machine.to_owned()),
+            machine: Some(machine.clone()),
             said,
             commands: Vec::new(),
+            joined: Some(joined.clone()),
         }
     }
 
@@ -110,6 +136,7 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine} joined, and Yantra could not reach it: {detail}"),
             commands: Vec::new(),
+            joined: None,
         }
     }
 
@@ -121,6 +148,7 @@ impl Event {
             machine: None,
             said: yantra_core::notify::test_message().body,
             commands: Vec::new(),
+            joined: None,
         }
     }
 
@@ -174,6 +202,7 @@ impl Event {
             machine: Some(report.machine.clone()),
             said,
             commands,
+            joined: None,
         }
     }
 
@@ -186,6 +215,7 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine}: the install did not finish: {reason}"),
             commands: Vec::new(),
+            joined: None,
         }
     }
 
@@ -202,6 +232,7 @@ impl Event {
                  running on {machine}"
             ),
             commands: Vec::new(),
+            joined: None,
         }
     }
 }
@@ -268,6 +299,7 @@ mod tests {
             machine: None,
             said: format!("w{n}: finished"),
             commands: Vec::new(),
+            joined: None,
         }
     }
 
@@ -359,6 +391,27 @@ mod tests {
             "{}",
             event.said
         );
+    }
+
+    /// Y-390: the page tells a wrong account and a kept block from a clean
+    /// join by these fields, so a `joined` event carries them and no other
+    /// kind does.
+    #[test]
+    fn a_join_carries_the_reply_it_answered() {
+        let reply = Joined {
+            machine: "pi".to_owned(),
+            user: "biswa".to_owned(),
+            kept: true,
+            logs_in_as: Some("yantra".to_owned()),
+        };
+        let event = Event::joined(&reply);
+        assert_eq!(event.joined.as_ref(), Some(&reply));
+        assert!(
+            event.said.contains("logs in there as yantra"),
+            "{}",
+            event.said
+        );
+        assert_eq!(Event::unreachable("pi").joined, None);
     }
 
     #[test]

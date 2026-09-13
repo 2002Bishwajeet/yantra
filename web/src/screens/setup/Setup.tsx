@@ -1,15 +1,13 @@
 import { useId, type ReactNode } from 'react'
-import { useQueries } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ArrowRight, Check, GitBranch, Plus, Radio } from 'lucide-react'
 import type { Machine, Readiness } from '@/api'
 import { useScreenTitle } from '@/shell/title'
 import { fromReading } from '@/api/client'
-import { useAbout, useGithub, useMachines, useReadiness, useSshIdentity } from '@/api/hooks'
 import { useRecheckReadiness } from '@/api/mutations'
-import { machineReadinessQuery } from '@/api/queries'
+import { joinUrl } from '@/lib/join'
 import { apart, runsSessions } from '@/lib/platform'
-import { ago, at } from '@/lib/time'
+import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -21,24 +19,10 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { useTick } from '@/useTick'
 import { stamp } from '../dashboard/bands'
-import {
-  github,
-  joinCommand,
-  joinUrl,
-  line,
-  machines as machinesStep,
-  marks,
-  push,
-  ready,
-  sshKey,
-  statusWord,
-  tailnet,
-  type Line,
-  type Step,
-} from './steps'
+import { Join } from './Join'
+import { STEPS, useChecklist } from './progress'
+import { marks, statusWord, type Line, type Step } from './steps'
 import './Setup.css'
-
-const STEPS = 6
 
 const tones = { done: 'primary', progress: 'tertiary', todo: 'high', failed: 'error' } as const
 
@@ -55,21 +39,6 @@ function Item(props: { title: string; step: Step; lead: ReactNode; trailing?: Re
       }
       trailing={trailing}
     />
-  )
-}
-
-/** The join command where it can be built, and why not where it cannot. */
-function Join(props: { url: string | null; about: { error: Error | null; data: unknown }; what: string }) {
-  const { url, about, what } = props
-  if (url) return <Copyable text={joinCommand(url)} what={what} />
-  return (
-    <Text scale="body-small" tone="variant">
-      {about.error
-        ? "the daemon's address could not be read, so the join command cannot be built"
-        : about.data
-          ? 'the daemon reports no tailnet address, so the join command cannot be built · check that Tailscale is up on the appliance, then restart yantrad'
-          : "reading the daemon's address…"}
-    </Text>
   )
 }
 
@@ -114,53 +83,18 @@ function MachineLine(props: { machine: Machine; line: Line; report: Readiness | 
   )
 }
 
-/** D3 §4.8: `/` while no workspace exists. The machines are the tailnet's,
- *  each asked on request, because the readiness sweep asks only the machines
- *  a workspace names. */
+/** D3 §4.8: `/` until the appliance has its key and one machine is ready (the
+ *  owner's ruling (b), 2026-09-13), and `/setup` after that. The machines are
+ *  the tailnet's, each asked on request, because the readiness sweep asks only
+ *  the machines a workspace names. */
 export function Setup() {
-  const about = useAbout()
-  const identity = useSshIdentity()
-  const connection = useGithub()
-  const machines = useMachines()
-  const sweep = useReadiness()
   const now = useTick(true)
   const devices = useId()
+  const { about, identity, machines, sweep, all, lines, steps, done } = useChecklist(now)
 
-  const all = machines.looked === 'ok' ? machines.data : []
-  const list = all.filter(runsSessions)
   const others = all.filter((one) => !runsSessions(one))
-  // A recheck answers into the per-machine key; nothing here reads that key
-  // over the wire, so an unasked machine draws as unasked rather than as a 404.
-  const asked = useQueries({
-    queries: list.map((one) => ({ ...machineReadinessQuery(one.name), enabled: false })),
-  })
-  const lines = list.map((machine, index) => {
-    const own = asked[index]?.data
-    const report =
-      own?.looked === 'ok'
-        ? own.data
-        : sweep.looked === 'ok'
-          ? (sweep.data.find((one) => one.machine === machine.name) ?? null)
-          : null
-    const since = machine.last_seen ? (at(machine.last_seen, now)?.text ?? null) : null
-    return { machine, report, line: line(machine, report, since) }
-  })
-  const readyCount = lines.filter((one) => ready(one.line)).length
   const publicKey = identity.data?.public_key ?? null
   const join = joinUrl(location, about.data)
-
-  const steps = {
-    tailnet: tailnet(about, location.protocol),
-    ssh: sshKey(identity),
-    machines: machinesStep(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
-    github: github(connection),
-    push: push(about),
-    first: {
-      status: 'todo',
-      words: `needs one ready machine, you have ${readyCount === 0 ? 'none yet' : readyCount}`,
-    } satisfies Step,
-  }
-  const done = Object.values(steps).filter((one) => one.status === 'done').length
   const read = stamp([
     { name: 'machines', reading: machines },
     { name: 'readiness', reading: sweep },
@@ -234,13 +168,14 @@ export function Setup() {
                   ))}
                 </ul>
               ) : null}
-              {/* Y-390's guided Add a device starts here. */}
               <Text scale="body-small" tone="variant">
-                To add a machine, run this once in a terminal on it. It turns on sshd, places this appliance's key
-                and tells the daemon which account ran it.
+                Add a device shows the steps for a Linux machine, a Mac, a phone or a tablet, and ticks each one when
+                the appliance sees it.
               </Text>
-              <div aria-live="polite">
-                <Join about={about} url={join} what="the join command" />
+              <div>
+                <Button icon={<Plus />} render={<Link to="/add" />} role="link" variant="tonal">
+                  Add a device
+                </Button>
               </div>
             </li>
             {others.length > 0 ? (
@@ -291,7 +226,7 @@ export function Setup() {
                   New session
                 </Button>
               }
-              yours
+              yours={steps.first.status !== 'done'}
             />
           </List>
         </>

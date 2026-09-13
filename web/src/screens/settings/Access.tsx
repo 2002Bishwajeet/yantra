@@ -1,23 +1,31 @@
 import { useState } from 'react'
-import { KeyRound, Network, Shield } from 'lucide-react'
-import { isApiError } from '@/api/errors'
+import { Link } from '@tanstack/react-router'
+import { KeyRound, Network, Plus, Shield } from 'lucide-react'
 import { useAbout, useSshIdentity } from '@/api/hooks'
+import { joinUrl } from '@/lib/join'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono } from '@/m3/text/Text'
+import { Join } from '@/screens/setup/Join'
 import { Group, Note } from './Group'
 import { Sheet } from './Sheet'
+
+const addDevice = (
+  <Button icon={<Plus />} render={<Link to="/add" />} role="link" variant="tonal">
+    Add a device
+  </Button>
+)
 
 export function Access() {
   const identity = useSshIdentity()
   const about = useAbout()
   const [open, setOpen] = useState(false)
-  // 404 is a key not yet made, which is a state of the row; anything else is
+  // `null` is a key not yet made, which is a state of the row; an error is
   // the boundary's.
-  const missing = isApiError(identity.error) && identity.error.kind === 'missing'
-  if (identity.error && !missing) throw identity.error
+  const missing = identity.data === null
+  if (identity.error) throw identity.error
   if (about.error) throw about.error
   const key = identity.data
   const tailnet = about.data?.tailnet ?? null
@@ -27,7 +35,7 @@ export function Access() {
     <>
       <Group
         label="SSH identity"
-        note="The public key is shown in the sheet so you can paste it into a new machine. The private key never leaves the appliance."
+        note="A new machine takes this key through the join command, which Add a device shows. The private key never leaves the appliance."
       >
         {key ? (
           <ListItem
@@ -52,15 +60,8 @@ export function Access() {
                 <KeyRound />
               </Lead>
             }
-            supporting={
-              missing ? (
-                <>
-                  not created · run <Mono>yantra ssh-identity</Mono> on the appliance
-                </>
-              ) : (
-                'asking the daemon'
-              )
-            }
+            supporting={missing ? 'not created yet · the first machine that joins makes it' : 'asking the daemon'}
+            trailing={missing ? addDevice : undefined}
           />
         )}
       </Group>
@@ -94,25 +95,34 @@ export function Access() {
         The daemon itself keeps two credentials, the relay token and the GitHub grant, in one file on the appliance. They
         are under Notifications and Providers.
       </Note>
-      {key ? <KeySheet onOpenChange={setOpen} open={open} publicKey={key.public_key} /> : null}
+      {key ? <KeySheet about={about} onOpenChange={setOpen} open={open} publicKey={key.public_key} /> : null}
     </>
   )
 }
 
-function KeySheet(props: { open: boolean; onOpenChange: (open: boolean) => void; publicKey: string }) {
-  const { open, onOpenChange, publicKey } = props
+function KeySheet(props: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  publicKey: string
+  about: { error: Error | null; data: Parameters<typeof joinUrl>[1] }
+}) {
+  const { open, onOpenChange, publicKey, about } = props
   return (
     <Sheet
       actions={
-        <Button onClick={() => onOpenChange(false)} variant="text">
-          Close
-        </Button>
+        <>
+          {addDevice}
+          <Button onClick={() => onOpenChange(false)} variant="text">
+            Close
+          </Button>
+        </>
       }
-      description="Paste this line into ~/.ssh/authorized_keys on a machine the daemon should reach."
+      description="A new machine takes this key through the join command. Run it once in a terminal on that machine; Add a device shows the steps for each platform."
       onOpenChange={onOpenChange}
       open={open}
       title="Public key"
     >
+      <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
       <Copyable text={publicKey} what="the public key" />
     </Sheet>
   )

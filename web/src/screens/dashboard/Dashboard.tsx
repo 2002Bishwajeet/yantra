@@ -46,7 +46,8 @@ import { unclaimed, unreachable, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
-import { runsSessions } from '@/lib/platform'
+import { useSetupGate } from '@/screens/setup/progress'
+import { FinishSetup } from './FinishSetup'
 import './Dashboard.css'
 
 const UNREACHABLE =
@@ -705,6 +706,7 @@ export function Dashboard() {
     listed.looked === 'ok' && agents.looked === 'ok' ? work(listed.data, agents) : [],
   )
   const nothing = unreachable([machines, listed, sessions])
+  const gate = useSetupGate(machines.looked === 'ok' ? machines.data : [])
 
   // The last time the page could be read, for the Unreachable surface's stamp:
   // noted during the render, once per reading, as `useHeldBands` notes its seeds.
@@ -740,7 +742,8 @@ export function Dashboard() {
     )
   }
 
-  if (reading === 'pending') {
+  const firstRun = fleetEmpty && machines.looked === 'ok'
+  if (reading === 'pending' || (firstRun && gate.key === 'reading')) {
     return (
       <>
         {title}
@@ -749,11 +752,11 @@ export function Dashboard() {
     )
   }
 
-  // D3 §4.8, amended 2026-09-07: the first run is a fleet with no workspace and
-  // no machine answering, and the checklist is the page until one answers. It
-  // draws its own h1, so this one is not also rendered. A phone runs no session
-  // (Y-388), so one online does not end the first run.
-  if (fleetEmpty && machines.looked === 'ok' && !machines.data.some((one) => one.online && runsSessions(one))) {
+  // D3 §4.8 and the owner's ruling (b), 2026-09-13: with no workspace, the
+  // checklist is the page until the appliance has its key and one machine is
+  // ready. It draws its own h1, so this one is not also rendered. A fleet with
+  // a workspace has been past it, and an asleep machine does not send it back.
+  if (firstRun && !gate.passed) {
     return (
       <Suspense fallback={<Pending />}>
         <Setup />
@@ -781,6 +784,11 @@ export function Dashboard() {
       <ErrorBoundary layout="inline" title="The status line could not be drawn">
         <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} stamp={stripStamp} />
       </ErrorBoundary>
+      {gate.passed ? (
+        <ErrorBoundary layout="inline" title="Finish setup could not be drawn">
+          <FinishSetup now={now} />
+        </ErrorBoundary>
+      ) : null}
       {changed > 0 ? (
         <div>
           <Pill icon={<RotateCw />} onClick={reorder}>

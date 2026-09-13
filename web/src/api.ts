@@ -347,9 +347,9 @@ export type About = {
 }
 
 /** `GET /api/ssh-identity` — the public half of the daemon's key and the
- *  fingerprint `ssh-keygen -l` prints. **404 before `yantra ssh-identity` has
- *  run on the daemon's machine**: a GET reads and never generates. The private
- *  key is never in it. */
+ *  fingerprint `ssh-keygen -l` prints. **404 until the key exists**, which the
+ *  first join makes (ADR-0029); `sshIdentityQuery` reads that 404 as `null`.
+ *  The private key is never in it. */
 export type SshIdentity = {
   path: string
   // `ed25519`, off the key's own type word.
@@ -394,6 +394,8 @@ export type Event = {
   // The exact commands an install left for a person, in order, each to be
   // run verbatim on `machine` (Y-394). Empty for every other kind.
   commands: string[]
+  // What `POST /api/join` answered, on a `joined` event only (Y-390).
+  joined: Joined | null
 }
 
 /** `POST /api/machines/{machine}/clone` with `{ url, path }` — `yantra clone`

@@ -318,6 +318,15 @@ has never been given a way to say what is still missing.*
 > readiness now"* — **D3.21 before D3.20**. That is an order, not a block, so §16's count of two
 > blocked units stands.
 
+> **2026-09-13, [Y-390](../../tracker.md), the owner's ruling (b).** The 2026-09-07 note in §5 made
+> `/` the checklist only while no machine is online, so a real first install never saw it. Now
+> **the checklist is `/` until the appliance has its ssh key and at least one machine is ready**,
+> where *ready* is `tmux`, `git` and `claude` behind ssh
+> ([walk-through](../plans/m15-qa-walkthrough.md) §3.2, beat 4). After that, the dashboard shows
+> a small *Finish setup* card until the other steps are done or the person dismisses it, and the
+> checklist moves to `/setup`. *Add a device* is always reachable from `/machines`. A fleet with a
+> workspace has passed the checklist, so an asleep machine does not send `/` back to it.
+
 ---
 
 ## 5. Hierarchy, density and type
@@ -326,7 +335,8 @@ has never been given a way to say what is still missing.*
 > (no workspace, a machine ready: "No sessions yet" and New session) beside `Setup` (the six-step
 > checklist). Readiness is blank on a fresh install (the Y-197 note above), so the signal is the
 > machine list: `/` is the checklist while **no machine is online**, and the empty Dashboard once
-> one is and no workspace exists. D3.20's "no workspace" reads as that pair.
+> one is and no workspace exists. D3.20's "no workspace" reads as that pair. **The owner's ruling
+> (b), 2026-09-13, replaces this pair** — see the note under §4.8.
 
 ### 5.1 Three surfaces, not one
 

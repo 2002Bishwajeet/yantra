@@ -54,18 +54,9 @@ export const fields =
     return names.find((name) => !(name in body)) ?? null
   }
 
-/** One fetch for everything that is not a `Looked` envelope. Every way it does
- *  not answer the body is an `ApiError` of one kind: `fetch` rejecting is
- *  `network`, a 404 is `missing`, any other non-2xx is `refused` carrying the
- *  daemon's own sentence, a body that is not JSON is `contract`. A 204 is
- *  `undefined`, and an abort is rethrown so Query reads the unmount as the
- *  cancellation it is. A `shape` names what a 2xx body must carry, and a body
- *  without it is `contract` too, with the field in `said`. */
-export async function fetchJson<T>(
-  path: string,
-  init: RequestInit = {},
-  shape?: Shape,
-): Promise<T> {
+/** `fetchJson`'s refusals with the body left unread, for a write that answers
+ *  `202` and nothing else (`install`). */
+export async function request(path: string, init: RequestInit = {}): Promise<Response> {
   let response: Response
   try {
     response = await fetch(path, init)
@@ -84,6 +75,23 @@ export async function fetchJson<T>(
     }
     throw new ApiError('refused', words, { status })
   }
+  return response
+}
+
+/** One fetch for everything that is not a `Looked` envelope. Every way it does
+ *  not answer the body is an `ApiError` of one kind: `fetch` rejecting is
+ *  `network`, a 404 is `missing`, any other non-2xx is `refused` carrying the
+ *  daemon's own sentence, a body that is not JSON is `contract`. A 204 is
+ *  `undefined`, and an abort is rethrown so Query reads the unmount as the
+ *  cancellation it is. A `shape` names what a 2xx body must carry, and a body
+ *  without it is `contract` too, with the field in `said`. */
+export async function fetchJson<T>(
+  path: string,
+  init: RequestInit = {},
+  shape?: Shape,
+): Promise<T> {
+  const response = await request(path, init)
+  const { status } = response
   if (status === 204) return undefined as T
   let body: unknown
   try {

@@ -10,3 +10,32 @@ export function apart(machine: Pick<Machine, 'os'>): string {
   if (machine.os === 'iOS' || machine.os === 'android') return 'opens the dashboard · runs no session'
   return `${machine.os || 'an unnamed system'} · runs no session`
 }
+
+/** The four flows of Add a device (walk-through §3.2). */
+export const PLATFORMS = ['linux', 'macOS', 'phone', 'windows'] as const
+export type Platform = (typeof PLATFORMS)[number]
+
+export const platformName: Record<Platform, string> = {
+  linux: 'Linux',
+  macOS: 'macOS',
+  phone: 'Phone or tablet',
+  windows: 'Windows',
+}
+
+export const asPlatform = (given: unknown): Platform | undefined => PLATFORMS.find((one) => one === given)
+
+/** Which flow a tailnet node belongs to, from the `os` Tailscale reports. */
+export function platformOf(machine: Pick<Machine, 'os'>): Platform | null {
+  if (machine.os === 'iOS' || machine.os === 'android') return 'phone'
+  return PLATFORMS.find((one) => one === machine.os) ?? null
+}
+
+/** The owner's guess (walk-through Q3.1), from this browser. An iPad asks for
+ *  the desktop site and says Macintosh, so touch is what tells it apart. */
+export function guessPlatform(browser: { userAgent: string; maxTouchPoints?: number }): Platform {
+  const agent = browser.userAgent
+  if (/iPhone|iPad|iPod|Android/i.test(agent)) return 'phone'
+  if (/Macintosh|Mac OS X/i.test(agent)) return (browser.maxTouchPoints ?? 0) > 1 ? 'phone' : 'macOS'
+  if (/Windows/i.test(agent)) return 'windows'
+  return 'linux'
+}

@@ -65,13 +65,10 @@ test.describe('the first run', () => {
     await expect(page.getByText(/One step runs in a terminal: the join command/)).toBeVisible()
   })
 
-  test('selects the join command where the page has no clipboard', async ({ page }) => {
-    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }))
-    await page.reload()
-    await expect(page.getByText(COMMAND)).toBeVisible()
-    await page.getByRole('button', { name: 'Copy the join command' }).click()
-    await expect(page.getByText(/this page has no clipboard, so the text is selected/)).toBeVisible()
-    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(COMMAND)
+  /** Y-390: the join command moved into the guided flow (add.spec.ts). */
+  test('opens Add a device where the join command was', async ({ page }) => {
+    await expect(page.getByText(COMMAND)).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Add a device' })).toHaveAttribute('href', '/add')
   })
 
   test('passes axe', async ({ page }) => {

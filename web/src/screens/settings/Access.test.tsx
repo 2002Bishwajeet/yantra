@@ -20,6 +20,10 @@ describe('Access', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show key' }))
     const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
     expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeTruthy()
+    // Y-390: a new machine takes the key through the join command.
+    expect(sheet.getByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+    expect(sheet.getByRole('link', { name: 'Add a device' }).getAttribute('href')).toBe('/add')
+    expect(sheet.queryByText(/authorized_keys/)).toBeNull()
     fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
     expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh-ed25519 /))
     expect(await sheet.findByRole('button', { name: 'Copied the public key' })).toBeTruthy()
@@ -38,12 +42,14 @@ describe('Access', () => {
     window.getSelection()?.removeAllRanges()
   })
 
-  it('says a key the daemon has not made is not created, and how to make it', async () => {
+  /** ADR-0029: the first join makes the key, so there is nothing to run. */
+  it('says a key the daemon has not made is made by the first join, and opens Add a device', async () => {
     mountSettings('desktop', '/settings/access', {
       'GET /api/ssh-identity': [404, { error: 'no identity: run `yantra ssh-identity`' }],
     })
-    expect(await screen.findByText(/not created · run/)).toBeTruthy()
-    expect(screen.getByText('yantra ssh-identity')).toBeTruthy()
+    expect(await screen.findByText('not created yet · the first machine that joins makes it')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Add a device' }).getAttribute('href')).toBe('/add')
+    expect(screen.queryByText(/yantra ssh-identity/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Show key' })).toBeNull()
   })
 

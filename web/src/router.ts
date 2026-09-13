@@ -10,11 +10,13 @@ import {
   attentionQuery,
   machineReadinessQuery,
   machinesQuery,
+  notificationsQuery,
   readinessQuery,
   sessionsQuery,
   statusQuery,
   workspacesQuery,
 } from '@/api/queries'
+import { asPlatform, type Platform } from '@/lib/platform'
 import { RouteError } from '@/m3/error-boundary/ErrorBoundary'
 import { Dashboard } from '@/screens/dashboard/Dashboard'
 import { Nowhere, Shell } from '@/shell/Shell'
@@ -180,6 +182,41 @@ const settingsCategory = createRoute({
   head: ({ params }) => titled(params.category.charAt(0).toUpperCase() + params.category.slice(1)),
 })
 
+// The checklist, once `/` has stopped being it (the owner's ruling (b)).
+const setup = createRoute({
+  getParentRoute: () => root,
+  path: '/setup',
+  component: lazyRouteComponent(() => import('@/screens/setup/Setup'), 'Setup'),
+  loader: ({ context: { client } }) => {
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(readinessQuery())
+  },
+  head: () => titled('Set up Yantra'),
+})
+
+// Walk-through §3. `machine` is the device the flow follows, so a reload and
+// the link opened on that device follow it too.
+const add = createRoute({
+  getParentRoute: () => root,
+  path: '/add',
+  validateSearch: (search: Record<string, unknown>): { platform?: Platform; machine?: string } => ({
+    platform: asPlatform(search.platform),
+    // The search parser reads `123` as a number, and a tailnet name can be one.
+    machine:
+      typeof search.machine === 'string' && search.machine
+        ? search.machine
+        : typeof search.machine === 'number'
+          ? String(search.machine)
+          : undefined,
+  }),
+  component: lazyRouteComponent(() => import('@/screens/add/AddDevice'), 'AddDevice'),
+  loader: ({ context: { client } }) => {
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(notificationsQuery())
+  },
+  head: () => titled('Add a device'),
+})
+
 // The phone's pushed notifications screen; the shell's bell links here
 // under 600 px and opens a popover or a side sheet above it.
 const notifications = createRoute({
@@ -222,6 +259,8 @@ export const routeTree = root.addChildren([
   newSession,
   settings,
   settingsCategory,
+  setup,
+  add,
   notifications,
   gallery,
 ])

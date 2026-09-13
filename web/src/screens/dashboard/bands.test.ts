@@ -28,6 +28,7 @@ const event = (kind: Event['kind'], workspace: string | null, at: number): Event
   machine: workspace === null ? 'thinkpad' : 'cachyos-g14',
   said: 'said so',
   commands: [],
+  joined: null,
 })
 
 describe('online', () => {

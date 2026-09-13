@@ -2,7 +2,7 @@
 
 `keys.ts` makes every query key. `queries.ts` is one `queryOptions` per read; `mutations.ts` one
 `useMutation` per write, each invalidating by key. `hooks.ts` is what a route calls. `socket.ts` is
-the two terminal sockets. `client.ts` holds `fetchJson`, the `Looked` envelope, and the
+the two terminal sockets. `client.ts` holds `fetchJson` (and `request`, its refusals with the body unread, for a `202` with none), the `Looked` envelope, and the
 `QueryClient` defaults. `fixtures.ts` is for tests only.
 
 ## Errors

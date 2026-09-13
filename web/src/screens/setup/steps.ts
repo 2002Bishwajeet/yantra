@@ -1,4 +1,4 @@
-import type { About, Check, Machine, Readiness, SshIdentity } from '@/api'
+import type { About, Machine, Readiness, SshIdentity } from '@/api'
 import { asApiError } from '@/api/errors'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -42,12 +42,10 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
   }
 }
 
-/** A 404 is a key not made (api.ts). The daemon makes it on the first join
- *  (ADR-0029), so there is nothing here for a person to run. */
-export function sshKey(identity: Asked<SshIdentity>): Step {
-  if (identity.error && asApiError(identity.error).kind === 'missing') {
-    return { status: 'todo', words: 'made when the first machine joins' }
-  }
+/** `null` is a key not made (queries.ts). The daemon makes it on the first
+ *  join (ADR-0029), so there is nothing here for a person to run. */
+export function sshKey(identity: Asked<SshIdentity | null>): Step {
+  if (identity.data === null) return { status: 'todo', words: 'made when the first machine joins' }
   if (identity.error) return failed(identity.error)
   if (identity.isPending || !identity.data) return reading()
   return { status: 'done', words: `created on the appliance · ${identity.data.fingerprint}` }
@@ -97,7 +95,14 @@ const named: Record<string, string> = {
   reachable: 'ssh',
 }
 
-const word = (check: Check) => named[check.check] ?? check.check
+export const word = (check: string) => named[check] ?? check
+
+/** What a session needs, so what *ready* means here and in Add a device:
+ *  walk-through §3.2's beat 4 and ADR-0028 §1's minimum, behind ssh. */
+export const MINIMUM = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli'] as const
+
+export const isReady = (report: Readiness | null) =>
+  report !== null && MINIMUM.every((name) => report.checks.some((one) => one.check === name && one.state === 'present'))
 
 export function line(machine: Machine, report: Readiness | null, since: string | null): Line {
   if (!machine.online) {
@@ -114,12 +119,12 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   }
   const present = report.checks.filter((one) => one.state === 'present')
   const total = report.checks.length
-  if (present.length === total) {
+  if (isReady(report)) {
     const listed = present.filter((one) => ['sshd', 'tmux', 'agent-cli', 'terminfo', 'provider-auth'].includes(one.check))
-    return { kind: 'ready', present: present.length, total, words: listed.map(word).join(', ') }
+    return { kind: 'ready', present: present.length, total, words: listed.map((one) => word(one.check)).join(', ') }
   }
-  const absent = report.checks.filter((one) => one.state === 'absent').map(word)
-  const unknown = report.checks.filter((one) => one.state === 'unknown').map(word)
+  const absent = report.checks.filter((one) => one.state === 'absent').map((one) => word(one.check))
+  const unknown = report.checks.filter((one) => one.state === 'unknown').map((one) => word(one.check))
   const words = [
     absent.length ? `missing ${absent.join(', ')}` : '',
     unknown.length ? `could not ask about ${unknown.join(', ')}` : '',
@@ -147,12 +152,8 @@ export function machines(lines: { machine: string; line: Line }[]): Step {
   }
 }
 
-/** Where `GET /join` answers. On HTTPS the page came through `tailscale serve`,
- *  which forwards `/join` too; on HTTP it is the daemon's own bound address. */
-export function joinUrl(page: { protocol: string; origin: string }, about: About | undefined): string | null {
-  if (page.protocol === 'https:') return `${page.origin}/join`
-  const bound = about?.listening_on[0]
-  return bound ? `http://${bound}/join` : null
+/** Done once a workspace exists, which is what a first session starts from. */
+export function firstSession(workspaces: number | null, ready: number): Step {
+  if (workspaces) return { status: 'done', words: `${workspaces} workspace${workspaces === 1 ? '' : 's'} made` }
+  return { status: 'todo', words: `needs one ready machine, you have ${ready === 0 ? 'none yet' : ready}` }
 }
-
-export const joinCommand = (url: string) => `curl -fsSL ${url} | sh`

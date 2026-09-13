@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
-import { github, joinCommand, joinUrl, line, machines, push, ready, sshKey, tailnet } from './steps'
+import { joinCommand, joinUrl } from '@/lib/join'
+import { github, line, machines, push, ready, sshKey, tailnet } from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -36,7 +37,7 @@ describe('the step each read makes', () => {
   /** The daemon makes its key on the first join (ADR-0029), so a 404 is a
    *  step that waits and names no command to run. */
   it('reads a 404 on the identity as a key the first join makes', () => {
-    const missing = sshKey(broke(new ApiError('missing', 'no identity', { status: 404 })))
+    const missing = sshKey(got(null))
     expect(missing).toEqual({ status: 'todo', words: 'made when the first machine joins' })
     expect(missing.words).not.toMatch(/yantra|`/)
     expect(sshKey(got(contract.sshIdentity))).toEqual({
@@ -101,11 +102,20 @@ describe("a machine's line", () => {
       check('reachable', 'present'),
       check('sshd', 'present'),
       check('tmux', 'present'),
+      check('git', 'present'),
       check('agent-cli', 'present'),
     ])
     const one = line(machine(), all, null)
-    expect(one).toEqual({ kind: 'ready', present: 4, total: 4, words: 'sshd, tmux, claude' })
+    expect(one).toEqual({ kind: 'ready', present: 5, total: 5, words: 'sshd, tmux, claude' })
     expect(ready(one)).toBe(true)
+  })
+
+  /** Walk-through §3.2 beat 4: ready is what a session needs, so a missing
+   *  `gh` does not hold it back and a missing `git` does. */
+  it('is ready without gh, and not ready without git', () => {
+    const minimum = [check('reachable', 'present'), check('sshd', 'present'), check('tmux', 'present'), check('agent-cli', 'present')]
+    expect(line(machine(), report([...minimum, check('git', 'present'), check('provider-auth', 'absent')]), null).kind).toBe('ready')
+    expect(line(machine(), report([...minimum, check('git', 'absent')]), null)).toMatchObject({ kind: 'missing', words: 'missing git' })
   })
 
   it('names what is missing and what could not be asked, in the board words', () => {

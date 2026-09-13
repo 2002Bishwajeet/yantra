@@ -1,0 +1,128 @@
+{
+  "extends": "firstrun",
+  "machines": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      { "name": "new-box", "dns_name": "new-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.21", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "joined-box", "dns_name": "joined-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.22", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "kept-box", "dns_name": "kept-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.23", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "ready-box", "dns_name": "ready-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.24", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "blocked-box", "dns_name": "blocked-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.25", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "iphone", "dns_name": "iphone.yantra.tail3a1b.ts.net.", "address": "100.64.0.26", "os": "iOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
+    ]
+  },
+  "arrives": {
+    "after": 3000,
+    "machine": { "name": "fresh-box", "dns_name": "fresh-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.27", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
+  },
+  "notifications": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "at": 1788695940,
+        "kind": "joined",
+        "workspace": null,
+        "machine": "blocked-box",
+        "said": "blocked-box joined, and Yantra logs in there as biswa",
+        "commands": [],
+        "joined": { "machine": "blocked-box", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+      },
+      {
+        "at": 1788695880,
+        "kind": "joined",
+        "workspace": null,
+        "machine": "ready-box",
+        "said": "ready-box joined, and Yantra logs in there as biswa",
+        "commands": [],
+        "joined": { "machine": "ready-box", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+      },
+      {
+        "at": 1788695820,
+        "kind": "joined",
+        "workspace": null,
+        "machine": "kept-box",
+        "said": "kept-box joined as biswa, but the ssh config logs in there as yantra, so Yantra cannot reach it until the owner edits that config",
+        "commands": [],
+        "joined": { "machine": "kept-box", "user": "biswa", "kept": true, "logs_in_as": "yantra" }
+      },
+      {
+        "at": 1788695760,
+        "kind": "joined",
+        "workspace": null,
+        "machine": "joined-box",
+        "said": "joined-box joined, and Yantra logs in there as biswa",
+        "commands": [],
+        "joined": { "machine": "joined-box", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+      }
+    ]
+  },
+  "readiness": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "machine": "ready-box",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" }
+        ]
+      },
+      {
+        "machine": "blocked-box",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+          { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" }
+        ]
+      }
+    ]
+  },
+  "asked": {
+    "joined-box": {
+      "machine": "joined-box",
+      "checks": [
+        { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+        { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+        { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
+        { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" }
+      ]
+    },
+    "blocked-box": {
+      "machine": "blocked-box",
+      "checks": [
+        { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+        { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+        { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
+        { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" }
+      ]
+    }
+  },
+  "installs": {
+    "blocked-box": {
+      "event": {
+        "kind": "install_stopped",
+        "said": "blocked-box: claude installed; tmux left for you: the package manager needs root, and sudo asks for a password or a terminal there — run `sudo apt-get update; sudo apt-get install -y tmux` on blocked-box",
+        "commands": ["sudo apt-get update; sudo apt-get install -y tmux"]
+      },
+      "after": {
+        "machine": "blocked-box",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+          { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" }
+        ]
+      }
+    }
+  }
+}

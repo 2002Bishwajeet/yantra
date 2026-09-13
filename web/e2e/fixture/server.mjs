@@ -197,7 +197,22 @@ function entriesOf(state, path) {
  *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
  *  for an empty body. */
 const routes = [
-  ['GET', /^\/api\/machines$/, (s) => [200, s.machines]],
+  // `arrives` is a node that joins the tailnet a while after the first look,
+  // which is what Add a device's first beat waits for (Y-390).
+  [
+    'GET',
+    /^\/api\/machines$/,
+    (s) => {
+      if (s.arrives && s.machines.looked === 'ok') {
+        s.firstLook ??= Date.now()
+        const { after, machine } = s.arrives
+        if (Date.now() - s.firstLook >= after && !s.machines.data.some((one) => one.name === machine.name)) {
+          s.machines.data.push(machine)
+        }
+      }
+      return [200, s.machines]
+    },
+  ],
   ['GET', /^\/api\/workspaces$/, (s) => [200, s.workspaces]],
   ['GET', /^\/api\/sessions$/, (s) => [200, s.sessions]],
   ['GET', /^\/api\/readiness$/, (s) => [200, s.readiness]],
@@ -254,6 +269,9 @@ const routes = [
     /^\/api\/machines\/([^/]+)\/readiness$/,
     (s, [machine], _, request) => {
       if (s.readiness.looked !== 'ok') return [200, s.readiness]
+      // A machine no workspace names answers a re-check (write.rs `recheck`
+      // takes any name), and `asked` is what it answers.
+      if (request.method === 'POST' && s.asked?.[machine]) return [200, ok(s.asked[machine])]
       const one = s.readiness.data.find((r) => r.machine === machine)
       if (one) return [200, ok(one)]
       // The GET is api.rs's (JSON); the POST is a verb in write.rs (a string).
@@ -438,6 +456,24 @@ const routes = [
       // is there — 1.2 s is under one probe interval and over none.
       s.cloning[sent.path] = Date.now() + 1200
       return [202, { machine, session }]
+    },
+  ],
+  // ADR-0028 §4: 202 and nothing else; the result is an event in the ring a
+  // moment later, and `installs[machine]` names it and what a re-check answers
+  // after it.
+  [
+    'POST',
+    /^\/api\/machines\/([^/]+)\/install$/,
+    (s, [machine]) => {
+      const plan = s.installs?.[machine]
+      setTimeout(() => {
+        if (s.notifications.looked !== 'ok') return
+        const at = Math.max(0, ...s.notifications.data.map((one) => one.at)) + 60
+        const event = plan?.event ?? { kind: 'installed', said: `${machine}: every basic was already there`, commands: [] }
+        s.notifications.data.unshift({ at, workspace: null, machine, joined: null, ...event })
+        if (plan?.after) s.asked = { ...s.asked, [machine]: plan.after }
+      }, 800)
+      return [202]
     },
   ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
