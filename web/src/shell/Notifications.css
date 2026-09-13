@@ -48,6 +48,13 @@
   text-align: center;
 }
 
+.notifications__commands {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 8px 60px;
+}
+
 .notifications__foot {
   display: flex;
   align-items: center;

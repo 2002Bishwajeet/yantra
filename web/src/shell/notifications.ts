@@ -1,4 +1,5 @@
 import type { Attention, Event } from '@/api'
+import type { MarkState } from '@/m3/mark/Mark'
 
 /** One row of the notifications list: a daemon event (ADR-0025) or a GitHub
  *  item from `/api/attention`, which the browser merges (api.ts, `Event`). */
@@ -9,8 +10,16 @@ export type Entry = {
   tile: { kind: 'workspace'; name: string } | { kind: 'github' } | { kind: 'relay' } | { kind: 'machine'; name: string }
   headline: string
   supporting: string
+  mark?: MarkState
+  /** `supporting` must wrap rather than clip: it carries a warning a person
+   *  cannot act on if it is cut off (S7). */
+  wrap?: boolean
   /** A trust prompt: the row offers Answer, into this workspace's chat. */
   answer?: string
+  /** A join or install event: the row offers Open, into the machine page. */
+  open?: string
+  /** An install left these for a person to run, verbatim, via `Copyable`. */
+  commands?: string[]
   /** A GitHub item opens on GitHub. */
   href?: string
 }
@@ -32,6 +41,57 @@ function ofEvent(event: Event, index: number): Entry {
     : event.kind === 'relay-test'
       ? { kind: 'relay' }
       : { kind: 'machine', name: event.machine ?? '?' }
+  const base = { id: `event-${event.at}-${index}`, at: event.at, tile }
+
+  if (event.kind === 'joined' && event.machine) {
+    // Structured, not parsed from `said` (Y-399): a reworded sentence in
+    // `events.rs` must not silently flip this. `kept` is always sent for a
+    // `joined` event; `logs_in_as` is absent when ssh could not be read.
+    const normal = event.kept === false && event.logs_in_as === event.user
+    return normal
+      ? { ...base, headline: `${event.machine} joined`, supporting: `as ${event.user}`, mark: 'done', open: event.machine }
+      : {
+          ...base,
+          headline: `${event.machine} joined, as another account`,
+          supporting: event.said,
+          mark: 'needs',
+          open: event.machine,
+          wrap: true,
+        }
+  }
+
+  if (event.kind === 'installed' && event.machine) {
+    return {
+      ...base,
+      headline: `${event.machine} is ready`,
+      supporting: 'tmux, git and claude are installed',
+      mark: 'done',
+      open: event.machine,
+    }
+  }
+
+  if (event.kind === 'install_stopped' && event.machine) {
+    const { commands } = event
+    return commands.length
+      ? {
+          ...base,
+          headline: `${event.machine} needs your password`,
+          supporting:
+            commands.length === 1 ? 'One command is left for you to run' : `${commands.length} commands are left for you to run`,
+          mark: 'needs',
+          open: event.machine,
+          commands,
+        }
+      : {
+          ...base,
+          headline: `${event.machine}'s install did not finish`,
+          supporting: event.said,
+          mark: 'needs',
+          open: event.machine,
+          wrap: true,
+        }
+  }
+
   const headline =
     event.kind === 'awaiting_trust'
       ? `${who} is waiting for trust`
@@ -44,9 +104,7 @@ function ofEvent(event: Event, index: number): Entry {
             : `${who} ${event.kind.replace('_', ' ')}`
   const supporting = event.machine && event.workspace ? `${event.said} · ${event.machine}` : event.said
   return {
-    id: `event-${event.at}-${index}`,
-    at: event.at,
-    tile,
+    ...base,
     headline,
     supporting,
     answer: event.kind === 'awaiting_trust' && event.workspace ? event.workspace : undefined,

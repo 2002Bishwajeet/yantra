@@ -1,11 +1,11 @@
 import { type FormEvent, useState } from 'react'
 import { Bell, BellRing, CircleSlash, Eye, EyeOff, MoonStar, SquareCheck } from 'lucide-react'
+import { useAbout } from '@/api/hooks'
 import { useSetRelay } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { Lead } from '@/m3/lead/Lead'
-import { ListItem } from '@/m3/list/List'
-import { Switch } from '@/m3/switch/Switch'
+import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { Group, Note } from './Group'
@@ -31,45 +31,54 @@ function refusal(status: number | undefined): string {
   return refusals[status] ?? 'The daemon did not take it.'
 }
 
-/** What `notify::Watch` sends, in the daemon's own terms. Every switch is
- *  disabled: the daemon decides, and no route changes it. The third row is off
- *  because a look that failed is not a change (I-47). */
+/** What `notify::Watch` sends, in the daemon's own terms. The daemon decides
+ *  what is worth a push, and no route changes it, so these read rather than
+ *  set. The third row is not sent because a look that failed is not a change
+ *  (I-47). */
 const WHEN = [
   {
     icon: <BellRing />,
     headline: 'When an agent needs you',
-    supporting: "a trust prompt, and only the first time one appears",
-    on: true,
+    supporting: 'a trust prompt, and only the first time one appears',
+    sent: true,
   },
   {
     icon: <SquareCheck />,
     headline: 'When a session ends',
     supporting: 'finished, crashed with its exit code, killed by a signal, or gone',
-    on: true,
+    sent: true,
   },
   {
     icon: <CircleSlash />,
     headline: 'When a machine goes unreachable',
-    supporting: 'not sent · a look the daemon could not make is not a change it can report',
-    on: false,
+    supporting: 'a look the daemon could not make is not a change it can report',
+    sent: false,
   },
 ]
 
-/** Nothing reads a relay back (§B4), so what the row says is what this page
- *  wrote: the host, and whether the test arrived. */
-type Held = { host: string; delivered: boolean } | null
-
-const hostOf = (url: string) => {
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
+/** `about.relay` says whether the running daemon holds one; `saved` says a
+ *  save happened in this session (§B4: nothing reads the relay itself back,
+ *  so a save cannot move `relay` until yantrad restarts and this page is read
+ *  again, ADR-0021). */
+function relaySupporting(relay: boolean | undefined, saved: boolean): string {
+  if (relay === undefined) return 'asking the daemon'
+  const base = relay ? 'On · the daemon holds a relay and pushes to it' : 'Off · nothing is pushed'
+  return saved ? `${base} · saved, used after yantrad restarts` : base
 }
 
 export function Notifications() {
-  const [held, setHeld] = useState<Held>(null)
+  const about = useAbout()
+  const [savedAtUptime, setSavedAtUptime] = useState<number | null>(null)
   const [open, setOpen] = useState(false)
+  if (about.error) throw about.error
+
+  // uptime_seconds only grows while yantrad runs and resets on a restart, so
+  // a read lower than the value at save time proves the restart happened —
+  // the daemon is now running with whatever this page last wrote, and the
+  // note has done its job. A steady climb (still the same process) never
+  // triggers it, including a save that changes nothing (on -> on).
+  const saved = savedAtUptime !== null && (about.data === undefined || about.data.uptime_seconds >= savedAtUptime)
+
   return (
     <>
       <Group label="Relay">
@@ -80,11 +89,7 @@ export function Notifications() {
               <Bell />
             </Lead>
           }
-          supporting={
-            held === null
-              ? 'nothing is read back · what you save replaces what is there'
-              : `${held.host} · Set · replaced just now${held.delivered ? '' : ' · the test message did not arrive'}`
-          }
+          supporting={relaySupporting(about.data?.relay, saved)}
           trailing={
             <Button onClick={() => setOpen(true)} variant="text">
               Edit
@@ -100,9 +105,9 @@ export function Notifications() {
           <ListItem
             headline={one.headline}
             key={one.headline}
-            leading={<Lead tone={one.on ? 'primary' : undefined}>{one.icon}</Lead>}
+            leading={<Lead tone={one.sent ? 'primary' : undefined}>{one.icon}</Lead>}
             supporting={one.supporting}
-            trailing={<Switch checked={one.on} disabled label={one.headline} />}
+            trailing={<ListValue>{one.sent ? 'Sent' : 'Not sent'}</ListValue>}
           />
         ))}
       </Group>
@@ -115,16 +120,16 @@ export function Notifications() {
             </Lead>
           }
           supporting="the daemon knows when a browser is looking"
-          trailing={<Switch checked disabled label="Quiet while a dashboard is open" />}
+          trailing={<ListValue>Always</ListValue>}
         />
       </Group>
       <Note>An open dashboard tells the daemon so every 20 seconds, and the push stops while one is.</Note>
-      <RelaySheet onOpenChange={setOpen} onSaved={setHeld} open={open} />
+      <RelaySheet onOpenChange={setOpen} onSaved={() => setSavedAtUptime(about.data?.uptime_seconds ?? 0)} open={open} />
     </>
   )
 }
 
-function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => void; onSaved: (held: Held) => void }) {
+function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => void }) {
   const { open, onOpenChange, onSaved } = props
   const relay = useSetRelay()
   const [shown, setShown] = useState(false)
@@ -140,9 +145,10 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
     relay.mutate(
       { url, ...(token === '' ? {} : { token }) },
       {
-        onSuccess: () => onSaved({ host: hostOf(url), delivered: true }),
+        onSuccess: () => onSaved(),
+        // The daemon writes before it sends, so a 502 is still a save (§B4).
         onError: (error) => {
-          if (error.status === 502) onSaved({ host: hostOf(url), delivered: false })
+          if (error.status === 502) onSaved()
         },
       },
     )
