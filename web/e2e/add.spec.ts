@@ -75,6 +75,20 @@ test.describe('Add a device', () => {
     await expect(page).toHaveURL(/machine=fresh-box/)
   })
 
+  // Y-404: a node another account shares in never ticks the beat, and says why.
+  test('a node shared in from another account says so and does not tick', async ({ page }) => {
+    await scenario(page, 'stranger')
+    await page.goto(flow())
+    await expect(page.getByText('waiting · watching the tailnet for a new Linux machine')).toBeVisible()
+    await expect(
+      beat(page, 'On the tailnet').getByText(
+        "stuck · friends-box is on the tailnet and shared from another account · not supported yet · log in to Tailscale there with the appliance's account",
+      ),
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(page).not.toHaveURL(/machine=/)
+    await axe(page)
+  })
+
   test('selects the join command where the page has no clipboard', async ({ page }) => {
     await scenario(page, 'adding')
     await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }))

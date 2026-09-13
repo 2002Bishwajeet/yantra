@@ -2663,6 +2663,7 @@ mod tests {
 
     fn machine(name: &str, os: Os, online: bool, expired: bool, seen: Option<&str>) -> MachineInfo {
         MachineInfo {
+            ownership: yantra_core::inventory::Ownership::Yours,
             id: format!("n{name}"),
             name: name.to_string(),
             dns_name: format!("{name}.example.ts.net."),

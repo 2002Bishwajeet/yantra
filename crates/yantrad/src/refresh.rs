@@ -245,6 +245,7 @@ mod tests {
 
     fn machine(name: &str) -> MachineInfo {
         MachineInfo {
+            ownership: yantra_core::inventory::Ownership::Yours,
             id: format!("n-{name}"),
             name: name.to_string(),
             dns_name: format!("{name}.example.ts.net."),
@@ -279,6 +280,7 @@ mod tests {
         let events = Events::default();
         let looking = |online: bool| Fake {
             machines: vec![MachineInfo {
+                ownership: yantra_core::inventory::Ownership::Yours,
                 online,
                 ..machine("pi")
             }],

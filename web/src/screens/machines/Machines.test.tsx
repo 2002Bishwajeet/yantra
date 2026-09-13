@@ -59,6 +59,27 @@ describe('/machines on the busy fleet', () => {
     expect(gone.queryAllByRole('button')).toHaveLength(0)
   })
 
+  /** Y-404, owner 2026-09-13: listed with the reason, never a card or a count. */
+  it('lists a node your account does not own apart, with the reason, and draws it no card', async () => {
+    const state = scenario('busy')
+    const first = (state.machines!.data as Record<string, unknown>[])[0]!
+    ;(state.machines!.data as Record<string, unknown>[]).push(
+      { ...first, name: 'friends-box', ownership: 'shared' },
+      { ...first, name: 'ci-runner', ownership: 'tagged' },
+    )
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+
+    expect(screen.getAllByRole('link', { name: 'Open' })).toHaveLength(6)
+    expect(screen.queryByRole('region', { name: 'friends-box' })).toBeNull()
+    const foreign = within(screen.getByRole('region', { name: 'Devices your account does not own' }))
+    expect(foreign.getByText('friends-box')).toBeTruthy()
+    expect(foreign.getByText('shared from another account · not supported yet')).toBeTruthy()
+    expect(foreign.getByText('shared')).toBeTruthy()
+    expect(foreign.getByText('ci-runner')).toBeTruthy()
+    expect(foreign.getByText(/tagged, so the tailnet owns it/)).toBeTruthy()
+  })
+
   it('starts an install when Install is pressed', async () => {
     const asked = mount('desktop', '/machines')
     await screen.findByText(/^looked /)

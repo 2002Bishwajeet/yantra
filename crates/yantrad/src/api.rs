@@ -514,6 +514,9 @@ struct Machine {
     /// row would erase. `online` beside it is what tells the two explanations
     /// of a missing beat apart, and it never decides whether one arrived (R-8).
     heartbeat: Option<Beat>,
+    /// Y-404: `yours`, `shared` or `tagged`. The owner's number and the tag
+    /// names stay in the daemon, because the page needs only whose node it is.
+    ownership: &'static str,
 }
 
 impl Machine {
@@ -536,6 +539,11 @@ impl Machine {
             expired: machine.expired,
             last_seen: machine.last_seen.clone(),
             heartbeat: beats.get(&machine.id).map(Beat::of),
+            ownership: match machine.ownership {
+                yantra_core::inventory::Ownership::Yours => "yours",
+                yantra_core::inventory::Ownership::Shared => "shared",
+                yantra_core::inventory::Ownership::Tagged => "tagged",
+            },
         }
     }
 }
@@ -993,6 +1001,7 @@ mod tests {
 
     fn machine(id: &str, name: &str, online: bool) -> MachineInfo {
         MachineInfo {
+            ownership: yantra_core::inventory::Ownership::Yours,
             id: id.into(),
             name: name.into(),
             dns_name: format!("{name}.example.ts.net."),
@@ -1229,12 +1238,43 @@ mod tests {
         );
     }
 
+    /// Y-404: whose node it is crosses the wire as one word, and the owner's
+    /// number and the tag names never do.
+    #[tokio::test]
+    async fn ownership_is_one_word_and_no_account_id_or_tag_leaves() {
+        let model = holding(Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(vec![
+                machine("n-1", "mine", true),
+                MachineInfo {
+                    ownership: yantra_core::inventory::Ownership::Shared,
+                    ..machine("n-2", "friend", true)
+                },
+                MachineInfo {
+                    ownership: yantra_core::inventory::Ownership::Tagged,
+                    ..machine("n-3", "ci", true)
+                },
+            ])))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(model, "/machines").await;
+        let listed = body["data"].as_array().expect("a list");
+        let words: Vec<_> = listed.iter().map(|m| m["ownership"].clone()).collect();
+        assert_eq!(words, [json!("yours"), json!("shared"), json!("tagged")]);
+        for machine in listed {
+            for key in ["user", "user_id", "owner", "tags"] {
+                assert!(machine.get(key).is_none(), "{key} leaked: {machine}");
+            }
+        }
+    }
+
     /// I-39 again: the dashboard's most actionable machine is the one that is
     /// listed, powered on and still unreachable, so `expired` is its own field.
     #[tokio::test]
     async fn an_expired_key_is_a_field_of_its_own_and_not_folded_into_offline() {
         let model = holding(Snapshot {
             machines: Some(Arc::new(Reading::new(Ok(vec![MachineInfo {
+                ownership: yantra_core::inventory::Ownership::Yours,
                 id: "n-1".into(),
                 name: "laptop-9ml3d644".into(),
                 dns_name: "laptop-9ml3d644.example.ts.net.".into(),

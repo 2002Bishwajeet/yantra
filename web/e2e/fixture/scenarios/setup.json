@@ -4,12 +4,12 @@
     "looked": "ok",
     "age_seconds": 0,
     "data": [
-      { "name": "ready-linux", "dns_name": "ready-linux.yantra.tail3a1b.ts.net.", "address": "100.64.0.31", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "missing-mac", "dns_name": "missing-mac.yantra.tail3a1b.ts.net.", "address": "100.64.0.32", "os": "macOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "refused-box", "dns_name": "refused-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.33", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "asleep-laptop", "dns_name": "asleep-laptop.yantra.tail3a1b.ts.net.", "address": "100.64.0.34", "os": "linux", "online": false, "expired": false, "last_seen": "2026-09-06T09:00:00Z", "heartbeat": null },
-      { "name": "iphone", "dns_name": "iphone.yantra.tail3a1b.ts.net.", "address": "100.64.0.35", "os": "iOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "gaming-pc", "dns_name": "gaming-pc.yantra.tail3a1b.ts.net.", "address": "100.64.0.36", "os": "windows", "online": false, "expired": false, "last_seen": "2026-09-05T20:00:00Z", "heartbeat": null }
+      { "name": "ready-linux", "ownership": "yours", "dns_name": "ready-linux.yantra.tail3a1b.ts.net.", "address": "100.64.0.31", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "missing-mac", "ownership": "yours", "dns_name": "missing-mac.yantra.tail3a1b.ts.net.", "address": "100.64.0.32", "os": "macOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "refused-box", "ownership": "yours", "dns_name": "refused-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.33", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "asleep-laptop", "ownership": "yours", "dns_name": "asleep-laptop.yantra.tail3a1b.ts.net.", "address": "100.64.0.34", "os": "linux", "online": false, "expired": false, "last_seen": "2026-09-06T09:00:00Z", "heartbeat": null },
+      { "name": "iphone", "ownership": "yours", "dns_name": "iphone.yantra.tail3a1b.ts.net.", "address": "100.64.0.35", "os": "iOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "gaming-pc", "ownership": "yours", "dns_name": "gaming-pc.yantra.tail3a1b.ts.net.", "address": "100.64.0.36", "os": "windows", "online": false, "expired": false, "last_seen": "2026-09-05T20:00:00Z", "heartbeat": null }
     ]
   },
   "readiness": {

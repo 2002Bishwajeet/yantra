@@ -176,6 +176,7 @@ mod tests {
 
     fn peer(name: &str, os: Os, online: bool) -> MachineInfo {
         MachineInfo {
+            ownership: crate::inventory::Ownership::Yours,
             id: format!("n{name}"),
             name: name.to_string(),
             dns_name: format!("{name}.tail.ts.net."),

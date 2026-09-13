@@ -1,7 +1,7 @@
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/hooks'
 import { INSTALLABLE, nameOf } from '@/lib/checks'
-import { platformOf, type Platform } from '@/lib/platform'
+import { notYours, platformOf, type Platform } from '@/lib/platform'
 import { blocking, isReady, missingBasics } from '@/lib/ready'
 import { listed } from '@/screens/machine/install'
 import { lacking } from '@/screens/setup/steps'
@@ -40,10 +40,21 @@ const check = (report: Readiness | null, name: string): Check | undefined =>
 const newest = (events: Event[], name: string, kinds: Event['kind'][]) =>
   events.find((one) => one.machine === name && kinds.includes(one.kind)) ?? null
 
-/** The first node of this platform that was not on the tailnet when the flow
- *  opened: the device the person is adding. */
+const arrivals = (list: Machine[], seen: string[] | null, platform: Platform) =>
+  seen === null ? [] : list.filter((one) => platformOf(one) === platform && !seen.includes(one.name))
+
+/** The first node of this platform, owned by the appliance's account, that was
+ *  not on the tailnet when the flow opened: the device the person is adding. */
 export const newDevice = (list: Machine[], seen: string[] | null, platform: Platform) =>
-  seen === null ? undefined : list.find((one) => platformOf(one) === platform && !seen.includes(one.name))?.name
+  arrivals(list, seen, platform).find((one) => one.ownership === 'yours')?.name
+
+/** A new node of this platform that another owner holds (Y-404). It never
+ *  ticks beat 1, and the beat says why. */
+export const newStranger = (list: Machine[], seen: string[] | null, platform: Platform) =>
+  arrivals(list, seen, platform).find((one) => one.ownership !== 'yours')
+
+const notOurs = (machine: Machine, reason: string) =>
+  `${machine.name} is on the tailnet and ${reason} · log in to Tailscale there with the appliance's account`
 
 /** Beat 1, read on the device already open: the node in the inventory the
  *  daemon serves. */
@@ -52,9 +63,14 @@ export function onTailnet(
   name: string | undefined,
   platform: Platform,
   late: boolean,
+  stranger?: Machine,
 ): Beat & { machine: Machine | null } {
   if (machines.looked === 'failed') return { state: 'stuck', words: 'the tailnet list could not be read', machine: null }
   if (machines.looked !== 'ok') return { state: 'waiting', words: 'reading the tailnet…', machine: null }
+  const strangerReason = stranger ? notYours(stranger) : null
+  if (!name && stranger && strangerReason) {
+    return { state: 'stuck', words: notOurs(stranger, strangerReason), machine: null }
+  }
   if (!name) {
     return late
       ? {
@@ -68,6 +84,8 @@ export function onTailnet(
   if (!machine) {
     return { state: 'stuck', words: `the tailnet lists no device called ${name} · pick the device again`, machine }
   }
+  const reason = notYours(machine)
+  if (reason) return { state: 'stuck', words: notOurs(machine, reason), machine }
   if (machine.expired) {
     return { state: 'stuck', words: `${name} is on the tailnet and its Tailscale key has expired · log in to Tailscale there again`, machine }
   }

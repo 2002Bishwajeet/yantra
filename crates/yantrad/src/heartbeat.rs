@@ -236,6 +236,7 @@ mod tests {
 
     fn peer(id: &str, name: &str, addresses: &[&str]) -> MachineInfo {
         MachineInfo {
+            ownership: yantra_core::inventory::Ownership::Yours,
             id: id.into(),
             name: name.into(),
             dns_name: format!("{name}.example.ts.net."),

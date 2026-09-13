@@ -46,7 +46,8 @@ function Machines(props: { form: SessionForm; values: Values }) {
   }
   return (
     <div aria-label="Machine" className="ns__chips" role="group">
-      {machines.data.map((one) => {
+      {/* Y-404: a node another owner holds is not a place to run sessions. */}
+      {machines.data.filter((one) => one.ownership === 'yours').map((one) => {
         const reachable = one.online && !one.expired
         return (
           <FilterChip

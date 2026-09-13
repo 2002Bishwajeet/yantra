@@ -3688,6 +3688,7 @@ mod tests {
     fn joining_tailnet() -> Fake {
         Fake {
             machines: vec![yantra_core::inventory::MachineInfo {
+                ownership: yantra_core::inventory::Ownership::Yours,
                 id: JOINING.to_owned(),
                 name: "joining-box".to_owned(),
                 dns_name: "joining-box.example.ts.net.".to_owned(),
@@ -3901,6 +3902,7 @@ mod tests {
         tailnet.machines.insert(
             0,
             yantra_core::inventory::MachineInfo {
+                ownership: yantra_core::inventory::Ownership::Yours,
                 id: "nIMPOSTOR000CNTRL".to_owned(),
                 name: "impostor-box".to_owned(),
                 dns_name: "impostor-box.example.ts.net.".to_owned(),

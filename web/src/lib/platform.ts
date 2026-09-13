@@ -1,11 +1,22 @@
 import type { Machine } from '@/api'
 
+/** Why a node another owner holds is not yours to use (owner, 2026-09-13,
+ *  Y-404); `null` is a node your account owns. */
+export function notYours(machine: Pick<Machine, 'ownership'>): string | null {
+  if (machine.ownership === 'shared') return 'shared from another account · not supported yet'
+  if (machine.ownership === 'tagged') return 'tagged, so the tailnet owns it and not your account · not supported yet'
+  return null
+}
+
 /** Tailscale's `os` for the two systems a session runs on: tmux and `/bin/sh`
- *  are there (walk-through §3.6). */
-export const runsSessions = (machine: Pick<Machine, 'os'>) => machine.os === 'linux' || machine.os === 'macOS'
+ *  are there (walk-through §3.6). A node you do not own never counts (Y-404). */
+export const runsSessions = (machine: Pick<Machine, 'os' | 'ownership'>) =>
+  machine.ownership === 'yours' && (machine.os === 'linux' || machine.os === 'macOS')
 
 /** What a node that runs no session is, in the dashboard's words (owner, 2026-09-12). */
-export function apart(machine: Pick<Machine, 'os'>): string {
+export function apart(machine: Pick<Machine, 'os' | 'ownership'>): string {
+  const reason = notYours(machine)
+  if (reason) return reason
   if (machine.os === 'windows') return 'Windows · coming soon as a machine for sessions · opens the dashboard meanwhile'
   if (machine.os === 'iOS' || machine.os === 'android') return 'opens the dashboard · runs no session'
   return `${machine.os || 'an unnamed system'} · runs no session`

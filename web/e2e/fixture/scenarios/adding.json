@@ -4,17 +4,17 @@
     "looked": "ok",
     "age_seconds": 0,
     "data": [
-      { "name": "new-box", "dns_name": "new-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.21", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "joined-box", "dns_name": "joined-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.22", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "kept-box", "dns_name": "kept-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.23", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "ready-box", "dns_name": "ready-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.24", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "blocked-box", "dns_name": "blocked-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.25", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
-      { "name": "iphone", "dns_name": "iphone.yantra.tail3a1b.ts.net.", "address": "100.64.0.26", "os": "iOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
+      { "name": "new-box", "ownership": "yours", "dns_name": "new-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.21", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "joined-box", "ownership": "yours", "dns_name": "joined-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.22", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "kept-box", "ownership": "yours", "dns_name": "kept-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.23", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "ready-box", "ownership": "yours", "dns_name": "ready-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.24", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "blocked-box", "ownership": "yours", "dns_name": "blocked-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.25", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "iphone", "ownership": "yours", "dns_name": "iphone.yantra.tail3a1b.ts.net.", "address": "100.64.0.26", "os": "iOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
     ]
   },
   "arrives": {
     "after": 3000,
-    "machine": { "name": "fresh-box", "dns_name": "fresh-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.27", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
+    "machine": { "name": "fresh-box", "ownership": "yours", "dns_name": "fresh-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.27", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
   },
   "notifications": {
     "looked": "ok",

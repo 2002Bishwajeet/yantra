@@ -1,0 +1,7 @@
+{
+  "extends": "adding",
+  "arrives": {
+    "after": 3000,
+    "machine": { "name": "friends-box", "ownership": "shared", "dns_name": "friends-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.28", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null }
+  }
+}
