@@ -3,8 +3,9 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import * as contract from '@/contract.gen'
 import { mountSettings, sent, unmountSettings } from './harness'
 
-/** GitHub's Connect: GitLab's and OpenAI's are drawn disabled. */
-const connect = () => screen.getAllByRole('button', { name: 'Connect' }).find((one) => !(one as HTMLButtonElement).disabled)!
+/** GitHub's is the only row with an enabled Connect: GitLab and OpenAI are
+ *  "Later", not a button. */
+const connect = () => screen.getByRole('button', { name: 'Connect' })
 
 afterEach(() => {
   cleanup()
@@ -19,7 +20,9 @@ describe('Providers', () => {
     expect(screen.getByRole('button', { name: 'Manage' })).toBeTruthy()
     // contract.readiness has no login-session check on any machine.
     expect(await screen.findByText(/Claude subscription · signed in on 0 of \d+ machines/)).toBeTruthy()
-    expect((screen.getAllByRole('button', { name: 'Connect' })[0] as HTMLButtonElement).disabled).toBe(true)
+    // GitLab and OpenAI are "Later", D7 N6: a value, not a disabled button.
+    expect(screen.getAllByText('Later')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
   })
 
   /** Row 114: `.m3-clip` cuts rather than wraps, so the 390 px row takes the
@@ -29,8 +32,13 @@ describe('Providers', () => {
     expect(await screen.findByText('Connected as 2002Bishwajeet')).toBeTruthy()
     expect(screen.queryByText(/repositories, reviews, issues/)).toBeNull()
     expect(await screen.findByText(/^Signed in on 0 of \d+ machines$/)).toBeTruthy()
-    expect(screen.getByText('Later · nothing uses it yet')).toBeTruthy()
+    expect(screen.getByText('nothing uses it yet')).toBeTruthy()
     expect(screen.queryByText(/for a future agent/)).toBeNull()
+  })
+
+  it('draws the boundary when the daemon answers something else', async () => {
+    mountSettings('desktop', '/settings/providers', { 'GET /api/github': [500, 'boom'] })
+    expect(await screen.findByText('Providers could not be drawn')).toBeTruthy()
   })
 
   it('says only what the category has not said, and draws GitLab as unconnected', async () => {
@@ -98,7 +106,17 @@ describe('Providers', () => {
     expect(await screen.findByText('Not connected')).toBeTruthy()
   })
 
-  describe('Use your own GitHub app', () => {
+  describe('GitLab and OpenAI', () => {
+    it('draw "Later" as a value, never a disabled button (N6)', async () => {
+      mountSettings('desktop', '/settings/providers')
+      await screen.findByText('not connected')
+      const later = screen.getAllByText('Later')
+      expect(later).toHaveLength(2)
+      for (const one of later) expect(one.tagName).not.toBe('BUTTON')
+    })
+  })
+
+  describe('GitHub app', () => {
     it('says none is configured, never inventing a value', async () => {
       mountSettings('desktop', '/settings/providers')
       expect(await screen.findByText('None configured')).toBeTruthy()
@@ -108,40 +126,61 @@ describe('Providers', () => {
       mountSettings('desktop', '/settings/providers', {
         'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.builtin', client_id_custom: false }],
       })
-      expect(await screen.findByText("Yantra's own app · Iv1.builtin")).toBeTruthy()
+      expect(await screen.findByText("Yantra's own · Iv1.builtin")).toBeTruthy()
 
       cleanup()
       mountSettings('desktop', '/settings/providers', {
         'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
       })
-      expect(await screen.findByText('Your own app · Iv1.mine')).toBeTruthy()
+      expect(await screen.findByText('Your own · Iv1.mine')).toBeTruthy()
     })
 
     it('takes the phone strings and drops the id on the row', async () => {
       mountSettings('phone', '/settings/providers', {
         'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
       })
-      expect(await screen.findByText('Your own app')).toBeTruthy()
+      expect(await screen.findByText('Your own')).toBeTruthy()
       expect(screen.queryByText(/Iv1\.mine/)).toBeNull()
     })
 
-    it('writes an id, and the daemon takes it at its next restart', async () => {
+    it('writes an id, and the row says so until a read shows it', async () => {
       const asked = mountSettings('desktop', '/settings/providers', {
         'POST /api/github/client-id': (init) => {
           expect(sent(init)).toEqual({ id: 'Iv1.mine' })
           return [204]
         },
       })
-      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      await screen.findByText('None configured')
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
       const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
       fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: 'Iv1.mine' } })
       fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
 
       await waitFor(() => expect(asked).toContain('POST /api/github/client-id'))
       expect(await sheet.findByText(/takes it at its next restart/)).toBeTruthy()
-      // Not read back: the row still says what GET answered, unchanged.
-      expect(screen.getByText('None configured')).toBeTruthy()
+      // D7 §4.6: not read back, so the row says what was just saved.
+      expect(await screen.findByText('Your own · after yantrad restarts')).toBeTruthy()
+      expect(screen.queryByText('None configured')).toBeNull()
     })
+
+    it('reverts to the plain reading once a poll confirms the saved id', async () => {
+      let polled = 0
+      const asked = mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': () =>
+          [200, ++polled < 2 ? contract.github : { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
+        'POST /api/github/client-id': [204],
+      })
+      await screen.findByText('None configured')
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: 'Iv1.mine' } })
+      fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(asked).toContain('POST /api/github/client-id'))
+      expect(await screen.findByText('Your own · after yantrad restarts')).toBeTruthy()
+      // The connection polls every 5 s; the next answer matches what was saved.
+      expect(await screen.findByText('Your own · Iv1.mine', undefined, { timeout: 8_000 })).toBeTruthy()
+    }, 10_000)
 
     it('draws a refused id in the sheet', async () => {
       mountSettings('desktop', '/settings/providers', {
@@ -156,20 +195,42 @@ describe('Providers', () => {
       fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
 
       expect(await sheet.findByText(/up to 64 characters/)).toBeTruthy()
+      // A refusal writes nothing, so the row keeps reading the connection.
+      expect(screen.getByText('None configured')).toBeTruthy()
     })
 
-    it('disables Clear with no custom id, and clears one that is set', async () => {
+    it('disables Clear with no custom id, and clears one that is set, and the row says so', async () => {
       const asked = mountSettings('desktop', '/settings/providers', {
         'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
         'DELETE /api/github/client-id': [204],
       })
-      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      await screen.findByText('Your own · Iv1.mine')
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
       const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
       fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
 
       await waitFor(() => expect(asked).toContain('DELETE /api/github/client-id'))
       expect(await sheet.findByText(/falls back to its own app/)).toBeTruthy()
+      expect(await screen.findByText("Yantra's own · after yantrad restarts")).toBeTruthy()
     })
+
+    it('reverts to the plain reading once a poll confirms the reset', async () => {
+      let polled = 0
+      const asked = mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': () =>
+          [200, ++polled < 2 ? { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true } : contract.github],
+        'DELETE /api/github/client-id': [204],
+      })
+      await screen.findByText('Your own · Iv1.mine')
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
+
+      await waitFor(() => expect(asked).toContain('DELETE /api/github/client-id'))
+      expect(await screen.findByText("Yantra's own · after yantrad restarts")).toBeTruthy()
+      // The connection polls every 5 s; the next answer confirms the reset.
+      expect(await screen.findByText('None configured', undefined, { timeout: 8_000 })).toBeTruthy()
+    }, 10_000)
 
     it('has nothing to clear when the id is not custom', async () => {
       mountSettings('desktop', '/settings/providers')

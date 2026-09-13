@@ -247,9 +247,19 @@ test.describe('settings · Providers', () => {
     await page.goto('/settings/providers')
     await opened(page, 'Providers', size)
     await expect(page.getByText('Connected as 2002Bishwajeet')).toBeVisible()
-    await expect(page.getByText('Later · nothing uses it yet')).toBeVisible()
+    await expect(page.getByText('nothing uses it yet')).toBeVisible()
     await expect(page.getByText(/repositories, reviews, issues/)).toHaveCount(0)
     await expect(page.getByText(/for a future agent/)).toHaveCount(0)
+  })
+
+  /** D7 §4.6, N6: GitLab and OpenAI are not yet connectable, and a disabled
+   *  Connect looked broken rather than later. */
+  test('draws GitLab and OpenAI as "Later", never a disabled button', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/settings/providers')
+    await opened(page, 'Providers', size)
+    await expect(page.getByText('Later', { exact: true })).toHaveCount(2)
+    await expect(page.getByRole('button', { name: 'Connect', disabled: true })).toHaveCount(0)
   })
 
   test('signs out from Manage', async ({ page, size }) => {
@@ -273,8 +283,11 @@ test.describe('settings · Notifications', () => {
     await page.goto('/settings/notifications')
     await opened(page, 'Notifications', size)
 
+    // `about.relay` says the running daemon holds one (D7 §4.7).
+    await expect(page.getByText('On · the daemon holds a relay and pushes to it')).toBeVisible()
     // What the daemon pushes reads rather than sets: no route changes it.
-    await expect(page.getByRole('switch', { name: 'When an agent needs you' })).toBeDisabled()
+    const needsYou = page.getByRole('listitem').filter({ hasText: 'When an agent needs you' })
+    await expect(needsYou.getByText('Sent', { exact: true })).toBeVisible()
 
     await page.getByRole('button', { name: 'Edit' }).click()
     const sheet = page.getByRole('dialog', { name: 'Push relay' })
@@ -290,11 +303,22 @@ test.describe('settings · Notifications', () => {
     await sheet.getByRole('button', { name: 'Save and send a test' }).click()
     await expect(sheet.getByText('The test message arrived at the relay.')).toBeVisible()
     await sheet.getByRole('button', { name: 'Done' }).click()
-    await expect(page.getByText(/^ntfy\.sh · Set · replaced just now/)).toBeVisible()
+    await expect(
+      page.getByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
+    ).toBeVisible()
 
     expect(writes.filter((one) => one === 'POST /api/relay')).toHaveLength(1)
     // Nothing reads a relay back (§B4), in either direction.
     expect(writes.filter((one) => one.endsWith('/api/relay'))).toHaveLength(1)
+  })
+
+  /** ADR-0021: a daemon that never held a relay says so plainly, not just
+   *  the sheet's own "nothing is read back" note. */
+  test('says off when the daemon holds no relay', async ({ page, size }) => {
+    await scenario(page, 'firstrun')
+    await page.goto('/settings/notifications')
+    await opened(page, 'Notifications', size)
+    await expect(page.getByText('Off · nothing is pushed')).toBeVisible()
   })
 })
 
