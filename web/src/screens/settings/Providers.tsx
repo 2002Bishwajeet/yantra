@@ -1,11 +1,13 @@
-import { useState } from 'react'
-import { Box, GitBranch, GitFork, Sparkles } from 'lucide-react'
+import { type FormEvent, useState } from 'react'
+import { Box, GitBranch, GitFork, KeyRound, Sparkles } from 'lucide-react'
+import type { Connection } from '@/api'
 import { useGithub, useReadiness } from '@/api/hooks'
-import { useGithubLogout } from '@/api/mutations'
+import { useClearGithubClientId, useGithubLogout, useSetGithubClientId } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
+import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { ConnectSheet } from './ConnectSheet'
 import { Group, Note } from './Group'
@@ -15,7 +17,7 @@ import { Sheet } from './Sheet'
 export function Providers() {
   const github = useGithub()
   const readiness = useReadiness()
-  const [sheet, setSheet] = useState<'connect' | 'manage' | null>(null)
+  const [sheet, setSheet] = useState<'connect' | 'manage' | 'client-id' | null>(null)
   // The phone row is 390 px less a lead and a chevron, and `.m3-clip` cuts
   // rather than wraps, so the phone takes the boards' shorter strings.
   const phone = useFormFactor() === 'phone'
@@ -51,6 +53,20 @@ export function Providers() {
                 Connect
               </Button>
             )
+          }
+        />
+        <ListItem
+          headline="Use your own GitHub app"
+          leading={
+            <Lead>
+              <KeyRound />
+            </Lead>
+          }
+          supporting={clientIdSupporting(connection, phone)}
+          trailing={
+            <Button onClick={() => setSheet('client-id')} variant="text">
+              Edit
+            </Button>
           }
         />
         <ListItem
@@ -103,8 +119,23 @@ export function Providers() {
       </Note>
       <ConnectSheet onOpenChange={(open) => setSheet(open ? 'connect' : null)} open={sheet === 'connect'} />
       <ManageSheet login={connection?.login ?? null} onOpenChange={(open) => setSheet(open ? 'manage' : null)} open={sheet === 'manage'} />
+      <ClientIdSheet
+        current={connection?.client_id_custom ? connection.client_id : null}
+        onOpenChange={(open) => setSheet(open ? 'client-id' : null)}
+        open={sheet === 'client-id'}
+      />
     </>
   )
+}
+
+/** What the row says without inventing a value: asking, none configured, the
+ *  build's own, or a self-hoster's own (Y-393). The phone board takes the
+ *  same shorter strings the GitHub row above it does (row 114). */
+function clientIdSupporting(connection: Connection | undefined, phone: boolean): string {
+  if (connection === undefined) return 'asking the daemon'
+  if (connection.client_id === null) return phone ? 'None set up' : 'None configured'
+  if (connection.client_id_custom) return phone ? 'Your own app' : `Your own app · ${connection.client_id}`
+  return phone ? "Yantra's own app" : `Yantra's own app · ${connection.client_id}`
 }
 
 function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => void; login: string | null }) {
@@ -140,6 +171,93 @@ function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => vo
           <Mono className="settings__said">{logout.error.said}</Mono>
         </div>
       ) : null}
+    </Sheet>
+  )
+}
+
+/** Y-393. Nothing here is read back once saved: the daemon takes it at its
+ *  next restart, exactly like the relay's own sheet, so a success is a note
+ *  rather than a refetch that would still show the old id. `current` is the
+ *  custom id in use now, if any — `Clear` is disabled with nothing to remove. */
+function ClientIdSheet(props: { open: boolean; onOpenChange: (open: boolean) => void; current: string | null }) {
+  const { open, onOpenChange, current } = props
+  const set = useSetGithubClientId()
+  const clear = useClearGithubClientId()
+  const [saved, setSaved] = useState<'set' | 'cleared' | null>(null)
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const id = String(new FormData(event.currentTarget).get('id') ?? '').trim()
+    set.mutate({ id }, { onSuccess: () => setSaved('set') })
+  }
+
+  const close = (next: boolean) => {
+    if (!next) {
+      set.reset()
+      clear.reset()
+      setSaved(null)
+    }
+    onOpenChange(next)
+  }
+
+  const pending = set.isPending || clear.isPending
+  const error = set.error ?? clear.error
+
+  return (
+    <Sheet
+      description="Use an OAuth App you registered instead of the one Yantra carries. The device flow needs no client secret."
+      onOpenChange={close}
+      open={open}
+      title="Use your own GitHub app"
+    >
+      <form className="settings__form" id="client-id" onSubmit={submit}>
+        <TextField autoComplete="off" label="Client ID" name="id" placeholder="Iv1.…" required type="text" />
+        <Text render={<p />} scale="body-small" tone="variant">
+          Register one at{' '}
+          <a href="https://github.com/settings/applications/new" rel="noreferrer" target="_blank">
+            github.com/settings/applications/new
+          </a>
+          , with Device Flow enabled and "Expire user access tokens" unticked.
+        </Text>
+        <div aria-live="polite" className="settings__outcome">
+          {saved === 'set' ? (
+            <Text render={<p />} scale="body-medium" emphasized>
+              Saved. yantrad takes it at its next restart —{' '}
+              <Mono>sudo systemctl restart yantrad</Mono>.
+            </Text>
+          ) : null}
+          {saved === 'cleared' ? (
+            <Text render={<p />} scale="body-medium" emphasized>
+              Cleared. yantrad falls back to its own app at its next restart.
+            </Text>
+          ) : null}
+          {error ? (
+            <>
+              <Text render={<p />} scale="body-medium" tone="error" emphasized>
+                {error.describe()}
+              </Text>
+              <Mono className="settings__said">{error.said}</Mono>
+            </>
+          ) : null}
+        </div>
+        <div className="m3-dialog__actions">
+          <Button onClick={() => close(false)} variant="text">
+            {saved ? 'Done' : 'Cancel'}
+          </Button>
+          <Button
+            disabled={pending || current === null}
+            onClick={() => clear.mutate(undefined, { onSuccess: () => setSaved('cleared') })}
+            tone="error"
+            type="button"
+            variant="tonal"
+          >
+            {clear.isPending ? 'Clearing…' : 'Clear'}
+          </Button>
+          <Button disabled={pending} type="submit">
+            {set.isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </form>
     </Sheet>
   )
 }

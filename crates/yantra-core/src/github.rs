@@ -7,10 +7,12 @@
 //! itself, no error below carries it, and nothing here writes it anywhere —
 //! [`crate::notify::write_github`] is the one place it lands on disk.
 //!
-//! **The OAuth App is the owner's.** Its client id is not a secret, and the
-//! device flow needs no client secret, so [`client_id`] is read from the
-//! environment with a build-time default and the flow refuses when neither
-//! names one.
+//! **The OAuth App is the owner's, unless a self-hoster registers their own.**
+//! Its client id is not a secret, and the device flow needs no client secret,
+//! so [`client_id`] is read from the environment with a build-time default —
+//! the environment wins, so `yantra github client-id` can override the app
+//! this build carries by writing it beside the grant — and the flow refuses
+//! when neither names one.
 //!
 //! Every send is blocking and runs on a blocking thread, because the caller's
 //! runtime is serving terminals on its workers (I-13).
@@ -71,10 +73,46 @@ pub fn from_env() -> Option<Token> {
 /// The environment first, then whatever the build baked in. `None` is a
 /// deployment with no app registered, and every flow refuses on it.
 pub fn client_id() -> Option<String> {
-    std::env::var(CLIENT_ID)
+    client_id_and_source().map(|(id, _)| id)
+}
+
+/// [`client_id`], with where it came from — a self-hoster's own, from the
+/// environment, or what the build baked in. Read fresh every call: nothing
+/// here holds a value in memory, so one just written to
+/// [`crate::notify::RELAY_FILE`] shows here only once `yantrad` restarts and
+/// this reads the new environment (Y-393).
+pub fn client_id_and_source() -> Option<(String, ClientIdSource)> {
+    if let Some(id) = std::env::var(CLIENT_ID)
         .ok()
-        .or_else(|| option_env!("YANTRA_GITHUB_CLIENT_ID").map(str::to_owned))
         .filter(|value| !value.is_empty())
+    {
+        return Some((id, ClientIdSource::Env));
+    }
+    option_env!("YANTRA_GITHUB_CLIENT_ID")
+        .map(str::to_owned)
+        .filter(|value| !value.is_empty())
+        .map(|id| (id, ClientIdSource::BuiltIn))
+}
+
+/// Where a [`client_id`] came from, so a caller can say *built-in* or *yours*
+/// without inventing a distinction the value alone does not carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientIdSource {
+    Env,
+    BuiltIn,
+}
+
+/// The conservative charset a client id must fit before it reaches the file:
+/// letters, digits, `.`, `_` and `-`, no more than 64 of them. GitHub's own
+/// ids (`Iv1.` and `Ov23li` prefixes, then hex) sit well inside it — this is
+/// not GitHub's rule, only the widest one an environment file's parser and a
+/// shell can both hold with no escaping.
+pub fn valid_client_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Step 1 of the device flow, as GitHub sends it. `device_code` is what the
@@ -647,6 +685,17 @@ mod tests {
             client_id().is_none_or(|id| !id.is_empty()),
             "a blank id must never reach the flow"
         );
+    }
+
+    #[test]
+    fn the_conservative_charset_allows_githubs_own_ids_and_refuses_the_rest() {
+        assert!(valid_client_id("Iv1.a1b2c3d4e5f6a7b8"));
+        assert!(valid_client_id("Ov23liAbCdEfGhIjKlMn"));
+        assert!(!valid_client_id(""), "empty");
+        assert!(!valid_client_id(&"a".repeat(65)), "too long");
+        assert!(!valid_client_id("has a space"), "whitespace");
+        assert!(!valid_client_id("has'quote"), "quote");
+        assert!(!valid_client_id("has;semicolon"), "shell metacharacter");
     }
 
     /// A bound port, so a scripted reply can name it in a `Link` header

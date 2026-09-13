@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
+  Connection,
   Listed,
   Listing,
   Looked,
@@ -9,6 +10,7 @@ import type {
   MachineSessions,
   Probed,
   Readiness,
+  Repo,
   Spend,
   Transcript,
   WorkspaceStatus,
@@ -27,7 +29,6 @@ import {
 } from '@/api/client'
 import { keys, type Window } from '@/api/keys'
 import type { About, Notification, SshIdentity } from '@/api/types/daemon'
-import type { Connection, Repo } from '@/api/types/github'
 
 const workspace = (name: string, tail: string) =>
   `/api/workspaces/${encodeURIComponent(name)}/${tail}`
@@ -207,7 +208,11 @@ export const githubQuery = () =>
   queryOptions({
     queryKey: keys.github(),
     queryFn: ({ signal }) =>
-      fetchJson<Connection>('/api/github', { signal }, fields('connected', 'login', 'scopes')),
+      fetchJson<Connection>(
+        '/api/github',
+        { signal },
+        fields('connected', 'login', 'scopes', 'client_id', 'client_id_custom'),
+      ),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
