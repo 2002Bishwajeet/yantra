@@ -406,11 +406,8 @@ mod tests {
         };
         let event = Event::joined(&reply);
         assert_eq!(event.joined.as_ref(), Some(&reply));
-        assert!(
-            event.said.contains("logs in there as yantra"),
-            "{}",
-            event.said
-        );
+        // No message: the sentence names a login, which is not for a test log.
+        assert!(event.said.contains("logs in there as yantra"));
         assert_eq!(Event::unreachable("pi").joined, None);
     }
 
