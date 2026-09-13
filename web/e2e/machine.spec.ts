@@ -121,11 +121,14 @@ test.describe('one machine that is off', () => {
 })
 
 test.describe('one machine missing a basic', () => {
+  // nas's report has no `git` check at all: `missingBasics` (`lib/ready`)
+  // counts an unasked basic as missing too, same as the machines-list card
+  // (Y-402 review), so it joins tmux and claude's explicit absence.
   test('offers Install and no session, inside the screen', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto('/m/nas')
     const ready = card(page, 'Readiness')
-    await expect(ready.getByRole('heading', { name: 'tmux and claude are missing' })).toBeVisible({ timeout: 15_000 })
+    await expect(ready.getByRole('heading', { name: 'tmux, git and claude are missing' })).toBeVisible({ timeout: 15_000 })
     await expect(ready.getByRole('button', { name: 'Install' })).toBeVisible()
     // The shell's FAB is D7 T8's; this page offers no session of its own.
     await expect(ready.getByRole('link', { name: 'New session' })).toHaveCount(0)

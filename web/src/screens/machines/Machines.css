@@ -117,6 +117,7 @@
 
 .machines__eyebrow {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
   padding: 0 4px;

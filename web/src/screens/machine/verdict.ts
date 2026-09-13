@@ -1,8 +1,9 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { nameOf } from '@/lib/checks'
+import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
+import { missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
-import { answer, listed, missingBasics, needsSudo, newestInstall, type Watch } from './install'
+import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
 
 /** D7 §4.3: what the Readiness card says, which decides its one action. */
 export type Verdict =
@@ -19,7 +20,7 @@ export type Verdict =
   | { kind: 'manual'; absent: Check[] }
   | { kind: 'ready' }
 
-const BASIC = new Set(['tmux', 'git', 'agent-cli'])
+const BASIC = new Set(INSTALLABLE)
 
 export function verdictOf(input: {
   name: string
@@ -37,15 +38,13 @@ export function verdictOf(input: {
   if (readiness.looked === 'never' || readiness.data.checks.length === 0) return { kind: 'unasked' }
 
   const { checks } = readiness.data
-  const missing = missingBasics(checks)
+  const missing = missingBasics(readiness.data).map((one) => nameOf(one.check))
   const fresh = watch ? answer(events, name, watch) : null
   if (watch && !fresh) return { kind: 'installing', missing }
 
   const reachable = checks.find((one) => one.check === 'reachable')
   if (reachable?.state === 'absent') {
-    // A changed host key reads as ssh failing, not refused: the join command
-    // places a key and cannot fix a host key.
-    return /permission denied/i.test(reachable.detail)
+    return reachableFailure(reachable.detail) === 'refused'
       ? { kind: 'refused', detail: reachable.detail }
       : { kind: 'unreachable', detail: reachable.detail }
   }
