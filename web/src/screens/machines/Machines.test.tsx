@@ -24,30 +24,58 @@ describe('/machines on the busy fleet', () => {
     expect(screen.getAllByRole('link', { name: 'Open' })).toHaveLength(6)
 
     const good = card('cachyos-g14')
-    expect(good.getByText('online')).toBeTruthy()
-    for (const check of ['reachable', 'tmux', 'agent-cli', 'terminfo']) {
+    // Every basic is present, so the chip reads the verdict, not `online` (D7 §3.3).
+    expect(good.getByText('ready')).toBeTruthy()
+    // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
+    for (const check of ['ssh', 'tmux', 'claude', 'terminfo']) {
       expect(good.getByText(check)).toBeTruthy()
     }
     expect(good.getAllByText('ok')).toHaveLength(4)
     expect(good.getByText('4 of 4 checks')).toBeTruthy()
     // Everything passes, so nothing asks the machine again.
-    expect(good.queryByRole('button', { name: 'Check again' })).toBeNull()
+    expect(good.queryByRole('button')).toBeNull()
 
     const short = card('pi-5')
     expect(short.getByText('missing')).toBeTruthy()
     expect(short.getByText('no `claude` on PATH there')).toBeTruthy()
     expect(short.getByText('1 failing')).toBeTruthy()
-    expect(short.getByRole('button', { name: 'Check again' })).toBeTruthy()
+    // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
+    expect(short.getByText('2 missing')).toBeTruthy()
+    expect(short.getByRole('button', { name: 'Install' })).toBeTruthy()
 
     const gone = card('thinkpad')
-    expect(gone.getByText('unreachable')).toBeTruthy()
+    // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
+    expect(gone.getByText('asleep · 7 Jul')).toBeTruthy()
     expect(gone.getAllByText('unknown').length).toBeGreaterThan(0)
     expect(gone.getByText('1 failing · 3 unknown')).toBeTruthy()
+    // Asleep offers nothing to press: ssh cannot answer either way.
+    expect(gone.queryAllByRole('button')).toHaveLength(0)
   })
 
-  it('asks the machine again when Check again is pressed', async () => {
+  it('starts an install when Install is pressed', async () => {
     const asked = mount('desktop', '/machines')
     await screen.findByText(/^looked /)
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/install'))
+  })
+
+  it('shows the daemon’s words when Install is refused', async () => {
+    mount('desktop', '/machines', scenario('refused'))
+    await screen.findByText(/^looked /)
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Install' }))
+    const alert = await card('pi-5').findByRole('alert')
+    expect(alert.textContent).toContain('Install did not start')
+    expect(alert.textContent).toContain('node biswas-iphone is on this tailnet but is not yours')
+  })
+
+  it('asks the machine again when Check again is pressed, for a machine never checked', async () => {
+    const state = scenario('busy')
+    state.readiness!.data = (state.readiness!.data as { machine: string }[]).filter(
+      (one) => one.machine !== 'pi-5',
+    )
+    const asked = mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(card('pi-5').getByText('not checked')).toBeTruthy()
     fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/readiness'))
   })
@@ -103,7 +131,7 @@ describe('/machines on the phone', () => {
     const good = card('cachyos-g14')
     expect(good.getByText('4 of 4 checks')).toBeTruthy()
     expect(good.queryByText('tmux')).toBeNull()
-    expect(card('pi-5').getByText('agent-cli')).toBeTruthy()
+    expect(card('pi-5').getByText('claude')).toBeTruthy()
   })
 })
 
@@ -115,6 +143,61 @@ describe('/machines on an empty fleet', () => {
         'every tmux session on the machines that answered belongs to a workspace',
       ),
     ).toBeTruthy()
+  })
+})
+
+describe('/machines with devices that open the dashboard', () => {
+  it('keeps a phone, a tablet and Windows apart, uncounted and without a Fix', async () => {
+    mount('desktop', '/machines', scenario('setup'))
+    await screen.findByText(/^looked /)
+
+    // Four machines run sessions; the phone and the Windows PC do not (D7 §3.4).
+    expect(screen.getAllByRole('link', { name: 'Open' })).toHaveLength(4)
+    expect(screen.queryByRole('region', { name: 'iphone' })).toBeNull()
+
+    const devices = within(
+      screen.getByRole('region', { name: 'Devices that open the dashboard' }),
+    )
+    expect(devices.getByText('iphone')).toBeTruthy()
+    expect(devices.getByText('gaming-pc')).toBeTruthy()
+    expect(devices.getByText('coming soon')).toBeTruthy()
+  })
+
+  it('reads a missing basic as Install, and a refused key as Copy join command', async () => {
+    mount('desktop', '/machines', scenario('setup'))
+    await screen.findByText(/^looked /)
+
+    const missing = card('missing-mac')
+    expect(missing.getByText('2 missing')).toBeTruthy()
+    expect(missing.getByRole('button', { name: 'Install' })).toBeTruthy()
+
+    const refused = card('refused-box')
+    expect(refused.getByText('key refused')).toBeTruthy()
+    expect(refused.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
+    expect(refused.queryByRole('button', { name: 'Install' })).toBeNull()
+  })
+
+  it('is asleep, not failed, for a machine the tailnet says is off — and offers nothing to press', async () => {
+    mount('desktop', '/machines', scenario('setup'))
+    await screen.findByText(/^looked /)
+
+    const asleep = card('asleep-laptop')
+    expect(asleep.getByText(/^asleep · /)).toBeTruthy()
+    expect(asleep.queryAllByRole('button')).toHaveLength(0)
+  })
+})
+
+describe('/machines when no machine can run a session', () => {
+  it('offers Add a device instead of an empty grid', async () => {
+    const state = scenario('busy')
+    state.machines!.data = (state.machines!.data as { os: string }[]).filter(
+      (one) => one.os !== 'linux' && one.os !== 'macOS',
+    )
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(screen.getByText('No machine can run a session yet.')).toBeTruthy()
+    // The title row keeps its own Add a device too, so there are two.
+    expect(screen.getAllByRole('link', { name: 'Add a device' }).length).toBeGreaterThan(0)
   })
 })
 

@@ -7,6 +7,7 @@ import type {
   Session,
   Workspace,
 } from '@/api'
+import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** The four a machine card draws; the machine page draws all ten. */
@@ -65,6 +66,44 @@ export const checksOf = (readiness: Readiness[], machine: string): Check[] =>
 
 export const checkNamed = (checks: Check[], name: string): Check | undefined =>
   checks.find((one) => one.check === name)
+
+/** D7 §3.3, for the grid card's chip. A closed lid is asleep, not failed —
+ *  only a machine that answered and then failed gets the error tone. */
+export type CardVerdict =
+  | { kind: 'asleep' }
+  | { kind: 'expired' }
+  | { kind: 'unchecked' }
+  | { kind: 'failed' }
+  | { kind: 'needs'; missing: number }
+  | { kind: 'ready' }
+
+export function cardVerdict(machine: Machine, checks: Check[]): CardVerdict {
+  if (machine.expired) return { kind: 'expired' }
+  if (!machine.online) return { kind: 'asleep' }
+  if (checks.length === 0) return { kind: 'unchecked' }
+  if (checkNamed(checks, 'reachable')?.state === 'absent') return { kind: 'failed' }
+  const missing = blocking({ machine: machine.name, checks })
+  return missing.length > 0 ? { kind: 'needs', missing: missing.length } : { kind: 'ready' }
+}
+
+/** The chip's mark, word and tone. `seen` is the machine's last-seen text,
+ *  already formatted by the caller's one clock (D3 §5.7). */
+export function cardChip(verdict: CardVerdict, seen: string | null): { state: MarkState; word: string; error: boolean } {
+  switch (verdict.kind) {
+    case 'asleep':
+      return { state: 'unknown', word: seen ? `asleep · ${seen}` : 'asleep', error: false }
+    case 'expired':
+      return { state: 'failed', word: 'key expired', error: true }
+    case 'unchecked':
+      return { state: 'idle', word: 'not checked', error: false }
+    case 'failed':
+      return { state: 'failed', word: 'key refused', error: true }
+    case 'needs':
+      return { state: 'needs', word: `${verdict.missing} missing`, error: false }
+    case 'ready':
+      return { state: 'done', word: 'ready', error: false }
+  }
+}
 
 export type Held = { machine: string; session: Session }
 

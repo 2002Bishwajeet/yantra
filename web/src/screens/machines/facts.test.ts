@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Check, MachineSessions } from '@/api'
 import { aMachine, aWorkspace } from '@/api/fixtures'
-import { machineState, markOf, summary, tally, unclaimed, wordOf } from './facts'
+import { cardChip, cardVerdict, machineState, markOf, summary, tally, unclaimed, wordOf } from './facts'
 
 const check = (name: string, state: Check['state']): Check => ({
   check: name,
@@ -50,6 +50,43 @@ describe('a machine', () => {
       state: 'failed',
       word: 'key expired',
     })
+  })
+})
+
+const ready = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session']
+const allPresent = (): Check[] => ready.map((name) => check(name, 'present'))
+
+describe('the card verdict (D7 §3.3)', () => {
+  it('is asleep, not failed, for a machine the tailnet says is off', () => {
+    expect(cardVerdict(aMachine({ online: false }), allPresent())).toEqual({ kind: 'asleep' })
+    expect(cardChip({ kind: 'asleep' }, '3h')).toEqual({ state: 'unknown', word: 'asleep · 3h', error: false })
+    expect(cardChip({ kind: 'asleep' }, null)).toEqual({ state: 'unknown', word: 'asleep', error: false })
+  })
+
+  it('is a key expired, and that stays an error', () => {
+    expect(cardVerdict(aMachine({ expired: true }), [])).toEqual({ kind: 'expired' })
+    expect(cardChip({ kind: 'expired' }, null).error).toBe(true)
+  })
+
+  it('is unchecked when online and nothing has been asked', () => {
+    expect(cardVerdict(aMachine(), [])).toEqual({ kind: 'unchecked' })
+  })
+
+  it('is failed when reachable itself is absent — a machine that answered and then refused', () => {
+    const checks = [check('reachable', 'absent')]
+    expect(cardVerdict(aMachine(), checks)).toEqual({ kind: 'failed' })
+    expect(cardChip({ kind: 'failed' }, null)).toEqual({ state: 'failed', word: 'key refused', error: true })
+  })
+
+  it('is needs when a basic is missing, and counts them', () => {
+    const checks = allPresent().map((one) => (one.check === 'tmux' ? check('tmux', 'absent') : one))
+    expect(cardVerdict(aMachine(), checks)).toEqual({ kind: 'needs', missing: 1 })
+    expect(cardChip({ kind: 'needs', missing: 2 }, null)).toEqual({ state: 'needs', word: '2 missing', error: false })
+  })
+
+  it('is ready when every basic is present, gh and heartbeat aside', () => {
+    expect(cardVerdict(aMachine(), allPresent())).toEqual({ kind: 'ready' })
+    expect(cardChip({ kind: 'ready' }, null)).toEqual({ state: 'done', word: 'ready', error: false })
   })
 })
 
