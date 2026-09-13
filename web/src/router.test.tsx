@@ -67,6 +67,7 @@ describe('every path draws its screen and names it in the title', () => {
     ['/new', 'New session', 'New session · Yantra'],
     ['/settings', 'Settings', 'Settings · Yantra'],
     ['/settings/about', 'Settings', 'About · Yantra'],
+    ['/machines/add', 'Add a device', 'Add a device · Yantra'],
   ])('%s', async (path, heading, title) => {
     await open(path)
     expect(await h1(heading)).toBeTruthy()

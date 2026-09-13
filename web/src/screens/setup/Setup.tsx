@@ -1,56 +1,52 @@
 import { useId, type ReactNode } from 'react'
-import { useQueries } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, Check, GitBranch, Plus, Radio } from 'lucide-react'
-import type { Machine, Readiness } from '@/api'
-import { useScreenTitle } from '@/shell/title'
+import { Check, GitBranch, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
+import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
-import { useAbout, useGithub, useMachines, useReadiness, useSshIdentity } from '@/api/hooks'
+import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
-import { machineReadinessQuery } from '@/api/queries'
+import { joinUrl } from '@/lib/join'
 import { apart, runsSessions } from '@/lib/platform'
-import { ago, at } from '@/lib/time'
+import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { List, ListItem } from '@/m3/list/List'
-import { State } from '@/m3/mark/Mark'
+import { State, type MarkState } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
+import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
+import { password } from '@/screens/add-device/beats'
+import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
 import { stamp } from '../dashboard/bands'
-import {
-  github,
-  joinCommand,
-  joinUrl,
-  line,
-  machines as machinesStep,
-  marks,
-  push,
-  ready,
-  sshKey,
-  statusWord,
-  tailnet,
-  type Line,
-  type Step,
-} from './steps'
+import { Join } from './Join'
+import { REQUIRED, useChecklist } from './progress'
+import { marks, statusWord, type Line, type Step } from './steps'
 import './Setup.css'
-
-const STEPS = 6
 
 const tones = { done: 'primary', progress: 'tertiary', todo: 'high', failed: 'error' } as const
 
-function Item(props: { title: string; step: Step; lead: ReactNode; trailing?: ReactNode; yours?: boolean }) {
-  const { title, step, lead, trailing, yours } = props
+/** D7 B5: the lead is the state — a tick when done, the number when not yet,
+ *  a ring in progress, a warning when it could not be read. */
+function lead(step: Step, fallback: ReactNode) {
+  if (step.status === 'done') return <Check />
+  if (step.status === 'progress') return <LoaderCircle />
+  if (step.status === 'failed') return <TriangleAlert />
+  return fallback
+}
+
+function Item(props: { title: string; step: Step; fallback: ReactNode; trailing?: ReactNode }) {
+  const { title, step, fallback, trailing } = props
   return (
     <ListItem
       headline={title}
-      leading={<Lead tone={yours ? 'primary' : tones[step.status]}>{lead}</Lead>}
+      leading={<Lead tone={tones[step.status]}>{lead(step, fallback)}</Lead>}
       supporting={
-        <State size="small" state={yours ? 'needs' : marks[step.status]}>
-          {yours ? 'waiting on you' : statusWord[step.status]} · {step.words}
+        <State size="small" state={marks[step.status]}>
+          {statusWord[step.status]} · {step.words}
         </State>
       }
       trailing={trailing}
@@ -58,109 +54,121 @@ function Item(props: { title: string; step: Step; lead: ReactNode; trailing?: Re
   )
 }
 
-/** The join command where it can be built, and why not where it cannot. */
-function Join(props: { url: string | null; about: { error: Error | null; data: unknown }; what: string }) {
-  const { url, about, what } = props
-  if (url) return <Copyable text={joinCommand(url)} what={what} />
-  return (
-    <Text scale="body-small" tone="variant">
-      {about.error
-        ? "the daemon's address could not be read, so the join command cannot be built"
-        : about.data
-          ? 'the daemon reports no tailnet address, so the join command cannot be built · check that Tailscale is up on the appliance, then restart yantrad'
-          : "reading the daemon's address…"}
-    </Text>
-  )
-}
+const newest = (events: Event[], machine: string) =>
+  events.find((one) => one.machine === machine && (one.kind === 'installed' || one.kind === 'install_stopped')) ??
+  null
 
-function MachineLine(props: { machine: Machine; line: Line; report: Readiness | null; join: ReactNode }) {
-  const { machine, line: said, report, join } = props
+/** D7 §4.1's machine lines: what each state says and the one action it
+ *  offers. An asleep machine offers none, since ssh cannot answer it. */
+function MachineLine(props: {
+  machine: Machine
+  line: Line
+  report: Readiness | null
+  events: Event[]
+  read: boolean
+  target: boolean
+  join: ReactNode
+}) {
+  const { machine, line: said, report, events, read, target, join } = props
+  const name = machine.name
   const recheck = useRecheckReadiness()
-  const mark = said.kind === 'ready' ? 'done' : said.kind === 'unreachable' ? 'unknown' : 'idle'
+  const install = useInstallOn(name, events)
+  useAskOnArrival(name, events, read, recheck.mutate)
+  const stop = newest(events, name)
+  const blocked = said.kind === 'missing' && stop?.kind === 'install_stopped' && stop.commands.length > 0
+  const view = said.kind === 'missing' && install.running ? 'installing' : blocked ? 'blocked' : said.kind
+
+  const mark: Record<typeof view, MarkState> = {
+    asleep: 'unknown',
+    unchecked: 'idle',
+    unreachable: 'unknown',
+    refused: 'failed',
+    missing: 'needs',
+    installing: 'running',
+    blocked: 'needs',
+    ready: 'done',
+  }
+  const words =
+    said.kind === 'asleep'
+      ? `asleep${said.since ? ` · last seen ${said.since} ago` : ''}`
+      : said.kind === 'unchecked'
+        ? 'not checked yet · a check costs one ssh round trip'
+        : said.kind === 'unreachable'
+          ? said.words
+          : said.kind === 'refused'
+            ? 'the key was refused · run the join command on it'
+            : said.kind === 'ready'
+              ? `ready · ${said.present} of ${said.total}`
+              : view === 'installing'
+                ? `installing on ${name}…`
+                : view === 'blocked'
+                  ? password(report)
+                  : said.installable
+                    ? said.words
+                    : `${said.words} · the machine page shows how`
+
+  const check = (label: string) => (
+    <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
+      {recheck.isPending ? 'asking…' : label}
+    </Button>
+  )
+  const action =
+    said.kind === 'asleep' || said.kind === 'ready' || view === 'installing'
+      ? null
+      : said.kind === 'unchecked'
+        ? check('Check')
+        : said.kind === 'missing' && said.installable && view !== 'blocked'
+          ? (
+              <Button onClick={install.press} variant={target ? 'filled' : 'tonal'}>
+                {target ? `Install on ${name}` : 'Install'}
+              </Button>
+            )
+          : said.kind === 'missing' && !said.installable
+            ? (
+                <Button render={<Link params={{ machine: name }} to="/m/$machine" />} role="link" variant="text">
+                  Open
+                </Button>
+              )
+            : check(report ? 'Check again' : 'Check')
+
   return (
-    <li className="setup__line" data-kind={said.kind}>
-      <State size="small" state={mark}>
-        <span className="setup__machine">{machine.name}</span>
+    <li className="setup__line" data-kind={view}>
+      <State size="small" state={mark[view]}>
+        <span className="setup__machine">{name}</span>
       </State>
       <div aria-live="polite" className="setup__said">
-        {said.kind === 'unchecked' ? (
-          <Text scale="body-small" tone="variant">
-            not checked yet · a check costs one ssh round trip
-          </Text>
-        ) : said.kind === 'unreachable' ? (
-          <Text className="setup__bad" scale="body-small">
-            {said.words}
-          </Text>
-        ) : said.kind === 'refused' ? (
-          <>
-            <Text scale="body-small" tone="variant">
-              key refused · run the join command once in a terminal on {machine.name}:
-            </Text>
-            {join}
-          </>
-        ) : (
-          <Text scale="body-small" tone="variant">
-            {said.kind === 'ready' ? `ready · ${said.words}` : said.words} · {said.present} of {said.total} checks
-          </Text>
-        )}
-        {recheck.error ? (
-          <ErrorSurface.Inline error={recheck.error} title={`${machine.name} was not asked`} />
-        ) : null}
+        <Text
+          className={said.kind === 'refused' || said.kind === 'unreachable' ? 'setup__bad' : undefined}
+          scale="body-small"
+          tone={said.kind === 'refused' || said.kind === 'unreachable' ? undefined : 'variant'}
+        >
+          {words}
+        </Text>
+        {said.kind === 'refused' ? join : null}
+        {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
+        {view === 'blocked'
+          ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
+          : null}
+        {recheck.error ? <ErrorSurface.Inline error={recheck.error} title={`${name} was not asked`} /> : null}
+        {install.error ? <ErrorSurface.Inline error={install.error} title={`The install on ${name} did not start`} /> : null}
       </div>
-      <Button disabled={recheck.isPending} onClick={() => recheck.mutate(machine.name)} variant="text">
-        {recheck.isPending ? 'asking…' : report ? 'Check again' : 'Check'}
-      </Button>
+      {action}
     </li>
   )
 }
 
-/** D3 §4.8: `/` while no workspace exists. The machines are the tailnet's,
- *  each asked on request, because the readiness sweep asks only the machines
- *  a workspace names. */
+/** D7 §4.1: `/` until the appliance has its key and one machine is ready (the
+ *  owner's ruling (b), 2026-09-13). Four steps are required; GitHub and push
+ *  are for later. One button is filled, and it is the next required thing. */
 export function Setup() {
-  const about = useAbout()
-  const identity = useSshIdentity()
-  const connection = useGithub()
-  const machines = useMachines()
-  const sweep = useReadiness()
   const now = useTick(true)
   const devices = useId()
+  const later = useId()
+  const { about, identity, machines, sweep, notifications, events, all, lines, steps, later: optional, done, next, target } =
+    useChecklist(now)
 
-  const all = machines.looked === 'ok' ? machines.data : []
-  const list = all.filter(runsSessions)
   const others = all.filter((one) => !runsSessions(one))
-  // A recheck answers into the per-machine key; nothing here reads that key
-  // over the wire, so an unasked machine draws as unasked rather than as a 404.
-  const asked = useQueries({
-    queries: list.map((one) => ({ ...machineReadinessQuery(one.name), enabled: false })),
-  })
-  const lines = list.map((machine, index) => {
-    const own = asked[index]?.data
-    const report =
-      own?.looked === 'ok'
-        ? own.data
-        : sweep.looked === 'ok'
-          ? (sweep.data.find((one) => one.machine === machine.name) ?? null)
-          : null
-    const since = machine.last_seen ? (at(machine.last_seen, now)?.text ?? null) : null
-    return { machine, report, line: line(machine, report, since) }
-  })
-  const readyCount = lines.filter((one) => ready(one.line)).length
-  const publicKey = identity.data?.public_key ?? null
   const join = joinUrl(location, about.data)
-
-  const steps = {
-    tailnet: tailnet(about, location.protocol),
-    ssh: sshKey(identity),
-    machines: machinesStep(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
-    github: github(connection),
-    push: push(about),
-    first: {
-      status: 'todo',
-      words: `needs one ready machine, you have ${readyCount === 0 ? 'none yet' : readyCount}`,
-    } satisfies Step,
-  }
-  const done = Object.values(steps).filter((one) => one.status === 'done').length
   const read = stamp([
     { name: 'machines', reading: machines },
     { name: 'readiness', reading: sweep },
@@ -174,7 +182,7 @@ export function Setup() {
           Set up Yantra
         </Text>
         <Text scale="body-medium" tone="variant">
-          the appliance is running; it checks each step itself and tells you what is left
+          Yantra runs AI agents on your own machines. Four steps get the first one ready, and each step checks itself.
         </Text>
       </div>
 
@@ -188,7 +196,7 @@ export function Setup() {
           <div className="setup__progress">
             <div className="setup__count">
               <Mono>
-                {done} of {STEPS} done
+                {done} of {REQUIRED} done
               </Mono>
               {read ? (
                 <Mono className="setup__stamp">
@@ -197,12 +205,12 @@ export function Setup() {
                 </Mono>
               ) : null}
             </div>
-            <Track className="setup__track" label={`${done} of ${STEPS} steps done`} value={done / STEPS} />
+            <Track className="setup__track" label={`${done} of ${REQUIRED} steps done`} value={done / REQUIRED} />
           </div>
 
           <List className="setup__list">
             <Item
-              lead={<Check />}
+              fallback="1"
               step={steps.tailnet}
               title="The appliance is on your tailnet"
               trailing={
@@ -211,89 +219,119 @@ export function Setup() {
                 </Button>
               }
             />
-            <Item lead={<Check />} step={steps.ssh} title="This account's ssh key" />
-            {publicKey ? (
-              <li className="setup__sub">
-                <Copyable text={publicKey} what="the public key" />
-              </li>
-            ) : null}
-            <Item lead={<Check />} step={steps.machines} title="Machines" />
+            <Item
+              fallback="2"
+              step={steps.machine}
+              title="Add a machine"
+              trailing={
+                <Button
+                  icon={<Plus />}
+                  render={<Link to="/machines/add" />}
+                  role="link"
+                  variant={next === 'add' ? 'filled' : 'tonal'}
+                >
+                  Add a device
+                </Button>
+              }
+            />
             <li className="setup__sub">
+              {identity.error ? (
+                <ErrorSurface.Inline
+                  error={asApiError(identity.error)}
+                  reset={() => void identity.refetch()}
+                  title="The appliance's key could not be read"
+                />
+              ) : (
+                <Text scale="body-small" tone="variant">
+                  {identity.data ? (
+                    <>
+                      this appliance's key · <Mono>{identity.data.fingerprint}</Mono>
+                    </>
+                  ) : (
+                    'the key is made when the first machine joins'
+                  )}
+                </Text>
+              )}
               {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
               ) : lines.length > 0 ? (
                 <ul className="setup__lines">
                   {lines.map((one) => (
                     <MachineLine
+                      events={events}
                       join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
                       key={one.machine.name}
                       line={one.line}
                       machine={one.machine}
+                      read={notifications.data !== undefined}
                       report={one.report}
+                      target={next === 'install' && one.machine.name === target}
                     />
                   ))}
                 </ul>
               ) : null}
-              {/* Y-390's guided Add a device starts here. */}
-              <Text scale="body-small" tone="variant">
-                To add a machine, run this once in a terminal on it. It turns on sshd, places this appliance's key
-                and tells the daemon which account ran it.
-              </Text>
-              <div aria-live="polite">
-                <Join about={about} url={join} what="the join command" />
-              </div>
+              {others.length > 0 ? (
+                <>
+                  <Text id={devices} scale="label-large" tone="variant">
+                    Devices that open the dashboard
+                  </Text>
+                  <ul aria-labelledby={devices} className="setup__lines">
+                    {others.map((one) => (
+                      <li className="setup__line" data-kind="apart" key={one.name}>
+                        <span className="setup__machine">{one.name}</span>
+                        <Text className="setup__said" scale="body-small" tone="variant">
+                          {apart(one)}
+                        </Text>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
             </li>
-            {others.length > 0 ? (
-              <li className="setup__sub">
-                <Text id={devices} scale="label-large" tone="variant">
-                  Devices that open the dashboard
-                </Text>
-                <ul aria-labelledby={devices} className="setup__lines">
-                  {others.map((one) => (
-                    <li className="setup__line" data-kind="apart" key={one.name}>
-                      <span className="setup__machine">{one.name}</span>
-                      <Text className="setup__said" scale="body-small" tone="variant">
-                        {apart(one)}
-                      </Text>
-                    </li>
-                  ))}
-                </ul>
-              </li>
-            ) : null}
+            <Item fallback="3" step={steps.ready} title="Get it ready" />
             <Item
-              lead={<GitBranch />}
-              step={steps.github}
-              title="GitHub"
-              trailing={
-                steps.github.status === 'done' ? undefined : (
-                  <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="tonal">
-                    Connect
-                  </Button>
-                )
-              }
-            />
-            <Item
-              lead={<Radio />}
-              step={steps.push}
-              title="Push to your phone"
-              trailing={
-                <Button render={<Link params={{ category: 'notifications' }} to="/settings/$category" />} role="link">
-                  Set up
-                </Button>
-              }
-            />
-            <Item
-              lead={<ArrowRight />}
+              fallback="4"
               step={steps.first}
               title="Your first session"
               trailing={
-                <Button icon={<Plus />} render={<Link to="/new" />} role="link">
+                <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={next === 'session' ? 'filled' : 'tonal'}>
                   New session
                 </Button>
               }
-              yours
             />
           </List>
+
+          <div className="setup__later">
+            <Text id={later} render={<h2 />} scale="title-small" tone="variant">
+              Later, when you want them
+            </Text>
+            <List aria-labelledby={later} className="setup__list">
+              <Item
+                fallback={<GitBranch />}
+                step={optional.github}
+                title="GitHub"
+                trailing={
+                  optional.github.status === 'done' ? undefined : (
+                    <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="tonal">
+                      Connect
+                    </Button>
+                  )
+                }
+              />
+              <Item
+                fallback={<Radio />}
+                step={optional.push}
+                title="Push to your phone"
+                trailing={
+                  optional.push.status === 'done' ? undefined : (
+                    <Button render={<Link params={{ category: 'notifications' }} to="/settings/$category" />} role="link" variant="tonal">
+                      Set up
+                    </Button>
+                  )
+                }
+              />
+            </List>
+          </div>
         </>
       )}
 

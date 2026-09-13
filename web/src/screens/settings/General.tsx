@@ -1,18 +1,23 @@
 import { useMachines } from '@/api/hooks'
+import { Button } from '@/m3/button/Button'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { readPrefs, usePrefs, writePrefs } from '@/shell/prefs'
+import { setupCardHidden, showSetupCard } from '@/screens/dashboard/setupCard'
 import { Group, Note } from './Group'
 import { CLONE_HOMES, type General as Held, readGeneral } from './general'
 
 // `writePrefs` merges one level deep, so General's keys are read again at the
-// write rather than held from the render that drew the row.
+// write rather than held from the render that drew the row. The keys no row
+// here edits, such as the setup card's, are kept.
 function write(patch: Partial<Held>) {
-  writePrefs({ general: { ...readGeneral(readPrefs()), ...patch } })
+  const prefs = readPrefs()
+  writePrefs({ general: { ...prefs.general, ...readGeneral(prefs), ...patch } })
 }
 
 export function General() {
-  const held = readGeneral(usePrefs())
+  const prefs = usePrefs()
+  const held = readGeneral(prefs)
   const machines = useMachines()
   const names = machines.looked === 'ok' ? machines.data.map((one) => one.name) : []
   // A machine the list no longer has still shows as chosen: it is what was
@@ -66,6 +71,17 @@ export function General() {
             </Segmented>
           }
         />
+        {setupCardHidden(prefs) ? (
+          <ListItem
+            headline="Finish setup card"
+            supporting="hidden from the dashboard · it shows again until GitHub and push are set up"
+            trailing={
+              <Button onClick={showSetupCard} variant="text">
+                Show the setup card
+              </Button>
+            }
+          />
+        ) : null}
         <ListItem
           headline="Confirmations"
           supporting="Kill and Delete ask first because they cannot be undone. Stop and Resume do not."

@@ -1,0 +1,116 @@
+{
+  "extends": "empty",
+  "machines": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      { "name": "ready-linux", "dns_name": "ready-linux.yantra.tail3a1b.ts.net.", "address": "100.64.0.31", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "missing-mac", "dns_name": "missing-mac.yantra.tail3a1b.ts.net.", "address": "100.64.0.32", "os": "macOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "refused-box", "dns_name": "refused-box.yantra.tail3a1b.ts.net.", "address": "100.64.0.33", "os": "linux", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "asleep-laptop", "dns_name": "asleep-laptop.yantra.tail3a1b.ts.net.", "address": "100.64.0.34", "os": "linux", "online": false, "expired": false, "last_seen": "2026-09-06T09:00:00Z", "heartbeat": null },
+      { "name": "iphone", "dns_name": "iphone.yantra.tail3a1b.ts.net.", "address": "100.64.0.35", "os": "iOS", "online": true, "expired": false, "last_seen": null, "heartbeat": null },
+      { "name": "gaming-pc", "dns_name": "gaming-pc.yantra.tail3a1b.ts.net.", "address": "100.64.0.36", "os": "windows", "online": false, "expired": false, "last_seen": "2026-09-05T20:00:00Z", "heartbeat": null }
+    ]
+  },
+  "readiness": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "machine": "ready-linux",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
+          { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 3s ago" }
+        ]
+      },
+      {
+        "machine": "missing-mac",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.9 answered" },
+          { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
+          { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
+          { "check": "login-session", "state": "present", "detail": "a launchd user session is running" },
+          { "check": "heartbeat", "state": "absent", "detail": "no beat has ever arrived from missing-mac" }
+        ]
+      },
+      {
+        "machine": "refused-box",
+        "checks": [
+          { "check": "reachable", "state": "absent", "detail": "Permission denied (publickey)" },
+          { "check": "sshd", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "tmux", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "git", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "agent-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "terminfo", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "provider-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "provider-auth", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "login-session", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "heartbeat", "state": "absent", "detail": "no beat has ever arrived from refused-box" }
+        ]
+      },
+      {
+        "machine": "asleep-laptop",
+        "checks": [
+          { "check": "reachable", "state": "absent", "detail": "connect to host asleep-laptop port 22: No route to host" },
+          { "check": "sshd", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "tmux", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "git", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "agent-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "terminfo", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "provider-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "provider-auth", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "login-session", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
+          { "check": "heartbeat", "state": "absent", "detail": "the last beat arrived 3 hours ago" }
+        ]
+      }
+    ]
+  },
+  "notifications": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "at": 1788695880,
+        "kind": "joined",
+        "workspace": null,
+        "machine": "missing-mac",
+        "said": "missing-mac joined, and Yantra logs in there as biswa",
+        "commands": [],
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
+      },
+      {
+        "at": 1788695820,
+        "kind": "joined",
+        "workspace": null,
+        "machine": "ready-linux",
+        "said": "ready-linux joined, and Yantra logs in there as biswa",
+        "commands": [],
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
+      }
+    ]
+  },
+  "installs": {
+    "missing-mac": {
+      "after": 800,
+      "fixes": ["agent-cli"],
+      "event": {
+        "kind": "install_stopped",
+        "said": "missing-mac: claude installed; tmux left for you: Homebrew is not installed there, and Yantra installs tmux on a Mac only through it",
+        "commands": []
+      }
+    }
+  }
+}

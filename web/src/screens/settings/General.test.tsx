@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { readPrefs } from '@/shell/prefs'
+import { hideSetupCard } from '@/screens/dashboard/setupCard'
 import { mountSettings, unmountSettings } from './harness'
 
 afterEach(() => {
@@ -32,5 +33,19 @@ describe('General', () => {
     expect(await screen.findByText('fixed')).toBeTruthy()
     expect(screen.getByText('English')).toBeTruthy()
     expect(screen.getByText(/Saved on this device/)).toBeTruthy()
+  })
+
+  /** D7 §4.9: a Finish setup card someone hid has a way back, and another
+   *  row's write does not bring it back by accident. */
+  it('offers a hidden setup card back, and keeps it hidden across other writes', async () => {
+    mountSettings('desktop', '/settings/general')
+    await screen.findByText('fixed')
+    expect(screen.queryByRole('button', { name: 'Show the setup card' })).toBeNull()
+    act(() => hideSetupCard())
+    fireEvent.click(await screen.findByRole('radio', { name: 'Clock' }))
+    expect(readPrefs().general.finishSetup).toBe('hidden')
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the setup card' }))
+    expect(readPrefs().general.finishSetup).toBeUndefined()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Show the setup card' })).toBeNull())
   })
 })

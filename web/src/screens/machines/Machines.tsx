@@ -1,5 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { Plus } from 'lucide-react'
 import { fromReading } from '@/api/client'
+import { Button } from '@/m3/button/Button'
 import { loaded, useMachines, useReadiness, useSessions, useWorkspaces } from '@/api/hooks'
 import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
@@ -65,6 +68,9 @@ export function Machines() {
           Machines
         </Text>
         <Looked className="machines__looked" reads={[machines, readiness, sessions]} />
+        <Button className="machines__add" icon={<Plus />} render={<Link to="/machines/add" />} role="link" variant="tonal">
+          Add a device
+        </Button>
       </div>
 
       <ErrorBoundary eyebrow="Machines" title="The machines could not be drawn">

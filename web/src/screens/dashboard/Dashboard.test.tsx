@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import type { Machine } from '@/api'
+import type { Machine, Readiness } from '@/api'
 import { aMachine, looked } from '@/api/fixtures'
-import { writePrefs } from '@/shell/prefs'
+import * as contract from '@/contract.gen'
+import { readPrefs, writePrefs } from '@/shell/prefs'
 import { mount, scenario, unmount, type Scenario } from '@/screens/fleet/harness'
 
 /* The e2e fixture's own instant, so an age here reads as it does in a
@@ -17,7 +18,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  writePrefs({ density: 'clean' })
+  writePrefs({ density: 'clean', general: {} })
   cleanup()
   unmount()
 })
@@ -33,8 +34,10 @@ describe('the Dashboard on a busy fleet', () => {
     mount('desktop', '/')
     await drawn()
     expect(screen.getByText(/5 of 6/).textContent).toBe('5 of 6 machines online')
-    expect(screen.getByText(/thinkpad unreachable/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: /^Fix/ }).getAttribute('href')).toBe('/m/thinkpad')
+    // D7 §3.3: a machine the tailnet sees off is asleep, and Open replaces Fix.
+    expect(screen.getByText(/thinkpad asleep/)).toBeTruthy()
+    const open = screen.getAllByRole('link').find((one) => one.getAttribute('href') === '/m/thinkpad')
+    expect(open?.textContent).toMatch(/^Open/)
   })
 
   it('counts the hero over the workspaces that wait and the GitHub queue', async () => {
@@ -158,9 +161,27 @@ describe('the Dashboard on a phone', () => {
   })
 })
 
+/** The daemon's key, which the unit scenarios leave out: the harness answers
+ *  a read by its path's last part. */
+const keyed = (state: Scenario): Scenario => Object.assign(state, { 'ssh-identity': contract.sshIdentity as never })
+
+/** The seven checks a session needs present (`lib/ready`), and gh with no
+ *  sign-in, which does not hold ready back. */
+const ready = (machine: string): Readiness => ({
+  machine,
+  checks: [
+    ...['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((check) => ({
+      check,
+      state: 'present' as const,
+      detail: '',
+    })),
+    { check: 'provider-auth', state: 'absent', detail: 'gh reports no stored credential there' },
+  ],
+})
+
 describe('the Dashboard on an empty fleet', () => {
   it('draws each block saying what would be there, and one New session', async () => {
-    mount('desktop', '/', scenario('empty'))
+    mount('desktop', '/', keyed(scenario('empty')))
     await drawn()
     expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
     expect(region('Running').getByText('Nothing is running')).toBeTruthy()
@@ -175,10 +196,10 @@ describe('the Dashboard on an empty fleet', () => {
 describe('the Dashboard on the first run', () => {
   /** No workspace, and the sweep asks no machine because none is named, so
    *  readiness is blank and the machine list is the only signal. */
-  const firstRun = (machines: Machine[]): Scenario =>
+  const firstRun = (machines: Machine[], reports: Readiness[] = []): Scenario =>
     Object.assign(scenario('empty'), {
       machines: looked.ok(machines),
-      readiness: looked.ok<never[]>([]),
+      readiness: looked.ok(reports),
     })
 
   it('is the setup checklist while no machine is online', async () => {
@@ -193,11 +214,34 @@ describe('the Dashboard on the first run', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
   })
 
-  it('gives way to the empty board as soon as one machine answers', async () => {
-    mount('desktop', '/', firstRun([aMachine({ online: true })]))
+  /** The owner's ruling (b), 2026-09-13: a machine answering is not enough. */
+  it('stays the checklist while a machine is online and none is ready', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })])))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+  })
+
+  it('stays the checklist until the appliance has its key', async () => {
+    mount('desktop', '/', firstRun([aMachine({ online: true })], [ready('cachyos-g14')]))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })).toBeTruthy()
+  })
+
+  it('gives way to the empty board once the key is made and one machine is ready', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
     await drawn()
     expect(screen.queryByRole('heading', { name: 'Set up Yantra' })).toBeNull()
     expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
+  })
+
+  /** D7 §4.9: the steps for later, until they are done or the card is hidden. */
+  it('then shows Finish setup with the steps for later, until it is hidden', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
+    const card = within(await screen.findByRole('region', { name: 'Finish setup' }))
+    expect(card.getByRole('progressbar')).toBeTruthy()
+    expect(card.getByText('GitHub')).toBeTruthy()
+    expect(card.getByRole('link', { name: 'Add another device' }).getAttribute('href')).toBe('/machines/add')
+    fireEvent.click(card.getByRole('button', { name: 'Hide Finish setup' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Finish setup' })).toBeNull())
+    expect(readPrefs().general.finishSetup).toBe('hidden')
   })
 
   /** Y-388: a phone runs no session, so one online is not a machine answering. */

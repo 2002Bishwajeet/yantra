@@ -143,3 +143,50 @@
   flex-direction: column;
   align-items: flex-start;
 }
+
+.setup__later {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setup__later > h2 {
+  margin: 0;
+  padding: 0 4px;
+}
+
+/* A line's words carry the commands and the install bar beneath them. */
+.setup__line[data-kind="blocked"],
+.setup__line[data-kind="installing"] {
+  align-items: flex-start;
+  padding-top: 8px;
+}
+
+/* D7 S14: on a phone a line stacks — mark and name, then the words, then the
+   action at full width — rather than squeezing the words into a column. */
+[data-shell="phone"] .setup__line {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+[data-shell="phone"] .setup__line > .m3-button {
+  justify-content: center;
+}
+
+/* On a phone a step's action goes under its words, past the lead, so the
+   words keep the row's width rather than a squeezed column. */
+[data-shell="phone"] .setup__list .m3-list__row:has(> .m3-list-item__trailing) {
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+}
+
+[data-shell="phone"] .setup__list .m3-list__row:has(> .m3-list-item__trailing) > .m3-list-item {
+  flex-basis: 100%;
+}
+
+[data-shell="phone"] .setup__list .m3-list-item__trailing {
+  max-width: none;
+  padding-left: 58px;
+}
