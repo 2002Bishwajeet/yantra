@@ -256,6 +256,7 @@ deleted everywhere else.
 | Y-406 | Turn CodeQL off | ✅ done | claude | — | **Owner, 2026-09-13:** too many false positives. **Done** when the repo's code-scanning default setup reads `not-configured`. It was never a required check. |
 | Y-407 | install.sh can uninstall | 🔵 review | claude | — | **Owner, 2026-09-13.** **Done** when `install.sh --uninstall` removes the services and binaries, asks before removing /etc/yantra, the yantra account and the dashboard's serve, keeps them by default, and a second run succeeds. |
 | Y-408 | The dashboard carries the Yantra icon | 🔵 review | claude | — | **Owner approved the brand assets, 2026-09-13.** **Done** when the dashboard's favicon, ICO, apple-touch and PWA icons (with a maskable one) are the gated-square mark, the manifest lists them, and the daemon serves each. |
+| Y-409 | The README carries the banner, and the brand sources are in the repo | 🔵 review | claude | — | **Owner approved the brand assets, 2026-09-13.** **Done** when the README opens with the banner, `design/brand/` holds the icon SVGs, the mark, the banner, the social preview and the template that renders them, and one command re-renders them. Owner step: upload the social preview in GitHub Settings. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

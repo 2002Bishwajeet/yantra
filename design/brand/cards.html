@@ -1,0 +1,102 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:F;src:url(../../landing/node_modules/@fontsource-variable/fraunces/files/fraunces-latin-opsz-normal.woff2) format('woff2-variations');font-weight:300 700}
+@font-face{font-family:G;src:url(../../landing/node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2) format('woff2-variations');font-weight:300 600}
+@font-face{font-family:M;src:url(../../landing/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:D;src:url(../../landing/node_modules/@fontsource/noto-serif-devanagari/files/noto-serif-devanagari-devanagari-400-normal.woff2) format('woff2')}
+:root{--ground:#0B0806;--ink:#F8EEDD;--body:#EFE2CE;--brass:#D7B98E;--accent:#E8734A;
+  --lowest:#100E07;--pc:#32291A;--opc:#FFDBCF;--sc:#59431E;--osc:#FFDEAB;--high:#25231C;--outline:#8A7F68}
+body{margin:0;background:#222;display:flex;flex-direction:column;gap:40px;padding:40px;align-items:flex-start}
+.card{position:relative;overflow:hidden;background:var(--ground);color:var(--ink);font-family:G;flex:none}
+.frame{position:absolute;inset:22px;border:1px solid rgb(184 135 63/.55);outline:1px solid rgb(184 135 63/.2);outline-offset:5px}
+.paint{position:absolute;background:url(../../landing/src/assets/vishvakarma.png) no-repeat;background-size:100% 100%}
+.col{position:absolute;top:62px;bottom:62px;display:flex;flex-direction:column;justify-content:space-between}
+.word{display:flex;align-items:center;gap:14px}
+.word img{width:60px;height:60px}
+.latin{font-family:F;font-size:38px;font-weight:500;font-variation-settings:'opsz' 72}
+.deva{font-family:D;font-size:27px;color:var(--brass);margin-top:6px}
+.claim{font-family:F;font-weight:400;font-size:60px;line-height:1.03;letter-spacing:-.015em;font-variation-settings:'opsz' 144;margin:0}
+.claim span{color:var(--accent)}
+.sub{font-size:22px;line-height:1.42;color:var(--body);margin:18px 0 0}
+.url{font-family:M;font-size:19px;color:var(--brass);letter-spacing:.02em}
+
+/* Banner B2: M3 Expressive */
+.b2{width:1280px;height:320px;background:var(--lowest)}
+.b2 .panel{position:absolute;inset:18px;border-radius:48px;background:linear-gradient(135deg,#1E1810 0%,#15110B 60%,#120F0A 100%);outline:1px solid rgb(184 135 63/.22);outline-offset:-1px;overflow:hidden}
+.b2 .cookie{position:absolute;left:56px;top:50%;transform:translateY(-50%);width:236px;height:236px}
+.b2 .cookie svg{position:absolute;inset:0}
+.b2 .cookie img{position:absolute;inset:14px;width:208px;height:208px}
+.b2 .text{position:absolute;left:336px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:14px}
+.b2 .latin{font-size:84px;font-weight:450;line-height:.95}
+.b2 .deva{font-size:40px}
+.b2 .tag{font-size:25px;color:var(--body)}
+.chips{display:flex;gap:10px;margin-top:6px}
+.chip{font:500 17px/1 G;color:var(--osc);background:var(--sc);padding:10px 18px 10px 14px;border-radius:9999px;display:flex;align-items:center;gap:9px}
+.chip i{width:10px;height:10px;border-radius:3px;background:var(--brass);transform:rotate(45deg)}
+.chip.ghost{background:transparent;color:var(--brass);outline:1.5px solid rgb(215 185 142/.5);outline-offset:-1.5px}
+.b2 .burst{position:absolute;right:-96px;top:50%;width:440px;height:440px;transform:translateY(-50%)}
+.b2 .pill{position:absolute;right:92px;bottom:72px;width:196px;height:52px;border-radius:9999px;background:#7C2E0D}
+.b2 .semi{position:absolute;right:136px;bottom:124px;width:108px;height:54px;border-radius:108px 108px 0 0;background:#C49A52}
+.b2 .dot{position:absolute;right:182px;bottom:186px;width:16px;height:16px;border-radius:50%;background:#FFDEAB}
+</style></head><body>
+
+<!-- A1: Vishvakarma framed at left, claim at right. Used for the landing og.jpg. -->
+<div class="card" id="og-a1" style="width:1200px;height:630px">
+  <div class="paint" style="left:-120px;top:-40px;width:1141px;height:714px"></div>
+  <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgb(11 8 6/.15) 0%,rgb(11 8 6/0) 22%,rgb(11 8 6/0) 42%,rgb(11 8 6/.8) 55%,var(--ground) 64%)"></div>
+  <div style="position:absolute;inset:0;background:linear-gradient(0deg,rgb(11 8 6/.55),rgb(11 8 6/0) 30%)"></div>
+  <div class="frame"></div>
+  <div class="col" style="left:742px;width:400px">
+    <div class="word"><img src="mark.webp" alt=""><span class="latin">Yantra</span><span class="deva" lang="sa">यन्त्र</span></div>
+    <div><p class="claim">Name the work, <span>not the machine.</span></p>
+      <p class="sub">ssh, tmux and your coding agent across your own machines, over Tailscale.</p></div>
+    <div class="url">yantra.cloudx.run</div>
+  </div>
+</div>
+
+<!-- GitHub social preview, A1 framing at 1280x640 -->
+<div class="card" id="gh-a1" style="width:1280px;height:640px">
+  <div class="paint" style="left:-120px;top:-40px;width:1157px;height:724px"></div>
+  <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgb(11 8 6/.15) 0%,rgb(11 8 6/0) 22%,rgb(11 8 6/0) 40%,rgb(11 8 6/.8) 53%,var(--ground) 62%)"></div>
+  <div style="position:absolute;inset:0;background:linear-gradient(0deg,rgb(11 8 6/.55),rgb(11 8 6/0) 30%)"></div>
+  <div class="frame"></div>
+  <div class="col" style="left:780px;width:440px">
+    <div class="word"><img src="mark.webp" alt=""><span class="latin">Yantra</span><span class="deva" lang="sa">यन्त्र</span></div>
+    <div><p class="claim">One workspace. One interface. <span>Every machine.</span></p>
+      <p class="sub">A self-hosted control plane for ssh, tmux and coding agents on your own machines.</p></div>
+    <div class="url">github.com/2002Bishwajeet/yantra</div>
+  </div>
+</div>
+
+<!-- README banner B2 -->
+<div class="card b2" id="readme-b2">
+  <div class="panel">
+    <svg class="burst" viewBox="-1 -1 2 2"><path id="burst" fill="#32291A"/></svg>
+    <div class="pill"></div>
+    <div class="semi"></div>
+    <div class="dot"></div>
+    <div class="cookie"><svg viewBox="-1 -1 2 2"><path id="cookie" fill="#2A2116" stroke="rgb(215 185 142/.35)" stroke-width=".012"/></svg><img src="mark.webp" alt=""></div>
+    <div class="text">
+      <div class="word"><span class="latin">Yantra</span><span class="deva" lang="sa">यन्त्र</span></div>
+      <div class="tag">One workspace. One interface. Every machine.</div>
+      <div class="chips"><span class="chip"><i></i>ssh</span><span class="chip"><i></i>tmux</span><span class="chip"><i></i>coding agents</span><span class="chip ghost">over Tailscale</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // M3 Expressive shapes as soft polar curves: the 12-scallop cookie and the 8-point soft burst.
+  const polar = (n, a, steps = 360) => {
+    let d = ''
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * Math.PI * 2
+      const r = (1 - a) + a * Math.cos(n * t)
+      d += (i ? 'L' : 'M') + (r * Math.cos(t)).toFixed(4) + ' ' + (r * Math.sin(t)).toFixed(4)
+    }
+    return d + 'Z'
+  }
+  document.getElementById('cookie').setAttribute('d', polar(12, 0.055))
+  document.getElementById('burst').setAttribute('d', polar(8, 0.12))
+</script>
+</body></html>
