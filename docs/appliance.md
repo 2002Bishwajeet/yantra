@@ -4,8 +4,8 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**[v0.2.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.2.0) is the current release**
-([Y-364](../tracker.md)), and there are two ways in. [`install.sh`](../install.sh) fetches the
+**[v0.3.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.3.0) is the current release**
+([Y-403](../tracker.md)), and there are two ways in. [`install.sh`](../install.sh) fetches the
 current release onto the box itself, verifies it, and at a terminal takes the box from bare to an
 open dashboard ([Y-384](../tracker.md)). `just appliance-install` builds on the machine that
 already builds everything and copies over ssh. Both put the same three binaries and the same two
@@ -44,8 +44,8 @@ less install.sh
 bash install.sh
 ```
 
-**Take it from `main`.** A copy from the v0.2.0 tag is the script before Y-384: it asks nothing and
-starts nothing. [Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until
+**Take it from `main` or from the v0.3.0 tag.** A copy from v0.2.0 or earlier is the script before
+Y-384: it asks nothing and starts nothing. [Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until
 then the URL is GitHub's.
 
 **Every device you use with Yantra must be on one tailnet**, logged in with the same Tailscale
