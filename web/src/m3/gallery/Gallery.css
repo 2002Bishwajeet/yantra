@@ -58,6 +58,11 @@
   gap: 12px;
 }
 
+/* Y-398: the proof that form, not colour, carries a state. */
+.m3-gallery__greyscale {
+  filter: grayscale(1);
+}
+
 .m3-gallery__wide {
   width: 100%;
 }
