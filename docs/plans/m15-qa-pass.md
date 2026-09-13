@@ -50,7 +50,7 @@ Record the box: architecture, OS, and how you reach it. `http://<tailscale-ip>:7
 The first release `install.sh` can install. It has been inert since #282 by design.
 
 - [ ] `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash`
-      → it resolves v0.2.0 on its own. **You name no version.**
+      → it resolves v0.3.0 on its own. **You name no version.**
 - [ ] It prints the checksum it verified. → the archive is checked before anything is written.
 - [ ] It creates the `yantra` account and installs three binaries to `/usr/local/bin`.
 - [ ] `/etc/systemd/system/yantrad.service` and `yantra-agent.service` are there.
@@ -60,7 +60,8 @@ The first release `install.sh` can install. It has been inert since #282 by desi
 - [ ] Run it a second time. → it asks nothing and changes no configuration.
 - [ ] `YANTRA_VERSION=v0.1.0 … | bash` → it refuses by name: *"carries no units"*. Nothing installs.
 - [ ] `systemctl status yantrad` → active, running as `yantra`.
-- [ ] `sudo -u yantra -H /usr/local/bin/yantra ssh-identity` → it prints a public key to place.
+- [ ] Open the dashboard. → the setup checklist is the home page until the key exists and one
+      machine is ready (ruling (b), Y-390). The key is made the first time a machine joins.
 
 **Time from the first command to a running daemon:** ____ min · **Shell commands you ran:** ____
 
@@ -84,16 +85,14 @@ Then walk the four steps.
 
 - [ ] The checklist is the page. There is no empty dashboard behind it.
 - [ ] **Tailnet** → names your tailnet and says HTTP or HTTPS.
-- [ ] **The ssh key** → before §1's last step it says *not created yet* and names the command.
-      After it, the fingerprint.
-      → **it names a command you must run in a terminal.** Count that as a shell drop. Should the
-        dashboard be able to press this button itself?
+- [ ] **The ssh key** → *made when the first machine joins* until then, and the fingerprint after.
+      → it names no command. The join command runs once in a terminal on each new machine (Y-387).
 - [ ] **GitHub** → *not connected*. Start the sign-in. → the device flow, then *signed in as you*.
       → does it tell you what GitHub is for **before** you sign in, or after?
 - [ ] **Machines** → *not checked yet*. Press Check. → it asks a machine over ssh and counts.
-- [ ] Leave one machine's `authorized_keys` empty. → it says *refused*, and offers the
-      `authorized_keys` line **with your real key in it**.
-- [ ] Copy that line. → it copies. On the phone too.
+- [ ] Leave one machine without the join. → Check says *refused*, and offers the join command.
+- [ ] Copy the join command. → it copies, or selects the text where there is no clipboard. On the
+      phone too.
 - [ ] Every step goes green. → the checklist gets out of the way and the dashboard appears.
 
 **Then the question that matters:** the checklist told you a thing was wrong. Did it tell you how
@@ -128,8 +127,8 @@ tailnet inventory, not from anything Yantra installs. So the fleet list needs no
 - [ ] The unprepared machine appears in `/machines` on its own, with no checks read.
 - [ ] Press Check. → it reports all ten, and names what is absent rather than saying *failed*.
 - [ ] Read the ten lines. **For each one, ask: does it tell me the command that fixes it?**
-- [ ] Settings → Access → **Show key** → **Copy**. Paste it into that machine's
-      `authorized_keys`. Check again. → `reachable` and `sshd` go green.
+- [ ] **Add a device** (`/machines/add`) → run the join command on that machine. → `reachable` and
+      `sshd` go green on their own.
 - [ ] Install `tmux` on it. Check again. → one more goes green.
 - [ ] Install the agent CLI on it. Check again.
 - [ ] `yantra fix-terminfo` for `terminfo`. → **does the dashboard mention this verb exists?**
@@ -251,7 +250,7 @@ Two groups: **Workspace** is what the dashboard does, **Appliance** is the daemo
 - [ ] **Access** — the key the daemon holds, and who can reach the dashboard. **There is no login.**
       → does it say that clearly enough that you are not alarmed?
 - [ ] **About** — version, target, build date, listen addresses, the tailnet.
-      → **it should now say 0.2.0.**
+      → **it should now say 0.3.0.**
 
 **Feel /5** ____ · **Anything here you could not find?** ____________________
 
@@ -363,7 +362,7 @@ only *"failed"* is a `[!]` even when the behaviour is right.
 
 `yantra` is the other half, and the dashboard touches none of it.
 
-- [ ] `yantra --version` → **0.2.0**.
+- [ ] `yantra --version` → **0.3.0**.
 - [ ] `yantra doctor` → says what each machine can and cannot do. It changes nothing.
 - [ ] `yantra ls machines` · `ls sessions` · `ls workspaces` · `ls work` · `ls repos`.
 - [ ] `yantra attach` from a terminal → keys reach the agent.
