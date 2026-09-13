@@ -50,7 +50,7 @@ Record the box: architecture, OS, and how you reach it. `http://<tailscale-ip>:7
 The first release `install.sh` can install. It has been inert since #282 by design.
 
 - [ ] `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash`
-      → it resolves v0.3.1 on its own. **You name no version.**
+      → it resolves v0.3.2 on its own. **You name no version.**
 - [ ] It prints the checksum it verified. → the archive is checked before anything is written.
 - [ ] It creates the `yantra` account and installs three binaries to `/usr/local/bin`.
 - [ ] `/etc/systemd/system/yantrad.service` and `yantra-agent.service` are there.
@@ -250,7 +250,7 @@ Two groups: **Workspace** is what the dashboard does, **Appliance** is the daemo
 - [ ] **Access** — the key the daemon holds, and who can reach the dashboard. **There is no login.**
       → does it say that clearly enough that you are not alarmed?
 - [ ] **About** — version, target, build date, listen addresses, the tailnet.
-      → **it should now say 0.3.1.**
+      → **it should now say 0.3.2.**
 
 **Feel /5** ____ · **Anything here you could not find?** ____________________
 
@@ -362,7 +362,7 @@ only *"failed"* is a `[!]` even when the behaviour is right.
 
 `yantra` is the other half, and the dashboard touches none of it.
 
-- [ ] `yantra --version` → **0.3.1**.
+- [ ] `yantra --version` → **0.3.2**.
 - [ ] `yantra doctor` → says what each machine can and cannot do. It changes nothing.
 - [ ] `yantra ls machines` · `ls sessions` · `ls workspaces` · `ls work` · `ls repos`.
 - [ ] `yantra attach` from a terminal → keys reach the agent.
