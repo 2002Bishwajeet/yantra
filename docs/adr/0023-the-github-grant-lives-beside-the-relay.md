@@ -131,3 +131,13 @@ its environment either way, so the move is an installer change.
 - **Whether the daemon's own `git` should clone with the token for a machine that has no
   credential.** Decision 4 says no. If a machine that cannot clone turns out to be the common case,
   that is R13 §2.6a's manual step made automatic, and it gets its own row.
+
+> **Amended 2026-09-13 (Y-393).** `/etc/yantra/daemon.env` now also carries an optional
+> `YANTRA_GITHUB_CLIENT_ID`, written by `yantra github client-id <id>`/`--clear` and by Settings →
+> Providers, through decision 2's writer unchanged. A client id is not a secret — the OAuth App
+> the flow talks to, not the grant it comes back with — so this is configuration beside the two
+> credentials the file already holds, not a third one. `GET /api/github` says which id is in use,
+> built-in or a self-hoster's own, for the same reason: nothing here is a value worth hiding. It
+> follows decision 3's other half rather than the token's: `client_id()` rereads the process
+> environment on every call, so a value this writes reaches a sign-in only once `yantrad` restarts,
+> exactly as the relay's own URL and token do.

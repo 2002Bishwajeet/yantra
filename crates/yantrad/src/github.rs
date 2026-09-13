@@ -118,7 +118,16 @@ impl Forge for Grant {
 /// §3): the person finished the sign-in on their phone, and a file the daemon
 /// could not write is a fault for the journal, not a reason to make them do
 /// it again.
-pub async fn sign_in(grant: Grant, client_id: String, device: Device) {
+///
+/// `env` is [`crate::heartbeat::Fleet::env`] — held around the write so this
+/// task, `relay`'s and the client id's do not race one another for the same
+/// file (Y-393's review).
+pub async fn sign_in(
+    grant: Grant,
+    client_id: String,
+    device: Device,
+    env: std::sync::Arc<tokio::sync::Mutex<()>>,
+) {
     let api = Github::default();
     let outcome = async {
         let got = api.wait(&client_id, &device).await?;
@@ -129,7 +138,11 @@ pub async fn sign_in(grant: Grant, client_id: String, device: Device) {
     match outcome {
         Ok((got, login)) => {
             let file = std::path::Path::new(notify::RELAY_FILE);
-            match notify::write_github(file, Some(&got.token)) {
+            let written = {
+                let _write = env.lock().await;
+                notify::write_github(file, Some(&got.token))
+            };
+            match written {
                 Ok(()) => tracing::info!("github grant for {login} written to {}", file.display()),
                 Err(error) => tracing::warn!(
                     "github grant for {login} is live and was not written to {}: {error}",

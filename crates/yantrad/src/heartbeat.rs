@@ -68,6 +68,15 @@ pub struct Fleet {
     /// One join at a time (Y-387): two first fetches would both run
     /// `ssh-keygen` on one path, and two reports would append two blocks.
     pub joins: Arc<tokio::sync::Mutex<()>>,
+    /// One writer of `/etc/yantra/daemon.env` at a time (Y-393's review): the
+    /// relay, the grant and the client id are three routes in this daemon
+    /// that all reach [`yantra_core::notify::write_relay`],
+    /// [`yantra_core::notify::write_github`] and
+    /// [`yantra_core::notify::write_client_id`]. Those functions also take a
+    /// `flock` for the CLI running beside this daemon, but a task already
+    /// waiting on this awaits rather than blocking a tokio worker on that
+    /// syscall.
+    pub env: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -99,6 +108,7 @@ impl Default for Fleet {
             }),
             github: crate::github::Grant::default(),
             joins: Arc::default(),
+            env: Arc::default(),
         }
     }
 }

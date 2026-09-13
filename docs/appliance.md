@@ -85,7 +85,8 @@ account. The script says so first, because the dashboard cannot exist before the
    ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The GitHub OAuth App's
    client id needs no line there: the release build already carries one
    ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md), Y-389), so `yantra github login`
-   works on a fresh box.
+   works on a fresh box. A self-hoster who wants their own app instead runs `yantra github
+   client-id <id>`, or sets it from Settings → Providers, and restarts `yantrad` (Y-393).
 8. It runs `systemctl enable --now` for both units and waits up to 30 s for `yantrad` to answer
    `/healthz`.
 9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or

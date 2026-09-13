@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
-import { mountSettings, unmountSettings } from './harness'
+import { mountSettings, sent, unmountSettings } from './harness'
 
 /** GitHub's Connect: GitLab's and OpenAI's are drawn disabled. */
 const connect = () => screen.getAllByRole('button', { name: 'Connect' }).find((one) => !(one as HTMLButtonElement).disabled)!
@@ -96,5 +96,86 @@ describe('Providers', () => {
     fireEvent.click(sheet.getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(asked).toContain('DELETE /api/github'))
     expect(await screen.findByText('Not connected')).toBeTruthy()
+  })
+
+  describe('Use your own GitHub app', () => {
+    it('says none is configured, never inventing a value', async () => {
+      mountSettings('desktop', '/settings/providers')
+      expect(await screen.findByText('None configured')).toBeTruthy()
+    })
+
+    it('names the build’s own app apart from a self-hoster’s', async () => {
+      mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.builtin', client_id_custom: false }],
+      })
+      expect(await screen.findByText("Yantra's own app · Iv1.builtin")).toBeTruthy()
+
+      cleanup()
+      mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
+      })
+      expect(await screen.findByText('Your own app · Iv1.mine')).toBeTruthy()
+    })
+
+    it('takes the phone strings and drops the id on the row', async () => {
+      mountSettings('phone', '/settings/providers', {
+        'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
+      })
+      expect(await screen.findByText('Your own app')).toBeTruthy()
+      expect(screen.queryByText(/Iv1\.mine/)).toBeNull()
+    })
+
+    it('writes an id, and the daemon takes it at its next restart', async () => {
+      const asked = mountSettings('desktop', '/settings/providers', {
+        'POST /api/github/client-id': (init) => {
+          expect(sent(init)).toEqual({ id: 'Iv1.mine' })
+          return [204]
+        },
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: 'Iv1.mine' } })
+      fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(asked).toContain('POST /api/github/client-id'))
+      expect(await sheet.findByText(/takes it at its next restart/)).toBeTruthy()
+      // Not read back: the row still says what GET answered, unchanged.
+      expect(screen.getByText('None configured')).toBeTruthy()
+    })
+
+    it('draws a refused id in the sheet', async () => {
+      mountSettings('desktop', '/settings/providers', {
+        'POST /api/github/client-id': [
+          400,
+          'a client id may only hold letters, digits, `.`, `_` and `-`, up to 64 characters',
+        ],
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: 'has a space' } })
+      fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
+
+      expect(await sheet.findByText(/up to 64 characters/)).toBeTruthy()
+    })
+
+    it('disables Clear with no custom id, and clears one that is set', async () => {
+      const asked = mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }],
+        'DELETE /api/github/client-id': [204],
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
+
+      await waitFor(() => expect(asked).toContain('DELETE /api/github/client-id'))
+      expect(await sheet.findByText(/falls back to its own app/)).toBeTruthy()
+    })
+
+    it('has nothing to clear when the id is not custom', async () => {
+      mountSettings('desktop', '/settings/providers')
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
+      expect((sheet.getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(true)
+    })
   })
 })
