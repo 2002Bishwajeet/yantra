@@ -43,6 +43,8 @@ export function verdictOf(input: {
 
   const reachable = checks.find((one) => one.check === 'reachable')
   if (reachable?.state === 'absent') {
+    // A changed host key reads as ssh failing, not refused: the join command
+    // places a key and cannot fix a host key.
     return /permission denied/i.test(reachable.detail)
       ? { kind: 'refused', detail: reachable.detail }
       : { kind: 'unreachable', detail: reachable.detail }

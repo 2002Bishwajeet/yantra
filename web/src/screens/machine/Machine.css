@@ -154,10 +154,12 @@
   background: var(--md-sys-color-surface-container-lowest);
 }
 
+/* A basis, so a narrow row wraps its actions under the name rather than
+   squeezing the name to one letter now that the card itself can shrink. */
 .machine__text {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 10rem;
   min-width: 0;
   gap: 1px;
 }
