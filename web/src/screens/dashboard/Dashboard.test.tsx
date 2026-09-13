@@ -165,9 +165,18 @@ describe('the Dashboard on a phone', () => {
  *  a read by its path's last part. */
 const keyed = (state: Scenario): Scenario => Object.assign(state, { 'ssh-identity': contract.sshIdentity as never })
 
+/** The seven checks a session needs present (`lib/ready`), and gh with no
+ *  sign-in, which does not hold ready back. */
 const ready = (machine: string): Readiness => ({
   machine,
-  checks: ['reachable', 'sshd', 'tmux', 'git', 'agent-cli'].map((check) => ({ check, state: 'present', detail: '' })),
+  checks: [
+    ...['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((check) => ({
+      check,
+      state: 'present' as const,
+      detail: '',
+    })),
+    { check: 'provider-auth', state: 'absent', detail: 'gh reports no stored credential there' },
+  ],
 })
 
 describe('the Dashboard on an empty fleet', () => {

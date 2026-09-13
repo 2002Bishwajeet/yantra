@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { Check, Event, Joined, Readiness } from '@/api'
+import type { Check, Event, Readiness } from '@/api'
 import { aMachine, looked } from '@/api/fixtures'
 import { ApiError } from '@/api/errors'
 import { guessPlatform, platformOf } from '@/lib/platform'
-import { joined, lastAsk, lastInstall, newDevice, onTailnet, reachable, ready, type Beat } from './beats'
+import { joined, lastAsk, lastInstall, newDevice, onTailnet, password, reachable, ready, type Beat } from './beats'
 
 const NAME = 'laptop'
 const done: Beat = { state: 'done', words: '' }
@@ -19,19 +19,27 @@ const event = (kind: Event['kind'], at: number, more: Partial<Event> = {}): Even
   ...more,
 })
 
-const reply = (more: Partial<Joined> = {}): Joined => ({ machine: NAME, user: 'biswa', kept: false, logs_in_as: 'biswa', ...more })
+/** Y-399's fields on a `joined` event. */
+const reply = (more: Partial<Event> = {}): Partial<Event> => ({ user: 'biswa', kept: false, logs_in_as: 'biswa', ...more })
 
 const report = (checks: [string, Check['state'], string?][]): Readiness => ({
   machine: NAME,
   checks: checks.map(([check, state, detail]) => ({ check, state, detail: detail ?? '' })),
 })
 
-const tools = (tmux: Check['state'], agent: Check['state'] = 'present'): [string, Check['state']][] => [
+/** The seven checks a session needs (`lib/ready`). */
+const tools = (
+  tmux: Check['state'],
+  agent: Check['state'] = 'present',
+  terminfo: Check['state'] = 'present',
+): [string, Check['state']][] => [
   ['reachable', 'present'],
   ['sshd', 'present'],
   ['tmux', tmux],
   ['git', 'present'],
   ['agent-cli', agent],
+  ['terminfo', terminfo],
+  ['login-session', 'present'],
 ]
 
 const reached = report([...tools('absent', 'unknown')])
@@ -111,7 +119,7 @@ describe('beat 2, joined', () => {
   })
 
   it('is done on a clean join', () => {
-    expect(joined(NAME, [event('joined', 5, { joined: reply() })], null, null, false)).toEqual({
+    expect(joined(NAME, [event('joined', 5, reply())], null, null, false)).toEqual({
       state: 'done',
       words: 'joined as biswa',
     })
@@ -119,25 +127,28 @@ describe('beat 2, joined', () => {
 
   /** The owner's ruling (ADR-0029): the page says a kept block. */
   it('says a kept block with the same account, and goes on', () => {
-    expect(joined(NAME, [event('joined', 5, { joined: reply({ kept: true }) })], null, null, false)).toMatchObject({
+    expect(joined(NAME, [event('joined', 5, reply({ kept: true }))], null, null, false)).toMatchObject({
       state: 'done',
       words: expect.stringMatching(/so it was kept$/),
     })
   })
 
-  /** The owner's ruling: the page says when the account differs. */
-  it('is stuck when ssh logs in as another account, or the config could not be read', () => {
-    const other = event('joined', 5, { joined: reply({ kept: true, logs_in_as: 'yantra' }) })
+  /** The owner's ruling: the page says when the account differs, and what
+   *  fixes it. */
+  it('is stuck when ssh logs in as another account, or the config could not be read, and names the remedy', () => {
+    const other = event('joined', 5, reply({ kept: true, logs_in_as: 'yantra' }))
     expect(joined(NAME, [other], null, null, false)).toEqual({
       state: 'stuck',
-      words: 'joined as biswa, and ssh logs in as yantra; a config you wrote was kept',
+      words:
+        "joined as biswa, and ssh logs in as yantra; a config you wrote was kept · edit the Host block for laptop in the appliance's ~/.ssh/config",
     })
-    const unread = event('joined', 5, { joined: reply({ logs_in_as: null }) })
+    // The daemon omits `logs_in_as` when ssh could not be read.
+    const unread = event('joined', 5, { user: 'biswa', kept: false })
     expect(joined(NAME, [unread], null, null, false).words).toMatch(/an account Yantra could not read/)
   })
 
-  it('reads the newest join, and takes the sentence of an event with no reply', () => {
-    const events = [event('joined', 9, { joined: reply() }), event('joined', 5, { joined: reply({ logs_in_as: 'yantra' }) })]
+  it('reads the newest join, and takes the sentence of an event with no fields', () => {
+    const events = [event('joined', 9, reply()), event('joined', 5, reply({ logs_in_as: 'yantra' }))]
     expect(joined(NAME, events, null, null, false).state).toBe('done')
     expect(joined(NAME, [event('joined', 5, { said: 'laptop joined' })], null, null, false).words).toBe('laptop joined')
   })
@@ -173,7 +184,7 @@ describe('beat 3, reachable', () => {
   })
 
   it("is stuck on the daemon's own re-check after the join", () => {
-    const events = [event('unreachable', 6, { said: 'laptop joined, and Yantra could not reach it: timed out' }), event('joined', 5, { joined: reply() })]
+    const events = [event('unreachable', 6, { said: 'laptop joined, and Yantra could not reach it: timed out' }), event('joined', 5, reply())]
     expect(reachable(done, NAME, null, events, idle, 'linux')).toMatchObject({ state: 'stuck', words: expect.stringMatching(/could not reach it/) })
   })
 
@@ -191,16 +202,22 @@ describe('beat 4, ready', () => {
     )
   })
 
-  it('is done when every check is present, or on an installed event', () => {
+  /** `lib/ready`, the home gate's own test: GitHub and a heartbeat are optional. */
+  it('is done when the seven checks a session needs are present, gh or not', () => {
     expect(ready(done, NAME, whole, [], idle, idle)).toEqual({ state: 'done', words: 'ready · open a session on laptop' })
-    const gh = report([...tools('present'), ['provider-auth', 'absent']])
-    expect(ready(done, NAME, gh, [event('installed', 9)], idle, idle).state).toBe('done')
-    expect(ready(done, NAME, reached, [event('installed', 9)], idle, idle).state).toBe('waiting')
+    const gh = report([...tools('present'), ['provider-auth', 'absent'], ['heartbeat', 'absent']])
+    expect(ready(done, NAME, gh, [], idle, idle).state).toBe('done')
   })
 
-  it('points a check Install does not fix at the machine page', () => {
-    const gh = report([...tools('present'), ['provider-auth', 'absent']])
-    expect(ready(done, NAME, gh, [], idle, idle).words).toBe('missing gh signed in · the machine page shows how to fix these')
+  /** The gate asks the same function, so an installed event alone would let
+   *  the two disagree. */
+  it('is not done on an installed event while a check a session needs is missing', () => {
+    expect(ready(done, NAME, reached, [event('installed', 9)], idle, idle).state).toBe('waiting')
+    const noTerminfo = report(tools('present', 'present', 'absent'))
+    expect(ready(done, NAME, noTerminfo, [event('installed', 9)], idle, idle)).toEqual({
+      state: 'waiting',
+      words: 'missing terminfo · the machine page shows how to fix these',
+    })
   })
 
   it('waits while an install runs, or an ask after it', () => {
@@ -208,14 +225,26 @@ describe('beat 4, ready', () => {
     expect(ready(done, NAME, reached, [], { pending: true, error: null }, idle).words).toBe('asking laptop again…')
   })
 
-  /** Y-386: a step that needs sudo names its command, and the page shows each. */
-  it('is stuck on a sudo-blocked install, carrying its commands', () => {
+  /** Y-386 and D7 §4.1: a step that needs sudo says what needs the password,
+   *  and carries each command for the page to show. */
+  it('is stuck on a sudo-blocked install, saying what needs the password', () => {
     const stopped = event('install_stopped', 9, { said: 'laptop: tmux left for you', commands: ['sudo apt-get install -y tmux'] })
-    expect(ready(done, NAME, reached, [stopped], idle, idle)).toEqual({
+    const tmux = report(tools('absent'))
+    expect(ready(done, NAME, tmux, [stopped], idle, idle)).toEqual({
       state: 'stuck',
-      words: 'laptop: tmux left for you',
+      words: 'tmux needs your password',
       commands: ['sudo apt-get install -y tmux'],
     })
+  })
+
+  it('keeps the sentence of a stop that left no command, such as Homebrew missing', () => {
+    const stopped = event('install_stopped', 9, { said: 'laptop: tmux left for you: Homebrew is not installed there' })
+    expect(ready(done, NAME, reached, [stopped], idle, idle).words).toBe('laptop: tmux left for you: Homebrew is not installed there')
+  })
+
+  it('names each tool that needs the password', () => {
+    expect(password(report(tools('absent', 'absent')))).toBe('tmux and claude need your password')
+    expect(password(whole)).toBe('the install needs your password')
   })
 
   it('is stuck, with the error, when the install did not start or the ask failed', () => {

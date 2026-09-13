@@ -11,9 +11,10 @@ import {
 } from '@/api/hooks'
 import { machineReadinessQuery } from '@/api/queries'
 import { runsSessions } from '@/lib/platform'
+import { isReady } from '@/lib/ready'
 import { at } from '@/lib/time'
 import { asEvents } from '@/shell/notifications'
-import { added, firstSession, github, isReady, line, machines as readied, push, tailnet } from './steps'
+import { added, failed, firstSession, github, line, machines as readied, push, tailnet } from './steps'
 
 /** D7 §4.1: four steps are required; GitHub and push wait for later. */
 export const REQUIRED = 4
@@ -34,13 +35,14 @@ export function useReports(list: Machine[]): (Readiness | null)[] {
 }
 
 /** The owner's ruling (b), 2026-09-13: the checklist is `/` until the appliance
- *  has its key and one machine is ready. */
+ *  has its key and one machine is ready. A key that could not be read is
+ *  `failed`, never `missing`: the checklist stays and says so. */
 export function useSetupGate(machines: Machine[]) {
   const identity = useSshIdentity()
   const list = machines.filter(runsSessions)
   const reports = useReports(list)
   const ready = list.filter((one, index) => one.online && isReady(reports[index] ?? null)).length
-  const key = identity.data ? 'made' : identity.data === null || identity.error ? 'missing' : 'reading'
+  const key = identity.data ? 'made' : identity.error ? 'failed' : identity.data === null ? 'missing' : 'reading'
   return { key, passed: key === 'made' && ready > 0 } as const
 }
 
@@ -66,15 +68,18 @@ export function useChecklist(now: number) {
     const since = machine.last_seen ? (at(machine.last_seen, now)?.text ?? null) : null
     return { machine, report, line: line(machine, report, since) }
   })
+  // A report about an asleep machine is an old one, so only an online machine
+  // counts as ssh getting in now.
+  const reached = lines
+    .filter(({ machine, report }) => machine.online && report?.checks.some((one) => one.check === 'reachable' && one.state === 'present'))
+    .map((one) => one.machine.name)
   // A join is its event, or ssh getting in now after a restart forgot it. The
-  // first join makes the key (ADR-0029), so with no key nothing has joined, and
-  // a report about an asleep machine is an old one.
+  // first join makes the key (ADR-0029), so with no key nothing has joined.
   const joined = identity.data
     ? lines
         .filter(
-          ({ machine, report }) =>
-            events.some((one) => one.kind === 'joined' && one.machine === machine.name) ||
-            (machine.online && report?.checks.some((one) => one.check === 'reachable' && one.state === 'present')),
+          ({ machine }) =>
+            events.some((one) => one.kind === 'joined' && one.machine === machine.name) || reached.includes(machine.name),
         )
         .map((one) => one.machine.name)
     : []
@@ -82,7 +87,7 @@ export function useChecklist(now: number) {
 
   const steps = {
     tailnet: tailnet(about, location.protocol),
-    machine: added(joined),
+    machine: identity.error ? failed(identity.error) : added(joined, identity.data === null ? reached : []),
     ready: readied(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
     first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount),
   }

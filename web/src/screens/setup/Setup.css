@@ -174,3 +174,19 @@
 [data-shell="phone"] .setup__line > .m3-button {
   justify-content: center;
 }
+
+/* On a phone a step's action goes under its words, past the lead, so the
+   words keep the row's width rather than a squeezed column. */
+[data-shell="phone"] .setup__list .m3-list__row:has(> .m3-list-item__trailing) {
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+}
+
+[data-shell="phone"] .setup__list .m3-list__row:has(> .m3-list-item__trailing) > .m3-list-item {
+  flex-basis: 100%;
+}
+
+[data-shell="phone"] .setup__list .m3-list-item__trailing {
+  max-width: none;
+  padding-left: 58px;
+}

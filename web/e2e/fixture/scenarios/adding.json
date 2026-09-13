@@ -27,7 +27,7 @@
         "machine": "blocked-box",
         "said": "blocked-box joined, and Yantra logs in there as biswa",
         "commands": [],
-        "joined": { "machine": "blocked-box", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
       },
       {
         "at": 1788695880,
@@ -36,7 +36,7 @@
         "machine": "ready-box",
         "said": "ready-box joined, and Yantra logs in there as biswa",
         "commands": [],
-        "joined": { "machine": "ready-box", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
       },
       {
         "at": 1788695820,
@@ -45,7 +45,7 @@
         "machine": "kept-box",
         "said": "kept-box joined as biswa, but the ssh config logs in there as yantra, so Yantra cannot reach it until the owner edits that config",
         "commands": [],
-        "joined": { "machine": "kept-box", "user": "biswa", "kept": true, "logs_in_as": "yantra" }
+        "user": "biswa", "kept": true, "logs_in_as": "yantra"
       },
       {
         "at": 1788695760,
@@ -54,7 +54,7 @@
         "machine": "joined-box",
         "said": "joined-box joined, and Yantra logs in there as biswa",
         "commands": [],
-        "joined": { "machine": "joined-box", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
       }
     ]
   },
@@ -69,7 +69,9 @@
           { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
           { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
           { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" }
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
         ]
       },
       {
@@ -79,7 +81,9 @@
           { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
           { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
           { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" }
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
         ]
       }
     ]
@@ -92,7 +96,9 @@
         { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
         { "check": "tmux", "state": "present", "detail": "tmux 3.5a at /usr/bin/tmux" },
         { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" }
+        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+        { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+        { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
       ]
     },
     "blocked-box": {
@@ -102,7 +108,9 @@
         { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
         { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
         { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" }
+        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+        { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+        { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
       ]
     }
   },
@@ -120,7 +128,9 @@
           { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
           { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
           { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" }
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
         ]
       }
     }

@@ -11,7 +11,11 @@ vi.mock('@/api/client', async (actual) => ({ ...(await actual<typeof import('@/a
 const laptop = aMachine({ name: 'laptop', os: 'linux', online: true })
 const whole: Readiness = {
   machine: 'laptop',
-  checks: ['reachable', 'sshd', 'tmux', 'git', 'agent-cli'].map((check) => ({ check, state: 'present', detail: '' })),
+  checks: ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((check) => ({
+    check,
+    state: 'present',
+    detail: '',
+  })),
 }
 const joined: Event = {
   at: 5,
@@ -20,10 +24,13 @@ const joined: Event = {
   machine: 'laptop',
   said: 'laptop joined, and Yantra logs in there as biswa',
   commands: [],
-  joined: { machine: 'laptop', user: 'biswa', kept: false, logs_in_as: 'biswa' },
+  user: 'biswa',
+  kept: false,
+  logs_in_as: 'biswa',
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
   unmountSettings()
 })
@@ -39,6 +46,29 @@ describe('what the flow sees arrive', () => {
     expect(await screen.findByText(/watching the tailnet for a new Linux machine/)).toBeTruthy()
     expect(await screen.findByText(/done · laptop is on the tailnet/)).toBeTruthy()
     await waitFor(() => expect(location.search).toBe('?platform=linux&machine=laptop'))
+  })
+
+  /** D7 §4.2: each beat's three minutes start when it becomes current. Beat 1
+   *  waited four, so a flow timer would have beat 2 stuck at birth. */
+  it("starts beat 2's three minutes when beat 1 is done, not when the flow opened", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const start = Date.parse('2026-09-13T12:00:00Z')
+    vi.setSystemTime(start)
+    let arrived = false
+    mountSettings('desktop', '/machines/add?platform=linux', {
+      'GET /api/machines': () => [200, looked.ok(arrived ? [laptop] : [])],
+      'GET /api/notifications': [200, looked.ok([])],
+      'GET /api/readiness': [200, looked.ok([])],
+    })
+    expect(await screen.findByText(/watching the tailnet for a new Linux machine/)).toBeTruthy()
+    vi.setSystemTime(start + 4 * 60_000)
+    expect(await screen.findByText(/stuck · Not seen yet/)).toBeTruthy()
+    arrived = true
+    expect(await screen.findByText(/done · laptop is on the tailnet/)).toBeTruthy()
+    expect(await screen.findByText(/waiting · run this in a terminal on laptop/)).toBeTruthy()
+    expect(screen.queryByText(/No join yet/)).toBeNull()
+    vi.setSystemTime(start + 8 * 60_000)
+    expect(await screen.findByText(/stuck · No join yet/)).toBeTruthy()
   })
 
   /** ADR-0019: one ask per join seen arriving, and none on a timer. */

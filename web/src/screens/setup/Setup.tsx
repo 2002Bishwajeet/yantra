@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { Check, GitBranch, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
 import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
+import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { joinUrl } from '@/lib/join'
 import { apart, runsSessions } from '@/lib/platform'
@@ -18,6 +19,7 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
+import { password } from '@/screens/add-device/beats'
 import { Busy } from '@/screens/add-device/Busy'
 import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
 import { stamp } from '../dashboard/bands'
@@ -101,7 +103,7 @@ function MachineLine(props: {
               : view === 'installing'
                 ? `installing on ${name}…`
                 : view === 'blocked'
-                  ? (stop?.said ?? said.words)
+                  ? password(report)
                   : said.installable
                     ? said.words
                     : `${said.words} · the machine page shows how`
@@ -234,15 +236,23 @@ export function Setup() {
               }
             />
             <li className="setup__sub">
-              <Text scale="body-small" tone="variant">
-                {identity.data ? (
-                  <>
-                    this appliance's key · <Mono>{identity.data.fingerprint}</Mono>
-                  </>
-                ) : (
-                  'the key is made when the first machine joins'
-                )}
-              </Text>
+              {identity.error ? (
+                <ErrorSurface.Inline
+                  error={asApiError(identity.error)}
+                  reset={() => void identity.refetch()}
+                  title="The appliance's key could not be read"
+                />
+              ) : (
+                <Text scale="body-small" tone="variant">
+                  {identity.data ? (
+                    <>
+                      this appliance's key · <Mono>{identity.data.fingerprint}</Mono>
+                    </>
+                  ) : (
+                    'the key is made when the first machine joins'
+                  )}
+                </Text>
+              )}
               {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
               ) : lines.length > 0 ? (

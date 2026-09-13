@@ -1,5 +1,6 @@
-import type { About, Machine, Readiness } from '@/api'
+import type { About, Check, Machine, Readiness } from '@/api'
 import { asApiError } from '@/api/errors'
+import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** Query's three states, as this screen reads them: nothing more of the
@@ -25,7 +26,7 @@ export const statusWord: Record<Status, string> = {
 }
 
 const reading = (): Step => ({ status: 'todo', words: 'reading…' })
-const failed = (error: Error): Step => {
+export const failed = (error: Error): Step => {
   const said = asApiError(error)
   return { status: 'failed', words: `${said.describe()} · ${said.said}` }
 }
@@ -43,10 +44,17 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
 }
 
 /** D7 §4.1 step 2: a machine has joined. The key is a line under it, since
- *  the first join makes it (ADR-0029). */
-export function added(joined: string[]): Step {
-  if (joined.length === 0) return { status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' }
-  return { status: 'done', words: `${joined.join(', ')} joined` }
+ *  the first join makes it (ADR-0029). `unkeyed` is a machine ssh reaches
+ *  with no key made, so through the account's own keys and not Yantra's. */
+export function added(joined: string[], unkeyed: string[] = []): Step {
+  if (joined.length > 0) return { status: 'done', words: `${joined.join(', ')} joined` }
+  if (unkeyed.length > 0) {
+    return {
+      status: 'todo',
+      words: `${unkeyed.join(', ')} reached without Yantra's key · run the join command on ${unkeyed.length === 1 ? 'it' : 'each'} once`,
+    }
+  }
+  return { status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' }
 }
 
 /** The grant, read as narrowly as this step needs it: the api layer still
@@ -101,9 +109,14 @@ export const word = (check: string) => named[check] ?? check
  *  machine itself (D7 §3.5). */
 export const INSTALLED: readonly string[] = ['tmux', 'git', 'agent-cli']
 
-/** D7 §4.1: ready is every check present, all ten, here and in Add a device. */
-export const isReady = (report: Readiness | null) =>
-  report !== null && report.checks.length > 0 && report.checks.every((one) => one.state === 'present')
+/** The checks that hold ready back, in the board's words. */
+export function lacking(needs: Check[]): string {
+  const absent = needs.filter((one) => one.state === 'absent').map((one) => word(one.check))
+  const unknown = needs.filter((one) => one.state !== 'absent').map((one) => word(one.check))
+  return [absent.length ? `missing ${absent.join(', ')}` : '', unknown.length ? `could not ask about ${unknown.join(', ')}` : '']
+    .filter(Boolean)
+    .join(' · ')
+}
 
 export function line(machine: Machine, report: Readiness | null, since: string | null): Line {
   if (!machine.online) return { kind: 'asleep', since }
@@ -115,17 +128,10 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   }
   const present = report.checks.filter((one) => one.state === 'present').length
   const total = report.checks.length
-  if (isReady(report)) return { kind: 'ready', present, total }
-  const absent = report.checks.filter((one) => one.state === 'absent').map((one) => word(one.check))
-  const unknown = report.checks.filter((one) => one.state === 'unknown').map((one) => word(one.check))
-  const words = [
-    absent.length ? `missing ${absent.join(', ')}` : '',
-    unknown.length ? `could not ask about ${unknown.join(', ')}` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
-  const installable = report.checks.some((one) => INSTALLED.includes(one.check) && one.state === 'absent')
-  return { kind: 'missing', present, total, words, installable }
+  const needs = blocking(report)
+  if (needs.length === 0) return { kind: 'ready', present, total }
+  const installable = needs.some((one) => INSTALLED.includes(one.check) && one.state === 'absent')
+  return { kind: 'missing', present, total, words: lacking(needs), installable }
 }
 
 export const ready = (one: Line) => one.kind === 'ready'

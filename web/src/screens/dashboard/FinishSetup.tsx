@@ -5,13 +5,10 @@ import { Card } from '@/m3/card/Card'
 import { State } from '@/m3/mark/Mark'
 import { Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
-import { readPrefs, usePrefs, writePrefs } from '@/shell/prefs'
+import { usePrefs } from '@/shell/prefs'
 import { REQUIRED, useChecklist } from '@/screens/setup/progress'
 import { marks, statusWord } from '@/screens/setup/steps'
-
-// ADR-0024 §5's one preferences key; `general` holds what no settings row edits.
-const HIDDEN = 'finishSetup'
-const hide = () => writePrefs({ general: { ...readPrefs().general, [HIDDEN]: 'hidden' } })
+import { hideSetupCard, setupCardHidden } from './setupCard'
 
 function Unfinished(props: { now: number }) {
   const heading = useId()
@@ -31,7 +28,7 @@ function Unfinished(props: { now: number }) {
         <Text emphasized id={heading} render={<h2 />} scale="title-large">
           Finish setup
         </Text>
-        <Button aria-label="Hide Finish setup" onClick={hide} variant="text">
+        <Button aria-label="Hide Finish setup" onClick={hideSetupCard} variant="text">
           Hide
         </Button>
       </div>
@@ -63,9 +60,9 @@ function Unfinished(props: { now: number }) {
 }
 
 /** D7 §4.9 and the owner's ruling (b): once the checklist stops being `/`,
- *  this card holds the steps for later until they are done or it is hidden. */
+ *  this card holds the steps for later until they are done or it is hidden.
+ *  Settings → General brings a hidden card back. */
 export function FinishSetup(props: { now: number }) {
-  const { general } = usePrefs()
-  if (general[HIDDEN] === 'hidden') return null
+  if (setupCardHidden(usePrefs())) return null
   return <Unfinished now={props.now} />
 }

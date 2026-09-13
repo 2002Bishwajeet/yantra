@@ -470,7 +470,7 @@ const routes = [
         if (s.notifications.looked !== 'ok') return
         const at = Math.max(0, ...s.notifications.data.map((one) => one.at)) + 60
         const event = plan?.event ?? { kind: 'installed', said: `${machine}: every basic was already there`, commands: [] }
-        s.notifications.data.unshift({ at, workspace: null, machine, joined: null, ...event })
+        s.notifications.data.unshift({ at, workspace: null, machine, ...event })
         if (plan?.after) s.asked = { ...s.asked, [machine]: plan.after }
       }, 800)
       return [202]
@@ -485,7 +485,7 @@ const routes = [
       const machine = request.headers['x-fixture-machine']
       if (!machine) return [503, 'tailscale knows the caller as a node it does not list, so there is no machine name to write']
       if (!sent.user) return [400, 'a join names the account it ran as']
-      const joined = { machine, user: sent.user, kept: false, logs_in_as: sent.user }
+      const reply = { user: sent.user, kept: false, logs_in_as: sent.user }
       if (s.notifications.looked === 'ok') {
         const at = Math.max(0, ...s.notifications.data.map((one) => one.at)) + 60
         s.notifications.data.unshift({
@@ -495,10 +495,10 @@ const routes = [
           machine,
           said: `${machine} joined, and Yantra logs in there as ${sent.user}`,
           commands: [],
-          joined,
+          ...reply,
         })
       }
-      return [200, joined]
+      return [200, { machine, ...reply }]
     },
   ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],

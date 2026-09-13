@@ -571,8 +571,8 @@ measures, and the reading belongs to no frame a reader sees (Y-363).
 **The fixture daemon is Node, not `yantrad`.**
 [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the
 dashboard calls from `src/contract.gen.ts`, plus both terminal sockets, under one
-of twelve scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
-`contract`, `broken`, `repair`, `firstrun`, `adding`, `setup`. A test picks one with a cookie
+of thirteen scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
+`contract`, `broken`, `repair`, `firstrun`, `notifications`, `adding`, `setup`. A test picks one with a cookie
 carrying its own key, so a write in one worker is not a row in another, and
 `page.clock` pins the instant so an age reads the same on every run.
 

@@ -36,22 +36,19 @@ pub struct Event {
     /// The exact commands an install left for a person, in order, each to be
     /// run verbatim on `machine` (Y-394). Empty for every other kind.
     pub commands: Vec<String>,
-    /// What `POST /api/join` answered, on a `joined` event and no other: the
-    /// add-a-device flow reads a wrong account or a kept block from it rather
-    /// than from `said` (Y-390).
-    pub joined: Option<Joined>,
-}
-
-/// What the join command reads back (owner, 2026-09-12: *"dashboard should
-/// say it"*). `kept` is a config that already named the machine and was left as
-/// it was. `logs_in_as` is what `ssh -G` resolves, which can differ from `user`
-/// — a kept block, or an owner's `Host *` above the new one — and `null` is a
-/// config ssh could not read.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct Joined {
-    pub machine: String,
-    pub user: String,
-    pub kept: bool,
+    /// The account the machine joined as. `Some` only for `kind: "joined"`
+    /// (Y-399): a page must not infer this from `said`, which a reworded
+    /// sentence would silently change underneath it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// Whether the join found a config that already named the machine and
+    /// left it alone. `Some` only for `kind: "joined"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept: Option<bool>,
+    /// What `ssh -G` resolves for the machine. Omitted both for every other
+    /// kind and for a `joined` event where ssh could not be read — a page
+    /// already knows which, from `kind` and the event's own `user`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub logs_in_as: Option<String>,
 }
 
@@ -76,7 +73,9 @@ impl Event {
             machine,
             said: notification.to_string(),
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -88,7 +87,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine} is no longer online"),
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -96,21 +97,15 @@ impl Event {
     /// written, before anything has tried to reach it. When the account ssh
     /// resolves is not the one that joined, the sentence says so (owner,
     /// 2026-09-12): the key went into an account Yantra does not log in as.
-    pub fn joined(joined: &Joined) -> Self {
-        let Joined {
-            machine,
-            user,
-            kept,
-            logs_in_as,
-        } = joined;
-        let said = match logs_in_as.as_deref() {
+    pub fn joined(machine: &str, user: &str, kept: bool, logs_in_as: Option<&str>) -> Self {
+        let said = match logs_in_as {
             None => format!(
                 "{machine} joined as {user}, and Yantra could not read which account its ssh config logs in as"
             ),
             Some(account) if account != user => format!(
                 "{machine} joined as {user}, but the ssh config logs in there as {account}, so Yantra cannot reach it until the owner edits that config"
             ),
-            Some(_) if *kept => format!(
+            Some(_) if kept => format!(
                 "{machine} joined as {user}, and the ssh config already named it with that account, so it was kept"
             ),
             Some(_) => format!("{machine} joined, and Yantra logs in there as {user}"),
@@ -119,10 +114,12 @@ impl Event {
             at: now(),
             kind: "joined",
             workspace: None,
-            machine: Some(machine.clone()),
+            machine: Some(machine.to_owned()),
             said,
             commands: Vec::new(),
-            joined: Some(joined.clone()),
+            user: Some(user.to_owned()),
+            kept: Some(kept),
+            logs_in_as: logs_in_as.map(str::to_owned),
         }
     }
 
@@ -136,7 +133,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine} joined, and Yantra could not reach it: {detail}"),
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -148,7 +147,9 @@ impl Event {
             machine: None,
             said: yantra_core::notify::test_message().body,
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -202,7 +203,9 @@ impl Event {
             machine: Some(report.machine.clone()),
             said,
             commands,
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -215,7 +218,9 @@ impl Event {
             machine: Some(machine.to_owned()),
             said: format!("{machine}: the install did not finish: {reason}"),
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -232,7 +237,9 @@ impl Event {
                  running on {machine}"
             ),
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 }
@@ -299,7 +306,9 @@ mod tests {
             machine: None,
             said: format!("w{n}: finished"),
             commands: Vec::new(),
-            joined: None,
+            user: None,
+            kept: None,
+            logs_in_as: None,
         }
     }
 
@@ -361,6 +370,29 @@ mod tests {
         assert!(done.commands.is_empty());
     }
 
+    /// Y-399: a page must not infer the warning from `said` — a reworded
+    /// sentence would silently change what it draws. `user`, `kept` and
+    /// `logs_in_as` carry the same facts as structured fields.
+    #[test]
+    fn joined_carries_the_account_kept_and_logs_in_as_as_fields() {
+        let normal = Event::joined("pi", "biswa", false, Some("biswa"));
+        assert_eq!(normal.user.as_deref(), Some("biswa"));
+        assert_eq!(normal.kept, Some(false));
+        assert_eq!(normal.logs_in_as.as_deref(), Some("biswa"));
+
+        let kept = Event::joined("pi", "biswa", true, Some("biswa"));
+        assert_eq!(kept.kept, Some(true));
+        assert_eq!(kept.logs_in_as.as_deref(), Some("biswa"));
+
+        let differs = Event::joined("pi", "biswa", false, Some("someone-else"));
+        assert_eq!(differs.user.as_deref(), Some("biswa"));
+        assert_eq!(differs.logs_in_as.as_deref(), Some("someone-else"));
+
+        let unknown = Event::joined("pi", "biswa", false, None);
+        assert_eq!(unknown.user.as_deref(), Some("biswa"));
+        assert_eq!(unknown.logs_in_as, None);
+    }
+
     /// One package run failing for two tools is said once.
     #[test]
     fn one_output_shared_by_two_tools_is_said_once() {
@@ -391,24 +423,6 @@ mod tests {
             "{}",
             event.said
         );
-    }
-
-    /// Y-390: the page tells a wrong account and a kept block from a clean
-    /// join by these fields, so a `joined` event carries them and no other
-    /// kind does.
-    #[test]
-    fn a_join_carries_the_reply_it_answered() {
-        let reply = Joined {
-            machine: "pi".to_owned(),
-            user: "biswa".to_owned(),
-            kept: true,
-            logs_in_as: Some("yantra".to_owned()),
-        };
-        let event = Event::joined(&reply);
-        assert_eq!(event.joined.as_ref(), Some(&reply));
-        // No message: the sentence names a login, which is not for a test log.
-        assert!(event.said.contains("logs in there as yantra"));
-        assert_eq!(Event::unreachable("pi").joined, None);
     }
 
     #[test]

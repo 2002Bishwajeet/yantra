@@ -28,9 +28,10 @@ const checks = (states: Record<string, 'present' | 'absent'>): Readiness => ({
   checks: Object.entries(states).map(([check, state]) => ({ check, state, detail: `${check} ${state}` })),
 })
 
-const reached = checks({ reachable: 'present', sshd: 'present', tmux: 'absent', git: 'present', 'agent-cli': 'present' })
-const whole = checks({ reachable: 'present', sshd: 'present', tmux: 'present', git: 'present', 'agent-cli': 'present' })
-const clean = event('joined', 5, { joined: { machine: 'laptop', user: 'biswa', kept: false, logs_in_as: 'biswa' } })
+const seven = { reachable: 'present', sshd: 'present', tmux: 'present', git: 'present', 'agent-cli': 'present', terminfo: 'present', 'login-session': 'present' } as const
+const reached = checks({ ...seven, tmux: 'absent' })
+const whole = checks(seven)
+const clean = event('joined', 5, { user: 'biswa', kept: false, logs_in_as: 'biswa' })
 
 function fleet(machines: Machine[], events: Event[], sweep: Readiness[] = [], more: Answers = {}): Answers {
   return {
@@ -119,9 +120,9 @@ describe('beat 2, joined', () => {
 
   /** The owner's ruling: the page says when the account differs. */
   it('is stuck, and says so, when the ssh config logs in as another account', async () => {
-    const other = event('joined', 5, { joined: { machine: 'laptop', user: 'biswa', kept: true, logs_in_as: 'yantra' } })
+    const other = event('joined', 5, { user: 'biswa', kept: true, logs_in_as: 'yantra' })
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [other]))
-    expect(await screen.findByText(/stuck · joined as biswa, and ssh logs in as yantra; a config you wrote was kept/)).toBeTruthy()
+    expect(await screen.findByText(/stuck · joined as biswa, and ssh logs in as yantra; a config you wrote was kept · edit the Host block for laptop in the appliance's ~\/\.ssh\/config/)).toBeTruthy()
     expect(beat('Reachable over ssh').getByText(/not yet · waits for the join/)).toBeTruthy()
   })
 
@@ -192,7 +193,7 @@ describe('beat 4, ready', () => {
       commands: ['sudo apt-get install -y tmux'],
     })
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [stopped, clean], [reached]))
-    expect(await screen.findByText(/stuck · laptop: tmux left for you/)).toBeTruthy()
+    expect(await screen.findByText(/stuck · tmux needs your password/)).toBeTruthy()
     expect(screen.getByText('sudo apt-get install -y tmux')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy the command for laptop' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Install' }).dataset.variant).toBe('tonal')

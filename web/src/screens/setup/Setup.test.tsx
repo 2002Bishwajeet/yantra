@@ -27,7 +27,16 @@ const checks = (states: Record<string, 'present' | 'absent'>, detail = ''): Read
   machine: up.name,
   checks: Object.entries(states).map(([check, state]) => ({ check, state, detail })),
 })
-const tools = { reachable: 'present', sshd: 'present', tmux: 'present', git: 'present', 'agent-cli': 'present' } as const
+/** The seven checks a session needs (`lib/ready`). */
+const tools = {
+  reachable: 'present',
+  sshd: 'present',
+  tmux: 'present',
+  git: 'present',
+  'agent-cli': 'present',
+  terminfo: 'present',
+  'login-session': 'present',
+} as const
 
 const base = (machines: Machine[] = [linux, mac, phone, tablet, windows]): Routes => ({
   'GET /api/machines': [200, looked.ok(machines)],
@@ -113,6 +122,15 @@ describe('the steps', () => {
     expect(filled()).toEqual(['Add a device'])
   })
 
+  /** A machine ssh reaches through the account's own keys is ready, and has
+   *  not joined: step 2 says so rather than *no machine has joined*. */
+  it("says a machine ready without Yantra's key was reached without it, and to run the join command", async () => {
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([checks(tools)])] })
+    expect(screen.getByText("not yet · cachyos-g14 reached without Yantra's key · run the join command on it once")).toBeTruthy()
+    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(filled()).toEqual(['Add a device'])
+  })
+
   it('names no terminal command for the key, and shows its fingerprint once it exists', async () => {
     await draw(base())
     expect(screen.getByText('the key is made when the first machine joins')).toBeTruthy()
@@ -120,6 +138,16 @@ describe('the steps', () => {
     cleanup()
     await draw({ ...base(), 'GET /api/ssh-identity': [200, contract.sshIdentity] })
     expect(screen.getByText('SHA256:<fingerprint>')).toBeTruthy()
+  })
+
+  /** A key that could not be read is not *no key yet*. */
+  it('draws the failure under step 2 when the key could not be read', async () => {
+    await draw({ ...base(), 'GET /api/ssh-identity': [500, 'the key file could not be read'] })
+    const surface = (await screen.findByText("The appliance's key could not be read")).closest('[role="alert"]')!
+    expect(within(surface as HTMLElement).getByText(/the key file could not be read/)).toBeTruthy()
+    expect(screen.getByText(/could not be read · .*the key file could not be read/)).toBeTruthy()
+    expect(screen.queryByText('the key is made when the first machine joins')).toBeNull()
+    expect([...document.querySelectorAll('.m3-lead')][1]!.querySelector('svg')).toBeTruthy()
   })
 
   it('reads the relay the daemon holds, and fails with the daemon words', async () => {
@@ -203,14 +231,16 @@ describe('the machine lines', () => {
     expect(asked).toContain('POST /api/machines/cachyos-g14/install')
   })
 
-  it('shows each command a sudo-blocked install left, with Copy', async () => {
+  /** D7 §4.1: the line says what needs the password; the command is below it,
+   *  once, with Copy. */
+  it('says what a sudo-blocked install needs, and shows each command it left with Copy', async () => {
     const missing = checks({ ...tools, tmux: 'absent' })
     const stopped: Event = {
       at: 9,
       kind: 'install_stopped',
       workspace: null,
       machine: up.name,
-      said: 'cachyos-g14: tmux left for you: sudo asks for a password there',
+      said: 'cachyos-g14: tmux left for you: run `sudo pacman -S --noconfirm tmux` on cachyos-g14',
       commands: ['sudo pacman -S --noconfirm tmux'],
     }
     await draw({
@@ -218,21 +248,22 @@ describe('the machine lines', () => {
       'GET /api/readiness': [200, looked.ok([missing])],
       'GET /api/notifications': [200, looked.ok([stopped])],
     })
-    expect(screen.getByText(/tmux left for you/)).toBeTruthy()
-    expect(screen.getByText('sudo pacman -S --noconfirm tmux')).toBeTruthy()
+    expect(screen.getByText('tmux needs your password')).toBeTruthy()
+    expect(screen.queryByText(/tmux left for you/)).toBeNull()
+    expect(screen.getAllByText('sudo pacman -S --noconfirm tmux')).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Copy the command for cachyos-g14' })).toBeTruthy()
   })
 
   it('sends a check Install does not fix to the machine page', async () => {
-    const gh = checks({ ...tools, 'provider-auth': 'absent' })
-    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([gh])] })
-    expect(screen.getByText('missing gh signed in · the machine page shows how')).toBeTruthy()
+    const term = checks({ ...tools, terminfo: 'absent' })
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([term])] })
+    expect(screen.getByText('missing terminfo · the machine page shows how')).toBeTruthy()
     const open = screen.getAllByRole('link', { name: 'Open' }).map((one) => one.getAttribute('href'))
     expect(open).toContain('/m/cachyos-g14')
   })
 
   /** Walk-through Q2.3: one ready machine is enough, and an asleep one waits
-   *  for nothing. Ready is every check present (D7 §4.1). */
+   *  for nothing. Ready is the seven checks a session needs (`lib/ready`). */
   it('is done at one ready machine, and fills New session next', async () => {
     await draw({
       ...base([up, mac]),
@@ -240,7 +271,18 @@ describe('the machine lines', () => {
       'GET /api/readiness': [200, looked.ok([checks(tools)])],
     })
     expect(screen.getByText(/1 of 2 machines ready · one is enough to start/)).toBeTruthy()
-    expect(screen.getByText('ready · 5 of 5')).toBeTruthy()
+    expect(screen.getByText('ready · 7 of 7')).toBeTruthy()
     expect(filled()).toEqual(['New session'])
+  })
+
+  /** GitHub is optional (coordinator's ruling, 2026-09-13). */
+  it('draws a machine with gh not signed in as ready', async () => {
+    await draw({
+      ...base([up]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, 'provider-auth': 'absent' })])],
+    })
+    expect(screen.getByText('ready · 7 of 8')).toBeTruthy()
+    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
   })
 })

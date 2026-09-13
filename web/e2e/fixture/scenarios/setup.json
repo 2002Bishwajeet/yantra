@@ -89,7 +89,7 @@
         "machine": "missing-mac",
         "said": "missing-mac joined, and Yantra logs in there as biswa",
         "commands": [],
-        "joined": { "machine": "missing-mac", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
       },
       {
         "at": 1788695820,
@@ -98,7 +98,7 @@
         "machine": "ready-linux",
         "said": "ready-linux joined, and Yantra logs in there as biswa",
         "commands": [],
-        "joined": { "machine": "ready-linux", "user": "biswa", "kept": false, "logs_in_as": "biswa" }
+        "user": "biswa", "kept": false, "logs_in_as": "biswa"
       }
     ]
   },

@@ -39,7 +39,7 @@ use yantra_core::{
 use yantra_core::{identity, join};
 
 use crate::api::Answer;
-use crate::events::{self, Event, Joined};
+use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
@@ -1185,18 +1185,26 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
     drop(one_at_a_time);
     tracing::info!("{machine} joined as {} for {}", joined.user, caller.node);
 
-    let joined = Joined {
-        machine: joined.machine,
-        user: joined.user,
-        kept: joined.kept,
-        logs_in_as: joined.logs_in_as,
-    };
-    events::remember(&state.fleet.events, Event::joined(&joined)).await;
+    events::remember(
+        &state.fleet.events,
+        Event::joined(
+            &joined.machine,
+            &joined.user,
+            joined.kept,
+            joined.logs_in_as.as_deref(),
+        ),
+    )
+    .await;
     // The re-check runs after the answer: the script is still on the person's
     // screen, and ssh back into that machine can take `ConnectTimeout`.
     tokio::spawn(check_joined(state.fleet.events.clone(), machine));
 
-    Ok(Json(joined))
+    Ok(Json(Joined {
+        machine: joined.machine,
+        user: joined.user,
+        kept: joined.kept,
+        logs_in_as: joined.logs_in_as,
+    }))
 }
 
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
@@ -1226,6 +1234,19 @@ fn from_identity(error: &identity::Error) -> StatusCode {
         | identity::Error::Spawn(_)
         | identity::Error::Keygen(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+/// What the join command reads back (owner, 2026-09-12: *"dashboard should
+/// say it"*). `kept` is a config that already named the machine and was left as
+/// it was. `logs_in_as` is what `ssh -G` resolves, which can differ from `user`
+/// — a kept block, or an owner's `Host *` above the new one — and `null` is a
+/// config ssh could not read.
+#[derive(Debug, serde::Serialize)]
+struct Joined {
+    machine: String,
+    user: String,
+    kept: bool,
+    logs_in_as: Option<String>,
 }
 
 /// What the agent in this workspace has spent — `yantra tokens <workspace>` on
@@ -2003,21 +2024,6 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 user: "<user>".to_owned(),
                 kept: true,
                 logs_in_as: Some("yantra".to_owned()),
-            }),
-        ),
-        // The same reply on the event the flow reads (Y-390). `at` is fixed
-        // rather than now, as the ring's own fixture is.
-        (
-            "joinedEvent",
-            "Event",
-            of(&Event {
-                at: 1_785_522_900,
-                ..Event::joined(&Joined {
-                    machine: "cachyos-g14".to_owned(),
-                    user: "<user>".to_owned(),
-                    kept: true,
-                    logs_in_as: Some("yantra".to_owned()),
-                })
             }),
         ),
         (
@@ -3727,14 +3733,10 @@ mod tests {
         );
         let events = events::newest_first(&fleet.events).await;
         assert!(
-            events.iter().any(|event| event.kind == "joined"
-                && event.machine.as_deref() == Some("joining-box")
-                && event
-                    .joined
-                    .as_ref()
-                    .is_some_and(|reply| reply.user == "biswa"
-                        && !reply.kept
-                        && reply.logs_in_as.as_deref() == Some("biswa"))),
+            events
+                .iter()
+                .any(|event| event.kind == "joined"
+                    && event.machine.as_deref() == Some("joining-box")),
             "{events:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);

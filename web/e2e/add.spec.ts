@@ -60,7 +60,7 @@ test.describe('Add a device', () => {
     await ready.getByRole('button', { name: 'Install' }).click()
     await expect(ready.getByText(/^waiting · installing…/)).toBeVisible()
     // The ring is polled every 5 s, and the stop lands 0.8 s after the press.
-    await expect(ready.getByText(/^stuck · blocked-box: claude installed; tmux left for you/)).toBeVisible({ timeout: 15_000 })
+    await expect(ready.getByText('stuck · tmux needs your password')).toBeVisible({ timeout: 15_000 })
     await expect(ready.getByText('sudo apt-get update; sudo apt-get install -y tmux', { exact: true })).toBeVisible()
     await expect(ready.getByRole('button', { name: 'Copy the command for blocked-box' })).toBeVisible()
     await axe(page)

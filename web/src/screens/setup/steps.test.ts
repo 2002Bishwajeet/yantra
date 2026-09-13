@@ -18,6 +18,10 @@ const report = (checks: Readiness['checks']): Readiness => ({ machine: 'pi-5', c
 const check = (name: string, state: string, detail = '') =>
   ({ check: name, state, detail }) as Readiness['checks'][number]
 
+/** The seven checks a session needs (`lib/ready`), each in the state given. */
+const needs = (over: Record<string, string> = {}) =>
+  ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((name) => check(name, over[name] ?? 'present'))
+
 describe('the step each read makes', () => {
   it('reads while nothing has answered, and fails with the daemon words', () => {
     expect(tailnet(reading, 'http:')).toEqual({ status: 'todo', words: 'reading…' })
@@ -40,6 +44,16 @@ describe('the step each read makes', () => {
     expect(none).toEqual({ status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' })
     expect(none.words).not.toMatch(/yantra|`/)
     expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined' })
+  })
+
+  /** With no key made, ssh that gets in used the account's own keys. */
+  it("says a machine ssh reaches without Yantra's key is not joined, and what to run", () => {
+    expect(added([], ['pi-5'])).toEqual({
+      status: 'todo',
+      words: "pi-5 reached without Yantra's key · run the join command on it once",
+    })
+    expect(added([], ['pi-5', 'nas']).words).toBe("pi-5, nas reached without Yantra's key · run the join command on each once")
+    expect(added(['pi-5'], ['nas']).status).toBe('done')
   })
 
   it('says who GitHub is signed in as, and that a flow is waiting', () => {
@@ -89,47 +103,34 @@ describe("a machine's line", () => {
     })
   })
 
-  it('is ready when every check is present', () => {
-    const all = report([
-      check('reachable', 'present'),
-      check('sshd', 'present'),
-      check('tmux', 'present'),
-      check('git', 'present'),
-      check('agent-cli', 'present'),
-    ])
-    const one = line(machine(), all, null)
-    expect(one).toEqual({ kind: 'ready', present: 5, total: 5 })
+  it('is ready when the seven checks a session needs are present', () => {
+    const one = line(machine(), report(needs()), null)
+    expect(one).toEqual({ kind: 'ready', present: 7, total: 7 })
     expect(ready(one)).toBe(true)
   })
 
-  /** D7 §4.1: ready is all ten checks, so a gh not signed in holds it back,
-   *  and Install is not what fixes it (§3.5). */
-  it('is not ready while any check is missing, gh included', () => {
-    const five = [
-      check('reachable', 'present'),
-      check('sshd', 'present'),
-      check('tmux', 'present'),
-      check('git', 'present'),
-      check('agent-cli', 'present'),
-    ]
-    expect(line(machine(), report([...five, check('provider-auth', 'absent')]), null)).toMatchObject({
+  /** GitHub and `yantra-agent` are optional, so neither holds ready back. */
+  it('is ready with gh missing and no heartbeat, and counts every check it shows', () => {
+    const optional = report([...needs(), check('provider-auth', 'absent'), check('heartbeat', 'absent')])
+    expect(line(machine(), optional, null)).toEqual({ kind: 'ready', present: 7, total: 9 })
+  })
+
+  /** Install is not what fixes terminfo (D7 §3.5). */
+  it('is not ready while a check a session needs is missing, and says whether Install fixes it', () => {
+    expect(line(machine(), report(needs({ terminfo: 'absent' })), null)).toMatchObject({
       kind: 'missing',
-      words: 'missing gh signed in',
+      words: 'missing terminfo',
       installable: false,
     })
   })
 
-  it('names what is missing and what could not be asked, and whether Install fixes it', () => {
-    const some = report([
-      check('reachable', 'present'),
-      check('tmux', 'absent'),
-      check('provider-auth', 'unknown'),
-    ])
+  it('names only the checks that hold ready back, and whether Install fixes them', () => {
+    const some = report([...needs({ tmux: 'absent', 'login-session': 'unknown' }), check('provider-auth', 'unknown')])
     expect(line(machine(), some, null)).toEqual({
       kind: 'missing',
-      present: 1,
-      total: 3,
-      words: 'missing tmux · could not ask about gh signed in',
+      present: 5,
+      total: 8,
+      words: 'missing tmux · could not ask about login session held',
       installable: true,
     })
   })

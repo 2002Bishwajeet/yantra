@@ -168,8 +168,12 @@ function Candidates(props: { list: Machine[]; platform: Platform }) {
 const later = (words: string): Beat => ({ state: 'ahead', words })
 
 /** Beats 2 to 4 for one device: the ring and its readiness, both read. */
-function Following(props: { first: StepItem; machine: Machine; platform: Session; late: boolean }) {
-  const { first, machine, platform, late } = props
+function Following(props: { first: StepItem; machine: Machine; platform: Session; now: number }) {
+  const { first, machine, platform, now } = props
+  // D7 §4.2: beat 2's three minutes start when it becomes current, which is
+  // when beat 1 is done and this mounts, not when the flow opened.
+  const [since] = useState(() => Date.now())
+  const late = now - since >= LATE_MS
   const name = machine.name
   const client = useQueryClient()
   const notifications = useNotifications()
@@ -331,7 +335,7 @@ function Flow(props: { platform: Exclude<Platform, 'windows'>; named: string | u
     )
   }
   if (first.machine && first.state === 'done') {
-    return <Following first={one} late={late} machine={first.machine} platform={platform} />
+    return <Following first={one} machine={first.machine} now={now} platform={platform} />
   }
   return (
     <Stepper
