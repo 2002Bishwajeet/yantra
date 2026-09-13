@@ -66,14 +66,18 @@ export function useChecklist(now: number) {
     const since = machine.last_seen ? (at(machine.last_seen, now)?.text ?? null) : null
     return { machine, report, line: line(machine, report, since) }
   })
-  // A join is its event, or ssh already getting in after a restart forgot it.
-  const joined = lines
-    .filter(
-      ({ machine, report }) =>
-        events.some((one) => one.kind === 'joined' && one.machine === machine.name) ||
-        report?.checks.some((one) => one.check === 'reachable' && one.state === 'present'),
-    )
-    .map((one) => one.machine.name)
+  // A join is its event, or ssh getting in now after a restart forgot it. The
+  // first join makes the key (ADR-0029), so with no key nothing has joined, and
+  // a report about an asleep machine is an old one.
+  const joined = identity.data
+    ? lines
+        .filter(
+          ({ machine, report }) =>
+            events.some((one) => one.kind === 'joined' && one.machine === machine.name) ||
+            (machine.online && report?.checks.some((one) => one.check === 'reachable' && one.state === 'present')),
+        )
+        .map((one) => one.machine.name)
+    : []
   const readyCount = lines.filter((one) => one.line.kind === 'ready').length
 
   const steps = {

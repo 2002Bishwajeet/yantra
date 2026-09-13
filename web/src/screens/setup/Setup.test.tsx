@@ -104,6 +104,15 @@ describe('the steps', () => {
     expect(screen.getByRole('link', { name: 'New session' }).dataset.variant).toBe('tonal')
   })
 
+  /** ADR-0029: the first join makes the key, so with no key nothing has
+   *  joined, whatever an old report about an asleep machine says. */
+  it('counts no join while the key does not exist, and keeps Add a device the next thing', async () => {
+    const old = { machine: linux.name, checks: [{ check: 'reachable', state: 'present', detail: '' }] }
+    await draw({ ...base([linux]), 'GET /api/readiness': [200, looked.ok([old as Readiness])] })
+    expect(screen.getByText(/not yet · no machine has joined yet/)).toBeTruthy()
+    expect(filled()).toEqual(['Add a device'])
+  })
+
   it('names no terminal command for the key, and shows its fingerprint once it exists', async () => {
     await draw(base())
     expect(screen.getByText('the key is made when the first machine joins')).toBeTruthy()
@@ -181,6 +190,8 @@ describe('the machine lines', () => {
     const missing = checks({ ...tools, tmux: 'absent' })
     const asked = await draw({
       ...base([up]),
+      // It joined, so the key exists (ADR-0029).
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
       'GET /api/readiness': [200, looked.ok([missing])],
       'POST /api/machines/cachyos-g14/install': [202, undefined],
     })
@@ -223,7 +234,11 @@ describe('the machine lines', () => {
   /** Walk-through Q2.3: one ready machine is enough, and an asleep one waits
    *  for nothing. Ready is every check present (D7 §4.1). */
   it('is done at one ready machine, and fills New session next', async () => {
-    await draw({ ...base([up, mac]), 'GET /api/readiness': [200, looked.ok([checks(tools)])] })
+    await draw({
+      ...base([up, mac]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks(tools)])],
+    })
     expect(screen.getByText(/1 of 2 machines ready · one is enough to start/)).toBeTruthy()
     expect(screen.getByText('ready · 5 of 5')).toBeTruthy()
     expect(filled()).toEqual(['New session'])
