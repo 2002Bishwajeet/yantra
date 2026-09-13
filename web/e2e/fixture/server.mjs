@@ -458,21 +458,17 @@ const routes = [
       return [202, { machine, session }]
     },
   ],
-  // ADR-0028 §4: 202 and nothing else; the result is an event in the ring a
-  // moment later, and `installs[machine]` names it and what a re-check answers
-  // after it.
+  // Y-396: write.rs `put_basics`. 202 and no body; the result is an event a
+  // moment later, and the readiness it changed, as `install.json` says.
   [
     'POST',
     /^\/api\/machines\/([^/]+)\/install$/,
     (s, [machine]) => {
       const plan = s.installs?.[machine]
-      setTimeout(() => {
-        if (s.notifications.looked !== 'ok') return
-        const at = Math.max(0, ...s.notifications.data.map((one) => one.at)) + 60
-        const event = plan?.event ?? { kind: 'installed', said: `${machine}: every basic was already there`, commands: [] }
-        s.notifications.data.unshift({ at, workspace: null, machine, ...event })
-        if (plan?.after) s.asked = { ...s.asked, [machine]: plan.after }
-      }, 800)
+      if (!plan) return [400, `\`${machine}\` has no install in this scenario`]
+      s.installing ??= {}
+      if (s.installing[machine]) return [409, `an install is already running on ${machine}`]
+      s.installing[machine] = Date.now() + plan.after
       return [202]
     },
   ],
@@ -516,8 +512,26 @@ function flakes(state, target) {
   return true
 }
 
+/** An install whose time has come lands its event at the head of the ring,
+ *  a minute after the newest one there, and fixes the checks it names. */
+function settle(state) {
+  for (const [machine, due] of Object.entries(state.installing ?? {})) {
+    if (Date.now() < due) continue
+    delete state.installing[machine]
+    const { event, fixes = [] } = state.installs[machine]
+    const ring = state.notifications.data
+    const at = Math.max(0, ...ring.map((one) => one.at)) + 60
+    ring.unshift({ at, workspace: null, machine, ...event })
+    const report = state.readiness.data?.find((one) => one.machine === machine)
+    for (const check of report?.checks ?? []) {
+      if (fixes.includes(check.check)) Object.assign(check, { state: 'present', detail: 'installed by Yantra' })
+    }
+  }
+}
+
 const server = createServer(async (request, response) => {
   const { state, slow, url } = select(request)
+  settle(state)
   if (url.pathname === '/healthz') {
     response.writeHead(200, { 'content-type': 'text/plain' }).end('ok')
     return

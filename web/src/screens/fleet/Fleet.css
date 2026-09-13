@@ -125,7 +125,9 @@ a.fleet__machine:hover {
 .fleet__detail {
   grid-area: detail;
   min-width: 0;
-  font: var(--md-sys-typescale-body-small);
+  /* Y-381: not the `font` shorthand, which reset the mono face `.m3-mono` asks for. */
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);
 }
 

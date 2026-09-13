@@ -58,7 +58,7 @@ export function Sessions(props: {
         // R-23: a machine that did not answer is data about the machine.
         <div className="machine__failed" role="status">
           <State state="failed">the machine did not answer</State>
-          <Mono className="machine__detail m3-clip">{answer.error}</Mono>
+          <Mono className="machine__detail">{answer.error}</Mono>
         </div>
       ) : rows.length === 0 ? (
         <Empty title="No session is open here">tmux lists nothing on {machine}</Empty>
@@ -115,10 +115,13 @@ export function Sessions(props: {
         </ul>
       )}
 
-      <Text render={<p />} className="machine__note" scale="body-small" tone="variant">
-        Kill asks first; it cannot be undone. A session no workspace claims is not adopted: its
-        repository is not on the wire, so a workspace for it starts at New session.
-      </Text>
+      {/* D7 N2: said only beside a Kill. */}
+      {rows.length > 0 ? (
+        <Text render={<p />} className="machine__note" scale="body-small" tone="variant">
+          Kill asks first; it cannot be undone. A session no workspace claims is not adopted: its
+          repository is not on the wire, so a workspace for it starts at New session.
+        </Text>
+      ) : null}
     </Card>
   )
 }

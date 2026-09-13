@@ -20,7 +20,6 @@ import { Track } from '@/m3/track/Track'
 import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
 import { password } from '@/screens/add-device/beats'
-import { Busy } from '@/screens/add-device/Busy'
 import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
 import { stamp } from '../dashboard/bands'
 import { Join } from './Join'
@@ -146,7 +145,7 @@ function MachineLine(props: {
           {words}
         </Text>
         {said.kind === 'refused' ? join : null}
-        {view === 'installing' ? <Busy label={`installing on ${name}`} /> : null}
+        {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
           : null}

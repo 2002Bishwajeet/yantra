@@ -1,5 +1,6 @@
 import type { About, Check, Machine, Readiness } from '@/api'
 import { asApiError } from '@/api/errors'
+import { CHECK_IDS, fixOf, nameOf } from '@/lib/checks'
 import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -90,29 +91,14 @@ export type Line =
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 
-const named: Record<string, string> = {
-  sshd: 'sshd',
-  tmux: 'tmux',
-  git: 'git',
-  'agent-cli': 'claude',
-  terminfo: 'terminfo',
-  'provider-cli': 'gh',
-  'provider-auth': 'gh signed in',
-  'login-session': 'login session held',
-  heartbeat: 'a heartbeat',
-  reachable: 'ssh',
-}
+/** What Install puts there (ADR-0028 §1), from the one check table. A person
+ *  fixes the rest on the machine itself (D7 §3.5). */
+export const INSTALLED: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
 
-export const word = (check: string) => named[check] ?? check
-
-/** What Install puts there (ADR-0028 §1). A person fixes the rest on the
- *  machine itself (D7 §3.5). */
-export const INSTALLED: readonly string[] = ['tmux', 'git', 'agent-cli']
-
-/** The checks that hold ready back, in the board's words. */
+/** The checks that hold ready back, by the names every screen uses. */
 export function lacking(needs: Check[]): string {
-  const absent = needs.filter((one) => one.state === 'absent').map((one) => word(one.check))
-  const unknown = needs.filter((one) => one.state !== 'absent').map((one) => word(one.check))
+  const absent = needs.filter((one) => one.state === 'absent').map((one) => nameOf(one.check))
+  const unknown = needs.filter((one) => one.state !== 'absent').map((one) => nameOf(one.check))
   return [absent.length ? `missing ${absent.join(', ')}` : '', unknown.length ? `could not ask about ${unknown.join(', ')}` : '']
     .filter(Boolean)
     .join(' · ')

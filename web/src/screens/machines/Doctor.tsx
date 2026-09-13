@@ -4,7 +4,8 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 
 /** `POST …/readiness` asks the machine again now — a full ssh round trip, so a
  *  button and never a timer (ADR-0019). The answer lands in the same key the
- *  sweep fills, which is why nothing here holds a result. */
+ *  sweep fills, which is why nothing here holds a result. The CLI's verb keeps
+ *  the name `yantra doctor`; the button says what it does (D7 §3.5). */
 export function Doctor(props: { machine: string; variant?: ButtonProps['variant'] }) {
   const { machine, variant } = props
   const recheck = useRecheckReadiness()
@@ -15,14 +16,14 @@ export function Doctor(props: { machine: string; variant?: ButtonProps['variant'
         onClick={() => recheck.mutate(machine)}
         variant={variant ?? 'text'}
       >
-        {recheck.isPending ? 'asking…' : 'Doctor'}
+        {recheck.isPending ? 'Checking…' : 'Check again'}
       </Button>
       {recheck.error ? (
         <ErrorSurface.Inline
           className="machines__said"
           error={recheck.error}
           reset={() => recheck.mutate(machine)}
-          title="Doctor was refused"
+          title="Check again was refused"
         />
       ) : null}
     </>

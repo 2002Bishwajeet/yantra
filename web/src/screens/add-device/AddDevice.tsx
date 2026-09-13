@@ -24,7 +24,7 @@ import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
 import { Join } from '@/screens/setup/Join'
 import { joined, LATE_MS, newDevice, onTailnet, reachable, ready, installable, type Beat, type BeatState } from './beats'
-import { Busy } from './Busy'
+import { Track } from '@/m3/track/Track'
 import { useAskOnArrival, useInstallOn } from './install'
 import './AddDevice.css'
 
@@ -220,7 +220,7 @@ function Following(props: { first: StepItem; machine: Machine; platform: Session
           fourth,
           fourth.state === 'ahead' ? undefined : (
             <>
-              {install.running ? <Busy label={`installing on ${name}`} /> : null}
+              {install.running ? <Track label={`installing on ${name}`} /> : null}
               {fourth.commands?.length ? (
                 <>
                   <Note>Run each in a terminal on {name}; sudo asks for your password there:</Note>

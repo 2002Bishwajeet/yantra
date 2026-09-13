@@ -1,28 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Event } from '@/api'
-import { request } from '@/api/client'
-import type { ApiError } from '@/api/errors'
-import { keys } from '@/api/keys'
+import { useInstall } from '@/api/mutations'
 import { lastAsk, lastInstall } from './beats'
 
-/** `POST /api/machines/{m}/install` answers `202` and nothing else
- *  (ADR-0028 §4). What it did arrives later as an `installed` or
- *  `install_stopped` event, so the ring is what is asked again. A `409` is an
- *  install already running there. Here until Y-396's lands in
- *  `api/mutations.ts` (D7 T3). */
-export function useInstall() {
-  const client = useQueryClient()
-  return useMutation<void, ApiError, string>({
-    mutationFn: async (machine) => {
-      await request(`/api/machines/${encodeURIComponent(machine)}/install`, { method: 'POST' })
-    },
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.notifications() }),
-  })
-}
-
 /** One machine's install, running from the press until an install event newer
- *  than the one before it arrives: the `202` says only that it started. */
+ *  than the one before it arrives: the `202` says only that it started. The
+ *  write is Y-396's `useInstall`, and the ring's own poll brings the event. */
 export function useInstallOn(machine: string, events: Event[]) {
   const install = useInstall()
   const [since, setSince] = useState<number | null>(null)

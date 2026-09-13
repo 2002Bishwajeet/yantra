@@ -14,6 +14,7 @@ type Envelope = { looked: string; data?: unknown; error?: string }
 export type Scenario = Record<string, Envelope> & {
   status: Record<string, Envelope>
   refuse?: { status: number; text: string }
+  install?: { status: number; text: string }
 }
 
 // jsdom gives `import.meta.url` an http scheme, so the path is from the cwd,
@@ -58,6 +59,10 @@ function answer(state: Scenario, method: string, path: string): [number, unknown
       default:
         return [200, contract.spend]
     }
+  }
+  // ADR-0028 §4: 202 and no body; `install` in a scenario answers otherwise.
+  if (/^\/api\/machines\/[^/]+\/install$/.test(path)) {
+    return state.install ? [state.install.status, state.install.text] : [202, undefined]
   }
   const kill = /^\/api\/machines\/([^/]+)\/sessions\/([^/]+)$/.exec(path)
   if (kill) return [200, { machine: kill[1], session: kill[2], killed: true }]

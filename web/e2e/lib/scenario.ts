@@ -12,6 +12,7 @@ export type Scenario =
   | 'broken'
   | 'repair'
   | 'firstrun'
+  | 'install'
   | 'notifications'
   | 'adding'
   | 'setup'

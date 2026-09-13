@@ -100,38 +100,16 @@
         { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
         { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
       ]
-    },
-    "blocked-box": {
-      "machine": "blocked-box",
-      "checks": [
-        { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
-        { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
-        { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
-        { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-        { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
-        { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
-        { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
-      ]
     }
   },
   "installs": {
     "blocked-box": {
+      "after": 800,
+      "fixes": ["agent-cli"],
       "event": {
         "kind": "install_stopped",
         "said": "blocked-box: claude installed; tmux left for you: the package manager needs root, and sudo asks for a password or a terminal there — run `sudo apt-get update; sudo apt-get install -y tmux` on blocked-box",
         "commands": ["sudo apt-get update; sudo apt-get install -y tmux"]
-      },
-      "after": {
-        "machine": "blocked-box",
-        "checks": [
-          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
-          { "check": "sshd", "state": "present", "detail": "OpenSSH_10.0 answered" },
-          { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
-          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
-          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /home/biswa/.local/bin/claude" },
-          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
-          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" }
-        ]
       }
     }
   }

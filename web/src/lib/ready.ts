@@ -1,9 +1,11 @@
 import type { Check, Readiness } from '@/api'
+import { CHECK_IDS, sessionNeeds } from '@/lib/checks'
 
-/** The checks a session needs on a machine (coordinator's ruling by the
- *  owner's delegation, 2026-09-13). GitHub and `yantra-agent` are optional, so
- *  `provider-cli`, `provider-auth` and `heartbeat` never hold ready back. */
-export const READY: readonly string[] = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session']
+/** The checks a session needs on a machine, from the one check table
+ *  (coordinator's ruling by the owner's delegation, 2026-09-13). GitHub and
+ *  `yantra-agent` are optional, so `provider-cli`, `provider-auth` and
+ *  `heartbeat` never hold ready back. */
+export const READY: readonly string[] = CHECK_IDS.filter(sessionNeeds)
 
 const unasked = (check: string): Check => ({ check, state: 'unknown', detail: '' })
 

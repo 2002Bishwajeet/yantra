@@ -104,6 +104,8 @@
   },
   "installs": {
     "missing-mac": {
+      "after": 800,
+      "fixes": ["agent-cli"],
       "event": {
         "kind": "install_stopped",
         "said": "missing-mac: claude installed; tmux left for you: Homebrew is not installed there, and Yantra installs tmux on a Mac only through it",

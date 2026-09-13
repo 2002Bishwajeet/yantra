@@ -2,7 +2,8 @@ import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/hooks'
 import { platformOf, type Platform } from '@/lib/platform'
 import { blocking, isReady } from '@/lib/ready'
-import { INSTALLED, lacking, word } from '@/screens/setup/steps'
+import { listed, missingBasics } from '@/screens/machine/install'
+import { INSTALLED, lacking } from '@/screens/setup/steps'
 
 /** Walk-through §3.2: every beat is seen by the appliance, never declared.
  *  `ahead` is a beat whose turn has not come. */
@@ -136,9 +137,9 @@ export const installable = (report: Readiness | null) =>
 /** D7 §4.1: a sudo-blocked step says what needs the password; the commands
  *  under it say what to run. */
 export function password(report: Readiness | null): string {
-  const tools = INSTALLED.filter((one) => check(report, one)?.state === 'absent').map(word)
+  const tools = missingBasics(report?.checks ?? [])
   if (tools.length === 0) return 'the install needs your password'
-  return `${tools.join(' and ')} need${tools.length === 1 ? 's' : ''} your password`
+  return `${listed(tools)} need${tools.length === 1 ? 's' : ''} your password`
 }
 
 /** Beat 4: every check a session needs present, which is the home gate's own

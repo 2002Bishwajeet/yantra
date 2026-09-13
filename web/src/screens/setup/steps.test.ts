@@ -130,7 +130,7 @@ describe("a machine's line", () => {
       kind: 'missing',
       present: 5,
       total: 8,
-      words: 'missing tmux · could not ask about login session held',
+      words: 'missing tmux · could not ask about claude signed in',
       installable: true,
     })
   })

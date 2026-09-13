@@ -68,7 +68,7 @@ proxies `/api` to the daemon.
 to this machine's Tailscale address, so a Mac or a phone opens
 `http://<this machine>.<tailnet>.ts.net:5173` (the MagicDNS name is allowed in `vite.config.ts`).
 With no `yantrad` running, `npm run fixture` starts the e2e fixture daemon on 7790 with the
-`busy` scenario (`FIXTURE_SCENARIO=` picks any of the twelve below), and
+`busy` scenario (`FIXTURE_SCENARIO=` picks any of the fourteen below), and
 `npm run dev:fixture` proxies `/api` to it instead, so every screen draws with fleet data. Plain
 HTTP: the service worker and the PWA install need HTTPS and are for the daemon's own build.
 
@@ -169,10 +169,26 @@ page draws them rather than running anything. A machine card draws four of them
 and `unknown` is never a shade of `absent` — one sends you to install something,
 the other to go and look (R-23).
 
-**`Doctor` asks again now, and is a button rather than a timer.** `POST
+**`Check again` asks the machine now, and is a button rather than a timer.**
+The CLI's verb keeps the name `yantra doctor`. `POST
 …/readiness` is a full ssh round trip ([ADR-0019](../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)),
 and its answer lands in the same query key the sweep fills, which is why
 [`Doctor.tsx`](src/screens/machines/Doctor.tsx) holds no result of its own.
+
+**`/m/{machine}` leads with a verdict** (Y-396,
+[D7](../docs/design/07-m15-screens.md) §4.3).
+[`verdict.ts`](src/screens/machine/verdict.ts) reads the machine, its report
+and the install events into one of twelve verdicts, and the verdict is the
+Readiness card's title and decides its one filled action. **Install appears
+while `tmux`, `git` or `claude` is absent**
+([ADR-0028](../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md)).
+The route answers `202` and nothing else, so the result is read off the newest
+`installed` or `install_stopped` event for that machine in
+`/api/notifications`, and then readiness is asked again once. An `unknown`
+check never counts as missing. What the page pressed lives in the page, so a
+reload forgets that it is waiting; a second press is the daemon's `409`, and
+the page waits for that one instead. **Every check has one name**, from
+[`lib/checks.ts`](src/lib/checks.ts), with what fixes it.
 
 ## A workspace file that did not load (Y-141)
 
@@ -571,8 +587,8 @@ measures, and the reading belongs to no frame a reader sees (Y-363).
 **The fixture daemon is Node, not `yantrad`.**
 [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the
 dashboard calls from `src/contract.gen.ts`, plus both terminal sockets, under one
-of thirteen scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
-`contract`, `broken`, `repair`, `firstrun`, `notifications`, `adding`, `setup`. A test picks one with a cookie
+of fourteen scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
+`contract`, `broken`, `repair`, `firstrun`, `notifications`, `install`, `adding`, `setup`. A test picks one with a cookie
 carrying its own key, so a write in one worker is not a row in another, and
 `page.clock` pins the instant so an age reads the same on every run.
 
