@@ -13,6 +13,7 @@ import { List, ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Text } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
+import { useFab } from '@/shell/primary'
 import { unreachable } from '@/work'
 import { Empty } from '@/screens/fleet/Empty'
 import { Looked } from '@/screens/fleet/age'
@@ -44,6 +45,8 @@ export function Machines() {
   const sessions = useSessions()
   const workspaces = loaded(useWorkspaces())
   const factor = useFormFactor()
+  // D7 §4.4: on the phone and the tablet the FAB carries Add a device.
+  const fab = useFab()
 
   const nothing = unreachable([machines, readiness, sessions])
   if (nothing) {
@@ -76,9 +79,11 @@ export function Machines() {
           Machines
         </Text>
         <Looked className="machines__looked" reads={[machines, readiness, sessions]} />
-        <Button className="machines__add" icon={<Plus />} render={<Link to="/machines/add" />} role="link" variant="tonal">
-          Add a device
-        </Button>
+        {fab ? null : (
+          <Button className="machines__add" icon={<Plus />} render={<Link to="/machines/add" />} role="link" variant="tonal">
+            Add a device
+          </Button>
+        )}
       </div>
 
       <ErrorBoundary eyebrow="Machines" title="The machines could not be drawn">

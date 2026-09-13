@@ -439,7 +439,13 @@ is why narrowing a window changes the shape without a reload.
 **The shell reads it once and the router never does** (ADR-0024, consequences).
 `Shell.tsx` has three shells — a header bar of pills beside a sessions rail on a
 desktop, a navigation rail on a tablet, a top app bar over a bottom navigation
-bar on a phone — and each screen lays itself out below that. A component that needs
+bar on a phone — and each screen lays itself out below that. On the phone and
+the tablet, a FAB carries the page's one next action
+([D7](../docs/design/07-m15-screens.md) §3.6). A route declares it in
+`staticData.primary`. A screen that knows better publishes its own through
+`<PrimaryAction>` ([`primary.ts`](src/shell/primary.ts)), and `null` means none.
+The desktop keeps the action in the page, and it hides the sessions rail while
+the setup checklist is `/`. A component that needs
 the width asks for it: the confirm is a dialog above 600 px and a bottom sheet
 below it, and the bell opens a popover, a side sheet or the `/notifications`
 route.

@@ -47,7 +47,9 @@ import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
 import { runsSessions } from '@/lib/platform'
-import { useSetupGate } from '@/screens/setup/progress'
+import { useSetupHome } from '@/screens/setup/progress'
+import { PrimaryAction } from '@/shell/PrimaryAction'
+import { useFab } from '@/shell/primary'
 import { FinishSetup } from './FinishSetup'
 import './Dashboard.css'
 
@@ -312,6 +314,8 @@ function Hero(props: {
   stamp: ReactNode
 }) {
   const { rows, attention, events, now, retry, stamp: aged } = props
+  // D7 §3.1: where the FAB carries New session, this copy is not also filled.
+  const carried = useFab() !== null
   const items = attention.looked === 'ok' ? attention.data.reviews.length + attention.data.issues.length : 0
   const count = rows.length + items
   const empty = count === 0 && attention.looked === 'ok'
@@ -342,7 +346,7 @@ function Hero(props: {
             </Text>
           </div>
           <div>
-            <Button icon={<Plus />} render={<Link to="/new" />} role="link">
+            <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={carried ? 'tonal' : 'filled'}>
               New session
             </Button>
           </div>
@@ -730,7 +734,7 @@ export function Dashboard() {
     listed.looked === 'ok' && agents.looked === 'ok' ? work(listed.data, agents) : [],
   )
   const nothing = unreachable([machines, listed, sessions])
-  const gate = useSetupGate(machines.looked === 'ok' ? machines.data : [])
+  const { gate, firstRun, home } = useSetupHome()
 
   // The last time the page could be read, for the Unreachable surface's stamp:
   // noted during the render, once per reading, as `useHeldBands` notes its seeds.
@@ -749,6 +753,7 @@ export function Dashboard() {
     return (
       <>
         {title}
+        <PrimaryAction action={null} />
         <ErrorSurface.Page
           action={
             <Button render={<a href="https://login.tailscale.com/admin/machines" rel="noreferrer" target="_blank" />} role="link" variant="text">
@@ -766,11 +771,11 @@ export function Dashboard() {
     )
   }
 
-  const firstRun = fleetEmpty && machines.looked === 'ok'
   if (reading === 'pending' || (firstRun && gate.key === 'reading')) {
     return (
       <>
         {title}
+        {home ? <PrimaryAction action={null} /> : null}
         <Pending />
       </>
     )
@@ -780,9 +785,17 @@ export function Dashboard() {
   // checklist is the page until the appliance has its key and one machine is
   // ready. It draws its own h1, so this one is not also rendered. A fleet with
   // a workspace has been past it, and an asleep machine does not send it back.
-  if (firstRun && !gate.passed) {
+  // Until its chunk lands, the FAB offers nothing rather than New session.
+  if (home) {
     return (
-      <Suspense fallback={<Pending />}>
+      <Suspense
+        fallback={
+          <>
+            <PrimaryAction action={null} />
+            <Pending />
+          </>
+        }
+      >
         <Setup />
       </Suspense>
     )

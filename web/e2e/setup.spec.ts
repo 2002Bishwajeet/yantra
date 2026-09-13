@@ -28,10 +28,11 @@ test.describe('the first run', () => {
     await expect(page.getByRole('link', { name: 'Skip for now' })).toBeVisible()
   })
 
-  /** D7 §3.1: one filled button, and before any join it is Add a device. */
-  test('fills only Add a device, which opens the guided flow', async ({ page }) => {
-    await expect(page.locator('main [data-variant="filled"]')).toHaveCount(1)
-    await expect(page.getByRole('link', { name: 'Add a device' })).toHaveAttribute('href', '/machines/add')
+  /** D7 §3.1: one filled button, and before any join it is Add a device. On
+   *  the phone and the tablet the FAB carries it, so the step's copy is tonal. */
+  test('fills only Add a device, which opens the guided flow', async ({ page, size }) => {
+    await expect(page.locator('main [data-variant="filled"]')).toHaveCount(size === 'desktop' ? 1 : 0)
+    await expect(page.getByRole('main').getByRole('link', { name: 'Add a device' })).toHaveAttribute('href', '/machines/add')
   })
 
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
