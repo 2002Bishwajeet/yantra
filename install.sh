@@ -8,6 +8,14 @@
 # HTTPS, starts both units and prints the dashboard's address (Y-384). With no
 # terminal it asks nothing, enables nothing and ends by naming what is left.
 # docs/appliance.md is the runbook around it.
+#
+# `--uninstall` reverses it (Y-407):
+#
+#     curl -fsSL <url>/install.sh | bash -s -- --uninstall
+#
+# It always removes the services and the binaries. It asks, one at a time and
+# default no, before it removes /etc/yantra, the yantra account, or the
+# dashboard's Tailscale serve.
 set -euo pipefail
 
 REPO=2002Bishwajeet/yantra
@@ -59,6 +67,66 @@ ask() {
     read -r reply </dev/tty || return 1
     case "$reply" in [Nn]*) return 1 ;; esac
 }
+
+# Like ask, but the default is no: an uninstall step must not delete a
+# person's keys or secrets on a blank Enter.
+ask_no() {
+    local reply
+    printf 'install: %s [y/N] ' "$1" >/dev/tty
+    read -r reply </dev/tty || return 1
+    case "$reply" in [Yy]*) return 0 ;; *) return 1 ;; esac
+}
+
+# Reverses the install (Y-407). The services and the binaries always go;
+# /etc/yantra, the yantra account and the dashboard's serve are each asked
+# for, kept by default, and left alone with no terminal to ask.
+uninstall() {
+    as_root systemctl stop yantrad.service yantra-agent.service 2>/dev/null || true
+    as_root systemctl disable yantrad.service yantra-agent.service 2>/dev/null || true
+    as_root rm -f /etc/systemd/system/yantrad.service /etc/systemd/system/yantra-agent.service
+    as_root systemctl daemon-reload
+    as_root rm -f "$BIN_DIR/yantra" "$BIN_DIR/yantrad" "$BIN_DIR/yantra-agent"
+
+    local removed="the services, the units and the three binaries" kept=""
+
+    if [ "$interactive" = yes ] &&
+        ask_no "Remove /etc/yantra? It holds the ntfy token and the GitHub token."; then
+        as_root rm -rf /etc/yantra
+        removed="$removed, /etc/yantra"
+    else
+        kept="/etc/yantra"
+    fi
+
+    if [ "$interactive" = yes ] &&
+        ask_no "Remove the yantra account and /home/yantra? It holds the SSH key, the SSH config and the workspaces."; then
+        as_root userdel -r yantra 2>/dev/null || true
+        removed="$removed, the yantra account and /home/yantra"
+    else
+        kept="${kept:+$kept, }the yantra account and /home/yantra"
+    fi
+
+    if command -v tailscale >/dev/null 2>&1 && [ "$interactive" = yes ] &&
+        ask_no "Turn off the Tailscale serve on port $HTTPS_PORT?"; then
+        as_root tailscale serve --https="$HTTPS_PORT" off 2>/dev/null || true
+        removed="$removed, the Tailscale serve on port $HTTPS_PORT"
+    else
+        kept="${kept:+$kept, }the Tailscale serve on port $HTTPS_PORT"
+    fi
+
+    echo "install: removed: $removed."
+    if [ "$interactive" != yes ]; then
+        echo "install: no terminal, so nothing above was asked."
+    fi
+    if [ -n "$kept" ]; then
+        echo "install: kept: $kept."
+        echo "install: run this script again and it picks up where it left off, for what it kept."
+    fi
+}
+
+if [ "${1:-}" = --uninstall ]; then
+    uninstall
+    exit 0
+fi
 
 # The landing page's mark, traced from its PNG into braille. A terminal that is not
 # UTF-8 would draw boxes, so it gets the wordmark alone. Drawn at a terminal only.

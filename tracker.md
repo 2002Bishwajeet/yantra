@@ -254,6 +254,7 @@ deleted everywhere else.
 | Y-401 | One primary action per screen, and the FAB that carries it | ✅ done | claude | Y-390, Y-397 | [D7](docs/design/07-m15-screens.md) task T8: §3.6, S11 and S12. **Done** when the phone and tablet FAB carries each route's one next action or is not drawn, and the desktop hides the sessions rail while the checklist is `/`. |
 | Y-405 | Cut v0.3.1 | ✅ done | claude | Y-401, Y-402 | **Owner, 2026-09-13:** make the next release. It carries the FAB (Y-401) and the machines list (Y-402), which merged after v0.3.0. **Done** when the tag publishes four archives with a verified `SHA256SUMS`, `/releases/latest` resolves v0.3.1, and the aarch64 `yantrad` carries the dashboard and the GitHub client id. |
 | Y-406 | Turn CodeQL off | ✅ done | claude | — | **Owner, 2026-09-13:** too many false positives. **Done** when the repo's code-scanning default setup reads `not-configured`. It was never a required check. |
+| Y-407 | install.sh can uninstall | 🔵 review | claude | — | **Owner, 2026-09-13.** **Done** when `install.sh --uninstall` removes the services and binaries, asks before removing /etc/yantra, the yantra account and the dashboard's serve, keeps them by default, and a second run succeeds. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

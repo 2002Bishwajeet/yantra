@@ -167,6 +167,38 @@ The cost is that **an archive published before this carries no units**, which is
 v0.1.0. The script says so and installs nothing rather than failing on a missing file, and
 [`installer.rs`](../crates/yantrad/tests/installer.rs) holds it to that.
 
+## Uninstall
+
+**[Y-407](../tracker.md):** `install.sh --uninstall`, or piped the same way the install itself is:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --uninstall
+```
+
+**It always** stops and disables `yantrad.service` and `yantra-agent.service`, removes both unit
+files, reloads systemd, and removes the three binaries from `/usr/local/bin`. Every step tolerates
+an item that is already gone, so a second run succeeds.
+
+**It asks, one at a time, default keep, and only at a terminal:**
+
+- Remove `/etc/yantra`? It holds the ntfy token and the GitHub token.
+- Remove the `yantra` account and `/home/yantra`? It holds the SSH key, the SSH config and the
+  workspaces.
+- Turn off the Tailscale serve on the dashboard's HTTPS port? Only that port comes off —
+  `tailscale serve --https=8443 off` — never `tailscale serve reset`, which would drop every other
+  serve on the tailnet too.
+
+With no terminal it keeps all three and says so. **Tailscale itself, tmux, git and claude are never
+touched, and nothing on any other machine changes.** The closing message names what was removed and
+what was kept, and a reinstall with the same script picks up where it left off for whatever it kept.
+
+**This is not how you switch versions.** Install over the current release and restart:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_VERSION=0.3.0 bash
+sudo systemctl restart yantrad yantra-agent
+```
+
 ## Install from a checkout, and update
 
 `just appliance-install` is the path for a box you build for from source. It copies binaries and
