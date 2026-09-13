@@ -255,6 +255,7 @@ deleted everywhere else.
 | Y-405 | Cut v0.3.1 | ✅ done | claude | Y-401, Y-402 | **Owner, 2026-09-13:** make the next release. It carries the FAB (Y-401) and the machines list (Y-402), which merged after v0.3.0. **Done** when the tag publishes four archives with a verified `SHA256SUMS`, `/releases/latest` resolves v0.3.1, and the aarch64 `yantrad` carries the dashboard and the GitHub client id. |
 | Y-406 | Turn CodeQL off | ✅ done | claude | — | **Owner, 2026-09-13:** too many false positives. **Done** when the repo's code-scanning default setup reads `not-configured`. It was never a required check. |
 | Y-407 | install.sh can uninstall | 🔵 review | claude | — | **Owner, 2026-09-13.** **Done** when `install.sh --uninstall` removes the services and binaries, asks before removing /etc/yantra, the yantra account and the dashboard's serve, keeps them by default, and a second run succeeds. |
+| Y-408 | The dashboard carries the Yantra icon | 🔵 review | claude | — | **Owner approved the brand assets, 2026-09-13.** **Done** when the dashboard's favicon, ICO, apple-touch and PWA icons (with a maskable one) are the gated-square mark, the manifest lists them, and the daemon serves each. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
