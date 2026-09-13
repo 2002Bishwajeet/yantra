@@ -63,6 +63,13 @@ says why it is written differently from the rest.
 > candidate stylesheets swap names the Material components no longer read, so switching one changes
 > nothing on the page. That is Y-330's to close.
 
+> **2026-09-13, Y-397: the number D7 now names the M15 screens.** The visual system that §7 planned
+> as D7 was never written, and ADR-0024 settled it instead. [D7](07-m15-screens.md) designs the
+> screens of the M15 walk-through end to end: the setup checklist, Add a device, the machine page,
+> the machines list, three Settings categories and the notifications list. The owner delegated its
+> decisions, so it records no interview (§4 step 2). Like every document here, it opens no rows
+> except its own; §6 there proposes the rest.
+
 ---
 
 ## 3. The order, and what it costs
