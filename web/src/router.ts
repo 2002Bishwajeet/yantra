@@ -19,6 +19,7 @@ import {
 import { asPlatform, type Platform } from '@/lib/platform'
 import { RouteError } from '@/m3/error-boundary/ErrorBoundary'
 import { Dashboard } from '@/screens/dashboard/Dashboard'
+import type { RoutePrimary } from '@/shell/primary'
 import { Nowhere, Shell } from '@/shell/Shell'
 import { asView, type View } from '@/views'
 
@@ -47,6 +48,8 @@ const dashboard = createRoute({
   getParentRoute: () => root,
   path: '/',
   component: Dashboard,
+  // D7 §3.6. The checklist under `/` publishes its own next step instead.
+  staticData: { primary: 'new-session' },
   loader: ({ context: { client } }) => {
     void client.prefetchQuery(workspacesQuery())
     void client.prefetchQuery(machinesQuery())
@@ -60,6 +63,7 @@ const fleet = createRoute({
   getParentRoute: () => root,
   path: '/fleet',
   component: lazyRouteComponent(() => import('@/screens/fleet/Fleet'), 'Fleet'),
+  staticData: { primary: 'new-session' },
   loader: ({ context: { client } }) => {
     void client.prefetchQuery(workspacesQuery())
     void client.prefetchQuery(machinesQuery())
@@ -73,6 +77,7 @@ const machines = createRoute({
   getParentRoute: () => root,
   path: '/machines',
   component: lazyRouteComponent(() => import('@/screens/machines/Machines'), 'Machines'),
+  staticData: { primary: 'add-device' },
   loader: ({ context: { client } }) => {
     void client.prefetchQuery(machinesQuery())
     void client.prefetchQuery(readinessQuery())
@@ -276,5 +281,9 @@ export type AppRouter = ReturnType<typeof getRouter>
 declare module '@tanstack/react-router' {
   interface Register {
     router: AppRouter
+  }
+  interface StaticDataRouteOption {
+    /** The FAB's action on this route (D7 §3.6). A route without one draws none. */
+    primary?: RoutePrimary
   }
 }

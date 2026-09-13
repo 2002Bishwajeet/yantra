@@ -1,10 +1,10 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { HeadContent, Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Download, Plus } from 'lucide-react'
 import { useResetOnRouteChange, useViewing } from '@/api/hooks'
 import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
-import { Fab } from '@/m3/fab/Fab'
+import { ExtendedFab, Fab } from '@/m3/fab/Fab'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { LiveRegion } from '@/m3/live/Live'
 import { BarDestination, NavigationBar } from '@/m3/navigation-bar/NavigationBar'
@@ -12,12 +12,14 @@ import { NavigationRail, RailDestination } from '@/m3/navigation-rail/Navigation
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Text } from '@/m3/text/Text'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
+import { useSetupHome } from '@/screens/setup/progress'
 import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination, isRailed } from './destinations'
 import { useFormFactor } from './formFactor'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
 import { usePrefs } from './prefs'
+import { keyOf, usePrimary, usePublishDrawn, usePublishRoute, useRouteAction, type Primary } from './primary'
 import { NotReached } from './NotReached'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
@@ -47,15 +49,56 @@ const useTitle = () => {
   return override ?? named
 }
 
+/** The route's own action, published from inside the page's boundary: when
+ *  the page breaks, this goes with it, and so does the FAB (D7 §3.6). */
+function RouteAction() {
+  usePublishRoute(useRouteAction())
+  return null
+}
+
 /** The outlet, under one boundary that a navigation resets — or, when nothing
  *  reached the daemon, the one screen that says so in its place. */
 function Page({ down }: { down: ReactNode }) {
   return (
     <main className="shell__main">
       <ErrorBoundary layout="page" {...useResetOnRouteChange()}>
-        {down ?? <Outlet />}
+        {down ?? (
+          <>
+            <RouteAction />
+            <Outlet />
+          </>
+        )}
       </ErrorBoundary>
     </main>
+  )
+}
+
+/** The page's one next action. Extended on the phone, where it has the width;
+ *  in the rail on the tablet, where the label is the button's name. */
+function PrimaryFab({ action, extended }: { action: Primary; extended: boolean }) {
+  const label =
+    action.kind === 'new-session'
+      ? 'New session'
+      : action.kind === 'add-device'
+        ? 'Add a device'
+        : `Install on ${action.machine}`
+  const icon = action.kind === 'install' ? <Download /> : <Plus />
+  const link =
+    action.kind === 'new-session' ? (
+      <Link to="/new" />
+    ) : action.kind === 'add-device' ? (
+      <Link to="/machines/add" />
+    ) : undefined
+  const press = action.kind === 'install' ? action.press : undefined
+  const role = link ? 'link' : undefined
+  return extended ? (
+    <ExtendedFab className="shell__fab" icon={icon} onClick={press} render={link} role={role}>
+      <span className="shell__fab-label">{label}</span>
+    </ExtendedFab>
+  ) : (
+    <Fab className="shell__rail-fab" label={label} onClick={press} render={link} role={role}>
+      {icon}
+    </Fab>
   )
 }
 
@@ -114,13 +157,16 @@ function DesktopBar() {
 // so that the name resolves to something.
 const SHEET = 'shell-notifications'
 
-function TabletRail({ onToggle, open }: { onToggle: () => void; open: boolean }) {
+function TabletRail(props: { action: Primary | null; onToggle: () => void; open: boolean }) {
+  const { action, onToggle, open } = props
   return (
     <NavigationRail
+      // The slot stays when a route has no action, so the destinations under
+      // it never move between routes.
       fab={
-        <Fab label="New session" role="link" render={<Link to="/new" />}>
-          <Plus />
-        </Fab>
+        <div className="shell__rail-slot">
+          {action ? <PrimaryFab action={action} extended={false} key={keyOf(action)} /> : null}
+        </div>
       }
       trailing={
         <>
@@ -191,12 +237,10 @@ function PhoneBar({ top }: { top: boolean }) {
   )
 }
 
-function PhoneBottom() {
+function PhoneBottom({ action }: { action: Primary | null }) {
   return (
     <>
-      <Fab className="shell__fab" label="New session" role="link" render={<Link to="/new" />}>
-        <Plus />
-      </Fab>
+      {action ? <PrimaryFab action={action} extended key={keyOf(action)} /> : null}
       <NavigationBar>
         {DESTINATIONS.map((one) => (
           <BarDestination
@@ -226,6 +270,12 @@ const CONTENTS = {
   tablet: 'shell__column',
   phone: 'shell__contents',
 } as const
+
+/** D7 S11: while the checklist is the page, the rail could only say that
+ *  nothing has been read. */
+function HomeRail() {
+  return useSetupHome().home ? null : <SessionsRail />
+}
 
 // Whether a seed is on the root, so going back to brass clears it once. Outside
 // the component because the compiler declines a function holding `import()`.
@@ -272,6 +322,11 @@ export function Shell() {
 
   const down = why === null ? null : <NotReached since={since} why={why} />
   const top = isDestination(pathname)
+  // D7 §3.6: the phone's FAB is on its four destinations and the tablet's is
+  // in the rail; the desktop keeps the action in the page.
+  const primary = usePrimary()
+  const fab = down === null && (factor === 'tablet' || (factor === 'phone' && top)) ? primary : null
+  usePublishDrawn(fab !== null)
   return (
     <>
       <HeadContent />
@@ -279,14 +334,14 @@ export function Shell() {
         {factor === 'desktop' ? (
           <DesktopBar />
         ) : factor === 'tablet' ? (
-          <TabletRail onToggle={() => setOpen((was) => !was)} open={open} />
+          <TabletRail action={fab} onToggle={() => setOpen((was) => !was)} open={open} />
         ) : (
           <PhoneBar top={top} />
         )}
         <div className={CONTENTS[factor]}>
           {factor === 'desktop' && down === null && isRailed(pathname) ? (
             <Guarded title="Sessions could not be drawn">
-              <SessionsRail />
+              {pathname === '/' ? <HomeRail /> : <SessionsRail />}
             </Guarded>
           ) : null}
           <Page down={down} />
@@ -298,7 +353,7 @@ export function Shell() {
             </Suspense>
           </Guarded>
         ) : factor === 'phone' && top ? (
-          <PhoneBottom />
+          <PhoneBottom action={fab} />
         ) : null}
       </div>
       <StatusAnnouncer />

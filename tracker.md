@@ -248,6 +248,7 @@ deleted everywhere else.
 | Y-398 | States read by shape, not by colour alone | 🔵 review | claude | — | **Done** when every state mark differs by shape, state colour never colours text, contrast is tested in light and dark, and screenshots moved only where marks moved. [D7](docs/design/07-m15-screens.md) §3.2, task T5. |
 | Y-400 | Settings say what the daemon is actually using | 🔵 review | claude | Y-388, Y-393 | [D7](docs/design/07-m15-screens.md) §4.6–§4.7. **Done** when Notifications reads the relay the daemon runs with, Providers follows D7, and each state is tested at three sizes. |
 | Y-399 | Notifications say what to do next | 🔵 review | claude | Y-386, Y-387, Y-388 | [D7](docs/design/07-m15-screens.md) §4.8, finding S7 and S8. **Done** when install and join events show their commands and their full warning with an action, the footer reads the relay, and each state is tested at three sizes. |
+| Y-401 | One primary action per screen, and the FAB that carries it | 🔵 review | claude | Y-390, Y-397 | [D7](docs/design/07-m15-screens.md) task T8: §3.6, S11 and S12. **Done** when the phone and tablet FAB carries each route's one next action or is not drawn, and the desktop hides the sessions rail while the checklist is `/`. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

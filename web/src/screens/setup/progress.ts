@@ -46,6 +46,17 @@ export function useSetupGate(machines: Machine[]) {
   return { key, passed: key === 'made' && ready > 0 } as const
 }
 
+/** Whether the checklist is `/`: no workspace yet, and the gate not passed.
+ *  The dashboard draws it and the shell hides the sessions rail for it (D7
+ *  S11), both from here, so the two cannot disagree. */
+export function useSetupHome() {
+  const machines = useMachines()
+  const listed = useWorkspaces()
+  const gate = useSetupGate(machines.looked === 'ok' ? machines.data : [])
+  const firstRun = machines.looked === 'ok' && listed.looked === 'ok' && listed.data.length === 0
+  return { gate, firstRun, home: firstRun && !gate.passed }
+}
+
 /** The next required thing, which is the page's one filled action (D7 §3.1). */
 export type Next = 'add' | 'install' | 'session' | null
 

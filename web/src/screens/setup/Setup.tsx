@@ -17,6 +17,8 @@ import { State, type MarkState } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
+import { useFab } from '@/shell/primary'
+import { PrimaryAction } from '@/shell/PrimaryAction'
 import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
 import { password } from '@/screens/add-device/beats'
@@ -73,6 +75,7 @@ function MachineLine(props: {
   const name = machine.name
   const recheck = useRecheckReadiness()
   const install = useInstallOn(name, events)
+  const carried = useFab() !== null
   useAskOnArrival(name, events, read, recheck.mutate)
   const stop = newest(events, name)
   const blocked = said.kind === 'missing' && stop?.kind === 'install_stopped' && stop.commands.length > 0
@@ -119,7 +122,7 @@ function MachineLine(props: {
         ? check('Check')
         : said.kind === 'missing' && said.installable && view !== 'blocked'
           ? (
-              <Button onClick={install.press} variant={target ? 'filled' : 'tonal'}>
+              <Button onClick={install.press} variant={target && !carried ? 'filled' : 'tonal'}>
                 {target ? `Install on ${name}` : 'Install'}
               </Button>
             )
@@ -133,6 +136,10 @@ function MachineLine(props: {
 
   return (
     <li className="setup__line" data-kind={view}>
+      {/* D7 §3.6: Install on the target is the FAB's while it can be pressed. */}
+      {target ? (
+        <PrimaryAction action={view === 'missing' ? { kind: 'install', machine: name, press: install.press } : null} />
+      ) : null}
       <State size="small" state={mark[view]}>
         <span className="setup__machine">{name}</span>
       </State>
@@ -166,6 +173,7 @@ export function Setup() {
   const later = useId()
   const { about, identity, machines, sweep, notifications, events, all, lines, steps, later: optional, done, next, target } =
     useChecklist(now)
+  const carried = useFab() !== null
 
   const others = all.filter((one) => !runsSessions(one))
   const join = joinUrl(location, about.data)
@@ -185,6 +193,18 @@ export function Setup() {
           Yantra runs AI agents on your own machines. Four steps get the first one ready, and each step checks itself.
         </Text>
       </div>
+      {/* The target machine's line publishes Install itself. */}
+      {next === 'install' ? null : (
+        <PrimaryAction
+          action={
+            machines.looked === 'pending' || next === null
+              ? null
+              : next === 'add'
+                ? { kind: 'add-device' }
+                : { kind: 'new-session' }
+          }
+        />
+      )}
 
       {machines.looked === 'pending' ? (
         <div className="setup__progress" data-slot="reading">
@@ -228,7 +248,7 @@ export function Setup() {
                   icon={<Plus />}
                   render={<Link to="/machines/add" />}
                   role="link"
-                  variant={next === 'add' ? 'filled' : 'tonal'}
+                  variant={next === 'add' && !carried ? 'filled' : 'tonal'}
                 >
                   Add a device
                 </Button>
@@ -294,7 +314,7 @@ export function Setup() {
               step={steps.first}
               title="Your first session"
               trailing={
-                <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={next === 'session' ? 'filled' : 'tonal'}>
+                <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={next === 'session' && !carried ? 'filled' : 'tonal'}>
                   New session
                 </Button>
               }

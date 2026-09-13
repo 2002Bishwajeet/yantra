@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
@@ -14,6 +14,50 @@ const DESTINATIONS = [
 // The phone's app bar is a second h1 over the screen's hidden one.
 const heading = (page: Parameters<typeof axe>[0], name: string) =>
   page.getByRole('heading', { level: 1, name }).first()
+
+// The shell's FAB. A page may keep a tonal copy of the same action, so a
+// query by name alone would find both.
+const fab = (page: Page) => page.locator('.shell__fab, .shell__rail-fab')
+
+/** D7 §4.1, S11 and S12 (Y-401): on the first run the checklist is `/`. */
+test.describe('the FAB on the first run', () => {
+  test.beforeEach(async ({ page }) => {
+    await scenario(page, 'firstrun')
+    await page.goto('/')
+    await expect(page.locator('h1', { hasText: 'Set up Yantra' }).first()).toBeAttached()
+  })
+
+  test('carries Add a device on the phone and the tablet, and the step keeps a tonal copy', async ({
+    page,
+    size,
+  }) => {
+    const add = page.getByRole('main').getByRole('link', { name: 'Add a device' })
+    if (size === 'desktop') {
+      await expect(add).toHaveAttribute('data-variant', 'filled')
+      await expect(fab(page)).toHaveCount(0)
+    } else {
+      await expect(fab(page)).toHaveAccessibleName('Add a device')
+      await expect(fab(page)).toHaveAttribute('href', '/machines/add')
+      await expect(add).toHaveAttribute('data-variant', 'tonal')
+    }
+    // D7 §3.1: one filled action in the view, and it is the next thing.
+    await expect(page.locator('main [data-variant="filled"]')).toHaveCount(size === 'desktop' ? 1 : 0)
+    await axe(page)
+  })
+
+  test('hides the sessions rail on the desktop', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'the rail is the desktop shell')
+    await expect(page.getByRole('link', { name: 'Add a device' })).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Sessions' })).toHaveCount(0)
+  })
+})
+
+test('draws no FAB while yantrad cannot be reached', async ({ page }) => {
+  await scenario(page, 'down')
+  await page.goto('/')
+  await expect(page.getByRole('alert').first()).toBeVisible()
+  await expect(fab(page)).toHaveCount(0)
+})
 
 test.describe('the shell on busy', () => {
   test.beforeEach(async ({ page }) => {
@@ -153,6 +197,56 @@ test.describe('the shell on busy', () => {
     await expect(list.getByText('Nothing unread.')).toBeVisible()
     await list.getByRole('radio', { name: 'All', exact: true }).click()
     await expect(list.getByText('yantra-web is waiting for trust')).toBeVisible()
+  })
+
+  /** D7 §3.6 (Y-401): the FAB carries the page's one next action, or is not
+   *  drawn. The desktop keeps the action in the page. */
+  test('carries each route’s next action on the phone and the tablet, and none on the desktop', async ({
+    page,
+    size,
+  }) => {
+    for (const [path, title, label] of [
+      ['/', 'Dashboard', 'New session'],
+      ['/fleet', 'Fleet', 'New session'],
+      ['/machines', 'Machines', 'Add a device'],
+      ['/usage', 'Usage', null],
+    ] as const) {
+      await page.goto(path)
+      await expect(heading(page, title)).toBeVisible()
+      if (size === 'desktop' || label === null) await expect(fab(page)).toHaveCount(0)
+      else await expect(fab(page)).toHaveAccessibleName(label)
+    }
+  })
+
+  /** The Readiness card holds this page's action, so a FAB would repeat it. */
+  test('draws none on the machine page', async ({ page }) => {
+    await page.goto('/m/nas')
+    await expect(heading(page, 'nas')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'tmux and claude are missing' })).toBeVisible({ timeout: 15_000 })
+    await expect(fab(page)).toHaveCount(0)
+  })
+
+  test('is a real control that the keyboard reaches and presses', async ({ page, size }) => {
+    test.skip(size === 'desktop', 'the desktop draws no FAB')
+    await page.goto('/machines')
+    await expect(heading(page, 'Machines')).toBeVisible()
+    await fab(page).focus()
+    await expect(fab(page)).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL('/machines/add')
+  })
+
+  /** In thumb reach: the bottom-right corner, above the navigation bar and
+   *  inside the screen, however long its label is. */
+  test('sits in thumb reach on the phone, clear of the navigation bar', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the extended FAB is the phone’s')
+    const view = page.viewportSize()!
+    const box = (await fab(page).boundingBox())!
+    const bar = (await page.locator('.m3-navigation-bar').boundingBox())!
+    expect(box.x + box.width).toBeLessThanOrEqual(view.width - 16)
+    expect(box.x).toBeGreaterThanOrEqual(16)
+    expect(box.y + box.height).toBeLessThanOrEqual(bar.y)
+    expect(box.height).toBe(56)
   })
 
   /** Y-379, the owner: the account menu answered nothing under the pointer.

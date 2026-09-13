@@ -180,9 +180,44 @@
 
 .shell__fab {
   position: fixed;
-  right: 16px;
+  right: calc(16px + env(safe-area-inset-right, 0px));
   bottom: calc(64px + 16px + env(safe-area-inset-bottom, 0px));
   z-index: 5;
+  max-width: calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  transform-origin: 100% 50%;
+}
+
+/* A machine's name can be long; the whole label is still the button's name. */
+.shell__fab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Holds the rail's FAB place on a route without one, so nothing under it moves. */
+.shell__rail-slot {
+  display: flex;
+  block-size: 56px;
+}
+
+/* D7 §3.7 and R14 §1.4: the FAB grows in on the default spatial spring each
+   time the page's action changes, and fades on the effects one. Reduced
+   motion takes the scale to one frame (tokens.css) and keeps the fade. */
+.shell__fab,
+.shell__rail-fab {
+  transition:
+    transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    opacity var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects),
+    border-radius var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
+}
+
+@starting-style {
+  .shell__fab,
+  .shell__rail-fab {
+    transform: scale(0.4);
+    opacity: 0;
+  }
 }
 
 .shell__nowhere {
