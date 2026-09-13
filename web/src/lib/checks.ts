@@ -53,3 +53,19 @@ export const fixOf = (check: string, machine: string): Fix | null => CHECKS[chec
 
 /** An id this table does not know is not one a session needs. */
 export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?? false
+
+/** ADR-0028 §1: what `yantra install` can put on a machine — narrower than
+ *  every check a session needs (`lib/ready`'s `READY`). The one place this
+ *  is derived; `lib/ready`'s `missingBasics` and the setup checklist both
+ *  read it from here (Y-402 review). */
+export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
+
+/** `reachable`'s failure reads two ways: the appliance's key was refused,
+ *  which the join command fixes by placing a fresh one, or ssh fails for
+ *  another reason (a changed host key, a firewall), which no command here
+ *  can fix. The machine page and the machines list both classify it this
+ *  same way, so they cannot disagree (Y-402 review). */
+export type ReachableFailure = 'refused' | 'unreachable'
+
+export const reachableFailure = (detail: string): ReachableFailure =>
+  /permission denied/i.test(detail) ? 'refused' : 'unreachable'

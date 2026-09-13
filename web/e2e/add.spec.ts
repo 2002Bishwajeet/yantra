@@ -96,12 +96,14 @@ test.describe('Add a device', () => {
 
   test('opens from Machines and from the checklist', async ({ page }) => {
     await scenario(page, 'adding')
-    // The page's own link: on the phone and the tablet the FAB carries it too.
+    // The page's own link on the desktop; on the phone and the tablet the FAB
+    // carries it, as "Add a device, quick action".
+    const add = page.getByRole('link', { name: /^Add a device/ }).first()
     await page.goto('/machines')
-    await page.getByRole('main').getByRole('link', { name: 'Add a device' }).click()
+    await add.click()
     await expect(page.locator('h1', { hasText: 'Add a device' }).first()).toBeAttached()
     await page.goto('/')
-    await page.getByRole('main').getByRole('link', { name: 'Add a device' }).click()
+    await add.click()
     await expect(page).toHaveURL(/\/machines\/add$/)
   })
 

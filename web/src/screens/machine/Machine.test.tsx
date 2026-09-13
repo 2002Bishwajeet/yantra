@@ -108,16 +108,19 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
   })
 })
 
-describe('/m/pi-5, which is missing claude', () => {
+describe('/m/pi-5, which is missing git and claude', () => {
+  /** pi-5's report has no `git` check at all: `missingBasics` (`lib/ready`)
+   *  counts an unasked basic as missing too, the same as the machines-list
+   *  card does (Y-402 review), so it joins `agent-cli`'s explicit absence. */
   it('offers Install and no New session, and the press starts it', async () => {
     const asked = mount('desktop', '/m/pi-5')
     const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
-    expect(await ready.findByRole('heading', { name: 'claude is missing' })).toBeTruthy()
+    expect(await ready.findByRole('heading', { name: 'git and claude are missing' })).toBeTruthy()
     expect(ready.queryByRole('link', { name: 'New session' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'New session' })).toBeNull()
     fireEvent.click(ready.getByRole('button', { name: 'Install' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/install'))
-    expect(await ready.findByRole('heading', { name: 'Installing claude' })).toBeTruthy()
+    expect(await ready.findByRole('heading', { name: 'Installing git and claude' })).toBeTruthy()
     expect(ready.getByRole('progressbar', { name: 'Installing on pi-5' })).toBeTruthy()
   })
 })

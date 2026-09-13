@@ -1,9 +1,10 @@
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/hooks'
+import { INSTALLABLE, nameOf } from '@/lib/checks'
 import { platformOf, type Platform } from '@/lib/platform'
-import { blocking, isReady } from '@/lib/ready'
-import { listed, missingBasics } from '@/screens/machine/install'
-import { INSTALLED, lacking } from '@/screens/setup/steps'
+import { blocking, isReady, missingBasics } from '@/lib/ready'
+import { listed } from '@/screens/machine/install'
+import { lacking } from '@/screens/setup/steps'
 
 /** Walk-through §3.2: every beat is seen by the appliance, never declared.
  *  `ahead` is a beat whose turn has not come. */
@@ -132,12 +133,12 @@ export function reachable(
 
 /** What Install would put there that is not there yet. */
 export const installable = (report: Readiness | null) =>
-  INSTALLED.some((one) => check(report, one)?.state !== 'present')
+  INSTALLABLE.some((one) => check(report, one)?.state !== 'present')
 
 /** D7 §4.1: a sudo-blocked step says what needs the password; the commands
  *  under it say what to run. */
 export function password(report: Readiness | null): string {
-  const tools = missingBasics(report?.checks ?? [])
+  const tools = missingBasics(report).map((one) => nameOf(one.check))
   if (tools.length === 0) return 'the install needs your password'
   return `${listed(tools)} need${tools.length === 1 ? 's' : ''} your password`
 }

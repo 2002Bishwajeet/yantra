@@ -181,6 +181,10 @@ describe('the FAB', () => {
       // WCAG 2.5.3: the name starts with the words on screen, and differs
       // from the page's own copy of the action.
       expect(screen.getByRole('link', { name: `${label}, quick action` })).toBe(fab())
+      // D7 §4.4: the page does not also draw its own Add a device.
+      if (path === '/machines') {
+        expect(within(screen.getByRole('main')).queryByRole('link', { name: 'Add a device' })).toBeNull()
+      }
     })
   }
 
@@ -215,6 +219,8 @@ describe('the FAB', () => {
     await screen.findByRole('heading', { level: 1, name: 'Machines' })
     expect(fab()).toBeNull()
     expect(document.querySelector('.m3-fab')).toBeNull()
+    const add = within(screen.getByRole('main')).getByRole('link', { name: 'Add a device' })
+    expect(add.dataset.variant).toBe('tonal')
   })
 
   it('draws none while yantrad cannot be reached', async () => {

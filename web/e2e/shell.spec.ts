@@ -221,7 +221,7 @@ test.describe('the shell on busy', () => {
   test('draws none on the machine page', async ({ page }) => {
     await page.goto('/m/nas')
     await expect(heading(page, 'nas')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'tmux and claude are missing' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: 'tmux, git and claude are missing' })).toBeVisible({ timeout: 15_000 })
     await expect(fab(page)).toHaveCount(0)
   })
 

@@ -57,6 +57,19 @@ describe('the machine page’s verdict', () => {
     expect(startable(v)).toBe(false)
   })
 
+  /** Y-402 review: the machines-list card reads `lib/ready`'s
+   *  `missingBasics` too, and the two must not disagree about a basic the
+   *  report never asked about — `git` is left out of this report entirely. */
+  it('counts a basic the report never asked about, same as the card does', () => {
+    const noGit = report(
+      ['reachable', 'sshd', 'tmux', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'heartbeat'].map(
+        (id) => check(id, id === 'agent-cli' ? 'absent' : 'present'),
+      ),
+    )
+    const v = verdict(noGit)
+    expect(v).toEqual({ kind: 'missing', missing: ['git', 'claude'], result: null, fresh: false })
+  })
+
   it('runs from the press until an answer newer than it lands', () => {
     const watch = { since: 10, pressed: 0 }
     const events = [stopped(10, ['sudo apk add tmux'])]

@@ -10,6 +10,11 @@ const open = async (page: Parameters<typeof scenario>[0]) => {
   await page.getByRole('button', { name: /^Notifications/ }).click()
   const popup = page.locator('.m3-popover')
   await expect(popup).toBeVisible()
+  // Base UI mounts with `data-starting-style` and an inline `transition:
+  // none` for one frame, so it can jump to the starting values instead of
+  // animating from the default ones; reading the transition before that
+  // frame ends sees "none". Wait for the real, transitioning state.
+  await expect(popup).not.toHaveAttribute('data-starting-style')
   return popup
 }
 
