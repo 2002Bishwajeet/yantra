@@ -18,14 +18,21 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.machine__spacer {
-  flex: 1;
+.machine__h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
+/* D7 B2: nothing here may be wider than the screen, so every track can
+   shrink and every machine-written line can break anywhere. */
 .machine__columns {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--m3-page-gap);
+}
+
+.machine__columns > * {
+  min-width: 0;
 }
 
 @media (min-width: 1240px) {
@@ -39,6 +46,42 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+}
+
+/* The list's own `break-word` wraps the value; `anywhere` here would change the
+   row's intrinsic width and clip the headline (List.css, Y-360). */
+.machine__about .m3-mono {
+  white-space: normal;
+}
+
+/* On the phone About sits in a Disclosure, and two fifths of that row is less
+   than `Tailnet name`: the headline keeps its width and the value wraps below. */
+[data-shell='phone'] .machine__about .m3-list-item {
+  flex-wrap: wrap;
+}
+
+[data-shell='phone'] .machine__about .m3-list-item__text {
+  min-width: max-content;
+}
+
+[data-shell='phone'] .machine__about .m3-list-item__trailing {
+  max-width: 100%;
+}
+
+.machine__detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.machine__fix {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 2px 0 4px;
 }
 
 .machine__head {
@@ -76,6 +119,19 @@
 
 .machine__check .machine__word {
   color: var(--md-sys-color-on-surface-variant);
+}
+
+/* D7 B2: on the phone a check is two lines, the name and its state, then the
+   detail below at full width. */
+@media (max-width: 599px) {
+  .machine__check {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 2px;
+  }
+
+  .machine__check .machine__detail {
+    grid-column: 1 / -1;
+  }
 }
 
 .machine__rows {
@@ -142,6 +198,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   padding: 8px 4px;
 }
 

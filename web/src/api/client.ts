@@ -87,7 +87,14 @@ export async function fetchJson<T>(
   if (status === 204) return undefined as T
   let body: unknown
   try {
-    body = await response.json()
+    // `install` answers 202 with no body; `clone` answers 202 with one.
+    if (status === 202) {
+      const text = await response.text()
+      if (text === '') return undefined as T
+      body = JSON.parse(text)
+    } else {
+      body = await response.json()
+    }
   } catch (cause) {
     throw new ApiError('contract', String(cause), { status })
   }

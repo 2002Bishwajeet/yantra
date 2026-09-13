@@ -21,6 +21,7 @@ import {
   fields,
   json,
   look,
+  NOT_REACHED,
   POLL_MS,
   SWEEP_MS,
 } from '@/api/client'
@@ -74,8 +75,28 @@ export const sessionsQuery = () =>
   swept<MachineSessions[]>(keys.sessions(), '/api/sessions')
 export const readinessQuery = () =>
   swept<Readiness[]>(keys.readiness(), '/api/readiness')
+/** A 404 is `doctor::fleet` holding no report for a machine no workspace
+ *  names: nobody has asked it yet, which is `never` and not a daemon that was
+ *  not reached (D7 S4). */
 export const machineReadinessQuery = (name: string) =>
-  swept<Readiness>(keys.readiness(name), machine(name, 'readiness'))
+  queryOptions({
+    // Widened as `swept` widens it, so `useReading` takes it.
+    queryKey: keys.readiness(name) as readonly unknown[],
+    queryFn: async ({ signal }): Promise<Looked<Readiness>> => {
+      const path = machine(name, 'readiness')
+      try {
+        const response = await fetch(path, { signal })
+        if (response.status === 404) return { looked: 'never' }
+        if (!response.ok) return failed(`${NOT_REACHED}: HTTP ${response.status}`)
+        return await envelope<Readiness>(response, path)
+      } catch (cause) {
+        if (signal.aborted) throw cause
+        return failed(`${NOT_REACHED}: ${String(cause)}`)
+      }
+    },
+    staleTime: SWEEP_MS,
+    refetchInterval: POLL_MS,
+  })
 /** On the daemon's 300 s clock rather than the 30 s sweep, which is why the
  *  band that draws it stamps itself (D6 §2). */
 export const attentionQuery = () =>

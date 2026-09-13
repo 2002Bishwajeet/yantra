@@ -169,10 +169,25 @@ page draws them rather than running anything. A machine card draws four of them
 and `unknown` is never a shade of `absent` — one sends you to install something,
 the other to go and look (R-23).
 
-**`Doctor` asks again now, and is a button rather than a timer.** `POST
+**`Check again` asks the machine now, and is a button rather than a timer.**
+The CLI's verb keeps the name `yantra doctor`. `POST
 …/readiness` is a full ssh round trip ([ADR-0019](../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)),
 and its answer lands in the same query key the sweep fills, which is why
 [`Doctor.tsx`](src/screens/machines/Doctor.tsx) holds no result of its own.
+
+**`/m/{machine}` leads with a verdict** (Y-396, D7 §4.3).
+[`verdict.ts`](src/screens/machine/verdict.ts) reads the machine, its report
+and the install events into one of twelve verdicts, and the verdict is the
+Readiness card's title and decides its one filled action. **Install appears
+while `tmux`, `git` or `claude` is absent**
+([ADR-0028](../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md)).
+The route answers `202` and nothing else, so the result is read off the newest
+`installed` or `install_stopped` event for that machine in
+`/api/notifications`, and then readiness is asked again once. An `unknown`
+check never counts as missing. What the page pressed lives in the page, so a
+reload forgets that it is waiting; a second press is the daemon's `409`, and
+the page waits for that one instead. **Every check has one name**, from
+[`lib/checks.ts`](src/lib/checks.ts), with what fixes it.
 
 ## A workspace file that did not load (Y-141)
 

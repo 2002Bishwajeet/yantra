@@ -20,13 +20,13 @@ test.describe('the machines on a busy fleet', () => {
     const good = card(page, 'cachyos-g14')
     await expect(good.getByText('online')).toBeVisible()
     await expect(good.getByText('4 of 4 checks')).toBeVisible()
-    await expect(good.getByRole('button', { name: 'Doctor' })).toHaveCount(0)
+    await expect(good.getByRole('button', { name: 'Check again' })).toHaveCount(0)
 
     const short = card(page, 'pi-5')
     await expect(short.getByText('agent-cli')).toBeVisible()
     await expect(short.getByText('no `claude` on PATH there')).toBeVisible()
     await expect(short.getByText('1 failing')).toBeVisible()
-    await expect(short.getByRole('button', { name: 'Doctor' })).toBeVisible()
+    await expect(short.getByRole('button', { name: 'Check again' })).toBeVisible()
 
     const gone = card(page, 'thinkpad')
     await expect(gone.getByText('unreachable')).toBeVisible()

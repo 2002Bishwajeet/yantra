@@ -1,0 +1,78 @@
+{
+  "extends": "busy",
+  "installs": {
+    "pi-5": {
+      "after": 600,
+      "fixes": ["agent-cli"],
+      "event": {
+        "kind": "installed",
+        "said": "pi-5: claude installed",
+        "commands": []
+      }
+    },
+    "nas": {
+      "after": 600,
+      "fixes": [],
+      "event": {
+        "kind": "install_stopped",
+        "said": "nas: tmux left for you: the package manager needs root, and sudo asks for a password or a terminal there; claude left for you: the package manager needs root, and sudo asks for a password or a terminal there — run `sudo apt-get update; sudo apt-get install -y tmux curl` on nas",
+        "commands": ["sudo apt-get update; sudo apt-get install -y tmux curl"]
+      }
+    },
+    "hetzner-1": {
+      "after": 60000,
+      "event": { "kind": "installed", "said": "hetzner-1: every basic was already there", "commands": [] }
+    }
+  },
+  "readiness": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "machine": "pi-5",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.9 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.4 at /usr/bin/tmux" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
+          { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 9s ago" }
+        ]
+      },
+      {
+        "machine": "nas",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.7 answered" },
+          { "check": "tmux", "state": "absent", "detail": "no `tmux` on PATH there" },
+          { "check": "git", "state": "present", "detail": "found at /usr/bin/git" },
+          { "check": "agent-cli", "state": "absent", "detail": "no `claude` on PATH there" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
+          { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
+          { "check": "login-session", "state": "absent", "detail": "no user session is running" },
+          { "check": "heartbeat", "state": "absent", "detail": "no beat has ever arrived from nas" }
+        ]
+      },
+      {
+        "machine": "hetzner-1",
+        "checks": [
+          { "check": "reachable", "state": "present", "detail": "a command ran there and reported its own status" },
+          { "check": "sshd", "state": "present", "detail": "OpenSSH_9.9 answered" },
+          { "check": "tmux", "state": "present", "detail": "tmux 3.4 at /usr/bin/tmux" },
+          { "check": "git", "state": "absent", "detail": "no `git` on PATH there" },
+          { "check": "agent-cli", "state": "present", "detail": "claude 2.1.0 at /root/.local/bin/claude" },
+          { "check": "terminfo", "state": "present", "detail": "xterm-256color is known there" },
+          { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
+          { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
+          { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
+          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 2s ago" }
+        ]
+      }
+    ]
+  }
+}
