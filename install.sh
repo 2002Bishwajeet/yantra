@@ -99,16 +99,24 @@ uninstall() {
 
     if [ "$interactive" = yes ] &&
         ask_no "Remove the yantra account and /home/yantra? It holds the SSH key, the SSH config and the workspaces."; then
-        as_root userdel -r yantra 2>/dev/null || true
-        removed="$removed, the yantra account and /home/yantra"
+        if as_root userdel -r yantra; then
+            removed="$removed, the yantra account and /home/yantra"
+        else
+            echo "install: could not remove the yantra account. It is kept."
+            kept="${kept:+$kept, }the yantra account and /home/yantra"
+        fi
     else
         kept="${kept:+$kept, }the yantra account and /home/yantra"
     fi
 
     if command -v tailscale >/dev/null 2>&1 && [ "$interactive" = yes ] &&
         ask_no "Turn off the Tailscale serve on port $HTTPS_PORT?"; then
-        as_root tailscale serve --https="$HTTPS_PORT" off 2>/dev/null || true
-        removed="$removed, the Tailscale serve on port $HTTPS_PORT"
+        if as_root tailscale serve --https="$HTTPS_PORT" off; then
+            removed="$removed, the Tailscale serve on port $HTTPS_PORT"
+        else
+            echo "install: could not turn off the Tailscale serve on port $HTTPS_PORT. It is kept."
+            kept="${kept:+$kept, }the Tailscale serve on port $HTTPS_PORT"
+        fi
     else
         kept="${kept:+$kept, }the Tailscale serve on port $HTTPS_PORT"
     fi
