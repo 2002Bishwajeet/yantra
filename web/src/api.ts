@@ -137,6 +137,14 @@ export type TerminalSize = {
   term: string
 }
 
+/** The text frame a one-off terminal ends on
+ *  ([ADR-0030](../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)
+ *  §5): the command's exit status, `null` where none could be read. It is the
+ *  one text frame from the daemon that is not a refusal. */
+export type TerminalExit = {
+  exit: number | null
+}
+
 export type Session = {
   name: string
   windows: number

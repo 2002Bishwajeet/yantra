@@ -13,6 +13,7 @@
     "nas": {
       "after": 600,
       "fixes": [],
+      "typed": ["tmux"],
       "event": {
         "kind": "install_stopped",
         "said": "nas: tmux left for you: the package manager needs root, and sudo asks for a password or a terminal there; claude left for you: the package manager needs root, and sudo asks for a password or a terminal there — run `sudo apt-get update; sudo apt-get install -y tmux curl` on nas",

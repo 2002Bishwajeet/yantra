@@ -1,0 +1,38 @@
+/* A terminal needs columns, so this side sheet is wider than the shell's 420 px
+   one (`inline-size` is what the sheet sets), and it floats over the page's
+   right edge as the shell's does. */
+.m3-side-sheet.sudo-sheet--side {
+  position: fixed;
+  inset-block: 16px;
+  right: 16px;
+  z-index: 30;
+  inline-size: min(760px, calc(100vw - 32px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Full height on the phone (D7 §4.3). The sheet caps itself at `100% - 64px`,
+   and a larger `min-height` would beat that cap and push it off the top. */
+.m3-bottom-sheet.sudo-sheet--phone {
+  height: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+}
+
+.sudo-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sudo-sheet__body > p {
+  margin: 0;
+}
+
+.sudo-sheet__command {
+  overflow-wrap: anywhere;
+}
+
+.sudo-sheet__pane {
+  min-width: 0;
+}

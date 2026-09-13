@@ -22,7 +22,11 @@ import { Terminal } from './Terminal'
 const MACHINE = 'cachyos-g14'
 
 const label = (target: Target) =>
-  'workspace' in target ? `tmux ${target.workspace} on ${target.machine}` : `tmux ${target.session} on ${target.machine}`
+  'workspace' in target
+    ? `tmux ${target.workspace} on ${target.machine}`
+    : 'session' in target
+      ? `tmux ${target.session} on ${target.machine}`
+      : `install step on ${target.machine}`
 
 const open = (target: Target = { machine: MACHINE, workspace: 'yantra' }) =>
   renderRouted(<Terminal label={label(target)} target={target} />)
@@ -431,5 +435,63 @@ describe('the phone key row under the pane', () => {
     await settled(() => expect(daemonised.heard.length).toBe(2))
     expect(daemonised.heard[1]).toEqual({ bytes: [0x01] })
     await settled(() => expect(ctrl.getAttribute('aria-pressed')).toBe('false'))
+  })
+})
+
+/** Y-394, ADR-0030: a one-off terminal runs a command an install left. It is
+ *  addressed by the step's place, ends on the command's status, and is never
+ *  reopened, because a reopened socket runs the command again. */
+describe('a one-off terminal for an install step', () => {
+  const step: Target = { machine: MACHINE, step: 0, at: 100 }
+
+  it('opens the step by its place, and ends on the command’s status', async () => {
+    let told: number | null | undefined
+    await renderRouted(
+      <Terminal
+        label="install step on cachyos-g14"
+        onExit={(exit) => {
+          told = exit
+        }}
+        target={step}
+      />,
+    )
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    expect(daemonised.asked).toEqual(['/api/machines/cachyos-g14/install/0/terminal?at=100'])
+
+    daemonised.print('[sudo] password for yantra: ')
+    await settled(() => expect(screenText()).toContain('password for yantra'))
+    daemonised.say('{"exit":0}')
+
+    await settled(() => expect(screen.getByRole('status').textContent).toContain('exited 0'))
+    expect(told).toBe(0)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('never reopens, because that would run the command again', async () => {
+    await renderRouted(<Terminal label="install step on cachyos-g14" target={step} />)
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+
+    daemonised.hangUp()
+    await settled(() => expect(screen.getByText(/Nothing reopens it/)).toBeTruthy())
+    await new Promise((done) => setTimeout(done, PAUSE * 3))
+    expect(daemonised.asked).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Open it again' })).toBeNull()
+  })
+
+  it('says a step that is not there as a refusal, not as an exit', async () => {
+    let told: number | null | undefined
+    await renderRouted(
+      <Terminal
+        label="install step on cachyos-g14"
+        onExit={(exit) => {
+          told = exit
+        }}
+        target={step}
+      />,
+    )
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    daemonised.say('no install on cachyos-g14 left a step 0; press Install again')
+    await settled(() => expect(screen.getByRole('alert').textContent).toContain('press Install again'))
+    expect(told).toBeUndefined()
   })
 })
