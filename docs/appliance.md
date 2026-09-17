@@ -4,7 +4,7 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**[v0.3.1](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.3.1) is the current release**
+**[v0.3.2](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.3.2) is the current release**
 ([Y-405](../tracker.md)), and there are two ways in. [`install.sh`](../install.sh) fetches the
 current release onto the box itself, verifies it, and at a terminal takes the box from bare to an
 open dashboard ([Y-384](../tracker.md)). `just appliance-install` builds on the machine that
@@ -44,7 +44,7 @@ less install.sh
 bash install.sh
 ```
 
-**Take it from `main` or from the v0.3.1 tag.** A copy from v0.2.0 or earlier is the script before
+**Take it from `main` or from the v0.3.2 tag.** A copy from v0.2.0 or earlier is the script before
 Y-384: it asks nothing and starts nothing. [Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until
 then the URL is GitHub's.
 
