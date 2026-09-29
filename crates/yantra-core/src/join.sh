@@ -98,6 +98,15 @@ sshd_listening() {
     fi
 }
 
+# Tailscale SSH answers port 22 on the tailnet from inside tailscaled, so
+# nothing listens there. `debug prefs` is readable without root.
+tailscale_ssh() {
+    command -v tailscale >/dev/null 2>&1 || return 1
+    prefs=$(tailscale debug prefs 2>/dev/null) || return 1
+    printf '%s\n' "$prefs" | grep -q '"RunSSH": *true' &&
+        printf '%s\n' "$prefs" | grep -q '"WantRunning": *true'
+}
+
 wait_for_sshd() {
     for _ in 1 2 3 4 5; do
         sshd_listening && return 0
@@ -332,7 +341,9 @@ report() {
 
 say "this lets the Yantra appliance at $DAEMON log in here as $user."
 
-if sshd_listening; then
+if tailscale_ssh; then
+    say "Tailscale SSH is on, so the appliance reaches this machine through it and sshd is not needed."
+elif sshd_listening; then
     say "sshd is running."
 elif [ "$os" = Darwin ]; then
     mac_remote_login
