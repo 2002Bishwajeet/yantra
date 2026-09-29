@@ -75,6 +75,14 @@ invokes `SSH_ASKPASS`; `ServerAliveInterval`/`ServerAliveCountMax` are the only 
 that freezes without closing TCP; `RequestTTY=no` stops a user's `~/.ssh/config` forcing a pty and
 corrupting stdout with CRLF.
 
+> **`-E` does not divert a server's banner, recorded 2026-09-29 (Y-412).** OpenSSH writes a
+> `SSH_MSG_USERAUTH_BANNER` straight to stderr, and only at `LogLevel=INFO` or above. Tailscale SSH
+> sends its policy refusal as a banner and then closes the connection. At `LogLevel=ERROR` both the
+> banner and `Connection closed by …` were suppressed, so the appliance reported *no diagnostics*.
+> `exec` now runs at `INFO`. The payload prints the nonce on stderr before the command starts.
+> What precedes it is `ssh`'s, and it joins the `-E` log in a transport error. What follows it is
+> the command's, so stderr still belongs to the command. The terminal path stays at `ERROR`.
+
 **Control socket paths are validated at construction**, not at first use. The budget is **90 bytes on
 Linux, 86 on macOS** — below `sun_path` because the master also binds a 17-character temporary
 suffix. `%C` contributes a fixed 40 characters. Exceeding it otherwise produces an opaque 255.

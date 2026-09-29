@@ -294,3 +294,79 @@ async fn a_tool_that_finds_no_credential_is_absent_rather_than_unknown() -> Resu
     );
     Ok(())
 }
+
+/// Y-412 against a real sshd. A machine no `Host` block names is reached as
+/// this account's own name, which the far side does not have, and the server
+/// says so in a banner — the shape Tailscale SSH refused the appliance with.
+/// The Check keeps the server's words and sends the reader to the join command.
+#[tokio::test]
+async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_servers_words()
+-> Result<()> {
+    const BANNER: &str = "yantra-fixture: this server does not let you in";
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_as_root(&format!(
+        "printf '%s\\n' '{BANNER}' > /etc/yantra-banner \
+         && echo 'Banner /etc/yantra-banner' >> /etc/ssh/sshd_config && kill -HUP 1"
+    ))?;
+
+    let config = std::path::PathBuf::from("/tmp").join("yd-unjoined-config");
+    let _ = std::fs::remove_dir_all(&config);
+    std::fs::create_dir_all(&config)?;
+    std::fs::write(config.join("config"), "Host laptop\n    User biswa\n")?;
+    let account = yantra_core::identity::unnamed_in(&config, fixture.host())
+        .expect("no block names the fixture, so ssh falls back to this account");
+    anyhow::ensure!(
+        account != USER,
+        "this test needs a local account the fixture does not have"
+    );
+
+    // With no block for the host, ssh would pick `account` itself.
+    let machine = |label: &str, user: &str| -> Result<Ssh> {
+        let dir = std::path::PathBuf::from("/tmp").join(format!("yd-{label}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        Ok(Ssh::new(Machine {
+            host: fixture.host().to_owned(),
+            user: Some(user.to_owned()),
+            port: Some(fixture.port()),
+            identity: Some(fixture.key_path()),
+            state_dir: dir,
+        })?)
+    };
+
+    // sshd re-executes on SIGHUP, so ask until the banner is in the answer.
+    let unjoined = machine("unjoined", &account)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut checks = doctor::of(&unjoined, KNOWN_REMOTELY).await;
+    while !look(&checks, "reachable").detail.contains(BANNER) {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "the banner never reached the diagnosis: {}",
+            look(&checks, "reachable").detail
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        checks = doctor::of(&unjoined, KNOWN_REMOTELY).await;
+    }
+    assert_state(&checks, "reachable", State::Absent);
+    assert_state(&checks, "sshd", State::Present);
+
+    doctor::name_the_account(&mut checks, fixture.host(), &config).await;
+    let detail = &look(&checks, "reachable").detail;
+    assert!(
+        detail.contains(&format!("names no account for {}", fixture.host())),
+        "{detail}"
+    );
+    assert!(detail.contains(&format!("`{account}`")), "{detail}");
+    assert!(detail.contains("Add a device"), "{detail}");
+    assert!(detail.contains(BANNER), "the server's words stay: {detail}");
+
+    // The banner is ssh's, so a command that runs keeps a stderr of its own.
+    let joined = machine("joined-banner", USER)?;
+    let out = joined.exec("echo own >&2").await?;
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "own\n");
+
+    let _ = std::fs::remove_dir_all(&config);
+    Ok(())
+}

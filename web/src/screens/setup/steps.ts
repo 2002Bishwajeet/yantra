@@ -1,6 +1,6 @@
 import type { About, Check, Machine, Readiness } from '@/api'
 import { asApiError } from '@/api/errors'
-import { INSTALLABLE, nameOf } from '@/lib/checks'
+import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
 import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -88,6 +88,7 @@ export type Line =
   | { kind: 'unreachable'; words: string }
   | { kind: 'unchecked' }
   | { kind: 'refused' }
+  | { kind: 'unjoined' }
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 
@@ -105,7 +106,8 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   if (!report) return { kind: 'unchecked' }
   const reachable = report.checks.find((one) => one.check === 'reachable')
   if (reachable && reachable.state !== 'present') {
-    if (/permission denied/i.test(reachable.detail)) return { kind: 'refused' }
+    const failure = reachableFailure(reachable.detail)
+    if (failure !== 'unreachable') return { kind: failure }
     return { kind: 'unreachable', words: `ssh did not answer · ${reachable.detail}` }
   }
   const present = report.checks.filter((one) => one.state === 'present').length

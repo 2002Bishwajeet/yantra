@@ -360,6 +360,18 @@ function Body(props: {
           {join ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
         </div>
       )
+    case 'unjoined':
+      return (
+        <div className="readiness__left">
+          <Mono className="readiness__detail">{verdict.detail}</Mono>
+          <Text render={<p />} scale="body-small" tone="variant">
+            The appliance does not know which account to log in to {name} as. Run the join command on {name}; it
+            names the account and places the key. <Link to="/machines/add">Add a device</Link> shows it for each
+            platform.
+          </Text>
+          {join ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
+        </div>
+      )
     case 'ready':
       return (
         <Disclosure summary={folded(checks)}>
