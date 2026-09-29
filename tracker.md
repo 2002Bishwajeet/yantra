@@ -268,6 +268,7 @@ deleted everywhere else.
 | Y-418 | Push-to-talk in the dashboard | ⬜ todo | claude | Y-417 | ADR-0031 §4–6. **Done** when holding the button streams 16 kHz s16le PCM over an `allowed()` WebSocket into `pw-cat` on the machine, releasing it closes both, no audio byte is logged, and a test records the tone on a real machine. |
 | Y-419 | `yantra mic <machine>` | ⬜ todo | claude | Y-417 | ADR-0031 §7. **Done** when the verb streams the laptop microphone one way into `yantra-mic-sink` until Ctrl-C, and a spoken test reaches a Yantra session. |
 | Y-420 | The microphone on macOS | ⬜ todo | claude | Y-417 | ADR-0031 §8. **Done** when Install puts BlackHole and SoX on a Mac, the dashboard guides the input choice and the microphone permission, and a test on a real Mac records speech. |
+| Y-421 | The build loop | 🔵 review | claude | — | **Owner, 2026-09-30:** build rows without the owner reviewing each one. **Done** when [`build-rows.js`](.claude/workflows/build-rows.js) and [`CLAUDE.md`](CLAUDE.md) §B7 are on `main`, and a first run has merged one row or parked it with a reason. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

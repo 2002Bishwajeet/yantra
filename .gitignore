@@ -45,6 +45,7 @@ web/.vite/
 # Agent worktrees and the screenshots agents leave behind
 .claude/worktrees/
 .claude/*.png
+.claude/build-loop/
 .agents/
 skills-lock.json
 

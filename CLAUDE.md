@@ -257,3 +257,24 @@ WebSearch/WebFetch — do not answer from memory for anything version-sensitive.
 findings loudly**: *"this does not work the way everyone assumes"* is the most valuable sentence you
 can write. Always include exact commands, flags, JSON shapes, and file paths — those are what the
 implementation actually needs.
+
+## B7. The build loop
+
+Owner's instruction, 2026-09-30: open rows are built, verified, reviewed and merged without the owner
+reviewing each one. [`.claude/workflows/build-rows.js`](.claude/workflows/build-rows.js) does it;
+start it with the `build-rows` workflow and `args.today`. It writes a report to
+`.claude/build-loop/<date>.md`.
+
+- **It merges on its own.** A row merges when the gate, an independent reviewer and every CI check
+  pass. The owner reads the report, not the PRs.
+- **It picks by priority.** 1: closes or unblocks an open milestone. 2: a defect or a red suite.
+  3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
+- **It runs up to three rows at once.** Rows that touch the same paths do not share a batch.
+  Verification and shipping run one row at a time, because podman runs out of memory and rebases
+  must see each other's merges.
+- **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a real
+  Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, a changed
+  invariant, or an answer to an open question. A parked row keeps its branch and appears in the
+  report.
+- **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
+  web and docs and runs the gate. No subagent runs on Fable.
