@@ -178,7 +178,7 @@ and its answer lands in the same query key the sweep fills, which is why
 **`/m/{machine}` leads with a verdict** (Y-396,
 [D7](../docs/design/07-m15-screens.md) §4.3).
 [`verdict.ts`](src/screens/machine/verdict.ts) reads the machine, its report
-and the install events into one of twelve verdicts, and the verdict is the
+and the install events into one of thirteen verdicts, and the verdict is the
 Readiness card's title and decides its one filled action. **Install appears
 while `tmux`, `git` or `claude` is absent**
 ([ADR-0028](../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md)).

@@ -11,7 +11,8 @@
 //!   remote *login shell*, so a repo path containing `$(...)` is remote code
 //!   execution. A quote-free wire format removes the quoting problem entirely.
 //! - **`-E`.** Diverts `ssh`'s own diagnostics off stderr so stderr belongs to
-//!   the command.
+//!   the command. A server's banner is the exception: `ssh` writes it to
+//!   stderr, so the payload marks where the command's stderr starts.
 //!
 //! A stdin-EOF watchdog was tried and withdrawn — it killed every command that
 //! took longer than a few hundred milliseconds. See ADR-0008.
@@ -86,7 +87,6 @@ impl Machine {
         let mut options = vec![
             "BatchMode=yes".to_owned(),
             "StrictHostKeyChecking=accept-new".to_owned(),
-            "LogLevel=ERROR".to_owned(),
             "ConnectTimeout=10".to_owned(),
             // The only defence against a host that freezes without closing TCP.
             "ServerAliveInterval=15".to_owned(),
@@ -237,6 +237,7 @@ impl Ssh {
     pub(crate) fn tty_argv(&self, command: &str) -> Result<Vec<String>, Error> {
         self.machine.prepare_sockets()?;
         let mut args = self.machine.connection_args();
+        args.extend(["-o".to_owned(), "LogLevel=ERROR".to_owned()]);
         args.push("-tt".to_owned());
         args.extend(self.machine.destination_args());
         args.push(command.to_owned());
@@ -256,6 +257,9 @@ impl Exec for Ssh {
         let mut cmd = tokio::process::Command::new("ssh");
         cmd.arg("-E").arg(log.path());
         cmd.args(m.connection_args());
+        // Not ERROR: ssh prints a server's banner only from INFO up, and
+        // Tailscale SSH sends its policy refusal as one (Y-412).
+        cmd.arg("-o").arg("LogLevel=INFO");
         // A ~/.ssh/config that forces a pty would corrupt stdout with CRLF and
         // merge stderr into it.
         cmd.arg("-o").arg("RequestTTY=no");
@@ -299,13 +303,14 @@ impl Exec for Ssh {
         read_err.map_err(|e| transport(format!("reading stderr: {e}")))?;
         status.map_err(|e| transport(format!("waiting for ssh: {e}")))?;
 
-        match split_sentinel(&stderr, &nonce) {
+        let (banner, stderr) = split_start(&stderr, &nonce);
+        match split_sentinel(stderr, &nonce) {
             Some((stderr, status)) => Ok(Output {
                 status,
                 stdout,
                 stderr,
             }),
-            None => Err(transport(log.read_or_default())),
+            None => Err(transport(diagnosis(banner, &log.read()))),
         }
     }
 }
@@ -321,7 +326,8 @@ fn payload(command: &str, nonce: &str) -> String {
     let b64 = base64::engine::general_purpose::STANDARD;
 
     let script = format!(
-        "CMD=$(echo {inner} | base64 -d)\n\
+        "printf '{nonce}\\n' >&2\n\
+         CMD=$(echo {inner} | base64 -d)\n\
          /bin/sh -c \"$CMD\"\n\
          r=$?\n\
          printf '\\n{nonce}:%d' \"$r\" >&2\n",
@@ -329,6 +335,34 @@ fn payload(command: &str, nonce: &str) -> String {
     );
 
     format!("echo {} | base64 -d | /bin/sh", b64.encode(script))
+}
+
+/// Splits what `ssh` printed before the command started off the command's own
+/// stderr. With no start marker, all of it is `ssh`'s.
+fn split_start<'a>(stderr: &'a [u8], nonce: &str) -> (&'a [u8], &'a [u8]) {
+    let marker = format!("{nonce}\n");
+    match stderr
+        .windows(marker.len())
+        .position(|w| w == marker.as_bytes())
+    {
+        Some(at) => (&stderr[..at], &stderr[at + marker.len()..]),
+        None => (stderr, &[]),
+    }
+}
+
+/// What the server said on stderr, then what `ssh` logged. Empty is a real
+/// answer: a silently dropped multiplexed connection and a ServerAlive timeout
+/// both produce no diagnostics at all.
+fn diagnosis(banner: &[u8], log: &str) -> String {
+    let banner = String::from_utf8_lossy(banner);
+    let said: Vec<&str> = [banner.trim(), log.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    if said.is_empty() {
+        return "no diagnostics; the connection dropped silently".to_owned();
+    }
+    said.join("\n")
 }
 
 /// Splits the trailer off stderr. Returns the caller's stderr and the remote
@@ -385,13 +419,8 @@ impl LogFile {
         &self.path
     }
 
-    /// Empty is a real answer: a silently dropped multiplexed connection and a
-    /// ServerAlive timeout both produce no diagnostics at all.
-    fn read_or_default(&self) -> String {
-        match std::fs::read_to_string(&self.path) {
-            Ok(text) if !text.trim().is_empty() => text.trim().to_owned(),
-            _ => "no diagnostics; the connection dropped silently".to_owned(),
-        }
+    fn read(&self) -> String {
+        std::fs::read_to_string(&self.path).unwrap_or_default()
     }
 }
 
@@ -433,6 +462,34 @@ mod tests {
         let stderr = b"\nYdeadbeef:1\nYdeadbeef:0";
         let (_, status) = split_sentinel(stderr, "Ydeadbeef").expect("sentinel is present");
         assert_eq!(status, 0);
+    }
+
+    /// A banner is `ssh`'s, not the command's, so it stays out of `Output`.
+    #[test]
+    fn what_ssh_printed_before_the_start_marker_is_not_the_commands() {
+        let stderr = b"Authorised use only.\nYdeadbeef\nwarning\nYdeadbeef:0";
+        let (banner, rest) = split_start(stderr, "Ydeadbeef");
+        assert_eq!(banner, b"Authorised use only.\n");
+        let (rest, status) = split_sentinel(rest, "Ydeadbeef").expect("sentinel is present");
+        assert_eq!((rest.as_slice(), status), (b"warning".as_slice(), 0));
+    }
+
+    /// Y-412: Tailscale SSH refuses an account with a banner and then closes,
+    /// so the banner is the only place the reason is.
+    #[test]
+    fn a_refusal_the_server_sent_as_a_banner_reaches_the_diagnosis() {
+        let stderr = b"tailscale: tailnet policy does not permit you to SSH as user \"yantra\"\n";
+        let (banner, rest) = split_start(stderr, "Ydeadbeef");
+        assert!(rest.is_empty());
+        assert_eq!(
+            diagnosis(banner, "Connection closed by 100.108.185.80 port 22\n"),
+            "tailscale: tailnet policy does not permit you to SSH as user \"yantra\"\n\
+             Connection closed by 100.108.185.80 port 22"
+        );
+        assert_eq!(
+            diagnosis(b"", " \n"),
+            "no diagnostics; the connection dropped silently"
+        );
     }
 
     #[test]

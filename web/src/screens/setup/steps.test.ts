@@ -96,6 +96,8 @@ describe("a machine's line", () => {
   it('separates a refused key from a host that did not answer', () => {
     const refused = report([check('reachable', 'absent', 'Permission denied (publickey)')])
     expect(line(machine(), refused, null)).toEqual({ kind: 'refused' })
+    const unjoined = report([check('reachable', 'absent', 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).')])
+    expect(line(machine(), unjoined, null)).toEqual({ kind: 'unjoined' })
     const silent = report([check('reachable', 'absent', 'No route to host')])
     expect(line(machine(), silent, null)).toEqual({
       kind: 'unreachable',

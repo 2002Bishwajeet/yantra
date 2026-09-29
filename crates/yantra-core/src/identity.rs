@@ -266,6 +266,17 @@ pub fn join_in(dir: &Path, machine: &str, user: &str) -> Result<Joined, Error> {
     })
 }
 
+/// The account ssh logs in as when this account's config has no block naming
+/// `machine`, which is a machine that never ran the join command (Y-412).
+/// `None` when a block names it, or when the config cannot be read.
+pub fn unnamed_in(dir: &Path, machine: &str) -> Option<String> {
+    let config = read_config(&dir.join("config")).ok()?;
+    if names(&config, machine) {
+        return None;
+    }
+    logs_in_as_in(dir, machine)
+}
+
 /// `ssh -G`, so the answer is ssh's own reading of every block that matches.
 /// `-F` drops `/etc/ssh/ssh_config`, which a real connection reads, so it is
 /// passed only for a directory that is not this account's own `~/.ssh`.
@@ -572,6 +583,25 @@ mod tests {
             fs::read_to_string(&joined.config).expect("readable"),
             owners
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Y-412: only a machine no block names is one the join command fixes.
+    #[test]
+    fn a_machine_no_block_names_is_the_one_that_never_joined() {
+        let dir = scratch("unnamed");
+        fs::create_dir_all(&dir).expect("scratch");
+        fs::write(dir.join("config"), "Host laptop\n    User biswa\n").expect("a config");
+
+        let account = unnamed_in(&dir, "cachyos-g14").expect("no block names it");
+        assert!(
+            !account.is_empty(),
+            "ssh falls back to this account's own name"
+        );
+
+        join_in(&dir, "cachyos-g14", "biswa").expect("joined");
+        assert_eq!(unnamed_in(&dir, "cachyos-g14"), None);
+        assert!(unnamed_in(&dir, "pi").is_some());
         let _ = fs::remove_dir_all(&dir);
     }
 

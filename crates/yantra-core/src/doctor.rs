@@ -16,6 +16,7 @@
 
 use crate::agent::{self, Claude};
 use crate::github;
+use crate::identity;
 use crate::ssh::{self, Exec, Os, Ssh};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Tmux, sq};
@@ -146,13 +147,38 @@ pub async fn machine(name: &str, term: &str) -> Report {
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
         .and_then(|m| Ssh::new(m).map_err(|err| err.to_string()));
 
-    let checks = match ssh {
+    let mut checks = match ssh {
         Ok(ssh) => of(&ssh, term).await,
         Err(reason) => nothing_asked(&format!("ssh could not be set up here: {reason}")),
     };
+    if let Ok(dir) = identity::dir() {
+        name_the_account(&mut checks, name, &dir).await;
+    }
     Report {
         machine: name.to_owned(),
         checks,
+    }
+}
+
+/// Y-412: a machine that never ran the join command has no block in the ssh
+/// config in `dir`, so ssh logs in as this account's own name, which the far
+/// side rarely has. When `reachable` failed, its detail says so first.
+pub async fn name_the_account(checks: &mut [Check], machine: &str, dir: &std::path::Path) {
+    let Some(reachable) = checks
+        .iter_mut()
+        .find(|check| check.check == REACHABLE && check.state == State::Absent)
+    else {
+        return;
+    };
+    // I-13: `ssh -G` is a blocking spawn.
+    let (dir, name) = (dir.to_owned(), machine.to_owned());
+    let asked = tokio::task::spawn_blocking(move || identity::unnamed_in(&dir, &name)).await;
+    if let Ok(Some(account)) = asked {
+        reachable.detail = format!(
+            "the ssh config here names no account for {machine}, so ssh tried `{account}` — run \
+             the join command on {machine} (Add a device, or `yantra join-script`) · {}",
+            reachable.detail
+        );
     }
 }
 
@@ -233,6 +259,16 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
         return (
             unreachable(format!("sshd refused this connection: {diagnosis}")),
             present(SSHD, "the refusal came from sshd itself, so one is running"),
+        );
+    }
+    // Y-412: Tailscale SSH refuses an account this way, after a banner.
+    if said.contains("connection closed by") {
+        return (
+            unreachable(format!("the ssh server closed the connection: {diagnosis}")),
+            present(
+                SSHD,
+                "something answered on the ssh port before it closed the connection",
+            ),
         );
     }
     (
@@ -542,6 +578,7 @@ fn unknown(check: &'static str, detail: impl Into<String>) -> Check {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -578,8 +615,69 @@ mod tests {
         );
     }
 
-    /// A silently dropped connection is what `LogFile::read_or_default` answers
-    /// for, and it must never make anything read as *not installed*.
+    /// Y-412, as the appliance logged it on 2026-09-28: the banner is the
+    /// reason, and the server that sent it is running.
+    #[test]
+    fn a_server_that_closes_after_a_banner_is_running_and_its_words_are_kept() {
+        let said = "tailscale: tailnet policy does not permit you to SSH as user \"yantra\"\n\
+                    Connection closed by 100.108.185.80 port 22";
+        let (reachable, sshd) = diagnose(said);
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable.detail.contains("does not permit"),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            !reachable.detail.contains("no answer"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
+    }
+
+    /// Only a failed `reachable` is annotated, and only when no block names
+    /// the machine — the one case the join command fixes.
+    #[tokio::test]
+    async fn a_machine_no_block_names_is_sent_to_the_join_command() {
+        let dir =
+            std::env::temp_dir().join(format!("yantra-doctor-unnamed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch");
+        std::fs::write(dir.join("config"), "Host pi\n    User biswa\n").expect("a config");
+        let failed = || {
+            let (reachable, sshd) = diagnose("Connection closed by 100.108.185.80 port 22");
+            vec![reachable, sshd]
+        };
+
+        let mut checks = failed();
+        name_the_account(&mut checks, "cachyos-g14", &dir).await;
+        let detail = &checks[0].detail;
+        assert!(
+            detail.contains("names no account for cachyos-g14"),
+            "{detail}"
+        );
+        assert!(detail.contains("Add a device"), "{detail}");
+        assert!(
+            detail.ends_with("port 22"),
+            "the diagnosis is kept: {detail}"
+        );
+
+        let mut checks = failed();
+        name_the_account(&mut checks, "pi", &dir).await;
+        assert_eq!(
+            checks,
+            failed(),
+            "a block names pi, so the join is not the fix"
+        );
+
+        let mut checks = vec![present(REACHABLE, "ran")];
+        name_the_account(&mut checks, "cachyos-g14", &dir).await;
+        assert_eq!(checks[0].detail, "ran");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A silently dropped connection is what `ssh::diagnosis` answers for when
+    /// nothing was said, and it must never make anything read as *not installed*.
     #[test]
     fn a_connection_that_dropped_silently_leaves_sshd_unknown() {
         let (reachable, sshd) = diagnose("no diagnostics; the connection dropped silently");

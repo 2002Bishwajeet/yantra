@@ -14,6 +14,7 @@ export type Verdict =
   | { kind: 'unread'; error: string }
   | { kind: 'installing'; missing: string[] }
   | { kind: 'refused'; detail: string }
+  | { kind: 'unjoined'; detail: string }
   | { kind: 'unreachable'; detail: string }
   | { kind: 'sudo'; missing: string[]; result: Event }
   | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
@@ -44,9 +45,7 @@ export function verdictOf(input: {
 
   const reachable = checks.find((one) => one.check === 'reachable')
   if (reachable?.state === 'absent') {
-    return reachableFailure(reachable.detail) === 'refused'
-      ? { kind: 'refused', detail: reachable.detail }
-      : { kind: 'unreachable', detail: reachable.detail }
+    return { kind: reachableFailure(reachable.detail), detail: reachable.detail }
   }
 
   if (missing.length > 0) {
@@ -91,6 +90,8 @@ export function titleOf(verdict: Verdict, name: string): string {
       return verdict.missing.length ? `Installing ${listed(verdict.missing)}` : `Installing on ${name}`
     case 'refused':
       return 'The key was refused'
+    case 'unjoined':
+      return `${name} has not joined`
     case 'unreachable':
       return `ssh to ${name} fails`
     case 'sudo':
@@ -113,6 +114,8 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
       return { state: 'failed', word: 'key expired', error: true }
     case 'refused':
       return { state: 'failed', word: 'key refused', error: true }
+    case 'unjoined':
+      return { state: 'failed', word: 'not joined', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'installing':

@@ -78,6 +78,7 @@ export type CardVerdict =
   | { kind: 'expired' }
   | { kind: 'unchecked' }
   | { kind: 'refused' }
+  | { kind: 'unjoined' }
   | { kind: 'unreachable' }
   | { kind: 'needs'; missing: number }
   | { kind: 'ready' }
@@ -88,7 +89,7 @@ export function cardVerdict(machine: Machine, checks: Check[]): CardVerdict {
   if (checks.length === 0) return { kind: 'unchecked' }
   const reachable = checkNamed(checks, 'reachable')
   if (reachable?.state === 'absent') {
-    return reachableFailure(reachable.detail) === 'refused' ? { kind: 'refused' } : { kind: 'unreachable' }
+    return { kind: reachableFailure(reachable.detail) }
   }
   // `lib/ready`'s `missingBasics`: the same answer the machine page's
   // Readiness card reads, so the two cannot disagree on one report.
@@ -108,6 +109,8 @@ export function cardChip(verdict: CardVerdict, seen: string | null): { state: Ma
       return { state: 'idle', word: 'not checked', error: false }
     case 'refused':
       return { state: 'failed', word: 'key refused', error: true }
+    case 'unjoined':
+      return { state: 'failed', word: 'not joined', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'needs':

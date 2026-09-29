@@ -50,6 +50,15 @@ describe('the machine page’s verdict', () => {
     expect(verdict(all({ reachable: 'absent' }, { reachable: 'No route to host' })).kind).toBe('unreachable')
   })
 
+  /** Y-412: doctor names a machine no ssh config block names, and that wins
+   *  over the refusal it caused — the join command is the fix either way. */
+  it('tells a machine that never joined from a refused key', () => {
+    const unjoined = verdict(all({ reachable: 'absent' }, { reachable: 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).' }))
+    expect(unjoined).toEqual({ kind: 'unjoined', detail: 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).' })
+    expect(titleOf(unjoined, 'cachyos-g14')).toBe('cachyos-g14 has not joined')
+    expect(chipOf(unjoined, null)).toEqual({ state: 'failed', word: 'not joined', error: true })
+  })
+
   it('names the missing basics and offers no session', () => {
     const v = verdict(all({ tmux: 'absent', 'agent-cli': 'absent', 'provider-cli': 'absent' }))
     expect(v).toEqual({ kind: 'missing', missing: ['tmux', 'claude'], result: null, fresh: false })
