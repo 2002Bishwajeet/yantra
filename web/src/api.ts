@@ -297,12 +297,18 @@ export type Probed = {
 /** [D4](../../docs/archive/design/04-workspace-creation.md) §3: one level of a machine's
  *  filesystem, with the repositories marked. **One level and no recursion** —
  *  a whole-home sweep measured 8.5 s on this fleet's Mac against 0.026 s on its
- *  Linux box, and D4 §2 is that measurement. */
-export type Dir = {
+ *  Linux box, and D4 §2 is that measurement. Since Y-414 it holds files,
+ *  dotfiles and closed directories too, each marked; the picker decides what
+ *  to show. */
+export type Entry = {
   /** Absolute, as the far side wrote it. */
   path: string
   /** The last segment, which is what a picker draws. */
   name: string
+  /** A symlink to a directory is a `dir`. A `file` is never a choice. */
+  kind: 'dir' | 'file'
+  /** Whether the login account can list and enter it. Always `true` for a file. */
+  access: boolean
   repo: boolean
   /** `origin`'s URL where this is a repository that has one. `null` covers both
    *  *not a repository* and *a repository with no origin*, exactly as
@@ -310,7 +316,16 @@ export type Dir = {
   origin: string | null
 }
 
-export type Listing = { machine: string; path: string; entries: Dir[] }
+export type Listing = {
+  machine: string
+  path: string
+  /** `false` when the login account cannot read `path`, so `entries` is empty
+   *  for that reason and not because the folder is. */
+  access: boolean
+  entries: Entry[]
+  /** The machine stopped at its cap and there were more entries. */
+  truncated: boolean
+}
 
 /** `GET /api/attention` — what GitHub is waiting on, read through the `gh` CLI
  *  where the daemon runs (Y-173). `refresh.rs` polls it every 300 s rather than

@@ -8,6 +8,11 @@
 //! So the verb walks and does not search, and this module holds no recursion,
 //! no cache and no file.
 //!
+//! **The whole filesystem, one level at a time** (Y-414, owner, 2026-09-29).
+//! D4 §3.1 listed directories only and skipped dotfiles. The owner reversed
+//! that: a listing now holds hidden entries, files, and directories the login
+//! account cannot enter, each marked, so the picker decides what to show.
+//!
 //! **This is a read, and it is reached over a `POST`**, for [`crate::probe`]'s
 //! reason and on the same ruling ([ADR-0019]): the answer depends on a path
 //! nobody has typed yet, so no snapshot can hold it.
@@ -24,18 +29,38 @@ pub struct Listing {
     /// The directory that was listed, as the far side spells it — which is how
     /// a caller that named no path learns where that machine's `$HOME` is.
     pub path: String,
-    /// Ordered as the far side's shell globbed them, and holding only
-    /// directories: **a name beginning with a dot is not among them**, because
-    /// `*/` skips it (D4 §3.1). Such a directory is reached by naming it.
-    pub entries: Vec<Dir>,
+    /// `false` when the login account cannot read or enter `path`. The listing
+    /// is then empty, and that is not the same answer as an empty directory.
+    pub access: bool,
+    /// Directories first, then files; each group in the far side's glob order,
+    /// with dotfiles after the rest.
+    pub entries: Vec<Entry>,
+    /// The far side stopped at [`CAP`] entries and there were more.
+    pub truncated: bool,
+}
+
+/// A directory with more entries than this is cut short: a person does not
+/// scroll past it, and typing a path still reaches the rest.
+pub const CAP: usize = 2000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// A symlink to a directory is one, because `cd` treats it as one.
+    Dir,
+    /// Anything else, a broken symlink included. Never a choice.
+    File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Dir {
+pub struct Entry {
     /// Absolute, as the far side wrote it.
     pub path: String,
     /// The last segment, which is what a picker draws.
     pub name: String,
+    pub kind: Kind,
+    /// Whether the login account can list and enter this directory. Always
+    /// `true` for a file, which nothing here opens.
+    pub access: bool,
     pub repo: bool,
     /// `origin`'s URL where this is a repository that has one. `None` covers
     /// both *not a repository* and *a repository with no origin*, exactly as
@@ -115,8 +140,7 @@ pub async fn make_on<E: Exec>(
 }
 
 /// One segment (I-24): no `/`, no `..`, and no leading dot, because the
-/// listing beside it skips dotfiles and a directory it cannot show is one a
-/// picker cannot pick.
+/// picker hides dotfiles by default and would not show what it just made.
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('.')
@@ -152,10 +176,17 @@ pub async fn list_on<E: Exec>(
 ) -> Result<Listing, Error> {
     let out = exec.exec(&command(path)).await?;
     match parse(&out.stdout) {
-        Some(Answer::Listed { path, entries }) => Ok(Listing {
+        Some(Answer::Listed {
+            path,
+            access,
+            entries,
+            truncated,
+        }) => Ok(Listing {
             machine: machine.to_owned(),
             path,
+            access,
             entries,
+            truncated,
         }),
         Some(Answer::NotADirectory { path }) => Err(Error::NotADirectory {
             machine: machine.to_owned(),
@@ -171,38 +202,55 @@ pub async fn list_on<E: Exec>(
 /// repository and what origin it holds only matter for the entries being shown
 /// now, and a person is waiting on all of it.
 ///
-/// **Records are NUL-separated**, so a directory whose name holds a newline or
-/// a tab arrives whole rather than as two half rows — a path is the one string
-/// a filesystem lets hold anything but `/` and NUL. `git`'s own failure is
-/// swallowed as [`crate::probe`] swallows it.
+/// **Records are NUL-separated**, so a name holding a newline or a tab arrives
+/// whole rather than as two half rows — a path is the one string a filesystem
+/// lets hold anything but `/` and NUL. `git`'s own failure is swallowed as
+/// [`crate::probe`] swallows it.
 ///
-/// The trailing `/` on the glob is what restricts it to directories, and it is
-/// also why a dotfile is not listed (D4 §3.1). `$p` gives the base exactly one
-/// trailing slash, so `/` lists as `/bin` rather than `//bin`.
+/// The three globs match every name but `.` and `..`; a glob that matches
+/// nothing stays literal, and the `-e`/`-L` test drops it. Only `test` builtins
+/// classify, so GNU and BSD far sides answer alike. `$p` gives the base exactly
+/// one trailing slash, so `/` lists as `/bin` rather than `//bin`.
 fn command(path: Option<&str>) -> String {
     let base = base(path);
     format!(
         r#"b={base}
-if test -d "$b"; then
+if ! test -d "$b"; then
+  printf 'no\0%s\0' "$b"
+elif ! {{ [ -r "$b" ] && [ -x "$b" ]; }}; then
+  printf 'shut\0%s\0' "$b"
+else
   printf 'yes\0%s\0' "$b"
   case "$b" in */) p=$b;; *) p=$b/;; esac
-  for d in "$p"*/; do
-    [ -d "$d" ] || continue
-    if [ -d "${{d}}.git" ]; then
-      printf '%s\0repo\0%s\0' "$d" "$(git -C "$d" remote get-url origin 2>/dev/null)"
+  n=0
+  for f in "$p"* "$p".[!.]* "$p"..?*; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    if [ "$n" -ge {CAP} ]; then printf '\0more\0\0'; break; fi
+    n=$((n + 1))
+    if [ ! -d "$f" ]; then
+      printf '%s\0file\0\0' "$f"
+    elif ! {{ [ -r "$f" ] && [ -x "$f" ]; }}; then
+      printf '%s\0shut\0\0' "$f"
+    elif [ -d "$f/.git" ]; then
+      printf '%s\0repo\0%s\0' "$f" "$(git -C "$f" remote get-url origin 2>/dev/null)"
     else
-      printf '%s\0dir\0\0' "$d"
+      printf '%s\0dir\0\0' "$f"
     fi
   done
-else
-  printf 'no\0%s\0' "$b"
 fi"#
     )
 }
 
 enum Answer {
-    Listed { path: String, entries: Vec<Dir> },
-    NotADirectory { path: String },
+    Listed {
+        path: String,
+        access: bool,
+        entries: Vec<Entry>,
+        truncated: bool,
+    },
+    NotADirectory {
+        path: String,
+    },
 }
 
 fn parse(stdout: &[u8]) -> Option<Answer> {
@@ -211,25 +259,49 @@ fn parse(stdout: &[u8]) -> Option<Answer> {
         .map(|field| String::from_utf8_lossy(field).into_owned());
     let head = fields.next()?;
     let path = fields.next()?;
-    if head != "yes" {
-        return (head == "no").then_some(Answer::NotADirectory { path });
-    }
+    let access = match head.as_str() {
+        "yes" => true,
+        "shut" => false,
+        "no" => return Some(Answer::NotADirectory { path }),
+        _ => return None,
+    };
 
     let mut entries = Vec::new();
+    let mut truncated = false;
     // A short last record is the tail after the final separator, and never an
     // entry: three fields or nothing.
     while let (Some(found), Some(kind), Some(origin)) =
         (fields.next(), fields.next(), fields.next())
     {
+        let (kind, access, repo) = match kind.as_str() {
+            "dir" => (Kind::Dir, true, false),
+            "repo" => (Kind::Dir, true, true),
+            "shut" => (Kind::Dir, false, false),
+            "file" => (Kind::File, true, false),
+            "more" => {
+                truncated = true;
+                continue;
+            }
+            _ => return None,
+        };
         let found = found.strip_suffix('/').unwrap_or(&found).to_owned();
-        entries.push(Dir {
+        entries.push(Entry {
             name: found.rsplit('/').next().unwrap_or_default().to_owned(),
             path: found,
-            repo: kind == "repo",
+            kind,
+            access,
+            repo,
             origin: Some(origin.trim().to_owned()).filter(|url| !url.is_empty()),
         });
     }
-    Some(Answer::Listed { path, entries })
+    // Stable, so each group keeps the glob's order.
+    entries.sort_by_key(|entry| entry.kind == Kind::File);
+    Some(Answer::Listed {
+        path,
+        access,
+        entries,
+        truncated,
+    })
 }
 
 #[cfg(test)]
@@ -239,9 +311,9 @@ fn parse(stdout: &[u8]) -> Option<Answer> {
 mod tests {
     use super::*;
 
-    fn listed(stdout: &[u8]) -> (String, Vec<Dir>) {
+    fn listed(stdout: &[u8]) -> (String, Vec<Entry>) {
         match parse(stdout) {
-            Some(Answer::Listed { path, entries }) => (path, entries),
+            Some(Answer::Listed { path, entries, .. }) => (path, entries),
             _ => panic!("a listing"),
         }
     }
@@ -256,20 +328,90 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                Dir {
+                Entry {
                     path: "/home/u/yantra".to_owned(),
                     name: "yantra".to_owned(),
+                    kind: Kind::Dir,
+                    access: true,
                     repo: true,
                     origin: Some("https://github.com/o/r.git".to_owned()),
                 },
-                Dir {
+                Entry {
                     path: "/home/u/scratch".to_owned(),
                     name: "scratch".to_owned(),
+                    kind: Kind::Dir,
+                    access: true,
                     repo: false,
                     origin: None,
                 },
             ]
         );
+    }
+
+    /// Y-414: files and closed directories are listed and marked, and every
+    /// directory comes before every file whatever order the glob gave.
+    #[test]
+    fn files_and_closed_directories_are_marked_and_directories_come_first() {
+        let (_, entries) = listed(
+            b"yes\0/srv\0/srv/notes.txt\0file\0\0/srv/data\0dir\0\0/srv/lost+found\0shut\0\0/srv/.cache\0dir\0\0",
+        );
+
+        let seen: Vec<(&str, Kind, bool)> = entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.kind, entry.access))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("data", Kind::Dir, true),
+                ("lost+found", Kind::Dir, false),
+                (".cache", Kind::Dir, true),
+                ("notes.txt", Kind::File, true),
+            ]
+        );
+    }
+
+    /// A directory the account cannot read is a listing that says so, not an
+    /// empty directory and not a refusal.
+    #[test]
+    fn a_directory_that_cannot_be_read_is_a_closed_listing() {
+        match parse(b"shut\0/root\0") {
+            Some(Answer::Listed {
+                path,
+                access,
+                entries,
+                ..
+            }) => {
+                assert_eq!(path, "/root");
+                assert!(!access);
+                assert!(entries.is_empty());
+            }
+            _ => panic!("a closed listing"),
+        }
+    }
+
+    #[test]
+    fn the_cap_marker_is_not_an_entry() {
+        match parse(b"yes\0/big\0/big/a\0file\0\0\0more\0\0") {
+            Some(Answer::Listed {
+                entries, truncated, ..
+            }) => {
+                assert!(truncated);
+                assert_eq!(entries.len(), 1);
+            }
+            _ => panic!("a listing"),
+        }
+        match parse(b"yes\0/big\0/big/a\0file\0\0") {
+            Some(Answer::Listed { truncated, .. }) => assert!(!truncated),
+            _ => panic!("a listing"),
+        }
+    }
+
+    /// The command and the parser are one build, so a kind neither knows is a
+    /// far side that answered something else (R-23).
+    #[test]
+    fn an_unknown_kind_is_unreadable() {
+        assert!(parse(b"yes\0/x\0/x/a\0socket\0\0").is_none());
     }
 
     /// The two `None`s [`crate::probe`] keeps together, kept together here: a

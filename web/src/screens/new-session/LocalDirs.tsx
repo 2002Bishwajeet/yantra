@@ -1,24 +1,25 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Folder, FolderGit2 } from 'lucide-react'
-import type { Dir, Probed } from '@/api'
+import { File, Folder, FolderGit2, FolderLock } from 'lucide-react'
+import type { Entry, Listing, Probed } from '@/api'
 import { asApiError, isApiError } from '@/api/errors'
 import { useMakeDir } from '@/api/mutations'
 import { dirsQuery, probeQuery } from '@/api/queries'
 import { derive } from '@/lib/name'
 import { trimSlash } from '@/lib/path'
 import { Button } from '@/m3/button/Button'
+import { FilterChip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
-import { crumbs } from './dirs'
+import { crumbs, under } from './dirs'
 import { slug, tilde, type Values } from './form'
 import type { SessionForm } from './useSessionForm'
 
-const badge = (entry: Dir): string =>
+const badge = (entry: Entry): string =>
   entry.origin ? `git · ${slug(entry.origin)}` : entry.repo ? 'git · no origin' : 'not a repository'
 
 function Breadcrumb(props: { here: string; home: string | null; onGo: (path: string | null) => void }) {
@@ -61,7 +62,7 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
         error={make.error ? make.error.said : undefined}
         label="New folder"
         onValueChange={setFolder}
-        supporting={`under ${here}/`}
+        supporting={`under ${here === '/' ? '/' : `${here}/`}`}
         value={folder}
       />
       <Button
@@ -69,7 +70,7 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
         onClick={() =>
           make.mutate(
             { machine, path: here, make: trimmed },
-            { onSuccess: () => onMade(`${here}/${trimmed}`) },
+            { onSuccess: () => onMade(under(here, trimmed)) },
           )
         }
         type="button"
@@ -79,6 +80,46 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
       </Button>
     </div>
   )
+}
+
+/** A folder that can be entered is a button; a closed folder and a file are
+ *  drawn and marked, and nothing happens when one is pressed (Y-414). */
+function EntryRow(props: { entry: Entry; onWalk: (entry: Entry) => void }) {
+  const { entry, onWalk } = props
+  if (entry.kind === 'file') {
+    return (
+      <Row className="ns__inert" tone="plain">
+        <Lead>
+          <File />
+        </Lead>
+        <RowText headline={entry.name} supporting="file" />
+      </Row>
+    )
+  }
+  if (!entry.access) {
+    return (
+      <Row className="ns__inert" tone="plain">
+        <Lead tone="error">
+          <FolderLock />
+        </Lead>
+        <RowText headline={entry.name} supporting="no access" />
+      </Row>
+    )
+  }
+  return (
+    <Row onClick={() => onWalk(entry)} render={<button type="button" />}>
+      <Lead tone={entry.repo ? 'primary' : undefined}>{entry.repo ? <FolderGit2 /> : <Folder />}</Lead>
+      <RowText headline={entry.name} supporting={badge(entry)} />
+    </Row>
+  )
+}
+
+/** Why a listing draws no rows: three different answers, never one sentence
+ *  true of all of them (R-23). */
+function nothing(listing: Listing, machine: string): string {
+  if (!listing.access) return `${machine} does not let this account read this folder`
+  if (listing.entries.length === 0) return 'this folder is empty'
+  return 'nothing here but hidden entries'
 }
 
 /** The local half of step 2 (NewSessionLocal): one level per walk, the
@@ -92,6 +133,8 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   const [where, setWhere] = useState<string | null>(null)
   const [typed, setTyped] = useState('')
   const [probing, setProbing] = useState(false)
+  // Off by default: a home's dotfiles outnumber its projects (Y-414).
+  const [hidden, setHidden] = useState(false)
   const home = useQuery({ ...dirsQuery(machine, null), enabled: true })
   const listing = useQuery({ ...dirsQuery(machine, where), enabled: true })
   const root = home.data ? trimSlash(home.data.path) : null
@@ -112,7 +155,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
     if (here !== null) arrived(here)
   }, [here])
 
-  const walk = (entry: Dir) => {
+  const walk = (entry: Entry) => {
     setWhere(entry.path)
     setTyped('')
     choose(entry.path, entry.origin, 'yes')
@@ -136,13 +179,23 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   }
 
   const source = values.source?.kind === 'local' ? values.source : null
+  const shown = listing.data
+    ? hidden
+      ? listing.data.entries
+      : listing.data.entries.filter((entry) => !entry.name.startsWith('.'))
+    : []
 
   return (
     <div className="ns__local">
       <Text render={<p />} scale="body-medium" tone="variant">
         browsing {machine} over the open ssh connection
       </Text>
-      {here !== null ? <Breadcrumb here={here} home={root} onGo={setWhere} /> : null}
+      <div className="ns__where">
+        {here !== null ? <Breadcrumb here={here} home={root} onGo={setWhere} /> : null}
+        <FilterChip onPressedChange={setHidden} pressed={hidden}>
+          Show hidden
+        </FilterChip>
+      </div>
 
       {listing.isPending ? (
         <div aria-busy="true" className="ns__list">
@@ -162,23 +215,25 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
         />
       ) : (
         <ul aria-label="Folders" className="ns__list">
-          {listing.data.entries.length === 0 ? (
+          {shown.length === 0 ? (
             <li>
               <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                nothing here but files or hidden directories
+                {nothing(listing.data, machine)}
               </Text>
             </li>
           ) : null}
-          {listing.data.entries.map((entry) => (
+          {shown.map((entry) => (
             <li key={entry.path}>
-              <Row onClick={() => walk(entry)} render={<button type="button" />}>
-                <Lead tone={entry.repo ? 'primary' : undefined}>
-                  {entry.repo ? <FolderGit2 /> : <Folder />}
-                </Lead>
-                <RowText headline={entry.name} supporting={badge(entry)} />
-              </Row>
+              <EntryRow entry={entry} onWalk={walk} />
             </li>
           ))}
+          {listing.data.truncated ? (
+            <li>
+              <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
+                {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Type a path to reach the rest.`}
+              </Text>
+            </li>
+          ) : null}
         </ul>
       )}
 

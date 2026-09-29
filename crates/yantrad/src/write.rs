@@ -1695,22 +1695,36 @@ struct Cloning {
     session: String,
 }
 
-/// One level of a machine's filesystem. **No entry is a file and none begins
-/// with a dot** — the glob that lists directories skips both (D4 §3.1), so a
-/// browser that draws this list draws directories or nothing.
+/// One level of a machine's filesystem: directories, files and dotfiles, each
+/// marked, since Y-414 reversed D4 §3.1. The browser decides what to show and
+/// what may be chosen.
 #[derive(Debug, serde::Serialize)]
 struct Listing {
     machine: String,
     /// The directory that was listed, as the far side spells it: a caller that
     /// sent no path reads its `$HOME` off this and nowhere else.
     path: String,
-    entries: Vec<Dir>,
+    /// `false` when the login account cannot read `path`; `entries` is then
+    /// empty for that reason and not because the directory is.
+    access: bool,
+    entries: Vec<Entry>,
+    /// The machine stopped at `dirs::CAP` entries and there were more.
+    truncated: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
-struct Dir {
+#[serde(rename_all = "lowercase")]
+enum Kind {
+    Dir,
+    File,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Entry {
     path: String,
     name: String,
+    kind: Kind,
+    access: bool,
     repo: bool,
     /// Absent for two different reasons — not a repository, and a repository
     /// with no origin — which the route leaves together exactly as [`ask`]
@@ -1723,16 +1737,23 @@ impl From<dirs::Listing> for Listing {
         Self {
             machine: listing.machine,
             path: listing.path,
+            access: listing.access,
             entries: listing
                 .entries
                 .into_iter()
-                .map(|entry| Dir {
+                .map(|entry| Entry {
                     path: entry.path,
                     name: entry.name,
+                    kind: match entry.kind {
+                        dirs::Kind::Dir => Kind::Dir,
+                        dirs::Kind::File => Kind::File,
+                    },
+                    access: entry.access,
                     repo: entry.repo,
                     origin: entry.origin,
                 })
                 .collect(),
+            truncated: listing.truncated,
         }
     }
 }
@@ -2088,22 +2109,44 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             of(&Listing::from(dirs::Listing {
                 machine: "cachyos-g14".to_owned(),
                 path: "/home/<user>/Github".to_owned(),
+                access: true,
                 entries: vec![
-                    dirs::Dir {
+                    dirs::Entry {
                         path: "/home/<user>/Github/yantra".to_owned(),
                         name: "yantra".to_owned(),
+                        kind: dirs::Kind::Dir,
+                        access: true,
                         repo: true,
                         origin: Some("https://github.com/2002Bishwajeet/yantra.git".to_owned()),
                     },
                     // Both `null`s the browser has to draw: a repository whose
                     // origin nothing answered for, and a plain directory.
-                    dirs::Dir {
+                    dirs::Entry {
                         path: "/home/<user>/Github/scratch".to_owned(),
                         name: "scratch".to_owned(),
+                        kind: dirs::Kind::Dir,
+                        access: true,
+                        repo: false,
+                        origin: None,
+                    },
+                    dirs::Entry {
+                        path: "/home/<user>/Github/private".to_owned(),
+                        name: "private".to_owned(),
+                        kind: dirs::Kind::Dir,
+                        access: false,
+                        repo: false,
+                        origin: None,
+                    },
+                    dirs::Entry {
+                        path: "/home/<user>/Github/notes.md".to_owned(),
+                        name: "notes.md".to_owned(),
+                        kind: dirs::Kind::File,
+                        access: true,
                         repo: false,
                         origin: None,
                     },
                 ],
+                truncated: false,
             })),
         ),
     ]
@@ -3542,12 +3585,16 @@ mod tests {
         let answered = serde_json::to_value(Listing::from(dirs::Listing {
             machine: "cachyos-g14".to_owned(),
             path: "/home/<user>".to_owned(),
-            entries: vec![dirs::Dir {
+            access: true,
+            entries: vec![dirs::Entry {
                 path: "/home/<user>/scratch".to_owned(),
                 name: "scratch".to_owned(),
+                kind: dirs::Kind::File,
+                access: true,
                 repo: false,
                 origin: None,
             }],
+            truncated: true,
         }))
         .expect("a DTO of owned strings and booleans");
 
@@ -3556,12 +3603,16 @@ mod tests {
             serde_json::json!({
                 "machine": "cachyos-g14",
                 "path": "/home/<user>",
+                "access": true,
                 "entries": [{
                     "path": "/home/<user>/scratch",
                     "name": "scratch",
+                    "kind": "file",
+                    "access": true,
                     "repo": false,
                     "origin": null,
                 }],
+                "truncated": true,
             })
         );
     }

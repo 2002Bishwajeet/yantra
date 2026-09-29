@@ -1,14 +1,14 @@
-/** `~ / Github / yantra`: every segment is a way back up. Outside `$HOME`
- *  the first crumb is `/`. */
+/** `/ home ~ Github yantra`: every segment is a way back up, to `/` itself
+ *  (Y-414). The segment that is `$HOME` reads `~`. */
 export function crumbs(here: string, home: string | null): { label: string; path: string }[] {
-  const inside = home !== null && (here === home || here.startsWith(`${home}/`))
-  const base = inside ? home : '/'
-  const out = [{ label: inside ? '~' : '/', path: base }]
-  const rest = here.slice(base.length).split('/').filter(Boolean)
-  let path = base === '/' ? '' : base
-  for (const segment of rest) {
+  const out = [{ label: '/', path: '/' }]
+  let path = ''
+  for (const segment of here.split('/').filter(Boolean)) {
     path = `${path}/${segment}`
-    out.push({ label: segment, path })
+    out.push({ label: path === home ? '~' : segment, path })
   }
   return out
 }
+
+/** `name` under `dir`, with one slash at the root rather than two. */
+export const under = (dir: string, name: string): string => (dir === '/' ? `/${name}` : `${dir}/${name}`)

@@ -155,6 +155,23 @@
   cursor: default;
 }
 
+/* A file or a closed folder: listed, and not a choice. */
+.ns__list > li > .ns__inert {
+  cursor: default;
+}
+
+.ns__inert .m3-row__headline {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.ns__where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .ns__place {
   flex: none;
   max-width: 45%;

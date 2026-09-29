@@ -21,27 +21,44 @@ export const HOME = '/home/biswa'
 const dir = (name: string, origin: string | null) => ({
   path: `${HOME}/Github/${name}`,
   name,
+  kind: 'dir' as const,
+  access: true,
   repo: origin !== null,
   origin,
 })
 
-/** `$HOME` and the clone home under it, as `dirs` answers them: the machine
- *  already holds `2002Bishwajeet/yantra`, and nothing else the sweep lists. */
-export const listing = (path: string) =>
-  path === `${HOME}/Github`
-    ? {
-        machine: 'cachyos-g14',
-        path,
-        entries: [
-          dir('yantra', 'git@github.com:2002Bishwajeet/yantra.git'),
-          dir('notes', null),
-        ],
-      }
-    : {
-        machine: 'cachyos-g14',
-        path: HOME,
-        entries: [{ path: `${HOME}/Github`, name: 'Github', repo: false, origin: null }],
-      }
+const entry = (at: string, name: string, kind: 'dir' | 'file' = 'dir', access = true) => ({
+  path: `${at === '/' ? '' : at}/${name}`,
+  name,
+  kind,
+  access,
+  repo: false,
+  origin: null,
+})
+
+/** `/`, `/home`, `$HOME` and the clone home under it, as `dirs` answers them:
+ *  the machine already holds `2002Bishwajeet/yantra`, and nothing else the
+ *  sweep lists. `$HOME` holds a dotfile, a file and a closed folder (Y-414). */
+export const listing = (path: string) => {
+  const of = (at: string, entries: unknown[]) => ({
+    machine: 'cachyos-g14',
+    path: at,
+    access: true,
+    entries,
+    truncated: false,
+  })
+  if (path === `${HOME}/Github`) {
+    return of(path, [dir('yantra', 'git@github.com:2002Bishwajeet/yantra.git'), dir('notes', null)])
+  }
+  if (path === '/') return of('/', [entry('/', 'home'), entry('/', 'srv'), entry('/', 'root', 'dir', false)])
+  if (path === '/home') return of('/home', [entry('/home', 'biswa')])
+  return of(HOME, [
+    entry(HOME, 'Github'),
+    entry(HOME, 'private', 'dir', false),
+    entry(HOME, '.config'),
+    entry(HOME, 'todo.txt', 'file'),
+  ])
+}
 
 /** The fleet every screen reads around its own facts, and the two reads step
  *  2 is about. */
