@@ -31,6 +31,15 @@ name is one more thing to get wrong, and the person must still go to that machin
    key to that account's `authorized_keys`, offers `tmux` and `git`, and offers `yantra-agent` with
    its unit and an `agent.env` it writes only when absent. On a Mac it cannot turn on Remote Login
    (`systemsetup` needs Full Disk Access), so it names the System Settings step.
+
+   > **2026-09-29, [Y-413](../../tracker.md):** a machine can answer ssh with no `sshd`. Tailscale
+   > SSH takes port 22 on the tailnet address inside `tailscaled`, so nothing listens there, and
+   > the appliance reaches the machine over the tailnet. When `tailscale debug prefs` shows
+   > `RunSSH` and `WantRunning`, the script says so and skips the `sshd` step. Turning `sshd` on
+   > there would open port 22 on the LAN for nothing. Tailscale SSH does not read
+   > `authorized_keys`, so the key the script places is unused and harmless. The tailnet's SSH
+   > policy decides whether the appliance may log in
+   > ([Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh), read 2026-09-29).
 3. **The account is whoever ran the command.** The script sends `POST /api/join` with `{ "user" }`
    and nothing else.
 4. **The machine is named from the caller's address, never from the body.** The route is behind
