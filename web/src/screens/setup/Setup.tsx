@@ -86,6 +86,7 @@ function MachineLine(props: {
     unchecked: 'idle',
     unreachable: 'unknown',
     refused: 'failed',
+    unjoined: 'failed',
     missing: 'needs',
     installing: 'running',
     blocked: 'needs',
@@ -100,15 +101,17 @@ function MachineLine(props: {
           ? said.words
           : said.kind === 'refused'
             ? 'the key was refused · run the join command on it'
-            : said.kind === 'ready'
-              ? `ready · ${said.present} of ${said.total}`
-              : view === 'installing'
-                ? `installing on ${name}…`
-                : view === 'blocked'
-                  ? password(report)
-                  : said.installable
-                    ? said.words
-                    : `${said.words} · the machine page shows how`
+            : said.kind === 'unjoined'
+              ? 'no account named for it · run the join command on it'
+              : said.kind === 'ready'
+                ? `ready · ${said.present} of ${said.total}`
+                : view === 'installing'
+                  ? `installing on ${name}…`
+                  : view === 'blocked'
+                    ? password(report)
+                    : said.installable
+                      ? said.words
+                      : `${said.words} · the machine page shows how`
 
   const check = (label: string) => (
     <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
@@ -151,13 +154,13 @@ function MachineLine(props: {
         tabIndex={target ? -1 : undefined}
       >
         <Text
-          className={said.kind === 'refused' || said.kind === 'unreachable' ? 'setup__bad' : undefined}
+          className={said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'unreachable' ? 'setup__bad' : undefined}
           scale="body-small"
-          tone={said.kind === 'refused' || said.kind === 'unreachable' ? undefined : 'variant'}
+          tone={said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'unreachable' ? undefined : 'variant'}
         >
           {words}
         </Text>
-        {said.kind === 'refused' ? join : null}
+        {said.kind === 'refused' || said.kind === 'unjoined' ? join : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)

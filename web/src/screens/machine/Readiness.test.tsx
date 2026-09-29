@@ -252,6 +252,19 @@ describe('the Readiness card', () => {
     expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
   })
 
+  /** Y-412: doctor's words for a machine no ssh config block names. */
+  it('sends a machine that never joined to the join command and Add a device', async () => {
+    daemon()
+    const said =
+      'the ssh config here names no account for pi, so ssh tried `yantra` — run the join command on pi ' +
+      '(Add a device, or `yantra join-script`) · Connection closed by 100.64.0.2 port 22'
+    await draw(report(checks(['reachable'], { reachable: said })))
+    expect(card().getByRole('heading', { name: 'pi has not joined' })).toBeTruthy()
+    expect(card().getByText(said)).toBeTruthy()
+    expect(card().getByRole('link', { name: 'Add a device' }).getAttribute('href')).toBe('/machines/add')
+    expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+  })
+
   it('puts a manual fix beside its check, and still offers a session', async () => {
     daemon()
     await draw(report(checks(['provider-auth'])))

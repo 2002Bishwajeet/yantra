@@ -204,7 +204,7 @@ export function MachineCard(props: MachineCardProps) {
           Open
         </Button>
         {verdict.kind === 'needs' ? <Install machine={machine.name} /> : null}
-        {verdict.kind === 'refused' ? <CopyJoin /> : null}
+        {verdict.kind === 'refused' || verdict.kind === 'unjoined' ? <CopyJoin /> : null}
         {verdict.kind === 'unchecked' ? <Doctor machine={machine.name} /> : null}
       </div>
     </Card>

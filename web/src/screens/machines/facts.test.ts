@@ -85,6 +85,12 @@ describe('the card verdict (D7 §3.3)', () => {
     expect(cardChip({ kind: 'unreachable' }, null)).toEqual({ state: 'failed', word: 'ssh failing', error: true })
   })
 
+  it('is unjoined when no ssh config block names the machine (Y-412)', () => {
+    const unjoined = [{ check: 'reachable', state: 'absent' as const, detail: 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).' }]
+    expect(cardVerdict(aMachine(), unjoined)).toEqual({ kind: 'unjoined' })
+    expect(cardChip({ kind: 'unjoined' }, null)).toEqual({ state: 'failed', word: 'not joined', error: true })
+  })
+
   it('is needs when a basic is missing, and counts them', () => {
     const checks = allPresent().map((one) => (one.check === 'tmux' ? check('tmux', 'absent') : one))
     expect(cardVerdict(aMachine(), checks)).toEqual({ kind: 'needs', missing: 1 })

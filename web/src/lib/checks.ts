@@ -60,12 +60,14 @@ export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?
  *  read it from here (Y-402 review). */
 export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
 
-/** `reachable`'s failure reads two ways: the appliance's key was refused,
+/** `reachable`'s failure reads three ways: the appliance's key was refused,
  *  which the join command fixes by placing a fresh one, or ssh fails for
  *  another reason (a changed host key, a firewall), which no command here
  *  can fix. The machine page and the machines list both classify it this
- *  same way, so they cannot disagree (Y-402 review). */
-export type ReachableFailure = 'refused' | 'unreachable'
+ *  same way, so they cannot disagree (Y-402 review). `unjoined` is a machine
+ *  the appliance's ssh config names no account for (doctor.rs
+ *  `name_the_account`, Y-412), which the join command also fixes. */
+export type ReachableFailure = 'refused' | 'unjoined' | 'unreachable'
 
 export const reachableFailure = (detail: string): ReachableFailure =>
-  /permission denied/i.test(detail) ? 'refused' : 'unreachable'
+  /names no account/i.test(detail) ? 'unjoined' : /permission denied/i.test(detail) ? 'refused' : 'unreachable'
