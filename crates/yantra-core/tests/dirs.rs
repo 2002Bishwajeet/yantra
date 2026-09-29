@@ -3,9 +3,9 @@
 //! Y-300. The unit tests hold captured stdout and would keep passing if the
 //! shell fragment stopped working entirely — it is a `for` loop over a glob
 //! sent to `/bin/sh` on another machine, and only a real one can say whether it
-//! parses, whether `printf '\0'` really writes a NUL, whether the glob skips
-//! dotfiles and files, and whether a path holding a quote or a newline survives
-//! the quoting.
+//! parses, whether `printf '\0'` really writes a NUL, whether the globs find
+//! dotfiles, files and closed directories and mark each (Y-414), and whether a
+//! path holding a quote or a newline survives the quoting.
 
 #![allow(clippy::expect_used)]
 
@@ -45,14 +45,14 @@ fn quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-fn named<'a>(listing: &'a dirs::Listing, name: &str) -> Option<&'a dirs::Dir> {
+fn named<'a>(listing: &'a dirs::Listing, name: &str) -> Option<&'a dirs::Entry> {
     listing.entries.iter().find(|entry| entry.name == name)
 }
 
-/// One level and nothing else: a repository, a plain directory, a dotfile, a
-/// file and a grandchild — the last three of which must not appear.
+/// One level: a repository, a plain directory, a hidden directory and a file,
+/// each marked, directories first — and never the grandchild (D4 §2).
 #[tokio::test]
-async fn one_level_marks_the_repositories_and_lists_nothing_else() -> Result<()> {
+async fn one_level_marks_the_repositories_the_hidden_and_the_files() -> Result<()> {
     let Some((_fixture, ssh)) = lab("dirs-level").await? else {
         return Ok(());
     };
@@ -73,9 +73,18 @@ async fn one_level_marks_the_repositories_and_lists_nothing_else() -> Result<()>
         .collect();
     assert_eq!(
         names,
-        ["plain", "repo"],
-        "a dotfile, a file and a grandchild are none of them one level of directories"
+        ["plain", "repo", ".hidden", "a-file"],
+        "directories in glob order with dotfiles last, then files; no grandchild"
     );
+    let file = named(&listing, "a-file").expect("the file");
+    assert_eq!(file.kind, dirs::Kind::File);
+    assert_eq!(
+        named(&listing, ".hidden")
+            .expect("the hidden directory")
+            .kind,
+        dirs::Kind::Dir
+    );
+    assert!(listing.access && !listing.truncated);
 
     let repo = named(&listing, "repo").expect("the repository");
     assert!(repo.repo);
@@ -151,7 +160,12 @@ async fn a_name_holding_a_quote_a_dollar_a_backtick_and_a_newline_survives() -> 
     let above = dirs::list_on(&ssh, "fixture", Some("/tmp/lab-odd")).await?;
     let entry = named(&above, AWKWARD).expect("the awkward directory, whole");
     assert_eq!(entry.path, parent);
-    assert_eq!(above.entries.len(), 1, "the marker is a file: {above:?}");
+    assert_eq!(entry.kind, dirs::Kind::Dir);
+    assert_eq!(
+        named(&above, "marker").expect("the marker file").kind,
+        dirs::Kind::File
+    );
+    assert_eq!(above.entries.len(), 2, "{above:?}");
 
     // And as the directory being listed, which is where it reaches the shell.
     let inside = dirs::list_on(&ssh, "fixture", Some(&parent)).await?;
@@ -279,8 +293,8 @@ async fn no_path_lists_the_machines_own_home() -> Result<()> {
     assert_eq!(listing.path, format!("/home/{USER}"));
     assert!(named(&listing, "Github").is_some(), "{listing:?}");
     assert!(
-        named(&listing, ".ssh").is_none(),
-        "a dotfile is reached by naming it (D4 §3.1): {listing:?}"
+        named(&listing, ".ssh").is_some(),
+        "a hidden directory is listed since Y-414: {listing:?}"
     );
     Ok(())
 }
@@ -312,5 +326,99 @@ async fn a_machine_that_cannot_be_reached_is_not_an_empty_listing() -> Result<()
         refused.to_string().contains("127.0.0.1"),
         "the ssh chain names what was tried: {refused}"
     );
+    Ok(())
+}
+
+/// Y-414: what the owner asked the picker to show, produced on a real shell
+/// rather than described. A closed directory needs a login that is not root,
+/// which the fixture's is.
+#[tokio::test]
+async fn closed_directories_symlinks_and_spaces_are_listed_and_marked() -> Result<()> {
+    let Some((_fixture, ssh)) = lab("dirs-marks").await? else {
+        return Ok(());
+    };
+    ssh.exec(
+        "rm -rf /tmp/lab-marks && mkdir -p /tmp/lab-marks/closed '/tmp/lab-marks/with space' \
+         /tmp/lab-marks/target /tmp/lab-marks/..dots \
+         && chmod 000 /tmp/lab-marks/closed \
+         && ln -s /tmp/lab-marks/target /tmp/lab-marks/link \
+         && ln -s /tmp/lab-marks/nowhere /tmp/lab-marks/broken",
+    )
+    .await?;
+
+    let listing = dirs::list_on(&ssh, "fixture", Some("/tmp/lab-marks")).await?;
+
+    let closed = named(&listing, "closed").expect("a closed directory is listed");
+    assert_eq!(closed.kind, dirs::Kind::Dir);
+    assert!(!closed.access, "{closed:?}");
+    assert!(named(&listing, "target").expect("the target").access);
+
+    let link = named(&listing, "link").expect("the symlink");
+    assert_eq!(link.kind, dirs::Kind::Dir, "a link to a directory is one");
+    assert_eq!(
+        named(&listing, "broken").expect("the broken link").kind,
+        dirs::Kind::File
+    );
+    assert_eq!(
+        named(&listing, "with space").expect("the spaced name").path,
+        "/tmp/lab-marks/with space"
+    );
+    assert!(
+        named(&listing, "..dots").is_some(),
+        "the third glob: {listing:?}"
+    );
+
+    // Walking into the closed one is an answer, not an error and not "empty".
+    let inside = dirs::list_on(&ssh, "fixture", Some("/tmp/lab-marks/closed")).await?;
+    assert!(!inside.access);
+    assert!(inside.entries.is_empty());
+
+    ssh.exec("chmod 755 /tmp/lab-marks/closed").await?;
+    Ok(())
+}
+
+/// Above `$HOME` is reachable: `/` lists with one slash, not two.
+#[tokio::test]
+async fn the_root_lists_with_single_slashes() -> Result<()> {
+    let Some((_fixture, ssh)) = lab("dirs-root").await? else {
+        return Ok(());
+    };
+
+    let listing = dirs::list_on(&ssh, "fixture", Some("/")).await?;
+
+    assert_eq!(listing.path, "/");
+    assert!(listing.access);
+    let tmp = named(&listing, "tmp").expect("/tmp");
+    assert_eq!(tmp.path, "/tmp");
+    assert!(named(&listing, "etc").is_some(), "{listing:?}");
+    Ok(())
+}
+
+/// A huge directory is cut at the cap and says so, rather than sending the
+/// whole of it over ssh to a list no person scrolls.
+#[tokio::test]
+async fn a_huge_directory_stops_at_the_cap_and_says_so() -> Result<()> {
+    let Some((_fixture, ssh)) = lab("dirs-cap").await? else {
+        return Ok(());
+    };
+    let over = dirs::CAP + 5;
+    ssh.exec(&format!(
+        "rm -rf /tmp/lab-cap && mkdir -p /tmp/lab-cap && cd /tmp/lab-cap \
+         && i=0; while [ $i -lt {over} ]; do : > f$i; i=$((i + 1)); done"
+    ))
+    .await?;
+
+    let listing = dirs::list_on(&ssh, "fixture", Some("/tmp/lab-cap")).await?;
+    assert_eq!(listing.entries.len(), dirs::CAP);
+    assert!(listing.truncated);
+
+    ssh.exec(&format!(
+        "cd /tmp/lab-cap && i={}; while [ $i -lt {over} ]; do rm -f f$i; i=$((i + 1)); done",
+        dirs::CAP
+    ))
+    .await?;
+    let exact = dirs::list_on(&ssh, "fixture", Some("/tmp/lab-cap")).await?;
+    assert_eq!(exact.entries.len(), dirs::CAP);
+    assert!(!exact.truncated, "exactly the cap is not more than it");
     Ok(())
 }

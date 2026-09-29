@@ -174,13 +174,24 @@ function setStatus(state, workspace, status, session) {
 
 const HOME = '/home/biswa'
 
-const dir = (path, name, origin) => ({ path: `${path}/${name}`, name, repo: origin !== null, origin })
+const dir = (path, name, origin, kind = 'dir', access = true) => ({
+  path: `${path === '/' ? '' : path}/${name}`,
+  name,
+  kind,
+  access,
+  repo: origin !== null,
+  origin,
+})
 
-/** One level of the machine, as `dirs` answers it: `$HOME`, the clone home
- *  under it holding the repository the fleet already has, and whatever
- *  `make` has added this run. */
+/** One level of the machine, as `dirs` answers it: `/`, `/home`, `$HOME`, the
+ *  clone home under it holding the repository the fleet already has, and
+ *  whatever `make` has added this run. The clone home also holds a dotfile, a
+ *  file and a closed folder, which the picker marks (Y-414). Directories come
+ *  before files, as the daemon sorts them. */
 function entriesOf(state, path) {
   const made = (state.made?.[path] ?? []).map((name) => dir(path, name, null))
+  if (path === '/') return [dir(path, 'home', null), dir(path, 'srv', null), dir(path, 'root', null, 'dir', false)]
+  if (path === '/home') return [dir(path, 'biswa', null)]
   if (path === HOME) return [dir(path, 'Github', null), dir(path, 'notes', null), ...made]
   if (path === `${HOME}/Github`) {
     return [
@@ -188,6 +199,9 @@ function entriesOf(state, path) {
       dir(path, 'landing', 'https://github.com/2002Bishwajeet/landing.git'),
       dir(path, 'notes', null),
       ...made,
+      dir(path, 'archive', null, 'dir', false),
+      dir(path, '.github', null),
+      dir(path, 'README.md', null, 'file'),
     ]
   }
   return made
@@ -438,7 +452,7 @@ const routes = [
         s.made ??= {}
         s.made[path] = [...(s.made[path] ?? []), sent.make]
       }
-      return [200, { machine, path, entries: entriesOf(s, path) }]
+      return [200, { machine, path, access: true, entries: entriesOf(s, path), truncated: false }]
     },
   ],
   [

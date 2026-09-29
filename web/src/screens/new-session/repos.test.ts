@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Listing, Repo } from '@/api'
-import { crumbs } from './dirs'
+import { crumbs, under } from './dirs'
 import { lastLine } from './progress'
 import { byOrigin, filterRepos, place } from './repos'
 
@@ -16,15 +16,26 @@ const repo = (full_name: string): Repo => ({
 const listing: Listing = {
   machine: 'cachyos-g14',
   path: '/home/biswa/Github',
+  access: true,
   entries: [
     {
       path: '/home/biswa/Github/yantra',
       name: 'yantra',
+      kind: 'dir',
+      access: true,
       repo: true,
       origin: 'git@github.com:2002Bishwajeet/yantra.git',
     },
-    { path: '/home/biswa/Github/scratch', name: 'scratch', repo: false, origin: null },
+    {
+      path: '/home/biswa/Github/scratch',
+      name: 'scratch',
+      kind: 'dir',
+      access: true,
+      repo: false,
+      origin: null,
+    },
   ],
+  truncated: false,
 }
 
 describe('the repository search', () => {
@@ -64,8 +75,10 @@ describe('what a machine already holds', () => {
 })
 
 describe('the breadcrumb', () => {
-  it('makes every segment a way back up, from ~ inside home', () => {
+  it('makes every segment a way back up to /, with home read as ~', () => {
     expect(crumbs('/home/biswa/Github/yantra', '/home/biswa')).toEqual([
+      { label: '/', path: '/' },
+      { label: 'home', path: '/home' },
       { label: '~', path: '/home/biswa' },
       { label: 'Github', path: '/home/biswa/Github' },
       { label: 'yantra', path: '/home/biswa/Github/yantra' },
@@ -79,6 +92,12 @@ describe('the breadcrumb', () => {
       { label: 'code', path: '/srv/code' },
     ])
     expect(crumbs('/srv', null)[0]).toEqual({ label: '/', path: '/' })
+    expect(crumbs('/', '/home/biswa')).toEqual([{ label: '/', path: '/' }])
+  })
+
+  it('puts a new folder at the root under one slash', () => {
+    expect(under('/', 'srv')).toBe('/srv')
+    expect(under('/srv', 'code')).toBe('/srv/code')
   })
 })
 

@@ -94,7 +94,23 @@ test.describe('the four steps', () => {
     const folders = page.getByRole('list', { name: 'Folders' })
     await folders.getByRole('button', { name: /Github/ }).click()
     await expect(folders.getByText('git · 2002Bishwajeet/yantra')).toBeVisible()
+    // Y-414: a file and a closed folder are drawn and are not buttons.
+    await expect(folders.getByText('README.md')).toBeVisible()
+    await expect(folders.getByRole('button', { name: /^(README\.md|archive)/ })).toHaveCount(0)
+    await expect(folders.getByText('.github')).toHaveCount(0)
     await screenshot(page, 'new-session-local', 'busy', size)
+
+    await page.getByRole('button', { name: 'Show hidden' }).click()
+    await expect(folders.getByText('.github')).toBeVisible()
+    await page.getByRole('button', { name: 'Show hidden' }).click()
+
+    const where = page.getByRole('navigation', { name: 'Where you are' })
+    await where.getByRole('button', { name: '/', exact: true }).click()
+    await expect(folders.getByRole('button', { name: /^srv/ })).toBeVisible()
+    await folders.getByRole('button', { name: /^home/ }).click()
+    await folders.getByRole('button', { name: /^biswa/ }).click()
+    await folders.getByRole('button', { name: /^Github/ }).click()
+    await expect(folders.getByText('git · 2002Bishwajeet/yantra')).toBeVisible()
 
     await page.getByLabel('New folder').fill('landing-copy')
     await page.getByRole('button', { name: 'Make', exact: true }).click()

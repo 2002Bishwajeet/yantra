@@ -143,6 +143,12 @@ time. **The ADR needs no amendment** — it classified the case, and this is the
   is the shell's own default and means `~/.config` is reached by typing it. Say so rather than
   leaving a reader to wonder where their directory went.
 
+> **2026-09-29, Y-414.** The owner reversed the last two points during the Y-382 QA pass. A
+> listing now holds files and dotfiles, and directories the login account cannot enter, each
+> marked. The picker draws files and closed folders but never offers them as a choice, and it hides
+> dotfiles behind a *Show hidden* chip that is off by default. The breadcrumb reaches `/`. The
+> first two points stand: one level per request, and no cache.
+
 ---
 
 ## 4. The page

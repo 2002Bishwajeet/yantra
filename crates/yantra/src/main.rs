@@ -1888,6 +1888,9 @@ fn render_dirs(listing: &dirs::Listing) -> String {
     let rows: Vec<Vec<String>> = listing
         .entries
         .iter()
+        // The verb is `ls dirs`: files are in the listing for the dashboard's
+        // picker (Y-414), and a directory is still the only thing to choose.
+        .filter(|entry| entry.kind == dirs::Kind::Dir)
         .map(|entry| {
             vec![
                 entry.name.clone(),
@@ -1912,6 +1915,15 @@ fn render_dirs(listing: &dirs::Listing) -> String {
         listing.path,
         listing.machine
     ));
+    if !listing.access {
+        out.push_str("the login account cannot read this directory\n");
+    }
+    if listing.truncated {
+        out.push_str(&format!(
+            "the machine stopped at {} entries; name a path to reach the rest\n",
+            dirs::CAP
+        ));
+    }
     out
 }
 
@@ -3315,21 +3327,35 @@ mod tests {
     /// which is the only place `$HOME` is resolved.
     #[test]
     fn a_listing_marks_the_repositories_and_names_where_it_looked() {
-        let entry = |name: &str, repo, origin: Option<&str>| dirs::Dir {
+        let entry = |name: &str, repo, origin: Option<&str>| dirs::Entry {
             path: format!("/home/u/{name}"),
             name: name.to_owned(),
+            kind: dirs::Kind::Dir,
+            access: true,
             repo,
             origin: origin.map(str::to_owned),
+        };
+        let file = dirs::Entry {
+            kind: dirs::Kind::File,
+            ..entry("notes.md", false, None)
         };
         let out = render_dirs(&dirs::Listing {
             machine: "mac".to_owned(),
             path: "/home/u".to_owned(),
+            access: true,
             entries: vec![
                 entry("yantra", true, Some("https://github.com/o/r.git")),
                 entry("local", true, None),
                 entry("scratch", false, None),
+                file,
             ],
+            truncated: false,
         });
+
+        assert!(
+            !out.contains("notes.md"),
+            "a file is not a directory: {out}"
+        );
 
         assert!(out.contains("https://github.com/o/r.git"), "{out}");
         assert_eq!(out.matches("repo").count(), 2, "{out}");
@@ -3346,19 +3372,25 @@ mod tests {
         let empty = render_dirs(&dirs::Listing {
             machine: "mac".to_owned(),
             path: "/home/u/nothing".to_owned(),
+            access: true,
             entries: Vec::new(),
+            truncated: false,
         });
         assert_eq!(empty.trim(), "0 directories in /home/u/nothing on mac");
 
         let one = render_dirs(&dirs::Listing {
             machine: "mac".to_owned(),
             path: "/home/u".to_owned(),
-            entries: vec![dirs::Dir {
+            access: true,
+            entries: vec![dirs::Entry {
                 path: "/home/u/only".to_owned(),
                 name: "only".to_owned(),
+                kind: dirs::Kind::Dir,
+                access: true,
                 repo: false,
                 origin: None,
             }],
+            truncated: false,
         });
         assert!(
             one.trim_end().ends_with("1 directory in /home/u on mac"),

@@ -165,6 +165,106 @@ describe('step 2, where the code comes from', () => {
   })
 })
 
+/** Y-414: the whole filesystem, one level at a time. */
+describe('step 2, the local browser', () => {
+  async function toLocal(answers: Answers = {}) {
+    const sent: unknown[] = []
+    const asked = mountNew('desktop', '/new', {
+      'POST /api/machines/cachyos-g14/dirs': (body) => {
+        sent.push(body.path)
+        return [200, listing(String(body.path ?? HOME))]
+      },
+      ...answers,
+    })
+    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByRole('button', { name: /Local directory/ })
+    press(/Local directory/)
+    // Not awaited: a refused listing draws no list.
+    const folders = within(document.body)
+    return { asked, sent, folders }
+  }
+
+  it('hides dotfiles until asked, then lists them', async () => {
+    const { folders } = await toLocal()
+    await folders.findByText('Github')
+    expect(folders.queryByText('.config')).toBeNull()
+
+    const toggle = screen.getByRole('button', { name: 'Show hidden' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(toggle)
+    expect(await folders.findByRole('button', { name: /\.config/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Show hidden' }))
+    await waitFor(() => expect(folders.queryByText('.config')).toBeNull())
+  })
+
+  it('draws files and closed folders, marked, and neither is a choice', async () => {
+    const { folders, sent } = await toLocal()
+    const file = await folders.findByText('todo.txt')
+    const closed = folders.getByText('private')
+    expect(folders.getByText('file')).toBeTruthy()
+    expect(folders.getByText('no access')).toBeTruthy()
+    expect(file.closest('button')).toBeNull()
+    expect(closed.closest('button')).toBeNull()
+    expect(folders.queryByRole('button', { name: /^(todo\.txt|private)/ })).toBeNull()
+
+    const before = sent.length
+    fireEvent.click(file)
+    fireEvent.click(closed)
+    // Nothing was asked and nothing was chosen: the folder is still $HOME.
+    expect(sent).toHaveLength(before)
+    expect(screen.getAllByText('~').length).toBeGreaterThan(0)
+  })
+
+  it('walks above $HOME to / and into another folder there', async () => {
+    const { folders, sent } = await toLocal()
+    await folders.findByText('Github')
+    const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
+    expect(where.getAllByRole('button').map((one) => one.textContent)).toEqual(['/', 'home'])
+
+    fireEvent.click(where.getByRole('button', { name: '/' }))
+    await folders.findByRole('button', { name: /srv/ })
+    expect(sent).toContain('/')
+    expect(folders.getByText('root').closest('button')).toBeNull()
+
+    fireEvent.click(folders.getByRole('button', { name: /srv/ }))
+    await waitFor(() => expect(sent).toContain('/srv'))
+  })
+
+  it('says when the list was cut, and when this account cannot read a folder', async () => {
+    const { folders } = await toLocal({
+      'POST /api/machines/cachyos-g14/dirs': (body) =>
+        body.path === '/srv'
+          ? [200, { machine: 'cachyos-g14', path: '/srv', access: false, entries: [], truncated: false }]
+          : body.path === '/'
+            ? [200, listing('/')]
+            : [200, { ...listing(HOME), truncated: true }],
+    })
+    expect(await folders.findByText(/sent the first 4 entries and stopped/)).toBeTruthy()
+
+    const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
+    fireEvent.click(where.getByRole('button', { name: '/' }))
+    fireEvent.click(await folders.findByRole('button', { name: /srv/ }))
+    expect(await folders.findByText('cachyos-g14 does not let this account read this folder')).toBeTruthy()
+    expect(folders.queryByText('this folder is empty')).toBeNull()
+  })
+
+  it('a folder that is not there, and a machine that cannot be asked, are two errors', async () => {
+    const refusal = (status: number, said: string): Answers => ({
+      'POST /api/machines/cachyos-g14/dirs': [status, said],
+    })
+    await toLocal(refusal(409, 'cachyos-g14 has no directory at /home/biswa'))
+    expect(await screen.findByText('cachyos-g14 has no directory there')).toBeTruthy()
+    cleanup()
+    unmountNew()
+
+    await toLocal(refusal(503, 'ssh: connect to host cachyos-g14 port 22: No route to host'))
+    expect(await screen.findByText('cachyos-g14 could not be asked what is there')).toBeTruthy()
+    expect(screen.getByText(/No route to host/)).toBeTruthy()
+  })
+})
+
 describe('step 3, what opens in the session', () => {
   it('starts Claude unless a command is typed, and says what will happen', async () => {
     await toStepThree()

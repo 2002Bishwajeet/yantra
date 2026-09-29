@@ -655,22 +655,44 @@ export const cloning = {
 } satisfies Cloning
 
 export const listing = {
+  "access": true,
   "entries": [
     {
+      "access": true,
+      "kind": "dir",
       "name": "yantra",
       "origin": "https://github.com/2002Bishwajeet/yantra.git",
       "path": "/home/<user>/Github/yantra",
       "repo": true
     },
     {
+      "access": true,
+      "kind": "dir",
       "name": "scratch",
       "origin": null,
       "path": "/home/<user>/Github/scratch",
       "repo": false
+    },
+    {
+      "access": false,
+      "kind": "dir",
+      "name": "private",
+      "origin": null,
+      "path": "/home/<user>/Github/private",
+      "repo": false
+    },
+    {
+      "access": true,
+      "kind": "file",
+      "name": "notes.md",
+      "origin": null,
+      "path": "/home/<user>/Github/notes.md",
+      "repo": false
     }
   ],
   "machine": "cachyos-g14",
-  "path": "/home/<user>/Github"
+  "path": "/home/<user>/Github",
+  "truncated": false
 } satisfies Listing
 
 export const terminalSize = {
