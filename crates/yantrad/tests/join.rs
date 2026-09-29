@@ -34,6 +34,7 @@ const REPORTS: &str = "/srv/reports";
 const KEPT_AS: &str = "/srv/kept-as";
 const ALIAS: &str = "fixture-box";
 const EDITED_ENV: &str = "YANTRA_DAEMON=100.64.0.5:7717";
+const TAILSCALE_SSH_ON: &str = "Tailscale SSH is on";
 
 /// Per process: two runs on one box (`just test` beside `just test-embedded`)
 /// sharing a directory swap the key under each other's container.
@@ -44,6 +45,20 @@ fn scratch(label: &str) -> Result<PathBuf> {
     }
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// A `tailscale` whose `debug prefs` prints the shape the real one prints,
+/// tab-indented, with only the two prefs `join.sh` reads.
+fn fake_tailscale(systemd: &Systemd, run_ssh: bool) -> Result<()> {
+    sh(
+        systemd,
+        &format!(
+            r#"printf '%s\n' '#!/bin/sh' '[ "$*" = "debug prefs" ] || exit 1' \
+                'printf "{{\n\t\"WantRunning\": true,\n\t\"RunSSH\": {run_ssh}\n}}\n"' \
+                > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale"#
+        ),
+    )?;
+    Ok(())
 }
 
 /// `curl | sh` as the person types it. `HOME` is set because a terminal has
@@ -197,6 +212,7 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
             .success(),
         "nobody said yes, so no agent may be installed:\n{quiet}"
     );
+    assert!(!quiet.contains(TAILSCALE_SSH_ON), "{quiet}");
     assert_eq!(keys_line_count(&systemd, &prepared.public_key)?, 1);
     assert_eq!(
         sh(
@@ -208,8 +224,11 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         format!("700 {UNPRIVILEGED}\n600 {UNPRIVILEGED}\n")
     );
 
-    // Yes to every question: sshd comes on, and the agent is installed.
+    // Yes to every question: sshd comes on, and the agent is installed. A
+    // `tailscale` with Tailscale SSH off changes nothing.
+    fake_tailscale(&systemd, false)?;
     let yes = succeeded(&run_join(&systemd, Some("y"))?, "answered")?;
+    assert!(!yes.contains(TAILSCALE_SSH_ON), "{yes}");
     assert_eq!(
         systemd.property("sshd.service", "UnitFileState")?,
         "enabled",
@@ -333,6 +352,20 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         );
     }
     assert_eq!(String::from_utf8(out.stdout)?.trim(), UNPRIVILEGED);
+
+    // Y-413: Tailscale SSH serves port 22 on the tailnet with nothing
+    // listening, so the script says so and does not ask to turn sshd on.
+    sh(&systemd, "systemctl disable --now sshd.service")?;
+    fake_tailscale(&systemd, true)?;
+    let tailnet = succeeded(&run_join(&systemd, Some("y"))?, "Tailscale SSH")?;
+    assert!(tailnet.contains(TAILSCALE_SSH_ON), "{tailnet}");
+    assert!(!tailnet.contains("sshd is not running"), "{tailnet}");
+    assert_eq!(
+        systemd.property("sshd.service", "UnitFileState")?,
+        "disabled",
+        "the answer was yes, and still sshd must stay off:\n{tailnet}"
+    );
+    sh(&systemd, "rm /usr/local/bin/tailscale")?;
 
     // A second run changes nothing that is already there.
     sh(
