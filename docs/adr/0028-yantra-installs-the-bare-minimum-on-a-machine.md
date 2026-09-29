@@ -68,6 +68,10 @@ a person initiated it, and nothing polls it.
 **Optional tools come later, chosen by checkbox** (owner, 2026-09-12). This ADR installs the minimum
 and offers no choice. A list of optional items is a later decision that extends §1.
 
+> **2026-09-29, [Y-415](../../tracker.md):** the first optional item is the microphone, chosen per
+> machine. [ADR-0031](0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §1 and §2 say what
+> it installs. §1's list of what Yantra is for is unchanged.
+
 **The CLI verb comes first:** `yantra install <machine>`. The daemon's route is a copy of the verb,
 as every write in `yantrad` is. `yantra doctor` stays a read (D2 §3.2).
 

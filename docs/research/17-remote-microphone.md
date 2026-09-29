@@ -289,6 +289,38 @@ remote can reach the laptop. The stream runs until Ctrl-C, so the microphone is 
 6. Plain ssh uses §4 B with the same remote setup; §4 A stays a documented option with its warning.
 7. macOS is out of scope for the first version.
 
+## 7. A microphone for Yantra's sessions alone (added 2026-09-29)
+
+The owner decided that the virtual mic must not become the machine's default input. So the recorder
+must pick `yantra-mic` by an environment variable. **`PIPEWIRE_NODE` does it.** `pipewire-alsa`
+reads it, and ALSA's `default` then records from that node. (Verified on the Debian 13 VM, same
+versions as §2.)
+
+The test. A second null sink, `decoy-sink`, stood in for a real microphone, and
+`pactl set-default-source decoy-sink.monitor` made it the default. A 440 Hz tone went into
+`yantra-mic-sink` through `pw-cat --target`. Claude Code's recorder ran with and without the variable:
+
+```sh
+arecord -f S16_LE -r 16000 -c 1 -t raw -q -                            # rms 0
+PIPEWIRE_NODE=yantra-mic arecord -f S16_LE -r 16000 -c 1 -t raw -q -   # rms 8485
+PULSE_SOURCE=yantra-mic arecord -f S16_LE -r 16000 -c 1 -t raw -q -    # rms 0
+```
+
+- `pactl get-default-source` answered `decoy-sink.monitor` before and after every run.
+- **`PULSE_SOURCE` does nothing here**, because ALSA `default` does not go through Pulse (§4).
+- In a `tmux` session made with `new-session -e PIPEWIRE_NODE=yantra-mic`, the recorder heard the
+  tone (rms 8485). In a second session on the same server without it, the recorder heard silence.
+- **SoX `rec`** (14.4.2, Claude Code's third path) gave the same result: rms 0 without the
+  variable, 8485 with it.
+- **Playback does not leak through the variable.** `aplay` with `PIPEWIRE_NODE=yantra-mic` did not
+  reach the mic while `decoy-sink` was the default sink. **It did reach it while `yantra-mic-sink`
+  was the default sink**, which it is on a box with no other sink (§2). The leak comes from the
+  default sink, not from the variable.
+
+**Not tested:** a desktop that runs PulseAudio itself rather than PipeWire, and macOS. Claude Code's
+native module on macOS opens the system default input and reads no device variable (§1), so there
+is no per-process choice on a Mac.
+
 ## Open decisions for the ADR
 
 1. **Who installs the audio packages?** [ADR-0028](../adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) installs `tmux`, `git` and `claude` only, and defers
