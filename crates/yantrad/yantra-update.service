@@ -8,7 +8,9 @@ Documentation=https://github.com/2002Bishwajeet/yantra
 Type=oneshot
 ExecStartPre=rm -f /home/yantra/yantra-update.requested
 ExecStart=/usr/local/bin/yantra-update
-# A Post step, so an install that failed restarts nothing.
+# A Post step, so an install that failed restarts nothing. A request made
+# while this one ran asked for the same release, so it goes first.
+ExecStartPost=rm -f /home/yantra/yantra-update.requested
 ExecStartPost=systemctl try-restart yantrad.service yantra-agent.service
 # A oneshot waits forever by default, and a stalled download would hold every
 # later request.

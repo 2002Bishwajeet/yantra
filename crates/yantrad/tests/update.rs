@@ -352,6 +352,13 @@ fn an_update_restarts_the_daemon_and_the_session_and_its_socket_survive() -> Res
         !journal.contains("stop-sigterm") && !journal.contains("signal SIGKILL"),
         "yantrad did not stop on SIGTERM:\n{journal}"
     );
+
+    // ADR-0027 §6: a second run of the same release leaves the rollback alone.
+    appliance.sh("systemctl start yantra-update.service")?;
+    assert!(
+        appliance.carries("/usr/local/bin/yantrad.prev", OLD_MARK)?,
+        "a repeated update overwrote yantrad.prev with v{NEW}"
+    );
     Ok(())
 }
 

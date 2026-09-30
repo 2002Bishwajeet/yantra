@@ -243,7 +243,7 @@ fetch "$work/SHA256SUMS" "$download/SHA256SUMS"
 tar -C "$work" -xzf "$work/$archive"
 staged="$work/yantra-$VERSION-$target"
 
-# The units ride in the archive, so SHA256SUMS covers the two files that decide
+# The units ride in the archive, so SHA256SUMS covers the files that decide
 # what runs as root (Y-365). Releases before v0.2.0 carry none, and a stat error
 # would be a poor way to learn that.
 [ -e "$staged/yantrad.service" ] ||
@@ -310,8 +310,9 @@ id yantra >/dev/null 2>&1 ||
 as_root install -d "$BIN_DIR"
 for binary in yantrad yantra yantra-agent; do
     as_root install -m 755 "$staged/$binary" "$BIN_DIR/$binary.new"
-    # ADR-0027 §6: one generation back, for a rollback with no network.
-    if [ -e "$BIN_DIR/$binary" ]; then
+    # ADR-0027 §6: one generation back, for a rollback with no network. A run
+    # that installs what is already there must not replace it with a copy of now.
+    if [ -e "$BIN_DIR/$binary" ] && ! cmp -s "$staged/$binary" "$BIN_DIR/$binary"; then
         as_root cp -p "$BIN_DIR/$binary" "$BIN_DIR/$binary.prev"
     fi
     as_root mv -f "$BIN_DIR/$binary.new" "$BIN_DIR/$binary"
@@ -433,6 +434,8 @@ fi
 # An update runs here too, with no terminal, and its journal must not say the
 # units are off when they are on.
 if systemctl is-enabled --quiet yantrad.service 2>/dev/null; then
+    # A box that came from a release with no updater has the path unit off.
+    [ "$updates" = yes ] && as_root systemctl enable --now yantra-update.path
     echo "install: v$VERSION is in $BIN_DIR, and yantrad.service is enabled."
     echo "install: yantra-update.service restarts what runs. By hand: sudo systemctl try-restart yantrad.service yantra-agent.service"
     exit 0

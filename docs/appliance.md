@@ -78,7 +78,7 @@ account. The script says so first, because the dashboard cannot exist before the
    On a tailnet that never had HTTPS, `tailscale serve` prints one link to turn it on and waits;
    open it. Ctrl-C there skips HTTPS, and the install goes on to finish on plain HTTP.
 6. It installs Yantra: the `yantra` account if it is absent, the three binaries renamed into
-   `/usr/local/bin` for the reason [below](#why-the-rename), both units from the archive, and a
+   `/usr/local/bin` for the reason [below](#why-the-rename), the units from the archive, and a
    `systemctl daemon-reload`.
 7. It writes `/etc/yantra/agent.env` **only if it is absent**, with this box's own
    `YANTRA_DAEMON=<tailnet address>:7717`. It writes `/etc/yantra/daemon.env` **only if it is
@@ -88,7 +88,7 @@ account. The script says so first, because the dashboard cannot exist before the
    ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md), Y-389), so `yantra github login`
    works on a fresh box. A self-hoster who wants their own app instead runs `yantra github
    client-id <id>`, or sets it from Settings → Providers, and restarts `yantrad` (Y-393).
-8. It runs `systemctl enable --now` for both units and waits up to 30 s for `yantrad` to answer
+8. It runs `systemctl enable --now` for both units and for `yantra-update.path`, and waits up to 30 s for `yantrad` to answer
    `/healthz`.
 9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
    `http://<tailnet address>:7717` if HTTPS is not on.
@@ -130,6 +130,8 @@ same thing, and `yantra update --check` only says whether one exists.
 - `yantra-update.service` runs as root. It removes the file, runs `yantra-update` with no terminal,
   and then runs `systemctl try-restart yantrad.service yantra-agent.service`.
 - **The request carries no version.** The unit installs the current release or nothing.
+- **A second request changes nothing.** One made while the unit runs is removed before the restart.
+  A run that installs the release already on disk keeps `.prev` as it was.
 - **A failed install restarts nothing.** The restart is `ExecStartPost=`, and a checksum mismatch
   or an unreachable GitHub stops the unit before it. Read why with `journalctl -u yantra-update`.
 - `yantra update` needs root. Without it, it prints `sudo systemctl start yantra-update.service`.
@@ -201,8 +203,8 @@ an hour per IP is what an unauthenticated one gets — stops the run and says so
 ### Where the units come from
 
 **From the archive, since [Y-365](../tracker.md).** The Linux archives hold the three binaries, a
-README, a LICENSE and both units — [`release.yml`](../.github/workflows/release.yml) stages them
-beside the binaries they start, so `SHA256SUMS` covers the two files that decide what runs as root.
+README, a LICENSE, `install.sh` and the four units — [`release.yml`](../.github/workflows/release.yml) stages them
+beside the binaries they start, so `SHA256SUMS` covers the files that decide what runs as root.
 The macOS archives carry none: they ship `yantra-agent` alone and no systemd reads a unit there.
 
 Before that the script fetched them from `raw.githubusercontent.com` at a `COMMIT` pinned beside
