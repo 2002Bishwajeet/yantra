@@ -1961,6 +1961,8 @@ mod tests {
                 listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
                 ssh_dir: std::path::PathBuf::new(),
                 relay: true,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(vec![
                 MachineInfo {
@@ -2062,6 +2064,8 @@ mod tests {
                 listening_on: Vec::new(),
                 ssh_dir: dir.to_owned(),
                 relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
             }),
             ..Fleet::default()
         };

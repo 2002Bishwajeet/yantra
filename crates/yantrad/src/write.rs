@@ -36,7 +36,7 @@ use yantra_core::{
     agent, clone, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
     terminfo, tmux, tokens, up, workspace,
 };
-use yantra_core::{identity, join};
+use yantra_core::{identity, join, update};
 
 use crate::api::Answer;
 use crate::events::{self, Event};
@@ -146,6 +146,7 @@ where
             post(set_client_id::<I>).delete(clear_client_id::<I>),
         )
         .route("/join", post(join_as::<I>))
+        .route("/update", post(renew::<I>))
         .with_state(Remembered {
             authoriser: authoriser.clone(),
             fleet: fleet.clone(),
@@ -1096,6 +1097,36 @@ async fn clear_client_id<I: Inventory + Clone + Send + Sync + 'static>(
     }
     tracing::info!("github client id cleared by {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `yantra update` on the wire ([ADR-0027] §3). The daemon only asks: it
+/// creates the trigger `yantra-update.path` watches and answers **202**, and
+/// the root unit installs the release and restarts this process. It fetches
+/// nothing (§2). A box with no updater is a **409** naming `install.sh`.
+///
+/// [ADR-0027]: ../../../docs/adr/0027-the-appliance-pulls-its-own-update.md
+async fn renew<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let facts = &state.fleet.facts;
+    update::request(&facts.trigger, &facts.updater).map_err(|error| Refused::Verb {
+        status: from_update(&error),
+        said: chain(&error),
+    })?;
+    tracing::info!("update asked for by {}", caller.node);
+    Ok(StatusCode::ACCEPTED)
+}
+
+fn from_update(error: &update::Error) -> StatusCode {
+    match error {
+        update::Error::NotInstalled { .. } => StatusCode::CONFLICT,
+        update::Error::NoPrivilege { .. } | update::Error::Failed { .. } | update::Error::Io(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 /// The dashboard saying it is on screen (D3 §13), so the notifier stops pushing
@@ -3714,6 +3745,113 @@ mod tests {
         );
     }
 
+    fn update_fleet(label: &str, installed: bool) -> (Fleet, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("yantra-write-update-{label}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        let updater = dir.join("yantra-update");
+        if installed {
+            std::fs::write(&updater, "#!/bin/sh\n").expect("an updater");
+        }
+        let trigger = dir.join("yantra-update.requested");
+        let fleet = Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: PathBuf::new(),
+                relay: false,
+                trigger: trigger.clone(),
+                updater,
+            }),
+            ..Fleet::default()
+        };
+        (fleet, trigger)
+    }
+
+    async fn ask_update<J: Inventory + Clone + Send + Sync + 'static>(
+        authoriser: Authoriser<J>,
+        fleet: Fleet,
+    ) -> (StatusCode, String) {
+        let (status, _, body) = join_send(
+            router::<J, ()>(authoriser, fleet),
+            "POST",
+            "/update",
+            address(9),
+            "",
+        )
+        .await;
+        (status, body)
+    }
+
+    /// ADR-0027 §3 on ADR-0016's gate: a caller that is not the owner's own
+    /// node asks for nothing, and the path unit is never woken.
+    #[tokio::test]
+    async fn an_update_is_refused_to_a_caller_that_is_not_the_owner() {
+        let (fleet, trigger) = update_fleet("refused", true);
+
+        let (status, _) = ask_update(direct(tailnet(vec![])), fleet).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!trigger.exists(), "a refused caller woke the path unit");
+    }
+
+    #[tokio::test]
+    async fn an_update_with_a_tailscale_that_cannot_answer_is_503() {
+        #[derive(Clone)]
+        struct Down;
+        impl Inventory for Down {
+            async fn machines(
+                &self,
+            ) -> Result<Vec<yantra_core::inventory::MachineInfo>, inventory::Error> {
+                unreachable!("authorisation does not list machines")
+            }
+            async fn addresses(&self) -> Result<Vec<IpAddr>, inventory::Error> {
+                unreachable!("authorisation does not ask for addresses")
+            }
+            async fn whois(&self, _address: IpAddr) -> Result<Option<Caller>, inventory::Error> {
+                Err(inventory::Error::Whois {
+                    stderr: "failed to connect to local tailscaled".to_string(),
+                })
+            }
+            async fn owner(&self) -> Result<u64, inventory::Error> {
+                unreachable!("it never gets this far")
+            }
+        }
+        let (fleet, trigger) = update_fleet("down", true);
+
+        let (status, _) = ask_update(Authoriser::new(Down, &[]), fleet).await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(!trigger.exists());
+    }
+
+    /// The whole of the daemon's part: an empty file, and a 202 with no body.
+    #[tokio::test]
+    async fn an_update_from_the_owner_creates_the_trigger_and_answers_202() {
+        let (fleet, trigger) = update_fleet("asked", true);
+
+        let (status, body) =
+            ask_update(direct(tailnet(vec![(address(9), caller(ME, &[]))])), fleet).await;
+
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        assert_eq!(body, "");
+        assert_eq!(std::fs::read(&trigger).expect("the trigger"), b"");
+    }
+
+    /// `just appliance-install` leaves no updater, and that box says so by
+    /// name rather than asking a unit that is not there.
+    #[tokio::test]
+    async fn an_update_on_a_box_with_no_updater_is_409_naming_install_sh() {
+        let (fleet, trigger) = update_fleet("absent", false);
+
+        let (status, body) =
+            ask_update(direct(tailnet(vec![(address(9), caller(ME, &[]))])), fleet).await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("install.sh"), "{body}");
+        assert!(!trigger.exists());
+    }
+
     const JOINING: &str = "nJOIN0000000CNTRL";
 
     fn join_scratch(label: &str) -> PathBuf {
@@ -3729,6 +3867,8 @@ mod tests {
                 listening_on: vec![SocketAddr::new(address(1), 7717)],
                 ssh_dir: dir.to_owned(),
                 relay: false,
+                trigger: PathBuf::new(),
+                updater: PathBuf::new(),
             }),
             ..Fleet::default()
         }
