@@ -29,11 +29,13 @@ const BUILDER = {
   docs: { model: 'sonnet', effort: 'low' },
 }
 
-const GATE = {
-  'rust-transport': 'just fmt-check && just lint && YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 just test && just deny',
-  rust: 'just fmt-check && just lint && YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 just test && just deny',
-  web: 'cd web && npm ci --prefer-offline && npm run lint && npx tsc -b && npm test && npm run build && npm run budget && npm run e2e',
-  docs: 'just fmt-check',
+const RUST_GATE = 'YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 just check'
+const WEB_GATE = '(cd web && npm ci --prefer-offline && npm run lint && npm test && npm run build && npm run budget && npm run e2e)'
+// A row's gate follows the paths it touches, not only its kind: a web row that changes the daemon runs both.
+const gate = (row) => {
+  const rust = row.kind.startsWith('rust') || row.paths.some((p) => p.startsWith('crates') || p.startsWith('Cargo'))
+  const web = row.kind === 'web' || row.paths.some((p) => p.startsWith('web'))
+  return [rust && RUST_GATE, web && WEB_GATE].filter(Boolean).join(' && ') || 'just fmt-check'
 }
 
 const RULES = (wt) => `
@@ -42,7 +44,7 @@ Rules for this run (CLAUDE.md §B7, the build loop):
 - Do not edit tracker.md or docs/session-log.md. The ship stage does that.
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
-- Podman tests run with YANTRA_REQUIRE_PODMAN=1 and NEXTEST_TEST_THREADS=4. Exit 137 is memory pressure, not a bug: rerun once.
+- Never run the podman suite, \`just check\` or \`npm run e2e\`. The verify stage runs them one row at a time, because parallel suites run the box out of memory. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
 - Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices and accessibility before you write any. Errors are typed and every error path is tested.`
 
 function lock() {
@@ -120,10 +122,26 @@ const REVIEW_SCHEMA = {
   required: ['blocking', 'doneMet', 'diffLines'],
 }
 
+const SETUP_SCHEMA = {
+  type: 'object',
+  properties: { commitsAhead: { type: 'integer', minimum: 0 } },
+  required: ['commitsAhead'],
+}
+
+const REBASE_SCHEMA = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean', description: 'false when the rebase had conflicts it could not resolve' },
+    codeChanged: { type: 'boolean', description: 'origin/main changed files this branch also touches, or the rebase needed a conflict resolution' },
+    failures: { type: 'string' },
+  },
+  required: ['ok', 'codeChanged'],
+}
+
 const SHIP_SCHEMA = {
   type: 'object',
   properties: {
-    status: { type: 'string', enum: ['merged', 'open', 'checks-failed', 'failed'] },
+    status: { type: 'string', enum: ['merged', 'open', 'checks-failed', 'behind', 'failed'] },
     pr: { type: 'string' },
     failures: { type: 'string' },
   },
@@ -131,11 +149,13 @@ const SHIP_SCHEMA = {
 }
 
 function triagePrompt(exclude) {
-  return `Rank the open rows in ${REPO}/tracker.md §3 that an agent can finish alone today.
+  return `Run git -C ${REPO} fetch origin, then read tracker.md from origin/main with git -C ${REPO} show origin/main:tracker.md. Do not read the file in the checkout: it can be stale or on another branch.
+Rank the open rows in its §3 that an agent can finish alone today.
 
 Eligible: status ⬜ todo, every row in Depends is ✅ done, and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
 Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a real Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question.
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
+Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.
 
 Priority, from CLAUDE.md §B7: 1 = closes or unblocks an open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the paths it will touch. Put every row you rejected in skipped with one line of reason.`
@@ -157,7 +177,7 @@ async function verify(row, wt, plan, label) {
   return serialVerify(() =>
     agent(
       `Run the gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
-Gate: ${GATE[row.kind]}
+Gate: ${gate(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 Remove leftover podman containers afterwards.`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
@@ -179,7 +199,7 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
     const v = await verify(row, wt, plan, String(i))
     if (v && v.pass) return true
     if (i === rounds) return false
-    await fix(row, wt, `The gate failed:\n${v ? v.failures : 'the verifier died'}`)
+    if (v) await fix(row, wt, `The gate failed:\n${v.failures}`)
   }
   return false
 }
@@ -189,13 +209,19 @@ async function runRow(row) {
   const wt = `${WT_ROOT}/${branch}`
   const park = (reason) => ({ id: row.id, title: row.title, status: 'parked', reason, branch })
 
-  await agent(
-    `In ${REPO}: run git fetch origin, then git worktree add -b ${branch} ${wt} origin/main. If the worktree already exists, reset it to origin/main instead. Report the path.`,
-    { label: `setup:${row.id}`, phase: 'Build', model: 'sonnet', effort: 'low' },
+  const setup = await agent(
+    `In ${REPO}: run git fetch origin. Then make ${wt} a worktree on branch ${branch}, keeping any work already on that branch:
+- If ${wt} exists, use it as it is.
+- Else if branch ${branch} exists, run git worktree add ${wt} ${branch}.
+- Else run git worktree add -b ${branch} ${wt} origin/main.
+Never reset or delete existing commits: they are work a parked run kept. Report how many commits ${branch} has ahead of origin/main.`,
+    { label: `setup:${row.id}`, phase: 'Build', schema: SETUP_SCHEMA, model: 'sonnet', effort: 'low' },
   )
+  if (!setup) return park('the setup agent died')
+  const prior = setup.commitsAhead > 0 ? `\nThe branch already has ${setup.commitsAhead} commits from an earlier run. Read them (git log -p origin/main..HEAD) and plan from where they stop.` : ''
 
   const plan = await agent(
-    `Plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.
+    `Plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${prior}
 Write a short plan and the checks that prove the row's done condition. Set park=true if the row needs something CLAUDE.md §B7 excludes.${RULES(wt)}`,
     { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, model: 'opus', effort: 'high' },
   )
@@ -210,8 +236,10 @@ Write the tests that prove the done condition first, then the code. Run the fast
   )
   if (!(await verifyUntilGreen(row, wt, plan, 3))) return park('the gate stayed red after 3 rounds')
 
+  // Simplify runs before the last review, so no code merges that a reviewer has not read.
   let simplified = false
-  for (let round = 1; round <= 2; round++) {
+  let fixes = 0
+  for (let round = 1; ; round++) {
     const r = await agent(
       `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
 Load the code-review skill and review at high effort. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
@@ -220,36 +248,46 @@ List only defects that must be fixed before merge as blocking. Do not change any
     )
     if (!r) return park('the reviewer died')
     if (r.blocking.length === 0 && r.doneMet) {
-      if (r.diffLines > 250 && !simplified) {
-        simplified = true
-        await agent(
-          `In ${wt}, load the simplify skill and apply it to git diff origin/main...HEAD. Keep behaviour and tests unchanged. Commit.${RULES(wt)}`,
-          { label: `simplify:${row.id}`, phase: 'Review', model: 'sonnet', effort: 'medium' },
-        )
-        if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after simplify')
-      }
-      break
+      if (r.diffLines <= 250 || simplified) break
+      simplified = true
+      await agent(
+        `In ${wt}, load the simplify skill and apply it to git diff origin/main...HEAD. Keep behaviour and tests unchanged. Commit.${RULES(wt)}`,
+        { label: `simplify:${row.id}`, phase: 'Review', model: b.model, effort: 'medium' },
+      )
+      if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after simplify')
+      continue
     }
-    if (round === 2) return park(`review still blocking: ${r.blocking.map((x) => x.issue).join('; ') || 'done condition not met'}`)
+    if (++fixes > 1) return park(`review still blocking: ${r.blocking.map((x) => x.issue).join('; ') || 'done condition not met'}`)
     const issues = r.blocking.map((x) => `- ${x.file}${x.line ? ':' + x.line : ''} ${x.issue}`).join('\n')
     await fix(row, wt, `A reviewer found:\n${issues}${r.doneMet ? '' : "\n- The row's done condition is not met or not proved by a test."}`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
   }
 
+  const title = `${row.id}: ${row.title.charAt(0).toLowerCase()}${row.title.slice(1)}`
   const ship = () =>
-    serialShip(() =>
-      agent(
-        `Ship ${row.id} from ${wt}, branch ${branch}.
-1. git fetch origin and rebase on origin/main. If the rebase touched code, run: ${GATE[row.kind]}. Stop with status failed if it fails.
-2. In tracker.md set the ${row.id} row to ✅ done and add "**Done ${TODAY}** by the build loop." with one line on what shipped. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing.
-3. Append one entry to docs/session-log.md for ${TODAY}, in the style of the entries above it. Plain prose, CLAUDE.md §A6.
-4. Commit "${row.id}: mark done", push, and open a PR with gh. The body says what changed and how it was verified. No AI attribution.
+    serialShip(async () => {
+      const rb = await agent(
+        `In ${wt} on branch ${branch}: git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict.`,
+        { label: `rebase:${row.id}`, phase: 'Ship', schema: REBASE_SCHEMA, model: 'sonnet', effort: 'medium' },
+      )
+      if (!rb || !rb.ok) return { status: 'failed', failures: rb ? rb.failures || 'rebase conflicts' : 'the rebase agent died' }
+      if (rb.codeChanged) {
+        const v = await verify(row, wt, plan, 'rebase')
+        if (!v || !v.pass) return { status: 'failed', failures: v ? v.failures : 'the verifier died after the rebase' }
+      }
+      return agent(
+        `Ship ${row.id} from ${wt}, branch ${branch}. The branch is rebased on origin/main and the gate passed.
+1. In tracker.md set the ${row.id} row to 🔵 review and add "**Merged ${TODAY}** by the build loop." with one line on what shipped. A row does not close in its own PR: a later release PR marks it ✅ done. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing. Skip this step if the row already says it.
+2. Append one entry to docs/session-log.md for ${TODAY}, in the style of the entries above it. Plain prose, CLAUDE.md §A6. Skip this step if the entry exists.
+3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
+4. Dry run: do not push. Return status open.` : `
+4. Push with git push --force-with-lease -u origin ${branch}. If gh pr view ${branch} finds a PR, reuse it. Else run gh pr create --base main --title "${title}" with a body that says what changed and how it was verified. The title becomes the squash commit on main, so it must keep the form "Y-NNN: <what changed>". No AI attribution anywhere.
 5. Wait for the checks (gh pr checks --watch). The merge guard: the five required checks clippy, deny, fmt, test and "cross (aarch64-unknown-linux-musl)" are present by name, and every check in gh pr view --json statusCheckRollup is SUCCESS, SKIPPED or NEUTRAL. If any is not, return checks-failed with the failing check's log tail.
-6. ${DRY ? 'Dry run: do not merge. Return status open.' : 'Merge with gh pr merge --squash --delete-branch. If GitHub says the branch is behind, rebase, push and go back to step 5 once.'}
-7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`,
+6. Merge with gh pr merge --squash --delete-branch --subject "${title} (#<pr number>)". If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
+7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'opus', effort: 'medium' },
-      ),
-    )
+      )
+    })
 
   let s = await ship()
   if (s && s.status === 'checks-failed') {
@@ -257,6 +295,7 @@ List only defects that must be fixed before merge as blocking. Do not change any
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return { ...park('CI failed and the fix did not pass the gate'), pr: s.pr }
     s = await ship()
   }
+  if (s && s.status === 'behind') s = await ship()
   if (!s) return park('the shipper died')
   return { id: row.id, title: row.title, status: s.status, pr: s.pr || '', reason: s.failures || '', branch }
 }

@@ -267,6 +267,8 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
 
 - **It merges on its own.** A row merges when the gate, an independent reviewer and every CI check
   pass. The owner reads the report, not the PRs.
+  A merged row goes to 🔵 review, because a row does not close in its own PR; the next release PR
+  marks it ✅ done.
 - **It picks by priority.** 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
 - **It runs up to three rows at once.** Rows that touch the same paths do not share a batch.
@@ -275,6 +277,6 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
 - **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a real
   Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, a changed
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the
-  report.
+  report. A later run skips it until its reason no longer holds, then continues from that branch.
 - **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
   web and docs and runs the gate. No subagent runs on Fable.
