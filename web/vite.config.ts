@@ -46,6 +46,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['src/test/setup.ts'],
+    // The build loop runs up to three rows' suites on one box, and a loaded box takes mid-file tests to about 4 s.
+    testTimeout: 15_000,
     // Playwright's specs live under e2e/ and refuse Vitest's runner.
     exclude: ['e2e/**', 'node_modules/**', 'dist/**', 'design/**'],
     // R14 §2.1: the colour package's own imports lack `.js`, so Node refuses

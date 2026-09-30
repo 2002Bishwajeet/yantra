@@ -122,6 +122,7 @@ about it. Row numbers below are the line numbers of the review's findings table.
 | 139 | `List.css` held the trailing value rigid, so a long one squeezed the headline to two pixels | `e0024a6` |
 | 140 | `/machines` printed `opened 4 Sep ago`, because `elapsed` gives a date past a day | `5dfa148` |
 | 142 | The other four call sites appended `ago` to the same helpers | `d441a0d` |
+| 138 | *Never runs a verb* timed out on a loaded box, at about 3.5 s of a 5 s budget | Y-374 warms `PalettePopup` and raises the timeouts |
 
 Rows 30 to 90 are the phase 1 review's findings table. Rows 91 and above are the boards
 review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that reason. Rows 139 and
@@ -131,7 +132,6 @@ review's (`m14-review-boards.md`, 2026-09-07), which numbers from 91 for that re
 
 | Row | Finding | Whose |
 | --- | --- | --- |
-| 138 | *Never runs a verb* opens and closes the palette once per option — about 3.5 s of Vitest's 5 s — so a loaded box times it out. One run in 25. Found while checking 137, and a different defect from it | Testing; it wants its own row |
 | 118 | Eight components draw a visible control under 44 px | **Refused in Y-360**: 40 and 32 are Material's own numbers, which ADR-0024 §4 puts above the brief's 44, and §3 measured the 48 px hit area whole. [Boards ledger](m14-review-boards.md) §4 |
 | 100 | Usage draws no per-model token counts, because `ModelSpend` carries `model`, `responses` and `cost` and nothing else | API. Y-360 drew the proportion bar and moved the read into the query cache; the counts need `crates/yantrad/src/write.rs:1387` to send them |
 | 141 | `/m/:machine` lays out 418 px wide in a 390 px viewport, so the phone scrolls sideways (1.4.10) | UI; the measurements are in §Row 139 below |

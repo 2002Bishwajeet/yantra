@@ -235,5 +235,5 @@ describe('the socket wrapper', () => {
       timeout: PAUSE * (ATTEMPTS + 4),
     })
     expect(daemonised.connections()).toBe(ATTEMPTS + 1)
-  }, 10_000)
+  })
 })
