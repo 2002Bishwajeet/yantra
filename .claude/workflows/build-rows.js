@@ -30,7 +30,10 @@ const BUILDER = {
 }
 
 const RUST_GATE = 'YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 just check'
-const WEB_GATE = '(cd web && npm ci --prefer-offline && npm run lint && npm test && npm run build && npm run budget && npm run e2e)'
+// e2e runs in the image the screenshot baselines are rendered in (web/playwright.config.ts); on the host, fonts differ.
+const WEB_GATE = '(cd web && npm ci --prefer-offline && npm run lint && npm test && npm run build && npm run budget' +
+  ' && podman run --rm -v "$PWD/..:/work" -v "$(readlink -f node_modules):$(readlink -f node_modules)"' +
+  ' -w /work/web mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test)'
 // A row's gate follows the paths it touches, not only its kind: a web row that changes the daemon runs both.
 const gate = (row) => {
   const rust = row.kind.startsWith('rust') || row.paths.some((p) => p.startsWith('crates') || p.startsWith('Cargo'))
