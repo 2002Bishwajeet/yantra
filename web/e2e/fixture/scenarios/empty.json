@@ -51,5 +51,5 @@
       "notifications": 0
     }
   },
-  "notifications": []
+  "notifications": { "looked": "ok", "age_seconds": 0, "data": [] }
 }

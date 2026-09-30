@@ -1,5 +1,8 @@
 import { ExternalLink, FileKey, Scale } from 'lucide-react'
+import type { Looked, Published } from '@/api'
+import { fromReading } from '@/api/client'
 import { useAbout } from '@/api/hooks'
+import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListChevron, ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -43,7 +46,17 @@ export function About() {
           <Fact label="Uptime" value={facts ? <Mono>{uptime(facts.uptime_seconds)}</Mono> : null} />
           <Fact label="Listens on" value={facts ? <Mono>{facts.listening_on.join(' · ')}</Mono> : null} />
           <Fact label="Reached at" value={<Mono>{location.host}</Mono>} />
+          {facts?.published.looked === 'failed' ? null : (
+            <Fact label="Published" value={facts ? <Release published={facts.published} /> : null} />
+          )}
         </dl>
+        {facts?.published.looked === 'failed' ? (
+          <ErrorSurface.Inline
+            error={fromReading(facts.published)!}
+            eyebrow="Published"
+            title="The newest release could not be read"
+          />
+        ) : null}
       </section>
       <Group label="Daemon">
         <ListItem
@@ -80,6 +93,19 @@ export function About() {
       </Group>
       <Note>Yantra persists nothing about the fleet. What you see on the dashboard is read from the machines each time.</Note>
     </>
+  )
+}
+
+/** ADR-0027 §2. A failed read is drawn by the caller, never as current. */
+function Release(props: { published: Exclude<Looked<Published>, { looked: 'failed' }> }) {
+  const { published } = props
+  if (published.looked === 'never') return <Text scale="body-medium" tone="variant">not asked yet</Text>
+  const { version, newer } = published.data
+  if (!newer) return <Mono>{version} · current</Mono>
+  return (
+    <a href={`https://github.com/2002Bishwajeet/yantra/releases/tag/v${version}`} rel="noreferrer" target="_blank">
+      <Mono>v{version} is out</Mono>
+    </a>
   )
 }
 

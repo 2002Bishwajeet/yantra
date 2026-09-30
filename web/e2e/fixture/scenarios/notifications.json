@@ -7,7 +7,8 @@
     "uptime_seconds": 86412,
     "listening_on": ["100.64.0.1:7717"],
     "tailnet": "yantra.tail3a1b.ts.net",
-    "relay": true
+    "relay": true,
+    "published": { "looked": "ok", "age_seconds": 1234, "data": { "version": "0.4.0", "newer": true } }
   },
   "notifications": {
     "looked": "ok",

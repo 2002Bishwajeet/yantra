@@ -77,6 +77,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
             .collect(),
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
         relay: fleet.facts.relay,
+        published: Answer::of(snapshot.release.as_deref(), Published::of),
     })
 }
 
@@ -476,6 +477,25 @@ pub(crate) struct About {
     pub(crate) tailnet: Option<String>,
     /// Whether this process holds a relay. Never the URL or the token (§B4).
     pub(crate) relay: bool,
+    /// The newest release GitHub publishes, read hourly (ADR-0027 §2).
+    pub(crate) published: Answer<Published>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct Published {
+    pub(crate) version: String,
+    /// Decided by [`about::newer`], so the page and `yantra update --check`
+    /// cannot disagree.
+    pub(crate) newer: bool,
+}
+
+impl Published {
+    fn of(release: &github::Release) -> Self {
+        Self {
+            version: release.version.clone(),
+            newer: about::newer(release),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -706,6 +726,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 ],
                 tailnet: Some("<tailnet>.ts.net".to_owned()),
                 relay: true,
+                published: Answer::Ok {
+                    age_seconds: 1_234,
+                    data: Published {
+                        version: "0.4.0".to_owned(),
+                        newer: true,
+                    },
+                },
             }),
         ),
         (
@@ -1961,12 +1988,57 @@ mod tests {
 
         let unlooked = get_json(holding(Snapshot::default()), "/about").await;
         assert_eq!(unlooked["tailnet"], Value::Null, "no look, no guess");
+        assert_eq!(unlooked["published"], json!({"looked": "never"}));
         assert_eq!(unlooked["listening_on"], json!([]));
         assert_eq!(
             unlooked["relay"],
             json!(false),
             "no relay at start is false, never absent"
         );
+    }
+
+    /// ADR-0027 §2 on the wire: the published version is one of the three
+    /// states every read has, and a failed read carries its reason rather
+    /// than folding into *current*.
+    #[tokio::test]
+    async fn about_names_the_published_release_and_whether_it_is_newer() {
+        let published = |release: Result<github::Release, github::Error>| {
+            holding(Snapshot {
+                release: Some(Arc::new(Reading::new(release))),
+                ..Snapshot::default()
+            })
+        };
+        let parsed = |tag: &str| Ok(github::Release::parse(tag).expect("a version"));
+
+        let newer = get_json(published(parsed("999.0.0")), "/about").await;
+        assert_eq!(newer["published"]["looked"], json!("ok"), "{newer}");
+        assert_eq!(
+            newer["published"]["data"],
+            json!({"version": "999.0.0", "newer": true})
+        );
+
+        let current = get_json(published(parsed(about::VERSION)), "/about").await;
+        assert_eq!(
+            current["published"]["data"],
+            json!({"version": about::VERSION, "newer": false})
+        );
+
+        let failed = get_json(
+            published(Err(github::Error::Status {
+                status: 403,
+                what: "/releases/latest",
+            })),
+            "/about",
+        )
+        .await;
+        assert_eq!(failed["published"]["looked"], json!("failed"), "{failed}");
+        assert!(
+            failed["published"]["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("403")),
+            "{failed}"
+        );
+        assert_eq!(failed["published"].get("data"), None, "never current");
     }
 
     fn looking_at_machines(machines: Vec<MachineInfo>) -> Fleet {

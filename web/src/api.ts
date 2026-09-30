@@ -370,6 +370,15 @@ export type About = {
   // Whether this process started with a relay. A relay saved since is the
   // next start's (ADR-0021). Never the URL or the token.
   relay: boolean
+  // Y-367: the newest release, read hourly. `failed` is never *current*.
+  published: Looked<Published>
+}
+
+/** ADR-0027 §2: the published version, and whether it is newer than this
+ *  build. The daemon decides `newer`, so the page and the CLI agree. */
+export type Published = {
+  version: string
+  newer: boolean
 }
 
 /** `GET /api/ssh-identity` — the public half of the daemon's key and the

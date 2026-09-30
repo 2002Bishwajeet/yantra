@@ -234,13 +234,19 @@ export const notificationsQuery = () =>
     refetchInterval: POLL_MS,
   })
 
-/** Y-343. `uptime_seconds` moves, so it is not held forever. */
+/** Y-343. `uptime_seconds` moves, so it is not held forever. Y-367: polled
+ *  slowly, so the hourly release reading reaches an open page. */
 export const aboutQuery = () =>
   queryOptions({
     queryKey: keys.about(),
     queryFn: ({ signal }) =>
-      fetchJson<About>('/api/about', { signal }, fields('version', 'uptime_seconds', 'listening_on')),
+      fetchJson<About>(
+        '/api/about',
+        { signal },
+        fields('version', 'uptime_seconds', 'listening_on', 'published'),
+      ),
     staleTime: SWEEP_MS,
+    refetchInterval: SLOW_POLL_MS,
   })
 
 /** Y-343. The 404 is a key not made yet, and the first join makes it

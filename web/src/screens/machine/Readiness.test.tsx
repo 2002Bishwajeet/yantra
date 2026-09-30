@@ -59,6 +59,7 @@ const ABOUT = {
   listening_on: ['100.64.0.1:7717'],
   tailnet: null,
   relay: false,
+  published: { looked: 'never' },
 }
 
 /** Every call answered by path, as `yantrad` would. `after` is what a

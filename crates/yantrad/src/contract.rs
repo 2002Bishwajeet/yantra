@@ -298,6 +298,9 @@ async fn fleet() -> Fleet {
         // `/readiness/github` has no entry below: the type it would satisfy is
         // the card's, and the dashboard is parked (Y-174).
         github: None,
+        // `/about` is built by hand in `api::answers` for its build date, and
+        // its `published` fact is spelled there.
+        release: None,
         repos: Some(Arc::new(Reading::new(Ok(vec![
             Repo {
                 full_name: "2002Bishwajeet/yantra".into(),

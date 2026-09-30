@@ -104,6 +104,7 @@
     "target": "aarch64-unknown-linux-musl",
     "uptime_seconds": 86412,
     "version": "0.1.0",
-    "relay": false
+    "relay": false,
+    "published": { "looked": "never" }
   }
 }

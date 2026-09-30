@@ -120,6 +120,11 @@ the scopes and whether a device flow is pending, read from `github::Grant` in me
 repository list, a class on the same slow clock, and **the search box filters it in the browser** —
 a typed box polls, and a read handler never awaits the network.
 
+**The newest release is a class too** (Y-367, [ADR-0027](../../docs/adr/0027-the-appliance-pulls-its-own-update.md) §2).
+`GET /api/about` serves it as `published`, and `refresh.rs` reads `/releases/latest` once an hour,
+with the grant when there is one and anonymously when there is not. A failed read is `failed`, and
+the page never draws it as *current*.
+
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Ten checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
