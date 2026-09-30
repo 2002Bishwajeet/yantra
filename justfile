@@ -184,6 +184,23 @@ web-build:
     npm --prefix web ci
     npm --prefix web run build
 
+# The e2e suite in the image its screenshot baselines are rendered in, which
+# CI's e2e jobs run in too, so a developer's own fonts never enter one. The tag
+# follows the installed @playwright/test, so a version bump cannot leave the
+# browsers behind. `just web-e2e --update-snapshots` regenerates baselines.
+web-e2e *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd web
+    npm ci --prefer-offline
+    # A worktree's node_modules can be a symlink the container cannot resolve without this mount.
+    nm="$(readlink -f node_modules)"
+    tag="v$(node -p "require('@playwright/test/package.json').version")-noble"
+    name="yantra-e2e-$(basename "$(git rev-parse --show-toplevel)")"
+    podman rm -f "$name" >/dev/null 2>&1 || true
+    podman run --rm --name "$name" -e CI=1 -v "$PWD/..:/work" -v "$nm:$nm" \
+        -w /work/web "mcr.microsoft.com/playwright:$tag" npx playwright test {{args}}
+
 # M7's one file to copy: the appliance daemon with the dashboard inside it.
 # Run it *after* `just appliance`, which builds a `yantrad` without one over it.
 appliance-embedded target=appliance_target: web-build
