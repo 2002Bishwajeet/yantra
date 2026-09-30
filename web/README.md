@@ -622,7 +622,8 @@ carrying its own key, so a write in one worker is not a row in another, and
 **The screenshot baselines are rendered in the Playwright image that
 [`web.yml`](../.github/workflows/web.yml) pins** — the image CI's e2e jobs run in —
 so a developer's own fonts never enter one. `just web-e2e` runs the suite in that
-image with `CI=1`, and `just web-e2e --update-snapshots` regenerates the baselines.
+image with `CI=1`, and `just web-e2e --update-snapshots=changed <spec>` regenerates a spec's
+baselines. Write the mode with `=`: Playwright reads a bare `--update-snapshots <spec>` as a mode.
 The recipe reads the image from `web.yml`.
 
 The recipe's second mount matters in a git worktree, where `node_modules` is a symlink
