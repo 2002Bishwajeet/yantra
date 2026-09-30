@@ -16,6 +16,10 @@
 # It always removes the services and the binaries. It asks, one at a time and
 # default no, before it removes /etc/yantra, the yantra account, or the
 # dashboard's Tailscale serve.
+
+# bash runs a piped script as it reads it, and a Ctrl-C also kills the `curl`
+# still writing it. The braces make bash read the whole file before it runs any.
+{
 set -euo pipefail
 
 REPO=2002Bishwajeet/yantra
@@ -455,3 +459,4 @@ Run this script again at a terminal and it does 2, starts yantrad and prints
 the dashboard's address. Step 1 stays yours: it never rewrites an agent.env
 that exists, and yantra-agent starts once that file names the daemon.
 REPORT
+}
