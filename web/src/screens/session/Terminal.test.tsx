@@ -274,7 +274,7 @@ describe('the terminal in the dashboard', () => {
         ),
       { timeout: PAUSE * 4 },
     )
-  }, 10000)
+  })
 
   /** A reason from the daemon is a refusal — the workspace has no session, the
    *  machine is asleep — and reopening a refused socket only refuses again. */
@@ -330,7 +330,7 @@ describe('the terminal in the dashboard', () => {
     expect(screen.getByRole('status').textContent).toContain('ended · tmux yantra on cachyos-g14')
     // The first socket, then the five it is worth reopening.
     expect(daemonised.asked.length).toBe(ATTEMPTS + 1)
-  }, 10000)
+  })
 })
 
 /** **Y-179.** One bridge, two addresses (ADR-0022). Nothing below is a second

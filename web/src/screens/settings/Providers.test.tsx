@@ -71,12 +71,12 @@ describe('Providers', () => {
     expect(sheet.getByText('notifications')).toBeTruthy()
 
     // The sheet polls at the interval GitHub named; the next answer is the grant.
-    expect(await sheet.findByText('Signed in as 2002Bishwajeet.', undefined, { timeout: 8_000 })).toBeTruthy()
+    expect(await sheet.findByText('Signed in as 2002Bishwajeet.')).toBeTruthy()
     fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
     expect(await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeTruthy()
     // Nothing that looks like a token crossed.
     expect(document.body.textContent).not.toMatch(/gho_|ghp_/)
-  }, 10_000)
+  })
 
   it('draws a refused login in the sheet', async () => {
     mountSettings('desktop', '/settings/providers', {
@@ -179,8 +179,8 @@ describe('Providers', () => {
       await waitFor(() => expect(asked).toContain('POST /api/github/client-id'))
       expect(await screen.findByText('Your own · after yantrad restarts')).toBeTruthy()
       // The connection polls every 5 s; the next answer matches what was saved.
-      expect(await screen.findByText('Your own · Iv1.mine', undefined, { timeout: 8_000 })).toBeTruthy()
-    }, 10_000)
+      expect(await screen.findByText('Your own · Iv1.mine')).toBeTruthy()
+    })
 
     it('draws a refused id in the sheet', async () => {
       mountSettings('desktop', '/settings/providers', {
@@ -229,8 +229,8 @@ describe('Providers', () => {
       await waitFor(() => expect(asked).toContain('DELETE /api/github/client-id'))
       expect(await screen.findByText("Yantra's own · after yantrad restarts")).toBeTruthy()
       // The connection polls every 5 s; the next answer confirms the reset.
-      expect(await screen.findByText('None configured', undefined, { timeout: 8_000 })).toBeTruthy()
-    }, 10_000)
+      expect(await screen.findByText('None configured')).toBeTruthy()
+    })
 
     it('has nothing to clear when the id is not custom', async () => {
       mountSettings('desktop', '/settings/providers')

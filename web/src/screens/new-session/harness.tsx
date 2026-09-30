@@ -1,12 +1,17 @@
 import { vi } from 'vitest'
-import { configure, render } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import App from '@/App'
 import * as contract from '@/contract.gen'
 import { answer } from '@/test/daemon'
 import type { FormFactor } from '@/shell/formFactor'
 
-// The `/new` chunk is lazy, and the first test in a file pays its transform.
-configure({ asyncUtilTimeout: 5_000 })
+// Warm the lazy route and shell chunks so no test's first mount pays their transform on a loaded box.
+await Promise.all([
+  import('@/screens/new-session/NewSession'),
+  import('@/shell/Account'),
+  import('@/shell/BellPopover'),
+  import('@/shell/NotificationsSheet'),
+])
 
 // The one eager route, which these tests never open.
 vi.mock('@/screens/dashboard/Dashboard', () => ({ Dashboard: () => null }))
