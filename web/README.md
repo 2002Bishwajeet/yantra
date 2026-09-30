@@ -619,11 +619,11 @@ of fourteen scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, 
 carrying its own key, so a write in one worker is not a row in another, and
 `page.clock` pins the instant so an age reads the same on every run.
 
-**The screenshot baselines are rendered in
-`mcr.microsoft.com/playwright:v1.63.0-noble`** — the image CI's e2e jobs run in —
+**The screenshot baselines are rendered in the Playwright image that
+[`web.yml`](../.github/workflows/web.yml) pins** — the image CI's e2e jobs run in —
 so a developer's own fonts never enter one. `just web-e2e` runs the suite in that
 image with `CI=1`, and `just web-e2e --update-snapshots` regenerates the baselines.
-The recipe takes the image tag from the installed `@playwright/test`.
+The recipe reads the image from `web.yml`.
 
 The recipe's second mount matters in a git worktree, where `node_modules` is a symlink
 to the main checkout's. The container has no mount for the symlink's target,
