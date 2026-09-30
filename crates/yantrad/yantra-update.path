@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch for a request to update Yantra
+Documentation=https://github.com/2002Bishwajeet/yantra
+
+[Path]
+# ADR-0027 §3: yantrad asks by creating this file, and the file carries nothing.
+# It sits directly in the daemon's home, which that account cannot rename, so no
+# directory on the way can become a symlink under root's rm.
+PathExists=/home/yantra/yantra-update.requested
+
+[Install]
+WantedBy=multi-user.target
