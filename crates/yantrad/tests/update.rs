@@ -228,6 +228,19 @@ impl Appliance {
             .success())
     }
 
+    /// Read as `yantra`: `/proc/<pid>/exe` needs ptrace access, and the
+    /// container's root has no `CAP_SYS_PTRACE` over another account's process.
+    fn runs(&self, pid: &str, marker: &str) -> Result<bool> {
+        let exe = format!("/proc/{pid}/exe");
+        let out = self
+            .systemd
+            .exec_as("yantra", &["grep", "-q", "-a", marker, &exe])?;
+        if out.status.code() == Some(2) {
+            bail!("{exe}: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+        Ok(out.status.success())
+    }
+
     fn exists(&self, path: &str) -> Result<bool> {
         Ok(self.systemd.exec(&["test", "-e", path])?.status.success())
     }
@@ -319,7 +332,7 @@ fn an_update_restarts_the_daemon_and_the_session_and_its_socket_survive() -> Res
     let after = appliance.daemon_pid()?;
     assert_ne!(after, before, "yantrad was not restarted:\n{story}");
     assert!(
-        appliance.carries(&format!("/proc/{after}/exe"), NEW_MARK)?,
+        appliance.runs(&after, NEW_MARK)?,
         "the running yantrad is not v{NEW}"
     );
     assert!(
