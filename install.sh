@@ -249,8 +249,8 @@ staged="$work/yantra-$VERSION-$target"
 [ -e "$staged/yantrad.service" ] ||
     fail "v$VERSION carries no units, so it predates them moving into the archive — install v0.2.0 or later"
 
-# The updater and its units ride in the archive too, since the release after
-# v0.3.3 (Y-368). An older release installs without them and cannot update itself.
+# The updater and its units ride in the archive too, since v0.4.0
+# (Y-368). An older release installs without them and cannot update itself.
 if [ -e "$staged/install.sh" ] && [ -e "$staged/yantra-update.service" ]; then
     updates=yes
 else
