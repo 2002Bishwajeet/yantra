@@ -220,6 +220,13 @@ enum Command {
     JoinScript,
     /// Say which build this is
     About,
+    /// Say whether a newer release is published. `--check` is required until
+    /// this verb can also apply one (Y-368)
+    Update {
+        /// Only read the published version; install nothing
+        #[arg(long, required = true)]
+        check: bool,
+    },
 }
 
 /// Spelled out rather than a bare bool so that adding a second agent is a new
@@ -378,6 +385,7 @@ async fn main() -> ExitCode {
         Some(Command::SshIdentity { .. }) => ssh_identity(),
         Some(Command::JoinScript) => join_script().await,
         Some(Command::About) => about(),
+        Some(Command::Update { .. }) => update_check().await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -1150,6 +1158,35 @@ fn render_about() -> String {
         yantra_core::about::VERSION,
         yantra_core::about::TARGET,
         yantra_core::about::BUILT
+    )
+}
+
+/// ADR-0027 §2's check, in-process like every other verb (ADR-0012): the
+/// grant from this shell when there is one, anonymous when there is not.
+async fn update_check() -> ExitCode {
+    let token = github::from_env();
+    match Github::default().latest_release(token.as_ref()).await {
+        Ok(release) => {
+            print!("{}", render_update(&release));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_update(published: &github::Release) -> String {
+    let verdict = if yantra_core::about::newer(published) {
+        "newer"
+    } else {
+        "current"
+    };
+    format!(
+        "running:   {}\npublished: {}\n{verdict}\n",
+        yantra_core::about::VERSION,
+        published.version
     )
 }
 
@@ -3293,6 +3330,34 @@ mod tests {
         assert!(out.contains("target:  "), "{out}");
         assert!(out.contains("built:   20"), "{out}");
         assert!(out.trim_end().ends_with("GET /api/about"), "{out}");
+    }
+
+    /// ADR-0027 §2's spelling. A bare `update` would be the apply Y-368 adds,
+    /// so it is refused until then rather than meaning *check*.
+    #[test]
+    fn update_parses_only_with_check() {
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "update", "--check"])
+                .expect("`update --check` parses")
+                .command,
+            Some(Command::Update { check: true })
+        ));
+        assert!(Cli::try_parse_from(["yantra", "update"]).is_err());
+    }
+
+    #[test]
+    fn update_check_names_both_versions_and_the_verdict() {
+        let newer = render_update(&github::Release::parse("999.0.0").expect("a version"));
+        assert_eq!(
+            newer,
+            format!(
+                "running:   {}\npublished: 999.0.0\nnewer\n",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        let current =
+            render_update(&github::Release::parse(env!("CARGO_PKG_VERSION")).expect("a version"));
+        assert!(current.ends_with("\ncurrent\n"), "{current}");
     }
 
     /// Which of the two happened is the sentence, and both name the session

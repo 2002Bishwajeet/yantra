@@ -73,7 +73,7 @@ describe('a route under an error boundary', () => {
       Promise.resolve(
         refusing
           ? answer(503, 'could not establish who is calling')
-          : answer(200, { version: '0.9.0', uptime_seconds: 1, listening_on: [] }),
+          : answer(200, { version: '0.9.0', uptime_seconds: 1, listening_on: [], published: { looked: 'never' } }),
       ),
     )
     vi.stubGlobal('fetch', asked)

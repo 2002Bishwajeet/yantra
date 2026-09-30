@@ -35,6 +35,8 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const SLOW_DOWN: Duration = Duration::from_secs(5);
 /// `gh search` capped here too: a person triaging does not scroll past thirty.
 const SEARCH_LIMIT: &str = "30";
+/// ADR-0027 §4: the one repository whose releases the appliance installs from.
+const RELEASES: &str = "repos/2002Bishwajeet/yantra/releases/latest";
 /// Enough for 3000 repositories; a `Link` chain that never ends is a bug, not a
 /// fleet.
 const MAX_PAGES: usize = 30;
@@ -168,6 +170,31 @@ pub struct Repo {
     pub default_branch: String,
 }
 
+/// The newest published release, read off its tag (ADR-0027 §4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Release {
+    /// `MAJOR.MINOR.PATCH`, without the tag's `v`.
+    pub version: String,
+    pub parts: (u64, u64, u64),
+}
+
+impl Release {
+    /// `v0.3.3` or `0.3.3`, and nothing else: a pre-release tag never reaches
+    /// `/releases/latest`, so a suffix here is a tag this cannot order.
+    pub fn parse(tag: &str) -> Option<Self> {
+        let version = tag.strip_prefix('v').unwrap_or(tag);
+        let mut numbers = version.split('.').map(|part| part.parse::<u64>().ok());
+        let parts = (numbers.next()??, numbers.next()??, numbers.next()??);
+        if numbers.next().is_some() {
+            return None;
+        }
+        Some(Self {
+            version: version.to_owned(),
+            parts,
+        })
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no OAuth App client id — set {CLIENT_ID} to the id of the app the owner registered")]
@@ -195,6 +222,9 @@ pub enum Error {
 
     #[error("GitHub could not be reached: {reason}")]
     Unreachable { reason: String },
+
+    #[error("the newest release is tagged `{tag}`, which is not MAJOR.MINOR.PATCH")]
+    NotAVersion { tag: String },
 
     #[error("could not read {what} from what GitHub sent")]
     Parse {
@@ -304,6 +334,23 @@ impl Github {
             ok(&response, "/user")?;
             let user: User = read_json(&mut response, "the account")?;
             Ok(user.login)
+        })
+        .await
+    }
+
+    /// ADR-0027 §4's one read: the newest release's `tag_name`. The grant goes
+    /// along when there is one, for its 5,000-an-hour quota; without one the
+    /// call is anonymous and a `403` is a failed check, never *current*.
+    pub async fn latest_release(&self, token: Option<&Token>) -> Result<Release, Error> {
+        let url = format!("{}/{RELEASES}", self.api);
+        let token = token.cloned();
+        blocking(move || {
+            let mut response = request(&url, token.as_ref(), &[]).map_err(unreachable)?;
+            ok(&response, "/releases/latest")?;
+            let latest: Latest = read_json(&mut response, "the newest release")?;
+            Release::parse(&latest.tag_name).ok_or(Error::NotAVersion {
+                tag: latest.tag_name,
+            })
         })
         .await
     }
@@ -454,6 +501,11 @@ struct TokenAnswer {
 }
 
 #[derive(serde::Deserialize)]
+struct Latest {
+    tag_name: String,
+}
+
+#[derive(serde::Deserialize)]
 struct User {
     login: String,
 }
@@ -506,11 +558,21 @@ fn agent() -> ureq::Agent {
 }
 
 fn get(url: &str, token: &Token, query: &[(&str, &str)]) -> Result<Response, ureq::Error> {
+    request(url, Some(token), query)
+}
+
+fn request(
+    url: &str,
+    token: Option<&Token>,
+    query: &[(&str, &str)],
+) -> Result<Response, ureq::Error> {
     let mut request = agent()
         .get(url)
-        .header("Authorization", &format!("Bearer {}", token.reveal()))
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28");
+    if let Some(token) = token {
+        request = request.header("Authorization", &format!("Bearer {}", token.reveal()));
+    }
     for (key, value) in query {
         request = request.query(key, value);
     }
@@ -1028,5 +1090,114 @@ mod tests {
         let unread = at(address).unread(&token()).await.expect("a count");
 
         assert_eq!(unread, 0);
+    }
+
+    /// ADR-0027 §4: `tag_name` is the one field read, and the `v` is the
+    /// tag's spelling rather than the version's.
+    #[tokio::test]
+    async fn the_latest_release_is_read_off_its_tag_without_the_v() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"{"tag_name":"v0.10.2","name":"v0.10.2","draft":false,"prerelease":false}"#,
+            )],
+        );
+
+        let release = at(address).latest_release(None).await.expect("a release");
+
+        assert_eq!(release.version, "0.10.2");
+        assert_eq!(release.parts, (0, 10, 2));
+        let request = served.join().expect("the listener thread").remove(0);
+        assert!(
+            request.starts_with("GET /repos/2002Bishwajeet/yantra/releases/latest HTTP/1.1\r\n"),
+            "{request}"
+        );
+    }
+
+    /// The grant rides along when there is one, and nothing pretends to be
+    /// one when there is not.
+    #[tokio::test]
+    async fn the_release_read_sends_a_bearer_only_with_a_grant() {
+        let (listener, address) = listen();
+        let tag = r#"{"tag_name":"v0.3.3"}"#;
+        let served = serve(listener, vec![reply("200 OK", tag), reply("200 OK", tag)]);
+
+        at(address).latest_release(None).await.expect("anonymous");
+        at(address)
+            .latest_release(Some(&token()))
+            .await
+            .expect("with the grant");
+
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            !seen[0].to_lowercase().contains("authorization:"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            seen[1]
+                .to_lowercase()
+                .contains("authorization: bearer gho_notarealtoken"),
+            "{}",
+            seen[1]
+        );
+    }
+
+    /// An anonymous box past its sixty an hour gets a `403`, and that is a
+    /// failed check naming the status (ADR-0027 §4).
+    #[tokio::test]
+    async fn a_rate_limited_release_read_is_a_status_and_not_a_version() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![reply(
+                "403 Forbidden",
+                r#"{"message":"API rate limit exceeded"}"#,
+            )],
+        );
+
+        let failed = at(address).latest_release(None).await.expect_err("403");
+
+        assert!(
+            matches!(failed, Error::Status { status: 403, .. }),
+            "{failed}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_release_read_with_nothing_listening_is_unreachable() {
+        let (listener, gone) = listen();
+        drop(listener);
+
+        let failed = at(gone)
+            .latest_release(None)
+            .await
+            .expect_err("nothing listens");
+
+        assert!(matches!(failed, Error::Unreachable { .. }), "{failed}");
+    }
+
+    #[tokio::test]
+    async fn a_tag_that_is_not_a_version_is_its_own_error() {
+        let (listener, address) = listen();
+        let _served = serve(listener, vec![reply("200 OK", r#"{"tag_name":"nightly"}"#)]);
+
+        let failed = at(address).latest_release(None).await.expect_err("nightly");
+
+        match failed {
+            Error::NotAVersion { tag } => assert_eq!(tag, "nightly"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn only_three_numbers_parse_as_a_release() {
+        assert_eq!(Release::parse("0.3.3").map(|r| r.parts), Some((0, 3, 3)));
+        assert!(Release::parse("v0.3").is_none());
+        assert!(Release::parse("v0.3.3.1").is_none());
+        assert!(Release::parse("v0.3.0-rc.1").is_none());
+        assert!(Release::parse("").is_none());
     }
 }

@@ -1,7 +1,7 @@
 // Y-343 serves these; written from docs/plans/m14-rust-inventory.md §2 (d, j)
 // ahead of the Rust. When that row lands its DTOs in `api.ts` and
 // `contract.gen.ts`, delete this file and import from there.
-import type { AgentState } from '@/api'
+import type { AgentState, Looked, Published } from '@/api'
 
 /** `GET /api/about` — facts about the process, so a bare object and not a
  *  `Looked` envelope: nothing was asked over ssh to know them. */
@@ -14,6 +14,8 @@ export type About = {
   tailnet: string | null
   // Y-388: whether this process started with a relay; never the URL or token.
   relay: boolean
+  // Y-367: the newest published release (ADR-0027 §2).
+  published: Looked<Published>
 }
 
 /** `GET /api/ssh-identity`, from `identity::prepare_in`. The public half only. */

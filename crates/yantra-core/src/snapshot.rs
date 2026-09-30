@@ -86,6 +86,9 @@ pub type Github = Reading<doctor::Check>;
 /// Every repository the grant can see (ADR-0023). Off the tailnet like
 /// [`Attention`], and on the same slow clock for the same reason.
 pub type Repos = Reading<Result<Vec<github::Repo>, github::Error>>;
+/// The newest published release (ADR-0027 §2). A failed read stays failed, so
+/// About can never say *current* when it could not ask.
+pub type Release = Reading<Result<github::Release, github::Error>>;
 
 /// Each class costs something different to look at, so each is looked at on its
 /// own and carries its own age. Behind an [`Arc`] so a handler can take the
@@ -100,6 +103,7 @@ pub struct Snapshot {
     pub attention: Option<Arc<Attention>>,
     pub github: Option<Arc<Github>>,
     pub repos: Option<Arc<Repos>>,
+    pub release: Option<Arc<Release>>,
 }
 
 #[cfg(test)]
@@ -128,6 +132,7 @@ mod tests {
         assert!(snapshot.attention.is_none());
         assert!(snapshot.github.is_none());
         assert!(snapshot.repos.is_none());
+        assert!(snapshot.release.is_none());
     }
 
     /// The clone a handler serves is the same reading, not a re-taken one.

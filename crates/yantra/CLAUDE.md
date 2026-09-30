@@ -38,6 +38,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `rm` while the session is open, or while the machine cannot be asked | 1 | deleting the file strands the session where nothing looks for it, and a check that cannot know must refuse (R-23). `--force` is how a caller means it anyway |
 | `doctor`, unless every check is `present` | 1 | *ready* is the only 0, so an installer can loop on it — and an `unknown` is not a yes (R-23). An empty fleet is 1 too: nothing was asked, so nothing is known |
 | `install`, unless every basic is there afterwards | 1 | `doctor`'s rule. A step left for a person, an installer that failed and a machine that could not be asked are each 1, and the output names the command to run there (ADR-0028) |
+| `update --check` when GitHub could not be asked | 1 | a failed read is not *current* (ADR-0027 §4). A newer release is **0**: the read worked, and the verdict is on stdout |
 | `tokens` on a session that has spent nothing | **0** | it reports a measurement rather than a state, and zero is one — the transcript was read |
 | `edit --machine` when that machine cannot be reached | 1 | it cannot be *known* that no session is being stranded, and a check that cannot know must refuse rather than allow (R-23) |
 | `github status`, unless GitHub accepts the grant | 1 | `doctor`'s rule on the one check about this host, so an installer can loop on it. No grant in this shell is 1 and names `YANTRA_GITHUB_TOKEN` |

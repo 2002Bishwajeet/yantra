@@ -32,6 +32,10 @@ const EVERY: Duration = Duration::from_secs(30);
 /// it since Y-342: the inbox, the repository list, and the grant check.
 const ATTENTION: Duration = Duration::from_secs(300);
 
+/// ADR-0027 §2: the published version is read hourly and never on the
+/// request path. One call an hour fits even GitHub's anonymous sixty.
+const RELEASE: Duration = Duration::from_secs(3600);
+
 pub type Model = Arc<RwLock<Snapshot>>;
 
 /// One task per class. A fleet-wide session query costs a full `ConnectTimeout`
@@ -121,10 +125,19 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     });
 
     let repos = model.clone();
+    let reader = grant.clone();
     tokio::spawn(async move {
         loop {
             look_at_repos(&repos, &grant).await;
             tick_or_change(&grant).await;
+        }
+    });
+
+    let release = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_release(&release, &reader, &Github::default()).await;
+            tokio::time::sleep(RELEASE).await;
         }
     });
 }
@@ -212,6 +225,14 @@ async fn look_at_repos(model: &Model, grant: &Grant) {
         Some(token) => Github::default().repos(&token).await,
     };
     model.write().await.repos = Some(Arc::new(Reading::new(repos)));
+}
+
+/// The newest published release, with the grant when there is one and
+/// anonymously when there is not (ADR-0027 §4).
+async fn look_at_release(model: &Model, grant: &Grant, github: &Github) {
+    let token = grant.token().await;
+    let release = github.latest_release(token.as_ref()).await;
+    model.write().await.release = Some(Arc::new(Reading::new(release)));
 }
 
 /// The reading lands in the model before anything is sent, so a browser never
@@ -475,5 +496,30 @@ mod tests {
         let reading = model.read().await.github.clone().expect("looked");
         assert_eq!(reading.value().state, doctor::State::Absent);
         assert!(reading.value().detail.contains("yantra github login"));
+    }
+
+    /// ADR-0027 §2: a GitHub that could not be asked is a failed reading,
+    /// which About draws as a failure and never as *current*.
+    #[tokio::test]
+    async fn a_release_read_that_failed_is_stored_as_failed() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let gone = format!("http://{}", listener.local_addr().expect("its address"));
+        drop(listener);
+
+        let model = Model::default();
+        look_at_release(&model, &Grant::default(), &Github::at(&gone, &gone)).await;
+
+        let reading = model.read().await.release.clone().expect("looked");
+        let failure = reading.value().as_ref().expect_err("the look failed");
+        assert!(
+            matches!(failure, github::Error::Unreachable { .. }),
+            "{failure}"
+        );
+    }
+
+    #[test]
+    fn the_release_is_read_hourly_and_no_faster_than_the_feed() {
+        assert_eq!(RELEASE, Duration::from_secs(3600));
+        assert!(RELEASE > ATTENTION);
     }
 }

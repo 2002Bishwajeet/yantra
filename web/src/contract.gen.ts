@@ -501,6 +501,14 @@ export const about = {
     "100.64.0.1:7717",
     "[fd7a:115c:a1e0::1]:7717"
   ],
+  "published": {
+    "age_seconds": 1234,
+    "data": {
+      "newer": true,
+      "version": "0.4.0"
+    },
+    "looked": "ok"
+  },
   "relay": true,
   "tailnet": "<tailnet>.ts.net",
   "target": "aarch64-unknown-linux-musl",
