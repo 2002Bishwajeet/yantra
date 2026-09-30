@@ -7,6 +7,7 @@ import { ApiError } from './errors'
 import { aWorkspace, looked, opened, stopped } from './fixtures'
 import { keys } from './keys'
 import {
+  useApplyUpdate,
   useClone,
   useCreateWorkspace,
   useDeleteWorkspace,
@@ -212,6 +213,28 @@ describe('the GitHub grant', () => {
     expect(sent(asked)).toMatchObject({ path: '/api/github', method: 'DELETE' })
     for (const key of [keys.github(), keys.attention(), keys.repos()])
       expect(result.current.client.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+})
+
+describe('an update (ADR-0027 §3)', () => {
+  it('asks with an empty POST and takes the 202 with no body', async () => {
+    const asked = daemon(202)
+    const { result } = renderHookQueried(() => useApplyUpdate())
+
+    await act(() => result.current.mutateAsync())
+
+    expect(sent(asked)).toEqual({ path: '/api/update', method: 'POST', body: undefined })
+  })
+
+  it('rejects a box with no updater as a refusal carrying the daemon’s words', async () => {
+    daemon(409, 'this box has no /usr/local/bin/yantra-update, so it was not installed by install.sh')
+    const { result } = renderHookQueried(() => useApplyUpdate())
+
+    const refused = await result.current.mutateAsync().catch((error: unknown) => error)
+
+    expect(refused).toBeInstanceOf(ApiError)
+    expect(refused).toMatchObject({ kind: 'refused', status: 409 })
+    expect((refused as ApiError).said).toContain('install.sh')
   })
 })
 

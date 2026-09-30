@@ -512,6 +512,9 @@ const routes = [
     },
   ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
+  // ADR-0027 §3: the daemon only asks. Nothing here restarts, so the version
+  // never moves and About stays on its updating line.
+  ['POST', /^\/api\/update$/, () => [202]],
   ['POST', /^\/api\/viewing$/, () => [204]],
   ['POST', /^\/api\/heartbeat$/, () => [204]],
 ]

@@ -227,6 +227,17 @@
   word-break: break-all;
 }
 
+.settings__update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.settings__update > p {
+  margin: 0;
+}
+
 /* Appearance. */
 
 .settings__choices {
