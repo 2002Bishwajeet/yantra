@@ -1,3 +1,4 @@
+import type { Request } from '@playwright/test'
 import { expect, scenario, test } from './lib/test'
 import { ROUTES } from './lib/routes'
 import type { Scenario } from './lib/scenario'
@@ -31,6 +32,15 @@ for (const name of SCENARIOS) {
   test(`on ${name}: no console error, warning or page error`, async ({ page }) => {
     const seen: string[] = []
     let path = ''
+    const open = new Set<Request>()
+    page.on('request', (request) => open.add(request))
+    page.on('requestfinished', (request) => open.delete(request))
+    page.on('requestfailed', (request) => open.delete(request))
+    // The last page polls until the new one commits, and a read aborted then
+    // fires no event, so the count starts over at the commit.
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) open.clear()
+    })
     page.on('pageerror', (error) => {
       seen.push(`${path}: pageerror ${error.message}`)
     })
@@ -47,7 +57,14 @@ for (const name of SCENARIOS) {
       // The screen has drawn: its own heading, or the board a failed read puts
       // in its place, which carries no `h1`.
       await expect(page.locator('h1, [role="alert"]').first()).toBeVisible()
-      await page.waitForLoadState('networkidle')
+      // The page polls, so the network is never idle; wait for the reads the
+      // screen started with, and not for the polls that follow them.
+      const first = [...open]
+      await expect
+        .poll(() => first.filter((one) => open.has(one)).map((one) => one.url()), {
+          message: `${path}: first reads still open`,
+        })
+        .toEqual([])
     }
 
     expect(seen, `console messages:\n${seen.join('\n')}`).toEqual([])
