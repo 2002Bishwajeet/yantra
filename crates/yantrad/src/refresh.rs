@@ -124,20 +124,20 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
         }
     });
 
-    let repos = model.clone();
-    let reader = grant.clone();
-    tokio::spawn(async move {
-        loop {
-            look_at_repos(&repos, &grant).await;
-            tick_or_change(&grant).await;
-        }
-    });
-
     let release = model.clone();
+    let reader = grant.clone();
     tokio::spawn(async move {
         loop {
             look_at_release(&release, &reader, &Github::default()).await;
             tokio::time::sleep(RELEASE).await;
+        }
+    });
+
+    let repos = model.clone();
+    tokio::spawn(async move {
+        loop {
+            look_at_repos(&repos, &grant).await;
+            tick_or_change(&grant).await;
         }
     });
 }
