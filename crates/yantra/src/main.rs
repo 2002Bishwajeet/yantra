@@ -385,7 +385,9 @@ async fn main() -> ExitCode {
         Some(Command::SshIdentity { .. }) => ssh_identity(),
         Some(Command::JoinScript) => join_script().await,
         Some(Command::About) => about(),
-        Some(Command::Update { .. }) => update_check().await,
+        Some(Command::Update { .. }) => {
+            update_check_with(&Github::default(), github::from_env().as_ref()).await
+        }
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -1161,11 +1163,10 @@ fn render_about() -> String {
     )
 }
 
-/// ADR-0027 §2's check, in-process like every other verb (ADR-0012): the
-/// grant from this shell when there is one, anonymous when there is not.
-async fn update_check() -> ExitCode {
-    let token = github::from_env();
-    match Github::default().latest_release(token.as_ref()).await {
+/// ADR-0027 §2's check, in-process like every other verb (ADR-0012). `main`
+/// passes the grant from this shell when there is one; `None` asks anonymously.
+async fn update_check_with(github: &Github, token: Option<&github::Token>) -> ExitCode {
+    match github.latest_release(token).await {
         Ok(release) => {
             print!("{}", render_update(&release));
             ExitCode::SUCCESS
@@ -3358,6 +3359,16 @@ mod tests {
         let current =
             render_update(&github::Release::parse(env!("CARGO_PKG_VERSION")).expect("a version"));
         assert!(current.ends_with("\ncurrent\n"), "{current}");
+    }
+
+    #[tokio::test]
+    async fn an_update_check_that_cannot_read_the_release_exits_1() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("an address");
+        drop(listener);
+        let github = Github::at(&format!("http://{address}"), &format!("http://{address}"));
+
+        assert_eq!(update_check_with(&github, None).await, ExitCode::FAILURE);
     }
 
     /// Which of the two happened is the sentence, and both name the session
