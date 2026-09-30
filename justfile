@@ -8,6 +8,9 @@ export CARGO_TARGET_DIR := justfile_directory() / "target"
 # this is the default rather than the answer (docs/appliance.md).
 appliance_target := "aarch64-unknown-linux-musl"
 
+# The image the web e2e baselines are rendered in; web.yml pins it, and every local run reads it from there.
+playwright_image := `grep -oE 'mcr.microsoft.com/playwright:v[0-9.]+-noble' .github/workflows/web.yml`
+
 appliance_stage := "/tmp/yantra-install"
 
 default:
@@ -184,22 +187,19 @@ web-build:
     npm --prefix web ci
     npm --prefix web run build
 
-# The e2e suite in the image its screenshot baselines are rendered in, which
-# CI's e2e jobs run in too, so a developer's own fonts never enter one. The tag
-# follows the installed @playwright/test, so a version bump cannot leave the
-# browsers behind. `just web-e2e --update-snapshots` regenerates baselines.
+# e2e in CI's image with CI's settings, so a developer's fonts never enter a baseline.
+[positional-arguments]
 web-e2e *args:
     #!/usr/bin/env bash
     set -euo pipefail
     cd web
-    npm ci --prefer-offline
+    [ -d node_modules ] || npm ci --prefer-offline
     # A worktree's node_modules can be a symlink the container cannot resolve without this mount.
     nm="$(readlink -f node_modules)"
-    tag="v$(node -p "require('@playwright/test/package.json').version")-noble"
-    name="yantra-e2e-$(basename "$(git rev-parse --show-toplevel)")"
+    name="yantra-e2e-$(git rev-parse --show-toplevel | sha1sum | cut -c1-8)"
     podman rm -f "$name" >/dev/null 2>&1 || true
     podman run --rm --name "$name" -e CI=1 -v "$PWD/..:/work" -v "$nm:$nm" \
-        -w /work/web "mcr.microsoft.com/playwright:$tag" npx playwright test {{args}}
+        -w /work/web "{{playwright_image}}" npx playwright test "$@"
 
 # M7's one file to copy: the appliance daemon with the dashboard inside it.
 # Run it *after* `just appliance`, which builds a `yantrad` without one over it.
@@ -230,7 +230,7 @@ brand:
     cd landing && npm ci
     podman run --rm -v "{{justfile_directory()}}:/work" \
         -v "{{justfile_directory()}}/web/node_modules:/nm:ro" \
-        -w /work mcr.microsoft.com/playwright:v1.63.0-noble \
+        -w /work {{playwright_image}} \
         node design/brand/render.mjs
 
 # Size and startup are quality targets carried over from ADR-0003's

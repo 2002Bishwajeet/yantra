@@ -31,7 +31,7 @@ const BUILDER = {
 
 const RUST_GATE = 'YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 just check'
 // e2e runs in the image the screenshot baselines are rendered in; on the host, fonts differ. A missing baseline fails, not written.
-const WEB_GATE = '(cd web && npm ci --prefer-offline && npm run lint && npm test && npm run build && npm run budget) && just web-e2e --update-snapshots=none --workers=4'
+const WEB_GATE = '(cd web && npm ci --prefer-offline && npm run lint && npm test && npm run build && npm run budget) && just web-e2e --update-snapshots=none'
 // A row's gate follows the paths it touches, not only its kind: a web row that changes the daemon runs both.
 const gate = (row) => {
   const rust = row.kind.startsWith('rust') || row.paths.some((p) => p.startsWith('crates') || p.startsWith('Cargo'))
@@ -45,7 +45,7 @@ Rules for this run (CLAUDE.md §B7, the build loop):
 - Do not edit tracker.md or docs/session-log.md. The ship stage does that.
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
-- Never run the podman suite, \`just check\`, \`just web-e2e\` or \`npx playwright test\`. The verify stage runs them one row at a time, because parallel suites run the box out of memory. The one exception: a fix agent may run \`just web-e2e --update-snapshots <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
+- Never run the podman suite, \`just check\`, or Playwright in any form (\`just web-e2e\`, \`npm run e2e\`, \`npx playwright test\`). The verify stage runs them one row at a time, because parallel suites run the box out of memory. The one exception: a fix agent may run \`just web-e2e --update-snapshots=changed <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
 - Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices and accessibility before you write any. Errors are typed and every error path is tested.`
 
 function lock() {
@@ -189,11 +189,13 @@ Remove leftover podman containers afterwards.`,
 
 async function fix(row, wt, what) {
   const b = BUILDER[row.kind]
-  return agent(
+  // A web fix may regenerate baselines in a podman container, so it takes the verify lock.
+  const run = gate(row).includes('web-e2e') ? serialVerify : (fn) => fn()
+  return run(() => agent(
     `Fix ${row.id} in ${wt}. ${what}
 Find the cause before you change code. Commit the fix.${RULES(wt)}`,
     { label: `fix:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
-  )
+  ))
 }
 
 async function verifyUntilGreen(row, wt, plan, rounds) {
