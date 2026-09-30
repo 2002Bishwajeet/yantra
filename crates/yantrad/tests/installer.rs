@@ -43,7 +43,20 @@ use common::{Systemd, UNPRIVILEGED, fixture_dir, repo_root};
 
 const BINARIES: [&str; 3] = ["yantrad", "yantra", "yantra-agent"];
 
-const UNITS: [&str; 2] = ["yantrad.service", "yantra-agent.service"];
+const UNITS: [&str; 4] = [
+    "yantrad.service",
+    "yantra-agent.service",
+    "yantra-update.path",
+    "yantra-update.service",
+];
+
+/// The units a person or the script enables. `yantra-update.service` has no
+/// `[Install]`: the path unit starts it (ADR-0027 §3).
+const ENABLED: [&str; 3] = [
+    "yantrad.service",
+    "yantra-agent.service",
+    "yantra-update.path",
+];
 
 /// What the fixture publishes first, and what it publishes over it. `install.sh`
 /// names neither, so a second run that installs the second one followed the
@@ -157,6 +170,14 @@ impl Installer {
             (
                 repo_root().join("crates/yantra-agent/yantra-agent.service"),
                 "/srv/units/yantra-agent.service",
+            ),
+            (
+                repo_root().join("crates/yantrad/yantra-update.path"),
+                "/srv/units/yantra-update.path",
+            ),
+            (
+                repo_root().join("crates/yantrad/yantra-update.service"),
+                "/srv/units/yantra-update.service",
             ),
         ] {
             installer.systemd.copy_in(&from, to)?;
@@ -377,12 +398,20 @@ fn the_fixtures_archive_is_shaped_the_way_release_yml_stages_one() -> Result<()>
     for unit in [
         "crates/yantrad/yantrad.service",
         "crates/yantra-agent/yantra-agent.service",
+        "crates/yantrad/yantra-update.path",
+        "crates/yantrad/yantra-update.service",
     ] {
         assert!(
             workflow.contains(unit),
             "release.yml no longer stages {unit}, so the archive install.sh verifies would not carry it"
         );
     }
+    // Y-368: the updater is the archive's copy of install.sh, so SHA256SUMS
+    // covers the script that runs as root on every update.
+    assert!(
+        workflow.contains(r#"install.sh "staging/$stage/""#),
+        "release.yml no longer stages install.sh, so no box could leave an updater behind"
+    );
     Ok(())
 }
 
@@ -445,10 +474,34 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
             "{unit} is not the one the archive carried"
         );
         assert_eq!(fixture.systemd.property(unit, "LoadState")?, "loaded");
+    }
+    for unit in ENABLED {
         assert_eq!(
             fixture.systemd.property(unit, "UnitFileState")?,
             "disabled",
             "{unit} is the owner's to enable"
+        );
+    }
+    // Y-368: the archive's own install.sh, left behind as the updater.
+    assert_eq!(
+        fixture
+            .sh("stat -c '%a %U' /usr/local/bin/yantra-update")?
+            .trim(),
+        "755 root"
+    );
+    assert_eq!(
+        fixture.sha("/usr/local/bin/yantra-update")?,
+        fixture.sha("/srv/staging/yantra-*/install.sh")?,
+        "the updater is not the install.sh the archive carried"
+    );
+    for binary in BINARIES {
+        assert!(
+            !fixture
+                .systemd
+                .exec(&["test", "-e", &format!("/usr/local/bin/{binary}.prev")])?
+                .status
+                .success(),
+            "a first install has no previous {binary} to keep"
         );
     }
 
@@ -548,7 +601,18 @@ fn a_second_run_replaces_a_running_binary_and_leaves_an_edited_agent_env_alone()
             fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
             "{binary} is not the one the second archive carried"
         );
+        // ADR-0027 §6: one generation back.
+        assert_eq!(
+            &fixture.sha(&format!("/usr/local/bin/{binary}.prev"))?,
+            was,
+            "{binary}.prev is not the {binary} the second run replaced"
+        );
     }
+    assert_eq!(
+        fixture.sha("/usr/local/bin/yantra-update")?,
+        fixture.sha("/srv/staging/yantra-*/install.sh")?,
+        "the updater is not the second archive's install.sh"
+    );
 
     for (unit, was) in UNITS.iter().zip(&units_before) {
         let now = fixture.sha(&format!("/etc/systemd/system/{unit}"))?;
@@ -647,6 +711,46 @@ fn a_release_whose_archive_carries_no_units_is_refused() -> Result<()> {
     fixture.nothing_is_installed("the archive carried no units")
 }
 
+/// v0.2.0 to v0.3.3 carry two units and no updater. This script still
+/// installs them, and leaves nothing behind that could not run.
+#[test]
+fn a_release_whose_archive_carries_no_updater_installs_without_one() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+
+    fixture.publish(VERSION, "updaterless")?;
+    fixture.release(&["strip_updater", &fixture.repo, VERSION])?;
+
+    let report = fixture.install_ok()?;
+    for binary in BINARIES {
+        assert_eq!(
+            fixture.sha(&format!("/usr/local/bin/{binary}"))?,
+            fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
+            "{binary} is not the one the archive carried"
+        );
+    }
+    for path in [
+        "/usr/local/bin/yantra-update",
+        "/etc/systemd/system/yantra-update.path",
+        "/etc/systemd/system/yantra-update.service",
+    ] {
+        assert!(
+            !fixture
+                .systemd
+                .exec(&["test", "-e", path])?
+                .status
+                .success(),
+            "{path} was written from an archive that carried none"
+        );
+    }
+    assert!(
+        !report.contains("yantra-update.path"),
+        "the report names a unit this release did not install:\n{report}"
+    );
+    Ok(())
+}
+
 /// A release list that does not answer resolves no version, and the script
 /// stops there — a `403` from the unauthenticated rate limit takes this same
 /// branch (ADR-0027 §4). `YANTRA_VERSION` is the way past it, and it reads no
@@ -717,7 +821,7 @@ fn at_a_terminal_a_serve_that_fails_or_is_interrupted_still_ends_on_http() -> Re
         refused.contains("tailscale serve failed"),
         "a refused serve must be said:\n{refused}"
     );
-    for unit in UNITS {
+    for unit in ENABLED {
         assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
     }
     assert_eq!(last_line(&refused), HTTP_URL);
@@ -766,7 +870,7 @@ fn at_a_terminal_a_no_to_https_on_a_logged_in_box_still_starts_the_dashboard() -
             .any(|c| c == "up" || c.starts_with("serve --bg")),
         "a no changed Tailscale's settings: {calls:?}"
     );
-    for unit in UNITS {
+    for unit in ENABLED {
         assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
     }
     assert_eq!(last_line(&screen), HTTP_URL);
@@ -814,7 +918,7 @@ fn at_a_terminal_a_yes_starts_the_dashboard_and_a_second_run_asks_nothing() -> R
         env.lines().any(|l| l == "YANTRA_DAEMON=127.0.0.1:7717"),
         "an absent agent.env is written with this box's address:\n{env}"
     );
-    for unit in UNITS {
+    for unit in ENABLED {
         assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
     }
     assert_eq!(
@@ -900,7 +1004,7 @@ fn at_a_terminal_a_no_to_tailscale_installs_yantra_and_starts_nothing() -> Resul
         env.contains("#YANTRA_DAEMON="),
         "with no tailnet there is no address to write:\n{env}"
     );
-    for unit in UNITS {
+    for unit in ENABLED {
         assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "disabled");
     }
     Ok(())
@@ -916,6 +1020,8 @@ fn uninstall_removes_units_and_binaries_and_keeps_the_rest_with_no_terminal() ->
     };
 
     fixture.publish(VERSION, "uninstall")?;
+    fixture.install_ok()?;
+    // A second run leaves the `.prev` files the uninstall has to find.
     fixture.install_ok()?;
     fixture.sh("id yantra")?;
 
@@ -937,6 +1043,21 @@ fn uninstall_removes_units_and_binaries_and_keeps_the_rest_with_no_terminal() ->
                 .status
                 .success(),
             "{binary} survived --uninstall"
+        );
+    }
+    for leftover in [
+        "yantra-update",
+        "yantrad.prev",
+        "yantra.prev",
+        "yantra-agent.prev",
+    ] {
+        assert!(
+            !fixture
+                .systemd
+                .exec(&["test", "-e", &format!("/usr/local/bin/{leftover}")])?
+                .status
+                .success(),
+            "{leftover} survived --uninstall"
         );
     }
     for unit in UNITS {

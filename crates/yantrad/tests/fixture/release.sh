@@ -56,8 +56,10 @@ serve() {
     exit 1
 }
 
+# A fourth argument is a real yantrad to publish in place of the stand-in, for
+# the update test that has to run the daemon it installed (Y-368).
 publish() {
-    local repo=$1 version=$2 marker=$3
+    local repo=$1 version=$2 marker=$3 daemon=${4:-}
     local stage binary unit
     stage=$(staged "$version")
 
@@ -70,20 +72,28 @@ publish() {
     # enough to be that file and is not what a release ships.
     for binary in yantrad yantra yantra-agent; do
         cp /usr/bin/sleep "$STAGING/$stage/$binary"
+        if [ "$binary" = yantrad ] && [ -n "$daemon" ]; then
+            cp "$daemon" "$STAGING/$stage/$binary"
+        fi
         printf '\n%s\n' "$marker" >> "$STAGING/$stage/$binary"
     done
     echo "$marker" > "$STAGING/$stage/README.md"
     echo "$marker" > "$STAGING/$stage/LICENSE"
 
-    # release.yml stages both units beside the binaries (Y-365). The marker is a
-    # comment, which is the one thing a unit carries without systemd-analyze
-    # objecting, so an installed unit names the archive it came out of.
-    for unit in yantrad yantra-agent; do
+    # release.yml stages the units beside the binaries (Y-365), and install.sh
+    # with them (Y-368). The marker is a comment, which is the one thing a unit
+    # carries without systemd-analyze objecting, so an installed file names the
+    # archive it came out of.
+    for unit in yantrad.service yantra-agent.service yantra-update.path yantra-update.service; do
         {
-            cat "$UNITS/$unit.service"
+            cat "$UNITS/$unit"
             echo "# $marker"
-        } > "$STAGING/$stage/$unit.service"
+        } > "$STAGING/$stage/$unit"
     done
+    {
+        cat /fixture/install.sh
+        echo "# $marker"
+    } > "$STAGING/$stage/install.sh"
 
     # /releases/latest, which is the one read install.sh makes when nobody names
     # a version. `tag_name` is all it reads.
@@ -110,7 +120,14 @@ pack() {
 # units.
 strip_units() {
     local repo=$1 version=$2
-    rm -f "$STAGING/$(staged "$version")"/*.service
+    rm -f "$STAGING/$(staged "$version")"/{*.service,*.path,install.sh}
+    pack "$repo" "$version"
+}
+
+# An archive shaped the way v0.2.0 to v0.3.3 are: two units, and no updater.
+strip_updater() {
+    local repo=$1 version=$2
+    rm -f "$STAGING/$(staged "$version")"/{yantra-update.*,install.sh}
     pack "$repo" "$version"
 }
 
