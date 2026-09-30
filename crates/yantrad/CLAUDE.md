@@ -274,9 +274,10 @@ directory to walk.
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
-`DELETE /api/github`, and `POST`/`DELETE /api/github/client-id` — **the CLI's own verbs and nothing
-more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`, `repair`, `relay`,
-`clone`, `install`, `github login`, `github logout` and `github client-id` (Y-393). The daemon may do
+`DELETE /api/github`, `POST`/`DELETE /api/github/client-id` and `POST /api/update` — **the CLI's own
+verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
+`repair`, `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
+`update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
 
@@ -293,6 +294,15 @@ nothing is spawned, because the name reaches `ssh`'s argv. **One install per mac
 keyed on the lowercased name: a second `POST` while one runs is a `409`, and a drop guard gives the machine
 back on every path out of the task. It is not a tmux session, because `tmux` can be the thing being
 installed.
+
+**`update` asks and does nothing else** ([ADR-0027](../../docs/adr/0027-the-appliance-pulls-its-own-update.md)
+§3, Y-368). It creates the empty file `/home/yantra/yantra-update.requested` and answers `202` with no
+body. `yantra-update.path` sees it and starts `yantra-update.service`, which runs as root, installs
+the current release and restarts this process. **The daemon fetches nothing and names no version**:
+the account it runs as may ask for *the current release* and nothing else. A box with no
+`/usr/local/bin/yantra-update` — one `just appliance-install` set up — is a `409` naming `install.sh`.
+The paths are `Facts` fields, so a test names a scratch directory. `tests/update.rs` is the proof that
+a restart leaves the far tmux session running and the terminal socket reconnects.
 
 **`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
 caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`

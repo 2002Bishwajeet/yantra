@@ -5,7 +5,7 @@
 #     curl -fsSL <url>/install.sh | bash
 #
 # At a terminal it asks before it installs Tailscale, logs the box in, turns on
-# HTTPS, starts both units and prints the dashboard's address (Y-384). With no
+# HTTPS, starts the units and prints the dashboard's address (Y-384). With no
 # terminal it asks nothing, enables nothing and ends by naming what is left.
 # docs/appliance.md is the runbook around it.
 #
