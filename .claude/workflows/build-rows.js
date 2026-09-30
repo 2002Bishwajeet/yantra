@@ -326,7 +326,7 @@ if (results.length >= MAX_ROWS) log(`Stopped at maxRows=${MAX_ROWS}; more rows m
 
 phase('Report')
 await agent(
-  `Write ${REPORT} (create the folder if needed). It is the owner's morning report for the build loop on ${TODAY}. Plain prose, CLAUDE.md §A6.
+  `Write ${REPORT} (create the folder if needed). If it exists, an earlier run today wrote it: keep its text and append this run under a \`## Another run\` heading. It is the owner's morning report for the build loop on ${TODAY}. Plain prose, CLAUDE.md §A6.
 Open with one line: how many rows merged, stayed open and parked.
 Then a table: row, title, outcome, PR, and for parked rows the reason and the branch that holds the work.
 Then the rows triage skipped, one line each.
