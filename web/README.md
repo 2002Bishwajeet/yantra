@@ -621,16 +621,11 @@ carrying its own key, so a write in one worker is not a row in another, and
 
 **The screenshot baselines are rendered in
 `mcr.microsoft.com/playwright:v1.63.0-noble`** — the image CI's e2e jobs run in —
-so a developer's own fonts never enter one. Regenerate them the same way, run
-from `web/`:
+so a developer's own fonts never enter one. `just web-e2e` runs the suite in that
+image with `CI=1`, and `just web-e2e --update-snapshots` regenerates the baselines.
+The recipe takes the image tag from the installed `@playwright/test`.
 
-```sh
-podman run --rm -v "$PWD/..:/work" \
-  -v "$(readlink -f node_modules):$(readlink -f node_modules)" \
-  -w /work/web mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --update-snapshots
-```
-
-The second mount matters in a git worktree, where `node_modules` is a symlink
+The recipe's second mount matters in a git worktree, where `node_modules` is a symlink
 to the main checkout's. The container has no mount for the symlink's target,
 so it cannot resolve it — and `npx` does not fail loudly. It silently installs
 its own copy of Playwright, then dies with a misleading `Cannot find package
