@@ -34,16 +34,7 @@ developer's own fonts never enter a screenshot:
 just brand
 ```
 
-That is:
-
-```sh
-cd web && npm ci
-cd landing && npm ci
-podman run --rm -v "$PWD/..:/work" \
-  -v "$PWD/../web/node_modules:/nm:ro" \
-  -w /work mcr.microsoft.com/playwright:v1.63.0-noble \
-  node design/brand/render.mjs
-```
+The recipe reads the image from [`web.yml`](../../.github/workflows/web.yml).
 
 It overwrites `readme-banner.png` and `social-preview.jpg` in place. Font rasterization is not
 byte-for-byte stable across runs; `magick compare -metric RMSE` against the checked-in files reads

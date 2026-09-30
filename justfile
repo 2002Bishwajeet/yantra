@@ -9,7 +9,8 @@ export CARGO_TARGET_DIR := justfile_directory() / "target"
 appliance_target := "aarch64-unknown-linux-musl"
 
 # The image the web e2e baselines are rendered in; web.yml pins it, and every local run reads it from there.
-playwright_image := `grep -oE 'mcr.microsoft.com/playwright:v[0-9.]+-noble' .github/workflows/web.yml`
+# `|| true` because just evaluates this on every load: a miss must fail the Playwright recipes, not all of them.
+playwright_image := `grep -m1 -oE 'mcr.microsoft.com/playwright:v[0-9.]+-noble' .github/workflows/web.yml || true`
 
 appliance_stage := "/tmp/yantra-install"
 
@@ -192,14 +193,18 @@ web-build:
 web-e2e *args:
     #!/usr/bin/env bash
     set -euo pipefail
+    image="{{playwright_image}}"
+    [ -n "$image" ] || { echo "web.yml pins no mcr.microsoft.com/playwright:v*-noble image" >&2; exit 1; }
     cd web
-    [ -d node_modules ] || npm ci --prefer-offline
+    [ -d node_modules ] && [ ! package-lock.json -nt node_modules/.package-lock.json ] || npm ci --prefer-offline
+    pw="$(grep -m1 -oE '"version": "[0-9.]+"' node_modules/@playwright/test/package.json | grep -oE '[0-9.]+')"
+    [[ "$image" == *":v$pw-"* ]] || { echo "@playwright/test is $pw but web.yml pins $image; bump them together" >&2; exit 1; }
     # A worktree's node_modules can be a symlink the container cannot resolve without this mount.
     nm="$(readlink -f node_modules)"
     name="yantra-e2e-$(git rev-parse --show-toplevel | sha1sum | cut -c1-8)"
     podman rm -f "$name" >/dev/null 2>&1 || true
     podman run --rm --name "$name" -e CI=1 -v "$PWD/..:/work" -v "$nm:$nm" \
-        -w /work/web "{{playwright_image}}" npx playwright test "$@"
+        -w /work/web "$image" npx playwright test "$@"
 
 # M7's one file to copy: the appliance daemon with the dashboard inside it.
 # Run it *after* `just appliance`, which builds a `yantrad` without one over it.
@@ -226,11 +231,12 @@ landing-visual:
 # design/brand/cards.html, in the same pinned image the web e2e baselines use
 # (web/README.md), so a developer's own fonts never enter one.
 brand:
+    @test -n "{{playwright_image}}" || { echo "web.yml pins no Playwright image" >&2; exit 1; }
     cd web && npm ci
     cd landing && npm ci
     podman run --rm -v "{{justfile_directory()}}:/work" \
         -v "{{justfile_directory()}}/web/node_modules:/nm:ro" \
-        -w /work {{playwright_image}} \
+        -w /work "{{playwright_image}}" \
         node design/brand/render.mjs
 
 # Size and startup are quality targets carried over from ADR-0003's

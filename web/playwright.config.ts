@@ -6,7 +6,7 @@ import { at, FIXTURE_PORT, WEB_PORT } from './e2e/lib/sizes'
  * Snapshots are rendered by one Chromium on one set of fonts: the Playwright
  * image CI's e2e jobs run in (web.yml). A baseline made on a developer's box
  * differs by a few pixels of text, so regenerate them inside that image with
- * `just web-e2e --update-snapshots` (the justfile and web/README.md say why the
+ * `just web-e2e --update-snapshots=changed <spec>` (the justfile and web/README.md say why the
  * recipe mounts node_modules twice).
  *
  * The path template carries no platform on purpose: there is one.
