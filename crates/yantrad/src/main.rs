@@ -167,6 +167,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             listening_on: addresses.clone(),
             ssh_dir,
             relay: relay.is_some(),
+            trigger: PathBuf::from(yantra_core::update::TRIGGER),
+            updater: PathBuf::from(yantra_core::update::UPDATER),
         }),
         github: github::Grant::from_env(),
         ..heartbeat::Fleet::default()

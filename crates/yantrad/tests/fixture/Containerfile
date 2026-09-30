@@ -29,6 +29,10 @@ RUN useradd --create-home deploy && \
 RUN printf 'auth sufficient pam_permit.so\naccount sufficient pam_permit.so\nsession sufficient pam_permit.so\n' \
     > /etc/pam.d/sudo
 
+# Y-368's update test runs the real yantrad here, and it reaches the far machine
+# with the system ssh client (I-20), which openssh-server does not pull in.
+RUN dnf -y install openssh-clients && dnf clean all
+
 # Y-387: a bare machine for the join command — sshd installed and off, which is
 # how most desktop Linux ships it, and tmux and git already here so no test
 # fetches a package. `pam_loginuid` cannot write its file in a rootless

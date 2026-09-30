@@ -40,4 +40,5 @@ pub mod terminfo;
 pub mod tmux;
 pub mod tokens;
 pub mod up;
+pub mod update;
 pub mod workspace;

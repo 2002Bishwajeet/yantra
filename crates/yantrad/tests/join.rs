@@ -146,6 +146,7 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         (fixture_dir().join("listen.py"), "/fixture/listen.py"),
         (fixture_dir().join("release.sh"), "/fixture/release.sh"),
         (fixture_dir().join("server.py"), "/fixture/server.py"),
+        (repo_root().join("install.sh"), "/fixture/install.sh"),
         (
             repo_root().join("crates/yantrad/yantrad.service"),
             "/srv/units/yantrad.service",
@@ -153,6 +154,14 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         (
             repo_root().join("crates/yantra-agent/yantra-agent.service"),
             "/srv/units/yantra-agent.service",
+        ),
+        (
+            repo_root().join("crates/yantrad/yantra-update.path"),
+            "/srv/units/yantra-update.path",
+        ),
+        (
+            repo_root().join("crates/yantrad/yantra-update.service"),
+            "/srv/units/yantra-update.service",
         ),
     ] {
         systemd.copy_in(&from, to)?;

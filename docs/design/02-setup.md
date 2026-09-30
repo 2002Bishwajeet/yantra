@@ -200,7 +200,7 @@ that `install.sh` is interactive and that `provision.sh` is retired
 ([walk-through](../plans/m15-qa-walkthrough.md) §1.5). The script reads its answers from
 `/dev/tty`, so a pipe no longer stops it asking. At a terminal it installs Tailscale after a yes,
 logs the box in, turns on `tailscale serve`, writes the box's own address into an absent
-`agent.env`, starts both units and prints the dashboard's URL. With no terminal it asks nothing and
+`agent.env`, starts the units and prints the dashboard's URL. With no terminal it asks nothing and
 starts nothing. **Steps 3–6 moved into the dashboard**: the fleet checks are its walkthrough, not a
 script's.
 

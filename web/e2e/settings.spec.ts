@@ -342,4 +342,18 @@ test.describe('settings · Access and About read the appliance', () => {
     await expect(page.getByText('aarch64-unknown-linux-musl')).toBeVisible()
     await expect(page.getByText('/etc/yantra/daemon.env')).toBeVisible()
   })
+
+  // Y-368: the fixture answers 202 and never restarts, so the page stays on
+  // its updating line.
+  test('asks for an update after saying what the restart ends', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/settings/about')
+    await opened(page, 'About', size)
+    await page.getByRole('button', { name: 'Update to v0.4.0' }).click()
+    const sheet = page.getByRole('dialog', { name: 'Update to v0.4.0?' })
+    await expect(sheet.getByText(/A chat turn in flight dies/)).toBeVisible()
+    await sheet.getByRole('button', { name: 'Update', exact: true }).click()
+    await expect(sheet).toBeHidden()
+    await expect(page.getByRole('status').filter({ hasText: 'Updating from' })).toBeVisible()
+  })
 })

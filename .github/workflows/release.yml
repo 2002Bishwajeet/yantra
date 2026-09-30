@@ -256,9 +256,14 @@ jobs:
           # them and install.sh needs no commit pin to fetch them (Y-365).
           # Linux only: the macOS archive ships the agent alone and systemd is
           # not there to read a unit.
+          # install.sh and the update units go with them (Y-368): the installer
+          # leaves its own copy behind as /usr/local/bin/yantra-update.
           if [ "$RUNNER_OS" = Linux ]; then
             cp crates/yantrad/yantrad.service \
-               crates/yantra-agent/yantra-agent.service "staging/$stage/"
+               crates/yantra-agent/yantra-agent.service \
+               crates/yantrad/yantra-update.path \
+               crates/yantrad/yantra-update.service \
+               install.sh "staging/$stage/"
           fi
           echo "STAGE=$stage" >> "$GITHUB_ENV"
 

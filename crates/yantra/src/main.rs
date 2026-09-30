@@ -30,6 +30,7 @@ use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tokens;
 use yantra_core::up;
+use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
 #[derive(Debug, Parser)]
@@ -220,11 +221,11 @@ enum Command {
     JoinScript,
     /// Say which build this is
     About,
-    /// Say whether a newer release is published. `--check` is required until
-    /// this verb can also apply one (Y-368)
+    /// Install the current release on this box and restart what runs.
+    /// Needs root
     Update {
-        /// Only read the published version; install nothing
-        #[arg(long, required = true)]
+        /// Only say whether a newer release is published; install nothing
+        #[arg(long)]
         check: bool,
     },
 }
@@ -385,9 +386,10 @@ async fn main() -> ExitCode {
         Some(Command::SshIdentity { .. }) => ssh_identity(),
         Some(Command::JoinScript) => join_script().await,
         Some(Command::About) => about(),
-        Some(Command::Update { .. }) => {
+        Some(Command::Update { check: true }) => {
             update_check_with(&Github::default(), github::from_env().as_ref()).await
         }
+        Some(Command::Update { check: false }) => update_apply().await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -1175,6 +1177,35 @@ async fn update_check_with(github: &Github, token: Option<&github::Token>) -> Ex
             report_error(&err);
             ExitCode::FAILURE
         }
+    }
+}
+
+/// ADR-0027 §3: the same unit the daemon's trigger starts, waited for.
+async fn update_apply() -> ExitCode {
+    match update::apply().await {
+        Ok(()) => {
+            println!(
+                "installed the current release; yantrad and yantra-agent restarted if they were running"
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            eprint!("{}", update_next(&err));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The next command, where there is one. `NotInstalled` names `install.sh`
+/// in its own words.
+fn update_next(err: &update::Error) -> &'static str {
+    match err {
+        update::Error::NoPrivilege { .. } => {
+            "  run it as root: sudo systemctl start yantra-update.service\n"
+        }
+        update::Error::Failed { .. } => "  read why: journalctl -u yantra-update --no-pager\n",
+        update::Error::NotInstalled { .. } | update::Error::Io(_) => "",
     }
 }
 
@@ -3333,17 +3364,39 @@ mod tests {
         assert!(out.trim_end().ends_with("GET /api/about"), "{out}");
     }
 
-    /// ADR-0027 §2's spelling. A bare `update` would be the apply Y-368 adds,
-    /// so it is refused until then rather than meaning *check*.
+    /// ADR-0027 §2's spelling: a bare `update` applies, and `--check` only
+    /// reads.
     #[test]
-    fn update_parses_only_with_check() {
+    fn update_applies_and_update_check_only_reads() {
         assert!(matches!(
             Cli::try_parse_from(["yantra", "update", "--check"])
                 .expect("`update --check` parses")
                 .command,
             Some(Command::Update { check: true })
         ));
-        assert!(Cli::try_parse_from(["yantra", "update"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "update"])
+                .expect("`update` parses")
+                .command,
+            Some(Command::Update { check: false })
+        ));
+    }
+
+    /// Each refusal names the next command: root for a caller without it,
+    /// the journal for a unit that failed.
+    #[test]
+    fn an_update_that_did_not_run_names_what_to_do_next() {
+        let denied = update_next(&update::Error::NoPrivilege {
+            said: "Access denied".to_owned(),
+        });
+        assert!(
+            denied.contains("sudo systemctl start yantra-update.service"),
+            "{denied}"
+        );
+        let failed = update_next(&update::Error::Failed {
+            said: "the control process exited with error code".to_owned(),
+        });
+        assert!(failed.contains("journalctl -u yantra-update"), "{failed}");
     }
 
     #[test]

@@ -230,6 +230,16 @@ export function useClearGithubClientId() {
   })
 }
 
+/** `POST /api/update` is `yantra update` (ADR-0027 §3): 202 and no body. The
+ *  daemon only asks; a root unit installs the release and restarts it, so
+ *  the answer arrives as a new `version` on `/api/about`. A 409 is a box with
+ *  no updater, and its sentence names install.sh. */
+export function useApplyUpdate() {
+  return useMutation<void, ApiError, void>({
+    mutationFn: () => fetchJson<void>('/api/update', { method: 'POST' }),
+  })
+}
+
 // ---- Y-349: clone and mkdir, for New session (Y-344's routes) ----
 
 /** `POST /api/machines/{m}/clone` → 202 with the tmux session `git clone`

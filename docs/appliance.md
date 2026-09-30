@@ -9,7 +9,8 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 current release onto the box itself, verifies it, and at a terminal takes the box from bare to an
 open dashboard ([Y-384](../tracker.md)). `just appliance-install` builds on the machine that
 already builds everything and copies over ssh. Both put the same three binaries and the same two
-units in the same places. One fact about the artifact matters to the first: **the released
+units in the same places. `install.sh` also leaves its updater and two more units, and
+`just appliance-install` leaves neither (see *Update from the dashboard* below). One fact about the artifact matters to the first: **the released
 `yantrad` is built with `embed-dashboard`**, so a fetched binary serves the dashboard with no
 `YANTRA_WEB` and no `web/dist` beside it.
 
@@ -77,7 +78,7 @@ account. The script says so first, because the dashboard cannot exist before the
    On a tailnet that never had HTTPS, `tailscale serve` prints one link to turn it on and waits;
    open it. Ctrl-C there skips HTTPS, and the install goes on to finish on plain HTTP.
 6. It installs Yantra: the `yantra` account if it is absent, the three binaries renamed into
-   `/usr/local/bin` for the reason [below](#why-the-rename), both units from the archive, and a
+   `/usr/local/bin` for the reason [below](#why-the-rename), the units from the archive, and a
    `systemctl daemon-reload`.
 7. It writes `/etc/yantra/agent.env` **only if it is absent**, with this box's own
    `YANTRA_DAEMON=<tailnet address>:7717`. It writes `/etc/yantra/daemon.env` **only if it is
@@ -87,7 +88,7 @@ account. The script says so first, because the dashboard cannot exist before the
    ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md), Y-389), so `yantra github login`
    works on a fresh box. A self-hoster who wants their own app instead runs `yantra github
    client-id <id>`, or sets it from Settings → Providers, and restarts `yantrad` (Y-393).
-8. It runs `systemctl enable --now` for both units and waits up to 30 s for `yantrad` to answer
+8. It runs `systemctl enable --now` for both units and for `yantra-update.path`, and waits up to 30 s for `yantrad` to answer
    `/healthz`.
 9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
    `http://<tailnet address>:7717` if HTTPS is not on.
@@ -108,21 +109,68 @@ configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon
 is, and it does not run `tailscale up` or `tailscale serve` again. It replaces the binaries and the
 units, and it ends on the same URL.
 
-**It does not restart what is running.** Applying an update is [Y-368](../tracker.md)'s. Until
-then the script says so and names the command:
+**A run at a terminal does not restart what is running.** It says so and names the command:
 
 ```bash
-sudo systemctl restart yantrad.service yantra-agent.service
+sudo systemctl try-restart yantrad.service yantra-agent.service
 ```
 
 `YANTRA_VERSION=0.2.0 bash install.sh` installs a named release instead of the current one.
+
+### Update from the dashboard
+
+**[ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §3, [Y-368](../tracker.md).** Settings
+→ About shows *Update to vX* when a newer release is published. `yantra update` on the box does the
+same thing, and `yantra update --check` only says whether one exists.
+
+- `install.sh` copies itself out of the archive to `/usr/local/bin/yantra-update`, so `SHA256SUMS`
+  covers it. It installs two more units: `yantra-update.path` and `yantra-update.service`.
+- `yantrad` runs as `yantra` and cannot write `/usr/local/bin`. To ask, it creates the empty file
+  `/home/yantra/yantra-update.requested`. `yantra-update.path` sees the file and starts the service.
+- `yantra-update.service` runs as root. It removes the file, runs `yantra-update` with no terminal,
+  and then runs `systemctl try-restart yantrad.service yantra-agent.service`.
+- **The request carries no version.** The unit installs the current release or nothing.
+- **A second request changes nothing.** One made while the unit runs is removed before the restart.
+  A run that installs the release already on disk keeps `.prev` as it was.
+- **A failed install restarts nothing.** The restart is `ExecStartPost=`, and a checksum mismatch
+  or an unreachable GitHub stops the unit before it. Read why with `journalctl -u yantra-update`.
+- `yantra update` needs root. Without it, it prints `sudo systemctl start yantra-update.service`.
+
+**What the restart ends.** Sessions on the machines keep running: their tmux servers belong to the
+login user there, not to `yantrad`. An open terminal in the dashboard loses its socket and
+reconnects to the same pane. **A chat turn in flight dies**, because the daemon owns that process
+(ADR-0026). The event list and the telemetry start empty. The page compares the version it loaded
+with the one `/api/about` now reports, and offers a reload.
+
+**Releases up to v0.3.3 carry no updater.** Installed from one of those, a box has no
+`yantra-update`, and the dashboard's action answers `409` naming `install.sh`. A box installed by
+`just appliance-install` answers the same.
+
+[`crates/yantrad/tests/update.rs`](../crates/yantrad/tests/update.rs) proves this against a real
+systemd, a real sshd and a real tmux: the session's processes survive, the socket reopens within the
+browser's reconnect budget, and a corrupted archive restarts nothing.
+
+### Roll back
+
+Each install copies every live binary to `/usr/local/bin/<name>.prev` before it replaces it. One
+generation is kept, not a history. Rolling back is three renames and a restart
+([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §6):
+
+```sh
+for b in yantrad yantra yantra-agent; do sudo mv -f /usr/local/bin/$b.prev /usr/local/bin/$b; done
+sudo systemctl try-restart yantrad.service yantra-agent.service
+```
+
+The units are not kept. A release that changed a unit is rolled back by installing the older release
+by number, which is also the better answer when the network works.
 
 ### With no terminal
 
 A run with nothing at `/dev/tty` — a container, a CI job, an `ssh host 'curl … | bash'` without
 `-t` — asks nothing and starts nothing. It installs the release, writes both environment files if
-they are absent (`agent.env` with a placeholder rather than an address), enables neither unit, and
-ends with a numbered list of what is left. That is the path
+they are absent (`agent.env` with a placeholder rather than an address), enables no unit, and
+ends with a numbered list of what is left. When `yantrad.service` is already enabled — which is
+how `yantra-update.service` runs it — it says that instead, and restarts nothing itself. That is the path
 [`crates/yantrad/tests/installer.rs`](../crates/yantrad/tests/installer.rs) runs twice against a
 real systemd ([Y-158](../tracker.md#3-task-board)).
 
@@ -131,7 +179,8 @@ real systemd ([Y-158](../tracker.md#3-task-board)).
 `installer.rs` runs the script against a real systemd as PID 1 in a podman container, with a release
 served from inside it. **With no terminal**: an edited `agent.env` and an edited `daemon.env`
 survive a second run, `daemon.env` is `600 yantra`, the binaries replace while one of them is
-executing, and a corrupted archive installs nothing. **At a terminal**, through a pty: a yes logs
+executing, each replaced binary is kept as `.prev`, the updater is the archive's own `install.sh`, and
+a corrupted archive installs nothing. **At a terminal**, through a pty: a yes logs
 in, turns on `serve`, writes the address into an absent `agent.env`, enables both units and ends on
 the URL; a second run asks nothing and changes no file; a no installs Yantra and starts nothing. On
 a box that is already logged in, a no to HTTPS still starts both units. A `serve` that refuses, and
@@ -154,8 +203,8 @@ an hour per IP is what an unauthenticated one gets — stops the run and says so
 ### Where the units come from
 
 **From the archive, since [Y-365](../tracker.md).** The Linux archives hold the three binaries, a
-README, a LICENSE and both units — [`release.yml`](../.github/workflows/release.yml) stages them
-beside the binaries they start, so `SHA256SUMS` covers the two files that decide what runs as root.
+README, a LICENSE, `install.sh` and the four units — [`release.yml`](../.github/workflows/release.yml) stages them
+beside the binaries they start, so `SHA256SUMS` covers the files that decide what runs as root.
 The macOS archives carry none: they ship `yantra-agent` alone and no systemd reads a unit there.
 
 Before that the script fetched them from `raw.githubusercontent.com` at a `COMMIT` pinned beside
@@ -175,8 +224,9 @@ v0.1.0. The script says so and installs nothing rather than failing on a missing
 curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --uninstall
 ```
 
-**It always** stops and disables `yantrad.service` and `yantra-agent.service`, removes both unit
-files, reloads systemd, and removes the three binaries from `/usr/local/bin`. Every step tolerates
+**It always** stops and disables `yantrad.service`, `yantra-agent.service` and the two update units,
+removes the four unit files, reloads systemd, and removes the three binaries, `yantra-update` and the
+three `.prev` files from `/usr/local/bin`. Every step tolerates
 an item that is already gone, so a second run succeeds.
 
 **It asks, one at a time, default keep, and only at a terminal:**

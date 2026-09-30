@@ -1,13 +1,23 @@
+import { useState } from 'react'
 import { ExternalLink, FileKey, Scale } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import type { Looked, Published } from '@/api'
 import { fromReading } from '@/api/client'
-import { useAbout } from '@/api/hooks'
+import type { ApiError } from '@/api/errors'
+import { useApplyUpdate } from '@/api/mutations'
+import { aboutQuery } from '@/api/queries'
+import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListChevron, ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Group, Note } from './Group'
+import { Sheet } from './Sheet'
+
+/** While the daemon restarts after an update, About asks this often, so the
+ *  new version is seen soon after it answers (ADR-0027 §5). */
+const UPDATE_POLL_MS = 2_000
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -27,8 +37,11 @@ function uptime(seconds: number): string {
 }
 
 export function About() {
-  const about = useAbout()
-  if (about.error) throw about.error
+  // The version this page saw when the person asked for an update.
+  const [asked, setAsked] = useState<string | null>(null)
+  const about = useQuery({ ...aboutQuery(), ...(asked === null ? {} : { refetchInterval: UPDATE_POLL_MS }) })
+  // The restart is a moment with no daemon; the facts already drawn stay.
+  if (about.error && !(asked !== null && about.data)) throw about.error
   const facts = about.data
 
   return (
@@ -57,6 +70,7 @@ export function About() {
             title="The newest release could not be read"
           />
         ) : null}
+        {facts ? <Update asked={asked} onAsked={setAsked} published={facts.published} running={facts.version} /> : null}
       </section>
       <Group label="Daemon">
         <ListItem
@@ -107,6 +121,95 @@ function Release(props: { published: Exclude<Looked<Published>, { looked: 'faile
       <Mono>v{version} is out</Mono>
     </a>
   )
+}
+
+/** ADR-0027 §3 on the wire: the daemon only asks, and the root unit installs
+ *  and restarts it. The page learns the result from `version` on its next
+ *  read, and offers a reload, because its chunks belong to the old build. */
+function Update(props: {
+  running: string
+  published: Looked<Published>
+  asked: string | null
+  onAsked: (running: string) => void
+}) {
+  const { running, published, asked, onAsked } = props
+  const [open, setOpen] = useState(false)
+  const update = useApplyUpdate()
+
+  if (asked !== null && running !== asked) {
+    return (
+      <div className="settings__update" role="status">
+        <Text render={<p />} scale="body-medium">
+          yantrad <Mono>{running}</Mono> is running. This page is still the <Mono>{asked}</Mono> dashboard.
+        </Text>
+        <Button onClick={() => location.reload()} variant="tonal">
+          Reload
+        </Button>
+      </div>
+    )
+  }
+  if (asked !== null) {
+    return (
+      <Text render={<p role="status" />} scale="body-medium" tone="variant">
+        Updating from <Mono>{asked}</Mono>. The daemon installs the release and restarts. If nothing changes in a few
+        minutes, the install failed: <Mono>journalctl -u yantra-update</Mono> on the box says why.
+      </Text>
+    )
+  }
+  if (published.looked !== 'ok' || !published.data.newer) return null
+
+  const { version } = published.data
+  const confirm = () =>
+    update.mutate(undefined, {
+      onSuccess: () => {
+        setOpen(false)
+        onAsked(running)
+      },
+    })
+
+  return (
+    <div className="settings__update">
+      <Button onClick={() => setOpen(true)} variant="tonal">
+        Update to v{version}
+      </Button>
+      <Sheet
+        actions={
+          <>
+            <Button onClick={() => setOpen(false)} variant="text">
+              Cancel
+            </Button>
+            <Button disabled={update.isPending} onClick={confirm}>
+              {update.isPending ? 'asking…' : 'Update'}
+            </Button>
+          </>
+        }
+        description={`yantrad installs v${version} and restarts. A chat turn in flight dies with it. Open terminals reconnect to the same sessions, which keep running on their machines.`}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (!next) update.reset()
+        }}
+        open={open}
+        title={`Update to v${version}?`}
+      >
+        {update.error ? <ErrorSurface.Inline error={update.error} title={refused(update.error)} /> : null}
+      </Sheet>
+    </div>
+  )
+}
+
+/** Each way the ask can fail is a different thing to fix. */
+function refused(error: ApiError): string {
+  if (error.kind === 'network') return 'The daemon did not answer, so no update was asked for'
+  switch (error.status) {
+    case 403:
+      return 'This device may not update the daemon'
+    case 409:
+      return 'This box cannot update itself'
+    case 503:
+      return 'The daemon could not tell who is asking'
+    default:
+      return 'The update was refused'
+  }
 }
 
 function Fact(props: { label: string; value: React.ReactNode }) {

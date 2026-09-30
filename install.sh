@@ -5,7 +5,7 @@
 #     curl -fsSL <url>/install.sh | bash
 #
 # At a terminal it asks before it installs Tailscale, logs the box in, turns on
-# HTTPS, starts both units and prints the dashboard's address (Y-384). With no
+# HTTPS, starts the units and prints the dashboard's address (Y-384). With no
 # terminal it asks nothing, enables nothing and ends by naming what is left.
 # docs/appliance.md is the runbook around it.
 #
@@ -16,6 +16,10 @@
 # It always removes the services and the binaries. It asks, one at a time and
 # default no, before it removes /etc/yantra, the yantra account, or the
 # dashboard's Tailscale serve.
+
+# bash runs a piped script as it reads it, and a Ctrl-C also kills the `curl`
+# still writing it. The braces make bash read the whole file before it runs any.
+{
 set -euo pipefail
 
 REPO=2002Bishwajeet/yantra
@@ -81,13 +85,16 @@ ask_no() {
 # /etc/yantra, the yantra account and the dashboard's serve are each asked
 # for, kept by default, and left alone with no terminal to ask.
 uninstall() {
-    as_root systemctl stop yantrad.service yantra-agent.service 2>/dev/null || true
-    as_root systemctl disable yantrad.service yantra-agent.service 2>/dev/null || true
-    as_root rm -f /etc/systemd/system/yantrad.service /etc/systemd/system/yantra-agent.service
+    local units=(yantrad.service yantra-agent.service yantra-update.path yantra-update.service)
+    as_root systemctl stop "${units[@]}" 2>/dev/null || true
+    as_root systemctl disable "${units[@]}" 2>/dev/null || true
+    as_root rm -f /etc/systemd/system/yantrad.service /etc/systemd/system/yantra-agent.service \
+        /etc/systemd/system/yantra-update.path /etc/systemd/system/yantra-update.service
     as_root systemctl daemon-reload
-    as_root rm -f "$BIN_DIR/yantra" "$BIN_DIR/yantrad" "$BIN_DIR/yantra-agent"
+    as_root rm -f "$BIN_DIR/yantra" "$BIN_DIR/yantrad" "$BIN_DIR/yantra-agent" "$BIN_DIR/yantra-update" \
+        "$BIN_DIR/yantra.prev" "$BIN_DIR/yantrad.prev" "$BIN_DIR/yantra-agent.prev"
 
-    local removed="the services, the units and the three binaries" kept=""
+    local removed="the services, the units, the three binaries, the updater and the previous binaries" kept=""
 
     if [ "$interactive" = yes ] &&
         ask_no "Remove /etc/yantra? It holds the ntfy token and the GitHub token."; then
@@ -175,7 +182,7 @@ if [ "$interactive" = yes ]; then
     mark
 fi
 
-echo "install: this installs Yantra — three binaries, two systemd units and a yantra account."
+echo "install: this installs Yantra — three binaries, its updater, four systemd units and a yantra account."
 echo "install: every device you use with Yantra must be on one tailnet, logged in to the same Tailscale account."
 if [ "$interactive" = yes ]; then
     echo "install: it asks before it installs Tailscale or turns on HTTPS, then starts the dashboard and prints its address."
@@ -236,11 +243,19 @@ fetch "$work/SHA256SUMS" "$download/SHA256SUMS"
 tar -C "$work" -xzf "$work/$archive"
 staged="$work/yantra-$VERSION-$target"
 
-# The units ride in the archive, so SHA256SUMS covers the two files that decide
+# The units ride in the archive, so SHA256SUMS covers the files that decide
 # what runs as root (Y-365). Releases before v0.2.0 carry none, and a stat error
 # would be a poor way to learn that.
 [ -e "$staged/yantrad.service" ] ||
     fail "v$VERSION carries no units, so it predates them moving into the archive — install v0.2.0 or later"
+
+# The updater and its units ride in the archive too, since the release after
+# v0.3.3 (Y-368). An older release installs without them and cannot update itself.
+if [ -e "$staged/install.sh" ] && [ -e "$staged/yantra-update.service" ]; then
+    updates=yes
+else
+    updates=no
+fi
 
 up() { command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; }
 serving() { as_root tailscale serve status --json 2>/dev/null | grep -q "\"$HTTPS_PORT\""; }
@@ -295,10 +310,23 @@ id yantra >/dev/null 2>&1 ||
 as_root install -d "$BIN_DIR"
 for binary in yantrad yantra yantra-agent; do
     as_root install -m 755 "$staged/$binary" "$BIN_DIR/$binary.new"
+    # ADR-0027 §6: one generation back, for a rollback with no network. A run
+    # that installs what is already there must not replace it with a copy of now.
+    if [ -e "$BIN_DIR/$binary" ] && ! cmp -s "$staged/$binary" "$BIN_DIR/$binary"; then
+        as_root cp -p "$BIN_DIR/$binary" "$BIN_DIR/$binary.prev"
+    fi
     as_root mv -f "$BIN_DIR/$binary.new" "$BIN_DIR/$binary"
 done
 
 as_root install -m 644 "$staged/yantrad.service" "$staged/yantra-agent.service" /etc/systemd/system/
+if [ "$updates" = yes ]; then
+    # The archive's copy, because a piped run has no file of its own and
+    # SHA256SUMS covers this one. Renamed, because during an update the old
+    # copy is the script bash is still reading.
+    as_root install -m 755 "$staged/install.sh" "$BIN_DIR/yantra-update.new"
+    as_root mv -f "$BIN_DIR/yantra-update.new" "$BIN_DIR/yantra-update"
+    as_root install -m 644 "$staged/yantra-update.path" "$staged/yantra-update.service" /etc/systemd/system/
+fi
 as_root systemctl daemon-reload
 
 address=
@@ -353,6 +381,9 @@ if [ -n "$address" ]; then
         running=yes
     fi
     as_root systemctl enable --now yantrad.service
+    if [ "$updates" = yes ]; then
+        as_root systemctl enable --now yantra-update.path
+    fi
     if grep -q '^YANTRA_DAEMON=' "$AGENT_ENV"; then
         as_root systemctl enable --now yantra-agent.service
     else
@@ -373,9 +404,10 @@ if [ -n "$address" ]; then
     [ "$ready" = yes ] ||
         fail "yantrad did not answer on $address in 30 s. Read why: journalctl -u yantrad -n 20 --no-pager"
 
-    # Applying an update is Y-368's; this run replaced the files and nothing else.
+    # A run at a terminal replaces the files and restarts nothing; `yantra
+    # update` is the path that restarts too (ADR-0027 §5).
     if [ "$running" = yes ]; then
-        echo "install: the units still run the version before v$VERSION. To run it: sudo systemctl restart yantrad.service yantra-agent.service"
+        echo "install: the units still run the version before v$VERSION. To run it: sudo systemctl try-restart yantrad.service yantra-agent.service"
     fi
 
     # Self comes before Peer in the status JSON, so the first DNSName is this box's.
@@ -399,16 +431,29 @@ else
     tailscale_step="Enrol this box: \`sudo tailscale up\`. yantrad refuses to start until it can name this machine's addresses."
 fi
 
+# An update runs here too, with no terminal, and its journal must not say the
+# units are off when they are on.
+if systemctl is-enabled --quiet yantrad.service 2>/dev/null; then
+    # A box that came from a release with no updater has the path unit off.
+    [ "$updates" = yes ] && as_root systemctl enable --now yantra-update.path
+    echo "install: v$VERSION is in $BIN_DIR, and yantrad.service is enabled."
+    echo "install: yantra-update.service restarts what runs. By hand: sudo systemctl try-restart yantrad.service yantra-agent.service"
+    exit 0
+fi
+
+start="yantrad.service yantra-agent.service"
+[ "$updates" = yes ] && start="$start yantra-update.path"
+
 cat <<REPORT
 
-install: yantrad, yantra and yantra-agent are in $BIN_DIR; both units are in
-install: /etc/systemd/system and neither is enabled. Tailscale is $tailscale_state.
+install: yantrad, yantra and yantra-agent are in $BIN_DIR; the units are in
+install: /etc/systemd/system and none is enabled. Tailscale is $tailscale_state.
 
 What is left, none of which this script does for you:
 
   1. $env_step
   2. $tailscale_step
-  3. Start them: \`sudo systemctl enable --now yantrad.service yantra-agent.service\`
+  3. Start them: \`sudo systemctl enable --now $start\`
   4. Add each machine. In a terminal on it, as the account Yantra is to log in as:
      \`curl -fsSL http://<this box's tailnet address>:7717/join | sh\`. The daemon
      makes its ssh key the first time a machine joins.
@@ -417,3 +462,4 @@ Run this script again at a terminal and it does 2, starts yantrad and prints
 the dashboard's address. Step 1 stays yours: it never rewrites an agent.env
 that exists, and yantra-agent starts once that file names the daemon.
 REPORT
+}

@@ -38,6 +38,7 @@ yantra ssh-identity --machine <m> --user <u>  # one machine's Host block, loggin
 yantra join-script               # the script a new machine pipes into sh (GET /join)
 yantra about                     # version, target and build date of this binary
 yantra update --check            # running and published version, and whether a newer one exists
+sudo yantra update               # install the current release and restart what runs
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:

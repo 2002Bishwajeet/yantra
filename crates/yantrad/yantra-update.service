@@ -1,0 +1,17 @@
+[Unit]
+Description=Install the current Yantra release
+Documentation=https://github.com/2002Bishwajeet/yantra
+
+[Service]
+# ADR-0027 §3: root, with no argument and no environment, so whoever asks cannot
+# name a version. The script resolves the current release itself.
+Type=oneshot
+ExecStartPre=rm -f /home/yantra/yantra-update.requested
+ExecStart=/usr/local/bin/yantra-update
+# A Post step, so an install that failed restarts nothing. A request made
+# while this one ran asked for the same release, so it goes first.
+ExecStartPost=rm -f /home/yantra/yantra-update.requested
+ExecStartPost=systemctl try-restart yantrad.service yantra-agent.service
+# A oneshot waits forever by default, and a stalled download would hold every
+# later request.
+TimeoutStartSec=15min
