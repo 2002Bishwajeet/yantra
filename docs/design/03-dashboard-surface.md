@@ -799,6 +799,14 @@ reconcile. Keep them, and say in
 > behind it — so today's build reads **152,258 B**, 148.7 KiB. The fonts keep their own 80 KiB line
 > ([ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md) §7) and are 78.5 KiB.
 >
+> **2026-10-05, Y-325: the 200 KiB ceiling already answered this row.** The row asked whether
+> the 384 bytes of headroom are spent or won back. Y-370 replaced that ceiling, so the question
+> no longer applies. The 2026-09-04 "384 bytes" amendment describes the old 145 KiB ceiling.
+> Measured on `cfac1c3`, `npm run budget` prints a first load of 160,739 B (157.0 KiB) against
+> 204,800 B. The headroom is 44,061 B (43.0 KiB). The fonts are 80,428 B against 81,920 B and
+> stay outside that figure. `npm run budget` now prints the headroom on every run, so a new
+> surface can read the figure it may spend.
+>
 > **The gate still refuses what a person would feel**: xterm in the entry fails by 33,865 B, every
 > screen eager by 48,423 B. It no longer fails on one extra eager screen, the largest of which is
 > 29,597 B and 155 ms on the link the target names.
