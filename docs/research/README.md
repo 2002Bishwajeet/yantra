@@ -32,6 +32,7 @@ is a broken build rather than a reader's problem.
 | R15 | T3 Code — what a streaming Chat tab can take from it, and what the licence asks in return | [ADR-0026](../adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md), Y-356 | [15-t3code-for-the-chat.md](15-t3code-for-the-chat.md) |
 | R16 | What the first load costs a phone, and the target a byte ceiling should come from | [ADR-0024](../adr/0024-the-dashboard-is-material-3-built-by-hand.md), Y-370 | [16-what-the-first-load-costs-a-phone.md](16-what-the-first-load-costs-a-phone.md) |
 | R17 | A microphone that reaches the remote machine, for Claude Code's voice dictation and any other program | Y-415 | [17-remote-microphone.md](17-remote-microphone.md) |
+| R19 | Driving every agent harness through ACP — support per harness, session lifetime over ssh, agent-calls-agent tools, and what T3 Code's chat needs | Y-427, Y-428 (no ADR yet) | [19-acp-for-every-harness.md](19-acp-for-every-harness.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that
