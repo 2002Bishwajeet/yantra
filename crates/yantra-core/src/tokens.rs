@@ -39,11 +39,18 @@
 //! - **`speed`**, which is not priced but refuses to be: fast mode costs twice
 //!   base input and twice output, and no record here carries anything but
 //!   `standard`.
+//!
+//! **`timestamp`** places a response in a window (Y-354). The last one on the
+//! record is taken: Claude Code writes the top-level stamp after `message`, so
+//! a tool argument of the same name comes first. Unlike the three above, this
+//! was not measured over real transcripts — the fixtures assert it.
 
 use crate::logs::{self, Error, NO_TRANSCRIPT};
 use crate::ssh::{self, Exec, Ssh};
 use crate::workspace;
 use std::collections::{BTreeMap, HashSet};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 /// The model named by a record that did not carry one.
 pub const UNKNOWN_MODEL: &str = "unknown";
@@ -103,13 +110,20 @@ impl Spend {
     }
 }
 
-/// What the agent working in workspace `name` has spent.
-pub async fn tokens(name: &str) -> Result<Spend, Error> {
+/// What the agent working in workspace `name` has spent, from `since` on when
+/// it is given.
+pub async fn tokens(name: &str, since: Option<OffsetDateTime>) -> Result<Spend, Error> {
     let workspace = workspace::load(name)?;
     let machine = ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?;
     let ssh = Ssh::new(machine)?;
     let session = logs::session_of(&ssh, &workspace.name).await;
-    spent(&ssh, &workspace.repo.to_string_lossy(), session.as_deref()).await
+    spent(
+        &ssh,
+        &workspace.repo.to_string_lossy(),
+        session.as_deref(),
+        since,
+    )
+    .await
 }
 
 /// The testable half, once a machine can be reached.
@@ -117,7 +131,15 @@ pub async fn tokens(name: &str) -> Result<Spend, Error> {
 /// It reports [`logs::Error`] rather than an error type of its own: this asks
 /// the same file for the same session by the same script, so every way it can
 /// fail is one `logs` already names, down to the wording of *no transcript*.
-pub async fn spent<E: Exec>(exec: &E, repo: &str, session: Option<&str>) -> Result<Spend, Error> {
+///
+/// With `since`, a response stamped before it is not counted, and neither is
+/// one with no stamp, because nothing places it.
+pub async fn spent<E: Exec>(
+    exec: &E,
+    repo: &str,
+    session: Option<&str>,
+    since: Option<OffsetDateTime>,
+) -> Result<Spend, Error> {
     let out = exec.exec(&probe(repo, session)).await?;
     if out.status == NO_TRANSCRIPT {
         return Err(match session {
@@ -138,7 +160,7 @@ pub async fn spent<E: Exec>(exec: &E, repo: &str, session: Option<&str>) -> Resu
 
     let text = String::from_utf8_lossy(&out.stdout);
     let (path, counts) = text.split_once('\n').ok_or(Error::Unreadable)?;
-    Ok(tally(path, counts))
+    Ok(tally(path, counts, since))
 }
 
 /// The path, then one `<record>:"<field>":<value>` line per field found.
@@ -152,7 +174,7 @@ fn probe(repo: &str, session: Option<&str>) -> String {
          grep '\"type\":\"assistant\"' \"$f\" \
          | grep -n -o -E '\"(model|speed|requestId|input_tokens|output_tokens\
          |cache_creation_input_tokens|cache_read_input_tokens\
-         |ephemeral_1h_input_tokens)\":(\"[^\"]*\"|[0-9]+)' || :\n",
+         |ephemeral_1h_input_tokens)\":(\"[^\"]*\"|[0-9]+)         |\"timestamp\":\"[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[^\"]*\"' || :\n",
         locate = logs::locate(repo, session),
     )
 }
@@ -168,6 +190,7 @@ struct Reply {
     cache_write: Option<u64>,
     cache_write_1h: Option<u64>,
     cache_read: Option<u64>,
+    at: Option<String>,
 }
 
 impl Reply {
@@ -188,6 +211,11 @@ impl Reply {
             "requestId" => return text(&mut self.request, value),
             "model" => return text(&mut self.model, value),
             "speed" => return text(&mut self.speed, value),
+            "timestamp" => {
+                // Last wins: a tool argument named `timestamp` precedes the record's own.
+                self.at = Some(value.trim_matches('"').to_owned());
+                return;
+            }
             _ => return,
         };
         if slot.is_none() {
@@ -211,6 +239,13 @@ impl Reply {
             .is_some_and(|speed| speed != "standard")
     }
 
+    fn within(&self, since: OffsetDateTime) -> bool {
+        self.at
+            .as_deref()
+            .and_then(|at| OffsetDateTime::parse(at, &Rfc3339).ok())
+            .is_some_and(|at| at >= since)
+    }
+
     fn counts(&self) -> Counts {
         Counts {
             responses: 1,
@@ -227,7 +262,7 @@ fn text(slot: &mut Option<String>, value: &str) {
     slot.get_or_insert_with(|| value.trim_matches('"').to_owned());
 }
 
-fn tally(path: &str, counts: &str) -> Spend {
+fn tally(path: &str, counts: &str, since: Option<OffsetDateTime>) -> Spend {
     let mut spend = Spend {
         path: path.to_owned(),
         ..Spend::default()
@@ -241,24 +276,35 @@ fn tally(path: &str, counts: &str) -> Spend {
             continue;
         };
         if record != Some(at) {
-            add(&mut spend, &mut seen, std::mem::take(&mut reply));
+            add(&mut spend, &mut seen, std::mem::take(&mut reply), since);
             record = Some(at);
         }
         reply.take(field);
     }
-    add(&mut spend, &mut seen, reply);
+    add(&mut spend, &mut seen, reply, since);
     spend
 }
 
 /// A record whose response has already been counted adds nothing, because the
 /// two carry the same usage and one of them is the same API call written twice.
-fn add(spend: &mut Spend, seen: &mut HashSet<String>, mut reply: Reply) {
+///
+/// The response is marked seen before the window is checked, so one whose first
+/// record falls outside cannot be counted from a later record inside (I-61).
+fn add(
+    spend: &mut Spend,
+    seen: &mut HashSet<String>,
+    mut reply: Reply,
+    since: Option<OffsetDateTime>,
+) {
     if !reply.counted() {
         return;
     }
     if let Some(request) = reply.request.take()
         && !seen.insert(request)
     {
+        return;
+    }
+    if since.is_some_and(|since| !reply.within(since)) {
         return;
     }
     if reply.fast() {
@@ -325,7 +371,7 @@ mod tests {
     /// and not four times them once `iterations` is counted too.
     #[test]
     fn one_response_written_twice_is_counted_once() {
-        let spend = tally("/h/.claude/projects/-srv-repo/s.jsonl", ONE_RESPONSE);
+        let spend = tally("/h/.claude/projects/-srv-repo/s.jsonl", ONE_RESPONSE, None);
         let counts = of(&spend, "claude-opus-5");
         assert_eq!(counts.responses, 1);
         assert_eq!(counts.input, 2);
@@ -353,7 +399,7 @@ mod tests {
 2:\"cache_read_input_tokens\":40353\n\
 2:\"output_tokens\":75\n\
 2:\"requestId\":\"req_B\"\n";
-        let spend = tally("/x", counts);
+        let spend = tally("/x", counts, None);
         let counts = of(&spend, "claude-opus-5");
         assert_eq!(counts.responses, 2);
         assert_eq!(counts.input, 4);
@@ -377,7 +423,7 @@ mod tests {
 2:\"input_tokens\":7\n\
 2:\"output_tokens\":3\n\
 2:\"requestId\":\"req_B\"\n";
-        let spend = tally("/x", counts);
+        let spend = tally("/x", counts, None);
         assert_eq!(spend.by_model.len(), 2);
         assert_eq!(of(&spend, "claude-opus-5").output, 100);
         assert_eq!(of(&spend, "claude-haiku-4-5-20251001").output, 3);
@@ -402,7 +448,7 @@ mod tests {
 2:\"input_tokens\":10\n\
 2:\"speed\":\"standard\"\n\
 2:\"requestId\":\"req_B\"\n";
-        let spend = tally("/x", counts);
+        let spend = tally("/x", counts, None);
         assert_eq!(spend.fast, 1);
         assert_eq!(of(&spend, "claude-opus-5").responses, 2);
     }
@@ -424,7 +470,7 @@ mod tests {
 2:\"output_tokens\":0\n\
 2:\"cache_creation_input_tokens\":0\n\
 2:\"cache_read_input_tokens\":0\n";
-        let spend = tally("/x", counts);
+        let spend = tally("/x", counts, None);
         assert_eq!(of(&spend, "<synthetic>").responses, 2);
         assert_eq!(spend.total().input, 0);
     }
@@ -440,7 +486,7 @@ mod tests {
 1:\"input_tokens\":10\n\
 1:\"model\":\"sonnet\"\n\
 1:\"requestId\":\"req_A\"\n";
-        let spend = tally("/x", counts);
+        let spend = tally("/x", counts, None);
         assert_eq!(spend.by_model.len(), 1);
         assert_eq!(of(&spend, "claude-opus-5").input, 10);
     }
@@ -449,7 +495,7 @@ mod tests {
     /// rather than a failure — `grep` finding no match is the ordinary case.
     #[test]
     fn a_transcript_with_no_assistant_record_spends_nothing() {
-        let spend = tally("/x", "");
+        let spend = tally("/x", "", None);
         assert_eq!(
             spend,
             Spend {
@@ -468,9 +514,111 @@ mod tests {
 1:\"input_tokens\":7\n\
 grep: /h/x.jsonl: Permission denied\n\
 2:\"web_search_requests\":3\n";
-        let spend = tally("/x", counts);
+        let spend = tally("/x", counts, None);
         assert_eq!(of(&spend, UNKNOWN_MODEL).responses, 1);
         assert_eq!(of(&spend, UNKNOWN_MODEL).input, 7);
+    }
+
+    fn at(stamp: &str) -> Option<OffsetDateTime> {
+        Some(OffsetDateTime::parse(stamp, &Rfc3339).expect("a valid stamp"))
+    }
+
+    /// Two responses a day apart, the later one written as two records.
+    const TWO_DAYS: &str = "\
+1:\"model\":\"claude-opus-5\"
+1:\"input_tokens\":5
+1:\"output_tokens\":50
+1:\"requestId\":\"req_old\"
+1:\"timestamp\":\"2026-10-03T23:59:59.999Z\"
+2:\"model\":\"claude-opus-5\"
+2:\"input_tokens\":7
+2:\"output_tokens\":70
+2:\"requestId\":\"req_new\"
+2:\"timestamp\":\"2026-10-04T09:00:00.000Z\"
+3:\"model\":\"claude-opus-5\"
+3:\"input_tokens\":7
+3:\"output_tokens\":70
+3:\"requestId\":\"req_new\"
+3:\"timestamp\":\"2026-10-04T09:00:01.000Z\"
+";
+
+    /// Y-354: a window keeps the responses stamped at or after its start, and
+    /// counts the one written twice once (I-61).
+    #[test]
+    fn a_window_counts_only_the_responses_inside_it_and_each_once() {
+        let spend = tally("/x", TWO_DAYS, at("2026-10-04T00:00:00Z"));
+        let counts = of(&spend, "claude-opus-5");
+        assert_eq!(counts.responses, 1);
+        assert_eq!(counts.input, 7);
+        assert_eq!(counts.output, 70);
+
+        let all = tally("/x", TWO_DAYS, None);
+        assert_eq!(of(&all, "claude-opus-5").responses, 2);
+        assert_eq!(of(&all, "claude-opus-5").input, 12);
+    }
+
+    /// The I-61 trap: a response whose first record falls before the window
+    /// and second inside it is one response, and it started outside.
+    #[test]
+    fn a_response_that_straddles_the_start_is_not_counted() {
+        let spend = tally("/x", TWO_DAYS, at("2026-10-04T09:00:00.500Z"));
+        assert!(spend.by_model.is_empty(), "{spend:?}");
+    }
+
+    /// A tool call's `timestamp` argument sits earlier on the record than the
+    /// record's own, so it must not decide which window the response is in.
+    #[test]
+    fn a_tool_argument_timestamp_does_not_place_the_response() {
+        let counts = "\
+1:\"model\":\"claude-opus-5\"\n\
+1:\"timestamp\":\"2020-01-01T00:00:00Z\"\n\
+1:\"input_tokens\":10\n\
+1:\"requestId\":\"req_A\"\n\
+1:\"timestamp\":\"2026-10-04T09:00:00Z\"\n\
+2:\"model\":\"claude-opus-5\"\n\
+2:\"timestamp\":\"2026-10-04T09:00:00Z\"\n\
+2:\"input_tokens\":3\n\
+2:\"requestId\":\"req_B\"\n\
+2:\"timestamp\":\"2020-01-01T00:00:00Z\"\n";
+        let spend = tally("/x", counts, at("2026-10-04T00:00:00Z"));
+        let counts = of(&spend, "claude-opus-5");
+        assert_eq!(counts.responses, 1);
+        assert_eq!(counts.input, 10);
+    }
+
+    /// A record with no stamp, or one that does not parse, cannot be placed in
+    /// a window. Without a window it counts as it always did.
+    #[test]
+    fn a_record_with_no_usable_stamp_is_dropped_only_under_a_window() {
+        let counts = "\
+1:\"model\":\"claude-opus-5\"\n\
+1:\"input_tokens\":10\n\
+1:\"requestId\":\"req_A\"\n\
+2:\"model\":\"claude-opus-5\"\n\
+2:\"input_tokens\":3\n\
+2:\"requestId\":\"req_B\"\n\
+2:\"timestamp\":\"2026-13-99Tnonsense\"\n";
+        let windowed = tally("/x", counts, at("2000-01-01T00:00:00Z"));
+        assert!(windowed.by_model.is_empty(), "{windowed:?}");
+
+        let all = tally("/x", counts, None);
+        assert_eq!(of(&all, "claude-opus-5").responses, 2);
+        assert_eq!(of(&all, "claude-opus-5").input, 13);
+    }
+
+    /// I-62 still holds with a stamp in the stream: the first `model` is the
+    /// response's, whatever window it falls in.
+    #[test]
+    fn the_first_model_is_still_the_one_priced_inside_a_window() {
+        let counts = "\
+1:\"model\":\"claude-opus-5\"\n\
+1:\"input_tokens\":10\n\
+1:\"model\":\"sonnet\"\n\
+1:\"requestId\":\"req_A\"\n\
+1:\"timestamp\":\"2026-10-04T09:00:00Z\"\n";
+        let spend = tally("/x", counts, at("2026-10-04T00:00:00Z"));
+        assert_eq!(spend.by_model.len(), 1);
+        assert_eq!(of(&spend, "claude-opus-5").input, 10);
     }
 
     /// The script has to find the same file `logs` finds, and by the same rules
@@ -486,7 +634,7 @@ grep: /h/x.jsonl: Permission denied\n\
             "{probe}"
         );
         assert!(probe.contains("grep -n -o -E"), "{probe}");
-        for field in ["model", "speed", "ephemeral_1h_input_tokens"] {
+        for field in ["model", "speed", "ephemeral_1h_input_tokens", "timestamp"] {
             assert!(probe.contains(field), "{field} is not asked for: {probe}");
         }
         assert!(

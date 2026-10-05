@@ -600,7 +600,7 @@ fn ago(seconds: i64) -> String {
 /// spent nothing — unlike `status`, this reports a measurement rather than a
 /// state, and zero is one.
 async fn show_tokens(name: &str) -> ExitCode {
-    match tokens::tokens(name).await {
+    match tokens::tokens(name, None).await {
         Ok(spend) => {
             print!("{}", render_tokens(&spend));
             ExitCode::SUCCESS
