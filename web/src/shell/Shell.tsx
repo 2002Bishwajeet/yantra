@@ -39,6 +39,7 @@ const BellPopover = lazy(() => loadBellPopover().then((it) => ({ default: it.Bel
 const NotificationsList = lazy(() => loadList().then((it) => ({ default: it.NotificationsList })))
 // A failed warm-up is the real import's to report, behind its boundary.
 const warm = (load: () => Promise<unknown>) => () => void load().catch(() => {})
+const warmList = warm(loadList)
 
 const usePathname = () => useRouterState({ select: (state) => state.location.pathname })
 
@@ -249,6 +250,8 @@ function TabletRail(props: { fab: ReactNode; onToggle: () => void; open: boolean
               aria-expanded={open}
               aria-haspopup="dialog"
               onClick={onToggle}
+              onFocus={warmList}
+              onPointerEnter={warmList}
             />
           </Guarded>
           <AccountButton />

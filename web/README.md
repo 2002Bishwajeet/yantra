@@ -742,10 +742,10 @@ src/
     gallery/         every component on one page, for the reviewer and
                      Playwright. Dev builds only
   shell/
-    Shell.tsx        the three shells, and the outlet under one boundary that a
+    Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
                      navigation resets
     Palette.tsx      the search pill and `⌘K`; the popup is its own chunk
-    Bell.tsx  BellPopover.tsx  NotificationsSheet.tsx  NotificationsScreen.tsx
+    Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from two media queries
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
