@@ -270,6 +270,7 @@ deleted everywhere else.
 | Y-420 | The microphone on macOS | ⬜ todo | claude | Y-417 | ADR-0031 §8. **Done** when Install puts BlackHole and SoX on a Mac, the dashboard guides the input choice and the microphone permission, and a test on a real Mac records speech. |
 | Y-421 | The build loop | ✅ done | claude | — | **Owner, 2026-09-30:** build rows without the owner reviewing each one. **Done** when [`build-rows.js`](.claude/workflows/build-rows.js) and [`CLAUDE.md`](CLAUDE.md) §B7 are on `main`, and a first run has merged one row or parked it with a reason. **Met 2026-09-30:** Y-367 merged unattended ([#359](https://github.com/2002Bishwajeet/yantra/pull/359)). |
 | Y-422 | Cut v0.4.0 | ✅ done | claude | Y-367, Y-368 | **Owner, 2026-09-30:** release what the build loop merged. **Done** when the tag publishes four archives with a verified `SHA256SUMS`, `/releases/latest` resolves v0.4.0, and each Linux archive carries `install.sh` and the two update units. |
+| Y-423 | The README says the box updates itself | 🔵 review | claude | Y-368 | **Owner, 2026-10-05.** **Done** when the README's install paragraph names the dashboard's *Update to vX* and `yantra update`, and says how a box older than v0.4.0 gets there. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
