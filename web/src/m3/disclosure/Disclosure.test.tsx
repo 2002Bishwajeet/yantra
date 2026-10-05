@@ -30,4 +30,35 @@ describe('Disclosure', () => {
     expect(screen.getByRole('button', { name: 'Hide Idle' }).getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('rows')).toBeTruthy()
   })
+
+  it('names its panel with aria-controls', () => {
+    render(
+      <Disclosure summary="Idle" defaultOpen>
+        rows
+      </Disclosure>,
+    )
+    const trigger = screen.getByRole('button', { name: 'Show Idle' })
+    const panel = document.getElementById(trigger.getAttribute('aria-controls') ?? '')
+    expect(panel).not.toBeNull()
+    expect(panel?.textContent).toContain('rows')
+  })
+
+  it('makes the panel inert while closed', () => {
+    render(<Disclosure summary="Idle">rows</Disclosure>)
+    const trigger = screen.getByRole('button', { name: 'Show Idle' })
+    const panel = document.getElementById(trigger.getAttribute('aria-controls') ?? '')
+    expect(panel?.hasAttribute('inert')).toBe(true)
+    fireEvent.click(trigger)
+    expect(panel?.hasAttribute('inert')).toBe(false)
+    fireEvent.click(trigger)
+    expect(panel?.hasAttribute('inert')).toBe(true)
+  })
+
+  it('keeps content mounted after the first open, so the close can animate', () => {
+    render(<Disclosure summary="Idle">rows</Disclosure>)
+    const trigger = screen.getByRole('button', { name: 'Show Idle' })
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    expect(screen.getByText('rows')).toBeTruthy()
+  })
 })

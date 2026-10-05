@@ -43,19 +43,28 @@
   transition: transform var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
 }
 
-.m3-disclosure__trigger[data-panel-open] .m3-disclosure__chevron {
+.m3-disclosure__trigger[aria-expanded='true'] .m3-disclosure__chevron {
   transform: rotate(180deg);
 }
 
 .m3-disclosure__panel {
-  height: var(--collapsible-panel-height);
-  overflow: hidden;
-  transition: height var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial);
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    visibility 0s var(--md-sys-motion-duration-default-spatial);
 }
 
-.m3-disclosure__panel[data-starting-style],
-.m3-disclosure__panel[data-ending-style] {
-  height: 0;
+.m3-disclosure[data-open] > .m3-disclosure__panel {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition-delay: 0s, 0s;
+}
+
+.m3-disclosure__clip {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .m3-disclosure__content {
