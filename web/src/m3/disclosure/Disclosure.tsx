@@ -14,11 +14,11 @@ export type DisclosureProps = {
 }
 
 /** The dashboard's Idle line: an outlined row that opens on a spring. */
-export function Disclosure({ summary, action, className, defaultOpen = false, children }: DisclosureProps) {
+export function Disclosure({ summary, action, className, defaultOpen, children }: DisclosureProps) {
   const id = useId()
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(defaultOpen ?? false)
   // Children mount on the first open and stay, so the close can animate.
-  const [seen, setSeen] = useState(defaultOpen)
+  const [seen, setSeen] = useState(defaultOpen ?? false)
   return (
     <div className={clsx('m3-disclosure', className)} data-open={open ? '' : undefined}>
       <div className="m3-disclosure__row">
