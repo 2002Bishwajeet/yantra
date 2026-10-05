@@ -246,7 +246,7 @@ Write the tests that prove the done condition first, then the code. Run the fast
   for (let round = 1; ; round++) {
     const r = await agent(
       `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
-Load the code-review skill and review at high effort. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
+Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
 List only defects that must be fixed before merge as blocking. Do not change any file.`,
       { label: `review:${row.id}:${round}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
     )
