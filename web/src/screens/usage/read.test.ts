@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import type { Spend, Workspace } from '@/api'
+import type { ModelSpend, Spend, Workspace } from '@/api'
 import { aWorkspace } from '@/api/fixtures'
 import { byModel, byWorkspace, lines, type Row } from './read'
+
+const model = (over: Partial<ModelSpend> & Pick<ModelSpend, 'model'>): ModelSpend => ({
+  responses: 4,
+  input: 10,
+  output: 20,
+  cache_write: 5,
+  cache_read: 900,
+  cost: 1.5,
+  ...over,
+})
 
 const spend = (over: Partial<Spend> = {}): Spend => ({
   path: '/home/biswa/.claude/projects/-home-biswa-Github-yantra/1f0c1a2e.jsonl',
   total: { responses: 4, input: 10, output: 20, cache_write: 5, cache_read: 900 },
-  models: [{ model: 'opus', responses: 4, cost: 1.5 }],
+  models: [model({ model: 'opus' })],
   fast: 0,
   cost: 1.5,
   as_of: '2026-08-11',
@@ -48,24 +58,71 @@ describe('by workspace', () => {
 describe('by model', () => {
   it('adds one model across the workspaces that used it', () => {
     const rows = [
-      read(one, { models: [{ model: 'opus', responses: 4, cost: 1 }] }),
-      read(two, { models: [{ model: 'opus', responses: 2, cost: 2 }] }),
+      read(one, { models: [model({ model: 'opus', responses: 4, cost: 1 })] }),
+      read(two, { models: [model({ model: 'opus', responses: 2, cost: 2 })] }),
     ]
     expect(byModel(rows)).toEqual([
-      { model: 'opus', responses: 6, cost: 3, workspaces: 2 },
+      {
+        model: 'opus',
+        responses: 6,
+        input: 20,
+        output: 40,
+        cacheRead: 1800,
+        cost: 3,
+        workspaces: 2,
+      },
     ])
   })
 
   it('is unpriced, never free, when one of its reads carries no price', () => {
     const rows = [
-      read(one, { models: [{ model: 'unknown', responses: 2, cost: null }] }),
-      read(two, { models: [{ model: 'unknown', responses: 1, cost: 4 }] }),
+      read(one, { models: [model({ model: 'unknown', responses: 2, cost: null })] }),
+      read(two, { models: [model({ model: 'unknown', responses: 1, cost: 4 })] }),
     ]
-    expect(byModel(rows)[0]).toEqual({
+    expect(byModel(rows)[0]).toMatchObject({
       model: 'unknown',
       responses: 3,
       cost: null,
       workspaces: 2,
+    })
+  })
+
+  // Y-373: the split comes from each model's own counts, not the workspace total.
+  it('gives each model of a two-model workspace its own tokens', () => {
+    const rows = [
+      read(one, {
+        total: { responses: 7, input: 110, output: 220, cache_write: 0, cache_read: 3300 },
+        models: [
+          model({ model: 'opus', responses: 5, input: 100, output: 200, cache_read: 3000 }),
+          model({ model: 'sonnet', responses: 2, input: 10, output: 20, cache_read: 300 }),
+        ],
+      }),
+    ]
+    const found = byModel(rows)
+    expect(found.find((row) => row.model === 'opus')).toMatchObject({
+      input: 100,
+      output: 200,
+      cacheRead: 3000,
+    })
+    expect(found.find((row) => row.model === 'sonnet')).toMatchObject({
+      input: 10,
+      output: 20,
+      cacheRead: 300,
+    })
+  })
+
+  it('keeps the tokens of an unpriced model while its cost stays null', () => {
+    const rows = [
+      read(one, {
+        models: [model({ model: 'unknown', input: 118, output: 640, cache_read: 7, cost: null })],
+      }),
+    ]
+    expect(byModel(rows)[0]).toMatchObject({
+      model: 'unknown',
+      input: 118,
+      output: 640,
+      cacheRead: 7,
+      cost: null,
     })
   })
 })

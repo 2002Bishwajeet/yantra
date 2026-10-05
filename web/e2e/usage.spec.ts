@@ -33,6 +33,10 @@ test.describe('usage on a busy fleet', () => {
 
     const models = card(page, 'By model')
     await expect(models.getByText('claude-opus-5-20260115')).toBeVisible()
+    // Y-373: opus's own counts, not the session total, across ten workspaces.
+    await expect(
+      models.getByText('94,120 in · 843,100 out · 48,120,030 cache read'),
+    ).toBeVisible()
     // A model the price table does not carry is unpriced, never free.
     await expect(models.getByText('unpriced')).toBeVisible()
 

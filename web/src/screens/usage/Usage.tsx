@@ -112,6 +112,10 @@ function ByModel(props: { rows: Row[] }) {
                     {count(one.responses)} responses · {one.workspaces} workspace
                     {one.workspaces === 1 ? '' : 's'}
                   </span>
+                  <span className="usage__where m3-wrap">
+                    {count(one.input)} in · {count(one.output)} out · {count(one.cacheRead)} cache
+                    read
+                  </span>
                 </span>
                 <Mono className="usage__cost">
                   {one.cost === null ? 'unpriced' : money(one.cost)}

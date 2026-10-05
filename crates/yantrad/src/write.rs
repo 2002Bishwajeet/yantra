@@ -1870,10 +1870,25 @@ struct Counts {
     cache_read: u64,
 }
 
+impl Counts {
+    /// `cache_write_1h` stays off the wire: it is a share of `cache_write`
+    /// that only the price needs.
+    fn of(counts: &tokens::Counts) -> Self {
+        Self {
+            responses: counts.responses,
+            input: counts.input,
+            output: counts.output,
+            cache_write: counts.cache_write,
+            cache_read: counts.cache_read,
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 struct ModelSpend {
     model: String,
-    responses: usize,
+    #[serde(flatten)]
+    counts: Counts,
     /// `null` is a model the price table does not carry — **unpriced**, which
     /// is a different thing from free. Its tokens are still in `total`, and its
     /// dollars are in nobody's figure.
@@ -1893,7 +1908,7 @@ impl Spend {
             .iter()
             .map(|(model, counts)| ModelSpend {
                 model: model.clone(),
-                responses: counts.responses,
+                counts: Counts::of(counts),
                 cost: priced
                     .then(|| price::rate(model))
                     .flatten()
@@ -1912,13 +1927,7 @@ impl Spend {
 
         Self {
             path: spend.path.clone(),
-            total: Counts {
-                responses: total.responses,
-                input: total.input,
-                output: total.output,
-                cache_write: total.cache_write,
-                cache_read: total.cache_read,
-            },
+            total: Counts::of(&total),
             models,
             fast: spend.fast,
             cost: charged,
@@ -3672,7 +3681,50 @@ mod tests {
             keys(&answered["total"]),
             ["cache_read", "cache_write", "input", "output", "responses"]
         );
-        assert_eq!(keys(&answered["models"][0]), ["cost", "model", "responses"]);
+        assert_eq!(
+            keys(&answered["models"][0]),
+            [
+                "cache_read",
+                "cache_write",
+                "cost",
+                "input",
+                "model",
+                "output",
+                "responses"
+            ]
+        );
+    }
+
+    /// Y-373: each model keeps its own tokens, so the dashboard can split a
+    /// two-model session, and fast mode withholds the dollars but not them.
+    #[test]
+    fn each_model_carries_its_own_tokens_and_they_add_up_to_the_total() {
+        let spend = Spend::of(&transcript(0));
+        let opus = &spend.models[0].counts;
+        let unknown = &spend.models[1].counts;
+        assert_eq!(
+            (opus.responses, opus.input, opus.output),
+            (66, 9_412, 84_310)
+        );
+        assert_eq!(
+            (unknown.responses, unknown.input, unknown.output),
+            (2, 118, 640)
+        );
+        assert_eq!(opus.input + unknown.input, spend.total.input);
+        assert_eq!(opus.output + unknown.output, spend.total.output);
+        assert_eq!(
+            opus.cache_write + unknown.cache_write,
+            spend.total.cache_write
+        );
+        assert_eq!(opus.cache_read + unknown.cache_read, spend.total.cache_read);
+
+        let fast = Spend::of(&transcript(3));
+        assert!(fast.models.iter().all(|model| model.cost.is_none()));
+        assert_eq!(
+            fast.models[0].counts.input, 9_412,
+            "fast mode keeps the tokens"
+        );
+        assert_eq!(fast.models[1].counts.output, 640);
     }
 
     /// **The three the price table refuses to price**, each a different thing
