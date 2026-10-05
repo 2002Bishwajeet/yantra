@@ -38,7 +38,8 @@ export default defineConfig({
       animations: 'disabled',
       caret: 'hide',
       scale: 'css',
-      maxDiffPixelRatio: 0.01,
+      // A changed word is about 300 px, so any ratio on a full page hides one (Y-378).
+      maxDiffPixels: 0,
       threshold: 0.2,
     },
   },

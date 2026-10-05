@@ -611,7 +611,7 @@ outside a spec's `known` list, and fails again the day a known one is fixed
 without the list being edited. **It waits for every CSS transition to end
 first**: a surface caught part-way through its fade composites the colour axe
 measures, and the reading belongs to no frame a reader sees (Y-363).
-`lib/screenshot.ts` writes one file per screen, scenario and size.
+`lib/screenshot.ts` writes one file per screen, scenario and size. The comparison allows no differing pixels beyond `threshold`, because a ratio hid a changed word (Y-378).
 
 **The fixture daemon is Node, not `yantrad`.**
 [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the

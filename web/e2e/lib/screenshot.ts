@@ -14,6 +14,8 @@ export async function screenshot(
   size: Size,
   options: { overlay?: boolean } = {},
 ) {
+  // Shell's lazy Account and BellPopover show a slot fallback until they load (321 px).
+  await expect(page.locator('.shell__slot')).toHaveCount(0)
   await expect(page).toHaveScreenshot(`${screen}-${scenario}-${size}.png`, {
     fullPage: !options.overlay,
   })
