@@ -187,3 +187,9 @@ drawn and tested without a fleet.
 - **Whether a second agent CLI is ever normalised into this union.** The vocabulary allows it; no row
   asks for it.
 - **The diff surface.** T3 Code has one, Yantra has no row for one.
+
+> **2026-10-05 (Y-428): the event model gains a second source.**
+> [ADR-0033](0033-other-harnesses-speak-acp-and-claude-delegates.md) has `yantrad` speak ACP to
+> Codex, Gemini, Grok and opencode, and maps their events into decision 1's model. Claude stays on
+> this ADR's bridge, so decisions 2 to 8 hold for it unchanged. Decision 1 said the union was
+> provider-neutral with no second agent planned. A second source is now planned.
