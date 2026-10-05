@@ -227,7 +227,7 @@ Never reset or delete existing commits: they are work a parked run kept. Report 
   const plan = await agent(
     `Plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${prior}
 Write a short plan and the checks that prove the row's done condition. Set park=true if the row needs something CLAUDE.md §B7 excludes.${RULES(wt)}`,
-    { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, model: 'opus', effort: 'high' },
+    { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, model: 'opus', effort: row.kind === 'rust-transport' ? 'high' : 'medium' },
   )
   if (!plan) return park('the planner died')
   if (plan.park) return park(plan.parkReason || 'the planner parked it')
@@ -256,7 +256,7 @@ List only defects that must be fixed before merge as blocking. Do not change any
       simplified = true
       await agent(
         `In ${wt}, load the simplify skill and apply it to git diff origin/main...HEAD. Keep behaviour and tests unchanged. Commit.${RULES(wt)}`,
-        { label: `simplify:${row.id}`, phase: 'Review', model: b.model, effort: 'medium' },
+        { label: `simplify:${row.id}`, phase: 'Review', model: 'sonnet', effort: 'medium' },
       )
       if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after simplify')
       continue
@@ -289,7 +289,7 @@ List only defects that must be fixed before merge as blocking. Do not change any
 5. Wait for the checks (gh pr checks --watch). The merge guard: the five required checks clippy, deny, fmt, test and "cross (aarch64-unknown-linux-musl)" are present by name, and every check in gh pr view --json statusCheckRollup is SUCCESS, SKIPPED or NEUTRAL. If any is not, return checks-failed with the failing check's log tail.
 6. Merge with gh pr merge --squash --delete-branch --subject "${title} (#<pr number>)". If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
 7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
-        { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'opus', effort: 'medium' },
+        { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
       )
     })
 
@@ -311,7 +311,7 @@ const only = A.rows || null
 
 while (results.length < MAX_ROWS) {
   phase('Triage')
-  const t = await agent(triagePrompt([...attempted]), { label: 'triage', phase: 'Triage', schema: TRIAGE_SCHEMA, model: 'opus', effort: 'high' })
+  const t = await agent(triagePrompt([...attempted]), { label: 'triage', phase: 'Triage', schema: TRIAGE_SCHEMA, model: 'opus', effort: 'medium' })
   if (!t) break
   for (const s of t.skipped) skipped.set(s.id, s.reason)
   const pool = t.rows.filter((r) => !attempted.has(r.id) && (!only || only.includes(r.id)))
