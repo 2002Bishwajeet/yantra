@@ -808,6 +808,14 @@ reconcile. Keep them, and say in
 > appliance's half sends no `ETag` and no `Cache-Control`, so **every open pays the whole 271,018 B
 > again** — three consecutive visits, measured. Four response headers are worth more than this
 > ceiling, and they need a row.
+>
+> **2026-10-05, Y-325: the 200 KiB ceiling already answered this row.** The row asked whether
+> the 384 bytes of headroom are spent or won back. Y-370 replaced that ceiling, so the question
+> no longer applies. The 2026-09-04 "384 bytes" amendment describes the old 145 KiB ceiling.
+> Measured on `cfac1c3`, `npm run budget` prints a first load of 160,739 B (157.0 KiB) against
+> 204,800 B. The headroom is 44,061 B (43.0 KiB). The fonts are 80,428 B against 81,920 B and
+> stay outside that figure. `npm run budget` now prints the headroom on every run, so a new
+> surface can read the figure it may spend.
 
 ### 9.2 What moves
 

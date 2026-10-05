@@ -64,6 +64,7 @@ for (const c of chunks) {
   console.log(`  ${c.url.padEnd(44)} ${String(c.gzip).padStart(8)} B  (${kib(c.gzip)} KiB)`)
 }
 console.log(`  ${'total'.padEnd(44)} ${String(firstLoad).padStart(8)} B  (${kib(firstLoad)} KiB, ceiling 200 KiB = ${FIRST_LOAD_CEILING} B)`)
+console.log(`  ${'headroom'.padEnd(44)} ${String(FIRST_LOAD_CEILING - firstLoad).padStart(8)} B  (${kib(FIRST_LOAD_CEILING - firstLoad)} KiB)`)
 console.log('fonts the stylesheet names (raw woff2)')
 for (const [file, size] of fonts) {
   console.log(`  ${file.slice(dist.length + 1).padEnd(44)} ${String(size).padStart(8)} B  (${kib(size)} KiB)`)

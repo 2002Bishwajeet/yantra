@@ -577,6 +577,8 @@ and a kilobyte costs 5.25 ms, so the headroom to 2 s is 75 KiB and the ceiling
 spends 52 of it. It still refuses xterm in the entry by 33 KiB and every screen
 eager by 47 KiB.
 
+The script prints the first-load headroom under the total (Y-325).
+
 **As of 2026-09-08 it is green.** `/` is **148.7 KiB** and the fonts are
 **78.5 KiB**, so `web.yml` runs the budget with no `continue-on-error` for the
 first time since M14 opened.
