@@ -63,6 +63,14 @@ describe('the desktop shell', () => {
     expect(await screen.findByRole('complementary', { name: 'Sessions' })).toBeTruthy()
   })
 
+  it('draws the home rail on /new, because the dashboard sits behind the scrim', async () => {
+    mount('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    // The modal hides what is behind it from the accessibility tree.
+    const rail = await screen.findByRole('complementary', { name: 'Sessions', hidden: true })
+    expect(within(rail).getByRole('region', { name: 'Live', hidden: true })).toBeTruthy()
+  })
+
   /** Finding 112: five session boards draw the rail beside the screen. That it
    *  is drawn there is the e2e's, which loads the session screen for it. */
   it('counts a session screen among the places the rail belongs', () => {
@@ -195,7 +203,8 @@ describe('the FAB', () => {
     ['/new', 'New session'],
   ])('draws none on the tablet on %s', async (path, title) => {
     mount('tablet', path)
-    await screen.findAllByRole('heading', { level: 1, name: title })
+    if (path === '/new') await screen.findByRole('dialog', { name: title })
+    else await screen.findAllByRole('heading', { level: 1, name: title })
     expect(fab()).toBeNull()
     // The rail keeps the FAB's place, so the destinations never move.
     expect(document.querySelector('.shell__rail-slot')).toBeTruthy()
@@ -289,9 +298,10 @@ describe('the FAB', () => {
       expect(fab()).toBeNull()
       expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
 
-      // The rail belongs to New session all the same.
+      // New session draws over the checklist, so the rail follows the page behind it.
       fireEvent.click(main.getByRole('link', { name: 'New session' }))
-      expect(await screen.findByRole('complementary', { name: 'Sessions' })).toBeTruthy()
+      await screen.findByRole('dialog', { name: 'New session' })
+      expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
     })
   })
 })

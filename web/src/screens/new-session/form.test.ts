@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { Repo } from '@/api'
+import type { Machine, Repo } from '@/api'
 import {
   cloneInto,
   complete,
   happenings,
   nameError,
+  pickMachine,
   plan,
   reachable,
   repoName,
@@ -12,6 +13,7 @@ import {
   tilde,
   type Values,
 } from './form'
+import { aMachine } from '@/api/fixtures'
 import { generateName } from './words'
 
 const repo: Repo = {
@@ -138,5 +140,23 @@ describe('paths', () => {
     expect(slug('https://github.com/2002Bishwajeet/yantra.git')).toBe('2002Bishwajeet/yantra')
     expect(slug('git@github.com:2002Bishwajeet/yantra.git')).toBe('2002Bishwajeet/yantra')
     expect(slug('https://gitlab.com/group/thing/')).toBe('group/thing')
+  })
+})
+
+describe('pickMachine', () => {
+  const one = (name: string, over: Partial<Machine> = {}) => aMachine({ name, ...over })
+  const list = [
+    one('up'),
+    one('down', { online: false }),
+    one('old', { expired: true }),
+    one('theirs', { ownership: 'shared' }),
+  ]
+
+  it('keeps a machine that is yours, online and current', () => {
+    expect(pickMachine('up', list)).toBe('up')
+  })
+
+  it.each(['down', 'old', 'theirs', 'gone', ''])('drops %j', (given) => {
+    expect(pickMachine(given, list)).toBe('')
   })
 })

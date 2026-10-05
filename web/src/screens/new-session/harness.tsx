@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import App from '@/App'
 import * as contract from '@/contract.gen'
 import { answer } from '@/test/daemon'
@@ -82,15 +82,24 @@ const fleet: Answers = {
 
 /** `<App/>` at `/new`, one width, over the contract fixtures with `answers`
  *  laid on top. Returns every request as `METHOD path`. */
+let width = 0
+const watchers = new Set<() => void>()
+
+/** Changes the width under a mounted form, as a phone does when it rotates. */
+export function resize(size: FormFactor) {
+  width = WIDTH[size]
+  act(() => watchers.forEach((notify) => notify()))
+}
+
 export function mountNew(size: FormFactor, path: string, answers: Answers = {}) {
   const asked: string[] = []
-  const width = WIDTH[size]
+  width = WIDTH[size]
   vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
     media: query,
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addEventListener: (_: string, notify: () => void) => watchers.add(notify),
+    removeEventListener: (_: string, notify: () => void) => watchers.delete(notify),
     // xterm.js still asks for the legacy pair on the device-pixel-ratio query.
     addListener: () => {},
     removeListener: () => {},

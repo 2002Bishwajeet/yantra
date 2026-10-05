@@ -52,6 +52,11 @@ async function open(path: string) {
   render(<App />)
 }
 
+const navigateTo = async (to: string) => {
+  history.pushState(null, '', to)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 const h1 = (name: string) => screen.findByRole('heading', { level: 1, name })
 
 describe('every path draws its screen and names it in the title', () => {
@@ -64,7 +69,6 @@ describe('every path draws its screen and names it in the title', () => {
     ['/usage', 'Usage', 'Usage · Yantra'],
     ['/w/landing', 'landing', 'landing · Yantra'],
     ['/w/landing/repair', 'Repair landing', 'Repair landing · Yantra'],
-    ['/new', 'New session', 'New session · Yantra'],
     ['/settings', 'Settings', 'Settings · Yantra'],
     ['/settings/about', 'Settings', 'About · Yantra'],
     ['/machines/add', 'Add a device', 'Add a device · Yantra'],
@@ -72,6 +76,21 @@ describe('every path draws its screen and names it in the title', () => {
     await open(path)
     expect(await h1(heading)).toBeTruthy()
     await waitFor(() => expect(document.title).toBe(title))
+  })
+
+  it('/new draws the dialog over the dashboard and names the title', async () => {
+    await open('/new')
+    expect(await screen.findByRole('dialog', { name: 'New session' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { level: 1, name: 'New session' })).toBeNull()
+    await waitFor(() => expect(document.title).toBe('New session · Yantra'))
+  })
+
+  it('keeps the dashboard mounted from / to /new', async () => {
+    await open('/')
+    const dashboard = await h1('Dashboard')
+    await navigateTo('/new')
+    expect(await screen.findByRole('dialog', { name: 'New session' })).toBeTruthy()
+    expect(dashboard.isConnected).toBe(true)
   })
 
   /** The daemon falls every unknown path back to `index.html`, so this arrives
@@ -98,12 +117,12 @@ describe('the search params', () => {
 
   it('keeps a step of one to four on /new and drops the rest', async () => {
     await open('/new?step=3')
-    await h1('New session')
+    await screen.findByRole('dialog', { name: 'New session' })
     expect(location.search).toBe('?step=3')
 
     cleanup()
     await open('/new?step=9')
-    await h1('New session')
+    await screen.findByRole('dialog', { name: 'New session' })
     await waitFor(() => expect(location.search).toBe(''))
   })
 })

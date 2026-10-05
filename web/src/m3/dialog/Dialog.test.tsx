@@ -68,4 +68,51 @@ describe('Dialog', () => {
     fireEvent.click(scrim)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
+
+  it('draws no close button and no leading slot unless asked', async () => {
+    render(<Kill />)
+    fireEvent.click(screen.getByRole('button', { name: 'Kill' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Kill landing?' })
+    expect(dialog.querySelector('.m3-dialog__head')?.hasAttribute('data-framed')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+  })
+
+  describe('with a leading slot and a dismiss', () => {
+    const framed = () =>
+      render(
+        <Dialog defaultOpen>
+          <DialogPopup
+            title="quiet-otter"
+            description="on cachyos-g14"
+            leading={<span data-testid="tile">Q</span>}
+            dismiss="Close"
+          >
+            <p>body</p>
+          </DialogPopup>
+        </Dialog>,
+      )
+
+    it('draws the leading slot before the title, which stays an h2', async () => {
+      framed()
+      const dialog = await screen.findByRole('dialog', { name: 'quiet-otter' })
+      const head = dialog.querySelector('.m3-dialog__head')!
+      expect(head.firstElementChild).toBe(screen.getByTestId('tile'))
+      expect(screen.getByRole('heading', { level: 2, name: 'quiet-otter' })).toBeTruthy()
+      expect(screen.getByText('on cachyos-g14')).toBeTruthy()
+    })
+
+    it('names the close button from dismiss and draws it last in the head', async () => {
+      framed()
+      const dialog = await screen.findByRole('dialog')
+      const close = screen.getByRole('button', { name: 'Close' })
+      expect(dialog.querySelector('.m3-dialog__head')?.lastElementChild).toBe(close)
+    })
+
+    it('closes the dialog from the close button', async () => {
+      framed()
+      await screen.findByRole('dialog')
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    })
+  })
 })
