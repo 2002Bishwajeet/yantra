@@ -279,4 +279,5 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the
   report. A later run skips it until its reason no longer holds, then continues from that branch.
 - **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
-  web and docs and runs the gate. No subagent runs on Fable.
+  web and docs, runs the gate, simplifies and ships. No subagent runs on Fable. Owner, 2026-10-05:
+  use Opus only where it matters, and at high effort only to review and to plan transport work.
