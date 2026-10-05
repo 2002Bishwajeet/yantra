@@ -37,6 +37,18 @@ test.describe('with motion', () => {
     await popup.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
     expect(await popup.evaluate((el) => getComputedStyle(el).transform)).toBe('none')
   })
+
+  test('the Idle disclosure opens on a grid-template-rows transition', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'one surface is enough to prove the animation survived')
+    await scenario(page, 'busy')
+    await page.goto('/')
+    const show = page.getByRole('button', { name: /Show/ })
+    await show.click()
+    const panel = page.locator('#' + (await show.getAttribute('aria-controls')))
+    expect(await panel.evaluate(durationOf, 'grid-template-rows')).toBe('0.435s')
+    expect(await panel.evaluate((el) => el.getAnimations().length)).toBeGreaterThan(0)
+    await panel.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
+  })
 })
 
 test.describe('under reduce', () => {
