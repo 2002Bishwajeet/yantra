@@ -42,7 +42,7 @@ export function General() {
         />
         <ListItem
           headline="Default machine for new sessions"
-          supporting="preselected in the Machine step"
+          supporting="preselected in the Machine step when it is reachable; with none, the step preselects nothing"
           trailing={
             <select
               aria-label="Default machine for new sessions"
@@ -50,7 +50,7 @@ export function General() {
               onChange={(event) => write({ defaultMachine: event.target.value || null })}
               value={held.defaultMachine ?? ''}
             >
-              <option value="">first in the list</option>
+              <option value="">none</option>
               {options.map((name) => (
                 <option key={name} value={name}>
                   {name}
