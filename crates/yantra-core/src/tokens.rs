@@ -174,7 +174,7 @@ fn probe(repo: &str, session: Option<&str>) -> String {
          grep '\"type\":\"assistant\"' \"$f\" \
          | grep -n -o -E '\"(model|speed|requestId|input_tokens|output_tokens\
          |cache_creation_input_tokens|cache_read_input_tokens\
-         |ephemeral_1h_input_tokens)\":(\"[^\"]*\"|[0-9]+)         |\"timestamp\":\"[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[^\"]*\"' || :\n",
+         |ephemeral_1h_input_tokens)\":(\"[^\"]*\"|[0-9]+)|\"timestamp\":\"[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[^\"]*\"' || :\n",
         locate = logs::locate(repo, session),
     )
 }
@@ -637,6 +637,14 @@ grep: /h/x.jsonl: Permission denied\n\
         for field in ["model", "speed", "ephemeral_1h_input_tokens", "timestamp"] {
             assert!(probe.contains(field), "{field} is not asked for: {probe}");
         }
+        let pattern = probe
+            .split('\'')
+            .find(|p| p.starts_with("\"(model"))
+            .unwrap_or_default();
+        assert!(
+            !pattern.is_empty() && !pattern.contains(' '),
+            "a space inside the pattern makes every count need one after it: {probe}"
+        );
         assert!(
             !probe.contains("tail -n"),
             "shipping records rather than counts would carry the conversation with them: {probe}"
