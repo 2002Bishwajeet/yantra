@@ -1,6 +1,7 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useStore } from '@tanstack/react-form'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
+import { useMachines } from '@/api/hooks'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
@@ -10,7 +11,7 @@ import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { usePrefs } from '@/shell/prefs'
 import { readGeneral } from '@/screens/settings/general'
-import { complete, plan, type Plan, reachable, STEPS, type Values } from './form'
+import { complete, pickMachine, plan, type Plan, reachable, STEPS, type Values } from './form'
 import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
@@ -29,11 +30,11 @@ const usePresetMachine = () =>
     },
   })
 
-function defaults(machine: string): Values {
+function defaults(): Values {
   return {
     name: generateName(),
     named: false,
-    machine,
+    machine: '',
     provider: 'github',
     source: null,
     opens: 'claude',
@@ -51,13 +52,24 @@ export function NewSession() {
   const defaultMachine = readGeneral(usePrefs()).defaultMachine
   const preset = presetMachine || defaultMachine || ''
   const [starting, setStarting] = useState<Plan | null>(null)
-  const form = useSessionForm(defaults(preset), (values) => {
+  const form = useSessionForm(defaults(), (values) => {
     const next = plan(values)
     if (!next) return
     setStarting(next)
     void navigate({ to: '/new', search: { step: 4 } })
   })
   const values = useStore(form.store, (state) => state.values)
+
+  // The list can arrive after mount, so the preset is resolved once it reads
+  // ok; a pick made meanwhile is never overwritten.
+  const machines = useMachines()
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (seeded.current || machines.looked !== 'ok') return
+    seeded.current = true
+    const picked = pickMachine(preset, machines.data)
+    if (picked !== '' && form.getFieldValue('machine') === '') form.setFieldValue('machine', picked)
+  }, [machines, preset, form])
 
   // A step the values do not reach yet draws the first one that is unfinished.
   const step = Math.min(requested, starting ? 4 : Math.min(3, reachable(values))) as Step

@@ -388,29 +388,78 @@ describe('the modal and the page', () => {
 })
 
 describe('the default machine', () => {
-  it('opens with its chip pressed and Continue enabled once there is a name', async () => {
+  const pressed = () =>
+    within(screen.getByRole('group', { name: 'Machine' }))
+      .getAllByRole('button')
+      .filter((chip) => chip.getAttribute('aria-pressed') === 'true')
+  const stays = async () => {
+    await screen.findByRole('group', { name: 'Machine' })
+    expect(pressed()).toHaveLength(0)
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  }
+
+  it('presses a reachable default once the list arrives, and Continue enables with a name', async () => {
     writePrefs({ general: { defaultMachine: 'cachyos-g14' } })
     mountNew('desktop', '/new')
     await screen.findByRole('dialog', { name: 'New session' })
-    const chip = screen.getByRole('button', { name: 'cachyos-g14' })
-    expect(chip.getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['cachyos-g14']))
     type('Name', 'quiet-otter')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
   })
 
+  it('selects no machine when there is no default', async () => {
+    mountNew('desktop', '/new')
+    await stays()
+  })
+
+  it('does not select a default that is offline', async () => {
+    writePrefs({ general: { defaultMachine: 'bishwajeets-macbook-pro' } })
+    mountNew('desktop', '/new')
+    await stays()
+  })
+
+  it('does not select a default the list does not hold', async () => {
+    writePrefs({ general: { defaultMachine: 'gone' } })
+    mountNew('desktop', '/new')
+    await stays()
+  })
+
   it('yields to ?machine=', async () => {
-    writePrefs({ general: { defaultMachine: 'thinkpad' } })
+    writePrefs({ general: { defaultMachine: 'pi' } })
     mountNew('desktop', '/new?machine=cachyos-g14')
     await screen.findByRole('dialog', { name: 'New session' })
-    expect(screen.getByRole('button', { name: 'cachyos-g14' }).getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['cachyos-g14']))
+  })
+
+  it('does not press a ?machine= that is unreachable', async () => {
+    mountNew('desktop', '/new?machine=bishwajeets-macbook-pro')
+    await stays()
+  })
+
+  it('does not overwrite a machine picked before the list was read again', async () => {
+    writePrefs({ general: { defaultMachine: 'cachyos-g14' } })
+    mountNew('desktop', '/new')
+    await waitFor(() => expect(pressed()).toHaveLength(1))
+    press('pi')
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['pi']))
+  })
+
+  it('selects nothing and shows the error when the machines cannot be read', async () => {
+    writePrefs({ general: { defaultMachine: 'cachyos-g14' } })
+    mountNew('desktop', '/new', {
+      'GET /api/machines': [200, { looked: 'failed', age_seconds: 0, error: 'tailscale: not running' }],
+    })
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Machines could not be read')
+    expect(screen.queryByRole('group', { name: 'Machine' })).toBeNull()
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
   it('chooses no machine when the general pref is corrupt', async () => {
     writePrefs({ general: { defaultMachine: 42 } })
     mountNew('desktop', '/new')
-    await screen.findByRole('dialog', { name: 'New session' })
-    expect(screen.getByRole('button', { name: 'cachyos-g14' }).getAttribute('aria-pressed')).toBe('false')
-    type('Name', 'quiet-otter')
-    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+    await stays()
   })
 })

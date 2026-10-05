@@ -1,4 +1,4 @@
-import type { Repo } from '@/api'
+import type { Machine, Repo } from '@/api'
 import { USABLE_NAME } from '@/lib/name'
 import type { Step } from '@/router'
 
@@ -34,6 +34,13 @@ export const nameError = (name: string): string | undefined =>
     : USABLE_NAME.test(name)
       ? undefined
       : 'The daemon takes letters, digits, - and _ and nothing else, so it would refuse this one.'
+
+/** The machine a preset may select: only one that is yours and reachable now,
+ *  since a disabled chip must never be pressed. */
+export const pickMachine = (given: string, machines: Machine[]): string =>
+  machines.some((one) => one.name === given && one.ownership === 'yours' && one.online && !one.expired)
+    ? given
+    : ''
 
 /** Whether a step is complete enough to leave. */
 export function complete(step: Step, values: Values): boolean {
