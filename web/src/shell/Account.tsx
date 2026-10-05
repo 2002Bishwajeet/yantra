@@ -7,10 +7,21 @@ import { Menu, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 /** The avatar and its menu. A generic mark rather than an initial: nothing
  *  on the wire names the person (inventory §C). */
 export function Account(props: { openOnMount?: boolean }) {
-  // Opens one effect after mount, not defaultOpen: a menu born open skips the
+  // Opens two frames after mount, not defaultOpen: a menu born open skips the
   // enter transition, and the arrow keys would find no focus inside it.
   const [open, setOpen] = useState(false)
-  useEffect(() => setOpen(props.openOnMount ?? false), [props.openOnMount])
+  useEffect(() => {
+    if (!props.openOnMount) return
+    // Two frames: the closed popup must be styled once, or the spring has no start.
+    let b = 0
+    const a = requestAnimationFrame(() => {
+      b = requestAnimationFrame(() => setOpen(true))
+    })
+    return () => {
+      cancelAnimationFrame(a)
+      cancelAnimationFrame(b)
+    }
+  }, [props.openOnMount])
   return (
     <Menu onOpenChange={setOpen} open={open}>
       <MenuTrigger render={<IconButton label="Account" variant="tonal" />}>
