@@ -84,6 +84,9 @@ export function byWorkspace(rows: Row[]): ByWorkspace[] {
 export type ByModel = {
   model: string
   responses: number
+  input: number
+  output: number
+  cacheRead: number
   cost: number | null
   workspaces: number
 }
@@ -91,16 +94,27 @@ export type ByModel = {
 /** `ModelSpend.cost` is null for a model the price table does not carry —
  *  unpriced, never free — so a group holding one has no figure at all. */
 export function byModel(rows: Row[]): ByModel[] {
-  const found = new Map<string, { responses: number; cost: number; unpriced: boolean; where: Set<string> }>()
+  type Held = Pick<ByModel, 'responses' | 'input' | 'output' | 'cacheRead'> & {
+    cost: number
+    unpriced: boolean
+    where: Set<string>
+  }
+  const found = new Map<string, Held>()
   for (const { workspace, spend } of priced(rows)) {
     for (const one of spend.models) {
       const held = found.get(one.model) ?? {
         responses: 0,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
         cost: 0,
         unpriced: false,
         where: new Set<string>(),
       }
       held.responses += one.responses
+      held.input += one.input
+      held.output += one.output
+      held.cacheRead += one.cache_read
       if (one.cost === null) held.unpriced = true
       else held.cost += one.cost
       held.where.add(workspace.name)
@@ -111,6 +125,9 @@ export function byModel(rows: Row[]): ByModel[] {
     .map(([model, held]) => ({
       model,
       responses: held.responses,
+      input: held.input,
+      output: held.output,
+      cacheRead: held.cacheRead,
       cost: held.unpriced ? null : held.cost,
       workspaces: held.where.size,
     }))
