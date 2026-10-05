@@ -31,6 +31,8 @@ const usePresetMachine = () =>
     },
   })
 
+const CONTENTS = { display: 'contents' } as const
+
 function defaults(): Values {
   return {
     name: generateName(),
@@ -85,13 +87,13 @@ export function NewSession() {
   // the dialog, so a form-factor change keeps its state and a running Starting (Y-361).
   const [host] = useState(() => {
     const node = document.createElement('div')
-    node.style.display = 'contents'
+    Object.assign(node.style, CONTENTS)
     return node
   })
   const seat = useCallback((slot: HTMLElement | null) => void slot?.appendChild(host), [host])
   const screen = (body: ReactNode) => (
     <>
-      {frame(<div ref={seat} style={{ display: 'contents' }} />)}
+      {frame(<div ref={seat} style={CONTENTS} />)}
       {createPortal(body, host)}
     </>
   )
