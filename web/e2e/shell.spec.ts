@@ -167,6 +167,35 @@ test.describe('the shell on busy', () => {
     await expect(rail.getByRole('link', { name: /^landing running/ })).toHaveAttribute('data-tone', 'selected')
   })
 
+  /** Y-375: the menu, the popover and the sheet's list are chunks that arrive
+   *  with the first press of their trigger, not with a cold `/`. */
+  test('fetches a popup chunk with its first press, not with the shell', async ({ page, size }) => {
+    const scripts: string[] = []
+    page.on('request', (request) => {
+      if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname)
+    })
+    await page.goto('/')
+    await expect(page.getByRole('button', { name: 'Account' })).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    const fetched = (name: RegExp) => scripts.filter((one) => name.test(one))
+    expect(fetched(/\/(Account|BellPopover|Notifications)-/)).toEqual([])
+
+    await page.getByRole('button', { name: 'Account' }).click()
+    await expect(page.getByRole('menu')).toBeVisible()
+    expect(fetched(/\/Account-/)).toHaveLength(1)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toBeHidden()
+
+    if (size === 'phone') return
+    await page.getByRole('button', { name: /^Notifications/ }).click()
+    const list =
+      size === 'desktop'
+        ? page.getByRole('dialog', { name: 'Notifications' })
+        : page.getByRole('complementary', { name: 'Notifications' })
+    await expect(list.getByText('yantra-web is waiting for trust')).toBeVisible()
+    expect(fetched(size === 'desktop' ? /\/BellPopover-/ : /\/Notifications-/)).toHaveLength(1)
+  })
+
   test('opens notifications, and Mark all read empties Unread', async ({ page, size }) => {
     const bell = page.getByRole(size === 'phone' ? 'link' : 'button', { name: /^Notifications/ })
     await expect(bell).toHaveAccessibleName(/unread/)

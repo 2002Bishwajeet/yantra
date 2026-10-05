@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { HeadContent, Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
-import { ArrowLeft, Download, Plus } from 'lucide-react'
+import { ArrowLeft, Download, Plus, User } from 'lucide-react'
 import { useResetOnRouteChange, useViewing } from '@/api/hooks'
 import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
@@ -10,6 +10,7 @@ import { LiveRegion } from '@/m3/live/Live'
 import { BarDestination, NavigationBar } from '@/m3/navigation-bar/NavigationBar'
 import { NavigationRail, RailDestination } from '@/m3/navigation-rail/NavigationRail'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
+import { SideSheet } from '@/m3/side-sheet/SideSheet'
 import { Text } from '@/m3/text/Text'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
 import { useSetupHome } from '@/screens/setup/progress'
@@ -27,14 +28,17 @@ import { SessionsRail } from './SessionsRail'
 import { useScreenTitle, useScreenTitleOverride } from './title'
 import './Shell.css'
 
-// The menu, the popover and the sheet carry Base UI's popup machinery, which
-// the first paint of `/` never draws. Each loads after it, behind a 44 px slot.
-const Account = lazy(() => import('./Account').then((it) => ({ default: it.Account })))
-const BellPopover = lazy(() => import('./BellPopover').then((it) => ({ default: it.BellPopover })))
-const NotificationsSheet = lazy(() =>
-  import('./NotificationsSheet').then((it) => ({ default: it.NotificationsSheet })),
-)
-const slot = <span aria-hidden="true" className="shell__slot" />
+// The menu, the popover and the sheet's list carry Base UI's popup machinery
+// and the list's code. Each loads on the first press of its trigger, or on the
+// pointer or focus reaching it, never with the shell (Y-375).
+const loadAccount = () => import('./Account')
+const loadBellPopover = () => import('./BellPopover')
+const loadList = () => import('./Notifications')
+const Account = lazy(() => loadAccount().then((it) => ({ default: it.Account })))
+const BellPopover = lazy(() => loadBellPopover().then((it) => ({ default: it.BellPopover })))
+const NotificationsList = lazy(() => loadList().then((it) => ({ default: it.NotificationsList })))
+// A failed warm-up is the real import's to report, behind its boundary.
+const warm = (load: () => Promise<unknown>) => () => void load().catch(() => {})
 
 const usePathname = () => useRouterState({ select: (state) => state.location.pathname })
 
@@ -139,6 +143,55 @@ function Guarded(props: { title: string; children: ReactNode }) {
   )
 }
 
+/** The avatar. The menu arrives with the first press and then stays mounted.
+ *  The trigger is not swapped on focus: a swap would drop the focus. */
+function AccountButton() {
+  const [armed, setArmed] = useState(false)
+  const trigger = (
+    <IconButton aria-haspopup="menu" label="Account" variant="tonal">
+      <User />
+    </IconButton>
+  )
+  if (!armed) {
+    const load = warm(loadAccount)
+    return (
+      <IconButton
+        aria-haspopup="menu"
+        label="Account"
+        onClick={() => setArmed(true)}
+        onFocus={load}
+        onPointerEnter={load}
+        variant="tonal"
+      >
+        <User />
+      </IconButton>
+    )
+  }
+  return (
+    <Guarded title="Account could not be drawn">
+      <Suspense fallback={trigger}>
+        <Account defaultOpen />
+      </Suspense>
+    </Guarded>
+  )
+}
+
+/** The desktop bell, on the same terms as the avatar. */
+function BellButton() {
+  const [armed, setArmed] = useState(false)
+  if (!armed) {
+    const load = warm(loadBellPopover)
+    return (
+      <Bell aria-haspopup="dialog" onClick={() => setArmed(true)} onFocus={load} onPointerEnter={load} />
+    )
+  }
+  return (
+    <Suspense fallback={<Bell aria-haspopup="dialog" />}>
+      <BellPopover defaultOpen />
+    </Suspense>
+  )
+}
+
 function DesktopBar() {
   return (
     <header className="shell__bar">
@@ -169,13 +222,9 @@ function DesktopBar() {
           <Palette />
         </Guarded>
         <Guarded title="Notifications could not be drawn">
-          <Suspense fallback={slot}>
-            <BellPopover />
-          </Suspense>
+          <BellButton />
         </Guarded>
-        <Suspense fallback={slot}>
-          <Account />
-        </Suspense>
+        <AccountButton />
       </div>
     </header>
   )
@@ -202,9 +251,7 @@ function TabletRail(props: { fab: ReactNode; onToggle: () => void; open: boolean
               onClick={onToggle}
             />
           </Guarded>
-          <Suspense fallback={slot}>
-            <Account />
-          </Suspense>
+          <AccountButton />
         </>
       }
     >
@@ -243,9 +290,7 @@ function PhoneBar({ top }: { top: boolean }) {
             <Guarded title="Notifications could not be drawn">
               <Bell role="link" render={<Link to="/notifications" />} />
             </Guarded>
-            <Suspense fallback={slot}>
-              <Account />
-            </Suspense>
+            <AccountButton />
           </>
         ) : undefined
       }
@@ -327,6 +372,9 @@ export function Shell() {
   const factor = useFormFactor()
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  // The sheet's list loads on the first open and stays after it.
+  const [armed, setArmed] = useState(false)
+  if (open && !armed) setArmed(true)
   // One screen, owned here: the daemon is down for Settings as much as for the
   // fleet, and seven inline surfaces saying so are seven copies of one fact.
   const { why, since } = useReached()
@@ -378,11 +426,15 @@ export function Shell() {
           <Page down={down} />
         </div>
         {factor === 'tablet' ? (
-          <Guarded title="Notifications could not be drawn">
-            <Suspense fallback={null}>
-              <NotificationsSheet id={SHEET} onClose={() => setOpen(false)} open={open} />
-            </Suspense>
-          </Guarded>
+          <SideSheet className="shell__sheet" id={SHEET} onClose={() => setOpen(false)} open={open} title="Notifications">
+            {armed ? (
+              <Guarded title="Notifications could not be drawn">
+                <Suspense fallback={null}>
+                  <NotificationsList onOpen={() => setOpen(false)} />
+                </Suspense>
+              </Guarded>
+            ) : null}
+          </SideSheet>
         ) : factor === 'phone' && top ? (
           <PhoneBottom fab={button} />
         ) : null}

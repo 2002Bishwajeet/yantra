@@ -5,9 +5,9 @@ import { Menu, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 
 /** The avatar and its menu. A generic mark rather than an initial: nothing
  *  on the wire names the person (inventory §C). */
-export function Account() {
+export function Account(props: { defaultOpen?: boolean }) {
   return (
-    <Menu>
+    <Menu defaultOpen={props.defaultOpen}>
       <MenuTrigger render={<IconButton label="Account" variant="tonal" />}>
         <User />
       </MenuTrigger>

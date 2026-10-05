@@ -10,7 +10,7 @@ await Promise.all([
   import('@/screens/new-session/NewSession'),
   import('@/shell/Account'),
   import('@/shell/BellPopover'),
-  import('@/shell/NotificationsSheet'),
+  import('@/shell/Notifications'),
 ])
 
 // The one eager route, which these tests never open.

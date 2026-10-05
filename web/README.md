@@ -789,6 +789,10 @@ a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1.
 - **One route is eager and the rest are `lazyRouteComponent`.** xterm.js, the
   stepper's form, the tables and the virtualiser are each a third of somebody's
   chunk and none of them is `/`'s.
+- **A popup's chunk arrives with its first press, not with the shell.** The
+  avatar, the desktop bell and the tablet sheet's list draw an eager trigger,
+  start the import on pointer or focus, and mount the lazy part on the click
+  (`Palette` does the same).
 - **A loader warms its screen's reads and is never awaited.** `prefetchQuery`
   rather than `ensureQueryData`, so a warm read is cancelled when the last
   observer leaves, and `defaultPreload: 'intent'` starts it on a hover. The
