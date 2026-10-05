@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { writePrefs } from '@/shell/prefs'
-import { type Answers, HOME, listing, mountNew, unmountNew } from './harness'
+import { type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
 
 afterEach(() => {
   cleanup()
@@ -295,6 +295,24 @@ describe('step 4, starting', () => {
     // Nothing was cloned: the repository was already on the machine.
     expect(asked.some((one) => one.endsWith('/clone'))).toBe(false)
     await waitFor(() => expect(window.location.pathname).toBe('/w/quiet-otter'))
+  })
+
+  it('does not run twice when the form factor changes during the run (Y-361)', async () => {
+    const create = vi.fn((sent: Record<string, unknown>) => [201, { ...sent, startup: null }] as [number, unknown])
+    const asked = await toStepThree({
+      'POST /api/workspaces': create,
+      'POST /api/workspaces/quiet-otter/up': [200, contract.opened],
+    })
+    press('Create and open')
+    expect(await screen.findByText('Starting quiet-otter')).toBeTruthy()
+
+    resize('tablet')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    resize('phone')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(asked).toContain('POST /api/workspaces/quiet-otter/up'))
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/refused/)).toBeNull()
   })
 
   /** 4.1.3: the four stages advance on a poll with no navigation, so the track

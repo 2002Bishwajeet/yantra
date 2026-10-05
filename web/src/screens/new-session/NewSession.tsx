@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '@tanstack/react-form'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
 import { useMachines } from '@/api/hooks'
@@ -80,9 +81,23 @@ export function NewSession() {
     source?.kind === 'github' ? source.repo.full_name : source ? source.path : null
   const on = `on ${values.machine}${step === 3 && sourceLabel ? ` · ${sourceLabel}` : ''}`
 
-  const screen = (body: ReactNode) =>
+  // The body is portalled into one host node that moves between the page and
+  // the dialog, so a form-factor change keeps its state and a running Starting (Y-361).
+  const [host] = useState(() => {
+    const node = document.createElement('div')
+    node.style.display = 'contents'
+    return node
+  })
+  const seat = useCallback((slot: HTMLElement | null) => void slot?.appendChild(host), [host])
+  const screen = (body: ReactNode) => (
+    <>
+      {frame(<div ref={seat} style={{ display: 'contents' }} />)}
+      {createPortal(body, host)}
+    </>
+  )
+  const frame = (slot: ReactNode) =>
     phone ? (
-      body
+      slot
     ) : (
       <Dialog open onOpenChange={(open) => !open && void navigate({ to: '/' })} disablePointerDismissal>
         <DialogPopup
@@ -99,7 +114,7 @@ export function NewSession() {
                 description: on,
               })}
         >
-          {body}
+          {slot}
         </DialogPopup>
       </Dialog>
     )
