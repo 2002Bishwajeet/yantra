@@ -170,7 +170,7 @@ function AccountButton() {
   return (
     <Guarded title="Account could not be drawn">
       <Suspense fallback={trigger}>
-        <Account defaultOpen />
+        <Account openOnMount />
       </Suspense>
     </Guarded>
   )
@@ -187,7 +187,7 @@ function BellButton() {
   }
   return (
     <Suspense fallback={<Bell aria-haspopup="dialog" />}>
-      <BellPopover defaultOpen />
+      <BellPopover openOnMount />
     </Suspense>
   )
 }
