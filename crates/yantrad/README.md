@@ -37,6 +37,7 @@ API the CLI cannot reach.
 | `POST /api/machines/{machine}/dirs` | `yantra ls dirs` |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
+| `POST /api/workspaces/{name}/tokens` | `yantra tokens`; an optional `{"since": <RFC 3339>}` body is the dashboard's window and has no CLI flag (Y-354) |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) |
