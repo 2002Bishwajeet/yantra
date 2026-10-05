@@ -434,6 +434,11 @@ duplicate rather than work.
 > Playwright serves, so what ships still has the route and nothing behind it. Row 125 takes the
 > hero's face, weight and tracking from the role instead of restating them.
 
+> **2026-10-05, Y-373: row 100's per-model token half is closed.** `ModelSpend` now carries each
+> model's `input`, `output`, `cache_write` and `cache_read` beside `responses` and `cost`. Usage's
+> By model card draws the input, output and cache-read counts for each model. Tokens add across
+> workspaces, and an unpriced model keeps its tokens while its dollars stay withheld.
+
 > **2026-09-08, Y-360: row 114's Providers half and four copy rows are closed. Row 113 is half
 > closed and half refused, and row 127's `Settings.css` half is refused.**
 >

@@ -9,9 +9,10 @@
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderValue, Uri, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use include_dir::{Dir, include_dir};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 static DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
 
@@ -42,9 +43,10 @@ async fn serve(uri: Uri, headers: HeaderMap) -> Response {
     let gzipped = wants_gzip(&headers)
         .then(|| DIST.get_file(format!("{path}.gz")))
         .flatten();
+    let asked_for = headers.get(header::IF_NONE_MATCH);
     match gzipped {
-        Some(file) => compressed(content_type(path), file.contents()),
-        None => respond(content_type(path), identity),
+        Some(file) => compressed(path, file.contents(), asked_for),
+        None => respond(path, identity, asked_for),
     }
 }
 
@@ -89,19 +91,60 @@ fn content_type(path: &str) -> &'static str {
     }
 }
 
-fn respond(content_type: &'static str, bytes: &'static [u8]) -> Response {
-    let mut response = Response::new(Body::from(bytes));
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+/// The tag hashes the bytes sent, so the gzip and identity bodies of one file
+/// are two representations with two tags. `DefaultHasher` may change between
+/// Rust releases, which costs one download after a rebuild and nothing more.
+fn respond(path: &str, bytes: &'static [u8], asked_for: Option<&HeaderValue>) -> Response {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let etag = format!("\"{:016x}\"", hasher.finish());
+    let fresh = asked_for
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| matches(value, &etag));
+    let mut response = if fresh {
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::NOT_MODIFIED;
+        response
+    } else {
+        let mut response = Response::new(Body::from(bytes));
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static(content_type(path)),
+        );
+        response
+    };
+    // Vite names `assets/` by content hash. Everything else, the SPA fallback
+    // under `/assets/` included, keeps its name across releases, so it revalidates.
+    let cache = if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+    if let Ok(etag) = HeaderValue::from_str(&etag) {
+        headers.insert(header::ETAG, etag);
+    }
     response
 }
 
-fn compressed(content_type: &'static str, bytes: &'static [u8]) -> Response {
-    let mut response = respond(content_type, bytes);
-    response
-        .headers_mut()
-        .insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+/// Weak comparison (RFC 9110 §13.1.2), which is what `ServeDir` does, so the two
+/// halves answer one `If-None-Match` the same way.
+fn matches(if_none_match: &str, etag: &str) -> bool {
+    if_none_match
+        .split(',')
+        .map(str::trim)
+        .any(|tag| tag == "*" || tag.strip_prefix("W/").unwrap_or(tag) == etag)
+}
+
+fn compressed(path: &str, bytes: &'static [u8], asked_for: Option<&HeaderValue>) -> Response {
+    let mut response = respond(path, bytes, asked_for);
+    if response.status() != StatusCode::NOT_MODIFIED {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    }
     response
 }
 
@@ -187,6 +230,150 @@ mod tests {
         let (encoding, body) = get_encoded(&format!("/{path}"), Some("gzip;q=0")).await;
         assert_eq!(encoding, "", "q=0 refuses the coding");
         assert_eq!(body, asset.contents());
+    }
+
+    async fn send(
+        path: &str,
+        accept: Option<&str>,
+        if_none_match: Option<&str>,
+    ) -> (StatusCode, HeaderMap, Vec<u8>) {
+        let mut request = Request::builder().uri(path);
+        if let Some(accept) = accept {
+            request = request.header(header::ACCEPT_ENCODING, accept);
+        }
+        if let Some(tag) = if_none_match {
+            request = request.header(header::IF_NONE_MATCH, tag);
+        }
+        let response = router()
+            .oneshot(request.body(Body::empty()).expect("a request"))
+            .await
+            .expect("a response");
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .expect("a body");
+        (status, headers, body.to_vec())
+    }
+
+    fn named(headers: &HeaderMap, name: header::HeaderName) -> &str {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+    }
+
+    fn every_file(dir: &'static Dir<'static>, into: &mut Vec<String>) {
+        for file in dir.files() {
+            let path = file.path().to_str().expect("a utf-8 path");
+            if !path.ends_with(".gz") {
+                into.push(format!("/{path}"));
+            }
+        }
+        for child in dir.dirs() {
+            every_file(child, into);
+        }
+    }
+
+    fn a_bundle() -> String {
+        let asset = DIST
+            .get_dir("assets")
+            .expect("vite writes assets/")
+            .files()
+            .find(|file| file.path().extension().is_some_and(|kind| kind == "js"))
+            .expect("a bundle");
+        format!("/{}", asset.path().to_str().expect("a utf-8 path"))
+    }
+
+    /// Y-372's done condition: before it, every open cost the whole first load.
+    #[tokio::test]
+    async fn a_second_open_costs_a_fraction_of_the_first() {
+        let mut paths = vec!["/".to_owned()];
+        every_file(&DIST, &mut paths);
+
+        let mut first = 0;
+        let mut tags = Vec::new();
+        for path in &paths {
+            let (status, headers, body) = send(path, Some("gzip"), None).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+            let tag = named(&headers, header::ETAG);
+            assert!(!tag.is_empty(), "{path} carries no ETag");
+            first += body.len();
+            tags.push(tag.to_owned());
+        }
+
+        let mut second = 0;
+        for (path, tag) in paths.iter().zip(&tags) {
+            let (status, headers, body) = send(path, Some("gzip"), Some(tag)).await;
+            assert_eq!(status, StatusCode::NOT_MODIFIED, "{path}");
+            assert!(body.is_empty(), "{path}");
+            assert_eq!(named(&headers, header::ETAG), tag);
+            assert_eq!(named(&headers, header::CONTENT_ENCODING), "", "{path}");
+            second += body.len();
+        }
+
+        assert!(second * 50 < first, "{second} bytes against {first}");
+    }
+
+    #[tokio::test]
+    async fn hashed_assets_are_immutable_and_the_rest_revalidates() {
+        let (_, headers, _) = send(&a_bundle(), None, None).await;
+        assert_eq!(
+            named(&headers, header::CACHE_CONTROL),
+            "public, max-age=31536000, immutable"
+        );
+
+        for path in ["/", "/workspaces/yantra", "/sw.js", "/assets/x.js"] {
+            let (_, headers, _) = send(path, Some("gzip"), None).await;
+            assert_eq!(named(&headers, header::CACHE_CONTROL), "no-cache", "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_matching_tag_gets_a_304() {
+        let (_, headers, full) = send("/", None, None).await;
+        let tag = named(&headers, header::ETAG).to_owned();
+
+        let (status, _, body) = send("/", None, Some("\"0000000000000000\"")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, full);
+
+        for asked in ["*".to_owned(), format!("W/{tag}"), format!("\"x\", {tag}")] {
+            let (status, _, body) = send("/", None, Some(&asked)).await;
+            assert_eq!(status, StatusCode::NOT_MODIFIED, "{asked}");
+            assert!(body.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn each_representation_has_its_own_tag() {
+        let path = a_bundle();
+        let (_, gzip, _) = send(&path, Some("gzip"), None).await;
+        let (_, identity, _) = send(&path, None, None).await;
+        let gzip_tag = named(&gzip, header::ETAG);
+        assert_ne!(gzip_tag, named(&identity, header::ETAG));
+
+        let (status, headers, body) = send(&path, None, Some(gzip_tag)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(named(&headers, header::CONTENT_ENCODING), "");
+        let asset = DIST
+            .get_file(path.trim_start_matches('/'))
+            .expect("the bundle");
+        assert_eq!(body, asset.contents());
+    }
+
+    #[tokio::test]
+    async fn every_answer_varies_on_accept_encoding() {
+        let mut paths = vec!["/".to_owned(), "/workspaces/yantra".to_owned()];
+        every_file(&DIST, &mut paths);
+        for path in &paths {
+            for accept in [None, Some("gzip")] {
+                let (_, headers, _) = send(path, accept, None).await;
+                assert_eq!(named(&headers, header::VARY), "accept-encoding", "{path}");
+            }
+        }
+        let (_, headers, _) = send("/", None, Some("*")).await;
+        assert_eq!(named(&headers, header::VARY), "accept-encoding");
     }
 
     #[tokio::test]

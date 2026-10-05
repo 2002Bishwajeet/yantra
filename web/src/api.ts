@@ -275,9 +275,8 @@ export type ToolCall = {
   target: string | null
 }
 
-export type ModelSpend = {
+export type ModelSpend = Counts & {
   model: string
-  responses: number
   // null is a model the price table does not carry — unpriced, never free.
   cost: number | null
 }

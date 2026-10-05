@@ -220,6 +220,12 @@ between them. **Do not add a `CompressionLayer`** — it would spend the applian
 the same bytes on every request. A client that does not ask, and a file with no `.gz`, both get the
 file itself.
 
+**The embedded half answers a conditional request** (Y-372). Every answer carries an `ETag` that
+hashes the bytes sent and `Vary: accept-encoding`. Files under `assets/` are `immutable`, because
+Vite names them by content hash; everything else is `no-cache`, so the browser revalidates. A
+matching `If-None-Match` gets a `304` with no body, compared weakly as `ServeDir` does. Before
+Y-372 every open on the appliance cost the whole first load ([R16](../../docs/research/16-what-the-first-load-costs-a-phone.md) §3).
+
 **A miss under `/api` is the one path that does not reach it** (Y-169, I-64). A nested router with no
 fallback of its own hands the miss to the outer one, so an absent API route used to answer
 `200 text/html` — indistinguishable from a served page. `api::router` therefore carries a fallback of

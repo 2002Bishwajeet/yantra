@@ -569,13 +569,21 @@ export const spend = {
   "fast": 0,
   "models": [
     {
+      "cache_read": 4812003,
+      "cache_write": 120400,
       "cost": 5.4633115,
+      "input": 9412,
       "model": "claude-opus-5-20260115",
+      "output": 84310,
       "responses": 66
     },
     {
+      "cache_read": 4812003,
+      "cache_write": 120400,
       "cost": null,
+      "input": 118,
       "model": "unknown",
+      "output": 640,
       "responses": 2
     }
   ],
@@ -595,13 +603,21 @@ export const spendFast = {
   "fast": 3,
   "models": [
     {
+      "cache_read": 4812003,
+      "cache_write": 120400,
       "cost": null,
+      "input": 9412,
       "model": "claude-opus-5-20260115",
+      "output": 84310,
       "responses": 66
     },
     {
+      "cache_read": 4812003,
+      "cache_write": 120400,
       "cost": null,
+      "input": 118,
       "model": "unknown",
+      "output": 640,
       "responses": 2
     }
   ],
