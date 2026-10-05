@@ -40,6 +40,8 @@ describe('/usage on the busy fleet', () => {
 
     const models = card('By model')
     expect(models.getByText('claude-opus-5-20260115')).toBeTruthy()
+    // Y-373: the opus fixture's own counts, read by ten workspaces.
+    expect(models.getByText('94,120 in · 843,100 out · 48,120,030 cache read')).toBeTruthy()
     // `unknown` costs null in every read, so the group has no figure at all.
     expect(models.getByText('unpriced')).toBeTruthy()
   })
