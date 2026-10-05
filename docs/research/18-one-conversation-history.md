@@ -84,6 +84,8 @@ Claude Code changes weekly. Treat the findings as true for 2.1.289 and re-check 
     rider withdraws the rights of OpenAI, Anthropic and their affiliates and agents. The owner is
     neither, but a tool that runs inside Claude Code may raise the question. GitHub reports the
     licence as NOASSERTION. (Read in the LICENSE file.)
+17. **`cass` cannot index 650 MB of history in 4 GB.** Peak RSS was 5.86 GB, a 2 GB cap killed it,
+    it has no MCP server, and its rider limits who may receive it. `ctx` fits. See section 11.
 
 ## 1. Where Claude Code keeps a conversation (2.1.289)
 
@@ -553,6 +555,203 @@ This is the evidence and a lean. It is not the pick.
 - Is the history for people, for agents, or for both? E1 serves agents. E2 serves people.
 - Does the owner accept an LLM bill for a vault?
 
+## 11. Trial of `cass` and `ctx`, and the hub decision
+
+**Added 2026-10-05 (Y-425, second request from the owner).** The owner asked for a short trial of
+`cass`, and for a weighed choice between three whole designs. The owner also likes the idea of
+keeping every conversation on the appliance and continuing it on any machine. All trials ran on this
+laptop (CachyOS, x86-64, 12 cores, 15 GB RAM) and the QA VM, with the release binaries `cass` 0.10.0
+and `ctx` 2.2.7, `gitleaks` 8.30.1. **Nothing ran on arm64.** The note holds no transcript text:
+only counts, timings and yes/no judgements.
+
+### 11.1 The `cass` licence
+
+The file says "MIT License (with OpenAI/Anthropic Rider)". The rider reads, in the parts that bind:
+
+> "Restricted Parties" means OpenAI, L.L.C.; Anthropic, PBC; any of their respective Affiliates; and
+> any person or entity acting directly or indirectly on behalf of, for the benefit of, or under the
+> direction of any of the foregoing (including any officer, director, employee, contractor, agent,
+> consultant, service provider, or representative). Notwithstanding any other provision of this
+> License, no rights are granted to any Restricted Party. [...] You may not provide, disclose,
+> distribute, sublicense, sell, lease, lend, host, make available, or otherwise permit access to the
+> Software or any derivative work [...] to or for any Restricted Party.
+
+It lists "executing, benchmarking, testing, analyzing, indexing" as uses. A breach ends the licence
+at once. Anyone who distributes the software must keep the rider unmodified. This is my reading and
+not legal advice.
+
+| Use | Permitted? |
+| --- | --- |
+| (a) The owner's personal use | **Yes**, as long as the owner is not an Anthropic or OpenAI employee, contractor or agent, and does not work for the benefit of one. Using Claude Code as a customer does not make the owner a Restricted Party. The trial went ahead on this reading. |
+| (b) Yantra installs or recommends it | **Unclear for installing.** A recommendation that links to the upstream release is not a distribution. If Yantra downloads or bundles the binary, Yantra distributes it and must pass the rider on. Every Yantra user must then also be outside the Restricted Parties, and Yantra cannot check that. |
+| (c) A commercial product built around it | **Only with a carve-out.** Selling is allowed in the MIT text. The rider bars any sale or access "to or for" Anthropic, OpenAI, their affiliates and their contractors. A product for the general public would have to exclude these customers. The wording "acting indirectly [...] for the benefit of" is broad and untested. Ask a lawyer before building on it. |
+
+GitHub reports the licence as NOASSERTION, so licence scanners and many companies will block it.
+`ctx` is Apache-2.0 and has no such term.
+
+### 11.2 Measured results
+
+Real history: 1,391 `.jsonl` files and 649 MB under `~/.claude/projects` (main and subagent files),
+Claude Code only. This laptop has no Codex, Gemini or opencode history, so the harness count is **one
+for both tools**. Both tools read the files in place and wrote nothing under `~/.claude`.
+
+| | `cass` 0.10.0 | `ctx` 2.2.7 |
+| --- | --- | --- |
+| Install | one 94 MB binary from the release, checksum verified | one 198 MB binary, checksum verified |
+| Index from scratch | **136 s** wall (`index --full`) | **103 s** (`import --provider claude`) |
+| Sessions / events | 1,381 conversations, 51,431 messages | 1,398 sessions, 112,059 events |
+| Peak RSS while indexing | **5.86 GB** | main process 47 MB; its **daemon peaked at 985 MB** |
+| Index on disk | **1.69 GB**: database 632 MB, lexical index 465 MB, a raw mirror of the sources 637 MB | **2.1 GB** |
+| Run again with no new files | 75 s, peak 1.43 GB (my own live session kept changing) | not measured |
+| Resident when idle | `index --watch`: 708 MB after 45 s (peak 874 MB). **There is no server mode.** | daemon 216 MB; `ctx mcp serve` (stdio): 20 MB at start, 36 MB after queries, 82 MB peak |
+| Search latency, 5 queries | 0.8 to 1.5 s a CLI call, 280 MB RSS a call | 1.0 to 1.3 s a CLI call, 90 MB RSS; MCP call 0.4 s |
+| Result size, 5 hits | 1.4 KB (minimal), 2 KB (summary), 6 KB (full) | 12.6 KB from the CLI, 14 KB from MCP |
+| Agent interface | CLI with `--robot-format`; **no MCP** (zero mentions in `capabilities`) | MCP over stdio, 16 tools; a skill |
+| Cap test | killed under a 2 GB memory cap (no completion record, 1.1 GB left behind) | not run |
+
+**Do not read the cass and ctx RSS figures as equal.** `cass` does the work in one process. `ctx`
+hands it to a daemon that stays resident, so add the daemon.
+
+**A 4 GB Pi cannot index 650 MB of history with `cass`.** The peak was 5.9 GB on a laptop, and a run
+under `MemoryMax=2G` was killed. Incremental runs need 1.4 GB. These are x86-64 numbers and the
+mirror and database may behave differently on arm64. **`ctx` fits**: 985 MB at its peak, about 250 MB
+at rest with MCP. Neither number was measured on a Pi.
+
+**Result quality, five queries over this repo's own history** (ControlMaster, build loop, virtual
+microphone, podman OOM, Tailscale serve). I judged each by counting how often the query terms occur
+in the session a result points to, not by reading the sessions.
+
+| Query | `cass` top 5 | `ctx` top 5 |
+| --- | --- | --- |
+| ControlMaster | yes, 5 of 5 sessions use the word | yes, 5 of 5 |
+| build loop | yes, 5 of 5 | partly: 2 of 5 use it often, 2 do not use the phrase |
+| virtual microphone | yes, all 5 hits sit in one session that uses it | partly: 1 of 5 uses it often |
+| podman OOM | partly: 1 of 5 holds the phrase | weak: 1 of 5 |
+| Tailscale serve | yes, 5 of 5 | yes, 5 of 5 |
+
+`cass` scored 4 yes and 1 partly. `ctx` scored 2 yes, 2 partly and 1 weak. `ctx` ranks by a session
+importance score, which can favour a long session over a precise one. Both search subagent files as
+well as main files, so most top hits are subagent transcripts. `ctx` returns snippets that a person
+can read at once, and that costs about six times the bytes of the `cass` minimal form. I did not
+compare answer quality when an agent reads them.
+
+**Other findings.**
+- **`ctx` sends usage analytics by default** to `https://cli.ctx.rs/functions/v1/analytics`. The
+  queued payload holds the version, OS, CPU tier and memory bucket and no history. Turn it off with
+  `CTX_ANALYTICS_ENABLED=false`. It also writes `~/.local/state/ctx` outside its data root, starts a
+  daemon on first use (`CTX_DAEMON_OFF` stops it) and has an auto-upgrade (`CTX_UPGRADE_OFF`). Because
+  I did not set the opt-out, some queued events may have gone out.
+- **`cass` keeps a byte copy of every source file** (the raw mirror, 637 MB). So `cass` is also a
+  store: a transcript that Claude Code deletes after 30 days stays in `cass`. This helps retention and
+  adds a second plaintext copy of every secret.
+- **`cass sources` works over ssh and rsync** (verified on the QA VM). It pulled a synthetic session
+  with `rsync`, indexed it, and `cass search` returned it with `origin_host: qa@<host>`. It copies
+  files to the machine that runs `cass`, so it is a pull-and-mirror and not a read on demand. It
+  needs `rsync` on the remote (the VM had none; I installed it with `apt`). A remote that is off is
+  skipped and the earlier copy stays. The host must be in `~/.ssh/config`: the `user@host` form accepts
+  no port or key flag. I used a wrapper `ssh` earlier on `PATH` so that I did not touch the owner's
+  file. The first sync took 7.5 s, most of it probing paths that do not exist, so list only the paths
+  you need.
+- The `ctx` server upload still did not finish in this pass (section 8 reports the earlier attempt).
+
+### 11.3 Redaction
+
+Test data: a synthetic Claude Code session with a fake `ghp_` token (`ghp_` plus 36 letters and
+digits), a fake `API_TOKEN=<20 characters>` line and a fake `DATABASE_PASSWORD=<17 characters>` line.
+
+| Check | `cass` | `ctx` |
+| --- | --- | --- |
+| Strips secrets while indexing | **No.** The byte mirror holds the token (1 of 29 files). | **No.** Search returned the token and the password text. |
+| Serves the secret in a result | Yes for the `.env` password, with the default fields. The token body did not match as a search term. | Yes, token and password. |
+| Redaction option | none found (`redact` appears only for support bundles) | none; the README says text is kept as it is |
+
+**Scanners.** `gitleaks` 8.30.1 reads a file and writes a **report**. It does not rewrite the file.
+`--redact` hides the value in its own log only. A redactor is a second step: take each `Secret` from
+the JSON report and replace it in the file. I wrote that in 8 lines of Python.
+
+| Step on a 31 MB synthetic JSONL (29,362 lines, 15 fake tokens) | Time on this laptop | Result |
+| --- | --- | --- |
+| `gitleaks detect --no-git` | 2.8 s, 70 MB RSS | 15 of 15 tokens found (`github-pat`) |
+| rewrite with the findings | 0.2 s | no token left; the file still parses as JSON on every line |
+| the same job with one `sed` line (`ghp_` shape and `KEY=value` shape) | 0.1 s | no token left |
+| On the 3-line session | 0.6 s | found the token and the `API_TOKEN` line; **missed `DATABASE_PASSWORD=...`** |
+
+So a scanner pass is cheap, and it **will miss secrets** that carry no known shape or entropy. A
+Pi 5 will be slower than this laptop by an amount I did not measure. `trufflehog` was not tested; it
+also reports and does not rewrite. Redaction fits "strip before it reaches the hub" only when it runs on
+the source machine, and only on a staging copy: the live transcript must stay whole, or `--resume`
+would resume a transcript with holes. It cannot make the hub safe. It makes a leak smaller.
+
+### 11.4 The three designs
+
+Design **H**: every machine pushes raw sessions to the appliance, redacted first, and the appliance
+runs the search index and serves it over MCP. Design **M**: Syncthing among all machines, each
+machine indexes locally. Design **C+S**: no store. Yantra copies a session over ssh at resume, and an
+index tool reads other machines on demand.
+
+For H the transport that fits best is **Syncthing**, with each machine's folder set to *send only*, the
+appliance's folder set to *receive only*, and `ignoreDelete` on the appliance. Reasons, with the
+evidence: Syncthing ran here at 16 s latency (section 5); `rclone` and `claude-code-sync` need a
+trigger or a timer; `claude-sync` can lose a turn (finding 11) and covers one harness; a send-only
+folder cannot take changes back from the appliance, so two writers cannot make a conflict file
+(documented). `ignoreDelete` keeps a transcript on the appliance after Claude Code's 30-day sweep
+removes it elsewhere. The docs call it an advanced setting that "should normally be set to `false`".
+I did not test it, and it grows the appliance's disk without bound unless a person prunes.
+For redaction the folder that Syncthing watches must be a **redacted staging copy** (11.3), so each
+machine also keeps a second copy and runs one more job. Resume on machine X pulls from the hub: that
+is a copy in the other direction, so the hub's folder must also reach X, and a send-only folder does
+not do this. The plain fix is Yantra's own resume copy over ssh from the appliance (the C half). That
+copy is of the *redacted* file.
+
+| Criterion | **H. Pi as hub** (Syncthing send-only, redact, `ctx` on the Pi) | **M. Peer mesh** (Syncthing, local index each) | **C+S. No store** (copy at resume, index reads on demand) |
+| --- | --- | --- | --- |
+| Efficiency on the Pi | Disk: all machines' redacted history (about 650 MB a heavy machine, 30 days; more with `ignoreDelete`) plus a `ctx` index of about 2 GB per 650 MB. RAM: `ctx` daemon 216 MB at rest, 985 MB while indexing, MCP 36 MB. `cass` is out (5.9 GB peak). Network: each changed file once. | The Pi is one more peer or not involved. Every machine holds all history and its own index (2 GB each for 650 MB). Network: each file to every peer. | Nothing stored on the Pi. Each search by `cass sources` pulls the remote files by rsync, then indexes locally. Network spent at query time (1.0 s up and 2.2 s down for 28 MB, section 5). |
+| Context handling | Best: one index of all machines and harnesses behind one MCP server. `ctx` gave 2 yes, 2 partly and 1 weak on five queries here; results are about 14 KB for five hits (about 3,500 tokens, my estimate). | Same tools, but each agent sees only what has synced to its machine, and each machine pays for an index. | Weakest: an index exists only where a tool pulled the files. Agents on a machine see the other machines only after a pull. |
+| Memory and retention | A machine that is off still has its history on the Pi as of the last sync. `ignoreDelete` outlasts the 30-day cleanup. A crash before sync loses the tail. | A peer that returns catches up. Deletions sync, so the 30-day sweep spreads (documented, not tested) unless `ignoreDelete` is set on every peer. | A machine that is off is **not readable and not resumable from**. After `cass` has pulled once, its mirror keeps a copy beyond the 30 days. |
+| Private data | The appliance holds every conversation, redacted by a pattern list that misses some secrets (11.3). The raw copy stays on the source machine. A stolen Pi leaks what the scanner missed. The index also holds it. | Every machine holds every unredacted transcript. | No new place at rest, except `cass`'s mirror on the machine that runs it. |
+| Sync across devices | Latency about 16 s (section 5). **One writer per path, so no conflicts.** Needs a resume-pull path of its own (above). | Latency about 16 s. Two writers give a conflict file (verified). | None: a fork on resume is a new id (ADR-0015). |
+| Budget and speed on a 4 GB Pi | Fits with `ctx`, with two caveats: peak 985 MB while indexing, and nothing was run on arm64. Needs `ctx` daemon and Syncthing on the Pi, and a job per machine for redaction. | Pi unaffected. | Pi unaffected. A search costs 0.8 to 1.5 s plus the pull. |
+| Productisable | Weakest: every user must install Syncthing on every machine, pair devices, and run a redaction job. A user's Pi must have 4 GB free. A plaintext archive of other people's conversations sits on a box that Yantra owns, so §B4 and an ADR beside 0021 and 0023 are needed. | Medium: one tool, but a person pairs every device. | Strongest: no new daemon. Needs ssh and `rsync` (the second is new on many machines). Y-044 holds. |
+| Licence | `ctx` Apache-2.0, Syncthing MPL-2.0, `gitleaks` MIT. | same | `cass` rider (11.1); `ctx` has no pull mode and no equal of `cass sources`. |
+| Rules | Y-044 holds only if Syncthing and `ctx` do the storing and yantrad stays out. §B4 needs a statement about the plaintext archive. | Y-044 holds. | Holds, with no amendment. |
+
+### 11.5 A lean
+
+This is evidence, and Q22 (Y-426) is the owner's call.
+
+1. **Keep C for resume.** It breaks no rule, works for any person's fleet and needs nothing new.
+2. **For search, try `ctx` and not `cass` on the appliance.** `ctx` fits 4 GB, speaks MCP, and has a
+   plain licence. `cass`'s indexing peak and its rider rule it out for the Pi and for a product. Turn
+   off `ctx` analytics and auto-upgrade first.
+3. **Treat H as the owner's personal setup, not as the product default.** H gives the best context
+   handling and the best memory for a machine that is off. It costs the most to set up, keeps a
+   plaintext archive on the Pi and needs a redaction job whose misses nobody sees. If the owner wants
+   it, build it from Syncthing (send-only, `ignoreDelete`), a redacted staging folder and `ctx`, and
+   keep yantrad out of the data path. Write the ADR for the archive first.
+4. **M adds no benefit over H for one owner and costs more disk.** Drop it unless the owner has no
+   always-on box.
+
+The question the owner must answer is the one in section 10: is a redacted, plaintext history of
+every machine on the appliance acceptable? If yes, H with `ctx` is the strongest design and fits the
+budget on paper. If no, choose C+S with `ctx` on each machine that needs search.
+
+### 11.6 Cleanup and what remains
+
+I removed `~/r18e` on the laptop and on the VM, the `cass` and `ctx` indexes and binaries, and the
+`ctx` state directory `~/.local/state/ctx`. I stopped every process that I started. **Left behind
+on the VM:** `rsync` (installed with `apt` for the trial; the earlier pass left `git`) and a
+`known_hosts` entry only on the laptop's removed scratch file. Left on the laptop: nothing known.
+
+### 11.7 Not verified in this pass
+
+- Any figure on arm64 or on a Pi.
+- `ctx` and `cass` over real Codex, Gemini, opencode or Grok history. This laptop has only Claude Code.
+- `ctx`'s history server upload and `ctx --server` reads; Syncthing's `ignoreDelete`; the receive-only
+  folder with a resume path.
+- `trufflehog`. Whether a redacted transcript still resumes under `claude --resume` (the JSON stays
+  valid; I did not run a model turn).
+- Whether the `ctx` analytics events left this laptop.
+
 ## Not verified
 
 - A resume that completes on the QA VM (no Claude login there).
@@ -603,4 +802,5 @@ Accessed 2026-10-05 unless noted.
 - Neo4j, *System requirements* — <https://neo4j.com/docs/operations-manual/current/installation/requirements/>; FalkorDB configuration — <https://docs.falkordb.com/getting-started/configuration.html>
 - Agent Trace — <https://agent-trace.dev/>, <https://www.infoq.com/news/2026/02/agent-trace-cursor/>; OpenTelemetry GenAI semantic conventions guides (Dash0, Uptrace); Agent Client Protocol — <https://github.com/agentclientprotocol/agent-client-protocol>
 - Repository metadata (stars, last push, licence) by `gh repo view` and `gh api repos/<owner>/<name>` on 2026-10-05.
+- Third pass, 2026-10-05: `cass` 0.10.0 LICENSE and release binary, `ctx` 2.2.7 release binary, `gitleaks` 8.30.1 release binary (GitHub releases); Syncthing folder types <https://docs.syncthing.net/users/foldertypes.html> and ignoreDelete <https://docs.syncthing.net/advanced/folder-ignoredelete.html>. Local trials only.
 - Local tests, 2026-10-05: `rclone` 1.75.1 (`serve webdav`), `git` 2.47.3 on the QA VM; synthetic JSONL only.
