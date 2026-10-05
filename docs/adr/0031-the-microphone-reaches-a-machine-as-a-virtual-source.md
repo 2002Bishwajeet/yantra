@@ -2,6 +2,7 @@
 
 - **Date:** 2026-09-29
 - **Status:** Accepted 2026-09-29. The owner took decisions 1 to 8 that day ([Y-415](../../tracker.md)).
+  Decision 3 amended 2026-10-05 ([Y-417](../../tracker.md)).
 - **Evidence:** [R17](../research/17-remote-microphone.md), 2026-09-29. Its §7 was measured for
   this ADR.
 - **Extends** [ADR-0028](0028-yantra-installs-the-bare-minimum-on-a-machine.md) §1 through the
@@ -57,6 +58,15 @@ with the default source unchanged. `PULSE_SOURCE` does not work for this, and ne
 The variable is exported in the agent's start command, in the same place as the musl
 `USE_BUILTIN_RIPGREP=0` (ADR-0028 §5, note of 2026-09-12). A shell pane in a Yantra session that
 must hear the mic sets the same variable.
+
+> **Amended 2026-10-05 ([Y-417](../../tracker.md)).** The owner runs `claude` in a plain `ssh`
+> shell, not only in sessions Yantra starts. That shell does not carry `PIPEWIRE_NODE`, so it
+> heard nothing. The owner chose this change: **on a machine with no sound card, Install runs
+> `pactl set-default-source yantra-mic`.** "No sound card" is the test Claude Code itself uses:
+> `/proc/asound/cards` is missing, empty, or says `no soundcards` (R17 §1). Such a machine has no
+> other input, so no program loses a microphone. WirePlumber keeps the choice across a reboot
+> (R17 §2). A machine with a sound card keeps the rule above, and its owner exports the variable
+> in their own shell. Install checks once; a card added later does not change the default.
 
 ### 4. The browser sends raw 16 kHz mono s16le PCM
 
