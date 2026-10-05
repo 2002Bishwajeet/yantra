@@ -107,6 +107,23 @@ describe('the machine page’s verdict', () => {
     expect(startable(v)).toBe(true)
   })
 
+  /** ADR-0031 §9: a microphone never installed is no fault. */
+  it('is ready with a microphone never installed', () => {
+    const ok = all()
+    const checks = ok.looked === 'ok' ? ok.data.checks : []
+    const v = verdict(report([...checks, check('mic', 'absent', 'not installed — the microphone is optional')]))
+    expect(v.kind).toBe('ready')
+    expect(chipOf(v, null).word).toBe('ready')
+  })
+
+  /** ADR-0031 §2: with every basic there, the step sudo stopped is linger. */
+  it('asks for a password for the microphone after this page’s press', () => {
+    const watch = { since: 10, pressed: 0 }
+    const v = verdict(all(), { watch, events: [stopped(20, ['sudo loginctl enable-linger biswa'])] })
+    expect(v).toMatchObject({ kind: 'sudo', missing: ['microphone'] })
+    expect(titleOf(v, 'pi')).toBe('microphone needs your password')
+  })
+
   it('is ready when nothing is absent', () => {
     const v = verdict(all())
     expect(titleOf(v, 'pi')).toBe('Ready for sessions')

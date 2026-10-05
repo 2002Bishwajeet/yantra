@@ -458,7 +458,7 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
 /// A file the listing refused. It is in the fixture rather than only in a
 /// hand-written stub for this file's own reason: a state nothing generated is a
 /// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
-/// Three checks rather than the ten `doctor` runs: what a page has to render
+/// Three checks rather than the eleven `doctor` runs: what a page has to render
 /// is one of three states beside a name and a sentence, and the tenth of those
 /// tells it nothing the third did not.
 fn swept(machine: &str) -> doctor::Report {

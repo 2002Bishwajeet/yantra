@@ -15,6 +15,7 @@ import {
   useEditWorkspace,
   useGithubLogin,
   useGithubLogout,
+  useInstall,
   useKillSession,
   useMakeDir,
   useRecheckReadiness,
@@ -213,6 +214,39 @@ describe('the GitHub grant', () => {
     expect(sent(asked)).toMatchObject({ path: '/api/github', method: 'DELETE' })
     for (const key of [keys.github(), keys.attention(), keys.repos()])
       expect(result.current.client.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+})
+
+describe('an install (ADR-0028 §4)', () => {
+  it('asks for the basics alone with no query', async () => {
+    const asked = daemon(202)
+    const { result } = renderHookQueried(() => useInstall())
+
+    await act(() => result.current.mutateAsync({ machine: 'pi 5' }))
+
+    expect(sent(asked)).toEqual({ path: '/api/machines/pi%205/install', method: 'POST', body: undefined })
+  })
+
+  /** ADR-0031 §1: the microphone is asked for in the query, per run. */
+  it('asks for the microphone with ?mic=true, and only when it is ticked', async () => {
+    const asked = daemon(202)
+    const { result } = renderHookQueried(() => useInstall())
+
+    await act(() => result.current.mutateAsync({ machine: 'pi', mic: true }))
+    await act(() => result.current.mutateAsync({ machine: 'pi', mic: false }))
+
+    expect(sent(asked, 0).path).toBe('/api/machines/pi/install?mic=true')
+    expect(sent(asked, 1).path).toBe('/api/machines/pi/install')
+  })
+
+  it('rejects an install already running as a refusal carrying the daemon’s words', async () => {
+    daemon(409, 'an install is already running on pi')
+    const { result } = renderHookQueried(() => useInstall())
+
+    const refused = await result.current.mutateAsync({ machine: 'pi', mic: true }).catch((error: unknown) => error)
+
+    expect(refused).toBeInstanceOf(ApiError)
+    expect(refused).toMatchObject({ kind: 'refused', status: 409 })
   })
 })
 

@@ -307,7 +307,7 @@ mod tests {
 
     /// The shape `agent::launch_command` builds, so a pane in these tests is one
     /// an agent was actually launched into.
-    const AGENT_COMMAND: &str = "cd '/srv/repo' && exec '/usr/bin/claude' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'";
+    const AGENT_COMMAND: &str = "cd '/srv/repo' && export PIPEWIRE_NODE=yantra-mic && exec '/usr/bin/claude' --session-id 'd4c3b2a1-0000-4000-8000-000000000000'";
 
     fn pane(dead: bool, status: Option<i32>, signal: Option<&str>) -> Pane {
         Pane {

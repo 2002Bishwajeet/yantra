@@ -181,7 +181,7 @@ async fn look_at_sessions(model: &Model) {
     model.write().await.sessions = Some(Arc::new(reading));
 }
 
-/// The dearest look of the five — ten checks over ssh per machine — and the
+/// The dearest look of the five — eleven checks over ssh per machine — and the
 /// reason it is a look rather than a handler: `doctor` costs a browser poll far
 /// more than a session list does, and the rule about ssh on the request path is
 /// this module's whole subject. The `term` is [`crate::write::term`]'s, because

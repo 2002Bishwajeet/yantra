@@ -147,10 +147,13 @@ enum Command {
         #[arg(long)]
         into: String,
     },
-    /// Install what a machine is missing of tmux, git and claude, and nothing else
+    /// Install what a machine is missing of tmux, git and claude, and the microphone when asked
     Install {
         /// Machine, as `~/.ssh/config` spells it
         machine: String,
+        /// Also set up the virtual microphone: PipeWire, its drop-in and linger (Linux)
+        #[arg(long)]
+        mic: bool,
     },
     /// Stop a tmux session by machine and name, for one no workspace claims
     Kill {
@@ -345,7 +348,7 @@ async fn main() -> ExitCode {
         Some(Command::Down { workspace }) => down(&workspace).await,
         Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
         Some(Command::Clone { url, machine, into }) => clone_repo(&url, &machine, &into).await,
-        Some(Command::Install { machine }) => install_basics(&machine).await,
+        Some(Command::Install { machine, mic }) => install_basics(&machine, mic).await,
         Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
@@ -1331,8 +1334,8 @@ fn render_cloning(cloning: &clone::Cloning, plan: &clone::Plan) -> String {
 /// ADR-0028: installs what is missing of tmux, git and claude, and says what it
 /// could not with the command a person runs there. Exit 0 only when every basic
 /// is there afterwards, which is `doctor`'s rule.
-async fn install_basics(machine: &str) -> ExitCode {
-    match install::install(machine).await {
+async fn install_basics(machine: &str, mic: bool) -> ExitCode {
+    match install::install(machine, mic).await {
         Ok(report) => {
             print!("{}", render_install(&report));
             if report.complete() {
@@ -1377,10 +1380,19 @@ fn render_install(report: &install::Report) -> String {
         };
         out.push_str(&format!("  {:<7} {said}\n", step.tool.name()));
     }
+    let again = if report
+        .steps
+        .iter()
+        .any(|step| step.tool == install::Tool::Mic)
+    {
+        format!("{} --mic", report.machine)
+    } else {
+        report.machine.clone()
+    };
     for command in commands {
         out.push_str(&format!(
-            "\nrun this on {}, then `yantra install {}` again:\n  {command}\n",
-            report.machine, report.machine
+            "\nrun this on {}, then `yantra install {again}` again:\n  {command}\n",
+            report.machine
         ));
     }
     out
@@ -3131,7 +3143,7 @@ mod tests {
     }
 
     /// A fleet with nothing in it is not a clean one — nothing was asked, so the
-    /// output must not look like ten passes, and `doctor` exits non-zero.
+    /// output must not look like eleven passes, and `doctor` exits non-zero.
     #[test]
     fn no_machines_says_nothing_was_checked_and_names_the_way_to_check_one() {
         let rendered = render_doctor(&[]);
@@ -3369,9 +3381,48 @@ mod tests {
         let cli = Cli::try_parse_from(["yantra", "install", "pi"]).expect("`install` parses");
         assert!(matches!(
             cli.command,
-            Some(Command::Install { ref machine }) if machine == "pi"
+            Some(Command::Install { ref machine, mic: false }) if machine == "pi"
         ));
         assert!(Cli::try_parse_from(["yantra", "install"]).is_err());
+        let cli =
+            Cli::try_parse_from(["yantra", "install", "pi", "--mic"]).expect("`--mic` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Install { mic: true, .. })
+        ));
+    }
+
+    /// ADR-0031 §2: the microphone's row, and the linger command it left,
+    /// with the run to repeat afterwards.
+    #[test]
+    fn an_install_with_the_microphone_shows_its_row() {
+        let report = install::Report {
+            machine: "pi".to_owned(),
+            steps: vec![
+                install::Step {
+                    tool: install::Tool::Tmux,
+                    outcome: Outcome::Present,
+                },
+                install::Step {
+                    tool: install::Tool::Mic,
+                    outcome: Outcome::ForYou {
+                        because: install::Because::SudoAsks,
+                        command: Some("sudo loginctl enable-linger biswa".to_owned()),
+                    },
+                },
+            ],
+        };
+        let rendered = render_install(&report);
+        assert!(
+            rendered.contains("  mic     not installed: it needs root"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "then `yantra install pi --mic` again:\n  sudo loginctl enable-linger biswa"
+            ),
+            "{rendered}"
+        );
     }
 
     /// Two tools left for one reason share one command, and it is printed

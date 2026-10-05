@@ -13,7 +13,7 @@ export function useInstallOn(machine: string, events: Event[]) {
   const running = install.isPending || (install.isSuccess && since !== null && last <= since)
   const press = () => {
     setSince(last)
-    install.mutate(machine)
+    install.mutate({ machine })
   }
   return { press, running, error: install.error }
 }

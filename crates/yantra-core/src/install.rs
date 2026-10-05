@@ -9,7 +9,11 @@
 //! step and names the command for a person to run there. No password is asked
 //! for, passed or stored.
 //!
+//! **The microphone is optional and asked for per run** ([ADR-0031] §1–3):
+//! its audio packages join the same package run, and the rest is per user.
+//!
 //! [ADR-0028]: ../../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md
+//! [ADR-0031]: ../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md
 
 use std::fmt;
 
@@ -23,6 +27,8 @@ pub enum Tool {
     Tmux,
     Git,
     Claude,
+    /// Not in [`BASICS`]: a step only when someone asks for the microphone.
+    Mic,
 }
 
 impl Tool {
@@ -31,6 +37,7 @@ impl Tool {
             Self::Tmux => "tmux",
             Self::Git => "git",
             Self::Claude => "claude",
+            Self::Mic => "mic",
         }
     }
 }
@@ -56,6 +63,30 @@ pub const HOMEBREW_INSTALLER: &str = r#"/bin/bash -c "$(curl -fsSL https://raw.g
 /// Apple's `git` comes with these, and their installer is a dialog on the
 /// Mac's own screen (ADR-0028 §5).
 pub const COMMAND_LINE_TOOLS: &str = "xcode-select --install";
+
+/// Where the kernel lists sound cards. Claude Code reads it to decide whether
+/// a machine has one (R17 §1), and so does the microphone step.
+pub const SOUND_CARDS: &str = "/proc/asound/cards";
+
+/// The per-user drop-in, relative to `$HOME` (ADR-0031 §1). `doctor` asks
+/// whether it is there.
+pub const MIC_DROP_IN: &str = ".config/pipewire/pipewire-pulse.conf.d/yantra-mic.conf";
+
+/// R17 §2's two modules. `media.class=Audio/Sink/Virtual` keeps the sink out of
+/// WirePlumber 0.5's default-sink choice, which takes only `Audio/Sink` and
+/// `Audio/Duplex` (`default-nodes/rescan.lua`); `pw-cat --target` still finds
+/// it by name.
+const MIC_CONFIG: &str = r#"pulse.cmd = [
+  { cmd = "load-module" args = "module-null-sink sink_name=yantra-mic-sink channel_map=mono rate=48000 sink_properties='device.description=Yantra-microphone-input media.class=Audio/Sink/Virtual'" flags = [ ] }
+  { cmd = "load-module" args = "module-remap-source master=yantra-mic-sink.monitor source_name=yantra-mic channel_map=mono source_properties=device.description=Yantra-microphone" flags = [ ] }
+]"#;
+
+/// Exits 0 when everything the microphone needs to run is on the machine.
+/// `pipewire-alsa` is a config file rather than a command.
+const AUDIO_PRESENT: &str = r#"for c in pipewire pipewire-pulse wireplumber pactl pw-cat arecord; do
+  command -v "$c" >/dev/null 2>&1 || exit 1
+done
+[ -e /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf ] || [ -e /etc/alsa/conf.d/99-pipewire-default.conf ]"#;
 
 /// How much of an installer's output a report keeps: the end, where the error is.
 pub const OUTPUT_CAP: usize = 2048;
@@ -132,6 +163,61 @@ impl Manager {
             Self::Brew => vec![format!("brew install {names}")],
         }
     }
+
+    /// ADR-0031 §1's set. Only apt's names were tested on a machine (R17 §2),
+    /// and dnf's are what `yantrad/tests/mic.rs` installs; the rest are the
+    /// same set by each distribution's own names. `brew` has none: the Mac is
+    /// Y-420.
+    fn audio(self) -> &'static [&'static str] {
+        match self {
+            Self::AptGet => &[
+                "pipewire",
+                "pipewire-pulse",
+                "wireplumber",
+                "pipewire-alsa",
+                "pulseaudio-utils",
+                "alsa-utils",
+            ],
+            // Fedora keeps `pw-cat` in `pipewire-utils`.
+            Self::Dnf => &[
+                "pipewire",
+                "pipewire-pulseaudio",
+                "wireplumber",
+                "pipewire-alsa",
+                "pulseaudio-utils",
+                "alsa-utils",
+                "pipewire-utils",
+            ],
+            // Arch keeps `pactl` in `libpulse`.
+            Self::Pacman => &[
+                "pipewire",
+                "pipewire-pulse",
+                "wireplumber",
+                "pipewire-alsa",
+                "libpulse",
+                "alsa-utils",
+            ],
+            Self::Apk => &[
+                "pipewire",
+                "pipewire-pulse",
+                "wireplumber",
+                "pipewire-alsa",
+                "pulseaudio-utils",
+                "alsa-utils",
+                "pipewire-tools",
+            ],
+            Self::Zypper => &[
+                "pipewire",
+                "pipewire-pulseaudio",
+                "wireplumber",
+                "pipewire-alsa",
+                "pulseaudio-utils",
+                "alsa-utils",
+                "pipewire-tools",
+            ],
+            Self::Brew => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,18 +252,16 @@ pub enum Because {
     NoHomebrew,
     /// macOS with no Homebrew and no `git`.
     NoCommandLineTools,
+    /// The microphone, asked for on a Mac.
+    MicOnMacOs,
 }
 
 impl fmt::Display for Because {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::SudoAsks => {
-                "the package manager needs root, and sudo asks for a password or a terminal there"
-            }
-            Self::SudoRefused => {
-                "the package manager needs root, and sudo refused this account, so run it as root"
-            }
-            Self::NoSudo => "the package manager needs root, and there is no sudo, so run it as root",
+            Self::SudoAsks => "it needs root, and sudo asks for a password or a terminal there",
+            Self::SudoRefused => "it needs root, and sudo refused this account, so run it as root",
+            Self::NoSudo => "it needs root, and there is no sudo, so run it as root",
             Self::NoPackageManager => {
                 "there is no package manager Yantra knows: apt-get, dnf, pacman, apk, zypper or brew"
             }
@@ -186,6 +270,7 @@ impl fmt::Display for Because {
                 "it is macOS, and Apple's git comes with the Command Line Tools, whose installer \
                  is a dialog on that Mac's own screen"
             }
+            Self::MicOnMacOs => "Yantra sets up the microphone on Linux only so far",
         })
     }
 }
@@ -199,7 +284,8 @@ pub struct Step {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub machine: String,
-    /// One per entry of [`BASICS`], in that order.
+    /// One per entry of [`BASICS`], in that order, then [`Tool::Mic`] when it
+    /// was asked for.
     pub steps: Vec<Step>,
 }
 
@@ -275,15 +361,21 @@ pub fn check_machine(machine: &str) -> Result<(), Error> {
     }
 }
 
-pub async fn install(machine: &str) -> Result<Report, Error> {
+pub async fn install(machine: &str, mic: bool) -> Result<Report, Error> {
     check_machine(machine)?;
     let ssh = Ssh::new(ssh::machine_at(machine).ok_or(Error::NoStateDir)?)?;
-    of(&ssh, machine, CLAUDE_INSTALLER).await
+    of(&ssh, machine, CLAUDE_INSTALLER, mic.then_some(SOUND_CARDS)).await
 }
 
 /// The testable half. `claude_installer` is a parameter so a container test
-/// runs a local stand-in and never fetches from claude.ai.
-pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Result<Report, Error> {
+/// runs a local stand-in and never fetches from claude.ai. `mic` is the sound
+/// card list to read when the microphone is asked for, for the same reason.
+pub async fn of<E: Exec>(
+    exec: &E,
+    machine: &str,
+    claude_installer: &str,
+    mic: Option<&str>,
+) -> Result<Report, Error> {
     let mut missing = Vec::new();
     for tool in BASICS {
         if !found(exec, tool).await? {
@@ -291,9 +383,15 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
         }
     }
 
+    let on_mac = mic.is_some() && ssh::os(exec).await? == Os::MacOs;
+    if mic.is_some() && !on_mac && !found(exec, Tool::Mic).await? {
+        missing.push(Tool::Mic);
+    }
+    let audio = missing.contains(&Tool::Mic);
+
     let mut names: Vec<&'static str> = missing
         .iter()
-        .filter(|tool| **tool != Tool::Claude)
+        .filter(|tool| !matches!(tool, Tool::Claude | Tool::Mic))
         .map(|tool| tool.name())
         .collect();
     let tools = names.len();
@@ -302,16 +400,16 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
     }
     // Whether the claude step waits on this package run.
     let claude_waits = names.len() > tools;
-    let packaged = if names.is_empty() {
+    let packaged = if names.is_empty() && !audio {
         Packaged::Nothing
     } else {
-        with_packages(exec, &names).await?
+        with_packages(exec, &names, audio).await?
     };
 
     let mut done = Vec::new();
     for &tool in &missing {
         let outcome = match (&packaged, tool) {
-            (Packaged::Stopped { because, command }, Tool::Tmux | Tool::Git) => {
+            (Packaged::Stopped { because, command }, Tool::Tmux | Tool::Git | Tool::Mic) => {
                 for_you(*because, command.as_deref())
             }
             (Packaged::Stopped { because, command }, Tool::Claude) if claude_waits => {
@@ -326,6 +424,7 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
             (Packaged::NoHomebrew, Tool::Claude) if claude_waits => {
                 for_you(Because::NoHomebrew, Some(HOMEBREW_INSTALLER))
             }
+            (Packaged::NoHomebrew, Tool::Mic) => for_you(Because::MicOnMacOs, None),
             (_, Tool::Claude) => claude(exec, claude_installer).await?,
             (Packaged::Ran(output), _) => settled(exec, tool, output).await?,
             (Packaged::Nothing, _) => settled(exec, tool, "").await?,
@@ -333,7 +432,7 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
         done.push(Step { tool, outcome });
     }
 
-    let steps = BASICS
+    let mut steps: Vec<Step> = BASICS
         .into_iter()
         .map(|tool| {
             done.iter()
@@ -345,6 +444,18 @@ pub async fn of<E: Exec>(exec: &E, machine: &str, claude_installer: &str) -> Res
                 })
         })
         .collect();
+    if let Some(cards) = mic {
+        let packages = done.iter().find(|step| step.tool == Tool::Mic);
+        let outcome = match packages.map(|step| &step.outcome) {
+            _ if on_mac => for_you(Because::MicOnMacOs, None),
+            None | Some(Outcome::Installed) => set_up_mic(exec, cards).await?,
+            Some(left) => left.clone(),
+        };
+        steps.push(Step {
+            tool: Tool::Mic,
+            outcome,
+        });
+    }
     Ok(Report {
         machine: machine.to_owned(),
         steps,
@@ -367,6 +478,8 @@ async fn found<E: Exec>(exec: &E, tool: Tool) -> Result<bool, Error> {
         },
         Tool::Git => doctor::find_git(exec).await?.is_some(),
         Tool::Claude => agent::locate(exec, "claude").await?.is_some(),
+        // Its packages; the rest is per user and [`set_up_mic`]'s.
+        Tool::Mic => exec.exec(AUDIO_PRESENT).await?.success(),
     })
 }
 
@@ -380,7 +493,8 @@ async fn prerequisites<E: Exec>(exec: &E) -> Result<Vec<&'static str>, Error> {
         .collect())
 }
 
-async fn with_packages<E: Exec>(exec: &E, names: &[&str]) -> Result<Packaged, Error> {
+/// `audio` adds the microphone's packages, by this manager's names.
+async fn with_packages<E: Exec>(exec: &E, names: &[&str], audio: bool) -> Result<Packaged, Error> {
     let mut manager = None;
     for candidate in Manager::ALL {
         if let Some(path) = agent::locate(exec, candidate.binary()).await? {
@@ -398,6 +512,10 @@ async fn with_packages<E: Exec>(exec: &E, names: &[&str]) -> Result<Packaged, Er
         });
     };
 
+    let mut names = names.to_vec();
+    if audio {
+        names.extend(manager.audio());
+    }
     let names = names.join(" ");
     let commands = manager.commands(&names);
     let stopped = |because, sudo: bool| {
@@ -427,6 +545,140 @@ async fn with_packages<E: Exec>(exec: &E, names: &[&str]) -> Result<Packaged, Er
         )
     };
     Ok(Packaged::Ran(tail(&exec.exec(&run).await?)))
+}
+
+/// ADR-0031 §1–3 after the packages: linger, the drop-in and the source, then
+/// the default source on a machine with no card. Linger comes first so the
+/// user manager runs whatever the login was. A linger step left for a person
+/// is the outcome even when the rest worked: without it the microphone stops
+/// at logout. `Present` when every part was there already (§B4).
+async fn set_up_mic<E: Exec>(exec: &E, cards: &str) -> Result<Outcome, Error> {
+    let (left, mut changed) = match linger(exec).await? {
+        Ok(changed) => (None, changed),
+        Err(Outcome::Failed { output }) => return Ok(Outcome::Failed { output }),
+        Err(left) => (Some(left), false),
+    };
+
+    let out = exec.exec(&configure_mic()).await?;
+    let set = if !out.success() {
+        Outcome::Failed { output: tail(&out) }
+    } else {
+        changed |= String::from_utf8_lossy(&out.stdout).trim() != "unchanged";
+        let listed = exec.exec(&format!("cat {} 2>/dev/null", sq(cards))).await?;
+        if has_card(&String::from_utf8_lossy(&listed.stdout)) {
+            settled_mic(changed)
+        } else {
+            let out = exec.exec(DEFAULT_SOURCE).await?;
+            if out.success() {
+                changed |= String::from_utf8_lossy(&out.stdout).trim() != "unchanged";
+                settled_mic(changed)
+            } else {
+                Outcome::Failed { output: tail(&out) }
+            }
+        }
+    };
+    Ok(left.unwrap_or(set))
+}
+
+fn settled_mic(changed: bool) -> Outcome {
+    if changed {
+        Outcome::Installed
+    } else {
+        Outcome::Present
+    }
+}
+
+/// `Ok(changed)` when linger is on now, and otherwise the step for a person,
+/// or `Failed` when `sudo -n` ran and loginctl refused.
+async fn linger<E: Exec>(exec: &E) -> Result<Result<bool, Outcome>, Error> {
+    let out = exec.exec(LINGER).await?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    let mut lines = said.lines().map(str::trim);
+    let user = lines.next().unwrap_or_default();
+    if lines.next() == Some("yes") {
+        return Ok(Ok(false));
+    }
+    let command = format!("loginctl enable-linger {}", word(user));
+    let prefix = match root(exec).await? {
+        Root::Superuser => "",
+        Root::Sudo => "sudo -n ",
+        Root::Asks => {
+            return Ok(Err(for_you(
+                Because::SudoAsks,
+                Some(&format!("sudo {command}")),
+            )));
+        }
+        Root::Refused => return Ok(Err(for_you(Because::SudoRefused, Some(&command)))),
+        Root::NoSudo => return Ok(Err(for_you(Because::NoSudo, Some(&command)))),
+    };
+    let out = exec.exec(&format!("{prefix}{command}")).await?;
+    if !out.success() {
+        return Ok(Err(Outcome::Failed { output: tail(&out) }));
+    }
+    Ok(Ok(true))
+}
+
+/// Overwrites the drop-in rather than appending to it, and restarts
+/// `pipewire-pulse` only when the file changed or the source is missing, so a
+/// second run interrupts no stream. Prints `changed` or `unchanged`. PipeWire
+/// listens in the runtime directory, which a command over ssh may not have in
+/// its environment (R17 §2), and which linger just enabled may not have made
+/// yet.
+fn configure_mic() -> String {
+    format!(
+        r#"export XDG_RUNTIME_DIR=/run/user/$(id -u)
+f="$HOME/{MIC_DROP_IN}"
+want={config}
+heard() {{ pactl list short sources 2>/dev/null | cut -f2 | grep -qx yantra-mic; }}
+if [ "$(cat "$f" 2>/dev/null)" = "$want" ] && heard; then echo unchanged; exit 0; fi
+mkdir -p "${{f%/*}}" && printf '%s\n' "$want" > "$f" || exit 1
+i=0
+while [ ! -S "$XDG_RUNTIME_DIR/systemd/private" ] && [ "$i" -lt 50 ]; do
+  sleep 0.2
+  i=$((i + 1))
+done
+systemctl --user daemon-reload
+systemctl --user restart pipewire-pulse.service || exit 1
+i=0
+while [ "$i" -lt 50 ]; do
+  heard && {{ echo changed; exit 0; }}
+  sleep 0.2
+  i=$((i + 1))
+done
+echo "PipeWire made no yantra-mic within 10 seconds. pactl lists:"
+pactl list short sources 2>&1
+exit 1"#,
+        config = sq(MIC_CONFIG),
+    )
+}
+
+/// ADR-0031 §3 as amended 2026-10-05: only where there is no card.
+const DEFAULT_SOURCE: &str = r#"export XDG_RUNTIME_DIR=/run/user/$(id -u)
+[ "$(pactl get-default-source 2>/dev/null)" = yantra-mic ] && { echo unchanged; exit 0; }
+pactl set-default-source yantra-mic && echo changed"#;
+
+/// The account, then whether systemd keeps its services with nobody logged in.
+const LINGER: &str = r#"u=$(id -un)
+printf '%s
+' "$u"
+loginctl show-user "$u" -p Linger --value 2>/dev/null"#;
+
+/// Claude Code's own test (R17 §1): a list that is missing, empty or says
+/// `no soundcards` is a machine with no card.
+fn has_card(cards: &str) -> bool {
+    let cards = cards.trim();
+    !cards.is_empty() && !cards.contains("no soundcards")
+}
+
+/// An account name as it goes into a command a person runs: bare when it is
+/// one plain word, quoted otherwise.
+fn word(name: &str) -> String {
+    let plain = !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if plain { name.to_owned() } else { sq(name) }
 }
 
 /// `-n` is what keeps a password out of this (ADR-0028 §5).
@@ -548,6 +800,60 @@ mod tests {
             ["pacman -Sy --needed --noconfirm tmux"]
         );
         assert_eq!(Manager::Apk.commands("tmux"), ["apk add tmux"]);
+    }
+
+    /// ADR-0031 §1: the audio set joins the basics in the one package run.
+    #[test]
+    fn the_microphone_packages_have_each_managers_names() {
+        assert_eq!(
+            Manager::AptGet.commands(&Manager::AptGet.audio().join(" ")),
+            [
+                "apt-get update",
+                "apt-get install -y pipewire pipewire-pulse wireplumber pipewire-alsa \
+                 pulseaudio-utils alsa-utils"
+            ]
+        );
+        assert_eq!(
+            Manager::Dnf.commands(&Manager::Dnf.audio().join(" ")),
+            [
+                "dnf install -y pipewire pipewire-pulseaudio wireplumber pipewire-alsa \
+              pulseaudio-utils alsa-utils pipewire-utils"
+            ]
+        );
+        assert!(Manager::Pacman.audio().contains(&"libpulse"));
+        assert!(Manager::Brew.audio().is_empty());
+    }
+
+    /// R17 §1, Claude Code's test for a card, on each shape the file takes.
+    #[test]
+    fn a_machine_without_a_card_is_told_from_one_with_a_card() {
+        assert!(!has_card(""), "missing: `cat` printed nothing");
+        assert!(!has_card("\n"), "empty");
+        assert!(!has_card("--- no soundcards ---\n"));
+        assert!(has_card(
+            " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n                      \
+             HDA Intel PCH at 0xf7f10000 irq 32\n"
+        ));
+    }
+
+    /// The drop-in is overwritten, never appended to, and it names the two
+    /// nodes ADR-0031 §5 writes to and records from.
+    #[test]
+    fn the_drop_in_is_written_whole() {
+        let script = configure_mic();
+        assert!(script.contains(r#"> "$f""#), "{script}");
+        assert!(!script.contains(">>"), "{script}");
+        assert!(MIC_CONFIG.contains("sink_name=yantra-mic-sink"));
+        assert!(MIC_CONFIG.contains("source_name=yantra-mic "));
+        assert!(MIC_CONFIG.contains("media.class=Audio/Sink/Virtual"));
+    }
+
+    #[test]
+    fn an_account_name_reaches_the_command_as_one_word() {
+        assert_eq!(word("deploy"), "deploy");
+        assert_eq!(word("first.last"), "first.last");
+        assert_eq!(word("a b"), "'a b'");
+        assert_eq!(word("-x"), "'-x'");
     }
 
     /// Measured on Alpine 3.22's sudo: "a password is required" is also what

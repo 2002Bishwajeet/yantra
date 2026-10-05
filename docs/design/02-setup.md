@@ -154,6 +154,13 @@ names, with `git` fourth. The lookup is `agent-cli`'s, with one more question on
 `/usr/bin/git` there is a stub until the Command Line Tools are installed, so it counts only when
 `xcode-select -p` answers.
 
+**2026-10-06, [Y-417](../../tracker.md#3-task-board): `mic` is a check, after `login-session`.**
+[ADR-0031](../adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §9: one round trip
+asks whether the drop-in is there and whether `pactl` under `XDG_RUNTIME_DIR` lists `yantra-mic`. A
+machine that never installed the microphone is *absent* with *not installed*, and the dashboard does
+not count it against readiness. A drop-in with no source and linger off names linger as the cause.
+The list is now eleven names.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor

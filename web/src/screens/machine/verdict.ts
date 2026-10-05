@@ -48,16 +48,18 @@ export function verdictOf(input: {
     return { kind: reachableFailure(reachable.detail), detail: reachable.detail }
   }
 
+  // Only an answer to this page's press: an older one may name a step a
+  // person has since run by hand. With every basic there, the step sudo
+  // stopped is the microphone's, the one other step Install has (ADR-0031 §2).
+  if (fresh?.kind === 'install_stopped' && fresh.commands.some(needsSudo)) {
+    return { kind: 'sudo', missing: missing.length > 0 ? missing : [nameOf('mic')], result: fresh }
+  }
   if (missing.length > 0) {
-    // Only an answer to this page's press: an older one may name a step a
-    // person has since run by hand.
-    if (fresh?.kind === 'install_stopped' && fresh.commands.some(needsSudo)) {
-      return { kind: 'sudo', missing, result: fresh }
-    }
     return { kind: 'missing', missing, result: fresh ?? newestInstall(events, name) ?? null, fresh: fresh !== null }
   }
 
-  const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check))
+  // ADR-0031 §9: the microphone is optional, so its absence never titles the card.
+  const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check) && one.check !== 'mic')
   return absent.length > 0 ? { kind: 'manual', absent } : { kind: 'ready' }
 }
 

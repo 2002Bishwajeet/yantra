@@ -39,7 +39,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `rm` on a workspace already gone | **0** | the same rule. `DELETE /api/workspaces/{name}` answers `200 {"removed": false}` for it rather than a `404`, so two tabs deleting one workspace do not show a failure for something that worked |
 | `rm` while the session is open, or while the machine cannot be asked | 1 | deleting the file strands the session where nothing looks for it, and a check that cannot know must refuse (R-23). `--force` is how a caller means it anyway |
 | `doctor`, unless every check is `present` | 1 | *ready* is the only 0, so an installer can loop on it — and an `unknown` is not a yes (R-23). An empty fleet is 1 too: nothing was asked, so nothing is known |
-| `install`, unless every basic is there afterwards | 1 | `doctor`'s rule. A step left for a person, an installer that failed and a machine that could not be asked are each 1, and the output names the command to run there (ADR-0028) |
+| `install`, unless every basic — and the microphone, with `--mic` — is there afterwards | 1 | `doctor`'s rule. A step left for a person, an installer that failed and a machine that could not be asked are each 1, and the output names the command to run there (ADR-0028) |
 | `update --check` when GitHub could not be asked | 1 | a failed read is not *current* (ADR-0027 §4). A newer release is **0**: the read worked, and the verdict is on stdout |
 | `update`, once `yantra-update.service` finished | **0** | the release is installed and what ran has restarted (ADR-0027 §3) |
 | `update` when the unit failed | 1 | nothing was installed and nothing restarted. It names `journalctl -u yantra-update` |

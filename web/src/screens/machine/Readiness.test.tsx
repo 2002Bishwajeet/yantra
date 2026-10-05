@@ -70,7 +70,7 @@ function daemon(install: [number, string?] = [202], after: Check[] = checks()) {
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
       asked.push(`${init?.method ?? 'GET'} ${path}`)
-      if (path.endsWith('/install')) return Promise.resolve(answer(install[0], install[1]))
+      if (path.split('?')[0]!.endsWith('/install')) return Promise.resolve(answer(install[0], install[1]))
       if (path.endsWith('/readiness')) return Promise.resolve(answer(200, report(after)))
       if (path === '/api/about') return Promise.resolve(answer(200, ABOUT))
       return Promise.resolve(answer(200, ring([earlier])))
@@ -105,6 +105,63 @@ describe('the Readiness card', () => {
     await draw(report(checks()))
     expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+    expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
+  })
+
+  /** ADR-0031 §1, §9: the microphone is optional, offered unticked beside
+   *  Install, and ready stays ready without it. */
+  it('offers the microphone on a ready machine, unticked, and sends it only when ticked', async () => {
+    const asked = daemon()
+    await draw(report([...checks(), { check: 'mic', state: 'absent', detail: 'not installed — the microphone is optional' }]))
+    expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
+    expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+    const box = card().getByRole('checkbox', { name: 'Microphone' }) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    box.focus()
+    expect(document.activeElement).toBe(box)
+
+    fireEvent.click(box)
+    expect(box.checked).toBe(true)
+    fireEvent.click(card().getByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(asked).toContain('POST /api/machines/pi/install?mic=true'))
+  })
+
+  /** ADR-0031 §2: linger is the step sudo stopped, and the one-off terminal runs it. */
+  it('leaves linger for a person when sudo asks, with a terminal for it', async () => {
+    const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
+    daemon([202], [...checks(), mic])
+    const client = await draw(report([...checks(), mic]))
+    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    fireEvent.click(card().getByRole('button', { name: 'Install' }))
+    await card().findByRole('heading', { name: 'Installing on pi' })
+
+    const linger: Event = {
+      ...stopped,
+      at: 300,
+      said: 'pi: mic left for you: it needs root, and sudo asks for a password or a terminal there',
+      commands: ['sudo loginctl enable-linger biswa'],
+    }
+    act(() => client.setQueryData(keys.notifications(), ring([linger, earlier])))
+
+    await card().findByRole('heading', { name: 'microphone needs your password' })
+    expect(card().getByText(/stopped before a step that needs root/)).toBeTruthy()
+    expect(card().getByText('sudo loginctl enable-linger biswa')).toBeTruthy()
+    expect(card().getByRole('button', { name: 'Open a terminal' })).toBeTruthy()
+  })
+
+  it('installs the basics alone while Microphone is unticked', async () => {
+    const asked = daemon()
+    await draw(report([...checks(['tmux']), { check: 'mic', state: 'absent', detail: 'not installed' }]))
+    expect(card().getByRole('checkbox', { name: 'Microphone' })).toBeTruthy()
+    fireEvent.click(card().getByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(asked).toContain('POST /api/machines/pi/install'))
+    expect(asked).not.toContain('POST /api/machines/pi/install?mic=true')
+  })
+
+  it('offers no microphone where doctor found one', async () => {
+    daemon()
+    await draw(report([...checks(), { check: 'mic', state: 'present', detail: 'PipeWire has the source yantra-mic' }]))
+    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
     expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
