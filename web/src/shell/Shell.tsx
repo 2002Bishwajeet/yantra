@@ -372,7 +372,7 @@ export function Shell() {
         <div className={CONTENTS[factor]}>
           {factor === 'desktop' && down === null && isRailed(pathname) ? (
             <Guarded title="Sessions could not be drawn">
-              {pathname === '/' ? <HomeRail /> : <SessionsRail />}
+              {pathname === '/' || pathname === '/new' ? <HomeRail /> : <SessionsRail />}
             </Guarded>
           ) : null}
           <Page down={down} />

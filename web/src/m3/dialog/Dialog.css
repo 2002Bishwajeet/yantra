@@ -55,6 +55,25 @@
   gap: 8px;
 }
 
+.m3-dialog__head[data-framed] {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+}
+
+.m3-dialog__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+
+.m3-dialog__dismiss {
+  flex: none;
+  margin-left: auto;
+}
+
 .m3-dialog__title {
   margin: 0;
   font: var(--md-sys-typescale-emphasized-headline-small);

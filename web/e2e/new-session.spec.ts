@@ -7,9 +7,9 @@ import { route } from './lib/routes'
  *  `2002Bishwajeet/scratch`, so one row is already there and one is a clone. */
 const PATH = route('new').path
 
-// The phone's app bar is a second h1 over the screen's own.
+// The phone's app bar is a second h1 over the screen's own; wider screens draw a dialog.
 const heading = (page: Parameters<typeof axe>[0], name: string) =>
-  page.getByRole('heading', { level: 1, name }).first()
+  page.getByRole('dialog', { name }).or(page.getByRole('heading', { level: 1, name })).first()
 
 test.describe('the four steps', () => {
   test.beforeEach(async ({ page }) => {

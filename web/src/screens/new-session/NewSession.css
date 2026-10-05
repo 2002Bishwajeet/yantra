@@ -418,3 +418,21 @@ span.ns__crumb {
 [data-shell="phone"] .ns__stage-detail {
   padding-left: 0;
 }
+
+/* Tablet and desktop: the boards' modal, 880 px on surface-container-low. */
+
+.m3-dialog.ns-dialog {
+  max-width: 880px;
+  background: var(--md-sys-color-surface-container-low);
+  --m3-field-surface: var(--md-sys-color-surface-container-low);
+}
+
+.ns-dialog .m3-dialog__title {
+  font: var(--md-sys-typescale-emphasized-headline-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-medium-tracking);
+}
+
+.ns-dialog__tile {
+  --m3-tile-size: 44px;
+  --m3-tile-radius: var(--md-sys-shape-corner-medium);
+}
