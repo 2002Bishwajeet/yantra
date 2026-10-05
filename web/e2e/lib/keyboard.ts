@@ -16,6 +16,8 @@ export type Stop = {
  *  Chromium applies `:focus-visible` to a Tab. Stops early when focus leaves
  *  the document, and fails if nothing took it at all. */
 export async function keyboardWalk(page: Page, n: number): Promise<Stop[]> {
+  // Lazy shell slots join the tab order when they load, so a walk begun earlier ends elsewhere.
+  await expect(page.locator('.shell__slot')).toHaveCount(0)
   const stops: Stop[] = []
   for (let presses = 0; stops.length < n && presses < n * 2; presses++) {
     await page.keyboard.press('Tab')

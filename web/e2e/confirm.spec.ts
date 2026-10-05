@@ -39,6 +39,8 @@ test.describe('Kill a session', () => {
 
   test('passes axe, walks by keyboard and closes on Cancel', async ({ page, size }) => {
     await focused(page)
+    // Base UI may move initial focus on after the poll passes, which shifts where two Tabs end.
+    await page.getByRole('dialog').focus()
     await axe(page)
     await keyboardWalk(page, 2)
     await screenshot(page, 'confirm-kill', 'busy', size, { overlay: true })
@@ -66,6 +68,8 @@ test.describe('Delete a workspace', () => {
 
   test('passes axe, walks by keyboard and closes on Cancel', async ({ page, size }) => {
     await focused(page)
+    // Base UI may move initial focus on after the poll passes, which shifts where two Tabs end.
+    await page.getByRole('dialog').focus()
     await axe(page)
     await keyboardWalk(page, 2)
     await screenshot(page, 'confirm-delete', 'busy', size, { overlay: true })
