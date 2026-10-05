@@ -8,7 +8,11 @@ export const keys = {
   machines: () => ['machines'] as const,
   workspaces: () => ['workspaces'] as const,
   status: (name: string) => ['workspaces', name, 'status'] as const,
-  spend: (name: string) => ['workspaces', name, 'spend'] as const,
+  /** No `since` is the whole session, and the prefix of every window. */
+  spend: (name: string, since?: string) =>
+    since === undefined
+      ? (['workspaces', name, 'spend'] as const)
+      : (['workspaces', name, 'spend', since] as const),
   transcript: (name: string, window: Window) =>
     ['workspaces', name, 'transcript', window] as const,
   repair: (name: string) => ['workspaces', name, 'repair'] as const,

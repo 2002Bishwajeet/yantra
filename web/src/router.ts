@@ -22,6 +22,7 @@ import { Home } from '@/screens/dashboard/Home'
 import type { RoutePrimary } from '@/shell/primary'
 import { Nowhere, Shell } from '@/shell/Shell'
 import { asView, type View } from '@/views'
+import { asSpan, type Span } from '@/screens/usage/span'
 
 /** A phone's app switcher shows the front of the title, so the route's own name
  *  goes first — every route was `Yantra` before Y-187. */
@@ -124,6 +125,9 @@ const sessionTerminal = createRoute({
 const usage = createRoute({
   getParentRoute: () => root,
   path: '/usage',
+  validateSearch: (search: Record<string, unknown>): { window?: Span } => ({
+    window: asSpan(search.window),
+  }),
   component: lazyRouteComponent(() => import('@/screens/usage/Usage'), 'Usage'),
   loader: ({ context: { client } }) => {
     void client.prefetchQuery(workspacesQuery())

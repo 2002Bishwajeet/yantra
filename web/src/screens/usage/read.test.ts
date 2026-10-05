@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
+import { spendQuery } from '@/api/queries'
 import type { ModelSpend, Spend, Workspace } from '@/api'
 import { aWorkspace } from '@/api/fixtures'
 import { byModel, byWorkspace, lines, type Row } from './read'
+import { asSpan, sinceOf } from './span'
 
 const model = (over: Partial<ModelSpend> & Pick<ModelSpend, 'model'>): ModelSpend => ({
   responses: 4,
@@ -141,5 +144,44 @@ describe('the table rows', () => {
   it('hold no row for a read that failed', () => {
     const rows: Row[] = [{ read: 'refused', workspace: one, status: 503, said: 'no' }]
     expect(lines(rows)).toEqual([])
+  })
+})
+
+describe('a window', () => {
+  const now = new Date(2026, 9, 5, 15, 30, 12)
+
+  it('is the whole session for All, and an absolute instant otherwise', () => {
+    expect(sinceOf('all', now)).toBeUndefined()
+    expect(sinceOf('today', now)).toBe(new Date(2026, 9, 5).toISOString())
+    expect(sinceOf('7d', now)).toBe(new Date(now.getTime() - 7 * 86_400_000).toISOString())
+    expect(sinceOf('30d', now)).toBe(new Date(now.getTime() - 30 * 86_400_000).toISOString())
+  })
+
+  it('ends in Z, which the daemon reads as RFC 3339', () => {
+    expect(sinceOf('today', now)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  })
+
+  it('reads an unknown search value as no window', () => {
+    expect(asSpan('7d')).toBe('7d')
+    expect(asSpan('7')).toBeUndefined()
+    expect(asSpan(undefined)).toBeUndefined()
+  })
+
+  it('posts `since` in the body, and no body for the whole session', async () => {
+    const fetch = vi.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(spend()) }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    try {
+      const client = new QueryClient()
+      await client.fetchQuery(spendQuery('site', '2026-10-04T22:00:00.000Z'))
+      await client.fetchQuery(spendQuery('site'))
+      const [windowed, whole] = fetch.mock.calls as unknown as [string, RequestInit][]
+      expect(windowed[1].body).toBe('{"since":"2026-10-04T22:00:00.000Z"}')
+      expect(whole[1].body).toBeUndefined()
+      expect(spendQuery('site', 'x').queryKey).not.toEqual(spendQuery('site').queryKey)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

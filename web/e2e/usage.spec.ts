@@ -3,7 +3,7 @@ import { at } from './lib/sizes'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /* Y-347. What the Usage, TabletUsage and PhoneUsage boards say the page must
-   carry, at all three sizes — minus the time window, which is Y-354. */
+   carry, at all three sizes, with Y-354's time window. */
 
 const card = (page: Page, name: string) => page.getByRole('region', { name })
 
@@ -13,12 +13,34 @@ test.describe('usage on a busy fleet', () => {
     await page.goto('/usage')
   })
 
-  test('reads nothing until a person asks, and offers no time window yet', async ({ page }) => {
+  test('reads nothing until a person asks, and the window starts at All', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Read spend' })).toBeVisible()
     await expect(page.getByText('Nothing read yet')).toBeVisible()
-    for (const window of ['Today', '7 days', '30 days']) {
-      await expect(page.getByRole('button', { name: window })).toHaveCount(0)
-    }
+    const window = page.getByRole('radiogroup', { name: 'Window' })
+    await expect(window.getByRole('radio')).toHaveText(['All', 'Today', '7 days', '30 days'])
+    await expect(window.getByRole('radio', { name: 'All' })).toBeChecked()
+  })
+
+  /* Y-354. A switch reads nothing (ADR-0019), and Read sends the window's
+     start as an instant the browser chose. */
+  test('a window is read on request and posts its start', async ({ page }) => {
+    let reads = 0
+    page.on('request', (request) => {
+      if (request.url().endsWith('/tokens')) reads += 1
+    })
+    await page.getByRole('radio', { name: '7 days' }).click()
+    await expect(page).toHaveURL('/usage?window=7d')
+    await expect(page.getByText('as read · responses in the last 7 days')).toBeVisible()
+    expect(reads).toBe(0)
+
+    const posted = page.waitForRequest((request) => request.url().endsWith('/tokens'))
+    await page.getByRole('button', { name: 'Read spend' }).click()
+    const since = ((await posted).postDataJSON() as { since: string }).since
+    expect(Date.now() - Date.parse(since)).toBeGreaterThan(6.9 * 86_400_000)
+    await expect(card(page, 'By workspace').getByText('10 workspaces read')).toBeVisible()
+
+    await page.getByRole('radio', { name: 'All' }).click()
+    await expect(page.getByText('Nothing read yet')).toBeVisible()
   })
 
   test('fans out on request and draws both breakdowns and the table', async ({ page }) => {

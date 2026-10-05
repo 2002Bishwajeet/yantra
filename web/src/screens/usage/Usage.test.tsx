@@ -1,6 +1,6 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, screen, within } from '@testing-library/react'
-import { mount, scenario, unmount } from '@/screens/fleet/harness'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { mount, type Scenario, scenario, unmount } from '@/screens/fleet/harness'
 
 // The route is lazy, so the first mount pays for its chunk; warming it here
 // keeps that cost out of the first test's own timeout.
@@ -15,15 +15,41 @@ afterEach(() => {
 
 const card = (name: string) => within(screen.getByRole('region', { name }))
 
+/** What each `/tokens` POST carried as its window, `null` for no body. */
+function sinces(): (string | null)[] {
+  return vi
+    .mocked(fetch)
+    .mock.calls.filter(([path]) => String(path).endsWith('/tokens'))
+    .map(([, init]) =>
+      typeof init?.body === 'string' ? (JSON.parse(init.body) as { since: string }).since : null,
+    )
+}
+
+function refusing(status: number, text: string): Scenario {
+  const state = scenario('busy')
+  state.refuse = { status, text }
+  return state
+}
+
+const pick = async (name: string) =>
+  fireEvent.click(await screen.findByRole('radio', { name }, { timeout: 2000 }))
+
 describe('/usage on the busy fleet', () => {
-  it('reads nothing until a person asks, and has no time window yet', async () => {
+  it('reads nothing until a person asks, and the window starts at All', async () => {
     const asked = mount('desktop', '/usage', scenario('busy'))
     await screen.findByRole('heading', { level: 1, name: 'Usage' }, { timeout: 2000 })
     expect(await screen.findByRole('button', { name: 'Read spend' })).toBeTruthy()
     expect(screen.getByText('Nothing read yet')).toBeTruthy()
     expect(asked.some((one) => one.includes('/tokens'))).toBe(false)
-    // Y-354 brings Today / 7 days / 30 days.
-    expect(screen.queryByRole('button', { name: '7 days' })).toBeNull()
+    const window = screen.getByRole('radiogroup', { name: 'Window' })
+    expect(within(window).getAllByRole('radio').map((one) => one.textContent)).toEqual([
+      'All',
+      'Today',
+      '7 days',
+      '30 days',
+    ])
+    expect(within(window).getByRole('radio', { name: 'All', checked: true })).toBeTruthy()
+    expect(screen.getByText('as read · every response in each transcript')).toBeTruthy()
   })
 
   it('fans out one read a workspace and draws both breakdowns', async () => {
@@ -124,4 +150,80 @@ describe('/usage when nothing can be reached', () => {
     expect(alert.textContent).toContain('Nothing here can be reached')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
   })
+})
+
+describe('/usage time windows (Y-354)', () => {
+  it('sends no body for All, and an instant for each other window', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 9, 5, 15, 30) })
+    try {
+      mount('desktop', '/usage', scenario('busy'))
+      const read = async () => {
+        fireEvent.click(await screen.findByRole('button', { name: /^Read (spend|again)$/ }, { timeout: 2000 }))
+        await screen.findByRole('region', { name: 'By workspace' })
+      }
+      await read()
+      expect(sinces()).toEqual(Array(10).fill(null))
+
+      const expected: [string, string][] = [
+        ['Today', new Date(2026, 9, 5).toISOString()],
+        ['7 days', new Date(2026, 8, 28, 15, 30).toISOString()],
+        ['30 days', new Date(2026, 8, 5, 15, 30).toISOString()],
+      ]
+      for (const [name, since] of expected) {
+        vi.mocked(fetch).mockClear()
+        await pick(name)
+        await read()
+        expect(sinces(), name).toEqual(Array(10).fill(since))
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads nothing on a switch, and each window keeps its own rows', async () => {
+    mount('desktop', '/usage', scenario('busy'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+    await screen.findByRole('region', { name: 'By workspace' })
+
+    vi.mocked(fetch).mockClear()
+    await pick('7 days')
+    expect(await screen.findByText('Nothing read yet')).toBeTruthy()
+    expect(screen.getByText('as read · responses in the last 7 days')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Read spend' })).toBeTruthy()
+    expect(location.search).toBe('?window=7d')
+
+    await pick('All')
+    expect(await screen.findByRole('region', { name: 'By workspace' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Read again' })).toBeTruthy()
+    expect(sinces()).toEqual([])
+  })
+
+  it('opens on the window the URL names, and on All for one it does not know', async () => {
+    mount('desktop', '/usage?window=30d', scenario('busy'))
+    expect(await screen.findByRole('radio', { name: '30 days', checked: true }, { timeout: 2000 })).toBeTruthy()
+    cleanup()
+    unmount()
+    mount('desktop', '/usage?window=forever', scenario('busy'))
+    expect(await screen.findByRole('radio', { name: 'All', checked: true }, { timeout: 2000 })).toBeTruthy()
+  })
+
+  for (const name of ['All', 'Today', '7 days', '30 days']) {
+    it(`names a refused read in place under ${name}`, async () => {
+      const said = 'Failed to deserialize the JSON body into the target type: since'
+      mount('desktop', '/usage', refusing(400, said))
+      await pick(name)
+      fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+      const workspaces = within(await screen.findByRole('region', { name: 'By workspace' }))
+      expect(workspaces.getByText('Nothing was counted')).toBeTruthy()
+      await waitFor(() => expect(workspaces.getAllByText(said)).toHaveLength(10))
+    })
+
+    it(`reads a 409 as nothing to count, not a failure, under ${name}`, async () => {
+      mount('desktop', '/usage', refusing(409, 'no transcript for /srv/site yet'))
+      await pick(name)
+      fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+      const workspaces = within(await screen.findByRole('region', { name: 'By workspace' }))
+      expect(workspaces.getAllByText('no transcript for /srv/site yet')).toHaveLength(10)
+    })
+  }
 })
