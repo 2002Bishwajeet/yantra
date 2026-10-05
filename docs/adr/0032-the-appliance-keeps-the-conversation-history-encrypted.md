@@ -36,11 +36,14 @@ End-to-end encryption would protect that case, but then only the machines could 
    §11.4. A copy stays on the appliance after the harness on the machine deletes its own.
 2. **Each machine redacts before it sends.** A job on the machine writes a redacted staging copy
    with `gitleaks` and the rules R18 §11.3 lacked. The live transcript stays whole, because
-   `--resume` needs it whole. The appliance never receives the unredacted text.
+   `--resume` needs it whole. The appliance never receives the unredacted text. The job deletes a
+   staging file when the harness deletes its live transcript, so the extra copy on a machine never
+   outgrows the live history.
 3. **Syncthing moves the files.** Each machine's staging folder is *send only*. The appliance's
    folder is *receive only*, with `ignoreDelete`. One writer per path means no conflict files.
 4. **The archive is encrypted on the appliance's disk.** The archive and the search index live
-   only inside an encrypted volume. The key must not be on the same disk in a form that opens it.
+   only inside a LUKS volume. The key must not be on the same disk in a form that opens it. On an
+   appliance with a TPM 2.0, `systemd-cryptenroll --tpm2-device=auto` seals the key to that board.
    A disk taken out of the appliance shows only ciphertext.
 5. **`ctx` indexes the archive on the appliance and serves it to agents over MCP.** Its analytics
    and its auto-upgrade are off. `cass` is out: its indexing peak was 5.9 GB, and its licence rider
@@ -67,10 +70,15 @@ cover it. The archive must not grow into a store for anything else.
 
 **Cost: setup and resources.** Every machine runs Syncthing and a redaction job. The appliance runs
 Syncthing and the `ctx` daemon: about 216 MB at rest and 985 MB while indexing on x86-64 (R18
-§11.2), inside the owner's 4 GB budget. `ignoreDelete` grows the disk without bound, so the archive
+§11.2), inside the owner's 4 GB budget. The index takes about 2.1 GB of disk for each 650 MB of
+history, so the archive belongs on an SSD and not on an SD card. `ignoreDelete` grows the disk without bound, so the archive
 needs a prune rule.
 
-**Not yet measured.** Every figure on arm64 and on a Pi. Where the key comes from so that a removed
-disk cannot open it: the Pi 5's OTP private key is a candidate, and a build row must verify it.
+**The hardware is open.** The owner may buy a Raspberry Pi or a mini PC. `install.sh` already
+installs on both, for `aarch64` and `x86_64`. A mini PC fits this decision better: R18 measured on
+x86-64, and most mini PCs have a TPM 2.0 for decision 4. A Pi 5 has no TPM. Its OTP private key is
+the candidate there, and a build row must verify it.
+
+**Not yet measured.** Every figure on arm64 and on a Pi.
 Whether a redacted transcript still resumes under `claude --resume`. `ctx` over real Codex, Gemini
 and Grok history. The build rows carry these checks.
