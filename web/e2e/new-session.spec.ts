@@ -1,172 +1,245 @@
-import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
-import { route } from './lib/routes'
+import {
+  axe,
+  expect,
+  keyboardWalk,
+  scenario,
+  screenshot,
+  test,
+} from "./lib/test";
+import { route } from "./lib/routes";
 
 /** `/new` (Y-349): the four steps of NewSession, NewSessionSource,
  *  NewSessionLocal, NewSessionStart and NewSessionCloning. The fixture's
  *  machine holds `2002Bishwajeet/yantra` under `~/Github` and not
  *  `2002Bishwajeet/scratch`, so one row is already there and one is a clone. */
-const PATH = route('new').path
+const PATH = route("new").path;
 
 // The phone's app bar is a second h1 over the screen's own; wider screens draw a dialog.
 const heading = (page: Parameters<typeof axe>[0], name: string) =>
-  page.getByRole('dialog', { name }).or(page.getByRole('heading', { level: 1, name })).first()
+  page
+    .getByRole("dialog", { name })
+    .or(page.getByRole("heading", { level: 1, name }))
+    .first();
 
-test.describe('the four steps', () => {
+test.describe("the four steps", () => {
   test.beforeEach(async ({ page }) => {
-    await scenario(page, 'busy')
-    await page.goto(PATH)
-    await expect(heading(page, 'New session')).toBeVisible()
-  })
+    await scenario(page, "busy");
+    await page.goto(PATH);
+    await expect(heading(page, "New session")).toBeVisible();
+  });
 
-  test('draws the board: a generated name, its tile, and the machine chips', async ({ page }) => {
-    await expect(page.getByLabel('Name')).toHaveValue(/^[a-z]+-[a-z]+$/)
-    const chips = page.getByRole('group', { name: 'Machine' })
-    await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeEnabled()
-    await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
-  })
+  test("draws the board: a generated name, its tile, and the machine chips", async ({
+    page,
+  }) => {
+    await expect(page.getByLabel("Name")).toHaveValue(/^[a-z]+-[a-z]+$/);
+    const chips = page.getByRole("group", { name: "Machine" });
+    await expect(
+      chips.getByRole("button", { name: "cachyos-g14" }),
+    ).toBeEnabled();
+    await expect(
+      chips.getByRole("button", { name: "thinkpad · unreachable" }),
+    ).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
 
-  test('passes axe on each step', async ({ page }) => {
-    await axe(page)
-    await page.getByLabel('Name').fill('quiet-otter')
-    await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
-    await axe(page)
-    await page.getByRole('button', { name: /2002Bishwajeet\/yantra/ }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('What opens in the session')).toBeVisible()
-    await axe(page)
-  })
+  test("passes axe on each step", async ({ page }) => {
+    await axe(page);
+    await page.getByLabel("Name").fill("quiet-otter");
+    await page.getByRole("button", { name: "cachyos-g14" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(
+      page.getByText("already on cachyos-g14 at ~/Github/yantra"),
+    ).toBeVisible();
+    await axe(page);
+    await page.getByRole("button", { name: /2002Bishwajeet\/yantra/ }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByText("What opens in the session")).toBeVisible();
+    await axe(page);
+  });
 
-  test('walks by keyboard', async ({ page }) => {
-    await keyboardWalk(page, 8)
-  })
+  test("walks by keyboard", async ({ page }) => {
+    await keyboardWalk(page, 8);
+  });
 
   /** Row 113: the boards name four steps and draw three panels, so leaving
    *  the first ticks Name and Machine together and the walk lands on Source. */
-  test('names the boards four steps, and ticks two of them at once', async ({ page }) => {
-    const steps = page.getByRole('list', { name: 'Steps' }).getByRole('listitem')
-    await expect(steps).toHaveText(['1Name', '2Machine', '3Source', '4Start'])
-    await expect(steps.first()).toHaveAttribute('aria-current', 'step')
+  test("names the boards four steps, and ticks two of them at once", async ({
+    page,
+  }) => {
+    const steps = page
+      .getByRole("list", { name: "Steps" })
+      .getByRole("listitem");
+    await expect(steps).toHaveText(["1Name", "2Machine", "3Source", "4Start"]);
+    await expect(steps.first()).toHaveAttribute("aria-current", "step");
 
-    await page.getByLabel('Name').fill('quiet-otter')
-    await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
-    await expect(steps.nth(1)).toHaveAttribute('data-state', 'done')
-    await expect(steps.nth(2)).toHaveAttribute('aria-current', 'step')
-  })
+    await page.getByLabel("Name").fill("quiet-otter");
+    await page.getByRole("button", { name: "cachyos-g14" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(
+      page.getByText("already on cachyos-g14 at ~/Github/yantra"),
+    ).toBeVisible();
+    await expect(steps.nth(1)).toHaveAttribute("data-state", "done");
+    await expect(steps.nth(2)).toHaveAttribute("aria-current", "step");
+  });
 
-  test('looks like the board', async ({ page, size }) => {
-    await page.getByLabel('Name').fill('quiet-otter')
-    await screenshot(page, 'new-session-name', 'busy', size)
-  })
+  test("looks like the board", async ({ page, size }) => {
+    await page.getByLabel("Name").fill("quiet-otter");
+    await screenshot(page, "new-session-name", "busy", size, {
+      overlay: size !== "phone",
+    });
+  });
 
-  test('the source step joins the swept list to the machine, and search narrows it', async ({
+  test("the source step joins the swept list to the machine, and search narrows it", async ({
     page,
     size,
   }) => {
-    await page.getByLabel('Name').fill('quiet-otter')
-    await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-
-    await expect(page.getByText('github.com · 2002Bishwajeet · signed in to Yantra', { exact: false })).toBeVisible()
-    const rows = page.getByRole('list', { name: 'Repositories' })
-    await expect(rows.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
-    await expect(rows.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
-    await expect(page.getByRole('button', { name: /GitLab/ })).toBeDisabled()
-    await screenshot(page, 'new-session-source', 'busy', size)
-
-    await page.getByLabel('Search your repositories').fill('scratch')
-    await expect(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toHaveCount(0)
-    await page.getByLabel('Search your repositories').fill('zzz')
-    await expect(page.getByText('nothing matches zzz')).toBeVisible()
-  })
-
-  test('the local browser walks the machine and makes a folder', async ({ page, size }) => {
-    test.skip(size !== 'desktop', 'one size is enough for the wire')
-    await page.getByLabel('Name').fill('quiet-otter')
-    await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-    await page.getByRole('button', { name: /Local directory/ }).click()
-
-    const folders = page.getByRole('list', { name: 'Folders' })
-    await folders.getByRole('button', { name: /Github/ }).click()
-    await expect(folders.getByText('git · 2002Bishwajeet/yantra')).toBeVisible()
-    // Y-414: a file and a closed folder are drawn and are not buttons.
-    await expect(folders.getByText('README.md')).toBeVisible()
-    await expect(folders.getByRole('button', { name: /^(README\.md|archive)/ })).toHaveCount(0)
-    await expect(folders.getByText('.github')).toHaveCount(0)
-    await screenshot(page, 'new-session-local', 'busy', size)
-
-    await page.getByRole('button', { name: 'Show hidden' }).click()
-    await expect(folders.getByText('.github')).toBeVisible()
-    await page.getByRole('button', { name: 'Show hidden' }).click()
-
-    const where = page.getByRole('navigation', { name: 'Where you are' })
-    await where.getByRole('button', { name: '/', exact: true }).click()
-    await expect(folders.getByRole('button', { name: /^srv/ })).toBeVisible()
-    await folders.getByRole('button', { name: /^home/ }).click()
-    await folders.getByRole('button', { name: /^biswa/ }).click()
-    await folders.getByRole('button', { name: /^Github/ }).click()
-    await expect(folders.getByText('git · 2002Bishwajeet/yantra')).toBeVisible()
-
-    await page.getByLabel('New folder').fill('landing-copy')
-    await page.getByRole('button', { name: 'Make', exact: true }).click()
-    await expect(page.getByText('~/Github/landing-copy')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
-  })
-})
-
-test.describe('all four steps, to a workspace that is running', () => {
-  test('a repository already on the machine is created and opened', async ({ page, size }) => {
-    await scenario(page, 'busy')
-    await page.goto(PATH)
-    await expect(heading(page, 'New session')).toBeVisible()
-
-    await page.getByLabel('Name').fill('quiet-otter')
-    await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-
-    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
-    await page.getByRole('button', { name: /2002Bishwajeet\/yantra/ }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-
-    await expect(page.getByText('What opens in the session')).toBeVisible()
-    await expect(page.getByText('open a tmux session on cachyos-g14 in ~/Github/yantra', { exact: false })).toBeVisible()
-    await screenshot(page, 'new-session-start', 'busy', size)
-    await page.getByRole('button', { name: 'Create and open' }).click()
-
-    const stages = page.getByRole('list', { name: 'Stages' })
-    await expect(page.getByText('Starting quiet-otter')).toBeVisible()
-    // Nothing to clone: the directory is already there.
-    await expect(stages.getByText('not needed')).toBeVisible()
-    await expect(page).toHaveURL('/w/quiet-otter?view=chat')
-  })
-
-  test('a repository that is not there is cloned, with its progress', async ({ page, size }) => {
-    await scenario(page, 'busy')
-    await page.goto(PATH)
-    await expect(heading(page, 'New session')).toBeVisible()
-
-    await page.getByLabel('Name').fill('brisk-heron')
-    await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
-
-    await expect(page.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
-    await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
-    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByLabel("Name").fill("quiet-otter");
+    await page.getByRole("button", { name: "cachyos-g14" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
 
     await expect(
-      page.getByText('clone 2002Bishwajeet/scratch into ~/Github/scratch on cachyos-g14'),
-    ).toBeVisible()
-    await page.getByRole('button', { name: 'Create and open' }).click()
+      page.getByText("github.com · 2002Bishwajeet · signed in to Yantra", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    const rows = page.getByRole("list", { name: "Repositories" });
+    await expect(
+      rows.getByText("already on cachyos-g14 at ~/Github/yantra"),
+    ).toBeVisible();
+    await expect(
+      rows.getByText("not here yet · clone into ~/Github/scratch"),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /GitLab/ })).toBeDisabled();
+    await screenshot(page, "new-session-source", "busy", size, {
+      overlay: size !== "phone",
+    });
 
-    const stages = page.getByRole('list', { name: 'Stages' })
-    await expect(stages.getByText('Cloning 2002Bishwajeet/scratch', { exact: false })).toBeVisible()
-    await expect(stages.getByText(/Receiving objects/)).toBeVisible()
-    await screenshot(page, 'new-session-cloning', 'busy', size)
-    await expect(page).toHaveURL('/w/brisk-heron?view=chat', { timeout: 15_000 })
-  })
-})
+    await page.getByLabel("Search your repositories").fill("scratch");
+    await expect(
+      rows.getByRole("button", { name: /2002Bishwajeet\/yantra/ }),
+    ).toHaveCount(0);
+    await page.getByLabel("Search your repositories").fill("zzz");
+    await expect(page.getByText("nothing matches zzz")).toBeVisible();
+  });
+
+  test("the local browser walks the machine and makes a folder", async ({
+    page,
+    size,
+  }) => {
+    test.skip(size !== "desktop", "one size is enough for the wire");
+    await page.getByLabel("Name").fill("quiet-otter");
+    await page.getByRole("button", { name: "cachyos-g14" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: /Local directory/ }).click();
+
+    const folders = page.getByRole("list", { name: "Folders" });
+    await folders.getByRole("button", { name: /Github/ }).click();
+    await expect(
+      folders.getByText("git · 2002Bishwajeet/yantra"),
+    ).toBeVisible();
+    // Y-414: a file and a closed folder are drawn and are not buttons.
+    await expect(folders.getByText("README.md")).toBeVisible();
+    await expect(
+      folders.getByRole("button", { name: /^(README\.md|archive)/ }),
+    ).toHaveCount(0);
+    await expect(folders.getByText(".github")).toHaveCount(0);
+    await screenshot(page, "new-session-local", "busy", size, {
+      overlay: size !== "phone",
+    });
+
+    await page.getByRole("button", { name: "Show hidden" }).click();
+    await expect(folders.getByText(".github")).toBeVisible();
+    await page.getByRole("button", { name: "Show hidden" }).click();
+
+    const where = page.getByRole("navigation", { name: "Where you are" });
+    await where.getByRole("button", { name: "/", exact: true }).click();
+    await expect(folders.getByRole("button", { name: /^srv/ })).toBeVisible();
+    await folders.getByRole("button", { name: /^home/ }).click();
+    await folders.getByRole("button", { name: /^biswa/ }).click();
+    await folders.getByRole("button", { name: /^Github/ }).click();
+    await expect(
+      folders.getByText("git · 2002Bishwajeet/yantra"),
+    ).toBeVisible();
+
+    await page.getByLabel("New folder").fill("landing-copy");
+    await page.getByRole("button", { name: "Make", exact: true }).click();
+    await expect(page.getByText("~/Github/landing-copy")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+});
+
+test.describe("all four steps, to a workspace that is running", () => {
+  test("a repository already on the machine is created and opened", async ({
+    page,
+    size,
+  }) => {
+    await scenario(page, "busy");
+    await page.goto(PATH);
+    await expect(heading(page, "New session")).toBeVisible();
+
+    await page.getByLabel("Name").fill("quiet-otter");
+    await page.getByRole("button", { name: "cachyos-g14" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await expect(
+      page.getByText("already on cachyos-g14 at ~/Github/yantra"),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /2002Bishwajeet\/yantra/ }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await expect(page.getByText("What opens in the session")).toBeVisible();
+    await expect(
+      page.getByText("open a tmux session on cachyos-g14 in ~/Github/yantra", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await screenshot(page, "new-session-start", "busy", size, {
+      overlay: size !== "phone",
+    });
+    await page.getByRole("button", { name: "Create and open" }).click();
+
+    const stages = page.getByRole("list", { name: "Stages" });
+    await expect(page.getByText("Starting quiet-otter")).toBeVisible();
+    // Nothing to clone: the directory is already there.
+    await expect(stages.getByText("not needed")).toBeVisible();
+    await expect(page).toHaveURL("/w/quiet-otter?view=chat");
+  });
+
+  test("a repository that is not there is cloned, with its progress", async ({
+    page,
+    size,
+  }) => {
+    await scenario(page, "busy");
+    await page.goto(PATH);
+    await expect(heading(page, "New session")).toBeVisible();
+
+    await page.getByLabel("Name").fill("brisk-heron");
+    await page.getByRole("button", { name: "cachyos-g14" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await expect(
+      page.getByText("not here yet · clone into ~/Github/scratch"),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /2002Bishwajeet\/scratch/ }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await expect(
+      page.getByText(
+        "clone 2002Bishwajeet/scratch into ~/Github/scratch on cachyos-g14",
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Create and open" }).click();
+
+    const stages = page.getByRole("list", { name: "Stages" });
+    await expect(
+      stages.getByText("Cloning 2002Bishwajeet/scratch", { exact: false }),
+    ).toBeVisible();
+    await expect(stages.getByText(/Receiving objects/)).toBeVisible();
+    await screenshot(page, "new-session-cloning", "busy", size, {
+      overlay: size !== "phone",
+    });
+    await expect(page).toHaveURL("/w/brisk-heron?view=chat", {
+      timeout: 15_000,
+    });
+  });
+});
