@@ -115,3 +115,9 @@ serves one user. Throughput was never the constraint, and no benchmark motivated
 > ADR-0021 chose. It is still one of the daemon's own inputs, not a store: no session, no verdict,
 > no beat, no history, and the first look after a start still says nothing. The rest of the
 > amendment above stands unchanged.
+
+> **2026-10-05 (Y-426): the appliance may keep the conversation history, and the daemon still does
+> not.** [ADR-0032](0032-the-appliance-keeps-the-conversation-history-encrypted.md) lets the owner
+> turn on an archive of every machine's redacted conversations, encrypted on the appliance's disk.
+> Syncthing writes it and `ctx` indexes it. yantrad writes none of it and reads none of it, so the
+> amendments above still hold for the daemon. What changed is the appliance, not the daemon.
