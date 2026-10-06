@@ -135,10 +135,9 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
         "remove_task" => daemon.send(Method::Delete, &format!("/api/tasks/{}", task()?)),
         _ => return Err(format!("no tool `{name}`")),
     };
-    Ok(match said {
-        Ok(text) => json!({"content": [{"type": "text", "text": text}], "isError": false}),
-        Err(text) => json!({"content": [{"type": "text", "text": text}], "isError": true}),
-    })
+    let is_error = said.is_err();
+    let (Ok(text) | Err(text)) = said;
+    Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
 }
 
 enum Method {
