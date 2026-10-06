@@ -1,12 +1,15 @@
 //! `GET /api/workspaces/{name}/chat?thread=<id>` — a chat thread on a
 //! WebSocket ([ADR-0026] decision 3).
 //!
-//! Each turn is one `claude -p` in the thread's own worktree
-//! ([`yantra_core::claude`], [`yantra_core::thread`]). Without `?thread=` the
-//! first turn opens a thread and the socket says so with `thread.started`;
-//! with it, the socket replays what the transcript holds and continues there.
-//! **There is no session-addressed form**: a thread is a worktree of a
-//! workspace's repository, and a bare session names none.
+//! A thread is a worktree of the workspace's repository ([`thread`]), and one
+//! harness speaks in it, chosen by the turn that opens it. Claude's turns are
+//! each one `claude -p` ([`yantra_core::claude`]). Every other harness is one
+//! ACP agent for the life of the socket ([`yantra_core::acp`], [ADR-0033]
+//! decision 2), whose session id the thread's git config keeps. Without
+//! `?thread=` the first turn opens a thread and the socket says so with
+//! `thread.started`; with it, the socket says `thread.started` too, replays
+//! the conversation and continues there. **There is no session-addressed
+//! form**: a bare session names no worktree.
 //!
 //! The browser sends three frames, `turn`, `answer` and `cancel`, and one turn
 //! runs at a time. The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
@@ -18,8 +21,13 @@
 //! one word of a prompt, a reply or a tool's output is.
 //!
 //! [ADR-0026]: ../../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md
+//! [ADR-0033]: ../../../docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md
 
+use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -29,7 +37,10 @@ use axum::http::{HeaderMap, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
-use yantra_core::chat::{ContentDelta, Decision, Event, StreamKind, ThreadEvent};
+use yantra_core::acp::{self, Agent, Answer, Harness};
+use yantra_core::chat::{
+    ContentDelta, Decision, Event, RequestOption, StopReason, StreamKind, ThreadEvent, TurnState,
+};
 use yantra_core::claude::{Events, Turn};
 use yantra_core::inventory::Inventory;
 use yantra_core::logs::{self, Who};
@@ -43,6 +54,8 @@ use crate::write::{Authoriser, Refused, allowed, chain};
 const HISTORY: usize = 200;
 /// How long a cancelled turn has to end by itself before its `ssh` is dropped.
 const STOP_GRACE: Duration = Duration::from_secs(10);
+/// How a Claude turn that has no login ends, in Claude's own words.
+const CLAUDE_NOT_LOGGED_IN: &str = "Not logged in";
 
 pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
 where
@@ -95,6 +108,10 @@ fn read_thread(uri: &Uri) -> Option<String> {
 enum Frame {
     Turn {
         text: String,
+        /// Read only on the turn that opens a thread.
+        #[serde(default)]
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
+        harness: Option<String>,
     },
     Answer {
         #[serde(rename = "requestId")]
@@ -111,6 +128,16 @@ struct Failure {
     tag: &'static str,
     kind: Kind,
     said: String,
+    #[serde(flatten)]
+    login: Option<Login>,
+}
+
+/// What a `notLoggedIn` failure names: whose login, where, and how to make it.
+#[derive(Debug, Serialize)]
+struct Login {
+    harness: &'static str,
+    machine: String,
+    command: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -122,8 +149,10 @@ enum Kind {
     Busy,
     /// A frame this daemon cannot read, or an answer to nothing.
     BadFrame,
-    /// The workspace, its machine or its `claude` could not be reached.
+    /// The workspace, its machine or its harness could not be reached.
     Unreachable,
+    /// The harness has no login on the machine (ADR-0033 decision 6).
+    NotLoggedIn,
 }
 
 fn failure(kind: Kind, said: impl Into<String>) -> Failure {
@@ -131,16 +160,55 @@ fn failure(kind: Kind, said: impl Into<String>) -> Failure {
         tag: "error",
         kind,
         said: said.into(),
+        login: None,
     }
 }
 
+fn not_logged_in(
+    harness: Option<Harness>,
+    machine: &str,
+    command: Option<String>,
+    said: String,
+) -> Failure {
+    Failure {
+        login: Some(Login {
+            harness: name_of(harness),
+            machine: machine.to_owned(),
+            command: command.unwrap_or_else(|| acp::login_command(harness).to_owned()),
+        }),
+        ..failure(Kind::NotLoggedIn, said)
+    }
+}
+
+/// `None` is Claude, which is not an ACP harness.
+fn name_of(harness: Option<Harness>) -> &'static str {
+    harness.map_or("claude", Harness::name)
+}
+
+fn harness_named(name: &str) -> Result<Option<Harness>, String> {
+    if name == "claude" {
+        return Ok(None);
+    }
+    name.parse().map(Some).map_err(|_: String| {
+        format!("`{name}` is not a harness: claude, codex, gemini, grok or opencode")
+    })
+}
+
 /// Where a conversation's turns run: a workspace's machine over ssh, or a
-/// test's script. The four calls are the whole of what the socket asks.
+/// test's script. These calls are the whole of what the socket asks.
 trait Machine: Sync {
+    /// The machine's name, as a login failure names it.
+    fn machine(&self) -> &str;
     async fn open(&self) -> Result<Place, String>;
     async fn find(&self, thread: &str) -> Result<Option<Place>, String>;
+    /// Removes a thread whose harness never started, so it is not taken for
+    /// a Claude thread later.
+    async fn remove(&self, place: &Place) -> Result<(), String>;
     async fn history(&self, place: &Place) -> Result<Vec<logs::Entry>, String>;
     fn start(&self, place: &Place, text: &str) -> Result<(Turn, Events), String>;
+    async fn recall(&self, place: &Place) -> Result<Option<(Harness, String)>, String>;
+    async fn remember(&self, place: &Place, harness: Harness, session: &str) -> Result<(), String>;
+    fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String>;
 }
 
 struct Fleet {
@@ -159,6 +227,10 @@ impl Fleet {
 }
 
 impl Machine for Fleet {
+    fn machine(&self) -> &str {
+        &self.workspace.machine
+    }
+
     async fn open(&self) -> Result<Place, String> {
         thread::open(&self.ssh, &self.workspace)
             .await
@@ -172,6 +244,12 @@ impl Machine for Fleet {
         Ok(places.into_iter().find(|place| thread::name(place) == id))
     }
 
+    async fn remove(&self, place: &Place) -> Result<(), String> {
+        thread::remove(&self.ssh, place)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
     async fn history(&self, place: &Place) -> Result<Vec<logs::Entry>, String> {
         match thread::logs(&self.ssh, place, None, HISTORY, 0).await {
             Ok(transcript) => Ok(transcript.entries),
@@ -183,6 +261,22 @@ impl Machine for Fleet {
 
     fn start(&self, place: &Place, text: &str) -> Result<(Turn, Events), String> {
         Turn::start(&self.ssh, place, text).map_err(|error| chain(&error))
+    }
+
+    async fn recall(&self, place: &Place) -> Result<Option<(Harness, String)>, String> {
+        thread::recall(&self.ssh, place)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn remember(&self, place: &Place, harness: Harness, session: &str) -> Result<(), String> {
+        thread::remember(&self.ssh, place, harness, session)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String> {
+        Agent::start(&self.ssh, harness).map_err(|error| chain(&error))
     }
 }
 
@@ -217,6 +311,59 @@ impl Peer for WebSocket {
     }
 }
 
+type Prompt = Pin<Box<dyn Future<Output = Result<StopReason, acp::Error>> + Send>>;
+
+/// One ACP agent, held for the life of the socket.
+struct Acp {
+    harness: Harness,
+    agent: Arc<Agent>,
+    events: acp::Events,
+    session: String,
+    /// The agent's own words on how to log in, from `initialize`.
+    login: Option<String>,
+    /// The options of each request relayed and not yet resolved, so a
+    /// browser's decision can name the agent's option.
+    asked: HashMap<String, Vec<RequestOption>>,
+    prompt: Option<Prompt>,
+}
+
+enum Speaker {
+    Claude(Option<(Turn, Events)>),
+    Acp(Box<Acp>),
+}
+
+struct Conversation {
+    place: Place,
+    speaker: Speaker,
+}
+
+impl Conversation {
+    fn harness(&self) -> Option<Harness> {
+        match &self.speaker {
+            Speaker::Claude(_) => None,
+            Speaker::Acp(acp) => Some(acp.harness),
+        }
+    }
+
+    fn busy(&self) -> bool {
+        match &self.speaker {
+            Speaker::Claude(turn) => turn.is_some(),
+            Speaker::Acp(acp) => acp.prompt.is_some(),
+        }
+    }
+
+    fn started(&self) -> ThreadEvent {
+        let id = thread::name(&self.place).to_owned();
+        ThreadEvent {
+            thread_id: id.clone(),
+            event: Event::ThreadStarted {
+                thread: id,
+                harness: name_of(self.harness()).to_owned(),
+            },
+        }
+    }
+}
+
 /// One socket, from the attach to the close.
 async fn converse<M: Machine, P: Peer>(
     machine: &M,
@@ -224,60 +371,62 @@ async fn converse<M: Machine, P: Peer>(
     thread: Option<String>,
     peer: &mut P,
 ) {
-    let mut place = None;
+    let mut here = None;
     if let Some(id) = thread {
-        match machine.find(&id).await {
-            Ok(Some(found)) => {
-                tracing::info!("chat {name} attached thread {id}");
-                if !replay(machine, &found, peer).await {
-                    return;
-                }
-                place = Some(found);
-            }
-            Ok(None) => {
-                let said = format!("{name} has no chat thread {id}");
-                let _ = peer.say(&failure(Kind::UnknownThread, said)).await;
-                return;
-            }
-            Err(said) => {
-                tracing::warn!("chat {name}: {said}");
-                let _ = peer.say(&failure(Kind::Unreachable, said)).await;
-                return;
-            }
+        match attach(machine, name, &id, peer).await {
+            Some(attached) => here = Some(attached),
+            None => return,
         }
     }
 
-    let mut turn: Option<(Turn, Events)> = None;
     let mut sent = 0usize;
     loop {
         let step = tokio::select! {
             heard = peer.hear() => Step::Heard(heard),
-            event = next(&mut turn) => Step::Event(event),
+            step = listen(&mut here) => step,
         };
         let open = match step {
             Step::Heard(None) => false,
             Step::Heard(Some(text)) => match serde_json::from_str::<Frame>(&text) {
-                Ok(Frame::Turn { .. }) if turn.is_some() => {
-                    let said = "a turn is running; stop it or wait for it to end";
-                    peer.say(&failure(Kind::Busy, said)).await
-                }
-                Ok(Frame::Turn { text }) if text.trim().is_empty() => {
-                    peer.say(&failure(Kind::BadFrame, "a turn needs some text"))
-                        .await
-                }
-                Ok(Frame::Turn { text }) => {
-                    sent += 1;
-                    begin(machine, name, &mut place, &mut turn, &text, sent, peer).await
+                Ok(Frame::Turn { text, harness }) => {
+                    let asked = harness.as_deref().map(harness_named).transpose();
+                    let theirs = here
+                        .as_ref()
+                        .map(|running| (running.busy(), running.harness()));
+                    match (asked, theirs) {
+                        (_, Some((true, _))) => {
+                            let said = "a turn is running; stop it or wait for it to end";
+                            peer.say(&failure(Kind::Busy, said)).await
+                        }
+                        _ if text.trim().is_empty() => {
+                            peer.say(&failure(Kind::BadFrame, "a turn needs some text"))
+                                .await
+                        }
+                        (Err(said), _) => peer.say(&failure(Kind::BadFrame, said)).await,
+                        (Ok(Some(asked)), Some((_, theirs))) if asked != theirs => {
+                            let said = format!(
+                                "this thread is {}'s, and a thread keeps its harness",
+                                name_of(theirs)
+                            );
+                            peer.say(&failure(Kind::BadFrame, said)).await
+                        }
+                        (Ok(asked), _) => {
+                            sent += 1;
+                            let pick = asked.flatten();
+                            begin(machine, name, &mut here, pick, text, sent, peer).await
+                        }
+                    }
                 }
                 Ok(Frame::Answer {
                     request_id,
                     decision,
                 }) => {
-                    let answered = match &turn {
-                        Some((running, _)) => running
+                    let answered = match here.as_mut().map(|running| &mut running.speaker) {
+                        Some(Speaker::Claude(Some((running, _)))) => running
                             .answer(&request_id, decision)
                             .map_err(|error| chain(&error)),
-                        None => Err("no turn is running, so nothing is waiting".to_owned()),
+                        Some(Speaker::Acp(acp)) => answer(acp, &request_id, decision),
+                        _ => Err("no turn is running, so nothing is waiting".to_owned()),
                     };
                     match answered {
                         Ok(()) => true,
@@ -285,10 +434,7 @@ async fn converse<M: Machine, P: Peer>(
                     }
                 }
                 Ok(Frame::Cancel) => {
-                    if let Some((running, _)) = &turn {
-                        tracing::info!("chat {name}: the turn was cancelled");
-                        running.cancel();
-                    }
+                    cancel(name, here.as_ref());
                     true
                 }
                 Err(error) => {
@@ -296,16 +442,17 @@ async fn converse<M: Machine, P: Peer>(
                     peer.say(&failure(Kind::BadFrame, said)).await
                 }
             },
-            Step::Event(Some(event)) => {
-                if let Event::TurnCompleted(done) = &event.event {
-                    tracing::info!("chat {name}: the turn ended {:?}", done.state);
-                    turn = None;
-                }
-                peer.say(&event).await
+            Step::Event(event) => {
+                let Some(running) = here.as_mut() else {
+                    continue;
+                };
+                relay(machine, name, running, event, peer).await
             }
-            Step::Event(None) => {
-                turn = None;
-                true
+            Step::Prompted(result) => {
+                let Some(running) = here.as_mut() else {
+                    continue;
+                };
+                prompted(machine, name, running, result, peer).await
             }
         };
         if !open {
@@ -313,30 +460,327 @@ async fn converse<M: Machine, P: Peer>(
         }
     }
 
-    if let Some((running, mut events)) = turn.take() {
-        tracing::info!("chat {name}: the socket closed mid-turn, so the turn is cancelled");
-        running.cancel();
-        let _ = tokio::time::timeout(STOP_GRACE, async {
-            while let Some(event) = events.recv().await {
-                if matches!(event.event, Event::TurnCompleted(_)) {
-                    return;
-                }
-            }
-        })
-        .await;
+    if let Some(running) = here {
+        hang_up(name, running).await;
     }
 }
 
 enum Step {
     Heard(Option<String>),
     Event(Option<ThreadEvent>),
+    Prompted(Result<StopReason, acp::Error>),
 }
 
-async fn next(turn: &mut Option<(Turn, Events)>) -> Option<ThreadEvent> {
-    match turn {
-        Some((_, events)) => events.recv().await,
+/// The next thing the thread's harness says, or never when nothing runs.
+async fn listen(here: &mut Option<Conversation>) -> Step {
+    match here.as_mut().map(|running| &mut running.speaker) {
+        Some(Speaker::Claude(Some((_, events)))) => Step::Event(events.recv().await),
+        Some(Speaker::Acp(acp)) => {
+            let Acp { events, prompt, .. } = acp.as_mut();
+            tokio::select! {
+                event = events.recv() => Step::Event(event),
+                result = finish(prompt) => Step::Prompted(result),
+            }
+        }
+        _ => std::future::pending().await,
+    }
+}
+
+async fn finish(prompt: &mut Option<Prompt>) -> Result<StopReason, acp::Error> {
+    match prompt {
+        Some(running) => running.await,
         None => std::future::pending().await,
     }
+}
+
+/// Sends one event on. `false` is a socket that went away.
+async fn relay<M: Machine, P: Peer>(
+    machine: &M,
+    name: &str,
+    running: &mut Conversation,
+    event: Option<ThreadEvent>,
+    peer: &mut P,
+) -> bool {
+    let id = thread::name(&running.place).to_owned();
+    match &mut running.speaker {
+        Speaker::Claude(turn) => {
+            let Some(event) = event else {
+                *turn = None;
+                return true;
+            };
+            let mut logged_out = None;
+            if let Event::TurnCompleted(done) = &event.event {
+                tracing::info!("chat {name}: the turn ended {:?}", done.state);
+                *turn = None;
+                logged_out = done
+                    .message
+                    .as_ref()
+                    .filter(|said| {
+                        done.state == TurnState::Failed && said.starts_with(CLAUDE_NOT_LOGGED_IN)
+                    })
+                    .cloned();
+            }
+            if !peer.say(&event).await {
+                return false;
+            }
+            match logged_out {
+                Some(said) => {
+                    let refusal = not_logged_in(None, machine.machine(), None, said);
+                    peer.say(&refusal).await
+                }
+                None => true,
+            }
+        }
+        Speaker::Acp(acp) => match event.and_then(|event| relabel(acp, &id, event)) {
+            Some(event) => peer.say(&event).await,
+            None => true,
+        },
+    }
+}
+
+/// An ACP event as the browser reads it: under the worktree's thread, and
+/// without ACP's own `thread.started`, whose id is the agent's session.
+fn relabel(acp: &mut Acp, id: &str, mut event: ThreadEvent) -> Option<ThreadEvent> {
+    match &event.event {
+        Event::ThreadStarted { .. } => return None,
+        Event::RequestOpened(opened) => {
+            acp.asked
+                .insert(opened.request_id.clone(), opened.options.clone());
+        }
+        Event::RequestResolved(resolved) => {
+            acp.asked.remove(&resolved.request_id);
+        }
+        _ => {}
+    }
+    id.clone_into(&mut event.thread_id);
+    Some(event)
+}
+
+/// Sends on what the agent said before it answered, so the browser reads
+/// every event in order. `false` is a socket that went away.
+async fn drain<P: Peer>(acp: &mut Acp, id: &str, peer: &mut P) -> bool {
+    while let Ok(event) = acp.events.try_recv() {
+        if let Some(event) = relabel(acp, id, event)
+            && !peer.say(&event).await
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// An ACP turn ended. The agent emitted `turn.completed` before it answered,
+/// so a refusal follows it.
+async fn prompted<M: Machine, P: Peer>(
+    machine: &M,
+    name: &str,
+    running: &mut Conversation,
+    result: Result<StopReason, acp::Error>,
+    peer: &mut P,
+) -> bool {
+    let id = thread::name(&running.place).to_owned();
+    let Speaker::Acp(acp) = &mut running.speaker else {
+        return true;
+    };
+    acp.prompt = None;
+    if !drain(acp, &id, peer).await {
+        return false;
+    }
+    match result {
+        Ok(reason) => {
+            tracing::info!("chat {name}: the turn ended {reason:?}");
+            true
+        }
+        Err(error) => {
+            tracing::info!("chat {name}: the turn failed");
+            peer.say(&refused(machine, acp.harness, acp.login.clone(), &error))
+                .await
+        }
+    }
+}
+
+/// What an agent's refusal tells the browser: the login to make, or the
+/// agent's own words.
+fn refused<M: Machine>(
+    machine: &M,
+    harness: Harness,
+    login: Option<String>,
+    error: &acp::Error,
+) -> Failure {
+    if error.is_auth() {
+        not_logged_in(Some(harness), machine.machine(), login, error.to_string())
+    } else {
+        failure(Kind::Unreachable, chain(error))
+    }
+}
+
+/// The browser's decision, as the option the agent offered for it.
+fn answer(acp: &Acp, request: &str, decision: Decision) -> Result<(), String> {
+    let options = acp
+        .asked
+        .get(request)
+        .ok_or_else(|| format!("no request `{request}` is waiting for an answer"))?;
+    let answer = if decision == Decision::Cancel {
+        Answer::Cancelled
+    } else {
+        let option = options
+            .iter()
+            .find(|option| option.decision == decision)
+            .ok_or_else(|| format!("request `{request}` offered no {decision:?}"))?;
+        Answer::Selected(option.option_id.clone())
+    };
+    acp.agent
+        .answer(request, answer)
+        .map_err(|error| chain(&error))
+}
+
+fn cancel(name: &str, here: Option<&Conversation>) {
+    match here.map(|running| &running.speaker) {
+        Some(Speaker::Claude(Some((running, _)))) => {
+            tracing::info!("chat {name}: the turn was cancelled");
+            running.cancel();
+        }
+        Some(Speaker::Acp(acp)) if acp.prompt.is_some() => {
+            tracing::info!("chat {name}: the turn was cancelled");
+            // An agent that is gone has no turn left to stop.
+            let _ = acp.agent.cancel(&acp.session);
+        }
+        _ => {}
+    }
+}
+
+/// The socket closed: a running turn is cancelled and given a moment to end.
+async fn hang_up(name: &str, running: Conversation) {
+    match running.speaker {
+        Speaker::Claude(Some((turn, mut events))) => {
+            tracing::info!("chat {name}: the socket closed mid-turn, so the turn is cancelled");
+            turn.cancel();
+            let _ = tokio::time::timeout(STOP_GRACE, async {
+                while let Some(event) = events.recv().await {
+                    if matches!(event.event, Event::TurnCompleted(_)) {
+                        return;
+                    }
+                }
+            })
+            .await;
+        }
+        Speaker::Acp(mut acp) => {
+            if let Some(prompt) = acp.prompt.take() {
+                tracing::info!("chat {name}: the socket closed mid-turn, so the turn is cancelled");
+                let _ = acp.agent.cancel(&acp.session);
+                let _ = tokio::time::timeout(STOP_GRACE, prompt).await;
+            }
+        }
+        Speaker::Claude(None) => {}
+    }
+}
+
+/// `?thread=`: finds the thread, says whose it is and replays it. `None` ends
+/// the socket.
+async fn attach<M: Machine, P: Peer>(
+    machine: &M,
+    name: &str,
+    id: &str,
+    peer: &mut P,
+) -> Option<Conversation> {
+    let unreachable = |said: String| {
+        tracing::warn!("chat {name}: {said}");
+        failure(Kind::Unreachable, said)
+    };
+    let place = match machine.find(id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => {
+            let said = format!("{name} has no chat thread {id}");
+            let _ = peer.say(&failure(Kind::UnknownThread, said)).await;
+            return None;
+        }
+        Err(said) => {
+            let _ = peer.say(&unreachable(said)).await;
+            return None;
+        }
+    };
+    let kept = match machine.recall(&place).await {
+        Ok(kept) => kept,
+        Err(said) => {
+            let _ = peer.say(&unreachable(said)).await;
+            return None;
+        }
+    };
+    tracing::info!(
+        "chat {name} attached thread {id} of {}",
+        name_of(kept.as_ref().map(|(harness, _)| *harness))
+    );
+    let mut running = match kept {
+        None => Conversation {
+            place,
+            speaker: Speaker::Claude(None),
+        },
+        Some((harness, session)) => match connect(machine, &place, harness, Some(session)).await {
+            Ok(acp) => Conversation {
+                place,
+                speaker: Speaker::Acp(Box::new(acp)),
+            },
+            Err(refusal) => {
+                let _ = peer.say(&refusal).await;
+                return None;
+            }
+        },
+    };
+    if !peer.say(&running.started()).await {
+        return None;
+    }
+    let replayed = match &mut running.speaker {
+        Speaker::Claude(_) => replay(machine, &running.place, peer).await,
+        Speaker::Acp(acp) => drain(acp, id, peer).await,
+    };
+    replayed.then_some(running)
+}
+
+/// Starts `harness` in the thread's worktree, and loads `session` or makes
+/// one and keeps it.
+async fn connect<M: Machine>(
+    machine: &M,
+    place: &Place,
+    harness: Harness,
+    session: Option<String>,
+) -> Result<Acp, Failure> {
+    let (agent, events) = machine
+        .start_acp(harness)
+        .map_err(|said| failure(Kind::Unreachable, said))?;
+    let capabilities = agent
+        .initialize()
+        .await
+        .map_err(|error| refused(machine, harness, None, &error))?;
+    let login = capabilities.login;
+    let session = match session {
+        Some(session) => {
+            agent
+                .load_session(&session, &place.worktree)
+                .await
+                .map_err(|error| refused(machine, harness, login.clone(), &error))?;
+            session
+        }
+        None => {
+            let session = agent
+                .new_session(&place.worktree)
+                .await
+                .map_err(|error| refused(machine, harness, login.clone(), &error))?;
+            machine
+                .remember(place, harness, &session)
+                .await
+                .map_err(|said| failure(Kind::Unreachable, said))?;
+            session
+        }
+    };
+    Ok(Acp {
+        harness,
+        agent: Arc::new(agent),
+        events,
+        session,
+        login,
+        asked: HashMap::new(),
+        prompt: None,
+    })
 }
 
 /// What the transcript holds, as the deltas a live turn would have sent.
@@ -376,56 +820,95 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: String) -> 
     }
 }
 
-/// Opens the thread on the first turn, repeats what the person wrote, and
-/// starts `claude`. `false` is a socket that went away.
+/// Opens the thread on the first turn with the harness `pick` names, repeats
+/// what the person wrote, and starts the turn. `false` is a socket that went
+/// away.
 async fn begin<M: Machine, P: Peer>(
     machine: &M,
     name: &str,
-    place: &mut Option<Place>,
-    turn: &mut Option<(Turn, Events)>,
-    text: &str,
+    here: &mut Option<Conversation>,
+    pick: Option<Harness>,
+    text: String,
     sent: usize,
     peer: &mut P,
 ) -> bool {
-    let here = match place {
-        Some(here) => here,
-        None => match machine.open().await {
+    let running = match here {
+        Some(running) => running,
+        None => match open(machine, name, pick).await {
             Ok(opened) => {
-                let id = thread::name(&opened).to_owned();
-                tracing::info!("chat {name} opened thread {id}");
-                let started = ThreadEvent {
-                    thread_id: id.clone(),
-                    event: Event::ThreadStarted { thread: id },
-                };
-                if !peer.say(&started).await {
+                if !peer.say(&opened.started()).await {
                     return false;
                 }
-                place.insert(opened)
+                here.insert(opened)
             }
-            Err(said) => {
-                tracing::warn!("chat {name}: {said}");
-                return peer.say(&failure(Kind::Unreachable, said)).await;
-            }
+            Err(refusal) => return peer.say(&refusal).await,
         },
     };
     let said = delta(
-        here,
+        &running.place,
         StreamKind::UserText,
-        text.to_owned(),
+        text.clone(),
         format!("user:{sent}"),
     );
     if !peer.say(&said).await {
         return false;
     }
-    match machine.start(here, text) {
-        Ok(started) => {
+    match &mut running.speaker {
+        Speaker::Claude(turn) => match machine.start(&running.place, &text) {
+            Ok(started) => {
+                tracing::info!("chat {name}: a turn started");
+                *turn = Some(started);
+                true
+            }
+            Err(said) => {
+                tracing::warn!("chat {name}: {said}");
+                peer.say(&failure(Kind::Unreachable, said)).await
+            }
+        },
+        Speaker::Acp(acp) => {
             tracing::info!("chat {name}: a turn started");
-            *turn = Some(started);
+            let agent = Arc::clone(&acp.agent);
+            let session = acp.session.clone();
+            acp.prompt = Some(Box::pin(async move { agent.prompt(&session, &text).await }));
             true
         }
-        Err(said) => {
-            tracing::warn!("chat {name}: {said}");
-            peer.say(&failure(Kind::Unreachable, said)).await
+    }
+}
+
+/// A new thread, and for an ACP harness its agent and session. A thread whose
+/// agent never started is removed again: without a harness in its git config
+/// it would read as Claude's.
+async fn open<M: Machine>(
+    machine: &M,
+    name: &str,
+    pick: Option<Harness>,
+) -> Result<Conversation, Failure> {
+    let place = machine.open().await.map_err(|said| {
+        tracing::warn!("chat {name}: {said}");
+        failure(Kind::Unreachable, said)
+    })?;
+    let id = thread::name(&place).to_owned();
+    tracing::info!("chat {name} opened thread {id} for {}", name_of(pick));
+    let Some(harness) = pick else {
+        return Ok(Conversation {
+            place,
+            speaker: Speaker::Claude(None),
+        });
+    };
+    match connect(machine, &place, harness, None).await {
+        Ok(acp) => {
+            // ACP's own `thread.started` waits in its events, and the relay drops it.
+            Ok(Conversation {
+                place,
+                speaker: Speaker::Acp(Box::new(acp)),
+            })
+        }
+        Err(refusal) => {
+            tracing::warn!("chat {name}: {} did not start", harness.name());
+            if let Err(said) = machine.remove(&place).await {
+                tracing::warn!("chat {name}: thread {id} stays: {said}");
+            }
+            Err(refusal)
         }
     }
 }
@@ -435,8 +918,8 @@ async fn begin<M: Machine, P: Peer>(
 #[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
     use yantra_core::chat::{
-        Item, ItemStatus, ItemType, RequestOpened, RequestOption, RequestResolved, RequestType,
-        StopReason, TokenUsage, TurnCompleted, TurnState,
+        Item, ItemStatus, ItemType, RequestOpened, RequestResolved, RequestType, TokenUsage,
+        TurnCompleted,
     };
     let event = |event| {
         serde_json::to_value(ThreadEvent {
@@ -464,6 +947,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             serde_json::Value::Array(vec![
                 event(Event::ThreadStarted {
                     thread: "1a2b3c4d".to_owned(),
+                    harness: "opencode".to_owned(),
                 }),
                 event(Event::TurnStarted),
                 event(Event::ContentDelta(ContentDelta {
@@ -523,11 +1007,27 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 .expect("a failure serialises"),
         ),
         (
+            "chatNotLoggedIn",
+            "ChatFailure",
+            serde_json::to_value(not_logged_in(
+                Some(Harness::Opencode),
+                "cachyos-g14",
+                None,
+                "the agent refused: Authentication required (-32000)".to_owned(),
+            ))
+            .expect("a failure serialises"),
+        ),
+        (
             "chatFrames",
             "ChatFrame[]",
             serde_json::Value::Array(vec![
                 frame(Frame::Turn {
                     text: "run the tests".to_owned(),
+                    harness: Some("opencode".to_owned()),
+                }),
+                frame(Frame::Turn {
+                    text: "and the docs".to_owned(),
+                    harness: None,
                 }),
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
@@ -540,7 +1040,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use serde_json::{Value, json};
@@ -591,14 +1091,67 @@ mod tests {
         }
     }
 
-    /// A machine with one thread, whose turns are pipes the test holds.
+    /// An ACP agent's end of its pipe, as `acp.rs`'s tests script it.
+    struct Acp {
+        hears: BufReader<ReadHalf<DuplexStream>>,
+        says: WriteHalf<DuplexStream>,
+    }
+
+    impl Acp {
+        async fn heard(&mut self) -> Value {
+            let mut line = String::new();
+            tokio::time::timeout(Duration::from_secs(5), self.hears.read_line(&mut line))
+                .await
+                .expect("the daemon writes within 5 s")
+                .expect("the pipe reads");
+            serde_json::from_str(&line).expect("a JSON line")
+        }
+
+        async fn say(&mut self, message: Value) {
+            self.says
+                .write_all(format!("{message}\n").as_bytes())
+                .await
+                .expect("the pipe writes");
+        }
+
+        async fn reply(&mut self, request: &Value, result: Value) {
+            self.say(json!({"jsonrpc": "2.0", "id": request["id"], "result": result}))
+                .await;
+        }
+
+        /// Answers `initialize` with no auth methods, so the login is Yantra's.
+        async fn initialized(&mut self) {
+            let request = self.heard().await;
+            assert_eq!(request["method"], "initialize");
+            self.reply(
+                &request,
+                json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}),
+            )
+            .await;
+        }
+
+        async fn update(&mut self, update: Value) {
+            self.say(json!({"jsonrpc": "2.0", "method": "session/update",
+                            "params": {"sessionId": SESSION, "update": update}}))
+                .await;
+        }
+    }
+
+    const SESSION: &str = "ses_1";
+
+    /// A machine with one thread, whose turns and agents are pipes the test holds.
     #[derive(Default)]
     struct Script {
         threads: Vec<Place>,
         history: Vec<logs::Entry>,
         unreachable: bool,
+        /// What the thread's git config keeps.
+        kept: Option<(Harness, String)>,
         turns: Mutex<Vec<Claude>>,
+        agents: Mutex<Vec<Acp>>,
         opened: Mutex<usize>,
+        removed: Mutex<usize>,
+        remembered: Mutex<Vec<(Harness, String)>>,
     }
 
     impl Script {
@@ -608,9 +1161,58 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(0)
         }
+
+        async fn agent(&self) -> Acp {
+            for _ in 0..500 {
+                let found = {
+                    let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+                    (!agents.is_empty()).then(|| agents.remove(0))
+                };
+                if let Some(agent) = found {
+                    return agent;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("no agent started within 5 s");
+        }
     }
 
     impl Machine for Script {
+        fn machine(&self) -> &str {
+            "m"
+        }
+
+        async fn remove(&self, _: &Place) -> Result<(), String> {
+            *self.removed.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            Ok(())
+        }
+
+        async fn recall(&self, _: &Place) -> Result<Option<(Harness, String)>, String> {
+            Ok(self.kept.clone())
+        }
+
+        async fn remember(&self, _: &Place, harness: Harness, session: &str) -> Result<(), String> {
+            self.remembered
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((harness, session.to_owned()));
+            Ok(())
+        }
+
+        fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String> {
+            let (ours, theirs) = tokio::io::duplex(1 << 16);
+            let (read, write) = tokio::io::split(ours);
+            let (hears, says) = tokio::io::split(theirs);
+            self.agents
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Acp {
+                    hears: BufReader::new(hears),
+                    says,
+                });
+            Ok(Agent::over(harness, read, write))
+        }
+
         async fn open(&self) -> Result<Place, String> {
             if self.unreachable {
                 return Err("ssh: connect to host m port 22: Connection refused".to_owned());
@@ -713,7 +1315,8 @@ mod tests {
 
         assert_eq!(
             tab.next().await,
-            json!({"threadId": THREAD, "type": "thread.started", "payload": {"thread": THREAD}})
+            json!({"threadId": THREAD, "type": "thread.started",
+                   "payload": {"thread": THREAD, "harness": "claude"}})
         );
         assert_eq!(
             tab.next().await,
@@ -783,6 +1386,14 @@ mod tests {
                 r#"{"type":"turn","text":"hi"}"#,
                 Frame::Turn {
                     text: "hi".to_owned(),
+                    harness: None,
+                },
+            ),
+            (
+                r#"{"type":"turn","text":"hi","harness":"codex"}"#,
+                Frame::Turn {
+                    text: "hi".to_owned(),
+                    harness: Some("codex".to_owned()),
                 },
             ),
             (
@@ -864,6 +1475,11 @@ mod tests {
         let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
         assert_eq!(
             tab.next().await["payload"],
+            json!({"thread": THREAD, "harness": "claude"}),
+            "the browser locks its picker"
+        );
+        assert_eq!(
+            tab.next().await["payload"],
             json!({"streamKind": "user_text", "delta": "hello", "itemId": "history:0"})
         );
         assert_eq!(
@@ -896,6 +1512,299 @@ mod tests {
             json!({"type": "error", "kind": "unreachable",
                    "said": "ssh: connect to host m port 22: Connection refused"})
         );
+    }
+
+    const WORKTREE: &str = "/home/u/.yantra/worktrees/chat/web/1a2b3c4d";
+
+    /// The first turn of an opencode thread, up to its `session/prompt`.
+    async fn an_opencode_thread(script: &Arc<Script>) -> (Tab, Acp, Value) {
+        let (mut tab, _served) = connect(Arc::clone(script), None);
+        tab.send(json!({"type": "turn", "text": "list the files", "harness": "opencode"}));
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        assert_eq!(new["method"], "session/new");
+        assert_eq!(new["params"]["cwd"], WORKTREE);
+        agent
+            .reply(&new, json!({"sessionId": SESSION, "configOptions": []}))
+            .await;
+        assert_eq!(
+            tab.next().await,
+            json!({"threadId": THREAD, "type": "thread.started",
+                   "payload": {"thread": THREAD, "harness": "opencode"}})
+        );
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
+        let prompt = agent.heard().await;
+        assert_eq!(prompt["method"], "session/prompt");
+        assert_eq!(prompt["params"]["sessionId"], SESSION);
+        assert_eq!(tab.next().await["type"], "turn.started");
+        (tab, agent, prompt)
+    }
+
+    #[tokio::test]
+    async fn the_first_turn_picks_the_harness_and_the_thread_keeps_it() {
+        let script = Arc::new(Script::default());
+        let (_tab, _agent, _prompt) = an_opencode_thread(&script).await;
+        assert_eq!(
+            *script.remembered.lock().expect("a lock"),
+            [(Harness::Opencode, SESSION.to_owned())]
+        );
+        assert_eq!(*script.removed.lock().expect("a lock"), 0);
+    }
+
+    #[tokio::test]
+    async fn acp_deltas_items_and_requests_arrive_under_the_worktree_thread() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        agent
+            .update(
+                json!({"sessionUpdate": "agent_message_chunk", "messageId": "m1",
+                           "content": {"type": "text", "text": "Listing."}}),
+            )
+            .await;
+        agent
+            .update(json!({"sessionUpdate": "tool_call", "toolCallId": "call_1",
+                           "title": "ls", "kind": "execute", "status": "pending"}))
+            .await;
+        agent.say(asked(7)).await;
+        for kind in ["content.delta", "item.started", "request.opened"] {
+            let event = tab.next().await;
+            assert_eq!(event["type"], kind, "{event}");
+            assert_eq!(event["threadId"], THREAD, "{event}");
+        }
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        let done = tab.next().await;
+        assert_eq!(done["threadId"], THREAD);
+        assert_eq!(
+            done["payload"],
+            json!({"state": "completed", "stopReason": "end_turn"})
+        );
+    }
+
+    /// R19 §2's permission request, as opencode words it.
+    fn asked(id: u64) -> Value {
+        json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission",
+               "params": {"sessionId": SESSION,
+                   "toolCall": {"toolCallId": "call_1", "title": "ls", "kind": "execute"},
+                   "options": [
+                       {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
+                       {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
+                       {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]}})
+    }
+
+    #[tokio::test]
+    async fn an_answer_names_the_option_the_agent_offered() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, _prompt) = an_opencode_thread(&script).await;
+        agent.say(asked(7)).await;
+        let opened = tab.next().await;
+        let request = opened["payload"]["requestId"].clone();
+        tab.send(json!({"type": "answer", "requestId": request, "decision": "acceptAlways"}));
+        assert_eq!(
+            agent.heard().await,
+            json!({"jsonrpc": "2.0", "id": 7,
+                   "result": {"outcome": {"outcome": "selected", "optionId": "always"}}})
+        );
+        let resolved = tab.next().await;
+        assert_eq!(resolved["type"], "request.resolved");
+        assert_eq!(resolved["payload"]["decision"], "acceptAlways");
+
+        // Answered once, it is an answer to nothing.
+        let again = tab
+            .next_after(json!({"type": "answer", "requestId": request, "decision": "accept"}))
+            .await;
+        assert_eq!(again["kind"], "badFrame", "{again}");
+    }
+
+    #[tokio::test]
+    async fn an_answer_to_nothing_on_an_acp_thread_is_a_bad_frame() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _agent, _prompt) = an_opencode_thread(&script).await;
+        let said = tab
+            .next_after(json!({"type": "answer", "requestId": "9", "decision": "accept"}))
+            .await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+    }
+
+    #[tokio::test]
+    async fn cancel_sends_session_cancel_and_a_closed_socket_cancels_too() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        tab.send(json!({"type": "cancel"}));
+        assert_eq!(
+            agent.heard().await,
+            json!({"jsonrpc": "2.0", "method": "session/cancel",
+                   "params": {"sessionId": SESSION}})
+        );
+        agent
+            .reply(&prompt, json!({"stopReason": "cancelled"}))
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "cancelled");
+
+        tab.send(json!({"type": "turn", "text": "again"}));
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:2");
+        assert_eq!(agent.heard().await["method"], "session/prompt");
+        tab.close();
+        assert_eq!(agent.heard().await["method"], "session/cancel");
+    }
+
+    #[tokio::test]
+    async fn an_attach_loads_the_acp_session_and_replays_it() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let load = agent.heard().await;
+        assert_eq!(load["method"], "session/load");
+        assert_eq!(
+            load["params"],
+            json!({"sessionId": SESSION, "cwd": WORKTREE, "mcpServers": []})
+        );
+        agent
+            .update(
+                json!({"sessionUpdate": "user_message_chunk", "messageId": "m0",
+                           "content": {"type": "text", "text": "list the files"}}),
+            )
+            .await;
+        agent.reply(&load, json!({})).await;
+
+        assert_eq!(
+            tab.next().await["payload"],
+            json!({"thread": THREAD, "harness": "opencode"})
+        );
+        let replayed = tab.next().await;
+        assert_eq!(replayed["threadId"], THREAD);
+        assert_eq!(
+            replayed["payload"],
+            json!({"streamKind": "user_text", "delta": "list the files", "itemId": "m0"})
+        );
+        tab.send(json!({"type": "turn", "text": "again", "harness": "opencode"}));
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
+        let prompt = agent.heard().await;
+        assert_eq!(prompt["params"]["sessionId"], SESSION);
+        assert_eq!(*script.opened.lock().expect("a lock"), 0, "no new thread");
+    }
+
+    #[tokio::test]
+    async fn a_harness_it_does_not_know_and_a_harness_change_are_bad_frames() {
+        let (mut tab, _served) = connect(Arc::new(Script::default()), None);
+        let said = tab
+            .next_after(json!({"type": "turn", "text": "hi", "harness": "aider"}))
+            .await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+        assert_eq!(
+            said["said"],
+            "`aider` is not a harness: claude, codex, gemini, grok or opencode"
+        );
+
+        let claudes = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&claudes), Some(THREAD));
+        assert_eq!(tab.next().await["payload"]["harness"], "claude");
+        let said = tab
+            .next_after(json!({"type": "turn", "text": "hi", "harness": "codex"}))
+            .await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+        assert_eq!(
+            said["said"],
+            "this thread is claude's, and a thread keeps its harness"
+        );
+        assert!(claudes.agents.lock().expect("a lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_agent_with_no_login_names_the_command_and_the_thread_goes() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi", "harness": "opencode"}));
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        agent
+            .say(json!({"jsonrpc": "2.0", "id": new["id"],
+                        "error": {"code": -32000, "message": "Authentication required"}}))
+            .await;
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "notLoggedIn",
+                   "said": "the agent refused: Authentication required (-32000)",
+                   "harness": "opencode", "machine": "m", "command": "opencode auth login"})
+        );
+        assert_eq!(*script.removed.lock().expect("a lock"), 1);
+        assert!(script.remembered.lock().expect("a lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_agents_own_login_words_win() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi", "harness": "codex"}));
+        let mut agent = script.agent().await;
+        let request = agent.heard().await;
+        agent
+            .reply(
+                &request,
+                json!({"protocolVersion": 1, "agentCapabilities": {},
+                       "authMethods": [{"id": "chat-gpt", "name": "ChatGPT",
+                                        "description": "Run `codex login` on this machine"}]}),
+            )
+            .await;
+        let new = agent.heard().await;
+        agent
+            .say(json!({"jsonrpc": "2.0", "id": new["id"],
+                        "error": {"code": -32000, "message": "Authentication required"}}))
+            .await;
+        let said = tab.next().await;
+        assert_eq!(said["harness"], "codex");
+        assert_eq!(said["command"], "Run `codex login` on this machine");
+    }
+
+    #[tokio::test]
+    async fn a_claude_turn_with_no_login_says_not_logged_in_after_it_ends() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude();
+        claude.heard().await;
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": true,
+                        "result": "Not logged in · Please run /login"}),
+            )
+            .await;
+        let ended = tab.next().await;
+        assert_eq!(ended["payload"]["state"], "failed", "{ended}");
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "notLoggedIn",
+                   "said": "Not logged in · Please run /login",
+                   "harness": "claude", "machine": "m",
+                   "command": "run claude and type /login"})
+        );
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_closed_is_unreachable_in_its_own_words() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi", "harness": "grok"}));
+        drop(script.agent().await);
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "unreachable",
+                   "said": "the agent closed the connection"})
+        );
+        assert_eq!(*script.removed.lock().expect("a lock"), 1);
     }
 
     #[test]

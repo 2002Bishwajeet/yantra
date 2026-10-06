@@ -6,8 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Workspace } from '@/api'
-import type { ThreadEvent } from '@/api/thread'
-import { chatEvents } from '@/contract.gen'
+import type { Harness, ThreadEvent } from '@/api/thread'
+import { chatEvents, chatNotLoggedIn } from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -25,6 +25,7 @@ let onThread: ReturnType<typeof vi.fn<(thread: string) => void>>
 
 const of = (type: ThreadEvent['type']) => chatEvents.find((event) => event.type === type)!
 const say = (event: unknown) => server.say(JSON.stringify(event))
+const started = (harness: Harness = 'claude') => ({ ...of('thread.started'), payload: { thread: '1a2b3c4d', harness } })
 const frames = () => server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))
 
 async function open(thread?: string) {
@@ -51,6 +52,78 @@ afterEach(async () => {
   await server.stop()
 })
 
+describe('the harness picker', () => {
+  it('offers every harness with Claude first, and sends the one picked with the first turn', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Harness: Claude' }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    expect(options.map((one) => one.textContent)).toEqual(['Claude', 'Codex', 'Gemini', 'Grok', 'opencode'])
+    expect(options[0].getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(options[4])
+    await settled(() => expect(screen.getByRole('button', { name: 'Harness: opencode' })).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list the files' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'list the files', harness: 'opencode' }]))
+    expect(screen.getByRole('status').textContent).toBe('opencode is answering.')
+  })
+
+  it("locks once the daemon names the thread's harness, and a later turn carries none", async () => {
+    await open()
+    say(started('codex'))
+    const kept = await settled(() => screen.getByRole('button', { name: 'Harness: Codex, kept by this chat' }))
+    expect(kept).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('button', { name: 'Harness: Codex' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Message Codex in yantra-web'), { target: { value: 'again' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'again' }]))
+  })
+
+  it("draws opencode's events on the same timeline as Claude's", async () => {
+    await open()
+    say(started('opencode'))
+    say(of('turn.started'))
+    say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'assistant_text', delta: 'Listing **files**.', itemId: 'prt_1' } })
+    say(of('item.started'))
+    say(of('request.opened'))
+
+    const strong = await settled(() => screen.getByText('files'))
+    expect(strong.tagName).toBe('STRONG')
+    expect(strong.closest('article')?.getAttribute('data-who')).toBe('agent')
+    expect(within(strong.closest('article')!).getByText('opencode')).toBeTruthy()
+    const card = screen.getAllByText('cargo test')[0].closest('article')!
+    expect(within(card).getByText('Command')).toBeTruthy()
+    expect(screen.getByText('opencode asks to run')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop opencode' })).toBeTruthy()
+  })
+
+  it('draws a missing login with the machine and the command, and Retry reopens the socket', async () => {
+    await open()
+    say(chatNotLoggedIn)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByRole('heading').textContent).toBe('opencode is not logged in on cachyos-g14')
+    expect(alert.textContent).toContain('Run this on cachyos-g14, then retry.')
+    expect(within(alert).getByText('opencode auth login')).toBeTruthy()
+    expect(within(alert).getByRole('button', { name: 'Copy how to log opencode in' })).toBeTruthy()
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+    // Every turn would fail the same way until someone logs in.
+    expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').disabled).toBe(true)
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await settled(() => expect(server.asked).toHaveLength(2))
+    await settled(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('draws the bad frame the daemon sends for a harness it refused', async () => {
+    await open()
+    say({ type: 'error', kind: 'badFrame', said: 'this thread is claude’s, and a thread keeps its harness' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
+    expect(alert.textContent).toContain('a thread keeps its harness')
+  })
+})
+
 describe('the chat', () => {
   it('opens on an empty conversation, and says why Send is off', async () => {
     await open()
@@ -71,11 +144,11 @@ describe('the chat', () => {
     type('run the tests')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'run the tests' }]))
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'run the tests', harness: 'claude' }]))
     expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').value).toBe('')
     expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
 
-    say(of('thread.started'))
+    say(started())
     await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
     say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'user_text', delta: 'run the tests', itemId: 'user:1' } })
     say(of('turn.started'))
@@ -186,7 +259,7 @@ describe('the chat', () => {
 
   it('draws a closed socket, and Try again reopens it on the same thread', async () => {
     await open()
-    say(of('thread.started'))
+    say(started())
     await settled(() => expect(onThread).toHaveBeenCalled())
     server.hangUp()
     const alert = await settled(() => screen.getByRole('alert'))
@@ -219,6 +292,6 @@ describe('the chat', () => {
     expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
 
     say({ type: 'error', kind: 'busy', said: 'a turn is running' })
-    await settled(() => expect(screen.getByRole('alert').textContent).toContain('Claude is still answering'))
+    await settled(() => expect(screen.getByRole('alert').textContent).toContain('The agent is still answering'))
   })
 })

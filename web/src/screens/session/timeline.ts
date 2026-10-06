@@ -1,5 +1,6 @@
 import type {
   ChatItem,
+  Harness,
   ItemStatus,
   ItemType,
   RequestOpened,
@@ -10,7 +11,8 @@ import type {
 export type Message = {
   kind: 'message'
   id: string
-  who: 'you' | 'claude' | 'thinking'
+  /** `agent` is whichever harness the thread speaks to. */
+  who: 'you' | 'agent' | 'thinking'
   text: string
 }
 
@@ -29,11 +31,13 @@ export type Entry = Message | Tool
 export type Timeline = {
   /** The id `?thread=` keeps, once the daemon has named one. */
   thread: string | null
+  /** Who speaks, once the daemon has said; the picker is locked from then on. */
+  harness: Harness | null
   entries: Entry[]
-  /** Requests Claude is waiting on, oldest first. */
+  /** Requests the agent is waiting on, oldest first. */
   requests: RequestOpened[]
   usage: { used: number; max: number } | null
-  /** `sent` is the frame on its way, before Claude says it started. */
+  /** `sent` is the frame on its way, before the agent says it started. */
   turn: 'idle' | 'sent' | 'running' | 'stopping'
   /** How the last turn ended, until the next one starts. */
   ended: TurnCompleted | null
@@ -41,6 +45,7 @@ export type Timeline = {
 
 export const empty: Timeline = {
   thread: null,
+  harness: null,
   entries: [],
   requests: [],
   usage: null,
@@ -57,7 +62,7 @@ export type Action =
   /** A reopened socket replays the thread from the start. */
   | { type: 'reset' }
 
-const WHO = { user_text: 'you', assistant_text: 'claude', reasoning_text: 'thinking' } as const
+const WHO = { user_text: 'you', assistant_text: 'agent', reasoning_text: 'thinking' } as const
 
 export function reduce(timeline: Timeline, action: Action): Timeline {
   switch (action.type) {
@@ -68,7 +73,7 @@ export function reduce(timeline: Timeline, action: Action): Timeline {
     case 'refused':
       return { ...timeline, turn: 'idle' }
     case 'reset':
-      return { ...empty, thread: timeline.thread }
+      return { ...empty, thread: timeline.thread, harness: timeline.harness }
     case 'event':
       return fold(timeline, action.event)
   }
@@ -77,7 +82,7 @@ export function reduce(timeline: Timeline, action: Action): Timeline {
 function fold(timeline: Timeline, event: ThreadEvent): Timeline {
   switch (event.type) {
     case 'thread.started':
-      return { ...timeline, thread: event.payload.thread }
+      return { ...timeline, thread: event.payload.thread, harness: event.payload.harness }
     case 'turn.started':
       return { ...timeline, turn: timeline.turn === 'stopping' ? 'stopping' : 'running', ended: null }
     case 'turn.completed':

@@ -8,9 +8,14 @@
 //!
 //! Claude Code files a transcript under the directory it ran in, so the
 //! transcript and the spend of a thread are read from the worktree's path.
+//!
+//! An ACP thread's harness and session id live in the repository's git config,
+//! under the thread's branch, so the daemon keeps nothing and `branch -D`
+//! forgets them. A thread with neither is a Claude thread.
 
 use time::OffsetDateTime;
 
+use crate::acp::Harness;
 use crate::agent::Running;
 use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO, branch, said};
@@ -114,6 +119,63 @@ fn threads(porcelain: &[u8], name: &str) -> Vec<(String, String)> {
         }
     }
     found
+}
+
+fn key(place: &Place, name: &str) -> String {
+    sq(&format!("branch.{}.{name}", place.branch))
+}
+
+/// Keeps an ACP thread's harness and session. The session is written first,
+/// so a thread that names a harness always names its session too.
+pub async fn remember<E: Exec>(
+    exec: &E,
+    place: &Place,
+    harness: Harness,
+    session: &str,
+) -> Result<(), Error> {
+    let repo = sq(&place.repo);
+    let out = exec
+        .exec(&format!(
+            "git -C {repo} config {} {} && git -C {repo} config {} {}",
+            key(place, "yantraSession"),
+            sq(session),
+            key(place, "yantraHarness"),
+            sq(harness.name()),
+        ))
+        .await?;
+    if !out.success() {
+        return Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        });
+    }
+    Ok(())
+}
+
+/// The harness and session [`remember`] kept, or `None` for a Claude thread.
+pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness, String)>, Error> {
+    let repo = sq(&place.repo);
+    let out = exec
+        .exec(&format!(
+            "git -C {repo} config --get {} && git -C {repo} config --get {}",
+            key(place, "yantraHarness"),
+            key(place, "yantraSession"),
+        ))
+        .await?;
+    // `config --get` exits 1 for a key that is not set.
+    if out.status == 1 && out.stderr.is_empty() {
+        return Ok(None);
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut lines = stdout.lines();
+    match (out.success(), lines.next(), lines.next()) {
+        (true, Some(harness), Some(session)) => harness
+            .parse()
+            .map(|harness| Some((harness, session.to_owned())))
+            .map_err(|stderr| Error::Worktree { stderr }),
+        _ => Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        }),
+    }
 }
 
 /// Removes the worktree and the branch, uncommitted work included. The only
@@ -399,6 +461,58 @@ mod tests {
         assert!(matches!(
             remove(&refused, &place()).await,
             Err(Error::Worktree { stderr }) if stderr == "fatal: not a working tree"
+        ));
+    }
+
+    #[tokio::test]
+    async fn remember_writes_the_session_then_the_harness_under_the_branch() {
+        let machine = Machine::answering(vec![out(0, b"", "")]);
+        remember(&machine, &place(), Harness::Opencode, "ses_1")
+            .await
+            .expect("kept");
+        assert_eq!(
+            machine.asked(),
+            [format!(
+                "git -C '{REPO}' config 'branch.yantra/chat/web/11111111.yantraSession' 'ses_1' \
+                 && git -C '{REPO}' config 'branch.yantra/chat/web/11111111.yantraHarness' 'opencode'"
+            )]
+        );
+
+        let refused =
+            Machine::answering(vec![out(255, b"", "error: could not lock config file\n")]);
+        assert!(matches!(
+            remember(&refused, &place(), Harness::Codex, "s").await,
+            Err(Error::Worktree { stderr }) if stderr == "error: could not lock config file"
+        ));
+    }
+
+    #[tokio::test]
+    async fn recall_reads_both_keys_and_a_thread_without_them_is_claudes() {
+        let machine = Machine::answering(vec![out(0, b"opencode\nses_1\n", "")]);
+        assert_eq!(
+            recall(&machine, &place()).await.expect("read"),
+            Some((Harness::Opencode, "ses_1".to_owned()))
+        );
+        assert_eq!(
+            machine.asked(),
+            [format!(
+                "git -C '{REPO}' config --get 'branch.yantra/chat/web/11111111.yantraHarness' \
+                 && git -C '{REPO}' config --get 'branch.yantra/chat/web/11111111.yantraSession'"
+            )]
+        );
+
+        let claude = Machine::answering(vec![out(1, b"", "")]);
+        assert_eq!(recall(&claude, &place()).await.expect("read"), None);
+
+        let gone = Machine::answering(vec![out(128, b"", "fatal: cannot change to '/x'\n")]);
+        assert!(matches!(
+            recall(&gone, &place()).await,
+            Err(Error::Worktree { stderr }) if stderr == "fatal: cannot change to '/x'"
+        ));
+        let odd = Machine::answering(vec![out(0, b"aider\nses_1\n", "")]);
+        assert!(matches!(
+            recall(&odd, &place()).await,
+            Err(Error::Worktree { stderr }) if stderr.contains("`aider`")
         ));
     }
 

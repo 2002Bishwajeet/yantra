@@ -27,14 +27,6 @@ use yantra_core::ssh::{self, Machine, Ssh};
 
 use crate::write::{Authoriser, Refused, allowed, chain};
 
-/// The harness names a caller may send, as R19 §1 lists them.
-const HARNESSES: [(&str, Harness); 4] = [
-    ("codex", Harness::Codex),
-    ("gemini", Harness::Gemini),
-    ("grok", Harness::Grok),
-    ("opencode", Harness::Opencode),
-];
-
 struct Entry {
     machine: String,
     harness: &'static str,
@@ -209,15 +201,8 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     // The name reaches `ssh`'s argv (ADR-0009).
     install::check_machine(&asked.machine).map_err(|error| bad(error.to_string()))?;
-    let (harness_name, harness) = HARNESSES
-        .into_iter()
-        .find(|(name, _)| *name == asked.harness)
-        .ok_or_else(|| {
-            bad(format!(
-                "`{}` is not a harness Yantra drives over ACP: codex, gemini, grok or opencode",
-                asked.harness
-            ))
-        })?;
+    let harness: Harness = asked.harness.parse().map_err(bad)?;
+    let harness_name = harness.name();
     let machine = (state.locate)(&asked.machine).ok_or_else(|| Refused::Verb {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         said: "this daemon has no directory for its ssh sockets".to_owned(),

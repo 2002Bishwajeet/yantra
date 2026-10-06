@@ -9,8 +9,11 @@ its licence asks that this notice travel with it.
 T3 Code's
 [`packages/contracts/src/providerRuntime.ts`](https://github.com/pingdotgg/t3code/blob/main/packages/contracts/src/providerRuntime.ts)
 in Rust ([ADR-0026](docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md) decision 5), and
-[`web/src/api/thread.ts`](web/src/api/thread.ts) spells the same vocabulary in TypeScript. No
-T3 Code source is copied. Its name, wordmark and icon are not used.
+[`web/src/api/thread.ts`](web/src/api/thread.ts) spells the same vocabulary in TypeScript.
+[`web/src/screens/session/HarnessPicker.tsx`](web/src/screens/session/HarnessPicker.tsx) copies the
+shape of
+[`apps/web/src/components/chat/ProviderModelPicker.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/ProviderModelPicker.tsx)
+onto Yantra's own menu and tokens. Its name, wordmark and icon are not used.
 
 ```text
 MIT License

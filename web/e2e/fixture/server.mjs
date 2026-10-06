@@ -647,9 +647,12 @@ function oneOff(state, request, socket, head, machine, index, at) {
 
 /** chat.rs's socket (Y-356). A turn replays what yantrad really serialises,
  *  contract.gen.ts's `chatEvents`, as far as the permission request, and the
- *  rest once it is answered. `?thread=` attaches to the one thread here and
- *  replays two turns of its transcript first. */
+ *  rest once it is answered. The first turn's harness is the thread's (Y-434),
+ *  and Gemini has no login on the fixture's machine, so a turn for it is
+ *  refused as yantrad refuses it. `?thread=` attaches to the one thread here,
+ *  a Claude thread, and replays two turns of its transcript first. */
 const THREAD = '1a2b3c4d'
+const LOGGED_OUT = { gemini: 'run gemini and sign in' }
 const HISTORY = [
   ['user_text', 'Is the core crate green?'],
   ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all.'],
@@ -684,7 +687,10 @@ function converse(state, request, socket, head, name, thread) {
       ws.close()
       return
     }
-    if (thread) HISTORY.forEach(([kind, text], at) => say(delta(kind, text, `history:${at}`)))
+    if (thread) {
+      say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } })
+      HISTORY.forEach(([kind, text], at) => say(delta(kind, text, `history:${at}`)))
+    }
     let known = thread
     let waiting = null
     let sent = 0
@@ -696,8 +702,17 @@ function converse(state, request, socket, head, name, thread) {
       if (frame?.type === 'turn' && typeof frame.text === 'string') {
         if (waiting) return fail('busy', 'a turn is running; stop it or wait for it to end')
         if (!known) {
+          const harness = frame.harness ?? 'claude'
+          if (LOGGED_OUT[harness]) {
+            return say({
+              ...contract.chatNotLoggedIn,
+              harness,
+              machine: findWorkspace(state, name).machine,
+              command: LOGGED_OUT[harness],
+            })
+          }
           known = THREAD
-          say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD } })
+          say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness } })
         }
         sent += 1
         say(delta('user_text', frame.text, `user:${sent}`))
