@@ -168,7 +168,8 @@ async fn yantra_mic_carries_speech_into_a_yantra_session_until_ctrl_c() -> Resul
         matches!(mic(&report), Outcome::Installed | Outcome::Present),
         "{report:?}"
     );
-    root(&systemd, "dnf -y install espeak-ng")?;
+    // The image has no `pgrep`, so without procps-ng every poll below fails.
+    root(&systemd, "dnf -y install espeak-ng procps-ng")?;
 
     // The laptop reaches the machine by name, as ADR-0009 has it.
     laptop(
