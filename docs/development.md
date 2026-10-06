@@ -308,6 +308,12 @@ run containers is not blocked. CI sets `YANTRA_REQUIRE_PODMAN=1` (via
 `just test-ci`), which turns that skip into a failure — a silent skip there
 would mean the test had stopped checking anything.
 
+**A test that needs a real `claude` uses the owner's login** (owner, 2026-10-06; Y-356, Y-424). The
+test copies `~/.claude/.credentials.json` into its throwaway container, read-only, and the container
+is removed in `Drop`. The file never enters git, CI or another machine. Without the file the test
+prints `SKIPPED:` and passes, and CI skips it even with `YANTRA_REQUIRE_PODMAN=1`, because CI has no
+login. Each run spends a little of the owner's Claude plan.
+
 **There is a second container, and it runs a real `systemd`.** Its fixture is
 `crates/yantrad/tests/common/mod.rs`, built from
 `crates/yantrad/tests/fixture/Containerfile` (Fedora, because Alpine ships no
