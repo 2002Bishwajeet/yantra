@@ -246,28 +246,28 @@ export function Usage() {
         {asOf ? <Mono className="usage__as">prices from {asOf}</Mono> : null}
         <span className="usage__spacer" />
         {list.length > 0 ? (
-          <Segmented
-            label="Window"
-            onValueChange={(value) =>
-              void navigate({ search: { window: asSpan(value) }, replace: true })
-            }
-            value={span}
-          >
-            {SPANS.map((one) => (
-              <Segment key={one} value={one}>
-                {SPAN_LABEL[one]}
-              </Segment>
-            ))}
-          </Segmented>
-        ) : null}
-        {list.length > 0 ? (
-          <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
-            {fanned.fanned === 'reading'
-              ? `reading ${fanned.of}…`
-              : fanned.fanned === 'done'
-                ? 'Read again'
-                : 'Read spend'}
-          </Button>
+          <>
+            <Segmented
+              label="Window"
+              onValueChange={(value) =>
+                void navigate({ search: { window: asSpan(value) }, replace: true })
+              }
+              value={span}
+            >
+              {SPANS.map((one) => (
+                <Segment key={one} value={one}>
+                  {SPAN_LABEL[one]}
+                </Segment>
+              ))}
+            </Segmented>
+            <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
+              {fanned.fanned === 'reading'
+                ? `reading ${fanned.of}…`
+                : fanned.fanned === 'done'
+                  ? 'Read again'
+                  : 'Read spend'}
+            </Button>
+          </>
         ) : null}
       </div>
 

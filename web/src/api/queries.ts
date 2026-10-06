@@ -133,9 +133,9 @@ export const statusQuery = (name: string) =>
   })
 
 /** `POST …/tokens` reads a whole transcript over ssh, and the page stamps its
- *  own arrival (D3 §11.4). Never fresh: every ask is a new read. */
-/** `since` is an RFC 3339 instant the browser chose (Y-354); without it the
- *  POST has no body, which the daemon reads as the whole session. */
+ *  own arrival (D3 §11.4). Never fresh: every ask is a new read. `since` is an
+ *  RFC 3339 instant the browser chose (Y-354); without it the POST has no body,
+ *  which the daemon reads as the whole session. */
 export const spendQuery = (name: string, since?: string) =>
   queryOptions({
     queryKey: keys.spend(name, since),
