@@ -617,7 +617,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Eight things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Nine things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -653,7 +653,10 @@ reading one on a timer.
 A task takes its own diff summary when its turn ends, and `POST /api/tasks/{id}/stop` takes it again.
 Starting, stopping and removing a task await ssh, because each is a write sent once.
 
-None of the eight licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-418 is the ninth, on `terminal.rs`'s licence**: `mic.rs` holds one ssh for as long as a button
+is held, and only after the upgrade has answered.
+
+None of the nine licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.
