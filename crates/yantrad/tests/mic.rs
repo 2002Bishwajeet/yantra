@@ -283,6 +283,12 @@ python3 -c 'import struct; d=open("/tmp/heard.raw","rb").read(); n=len(d)//2; pr
     // (f) a card, so Install chose no default source.
     let configured = configured_source(&listener).await?;
     assert!(!configured.contains("yantra-mic"), "{configured}");
+    // The ssh login started the user manager, so yantra-mic may be listed;
+    // without linger it stops at the next logout, and doctor says so.
+    let lingerless = doctor::of(&listener, TERM).await;
+    let check = mic_check(&lingerless);
+    assert_eq!(check.state, State::Absent, "{}", check.detail);
+    assert!(check.detail.contains("linger"), "{}", check.detail);
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&listener_dir);

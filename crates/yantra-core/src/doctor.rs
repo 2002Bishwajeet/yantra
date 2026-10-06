@@ -504,13 +504,16 @@ async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&C
 }
 
 /// ADR-0031 §9 in one round trip. The first line is `absent` (no drop-in),
-/// `present`, or `linger=<value>` followed by what `pactl` said.
+/// `present`, or `linger=<value>` followed by what `pactl` said. It reads
+/// linger first: an ssh login starts the user manager, so a source listed
+/// without linger is gone at the next logout and is not `present`.
 fn mic_probe() -> String {
     format!(
         r#"[ -e "$HOME/{drop_in}" ] || {{ echo absent; exit 0; }}
+linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)
 said=$(XDG_RUNTIME_DIR=/run/user/$(id -u) pactl list short sources 2>&1)
-if printf '%s\n' "$said" | cut -f2 | grep -qx yantra-mic; then echo present; exit 0; fi
-echo "linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)"
+if [ "$linger" = yes ] && printf '%s\n' "$said" | cut -f2 | grep -qx yantra-mic; then echo present; exit 0; fi
+echo "linger=$linger"
 printf '%s\n' "$said""#,
         drop_in = install::MIC_DROP_IN,
     )
@@ -792,6 +795,22 @@ mod tests {
         );
 
         assert_eq!(mic_from("").state, State::Unknown);
+    }
+
+    /// A listed source without linger stops at the next logout, so the probe
+    /// asks loginctl before it can say `present`.
+    #[test]
+    fn the_mic_probe_reads_linger_before_the_source() {
+        let probe = mic_probe();
+        let linger = probe.find("loginctl").expect("the probe reads linger");
+        let present = probe
+            .find("echo present")
+            .expect("the probe can say present");
+        assert!(linger < present, "{probe}");
+
+        let listed = mic_from("linger=no\n42\tyantra-mic\tPipeWire\n");
+        assert_eq!(listed.state, State::Absent);
+        assert!(listed.detail.contains("linger"), "{}", listed.detail);
     }
 
     /// R-23 on the one check that is about this host: no grant and a refused
