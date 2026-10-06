@@ -817,6 +817,9 @@ reconcile. Keep them, and say in
 > stay outside that figure. `npm run budget` now prints the headroom on every run, so a new
 > surface can read the figure it may spend.
 
+> **2026-10-07, Y-441.** Every byte count in the amendments above is the figure on its date.
+> `npm run budget` gives the current one.
+
 ### 9.2 What moves
 
 **Motion exists only where something would otherwise teleport.** Overlays fade. Disclosures slide.
