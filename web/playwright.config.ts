@@ -38,7 +38,8 @@ export default defineConfig({
       animations: 'disabled',
       caret: 'hide',
       scale: 'css',
-      maxDiffPixelRatio: 0.01,
+      // Glyph noise measures 24 px on a phone and grows with the text on a wider page; a changed word is about 300 px.
+      maxDiffPixels: 64,
       threshold: 0.2,
     },
   },
@@ -54,8 +55,8 @@ export default defineConfig({
 
   projects: [
     { name: 'phone', use: at('phone') },
-    { name: 'tablet', use: at('tablet') },
-    { name: 'desktop', use: at('desktop') },
+    { name: 'tablet', use: at('tablet'), expect: { toHaveScreenshot: { maxDiffPixels: 160 } } },
+    { name: 'desktop', use: at('desktop'), expect: { toHaveScreenshot: { maxDiffPixels: 160 } } },
   ],
 
   webServer: [
