@@ -243,6 +243,58 @@ impl Ssh {
         args.push(command.to_owned());
         Ok(args)
     }
+
+    /// The fourth call shape: a long-lived command whose stdin and stdout are
+    /// the conversation, as an ACP agent's are. No sentinel, because the
+    /// command's status is not the answer; the stream is.
+    pub(crate) fn stdio(&self, command: &str) -> Result<Piped, Error> {
+        self.machine.prepare_sockets()?;
+        let log = LogFile::new(&self.machine.state_dir)?;
+
+        let mut child = tokio::process::Command::new("ssh")
+            .args(self.stdio_argv(command, log.path()))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(Error::Spawn)?;
+        let (Some(stdin), Some(stdout), Some(stderr)) =
+            (child.stdin.take(), child.stdout.take(), child.stderr.take())
+        else {
+            return Err(Error::Spawn(std::io::Error::other(
+                "ssh started without the pipes it was given",
+            )));
+        };
+        Ok(Piped {
+            child,
+            stdin,
+            stdout,
+            stderr,
+            log,
+        })
+    }
+
+    fn stdio_argv(&self, command: &str, log: &Path) -> Vec<String> {
+        let mut args = vec!["-E".to_owned(), log.display().to_string()];
+        args.extend(self.machine.connection_args());
+        args.extend(["-o", "LogLevel=ERROR", "-o", "RequestTTY=no"].map(str::to_owned));
+        args.extend(self.machine.destination_args());
+        args.push(stdio_payload(command));
+        args
+    }
+}
+
+/// An `ssh` running one command with its three streams held open.
+#[derive(Debug)]
+pub(crate) struct Piped {
+    pub(crate) child: tokio::process::Child,
+    pub(crate) stdin: tokio::process::ChildStdin,
+    pub(crate) stdout: tokio::process::ChildStdout,
+    pub(crate) stderr: tokio::process::ChildStderr,
+    /// What `ssh` itself said, which is the only reason a refused connection
+    /// gives. Removed when this is dropped.
+    pub(crate) log: LogFile,
 }
 
 impl Exec for Ssh {
@@ -337,6 +389,14 @@ fn payload(command: &str, nonce: &str) -> String {
     format!("echo {} | base64 -d | /bin/sh", b64.encode(script))
 }
 
+/// Still base64 (I-26, I-35), but not `payload`'s pipe into `/bin/sh`: that
+/// gives the command the pipe as its stdin, and here stdin must be ssh's.
+fn stdio_payload(command: &str) -> String {
+    use base64::Engine as _;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(command);
+    format!("exec /bin/sh -c \"$(echo {encoded} | base64 -d)\"")
+}
+
 /// Splits what `ssh` printed before the command started off the command's own
 /// stderr. With no start marker, all of it is `ssh`'s.
 fn split_start<'a>(stderr: &'a [u8], nonce: &str) -> (&'a [u8], &'a [u8]) {
@@ -394,7 +454,7 @@ fn hex(bytes: &[u8]) -> String {
 /// Holds `ssh`'s own diagnostics away from the command's stderr, and removes the
 /// file afterwards. `-E` appends, so each exec needs its own.
 #[derive(Debug)]
-struct LogFile {
+pub(crate) struct LogFile {
     path: PathBuf,
 }
 
@@ -419,7 +479,7 @@ impl LogFile {
         &self.path
     }
 
-    fn read(&self) -> String {
+    pub(crate) fn read(&self) -> String {
         std::fs::read_to_string(&self.path).unwrap_or_default()
     }
 }
@@ -572,6 +632,45 @@ mod tests {
             "true",
             "the command follows the name directly: {argv:?}"
         );
+    }
+
+    /// The stdio shape: the same socket, no terminal, `ssh`'s own words in a
+    /// file, `--` before the name (I-63), and no command text on the wire.
+    #[test]
+    fn the_stdio_argv_encodes_the_command_after_a_double_dash() {
+        let ssh = Ssh::new(Machine {
+            host: "-oProxyCommand=evil".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: PathBuf::from("/tmp/yantra-stdio-argv"),
+        })
+        .expect("the path is short enough");
+
+        let argv = ssh.stdio_argv("opencode acp $(id -un)", Path::new("/tmp/ssh.log"));
+
+        assert_eq!(&argv[..2], ["-E", "/tmp/ssh.log"]);
+        assert!(argv.iter().any(|arg| arg.starts_with("ControlPath=")));
+        assert!(argv.contains(&"RequestTTY=no".to_owned()), "{argv:?}");
+        assert!(argv.contains(&"LogLevel=ERROR".to_owned()), "{argv:?}");
+        let at = argv
+            .iter()
+            .position(|arg| arg == "-oProxyCommand=evil")
+            .expect("the name is in the argv");
+        assert_eq!(argv[at - 1], "--", "{argv:?}");
+        assert_eq!(
+            at + 2,
+            argv.len(),
+            "the command is the one word after the name"
+        );
+
+        let wire = &argv[at + 1];
+        assert!(
+            !wire.contains("opencode") && !wire.contains("id -un"),
+            "{wire}"
+        );
+        assert!(wire.starts_with("exec /bin/sh -c \"$(echo "), "{wire}");
+        assert!(!wire.contains("| /bin/sh"), "stdin must stay ssh's: {wire}");
     }
 
     #[test]

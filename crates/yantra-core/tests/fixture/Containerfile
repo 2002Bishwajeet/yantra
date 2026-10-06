@@ -12,13 +12,27 @@ FROM docker.io/library/alpine:3.22
 # `ncurses` is what puts `tic` and `infocmp` here. Without it the terminfo
 # tests could only ever exercise the fallback, never the install (Y-058).
 # `git` and `sudo` are for the install tests (Y-386): each arranges its own
-# sudoers line, and with none, sudo refuses the account.
-RUN apk add --no-cache openssh-server tmux ncurses git sudo \
+# sudoers line, and with none, sudo refuses the account. `libstdc++` and
+# `libgcc` are what opencode's musl build links against (Y-433).
+RUN apk add --no-cache openssh-server tmux ncurses git sudo libstdc++ libgcc \
  && ssh-keygen -A \
  && adduser -D -s /bin/sh yantra \
  && passwd -u yantra \
  && install -d -o yantra -g yantra -m 700 /home/yantra/.ssh \
  && printf 'PasswordAuthentication no\nPermitRootLogin no\n' >> /etc/ssh/sshd_config
+
+# A real ACP agent for tests/acp.rs (Y-433), pinned by version and checksum.
+ARG OPENCODE=1.18.34
+RUN case "$(uname -m)" in \
+      x86_64) arch=x64 sum=9dd4470885d07205e31b702465564aaee97be26ee3dc192ec6702a15e7a21272 ;; \
+      aarch64) arch=arm64 sum=eaf0692e4b60dca382a126ca607d617be7b6eaf82d318a828f2b6eb1eacea99a ;; \
+      *) echo "no opencode build for $(uname -m)" >&2; exit 1 ;; \
+    esac \
+ && wget -q -O /tmp/opencode.tar.gz \
+      "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE}/opencode-linux-${arch}-musl.tar.gz" \
+ && echo "${sum}  /tmp/opencode.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
+ && rm /tmp/opencode.tar.gz
 
 EXPOSE 22
 
