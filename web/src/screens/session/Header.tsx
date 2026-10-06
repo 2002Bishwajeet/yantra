@@ -13,6 +13,7 @@ import { Tile } from '@/m3/tile/Tile'
 import { DeleteWorkspace } from '@/screens/fleet/Confirm'
 import { phrase } from '@/shell/phrase'
 import { home } from './format'
+import { Talk } from './Talk'
 import { startedAt, verbs, whyNot } from './verbs'
 
 const URL = /^https?:\/\//
@@ -134,6 +135,7 @@ export function Header(props: HeaderProps) {
           workspace={workspace}
         />
       </div>
+      <Talk machine={workspace.machine} />
       {failed ? (
         <ErrorSurface.Inline
           className="session__refusal"

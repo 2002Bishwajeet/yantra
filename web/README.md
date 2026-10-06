@@ -241,7 +241,7 @@ answer rather than the row it replaced.
   a surface sends it only where a person meant it. What was held about the name
   goes with it, or a mounted status would keep polling a workspace that is gone.
 - **Every refusal keeps the daemon's own sentence.** The status table and the
-  five error kinds live in [`src/api/README.md`](src/api/README.md) and
+  nine error kinds live in [`src/api/README.md`](src/api/README.md) and
   [`errors.ts`](src/api/errors.ts); nothing invents wording for a sentence
   [`edit.rs`](../crates/yantra-core/src/edit.rs) or `write.rs` already writes.
 - **A refusal is drawn as a refusal rather than as a crash.** A `409` is an agent
@@ -286,6 +286,29 @@ reasonably have gone the other way:
   screen would make it indistinguishable from something the session printed, so it
   becomes an `ApiError` of kind `socket` and is drawn beside the terminal. A close
   with nothing said is not an error at all, and is what reconnect turns on.
+
+## Push-to-talk (Y-418)
+
+[`Talk.tsx`](src/screens/session/Talk.tsx) is
+[ADR-0031](../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §4–6's
+button, in the workspace header and above an unclaimed session's terminal.
+[`api/mic.ts`](src/api/mic.ts) does the work.
+
+- **It draws only where `doctor` found `yantra-mic`.** The machine's readiness
+  report must say `mic: present`; an optional item a machine does not have draws
+  nothing.
+- **The press opens everything and the release closes everything.** A pointer
+  down, or Space or Enter held, opens the microphone, an AudioWorklet and the
+  socket. Pointer up, cancel, lost capture, key up and blur stop every track and
+  close the context and the socket. A release before the permission resolves
+  still closes all of it, so the microphone is never open while the button is up.
+- **The frames are 16 kHz mono s16le, 640 bytes each.** `toPcm16` resamples from
+  the device rate with a carry that spans blocks, and writes little-endian.
+- **On `:7717` the button is off and says why.** The browser offers a
+  microphone only in a secure context, which is the HTTPS address on `:8443`.
+- **Each way a press ends is its own sentence**: a refused permission, no
+  device, a track the browser took, a socket that never opened, and the
+  daemon's text frame. The audio is never stored or logged here either (Q5).
 
 ## The transcript (Y-309, Y-310)
 
