@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
@@ -138,6 +139,10 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   // terminal and back may not spend a second ssh (D5 §3.5, §4.3).
   const transcript = useTranscript(name)
   const spend = useSpend()
+  // The chat stays mounted once opened: closing its socket cancels Claude's turn.
+  const [chatFor, setChatFor] = useState(view === 'chat' ? name : null)
+  if (view === 'chat' && chatFor !== name) setChatFor(name)
+  const chatOpened = chatFor === name
 
   const { data: agent } = useQuery(statusQuery(name))
   const status: WorkspaceStatus | null =
@@ -184,11 +189,13 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
           </Mono>
         ) : null}
       </div>
-      {/* Only the open tab is mounted: mounting the terminal opens an ssh, and
-          tmux redraws the pane for whoever attaches next (D5 §3.5). */}
+      {/* Only the open tab is mounted, except the chat: mounting the terminal
+          opens an ssh, and tmux redraws the pane for whoever attaches next (D5 §3.5). */}
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
-        {view === 'chat' ? (
-          <Chat key={name} onThread={onThread} thread={thread} workspace={workspace} />
+        {chatOpened ? (
+          <div hidden={view !== 'chat'}>
+            <Chat key={name} onThread={onThread} thread={thread} workspace={workspace} />
+          </div>
         ) : null}
         {view === 'terminal' ? (
           <div className="session__terminal">

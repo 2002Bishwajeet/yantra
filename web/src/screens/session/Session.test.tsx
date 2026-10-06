@@ -6,7 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
+import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { renderInApp } from '@/test/inApp'
 import { answer } from '@/test/daemon'
@@ -140,6 +141,45 @@ describe('one workspace, four views the URL carries', () => {
     expect(asked.filter((one) => one.endsWith('/tokens'))).toEqual([
       'POST /api/workspaces/landing/tokens',
     ])
+  })
+
+  /** Y-356: closing the chat socket cancels Claude's turn, so a look at
+   *  another view must leave it open. */
+  it('keeps the chat socket open while another view is shown', async () => {
+    daemon()
+    const sockets: { url: string; closed: boolean }[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        static OPEN = 1
+        readyState = 0
+        record: { url: string; closed: boolean }
+        constructor(url: string) {
+          this.record = { url, closed: false }
+          sockets.push(this.record)
+        }
+        send() {}
+        close() {
+          this.record.closed = true
+        }
+      },
+    )
+    let show: (view: View) => void = () => {}
+    function Switch() {
+      const [view, setView] = useState<View>('chat')
+      show = setView
+      return <Workspace name="landing" view={view} />
+    }
+    await renderInApp(<Switch />, new QueryClient({ defaultOptions: { queries: { retry: false } } }))
+
+    await waitFor(() => expect(sockets.map((one) => one.url).join()).toContain('/chat'))
+    act(() => show('transcript'))
+    await screen.findByRole('link', { name: 'Transcript', current: 'page' })
+    act(() => show('chat'))
+
+    const chats = sockets.filter((one) => one.url.includes('/chat'))
+    expect(chats).toHaveLength(1)
+    expect(chats[0]?.closed).toBe(false)
   })
 })
 
