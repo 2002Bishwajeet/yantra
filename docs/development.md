@@ -288,7 +288,8 @@ touches SSH, tmux, or an agent CLI gets an integration test against the real thi
 
 The fixture is `crates/yantra-core/tests/common/mod.rs`. Its image is built from
 `crates/yantra-core/tests/fixture/Containerfile` (Alpine + `openssh-server` +
-`tmux`, plus opencode for the ACP test, whose binary alone is 196 MB) the first
+`tmux`, plus opencode for the ACP test, whose binary alone is 196 MB, and
+claude 2.1.291's musl build for the chat test, 243 MB, pinned by checksum) the first
 time a test needs it, then reused. Each run generates
 its own throwaway keypair and publishes sshd on an ephemeral loopback port —
 your `~/.ssh` is never read — and the container is removed in `Drop`, so it goes
@@ -312,7 +313,11 @@ would mean the test had stopped checking anything.
 test copies `~/.claude/.credentials.json` into its throwaway container, read-only, and the container
 is removed in `Drop`. The file never enters git, CI or another machine. Without the file the test
 prints `SKIPPED:` and passes, and CI skips it even with `YANTRA_REQUIRE_PODMAN=1`, because CI has no
-login. Each run spends a little of the owner's Claude plan.
+login. Each run spends a little of the owner's Claude plan. **`YANTRA_REQUIRE_CLAUDE=1` turns that
+skip into a failure**, the way `YANTRA_REQUIRE_PODMAN` does for podman, so a run that must prove the
+chat cannot pass by skipping it. `tests/claude.rs` is the one such test today
+([R20](research/20-claude-stream-json-turn.md)). It sets the container's model to `haiku`, and the
+image carries `bash` because claude's Bash tool refuses busybox `sh`.
 
 **There is a second container, and it runs a real `systemd`.** Its fixture is
 `crates/yantrad/tests/common/mod.rs`, built from

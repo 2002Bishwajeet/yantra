@@ -2,23 +2,20 @@ import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/tes
 import { route } from './lib/routes'
 import type { Page } from '@playwright/test'
 
-/** `/w/{name}` (Y-348) on the `busy` scenario, where `yantra-web` is at
- *  claude's trust prompt and the fixture's socket prints the box the
- *  SessionChat and SessionTerminal boards draw.
- *
- *  The rule under every test here: **the composer and the option rows write to
- *  the terminal socket**, which is the only way in (I-21, I-22). Nothing in
- *  this spec posts a keystroke to the daemon, because no such route exists. */
+/** `/w/{name}` (Y-348) on the `busy` scenario. The Chat tab streams over the
+ *  chat socket (Y-356, ADR-0026), and the fixture replays what `yantrad`
+ *  serialises: a turn streams as far as Claude's permission request and ends
+ *  once it is answered. The Terminal tab is still the tmux pane. */
 const NAME = 'yantra-web'
 const PATH = `/w/${NAME}`
+const THREAD = '1a2b3c4d'
 
 const views = (page: Page) => page.getByRole('navigation', { name: 'Views' })
 
 const open = (page: Page, name: string) => views(page).getByRole('link', { name }).click()
 
-/** The chat's dialog is parsed off the pane, so it arrives a socket after the
- *  page does. */
-const asking = (page: Page) => page.getByText('Claude is asking')
+/** Claude's request arrives a socket and a turn after the page does. */
+const asking = (page: Page) => page.getByText('Claude asks to run')
 
 /** The composer's label. The PhoneSessionChat board writes the short one, and
  *  the desktop boards name the workspace (finding 114). */
@@ -26,6 +23,12 @@ const composer = (page: Page, size: string) =>
   page.getByLabel(size === 'phone' ? 'Message Claude' : `Message Claude in ${NAME}`, {
     exact: true,
   })
+
+async function turn(page: Page, size: string) {
+  await composer(page, size).fill('run the core tests')
+  await page.getByRole('button', { name: 'Send' }).click()
+  await expect(asking(page)).toBeVisible()
+}
 
 /** xterm fits its rows to the pane, and the pane settles only once the mono
  *  face has loaded — so the row count, and with it where the buffer scrolled,
@@ -64,51 +67,65 @@ test.describe('the session screen, chat first', () => {
     await expect(page.locator('.session__name')).toContainText('waiting for trust')
   })
 
-  test("draws the agent's own dialog, and Yantra offers no answer of its own", async ({ page }) => {
-    await expect(asking(page)).toBeVisible()
-    await expect(page.getByText('cargo test -p yantra-core').first()).toBeVisible()
-    await expect(page.locator('.chat__option')).toHaveCount(3)
-    // D5 §5.2: no trust buttons of Yantra's own, ever.
-    await expect(page.getByRole('button', { name: /^(Allow|Deny|Trust|Approve)$/ })).toHaveCount(0)
+  test("streams a turn, and draws Claude's request with three answers", async ({ page, size }) => {
+    await turn(page, size)
+    await expect(page.getByText('Running the tests.')).toBeVisible()
+    await expect(page.getByText('cargo test').first()).toBeVisible()
+    for (const name of ['Accept', 'Accept always', 'Decline']) {
+      await expect(page.getByRole('button', { name, exact: true })).toBeVisible()
+    }
+    await expect(page.getByRole('status')).toHaveText('Claude is waiting for your answer.')
+    // The new thread is in the URL, so a reload continues it.
+    await expect(page).toHaveURL(new RegExp(`thread=${THREAD}`))
   })
 
-  test('an option row types its number and Enter into the pane', async ({ page }) => {
-    await expect(asking(page)).toBeVisible()
-    await page.getByRole('button', { name: /Yes then Enter/ }).click()
+  test('Accept answers the request, and the turn ends with its output and usage', async ({ page, size }) => {
+    await turn(page, size)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
 
-    await expect(page.getByRole('status')).toContainText('Typed 1 and Enter into the pane.')
+    await expect(asking(page)).toHaveCount(0)
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+    await expect(page.getByRole('meter', { name: 'Context used' })).toBeVisible()
+    await page.getByText('Output').click()
+    await expect(page.getByText('test result: ok')).toBeVisible()
   })
 
-  test('the composer types the message into the pane', async ({ page, size }) => {
-    const field = composer(page, size)
-    await field.fill('run the whole crate')
-    await page.getByRole('button', { name: 'Send' }).click()
-
-    await expect(field).toHaveValue('')
-    await expect(page.getByRole('status')).toContainText('Typed your message into the pane.')
+  test('Stop cancels a turn that is waiting', async ({ page, size }) => {
+    await turn(page, size)
+    await page.getByRole('button', { name: 'Stop' }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude stopped.')
+    await expect(asking(page)).toHaveCount(0)
   })
 
-  test('passes axe', async ({ page }) => {
-    await expect(asking(page)).toBeVisible()
+  test('a thread in the URL replays its transcript', async ({ page }) => {
+    await page.goto(`${PATH}?thread=${THREAD}`)
+    await expect(page.getByText('Is the core crate green?')).toBeVisible()
+    await expect(page.locator('.chat__markdown strong')).toHaveText('326')
+  })
+
+  test('a thread the workspace does not have is refused by name', async ({ page }) => {
+    await page.goto(`${PATH}?thread=ffffffff`)
+    const alert = page.getByRole('alert')
+    await expect(alert).toContainText('This workspace has no chat with that id.')
+    await expect(alert).toContainText(`${NAME} has no chat thread ffffffff`)
+  })
+
+  test('passes axe', async ({ page, size }) => {
+    await turn(page, size)
     await axe(page)
   })
 
-  /** **Finding 114.** The PhoneSessionChat board shortens three strings the
-   *  desktop boards write in full, and the build used to write the long ones
-   *  at 390 and cut them. */
+  /** **Finding 114.** The PhoneSessionChat board shortens the strings the
+   *  desktop boards write in full. */
   test('writes the phone board’s strings at 390 and the desktop ones above it', async ({
     page,
     size,
   }) => {
     await expect(composer(page, size)).toBeVisible()
-    await expect(page.getByText('typed into the tmux pane')).toContainText(
+    await expect(page.getByRole('status')).toHaveText(
       size === 'phone'
-        ? 'typed into the tmux pane · turns refresh about every 5 s'
-        : 'typed into the tmux pane on cachyos-g14',
-    )
-    await expect(asking(page)).toBeVisible()
-    await expect(page.getByText("the answer is Claude's, not Yantra's")).toHaveCount(
-      size === 'phone' ? 0 : 1,
+        ? 'Each turn runs in this chat’s own worktree.'
+        : 'Each turn runs claude in this chat’s own worktree on cachyos-g14, apart from the terminal’s.',
     )
   })
 
@@ -136,7 +153,7 @@ test.describe('the session screen, chat first', () => {
   })
 
   test('looks like the board', async ({ page, size }) => {
-    await expect(asking(page)).toBeVisible()
+    await turn(page, size)
     await screenshot(page, 'session-chat', 'busy', size)
   })
 })
@@ -244,24 +261,18 @@ test.describe('the session screen, the other three views', () => {
   })
 })
 
-/** The SessionEnded board. `docs-sweep` finished and its tmux session is gone,
- *  so the turns are frozen and the two verbs are Resume and Delete. */
+/** `docs-sweep` finished and its tmux session is gone. The chat runs in a
+ *  worktree of its own, so it stays open; Resume is the header's. */
 test.describe('a session that has ended', () => {
-  test('freezes the transcript under an end card, and offers Resume and Delete', async ({
-    page,
-    size,
-  }) => {
+  test('keeps the chat open, and offers Resume in the header', async ({ page, size }) => {
     await scenario(page, 'busy')
     await page.goto('/w/docs-sweep')
 
-    // The turns are frozen, not absent: the view still reads them once.
-    await expect(page.locator('[data-slot="reading"]')).toHaveCount(0)
-    await expect(page.getByText('Running them now.')).toBeVisible()
-    await expect(page.getByText('claude exited 0 in tmux docs-sweep on macbook.')).toBeVisible()
-    await expect(page.getByLabel('Message Claude in docs-sweep')).toHaveCount(0)
-    await expect(page.getByText('Resume starts claude again in the same pane')).toBeVisible()
+    await expect(
+      page.getByLabel(size === 'phone' ? 'Message Claude' : 'Message Claude in docs-sweep', { exact: true }),
+    ).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeEnabled()
     await axe(page)
-    await screenshot(page, 'session-ended', 'busy', size)
   })
 })
 

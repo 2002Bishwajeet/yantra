@@ -210,7 +210,8 @@ pub enum RequestType {
     DynamicToolCall,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Deserialised too: a browser answers a request with one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Decision {
     Accept,

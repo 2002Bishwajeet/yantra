@@ -141,8 +141,11 @@ const session = createRoute({
   // D5 §3.3. The key is always written, because the root validates nothing and
   // an unknown `?view=` would otherwise reach the page by inheritance; the type
   // stays optional, so every link here still needs no search.
-  validateSearch: (search: Record<string, unknown>): { view?: View } => ({
+  validateSearch: (search: Record<string, unknown>): { view?: View; thread?: string } => ({
     view: asView(search.view),
+    // Y-356: the chat thread to continue. The daemon compares it with what git
+    // lists, so anything else is its `unknownThread`, not a 404 here.
+    thread: typeof search.thread === 'string' && search.thread !== '' ? search.thread : undefined,
   }),
   component: lazyRouteComponent(() => import('@/screens/session/Session'), 'Session'),
   loader: ({ context: { client }, params }) => {

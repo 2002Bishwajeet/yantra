@@ -58,6 +58,8 @@ import type {
   About,
   Attention,
   Broken,
+  ChatFailure,
+  ChatFrame,
   Cloning,
   Connection,
   Device,
@@ -77,6 +79,7 @@ import type {
   Stopped,
   TerminalExit,
   TerminalSize,
+  ThreadEvent,
   Transcript,
   Workspace,
   WorkspaceStatus,
@@ -168,6 +171,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
     out.extend(crate::api::answers());
     out.extend(crate::write::answers());
     out.extend(crate::terminal::answers());
+    out.extend(crate::chat::answers());
     out
 }
 

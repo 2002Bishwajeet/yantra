@@ -522,3 +522,7 @@ export type Joined = {
   kept: boolean
   logs_in_as: string | null
 }
+
+// Y-356: the chat socket's three shapes, whose home is `api/thread.ts`.
+// Re-exported so `contract.gen.ts` checks them with every other shape.
+export type { ChatFailure, ChatFrame, ThreadEvent } from './api/thread'

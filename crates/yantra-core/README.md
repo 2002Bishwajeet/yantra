@@ -27,7 +27,9 @@ let moved  = edit::edit("yantra", &workspace::Changes {
 repository and a prompt, and runs an ACP agent in a new git worktree of that repository (ADR-0033).
 `thread` gives a chat session the same kind of worktree, on `yantra/chat/<workspace>/<id>`: the
 chat edits there while the workspace's TUI keeps the repository. Ending a session deletes nothing;
-`thread::remove` does.
+`thread::remove` does. `claude::Turn` is one chat turn in that worktree: `claude -p` over
+stream-json, resumed from the newest transcript there, with permission requests answered on its
+stdin.
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.

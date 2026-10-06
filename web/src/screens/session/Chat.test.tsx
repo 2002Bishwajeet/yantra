@@ -1,15 +1,13 @@
 /**
- * The Chat view against a real WebSocket server (`harness.ts`). What matters
- * here is where the words go: **there is no send-keys route** (I-21, I-22), so
- * an option row and the composer both write bytes to the workspace's terminal
- * socket, opened without a screen. Every frame asserted below crossed a socket.
+ * The Chat view against a real WebSocket server (`harness.ts`). The daemon's
+ * side is played from `contract.gen.ts`, which is what `yantrad` really
+ * serialises, and every frame asserted below crossed a socket.
  */
-import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import type { Turn, Workspace } from '@/api'
-import type { Said } from '@/api/hooks'
-import { renderRouted } from '@/test/inRouter'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { Workspace } from '@/api'
+import type { ThreadEvent } from '@/api/thread'
+import { chatEvents } from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -20,252 +18,182 @@ const web: Workspace = {
   startup: null,
 }
 
-/** The box `claude` draws at its trust prompt, as the e2e fixture sends it. */
-const BOX = [
-  '╭──────────────────────────────────────────────╮',
-  '│ Bash command                                 │',
-  '│                                              │',
-  '│   cargo test -p yantra-core                  │',
-  '│                                              │',
-  '│ Do you want to proceed?                      │',
-  '│ > 1. Yes                                     │',
-  "│   2. Yes, and don't ask again for cargo test │",
-  '│   3. No, and tell Claude what to do (esc)    │',
-  '╰──────────────────────────────────────────────╯',
-  '',
-  '> ',
-].join('\r\n')
-
-const turn: Turn = {
-  who: 'claude',
-  at: '2026-09-06T11:39:00Z',
-  text: 'Running the unit tests first, without the container.',
-  tools: [{ name: 'Bash', target: 'cargo test -p yantra-core --lib' }],
-}
-
-const held: Said = {
-  said: 'held',
-  total: 1_944,
-  asked: 50,
-  turns: [turn],
-  at: '2026-09-06T11:59:48Z',
-  paging: false,
-  moved: false,
-}
-
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 10_000 })
 
-const bytes = (frame: { text: string } | { bytes: number[] }) =>
-  'bytes' in frame ? String.fromCharCode(...frame.bytes) : ''
+let server: Awaited<ReturnType<typeof daemon>>
+let onThread: ReturnType<typeof vi.fn<(thread: string) => void>>
 
-/** Everything the socket carried after the frame that opened the pty. */
-const typed = () => daemonised.heard.slice(1).map(bytes).join('')
+const of = (type: ThreadEvent['type']) => chatEvents.find((event) => event.type === type)!
+const say = (event: unknown) => server.say(JSON.stringify(event))
+const frames = () => server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))
 
-let daemonised: Awaited<ReturnType<typeof daemon>>
-let read: ReturnType<typeof vi.fn<(lines: number, before: number) => void>>
+async function open(thread?: string) {
+  render(<Chat onThread={onThread} thread={thread} workspace={web} />)
+  await settled(() => expect(server.asked).toHaveLength(1))
+  // The empty line appears once the socket is open.
+  await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+}
 
-const open = (said: Said = held, state: Parameters<typeof Chat>[0]['state'] = { state: 'awaiting_trust' }) =>
-  renderRouted(
-    <Chat
-      endActions={<button type="button">Resume</button>}
-      now={Date.parse('2026-09-06T12:00:00Z')}
-      onRead={read}
-      paneOpen
-      said={said}
-      state={state}
-      workspace={web}
-    />,
-  )
+function type(text: string) {
+  fireEvent.change(screen.getByLabelText('Message Claude in yantra-web'), { target: { value: text } })
+}
 
 beforeEach(async () => {
   browser()
-  read = vi.fn<(lines: number, before: number) => void>()
-  daemonised = await daemon()
-  vi.stubGlobal('location', new URL(`http://127.0.0.1:${daemonised.port}/`))
-  // jsdom has no layout, so a chat that scrolls to its newest turn needs this.
-  Element.prototype.scrollIntoView = () => {}
+  onThread = vi.fn<(thread: string) => void>()
+  server = await daemon()
+  vi.stubGlobal('location', new URL(`http://127.0.0.1:${server.port}/`))
 })
 
 afterEach(async () => {
   cleanup()
   vi.unstubAllGlobals()
-  await daemonised.stop()
+  await server.stop()
 })
 
-describe('the chat view of a live session', () => {
-  it('opens the workspace terminal socket and tells it a window, with no pane on screen', async () => {
+describe('the chat', () => {
+  it('opens on an empty conversation, and says why Send is off', async () => {
     await open()
-
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-    expect(daemonised.asked).toEqual(['/api/workspaces/yantra-web/terminal'])
-    // The socket is the only way in: nothing here posts keys to the daemon.
-    expect(document.querySelector('.xterm')).toBeNull()
+    expect(server.asked).toEqual(['/api/workspaces/yantra-web/chat'])
+    await settled(() => expect(screen.getByText(/Ask Claude something about yantra-web/)).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
+    expect(screen.getByText('Type a message to send it.')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toContain('own worktree on cachyos-g14')
   })
 
-  it("draws the agent's own dialog as rows, in the agent's words", async () => {
-    await open()
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-
-    daemonised.print(BOX)
-
-    await settled(() => expect(screen.getByText('Claude is asking')).toBeTruthy())
-    const options = screen.getAllByRole('button', { name: /^[123]/ })
-    expect(options).toHaveLength(3)
-    expect(options[0]?.textContent).toContain('Yes')
-    // D5 §5.2: Yantra offers no verb of its own beside the agent's numbers.
-    expect(screen.queryByRole('button', { name: /^(Allow|Trust|Approve|Deny)$/ })).toBeNull()
+  it('attaches to the thread the URL names', async () => {
+    await open('1a2b3c4d')
+    expect(server.asked).toEqual(['/api/workspaces/yantra-web/chat?thread=1a2b3c4d'])
   })
 
-  it('types the option number and Enter into the pane, and re-reads the transcript', async () => {
+  it('sends a turn, keeps the new thread in the URL, and streams the answer as Markdown', async () => {
     await open()
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-    daemonised.print(BOX)
-    await settled(() => expect(screen.getByText('Claude is asking')).toBeTruthy())
-
-    fireEvent.click(screen.getAllByRole('button', { name: /^1/ })[0]!)
-
-    await settled(() => expect(typed()).toBe('1\r'))
-    expect(screen.getByRole('status').textContent).toContain('Typed 1 and Enter')
-    // The turns come from the file, so an answer is followed by a fresh read.
-    expect(read).toHaveBeenCalledWith(50, 0)
-  })
-
-  it('types what the composer holds into the pane, and empties it', async () => {
-    await open()
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-
-    const field = screen.getByLabelText('Message Claude in yantra-web')
-    fireEvent.change(field, { target: { value: 'run the whole crate' } })
+    type('run the tests')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    await settled(() => expect(typed()).toBe('run the whole crate\r'))
-    expect((field as HTMLInputElement).value).toBe('')
-    expect(screen.getByRole('status').textContent).toContain('Typed your message into the pane')
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'run the tests' }]))
+    expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').value).toBe('')
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
+
+    say(of('thread.started'))
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'user_text', delta: 'run the tests', itemId: 'user:1' } })
+    say(of('turn.started'))
+    say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'assistant_text', delta: 'Running **the', itemId: 'm:1' } })
+    say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'assistant_text', delta: ' tests**.', itemId: 'm:1' } })
+
+    const strong = await settled(() => screen.getByText('the tests'))
+    expect(strong.tagName).toBe('STRONG')
+    expect(screen.getByText('run the tests').closest('article')?.getAttribute('data-who')).toBe('you')
+    // While a turn runs, Stop stands where Send was.
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy()
   })
 
-  /** **4.1.3, finding 103.** A live region announces the text that arrived, so
-   *  a second send writing the string React already holds is silent. */
-  it('empties the status line between two identical sends, so both are announced', async () => {
+  it('never renders raw HTML from a reply', async () => {
     await open()
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-    const field = screen.getByLabelText('Message Claude in yantra-web')
-    const said = () => screen.getByRole('status').textContent
+    say({ threadId: 't', type: 'content.delta', payload: { streamKind: 'assistant_text', delta: '<img src=x onerror="alert(1)"> hi', itemId: 'm:1' } })
+    await settled(() => expect(document.querySelector('.chat__markdown')?.textContent).toContain('hi'))
+    expect(document.querySelector('img')).toBeNull()
+  })
 
-    fireEvent.change(field, { target: { value: 'run it' } })
+  it('draws a tool as a card with its status, command and output', async () => {
+    await open()
+    say(of('item.started'))
+    const card = await settled(() => screen.getByText('cargo test').closest('article')!)
+    expect(within(card).getByText('Command')).toBeTruthy()
+    expect(within(card).getByText('running')).toBeTruthy()
+
+    say(of('item.completed'))
+    await settled(() => expect(within(card).getByText('done')).toBeTruthy())
+    expect(within(card).getByText('test result: ok')).toBeTruthy()
+  })
+
+  it.each([
+    ['Accept', 'accept'],
+    ['Accept always', 'acceptAlways'],
+    ['Decline', 'decline'],
+  ] as const)('sends %s as its decision, and the card goes when it is resolved', async (label, decision) => {
+    await open()
+    say(of('request.opened'))
+    await settled(() => expect(screen.getByText('Claude asks to run')).toBeTruthy())
+    expect(screen.getByText('Run the unit tests')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('Claude is waiting for your answer.')
+
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision }]))
+
+    say({ ...of('request.resolved'), payload: { requestId: 'r1', requestType: 'exec_command_approval', decision } })
+    await settled(() => expect(screen.queryByText('Claude asks to run')).toBeNull())
+  })
+
+  it('stops a running turn, and says it stopped', async () => {
+    await open()
+    type('count to 400')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await settled(() => expect(said()).toBe('Typed your message into the pane.'))
+    say(of('turn.started'))
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Stop' })))
 
-    fireEvent.change(field, { target: { value: 'run it' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(said()).toBe('')
-    await settled(() => expect(said()).toBe('Typed your message into the pane.'))
+    await settled(() => expect(frames()).toContainEqual({ type: 'cancel' }))
+    expect(screen.getByRole('status').textContent).toBe('Stopping Claude…')
+    say({ threadId: 't', type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude stopped.'))
+    expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy()
   })
 
-  /** **Finding 120.** A disabled control that gives no reason reads as broken.
-   *  The boards draw no line for it, so the reason is the description. */
-  it('says why Send is off, and drops the reason once it is on', async () => {
+  it('shows the context the last turn used', async () => {
     await open()
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-
-    const off = screen.getByRole('button', { name: 'Send' })
-    await settled(() => expect(off.getAttribute('aria-describedby')).toBeTruthy())
-    const reason = document.getElementById(off.getAttribute('aria-describedby')!)
-    expect(reason?.textContent).toBe('Type a message to send it.')
-
-    fireEvent.change(screen.getByLabelText('Message Claude in yantra-web'), {
-      target: { value: 'run it' },
-    })
-    expect(screen.getByRole('button', { name: 'Send' }).getAttribute('aria-describedby')).toBeNull()
+    say(of('thread.token-usage.updated'))
+    const meter = await settled(() => screen.getByRole('meter', { name: 'Context used' }))
+    expect(meter.getAttribute('value')).toBe('29149')
+    expect(screen.getByText('context 15% · 29k of 200k')).toBeTruthy()
   })
 
-  it('says the pane could not be reached, and offers the Terminal tab, when the socket is refused', async () => {
+  it("draws a failed turn in Claude's own words", async () => {
     await open()
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-
-    daemonised.say('ssh: connect to host cachyos-g14 port 22: No route to host')
-
-    await settled(() =>
-      expect(screen.getByRole('alert').textContent).toContain('The pane could not be reached'),
-    )
-    expect(screen.getByRole('alert').textContent).toContain('No route to host')
-    expect(screen.getByRole('link', { name: 'Terminal' }).getAttribute('href')).toBe(
-      '/w/yantra-web?view=terminal',
-    )
-  })
-})
-
-/** **2.2.2, finding 104.** The transcript is re-read about every five seconds,
- *  and a scroll to the foot on every read takes the page away from whoever
- *  scrolled up to read an older turn. */
-describe('the chat view scrolling itself to the newest turn', () => {
-  /** The foot's sentinel, watched: `isIntersecting` is the whole of what the
-   *  component reads, and jsdom has no observer of its own. */
-  const bottom = (seen: boolean) => act(() => watching?.([{ isIntersecting: seen }]))
-
-  let watching: ((seen: { isIntersecting: boolean }[]) => void) | null = null
-  let scrolled: ReturnType<typeof vi.fn<Element['scrollIntoView']>>
-  const later: { read: (next: Said) => void } = { read: () => {} }
-
-  /** `said` in state, so a five-second read is one call rather than a remount. */
-  function Reading() {
-    const [current, setCurrent] = useState(held)
-    useEffect(() => {
-      later.read = setCurrent
-    }, [])
-    return (
-      <Chat
-        endActions={null}
-        now={Date.parse('2026-09-06T12:00:00Z')}
-        onRead={read}
-        paneOpen
-        said={current}
-        state={{ state: 'awaiting_trust' }}
-        workspace={web}
-      />
-    )
-  }
-
-  beforeEach(() => {
-    watching = null
-    scrolled = vi.fn<Element['scrollIntoView']>()
-    Element.prototype.scrollIntoView = scrolled
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        constructor(handler: (seen: { isIntersecting: boolean }[]) => void) {
-          watching = handler
-        }
-        observe() {}
-        disconnect() {}
-      },
-    )
+    say(chatEvents[chatEvents.length - 1])
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The turn failed')
+    expect(alert.textContent).toContain('Not logged in · Please run /login')
+    // Asking again would fail the same way.
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 
-  it('stops pinning the foot once the reader scrolls away, and pins again when they return', async () => {
-    await renderRouted(<Reading />)
-    await settled(() => expect(daemonised.heard.length).toBe(1))
-    expect(scrolled).toHaveBeenCalled()
+  it('draws a closed socket, and Try again reopens it on the same thread', async () => {
+    await open()
+    say(of('thread.started'))
+    await settled(() => expect(onThread).toHaveBeenCalled())
+    server.hangUp()
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The chat socket closed')
+    expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').disabled).toBe(true)
 
-    bottom(false)
-    scrolled.mockClear()
-    act(() => later.read({ ...held, at: '2026-09-06T12:00:48Z' }))
-    expect(scrolled).not.toHaveBeenCalled()
-
-    bottom(true)
-    act(() => later.read({ ...held, at: '2026-09-06T12:01:48Z' }))
-    expect(scrolled).toHaveBeenCalled()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await settled(() => expect(server.asked).toHaveLength(2))
+    expect(server.asked[1]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d')
+    await settled(() => expect(screen.queryByRole('alert')).toBeNull())
   })
-})
 
-describe('the chat view of a session that ended', () => {
-  it('freezes the turns under an end card, and offers no composer', async () => {
-    await open(held, { state: 'finished' })
+  it('draws a refused socket, with nothing to retry', async () => {
+    const port = server.port
+    await server.stop()
+    render(<Chat onThread={onThread} workspace={web} />)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The daemon refused the chat')
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
+    expect(port).toBeGreaterThan(0)
+    server = await daemon()
+  })
 
-    expect(screen.getByText(/claude exited 0 in tmux yantra-web on cachyos-g14/)).toBeTruthy()
-    expect(screen.getByText(turn.text)).toBeTruthy()
-    expect(screen.queryByLabelText('Message Claude in yantra-web')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy()
-    // Nothing is attached to a session nobody is talking to (ADR-0019).
-    expect(daemonised.asked).toEqual([])
+  it('draws a machine it could not reach, and a busy daemon', async () => {
+    await open()
+    say({ type: 'error', kind: 'unreachable', said: 'ssh: connect to host cachyos-g14 port 22: Connection refused' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('Connection refused')
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
+
+    say({ type: 'error', kind: 'busy', said: 'a turn is running' })
+    await settled(() => expect(screen.getByRole('alert').textContent).toContain('Claude is still answering'))
   })
 })

@@ -7,8 +7,9 @@ import { State } from '../mark/Mark'
 import { Eyebrow, Mono } from '../text/Text'
 import './ErrorSurface.css'
 
-/** What a surface needs of an error: `api/errors.ts` gives exactly this. */
-export type Described = Pick<ApiError, 'kind' | 'said' | 'retryable'> & { describe: () => string }
+/** What a surface needs of an error: `api/errors.ts` gives exactly this, and
+ *  `api/chat.ts` names kinds of its own. */
+export type Described = Pick<ApiError, 'said' | 'retryable'> & { kind: string; describe: () => string }
 
 export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
   /** The eyebrow: "Fleet", "Session / Chat". */

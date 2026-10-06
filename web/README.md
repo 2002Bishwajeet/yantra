@@ -310,6 +310,30 @@ button, in the workspace header and above an unclaimed session's terminal.
   device, a track the browser took, a socket that never opened, and the
   daemon's text frame. The audio is never stored or logged here either (Q5).
 
+## The chat (Y-356)
+
+[`Chat.tsx`](src/screens/session/Chat.tsx) streams one conversation over the chat
+socket that [`api/chat.ts`](src/api/chat.ts) opens
+([ADR-0026](../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)).
+Each turn is `claude -p` in the thread's own git worktree, so it never writes
+the tree the Terminal tab's agent is in. Four things about the code:
+
+- **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
+  events and frames in T3 Code's vocabulary, credited at its top, and
+  `contract.gen.ts` checks them against what `yantrad` serialises.
+- **A pure reducer draws it.** [`timeline.ts`](src/screens/session/timeline.ts)
+  folds events into messages, tool cards, open requests, usage and the turn's
+  state; `useChat` owns the socket and the URL's `?thread=`.
+- **Every failure is a `ChatError` of its own kind**: refused, unreachable,
+  unknown thread, busy, bad frame, turn failed and closed. Only unreachable and
+  closed offer Try again, and a socket is never reopened behind the person's
+  back, because the daemon cancels a turn whose socket closed.
+- **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
+  `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it
+  costs about 48 KB gzip (15 KB to 63 KB). The first load did not move.
+
+The Transcript tab below is unchanged and still draws text as text.
+
 ## The transcript (Y-309, Y-310)
 
 [`Transcript.tsx`](src/screens/session/Transcript.tsx) draws `POST
