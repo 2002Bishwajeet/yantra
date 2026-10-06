@@ -259,6 +259,11 @@ fn a_redacted_transcript_is_staged_for_every_harness_and_still_resumes() -> Resu
     for (path, _) in others {
         machine.put(&format!("/home/dev/{path}"), &transcript_line())?;
     }
+    // A quoted `.env` line: the JSON escapes the quotes around the value.
+    machine.put(
+        "/home/dev/.codex/sessions/2026/10/06/rollout-c.jsonl",
+        &format!("{{\"type\":\"message\",\"text\":\"DATABASE_PASSWORD=\\\"{DB_PASSWORD}\\\"\"}}\n"),
+    )?;
     machine.put(
         "/home/dev/.grok/sessions/s2.json",
         &format!("{{\n  \"messages\": [\n    \"API_KEY: {API_TOKEN}\"\n  ]\n}}\n"),
@@ -268,7 +273,11 @@ fn a_redacted_transcript_is_staged_for_every_harness_and_still_resumes() -> Resu
     // c. One pass.
     let summary = machine.ok("yantra history stage")?;
     ensure!(summary.contains("failed:     0"), "{summary}");
-    let mut staged = vec![format!("claude/{claude_rel}"), "grok/s2.json".to_owned()];
+    let mut staged = vec![
+        format!("claude/{claude_rel}"),
+        "grok/s2.json".to_owned(),
+        "codex/2026/10/06/rollout-c.jsonl".to_owned(),
+    ];
     staged.extend(others.iter().map(|(_, s)| (*s).to_owned()));
     for rel in &staged {
         machine.ok(&format!("test -f {STAGING}/{rel}"))?;
@@ -282,6 +291,11 @@ fn a_redacted_transcript_is_staged_for_every_harness_and_still_resumes() -> Resu
         String::from_utf8_lossy(&leaked.stdout)
     );
     machine.ok(JSON_CHECK)?;
+    let open = machine.ok(&format!("find {STAGING} -type f ! -perm 600"))?;
+    ensure!(
+        open.is_empty(),
+        "staged copies other accounts can read: {open}"
+    );
     ensure!(
         machine.ok(&format!("cd && {LIVE_HASHES}"))? == before,
         "a live transcript changed"

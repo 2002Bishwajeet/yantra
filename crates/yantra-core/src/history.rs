@@ -13,7 +13,7 @@
 //! [ADR-0032]: ../../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md
 
 use std::collections::HashSet;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -25,14 +25,15 @@ pub const REDACTED: &str = "[REDACTED]";
 /// `gitleaks`' own rules, and one more. R18 §11.3 found the default set misses
 /// `DATABASE_PASSWORD=<17 characters>`: it has no known shape and too little
 /// entropy, so this rule has no entropy gate. A backslash ends the value
-/// because a JSON line escapes the newline after it.
+/// because a JSON line escapes the newline or quote after it; it may also
+/// come before the opening quote, as `\"` in a JSON line.
 pub const GITLEAKS_CONFIG: &str = r#"[extend]
 useDefault = true
 
 [[rules]]
 id = "yantra-assignment"
 description = "A name that says secret, assigned a value"
-regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Z0-9_]*\s*[=:]\s*["']?([^\s"'\\]{8,})'''
+regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Z0-9_]*\s*[=:]\s*(?:\\?["'])?([^\s"'\\]{8,})'''
 secretGroup = 2
 "#;
 
@@ -372,8 +373,15 @@ fn is_json(text: &str) -> bool {
 }
 
 fn write_atomic(staged: &Path, scratch: &Path, text: &str, mtime: SystemTime) -> io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt as _;
     let temp = scratch.join(format!("stage-{}", std::process::id()));
-    let mut file = File::create(&temp)?;
+    // The live transcript is 0600, and some secrets survive redaction.
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&temp)?;
     file.write_all(text.as_bytes())?;
     // Set before the rename, so the file never appears in the folder with
     // another mtime.
@@ -455,6 +463,7 @@ fn prune_empty(dir: &Path) -> Result<bool, Error> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::os::unix::fs::PermissionsExt as _;
 
     /// R18 §11.3's three fake secrets, in the shapes that test used.
     const GHP: &str = "ghp_aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6";
@@ -553,6 +562,11 @@ mod tests {
                 DB_PASSWORD,
             ),
             (format!("db_password: '{DB_PASSWORD}'"), DB_PASSWORD),
+            // A quoted `.env` line, as a JSON line escapes it.
+            (
+                format!(r#""DATABASE_PASSWORD=\"{DB_PASSWORD}\"""#),
+                DB_PASSWORD,
+            ),
         ] {
             let found = re.captures(&text).and_then(|c| c.get(group));
             assert_eq!(found.map(|m| m.as_str()), Some(secret), "in {text}");
@@ -650,6 +664,8 @@ mod tests {
         let clean = fs::read_to_string(&staged).unwrap();
         assert!(!clean.contains(GHP) && !clean.contains(DB_PASSWORD));
         assert_eq!(fs::read_to_string(&live).unwrap(), text);
+        let mode = fs::metadata(&staged).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the staged copy is {mode:o}");
         assert_eq!(
             fs::metadata(&staged).unwrap().modified().unwrap(),
             fs::metadata(&live).unwrap().modified().unwrap()
@@ -672,7 +688,7 @@ mod tests {
 
         let later =
             fs::metadata(&live).unwrap().modified().unwrap() + std::time::Duration::from_secs(5);
-        let mut file = File::options().append(true).open(&live).unwrap();
+        let mut file = fs::File::options().append(true).open(&live).unwrap();
         file.write_all(line("more").as_bytes()).unwrap();
         file.set_modified(later).unwrap();
         drop(file);
