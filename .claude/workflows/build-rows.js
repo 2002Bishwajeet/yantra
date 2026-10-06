@@ -11,13 +11,14 @@ export const meta = {
   ],
 }
 
-// args: { today: 'YYYY-MM-DD' (required), maxRows?: 3, parallel?: 3, rows?: ['Y-371'], dryRun?: false }
+// args: { today: 'YYYY-MM-DD' (required), maxRows?: 3, parallel?: 3, rows?: ['Y-371'], retry?: ['Y-417'], dryRun?: false }
 const A = args || {}
 if (!A.today) throw new Error('pass args.today as YYYY-MM-DD')
 const TODAY = A.today
 const MAX_ROWS = A.maxRows ?? 3
 const PARALLEL = A.parallel ?? 3
 const DRY = !!A.dryRun
+const RETRY = A.retry || []
 const REPO = '/home/biswa/Github/homelab/yantra'
 const WT_ROOT = `${REPO}/.claude/worktrees`
 const REPORT = `${REPO}/.claude/build-loop/${TODAY}.md`
@@ -157,7 +158,7 @@ Rank the open rows in its §3 that an agent can finish alone today.
 Eligible: status ⬜ todo, every row in Depends is ✅ done or 🔵 review (a 🔵 review row has merged; only a release has not marked it), and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
 Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a real Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question.
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
-Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.
+Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}.` : ''}
 
 Priority, from CLAUDE.md §B7: 1 = closes or unblocks an open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the paths it will touch. Put every row you rejected in skipped with one line of reason.`
@@ -226,10 +227,12 @@ Never reset or delete existing commits: they are work a parked run kept. Report 
     { label: `setup:${row.id}`, phase: 'Build', schema: SETUP_SCHEMA, model: 'sonnet', effort: 'low' },
   )
   if (!setup) return park('the setup agent died')
+  // A retried row was parked on review findings, and only the report remembers them.
+  const retried = RETRY.includes(row.id) ? `\nThe owner asked to retry this parked row. Read why it was parked in the reports in ${REPO}/.claude/build-loop/, and fix those findings first.` : ''
   const prior = setup.commitsAhead > 0 ? `\nThe branch already has ${setup.commitsAhead} commits from an earlier run. Read them (git log -p origin/main..HEAD) and plan from where they stop.` : ''
 
   const plan = await agent(
-    `Plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${prior}
+    `Plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${prior}${retried}
 Write a short plan and the checks that prove the row's done condition. Set park=true if the row needs something CLAUDE.md §B7 excludes.${RULES(wt)}`,
     { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, model: 'opus', effort: row.kind === 'rust-transport' ? 'high' : 'medium' },
   )
