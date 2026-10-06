@@ -28,6 +28,13 @@ describe('General', () => {
     expect((select as HTMLSelectElement).value).toBe('pi')
   })
 
+  it('says no machine is the default when none is set', async () => {
+    mountSettings('desktop', '/settings/general')
+    const select = await screen.findByRole('combobox', { name: 'Default machine for new sessions' })
+    expect((select as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('none')
+    expect(screen.getByText(/preselects nothing/)).toBeTruthy()
+  })
+
   it('says the rest is fixed, and that everything is saved on this device', async () => {
     mountSettings('desktop', '/settings/general')
     expect(await screen.findByText('fixed')).toBeTruthy()

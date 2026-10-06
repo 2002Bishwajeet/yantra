@@ -7,9 +7,12 @@ import { route } from './lib/routes'
  *  `2002Bishwajeet/scratch`, so one row is already there and one is a clone. */
 const PATH = route('new').path
 
-// The phone's app bar is a second h1 over the screen's own.
+// The phone's app bar is a second h1 over the screen's own; wider screens draw a dialog.
 const heading = (page: Parameters<typeof axe>[0], name: string) =>
-  page.getByRole('heading', { level: 1, name }).first()
+  page
+    .getByRole('dialog', { name })
+    .or(page.getByRole('heading', { level: 1, name }))
+    .first()
 
 test.describe('the four steps', () => {
   test.beforeEach(async ({ page }) => {
@@ -60,7 +63,7 @@ test.describe('the four steps', () => {
 
   test('looks like the board', async ({ page, size }) => {
     await page.getByLabel('Name').fill('quiet-otter')
-    await screenshot(page, 'new-session-name', 'busy', size)
+    await screenshot(page, 'new-session-name', 'busy', size, { overlay: size !== 'phone' })
   })
 
   test('the source step joins the swept list to the machine, and search narrows it', async ({
@@ -76,7 +79,7 @@ test.describe('the four steps', () => {
     await expect(rows.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
     await expect(rows.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
     await expect(page.getByRole('button', { name: /GitLab/ })).toBeDisabled()
-    await screenshot(page, 'new-session-source', 'busy', size)
+    await screenshot(page, 'new-session-source', 'busy', size, { overlay: size !== 'phone' })
 
     await page.getByLabel('Search your repositories').fill('scratch')
     await expect(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toHaveCount(0)
@@ -98,7 +101,7 @@ test.describe('the four steps', () => {
     await expect(folders.getByText('README.md')).toBeVisible()
     await expect(folders.getByRole('button', { name: /^(README\.md|archive)/ })).toHaveCount(0)
     await expect(folders.getByText('.github')).toHaveCount(0)
-    await screenshot(page, 'new-session-local', 'busy', size)
+    await screenshot(page, 'new-session-local', 'busy', size, { overlay: size !== 'phone' })
 
     await page.getByRole('button', { name: 'Show hidden' }).click()
     await expect(folders.getByText('.github')).toBeVisible()
@@ -135,7 +138,7 @@ test.describe('all four steps, to a workspace that is running', () => {
 
     await expect(page.getByText('What opens in the session')).toBeVisible()
     await expect(page.getByText('open a tmux session on cachyos-g14 in ~/Github/yantra', { exact: false })).toBeVisible()
-    await screenshot(page, 'new-session-start', 'busy', size)
+    await screenshot(page, 'new-session-start', 'busy', size, { overlay: size !== 'phone' })
     await page.getByRole('button', { name: 'Create and open' }).click()
 
     const stages = page.getByRole('list', { name: 'Stages' })
@@ -166,7 +169,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     const stages = page.getByRole('list', { name: 'Stages' })
     await expect(stages.getByText('Cloning 2002Bishwajeet/scratch', { exact: false })).toBeVisible()
     await expect(stages.getByText(/Receiving objects/)).toBeVisible()
-    await screenshot(page, 'new-session-cloning', 'busy', size)
+    await screenshot(page, 'new-session-cloning', 'busy', size, { overlay: size !== 'phone' })
     await expect(page).toHaveURL('/w/brisk-heron?view=chat', { timeout: 15_000 })
   })
 })

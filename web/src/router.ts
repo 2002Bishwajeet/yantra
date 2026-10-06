@@ -18,7 +18,7 @@ import {
 } from '@/api/queries'
 import { asPlatform, type Platform } from '@/lib/platform'
 import { RouteError } from '@/m3/error-boundary/ErrorBoundary'
-import { Dashboard } from '@/screens/dashboard/Dashboard'
+import { Home } from '@/screens/dashboard/Home'
 import type { RoutePrimary } from '@/shell/primary'
 import { Nowhere, Shell } from '@/shell/Shell'
 import { asView, type View } from '@/views'
@@ -44,18 +44,24 @@ const root = createRootRouteWithContext<Context>()({
 })
 
 // The one eager route: everything else arrives with its chunk (ADR-0024 §3).
-const dashboard = createRoute({
+// `/new` is its child, so the dashboard stays mounted behind the modal (Y-376).
+const home = createRoute({
   getParentRoute: () => root,
-  path: '/',
-  component: Dashboard,
-  // D7 §3.6. The checklist under `/` publishes its own next step instead.
-  staticData: { primary: 'new-session' },
+  id: 'home',
+  component: Home,
   loader: ({ context: { client } }) => {
     void client.prefetchQuery(workspacesQuery())
     void client.prefetchQuery(machinesQuery())
     void client.prefetchQuery(sessionsQuery())
     void client.prefetchQuery(attentionQuery())
   },
+})
+
+const dashboard = createRoute({
+  getParentRoute: () => home,
+  path: '/',
+  // D7 §3.6. The checklist under `/` publishes its own next step instead.
+  staticData: { primary: 'new-session' },
   head: () => titled('Dashboard'),
 })
 
@@ -156,7 +162,7 @@ const asStep = (given: unknown): Step | undefined =>
   STEPS.find((one) => one === Number(given))
 
 const newSession = createRoute({
-  getParentRoute: () => root,
+  getParentRoute: () => home,
   path: '/new',
   validateSearch: (search: Record<string, unknown>): { step?: Step } => ({
     step: asStep(search.step),
@@ -241,7 +247,7 @@ const gallery = createRoute({
 })
 
 export const routeTree = root.addChildren([
-  dashboard,
+  home.addChildren([dashboard, newSession]),
   fleet,
   machines,
   machine,
@@ -249,7 +255,6 @@ export const routeTree = root.addChildren([
   usage,
   session,
   repair,
-  newSession,
   settings,
   settingsCategory,
   addDevice,

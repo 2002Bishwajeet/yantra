@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
-import { type Answers, HOME, listing, mountNew, unmountNew } from './harness'
+import { writePrefs } from '@/shell/prefs'
+import { type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
 
 afterEach(() => {
   cleanup()
   unmountNew()
+  writePrefs({ general: {} })
 })
 
 const type = (label: string | RegExp, value: string) =>
@@ -17,7 +19,7 @@ const press = (name: string | RegExp) => fireEvent.click(screen.getByRole('butto
  *  already on it. */
 async function toStepThree(answers: Answers = {}) {
   const asked = mountNew('desktop', '/new', answers)
-  await screen.findByRole('heading', { level: 1, name: 'New session' })
+  await screen.findByRole('dialog', { name: 'New session' })
   type('Name', 'quiet-otter')
   press('cachyos-g14')
   press('Continue')
@@ -31,7 +33,7 @@ async function toStepThree(answers: Answers = {}) {
 describe('step 1, the name and the machine', () => {
   it('offers a generated pair, another one on request, and refuses what the daemon would', async () => {
     mountNew('desktop', '/new')
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     const field = screen.getByLabelText('Name') as HTMLInputElement
     expect(field.value).toMatch(/^[a-z]+-[a-z]+$/)
 
@@ -47,7 +49,7 @@ describe('step 1, the name and the machine', () => {
    *  ticks Name and Machine together (NewSession, NewSessionSource). */
   it('names the boards four steps, and ticks two of them at once', async () => {
     mountNew('desktop', '/new')
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     const steps = () => within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
     expect(steps().map((one) => one.textContent)).toEqual(['1Name', '2Machine', '3Source', '4Start'])
     expect(steps()[0].getAttribute('aria-current')).toBe('step')
@@ -66,7 +68,7 @@ describe('step 1, the name and the machine', () => {
 
   it('takes one machine, and never one that is not there', async () => {
     mountNew('desktop', '/new')
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     const chips = within(screen.getByRole('group', { name: 'Machine' }))
     expect(chips.getByRole('button', { name: 'bishwajeets-macbook-pro · unreachable' })).toHaveProperty(
       'disabled',
@@ -92,7 +94,7 @@ describe('step 1, the name and the machine', () => {
 describe('step 2, where the code comes from', () => {
   it('joins the swept list to the machine, and searching narrows it in the browser', async () => {
     const asked = mountNew('desktop', '/new')
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
 
@@ -116,7 +118,7 @@ describe('step 2, where the code comes from', () => {
           ? [200, listing(HOME)]
           : [503, 'ssh: connect to host cachyos-g14 port 22: No route to host'],
     })
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
     const rows = within(await screen.findByRole('list', { name: 'Repositories' }))
@@ -128,7 +130,7 @@ describe('step 2, where the code comes from', () => {
 
   it('sends nobody to GitHub without a grant, and draws GitLab as later', async () => {
     mountNew('desktop', '/new', { 'GET /api/github': [200, contract.disconnected] })
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
     expect(await screen.findByText('GitHub is not signed in')).toBeTruthy()
@@ -144,7 +146,7 @@ describe('step 2, where the code comes from', () => {
       'POST /api/machines/cachyos-g14/dirs': (sent) =>
         sent.make === undefined ? [200, listing(String(sent.path ?? HOME))] : [200, made],
     })
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
     await screen.findByRole('button', { name: /Local directory/ })
@@ -176,7 +178,7 @@ describe('step 2, the local browser', () => {
       },
       ...answers,
     })
-    await screen.findByRole('heading', { level: 1, name: 'New session' })
+    await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
     await screen.findByRole('button', { name: /Local directory/ })
@@ -295,6 +297,24 @@ describe('step 4, starting', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/w/quiet-otter'))
   })
 
+  it('does not run twice when the form factor changes during the run (Y-361)', async () => {
+    const create = vi.fn((sent: Record<string, unknown>) => [201, { ...sent, startup: null }] as [number, unknown])
+    const asked = await toStepThree({
+      'POST /api/workspaces': create,
+      'POST /api/workspaces/quiet-otter/up': [200, contract.opened],
+    })
+    press('Create and open')
+    expect(await screen.findByText('Starting quiet-otter')).toBeTruthy()
+
+    resize('tablet')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    resize('phone')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(asked).toContain('POST /api/workspaces/quiet-otter/up'))
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/refused/)).toBeNull()
+  })
+
   /** 4.1.3: the four stages advance on a poll with no navigation, so the track
    *  over them is a live region and it says which stage is which. */
   it('draws a progress track that says what the stages are doing', async () => {
@@ -319,5 +339,145 @@ describe('step 4, starting', () => {
     expect(screen.getByText(/Creating workspace quiet-otter was refused/)).toBeTruthy()
     press('Try again')
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('the modal and the page', () => {
+  it.each(['desktop', 'tablet'] as const)('draws a dialog named New session on a %s', async (size) => {
+    mountNew(size, '/new')
+    const dialog = await screen.findByRole('dialog', { name: 'New session' })
+    expect(within(dialog).getByRole('heading', { level: 2, name: 'New session' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { level: 1, name: 'New session' })).toBeNull()
+  })
+
+  it('draws a page with an h1 and no dialog on a phone', async () => {
+    mountNew('phone', '/new')
+    expect(await screen.findAllByRole('heading', { level: 1, name: 'New session' })).not.toHaveLength(0)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('goes back to the dashboard from the close button', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('Close')
+    await waitFor(() => expect(location.pathname).toBe('/'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('goes back to the dashboard on Escape', async () => {
+    mountNew('desktop', '/new')
+    const dialog = await screen.findByRole('dialog', { name: 'New session' })
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(location.pathname).toBe('/'))
+  })
+
+  it('goes back to the dashboard from Cancel', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    fireEvent.click(screen.getByRole('link', { name: 'Cancel' }))
+    await waitFor(() => expect(location.pathname).toBe('/'))
+  })
+
+  it('keeps the form when the scrim is clicked', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    const scrim = document.querySelector('.m3-scrim')!
+    fireEvent.pointerDown(scrim, { pointerType: 'mouse', button: 0 })
+    fireEvent.mouseDown(scrim, { button: 0 })
+    fireEvent.pointerUp(scrim, { pointerType: 'mouse', button: 0 })
+    fireEvent.mouseUp(scrim, { button: 0 })
+    fireEvent.click(scrim)
+    await new Promise((done) => setTimeout(done, 50))
+    expect(location.pathname).toBe('/new')
+    expect(screen.getByRole('dialog', { name: 'New session' })).toBeTruthy()
+  })
+
+  it('heads step 2 with the tile, the name and the machine', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    type('Name', 'quiet-otter')
+    press('cachyos-g14')
+    press('Continue')
+    const dialog = await screen.findByRole('dialog', { name: 'quiet-otter' })
+    expect(within(dialog).getByRole('heading', { level: 2, name: 'quiet-otter' })).toBeTruthy()
+    expect(dialog.querySelector('.ns-dialog__tile')).toBeTruthy()
+    expect(within(dialog).getByText('on cachyos-g14')).toBeTruthy()
+  })
+})
+
+describe('the default machine', () => {
+  const pressed = () =>
+    within(screen.getByRole('group', { name: 'Machine' }))
+      .getAllByRole('button')
+      .filter((chip) => chip.getAttribute('aria-pressed') === 'true')
+  const stays = async () => {
+    await screen.findByRole('group', { name: 'Machine' })
+    expect(pressed()).toHaveLength(0)
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  }
+
+  it('presses a reachable default once the list arrives, and Continue enables with a name', async () => {
+    writePrefs({ general: { defaultMachine: 'cachyos-g14' } })
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['cachyos-g14']))
+    type('Name', 'quiet-otter')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
+  })
+
+  it('selects no machine when there is no default', async () => {
+    mountNew('desktop', '/new')
+    await stays()
+  })
+
+  it('does not select a default that is offline', async () => {
+    writePrefs({ general: { defaultMachine: 'bishwajeets-macbook-pro' } })
+    mountNew('desktop', '/new')
+    await stays()
+  })
+
+  it('does not select a default the list does not hold', async () => {
+    writePrefs({ general: { defaultMachine: 'gone' } })
+    mountNew('desktop', '/new')
+    await stays()
+  })
+
+  it('yields to ?machine=', async () => {
+    writePrefs({ general: { defaultMachine: 'pi' } })
+    mountNew('desktop', '/new?machine=cachyos-g14')
+    await screen.findByRole('dialog', { name: 'New session' })
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['cachyos-g14']))
+  })
+
+  it('does not press a ?machine= that is unreachable', async () => {
+    mountNew('desktop', '/new?machine=bishwajeets-macbook-pro')
+    await stays()
+  })
+
+  it('does not overwrite a machine picked before the list was read again', async () => {
+    writePrefs({ general: { defaultMachine: 'cachyos-g14' } })
+    mountNew('desktop', '/new')
+    await waitFor(() => expect(pressed()).toHaveLength(1))
+    press('pi')
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['pi']))
+  })
+
+  it('selects nothing and shows the error when the machines cannot be read', async () => {
+    writePrefs({ general: { defaultMachine: 'cachyos-g14' } })
+    mountNew('desktop', '/new', {
+      'GET /api/machines': [200, { looked: 'failed', age_seconds: 0, error: 'tailscale: not running' }],
+    })
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Machines could not be read')
+    expect(screen.queryByRole('group', { name: 'Machine' })).toBeNull()
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('chooses no machine when the general pref is corrupt', async () => {
+    writePrefs({ general: { defaultMachine: 42 } })
+    mountNew('desktop', '/new')
+    await stays()
   })
 })
