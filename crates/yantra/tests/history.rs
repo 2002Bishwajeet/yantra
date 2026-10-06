@@ -289,7 +289,7 @@ fn a_redacted_transcript_is_staged_for_every_harness_and_still_resumes() -> Resu
 
     // d. The staged copy resumes, alone, in a fresh HOME.
     machine.ok(&format!(
-        "mkdir -p ~/fresh/.claude/projects/$(dirname {claude_rel}) && \
+        "mkdir -p ~/fresh/.claude/projects/\"$(dirname -- '{claude_rel}')\" && \
          cp ~/.claude.json ~/fresh/ && \
          cp {STAGING}/claude/{claude_rel} ~/fresh/.claude/projects/{claude_rel} && \
          : > {API_LOG}"
