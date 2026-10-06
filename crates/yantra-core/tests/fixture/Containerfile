@@ -38,17 +38,20 @@ RUN case "$(uname -m)" in \
  && rm /tmp/opencode.tar.gz
 
 # A real claude for tests/claude.rs (Y-356): the vendor's musl native build,
-# pinned by version and by the checksum its release manifest names.
+# pinned by version and by the checksum its release manifest names. It lives
+# off PATH and outside agent::CANDIDATES, so the tests that stub claude or need
+# none still find what they expect; tests/claude.rs links it into place.
 ARG CLAUDE=2.1.291
 RUN case "$(uname -m)" in \
       x86_64) arch=x64 sum=e4b1fb39b56a6798063fa04912e838c01dd58dffeb238d6dcd31ad2d172e82c5 ;; \
       aarch64) arch=arm64 sum=582811002a94033fb27f1a307ab893a32ebac827b4ea1b20f72eb778ccf834ab ;; \
       *) echo "no claude build for $(uname -m)" >&2; exit 1 ;; \
     esac \
- && wget -q -O /usr/local/bin/claude \
+ && mkdir -p /opt/claude \
+ && wget -q -O /opt/claude/claude \
       "https://downloads.claude.ai/claude-code-releases/${CLAUDE}/linux-${arch}-musl/claude" \
- && echo "${sum}  /usr/local/bin/claude" | sha256sum -c - \
- && chmod 755 /usr/local/bin/claude
+ && echo "${sum}  /opt/claude/claude" | sha256sum -c - \
+ && chmod 755 /opt/claude/claude
 
 EXPOSE 22
 

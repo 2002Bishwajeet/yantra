@@ -128,6 +128,8 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
          && chmod 400 .credentials.json \
          && printf '{{\"model\":\"haiku\"}}' > settings.json && chown {USER}:{USER} settings.json"
     ))?;
+    // Where the vendor's installer links it; the image keeps it off PATH.
+    fixture.run("mkdir -p ~/.local/bin && ln -s /opt/claude/claude ~/.local/bin/claude")?;
     fixture.run(&format!(
         "mkdir -p {REPO} && cd {REPO} && git init -q && echo one > README \
          && git add README && git -c user.name=t -c user.email=t@example.com commit -qm one"
