@@ -88,7 +88,7 @@ function Install(props: { machine: string }) {
 
   const press = () => {
     const since = newestInstall(events, machine)?.at ?? 0
-    const waiting = () => setWatch({ since, pressed: Date.now() })
+    const waiting = () => setWatch({ since, pressed: Date.now(), mic: false })
     install.mutate({ machine }, {
       onSuccess: waiting,
       // One is running already, and its result is the one to wait for.

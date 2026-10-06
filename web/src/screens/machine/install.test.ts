@@ -25,8 +25,8 @@ describe('the install result', () => {
   })
 
   it('answers a press only when it is newer than what the page had seen', () => {
-    expect(answer(events, 'pi', { since: 30, pressed: 0 })).toBeNull()
-    expect(answer(events, 'pi', { since: 20, pressed: 0 })?.at).toBe(30)
+    expect(answer(events, 'pi', { since: 30, pressed: 0, mic: false })).toBeNull()
+    expect(answer(events, 'pi', { since: 20, pressed: 0, mic: false })?.at).toBe(30)
   })
 
   it('needs a password only where install.rs put sudo in front', () => {

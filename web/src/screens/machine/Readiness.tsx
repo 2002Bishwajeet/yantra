@@ -143,8 +143,9 @@ export function ReadinessCard(props: {
 
   const press = () => {
     const since = newestInstall(events, name)?.at ?? 0
-    const waiting = () => setWatch({ since, pressed: Date.now() })
-    install.mutate({ machine: name, mic: offerMic && mic }, {
+    const asked = offerMic && mic
+    const waiting = () => setWatch({ since, pressed: Date.now(), mic: asked })
+    install.mutate({ machine: name, mic: asked }, {
       onSuccess: waiting,
       // One is running already, and its result is the one to wait for.
       onError: (error) => {

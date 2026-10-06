@@ -3,7 +3,7 @@ import type { Reading } from '@/api/client'
 import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
 import { missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
-import { answer, isLinger, listed, needsSudo, newestInstall, type Watch } from './install'
+import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
 
 /** D7 §4.3: what the Readiness card says, which decides its one action. */
 export type Verdict =
@@ -56,8 +56,12 @@ export function verdictOf(input: {
     return { kind: 'missing', missing, result: fresh ?? newestInstall(events, name) ?? null, fresh: fresh !== null }
   }
 
-  // ADR-0031 §2: a package command here was run by hand since; only linger is the microphone's.
-  if (stopped?.commands.some(isLinger)) return { kind: 'sudo', missing: [nameOf('mic')], result: stopped }
+  // ADR-0031 §1–2: with every basic there, a sudo step this press stopped is the
+  // microphone's, until doctor finds the microphone.
+  const mic = checks.find((one) => one.check === 'mic')
+  if (watch?.mic && stopped?.commands.some(needsSudo) && mic?.state !== 'present') {
+    return { kind: 'sudo', missing: [nameOf('mic')], result: stopped }
+  }
 
   // ADR-0031 §9: the microphone is optional, so its absence never titles the card.
   const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check) && one.check !== 'mic')

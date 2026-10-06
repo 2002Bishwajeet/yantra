@@ -149,6 +149,28 @@ describe('the Readiness card', () => {
     expect(card().getByRole('button', { name: 'Open a terminal' })).toBeTruthy()
   })
 
+  /** ADR-0031 §1: on a ready machine, a package step sudo stopped is the microphone's. */
+  it('asks for the microphone’s package step when sudo asks on a ready machine', async () => {
+    const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
+    daemon([202], [...checks(), mic])
+    const client = await draw(report([...checks(), mic]))
+    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    fireEvent.click(card().getByRole('button', { name: 'Install' }))
+    await card().findByRole('heading', { name: 'Installing on pi' })
+
+    const command = 'sudo apt-get install -y pipewire pipewire-pulse wireplumber'
+    const packages: Event = {
+      ...stopped,
+      at: 300,
+      said: 'pi: mic left for you: it needs root, and sudo asks for a password or a terminal there',
+      commands: [command],
+    }
+    act(() => client.setQueryData(keys.notifications(), ring([packages, earlier])))
+
+    await card().findByRole('heading', { name: 'microphone needs your password' })
+    expect(card().getByText(command)).toBeTruthy()
+  })
+
   it('installs the basics alone while Microphone is unticked', async () => {
     const asked = daemon()
     await draw(report([...checks(['tmux']), { check: 'mic', state: 'absent', detail: 'not installed' }]))

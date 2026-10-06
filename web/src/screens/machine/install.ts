@@ -11,8 +11,8 @@ export function newestInstall(events: Event[], machine: string): Event | undefin
  *  one is the answer, and the browser's own instant for the lost-result check.
  *  The answer is found by comparing event times with each other, so the two
  *  clocks need not agree; the age the card prints does mix them, as every age
- *  in the dashboard does. */
-export type Watch = { since: number; pressed: number }
+ *  in the dashboard does. `mic` is whether the press asked for the microphone. */
+export type Watch = { since: number; pressed: number; mic: boolean }
 
 /** The result that answers this page's press, or null while it runs. */
 export function answer(events: Event[], machine: string, watch: Watch): Event | null {
@@ -23,10 +23,6 @@ export function answer(events: Event[], machine: string, watch: Watch): Event | 
 /** A command the person runs because sudo there wants a password
  *  (`Because::SudoAsks`, the one step install.rs prefixes with `sudo`). */
 export const needsSudo = (command: string) => command.startsWith('sudo ')
-
-/** The microphone's sudo step (install.rs `linger`), the one step Install
- *  runs with every basic there. */
-export const isLinger = (command: string) => command.startsWith('sudo loginctl enable-linger ')
 
 /** The daemon waits 15 minutes (`INSTALL_BUDGET`) and then says so, so a page
  *  that has heard nothing a minute later has lost the result — a daemon
