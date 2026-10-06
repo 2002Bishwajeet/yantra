@@ -260,10 +260,12 @@ async fn a_machine_with_everything_reports_present_except_the_beat() -> Result<(
 
     let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
     for check in &checks {
-        let wanted = if check.check == "heartbeat" {
-            State::Unknown
-        } else {
-            State::Present
+        // The mic is optional and this image has no PipeWire; tests/mic.rs in
+        // yantrad proves the present case on a systemd machine.
+        let wanted = match check.check {
+            "heartbeat" => State::Unknown,
+            "mic" => State::Absent,
+            _ => State::Present,
         };
         assert_eq!(check.state, wanted, "{}: {}", check.check, check.detail);
     }
