@@ -21,6 +21,7 @@ use yantra_core::identity;
 use yantra_core::install::{self, Outcome};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
+use yantra_core::mic;
 use yantra_core::notify;
 use yantra_core::price;
 use yantra_core::probe;
@@ -154,6 +155,11 @@ enum Command {
         /// Also set up the virtual microphone: PipeWire, its drop-in and linger (Linux)
         #[arg(long)]
         mic: bool,
+    },
+    /// Stream this laptop's microphone into a machine's virtual mic until Ctrl-C
+    Mic {
+        /// Machine, as `~/.ssh/config` spells it
+        machine: String,
     },
     /// Stop a tmux session by machine and name, for one no workspace claims
     Kill {
@@ -349,6 +355,7 @@ async fn main() -> ExitCode {
         Some(Command::Probe { machine, path }) => probe(&machine, &path).await,
         Some(Command::Clone { url, machine, into }) => clone_repo(&url, &machine, &into).await,
         Some(Command::Install { machine, mic }) => install_basics(&machine, mic).await,
+        Some(Command::Mic { machine }) => mic_stream(&machine).await,
         Some(Command::Kill { machine, session }) => kill(&machine, &session).await,
         Some(Command::Rm { workspace, force }) => rm(&workspace, force).await,
         Some(Command::Ls {
@@ -1348,6 +1355,68 @@ async fn install_basics(machine: &str, mic: bool) -> ExitCode {
             report_error(&err);
             ExitCode::FAILURE
         }
+    }
+}
+
+/// ADR-0031 §7. Ctrl-C is how it ends, so that is the one 0.
+async fn mic_stream(machine: &str) -> ExitCode {
+    let mut stream = match mic::open_at(machine) {
+        Ok(stream) => stream,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let (mut recorder, audio) = match mic::record() {
+        Ok(recorder) => recorder,
+        Err(err) => {
+            report_error(&err);
+            let _ = stream.close().await;
+            return ExitCode::FAILURE;
+        }
+    };
+    eprintln!(
+        "streaming the microphone to {machine}; Ctrl-C stops. The microphone stays open until then"
+    );
+    let ended = mic::relay(audio, &mut stream, tokio::signal::ctrl_c()).await;
+    let _ = recorder.start_kill();
+    let recorder = recorder.wait_with_output().await;
+    let closed = stream.close().await;
+    match (ended, closed) {
+        (Ok(mic::Ended::Stopped), Ok(())) => ExitCode::SUCCESS,
+        (Ok(mic::Ended::Recorder), _) => {
+            eprintln!("yantra: the microphone's recorder on this laptop ended on its own");
+            if let Ok(output) = recorder {
+                let said = String::from_utf8_lossy(&output.stderr);
+                if !said.trim().is_empty() {
+                    eprintln!("  it said: {}", said.trim());
+                }
+            }
+            ExitCode::FAILURE
+        }
+        // The writer's own exit says more than the copy that noticed it.
+        (_, Err(err)) | (Err(err), Ok(())) => {
+            report_error(&err);
+            if let Some(note) = mic_note(&err, machine) {
+                eprintln!("{note}");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// A writer that ran and exited usually means the machine has no virtual mic.
+/// 255 is `ssh`'s own failure, where that advice would be wrong.
+fn mic_note(err: &mic::Error, machine: &str) -> Option<String> {
+    match err {
+        mic::Error::Exited {
+            status: Some(255), ..
+        } => None,
+        mic::Error::Exited { .. } | mic::Error::Ended => Some(format!(
+            "\x20 note: the machine needs the virtual microphone. set it up with:\n\
+             \x20         yantra install {machine} --mic"
+        )),
+        _ => None,
     }
 }
 
@@ -3390,6 +3459,35 @@ mod tests {
             cli.command,
             Some(Command::Install { mic: true, .. })
         ));
+    }
+
+    /// Y-419: one machine, as `install` takes it.
+    #[test]
+    fn mic_takes_one_machine() {
+        let cli = Cli::try_parse_from(["yantra", "mic", "pi"]).expect("`mic` parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Mic { ref machine }) if machine == "pi"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "mic"]).is_err());
+    }
+
+    #[test]
+    fn a_writer_that_exited_names_the_install_and_ssh_failing_does_not() {
+        let exited = mic::Error::Exited {
+            status: Some(1),
+            stderr: "target not found".to_owned(),
+        };
+        let note = mic_note(&exited, "pi").expect("a note");
+        assert!(note.contains("yantra install pi --mic"), "{note}");
+        assert!(mic_note(&mic::Error::Ended, "pi").is_some());
+
+        let unreachable = mic::Error::Exited {
+            status: Some(255),
+            stderr: "Connection refused".to_owned(),
+        };
+        assert_eq!(mic_note(&unreachable, "pi"), None);
+        assert_eq!(mic_note(&mic::Error::NoRecorder, "pi"), None);
     }
 
     /// ADR-0031 §2: the microphone's row, and the linger command it left,

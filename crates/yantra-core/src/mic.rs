@@ -7,11 +7,17 @@
 //! I-26). **It keeps no buffer beyond the pipe and never logs or formats a
 //! payload** (Q5).
 //!
+//! `yantra mic` (§7, recipe B) adds the laptop half: [`record`] runs
+//! [`RECORDER`] here, and [`relay`] copies what it hears into a [`Stream`].
+//!
 //! [ADR-0031]: ../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md
 
+use std::future::Future;
+use std::process::Stdio;
 use std::time::Duration;
 
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::process::{Child, ChildStdout};
 use tokio::task::JoinHandle;
 
 use crate::acp;
@@ -20,6 +26,22 @@ use crate::ssh::{self, Ssh};
 /// ADR-0031 §5, verbatim. The variable is set here because a non-login ssh
 /// command has no `XDG_RUNTIME_DIR`, and `pw-cat` finds PipeWire through it.
 pub const WRITER: &str = "XDG_RUNTIME_DIR=/run/user/$(id -u) pw-cat --playback --raw --target yantra-mic-sink --format s16 --rate 16000 --channels 1 -";
+
+/// ADR-0031 §7's laptop half: the default source, in the format `WRITER` takes.
+pub const RECORDER: &[&str] = &[
+    "pw-record",
+    "--raw",
+    "--format",
+    "s16",
+    "--rate",
+    "16000",
+    "--channels",
+    "1",
+    "-",
+];
+
+/// 20 ms of 16 kHz mono s16le, the size the dashboard sends.
+const CHUNK: usize = 640;
 
 /// How long a closed stdin waits for `pw-cat` to drain and exit.
 const CLOSE_WITHIN: Duration = Duration::from_secs(5);
@@ -51,6 +73,21 @@ pub enum Error {
 
     #[error("the microphone's writer did not end within {} seconds of its input closing", CLOSE_WITHIN.as_secs())]
     Hung,
+
+    #[error("this laptop has no `pw-record`; it needs the PipeWire tools to read its microphone")]
+    NoRecorder,
+
+    #[error("could not read this laptop's microphone")]
+    Record(#[source] std::io::Error),
+}
+
+/// Why [`relay`] stopped copying without an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ended {
+    /// The recorder closed its output.
+    Recorder,
+    /// The caller's `stop` resolved.
+    Stopped,
 }
 
 fn said(stderr: &str) -> String {
@@ -108,6 +145,61 @@ pub fn open(ssh: &Ssh) -> Result<Stream, Error> {
 pub fn open_at(machine: &str) -> Result<Stream, Error> {
     let machine = ssh::machine_at(machine).ok_or(Error::NoStateDir)?;
     open(&Ssh::new(machine)?)
+}
+
+/// Starts [`RECORDER`] on this laptop. Its stdout is the audio; its stderr
+/// stays on the child.
+pub fn record() -> Result<(Child, ChildStdout), Error> {
+    spawn(RECORDER[0], &RECORDER[1..])
+}
+
+fn spawn(program: &str, args: &[&str]) -> Result<(Child, ChildStdout), Error> {
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        // A terminal's Ctrl-C is for `yantra`, which then ends this itself.
+        .process_group(0)
+        .spawn()
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => Error::NoRecorder,
+            _ => Error::Record(error),
+        })?;
+    let Some(stdout) = child.stdout.take() else {
+        return Err(Error::Record(std::io::Error::other(
+            "the recorder started without the pipe it was given",
+        )));
+    };
+    Ok((child, stdout))
+}
+
+/// Copies `recorder` into `stream` one chunk at a time until the recorder
+/// ends, `stop` resolves, or the writer exits ([`Error::Ended`]). It holds no
+/// more than one chunk and never looks inside it (Q5).
+pub async fn relay(
+    mut recorder: impl AsyncRead + Unpin,
+    stream: &mut Stream,
+    stop: impl Future,
+) -> Result<Ended, Error> {
+    let mut chunk = [0u8; CHUNK];
+    tokio::pin!(stop);
+    loop {
+        let read = tokio::select! {
+            read = recorder.read(&mut chunk) => read.map_err(Error::Record)?,
+            _ = &mut stop => return Ok(Ended::Stopped),
+            () = stream.stopped() => return Err(Error::Ended),
+        };
+        if read == 0 {
+            return Ok(Ended::Recorder);
+        }
+        // `stop` still counts while a stalled connection holds the write.
+        tokio::select! {
+            written = stream.write(&chunk[..read]) => written?,
+            _ = &mut stop => return Ok(Ended::Stopped),
+        }
+    }
 }
 
 impl Stream {
@@ -172,7 +264,9 @@ impl Stream {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use tokio::io::AsyncReadExt;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::ReadBuf;
 
     #[tokio::test]
     async fn bytes_arrive_unchanged_and_in_order_and_close_gives_eof() {
@@ -226,5 +320,99 @@ mod tests {
             error.to_string(),
             "the microphone's writer exited on a signal"
         );
+    }
+
+    #[test]
+    fn the_recorder_is_adr_0031s_command() {
+        assert_eq!(
+            RECORDER.join(" "),
+            "pw-record --raw --format s16 --rate 16000 --channels 1 -"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_recorders_bytes_arrive_unchanged_until_it_ends() {
+        let (mut mic_in, recorder) = tokio::io::duplex(64 * 1024);
+        let (writer, mut heard) = tokio::io::duplex(64 * 1024);
+        let mut stream = Stream::over(writer);
+        let said: Vec<u8> = (0..5000u32).map(|n| (n % 251) as u8).collect();
+        mic_in.write_all(&said).await.expect("the pipe takes it");
+        drop(mic_in);
+
+        let ended = relay(recorder, &mut stream, std::future::pending::<()>())
+            .await
+            .expect("nothing failed");
+        assert_eq!(ended, Ended::Recorder);
+        stream.close().await.expect("nothing to wait for");
+
+        let mut got = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), heard.read_to_end(&mut got))
+            .await
+            .expect("close gave the reader EOF")
+            .expect("a read");
+        assert_eq!(got, said);
+    }
+
+    #[tokio::test]
+    async fn stop_ends_the_copy_and_close_gives_the_reader_eof() {
+        let (mut mic_in, recorder) = tokio::io::duplex(64 * 1024);
+        let (writer, mut heard) = tokio::io::duplex(64 * 1024);
+        let mut stream = Stream::over(writer);
+        let (fire, stop) = tokio::sync::oneshot::channel::<()>();
+
+        let speaking = async {
+            mic_in
+                .write_all(&[7; CHUNK])
+                .await
+                .expect("the pipe takes it");
+            let mut got = [0u8; CHUNK];
+            heard.read_exact(&mut got).await.expect("it arrives");
+            let _ = fire.send(());
+            got
+        };
+        let (ended, got) = tokio::join!(relay(recorder, &mut stream, stop), speaking);
+        assert_eq!(ended.expect("nothing failed"), Ended::Stopped);
+        assert_eq!(got, [7; CHUNK]);
+
+        // The recorder is still open, so only `stop` can have ended it.
+        stream.close().await.expect("nothing to wait for");
+        let mut rest = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), heard.read_to_end(&mut rest))
+            .await
+            .expect("close gave the reader EOF")
+            .expect("a read");
+        assert!(rest.is_empty());
+        drop(mic_in);
+    }
+
+    struct Unplugged;
+
+    impl AsyncRead for Unplugged {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::other("unplugged")))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_recorder_that_cannot_be_read_is_a_record_error() {
+        let (writer, _heard) = tokio::io::duplex(64);
+        let mut stream = Stream::over(writer);
+        let error = relay(Unplugged, &mut stream, std::future::pending::<()>())
+            .await
+            .expect_err("the read failed");
+        assert!(matches!(error, Error::Record(_)), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_laptop_without_the_recorder_is_told_what_it_needs() {
+        let error = spawn("yantra-test-no-such-recorder", &[]).expect_err("not on PATH");
+        assert!(matches!(error, Error::NoRecorder), "{error}");
+        let said = error.to_string();
+        assert!(said.contains("`pw-record`"), "{said}");
+        assert!(said.contains("PipeWire"), "{said}");
     }
 }

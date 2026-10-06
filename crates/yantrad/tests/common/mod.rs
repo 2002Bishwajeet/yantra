@@ -233,8 +233,9 @@ pub fn repo_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// From the repository root, because `yantra`'s tests include this file too.
 pub fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture")
+    repo_root().join("crates/yantrad/tests/fixture")
 }
 
 fn unit_source(name: &str) -> String {
