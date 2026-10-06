@@ -38,7 +38,8 @@ export default defineConfig({
       animations: 'disabled',
       caret: 'hide',
       scale: 'css',
-      maxDiffPixelRatio: 0.01,
+      // Glyph noise measures 24 px; a changed word is about 300 px.
+      maxDiffPixels: 64,
       threshold: 0.2,
     },
   },
