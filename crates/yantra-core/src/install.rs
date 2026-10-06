@@ -652,9 +652,11 @@ exit 1"#,
     )
 }
 
-/// ADR-0031 §3 as amended 2026-10-05: only where there is no card.
+/// ADR-0031 §3 as amended 2026-10-05: only where there is no card. With no
+/// card WirePlumber already picks `yantra-mic` itself, so the test is the
+/// configured choice, which `get-default-source` does not show.
 const DEFAULT_SOURCE: &str = r#"export XDG_RUNTIME_DIR=/run/user/$(id -u)
-[ "$(pactl get-default-source 2>/dev/null)" = yantra-mic ] && { echo unchanged; exit 0; }
+pw-metadata -n default 0 default.configured.audio.source 2>/dev/null | grep -q '"yantra-mic"' && { echo unchanged; exit 0; }
 pactl set-default-source yantra-mic && echo changed"#;
 
 /// The account, then whether systemd keeps its services with nobody logged in.
