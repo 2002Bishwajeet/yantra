@@ -32,6 +32,10 @@ chat edits there while the workspace's TUI keeps the repository. Ending a sessio
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.
 
+`history::stage()` is the exception: it reaches no machine. It writes a redacted copy of this
+account's agent transcripts for Syncthing to send to the appliance
+([ADR-0032](../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md)).
+
 ## Why it looks the way it does
 
 Yantra orchestrates `ssh`, `tmux`, `tailscale` and `claude` rather than reimplementing them, so most

@@ -40,6 +40,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # than a build script, so nothing about it runs on a build that leaves the
 # feature off — which is R-24's first clause, avoided by construction.
 include_dir = "0.7"
+# Test-only: evaluates the gitleaks rule `history.rs` embeds (Y-430).
+regex = "1"
 portable-pty = "0.9"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 

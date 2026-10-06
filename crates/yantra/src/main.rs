@@ -16,6 +16,7 @@ use yantra_core::clone;
 use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::github::{self, Github};
+use yantra_core::history;
 use yantra_core::identity;
 use yantra_core::install::{self, Outcome};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
@@ -196,6 +197,11 @@ enum Command {
         #[command(subcommand)]
         action: GithubAction,
     },
+    /// This machine's conversation history, as the appliance receives it
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
     /// Say what each machine can and cannot do — a read, it changes nothing
     Doctor {
         /// ssh destination to check. Every machine a workspace names, if omitted
@@ -263,6 +269,13 @@ enum GithubAction {
         #[arg(long, conflicts_with = "id")]
         clear: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum HistoryAction {
+    /// Write a redacted copy of every agent transcript to the folder Syncthing
+    /// sends. Needs `gitleaks` on PATH
+    Stage,
 }
 
 #[derive(Debug, Subcommand)]
@@ -386,6 +399,9 @@ async fn main() -> ExitCode {
         Some(Command::Github {
             action: GithubAction::ClientId { id, clear },
         }) => github_client_id(id.as_deref(), clear),
+        Some(Command::History {
+            action: HistoryAction::Stage,
+        }) => history_stage(),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity {
@@ -1414,6 +1430,43 @@ async fn doctor(machine: Option<&str>, json: bool) -> ExitCode {
     }
 }
 
+/// One pass of ADR-0032's redaction job. Exit 0 only when every transcript
+/// has a current staging copy: `doctor`'s rule, so a timer's failure shows.
+fn history_stage() -> ExitCode {
+    match history::stage() {
+        Ok(report) => {
+            print!("{}", render_history(&report));
+            for failure in &report.failed {
+                eprintln!(
+                    "yantra: not staged: {}: {}",
+                    failure.live.display(),
+                    failure.reason
+                );
+            }
+            if report.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_history(report: &history::Report) -> String {
+    format!(
+        "written:    {}\nunchanged:  {}\nremoved:    {}\nfailed:     {}\nredactions: {}\n",
+        report.written.len(),
+        report.unchanged,
+        report.removed.len(),
+        report.failed.len(),
+        report.redactions
+    )
+}
+
 /// The shape an installer and an agent read (D2.2), and a test pins it.
 /// `machines` is an object rather than a bare array so a later reading can be
 /// added beside it without moving what is already there.
@@ -2245,6 +2298,31 @@ mod tests {
             Some(Command::Mcp { daemon }) if daemon == "http://x:7717"
         ));
         assert!(Cli::try_parse_from(["yantra", "mcp"]).is_err());
+    }
+
+    #[test]
+    fn history_stage_parses() {
+        let cli = Cli::try_parse_from(["yantra", "history", "stage"]).expect("parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::History {
+                action: HistoryAction::Stage
+            })
+        ));
+    }
+
+    #[test]
+    fn the_history_summary_has_one_line_per_class() {
+        let report = history::Report {
+            written: vec![PathBuf::from("a"), PathBuf::from("b")],
+            unchanged: 7,
+            redactions: 3,
+            ..history::Report::default()
+        };
+        assert_eq!(
+            render_history(&report),
+            "written:    2\nunchanged:  7\nremoved:    0\nfailed:     0\nredactions: 3\n"
+        );
     }
 
     /// `--agent` is a value enum rather than a flag, so the spelling users type

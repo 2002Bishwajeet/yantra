@@ -53,6 +53,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `ssh-identity --machine m --user u` when ssh logs in to `m` as someone else | 1 | a block already in the config, or an owner's `Host *` above the new one, wins, so the verb did not do what it says. It names the account that wins, and it rewrites nothing (ADR-0009, ADR-0029) |
 | `ls repos` with nothing matching `--search` | **0** | a reading: the count under the table says `0 of N`, which is a filter that kept nothing and not an empty account |
 | `mcp`, when stdin ends | **0** | an MCP client closes the server by closing its stdin. A daemon that refuses or cannot be reached is a tool result with `isError`, not an exit, because the client is still talking. Only a stdout that cannot be written is 1 |
+| `history stage`, unless every transcript has a current redacted copy | 1 | `doctor`'s rule, so a timer's failure shows. A file it could not stage is named on stderr, and no `gitleaks` on PATH stages nothing ([ADR-0032](../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md)) |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.

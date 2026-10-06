@@ -31,6 +31,7 @@ yantra github logout             # remove it
 yantra github status             # whom GitHub says the grant in this shell belongs to
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
 yantra relay <url> [--token T]   # write that relay down for yantrad, and test it
+yantra history stage             # redact this machine's agent transcripts into the folder Syncthing sends
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
