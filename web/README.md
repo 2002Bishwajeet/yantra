@@ -684,7 +684,7 @@ so a developer's own fonts never enter one. `just web-e2e` runs the suite in tha
 image with `CI=1`, and `just web-e2e --update-snapshots=changed <spec>` regenerates a spec's
 baselines. Write the mode with `=`: Playwright reads a bare `--update-snapshots <spec>` as a mode.
 The recipe reads the image from `web.yml`.
-The screenshot budget is an absolute pixel count in [`playwright.config.ts`](playwright.config.ts), and a changed word fails it.
+The screenshot budget is an absolute pixel count per size in [`playwright.config.ts`](playwright.config.ts), and a changed word fails it.
 
 The recipe's second mount matters in a git worktree, where `node_modules` is a symlink
 to the main checkout's. The container has no mount for the symlink's target,

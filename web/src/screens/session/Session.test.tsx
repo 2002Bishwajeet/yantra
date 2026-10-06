@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { renderInApp } from '@/test/inApp'
@@ -164,18 +164,20 @@ describe('one workspace, four views the URL carries', () => {
         }
       },
     )
-    let show: (view: View) => void = () => {}
+    const control: { show: (view: View) => void } = { show: () => {} }
     function Switch() {
       const [view, setView] = useState<View>('chat')
-      show = setView
+      useEffect(() => {
+        control.show = setView
+      }, [setView])
       return <Workspace name="landing" view={view} />
     }
     await renderInApp(<Switch />, new QueryClient({ defaultOptions: { queries: { retry: false } } }))
 
     await waitFor(() => expect(sockets.map((one) => one.url).join()).toContain('/chat'))
-    act(() => show('transcript'))
+    act(() => control.show('transcript'))
     await screen.findByRole('link', { name: 'Transcript', current: 'page' })
-    act(() => show('chat'))
+    act(() => control.show('chat'))
 
     const chats = sockets.filter((one) => one.url.includes('/chat'))
     expect(chats).toHaveLength(1)
