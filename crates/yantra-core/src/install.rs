@@ -559,25 +559,27 @@ async fn set_up_mic<E: Exec>(exec: &E, cards: &str) -> Result<Outcome, Error> {
         Err(left) => (Some(left), false),
     };
 
-    let out = exec.exec(&configure_mic()).await?;
-    let set = if !out.success() {
-        Outcome::Failed { output: tail(&out) }
-    } else {
-        changed |= String::from_utf8_lossy(&out.stdout).trim() != "unchanged";
-        let listed = exec.exec(&format!("cat {} 2>/dev/null", sq(cards))).await?;
-        if has_card(&String::from_utf8_lossy(&listed.stdout)) {
-            settled_mic(changed)
-        } else {
-            let out = exec.exec(DEFAULT_SOURCE).await?;
-            if out.success() {
-                changed |= String::from_utf8_lossy(&out.stdout).trim() != "unchanged";
-                settled_mic(changed)
-            } else {
-                Outcome::Failed { output: tail(&out) }
-            }
+    let set = 'set: {
+        let out = exec.exec(&configure_mic()).await?;
+        if !out.success() {
+            break 'set Outcome::Failed { output: tail(&out) };
         }
+        changed |= printed_changed(&out);
+        let listed = exec.exec(&format!("cat {} 2>/dev/null", sq(cards))).await?;
+        if !has_card(&String::from_utf8_lossy(&listed.stdout)) {
+            let out = exec.exec(DEFAULT_SOURCE).await?;
+            if !out.success() {
+                break 'set Outcome::Failed { output: tail(&out) };
+            }
+            changed |= printed_changed(&out);
+        }
+        settled_mic(changed)
     };
     Ok(left.unwrap_or(set))
+}
+
+fn printed_changed(out: &ssh::Output) -> bool {
+    String::from_utf8_lossy(&out.stdout).trim() != "unchanged"
 }
 
 fn settled_mic(changed: bool) -> Outcome {
