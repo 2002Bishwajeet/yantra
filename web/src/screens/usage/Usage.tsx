@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { fromReading } from '@/api/client'
 import { on } from '@/lib/time'
 import { loaded, useWorkspaces } from '@/api/hooks'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
+import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
@@ -17,7 +18,15 @@ import { Empty } from '@/screens/fleet/Empty'
 import { count, money } from './format'
 import { byModel, byWorkspace, type Fanned, lines, type Row, useFleetSpend } from './read'
 import { SessionsTable } from './Sessions'
+import { asSpan, SPAN_LABEL, SPANS, type Span } from './span'
 import './Usage.css'
+
+const AS_READ: Record<Span, string> = {
+  all: 'every response in each transcript',
+  today: 'responses since midnight here',
+  '7d': 'responses in the last 7 days',
+  '30d': 'responses in the last 30 days',
+}
 
 function Waiting() {
   return (
@@ -205,7 +214,9 @@ export function Usage() {
   const workspaces = loaded(listed)
   const factor = useFormFactor()
   const list = workspaces.looked === 'ok' ? workspaces.data : []
-  const { fanned, read } = useFleetSpend(list)
+  const span = useSearch({ from: '/usage' }).window ?? 'all'
+  const navigate = useNavigate({ from: '/usage' })
+  const { fanned, read } = useFleetSpend(list, span)
 
   if (listed.looked === 'failed') {
     return (
@@ -231,19 +242,32 @@ export function Usage() {
         <Text render={<h1 />} emphasized scale="display-small">
           Usage
         </Text>
-        {/* Y-354 brings the Today / 7 days / 30 days window; until it lands
-            there is one window, and it is what the transcripts hold. */}
-        <Mono className="usage__as">as read · every response in each transcript</Mono>
+        <Mono className="usage__as">as read · {AS_READ[span]}</Mono>
         {asOf ? <Mono className="usage__as">prices from {asOf}</Mono> : null}
         <span className="usage__spacer" />
         {list.length > 0 ? (
-          <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
-            {fanned.fanned === 'reading'
-              ? `reading ${fanned.of}…`
-              : fanned.fanned === 'done'
-                ? 'Read again'
-                : 'Read spend'}
-          </Button>
+          <>
+            <Segmented
+              label="Window"
+              onValueChange={(value) =>
+                void navigate({ search: { window: asSpan(value) }, replace: true })
+              }
+              value={span}
+            >
+              {SPANS.map((one) => (
+                <Segment key={one} value={one}>
+                  {SPAN_LABEL[one]}
+                </Segment>
+              ))}
+            </Segmented>
+            <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
+              {fanned.fanned === 'reading'
+                ? `reading ${fanned.of}…`
+                : fanned.fanned === 'done'
+                  ? 'Read again'
+                  : 'Read spend'}
+            </Button>
+          </>
         ) : null}
       </div>
 

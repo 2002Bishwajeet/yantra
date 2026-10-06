@@ -106,7 +106,7 @@ async fn a_response_written_as_two_records_is_counted_once() -> Result<()> {
     lab.write_transcript(id, ONE_RESPONSE).await?;
     lab.write_transcript(id, THE_REST).await?;
 
-    let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id), None).await?;
     assert!(
         spend.path.ends_with(&format!("/{id}.jsonl")),
         "{}",
@@ -138,7 +138,7 @@ async fn a_second_model_is_counted_apart_from_the_first() -> Result<()> {
     lab.write_transcript(id, ONE_RESPONSE).await?;
     lab.write_transcript(id, A_SUBAGENT).await?;
 
-    let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id), None).await?;
     assert_eq!(
         spend.by_model.keys().collect::<Vec<_>>(),
         vec!["claude-haiku-4-5-20251001", "claude-opus-5"],
@@ -159,6 +159,57 @@ async fn a_second_model_is_counted_apart_from_the_first() -> Result<()> {
     Ok(())
 }
 
+/// Y-354: a window counts what a real `grep` stamps inside it. `ONE_RESPONSE`
+/// is stamped 17:19:37 and 17:19:38, the second response 17:19:44, and the
+/// subagent 17:19:50 — whose `Agent` call carries a `timestamp` argument of its
+/// own, ahead of the record's, that must not place it.
+#[tokio::test]
+async fn a_window_counts_only_the_responses_stamped_inside_it() -> Result<()> {
+    use time::OffsetDateTime;
+    use time::format_description::well_known::Rfc3339;
+
+    let Some(lab) = Lab::start("tokens-window").await? else {
+        return Ok(());
+    };
+    let id = "55555555-5555-4555-8555-555555555555";
+    lab.write_transcript(id, ONE_RESPONSE).await?;
+    lab.write_transcript(id, THE_REST).await?;
+    lab.write_transcript(
+        id,
+        &[
+            r#"{"parentUuid":"u3","isSidechain":true,"message":{"id":"msg_4","model":"claude-haiku-4-5-20251001","role":"assistant","content":[{"type":"tool_use","id":"t3","name":"Agent","input":{"timestamp":"2020-01-01T00:00:00Z","prompt":"look it up"}}],"usage":{"input_tokens":11,"cache_creation_input_tokens":300,"cache_read_input_tokens":0,"output_tokens":7,"service_tier":"standard","speed":"standard","cache_creation":{"ephemeral_5m_input_tokens":300,"ephemeral_1h_input_tokens":0}}},"requestId":"req_011CdjzFOURTH","type":"assistant","uuid":"u5","timestamp":"2026-08-05T17:19:50.000Z"}"#,
+        ],
+    )
+    .await?;
+
+    let since = OffsetDateTime::parse("2026-08-05T17:19:40Z", &Rfc3339)?;
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id), Some(since)).await?;
+    let opus = spend
+        .by_model
+        .get("claude-opus-5")
+        .expect("the second response is inside");
+    assert_eq!(opus.responses, 1, "{spend:?}");
+    assert_eq!(opus.output, 75, "{spend:?}");
+    assert_eq!(opus.cache_read, 40_353, "{spend:?}");
+    let haiku = spend
+        .by_model
+        .get("claude-haiku-4-5-20251001")
+        .expect("the tool argument's 2020 stamp did not place it");
+    assert_eq!(haiku.responses, 1, "{spend:?}");
+
+    // The I-61 trap through a real grep: the first response's two records are
+    // stamped either side of this start, and it is counted zero times.
+    let straddle = OffsetDateTime::parse("2026-08-05T17:19:38Z", &Rfc3339)?;
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id), Some(straddle)).await?;
+    assert_eq!(spend.total().responses, 2, "{spend:?}");
+    assert_eq!(
+        spend.by_model.get("claude-opus-5").map(|c| c.output),
+        Some(75),
+        "{spend:?}"
+    );
+    Ok(())
+}
+
 /// A launched agent that has only just started has a transcript with no
 /// assistant record in it. `grep` matching nothing exits 1, so without the
 /// `|| :` this reads as a failed probe rather than as nothing spent.
@@ -176,7 +227,7 @@ async fn a_transcript_with_no_assistant_record_is_zero_and_not_an_error() -> Res
     )
     .await?;
 
-    let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id), None).await?;
     assert!(spend.by_model.is_empty(), "{spend:?}");
     assert_eq!(spend.total().responses, 0, "{spend:?}");
     Ok(())
@@ -195,7 +246,7 @@ async fn no_conversation_crosses_the_wire() -> Result<()> {
     lab.write_transcript(id, THE_REST).await?;
     lab.write_transcript(id, A_SUBAGENT).await?;
 
-    let spend = tokens::spent(&lab.ssh, REPO, Some(id)).await?;
+    let spend = tokens::spent(&lab.ssh, REPO, Some(id), None).await?;
     let answer = format!("{spend:?}");
     assert!(!answer.contains("Fixed it."), "{answer}");
     assert!(!answer.contains("fix the failing test"), "{answer}");
@@ -214,7 +265,7 @@ async fn a_repo_with_no_transcript_says_so_instead_of_failing() -> Result<()> {
         return Ok(());
     };
 
-    let err = tokens::spent(&lab.ssh, REPO, None)
+    let err = tokens::spent(&lab.ssh, REPO, None, None)
         .await
         .expect_err("there is no transcript there");
     assert!(matches!(err, logs::Error::NoTranscript { .. }), "{err:?}");

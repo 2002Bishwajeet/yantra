@@ -2,6 +2,7 @@ import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-quer
 import type { Spend, Workspace } from '@/api'
 import { isApiError } from '@/api/errors'
 import { spendQuery } from '@/api/queries'
+import { type Span, sinceOf } from './span'
 
 /** One workspace's answer. A 409 is not a failure (D5 §4.5): a transcript that
  *  is not there, or one with no turn in it yet. */
@@ -17,9 +18,9 @@ export type Fanned =
 
 // Outside the hook: the React Compiler bails out of a function whose try/catch
 // holds a conditional, and this needs both (api/hooks.ts says the same).
-async function readOne(client: QueryClient, workspace: Workspace): Promise<Row> {
+async function readOne(client: QueryClient, workspace: Workspace, since?: string): Promise<Row> {
   try {
-    const spend = await client.fetchQuery(spendQuery(workspace.name))
+    const spend = await client.fetchQuery(spendQuery(workspace.name, since))
     return { read: 'ok', workspace, spend }
   } catch (cause) {
     const status = isApiError(cause) ? (cause.status ?? null) : null
@@ -36,12 +37,19 @@ const FANNED = ['usage', 'fleet-spend'] as const
 /** Every workspace's spend, asked for at once and only when a person asks
  *  (D5 §6.1, ADR-0019). Each read opens a transcript over ssh, so nothing here
  *  polls, refetches on focus, or runs on mount, and the rows live in the query
- *  cache rather than in the page: leaving Usage used to throw them away. */
-export function useFleetSpend(workspaces: Workspace[]) {
+ *  cache rather than in the page: leaving Usage used to throw them away.
+ *
+ *  Each window keeps its own fan-out, and switching to one reads nothing. Its
+ *  start is fixed when Read is pressed, so *7 days* means seven days back from
+ *  the read and not from the switch. */
+export function useFleetSpend(workspaces: Workspace[], span: Span) {
   const client = useQueryClient()
   const query = useQuery({
-    queryKey: FANNED,
-    queryFn: () => Promise.all(workspaces.map((one) => readOne(client, one))),
+    queryKey: [...FANNED, span],
+    queryFn: () => {
+      const since = sinceOf(span, new Date())
+      return Promise.all(workspaces.map((one) => readOne(client, one, since)))
+    },
     // `refetch` is the only way in, and it cancels a fan-out still in the air,
     // so two answers in either order cannot both land.
     enabled: false,

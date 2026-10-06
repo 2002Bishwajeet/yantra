@@ -21,6 +21,8 @@ include_dir = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# A spend window's start arrives as an RFC 3339 instant (Y-354).
+time.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
@@ -33,6 +35,4 @@ yantra-core.workspace = true
 # The systemd fixture shells out to `podman` and reports what it said, the same
 # way the sshd one in `yantra-core` does.
 anyhow.workspace = true
-# A fixture beat cannot be built without it: `sent_at` is an `OffsetDateTime`.
-time.workspace = true
 tower.workspace = true

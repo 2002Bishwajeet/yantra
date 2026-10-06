@@ -356,6 +356,11 @@ there is nothing to pick. [`Spend.tsx`](src/screens/session/Spend.tsx) draws it,
 `useSpend` holds the answer in the page for the transcript's reason, and mounting
 the view is the request.
 
+**`/usage` adds a window** (Y-354): All, Today, 7 days or 30 days, kept in
+`?window=`. The browser turns it into an instant when Read is pressed — Today is
+local midnight — and posts it as `since`, so the daemon never guesses a timezone.
+Each window keeps its own fan-out, and switching reads nothing.
+
 **Any unpriced model makes the headline a token count, with no dollar line.**
 That is D5 §6.2, and it holds on `/usage` too. The daemon does not help here: it
 sums the models the price table carries and nulls only the rest, so a

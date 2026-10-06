@@ -1342,20 +1342,27 @@ struct Joined {
 /// ships back counts, so no conversation crosses the wire (Y-181), and [`Spend`]
 /// has nowhere to put one.
 ///
+/// **A window is an instant the browser sends** (Y-354): the daemon and the far
+/// machine never guess whose midnight *today* starts at.
+///
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn spent<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    body: Option<Json<Since>>,
 ) -> Result<Json<Spend>, Refused> {
     let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let Json(Since { since }) = body.unwrap_or_default();
     tracing::info!("tokens {name} for {}", caller.node);
 
-    let spend = tokens::tokens(&name).await.map_err(|error| Refused::Verb {
-        status: from_logs(&error),
-        said: chain(&error),
-    })?;
+    let spend = tokens::tokens(&name, since)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_logs(&error),
+            said: chain(&error),
+        })?;
 
     Ok(Json(Spend::of(&spend)))
 }
@@ -1934,6 +1941,14 @@ impl Spend {
             as_of: price::AS_OF,
         }
     }
+}
+
+/// Where a spend window starts. No body, or no `since`, is the whole session.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Since {
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    since: Option<time::OffsetDateTime>,
 }
 
 /// Which records to read. A caller that sends no body gets the first window,
@@ -3537,6 +3552,48 @@ mod tests {
         assert_eq!(older.before, 50);
 
         serde_json::from_str::<Window>(r#"{"lnies":50}"#).expect_err("a typo is refused");
+    }
+
+    /// Y-354: no `since` is the whole session, an RFC 3339 instant with an
+    /// offset is a window, and anything else is refused rather than read as
+    /// *everything*.
+    #[test]
+    fn a_spend_window_is_an_rfc3339_instant_or_nothing() {
+        assert!(Since::default().since.is_none());
+        let none: Since = serde_json::from_str("{}").expect("no window");
+        assert!(none.since.is_none());
+
+        let today: Since = serde_json::from_str(r#"{"since":"2026-10-04T22:00:00.000Z"}"#)
+            .expect("the browser's toISOString");
+        assert_eq!(
+            today.since.map(time::OffsetDateTime::unix_timestamp),
+            Some(1_791_151_200)
+        );
+
+        for bad in [
+            r#"{"since":"2026-10-04"}"#,
+            r#"{"since":"2026-10-04T22:00:00"}"#,
+            r#"{"since":1791150400}"#,
+            r#"{"snice":"2026-10-04T22:00:00Z"}"#,
+        ] {
+            serde_json::from_str::<Since>(bad).expect_err(bad);
+        }
+    }
+
+    /// A `since` the daemon cannot read is refused before any machine is
+    /// asked, so a typo never reads as the whole session.
+    #[tokio::test]
+    async fn a_spend_with_an_unreadable_since_is_refused_before_ssh() {
+        for bad in [
+            serde_json::json!({"since": "yesterday"}),
+            serde_json::json!({"since": "2026-10-04"}),
+            serde_json::json!({"from": "2026-10-04T22:00:00Z"}),
+        ] {
+            let (status, said) = refused_body("/workspaces/site/tokens", bad.clone()).await;
+            assert!(status.is_client_error(), "{bad}: {status} {said}");
+            assert_ne!(status, StatusCode::FORBIDDEN, "{bad}: {said}");
+            assert_ne!(status, StatusCode::NOT_FOUND, "{bad}: {said}");
+        }
     }
 
     /// `you` and `claude` are the CLI's words and the browser reads the same
