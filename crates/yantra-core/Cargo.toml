@@ -27,6 +27,8 @@ anyhow.workspace = true
 # real password goes through the pty (Y-394, ADR-0030).
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# The redaction rule's unit test runs the regex it ships (Y-430).
+regex.workspace = true
 
 # `build.rs` stamps the build date; `time` is already in the tree.
 [build-dependencies]

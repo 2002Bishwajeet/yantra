@@ -24,6 +24,7 @@ pub mod down;
 pub mod edit;
 pub mod github;
 pub mod heartbeat;
+pub mod history;
 pub mod identity;
 pub mod install;
 pub mod inventory;

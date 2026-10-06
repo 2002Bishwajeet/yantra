@@ -18,3 +18,6 @@ yantra-core.workspace = true
 [dev-dependencies]
 # `yantra mcp`'s tests answer from a loopback daemon.
 axum.workspace = true
+# The history test shells out to `podman` and reports what it said, the same
+# way yantrad's systemd fixture does (Y-430).
+anyhow.workspace = true
