@@ -202,3 +202,9 @@ drawn and tested without a fleet.
 > Refuse would refuse nearly every time, and serialize releases its lock on a guess. Isolate still
 > owes what decision 8 named: the transcript path, the spend figure and the agent registry must
 > answer for the chat's worktree, and its branch and uncommitted work need a rule.
+
+> **2026-10-06 (Y-434): decision 4 no longer forbids copying T3 Code's UI.** The owner wants the chat
+> on par with T3 Code and its components copied rather than rewritten (root `CLAUDE.md` §B1). The
+> copied components still sit in `web/src/m3/`, use the tokens, and are tested as ADR-0024 §6
+> requires. Decision 5's attribution covers them: the notice file, and a block comment naming the
+> upstream path.
