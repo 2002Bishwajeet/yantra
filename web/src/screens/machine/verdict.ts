@@ -48,16 +48,23 @@ export function verdictOf(input: {
     return { kind: reachableFailure(reachable.detail), detail: reachable.detail }
   }
 
+  // Only an answer to this page's press: an older one may name a step a
+  // person has since run by hand.
+  const stopped = fresh?.kind === 'install_stopped' ? fresh : null
   if (missing.length > 0) {
-    // Only an answer to this page's press: an older one may name a step a
-    // person has since run by hand.
-    if (fresh?.kind === 'install_stopped' && fresh.commands.some(needsSudo)) {
-      return { kind: 'sudo', missing, result: fresh }
-    }
+    if (stopped?.commands.some(needsSudo)) return { kind: 'sudo', missing, result: stopped }
     return { kind: 'missing', missing, result: fresh ?? newestInstall(events, name) ?? null, fresh: fresh !== null }
   }
 
-  const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check))
+  // ADR-0031 §1–2: with every basic there, a sudo step this press stopped is the
+  // microphone's, until doctor finds the microphone.
+  const mic = checks.find((one) => one.check === 'mic')
+  if (watch?.mic && stopped?.commands.some(needsSudo) && mic?.state !== 'present') {
+    return { kind: 'sudo', missing: [nameOf('mic')], result: stopped }
+  }
+
+  // ADR-0031 §9: the microphone is optional, so its absence never titles the card.
+  const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check) && one.check !== 'mic')
   return absent.length > 0 ? { kind: 'manual', absent } : { kind: 'ready' }
 }
 

@@ -11,8 +11,8 @@ export function newestInstall(events: Event[], machine: string): Event | undefin
  *  one is the answer, and the browser's own instant for the lost-result check.
  *  The answer is found by comparing event times with each other, so the two
  *  clocks need not agree; the age the card prints does mix them, as every age
- *  in the dashboard does. */
-export type Watch = { since: number; pressed: number }
+ *  in the dashboard does. `mic` is whether the press asked for the microphone. */
+export type Watch = { since: number; pressed: number; mic: boolean }
 
 /** The result that answers this page's press, or null while it runs. */
 export function answer(events: Event[], machine: string, watch: Watch): Event | null {

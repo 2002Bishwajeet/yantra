@@ -727,7 +727,10 @@ const INSTALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 
 /// here awaits the install**, which can take minutes: a task the daemon owns
 /// runs it, puts the result in the ring (ADR-0025) and then runs the readiness
 /// sweep. **One install per machine at a time**, so a second `POST` while one
-/// runs is a **409**.
+/// runs is a **409**. `?mic=true` adds the microphone ([ADR-0031] §1); a `POST`
+/// with no query installs the basics alone.
+///
+/// [ADR-0031]: ../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md
 ///
 /// [ADR-0028]: ../../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md
 async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
@@ -735,6 +738,7 @@ async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(machine): Path<String>,
+    uri: Uri,
 ) -> Result<StatusCode, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     // The name is a request value, and it reaches `ssh`'s argv (ADR-0009).
@@ -748,8 +752,9 @@ async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
             said: format!("an install is already running on {machine}"),
         });
     };
-    tracing::info!("install on {machine} for {}", caller.node);
-    tokio::spawn(install_in_background(state.fleet, claim, machine));
+    let mic = asked(&uri, "mic");
+    tracing::info!("install on {machine} (mic: {mic}) for {}", caller.node);
+    tokio::spawn(install_in_background(state.fleet, claim, machine, mic));
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -799,8 +804,8 @@ pub(crate) fn left_command(
     commands.get(index).cloned().ok_or(Missed::Nothing)
 }
 
-async fn install_in_background(fleet: Fleet, claim: Claim, machine: String) {
-    let event = match tokio::time::timeout(INSTALL_BUDGET, install::install(&machine)).await {
+async fn install_in_background(fleet: Fleet, claim: Claim, machine: String, mic: bool) {
+    let event = match tokio::time::timeout(INSTALL_BUDGET, install::install(&machine, mic)).await {
         Ok(Ok(report)) => Event::install(&report),
         Ok(Err(error)) => Event::install_failed(
             &machine,
@@ -836,7 +841,7 @@ fn from_install(error: &install::Error) -> &'static str {
 /// person taps it and nothing polls it, which is both halves of the ADR's test.
 ///
 /// **It costs an ssh round trip, and an asleep machine costs all ten seconds of
-/// `ConnectTimeout` before it answers.** What it answers then is ten
+/// `ConnectTimeout` before it answers.** What it answers then is eleven
 /// *unknown* checks and never a 500: [`doctor::machine`] cannot fail, because a
 /// machine that could not be asked is not a machine that failed (R-23). A name
 /// nothing answers to reads the same way, and deliberately — ADR-0009 leaves
@@ -1500,8 +1505,14 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
 /// workspace does not enable — one flag is a real cost on a binary this repo
 /// measures, and the whole requirement is a single boolean.
 fn forced(uri: &Uri) -> bool {
+    asked(uri, "force")
+}
+
+/// Whether the query carries `<flag>=true`.
+fn asked(uri: &Uri, flag: &str) -> bool {
+    let wanted = format!("{flag}=true");
     uri.query()
-        .is_some_and(|query| query.split('&').any(|pair| pair == "force=true"))
+        .is_some_and(|query| query.split('&').any(|pair| pair == wanted))
 }
 
 fn from_workspace(error: &workspace::Error) -> StatusCode {
@@ -3044,6 +3055,18 @@ mod tests {
             "nothing was claimed"
         );
         assert!(fleet.events.read().await.is_empty(), "nothing ran");
+    }
+
+    /// ADR-0031 §1: the microphone only when the query asks for it, so a
+    /// `POST` with no query still installs the basics alone.
+    #[test]
+    fn the_microphone_is_asked_for_in_the_query() {
+        let mic = |uri: &'static str| asked(&Uri::from_static(uri), "mic");
+        assert!(mic("/machines/pi/install?mic=true"));
+        assert!(mic("/machines/pi/install?x=1&mic=true"));
+        assert!(!mic("/machines/pi/install"));
+        assert!(!mic("/machines/pi/install?mic=false"));
+        assert!(!mic("/machines/pi/install?mic=truely"));
     }
 
     /// The lock an install holds is given back when its task ends, and on a

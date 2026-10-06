@@ -331,6 +331,10 @@ async fn ready<E: Exec>(
 /// `musl` exports `USE_BUILTIN_RIPGREP=0` for the agent alone: the ripgrep it
 /// bundles does not run there, and the vendor's docs name this variable
 /// (ADR-0028 §5's note). Never on glibc, where no system `rg` may exist.
+///
+/// `PIPEWIRE_NODE=yantra-mic` on every launch makes ALSA's `default` record
+/// from the virtual microphone for the agent alone (ADR-0031 §3). Where there
+/// is no such node, nothing reads it.
 fn launch_command(claude: &str, repo: &str, session_id: &str, mode: Mode, musl: bool) -> String {
     // Measured on 2.1.220: `--session-id` beside `--continue` is refused outright
     // unless `--fork-session` is there too.
@@ -344,7 +348,7 @@ fn launch_command(claude: &str, repo: &str, session_id: &str, mode: Mode, musl: 
         ""
     };
     format!(
-        "cd {} && {ripgrep}exec {}{resuming} --session-id {}",
+        "cd {} && export PIPEWIRE_NODE=yantra-mic && {ripgrep}exec {}{resuming} --session-id {}",
         sq(repo),
         sq(claude),
         sq(session_id)
@@ -411,7 +415,7 @@ mod tests {
                 Mode::New,
                 false
             ),
-            r"cd '/tmp/x'\''; rm -rf ~; '\''' && exec '/usr/bin/claude' --session-id 'an-id'"
+            r"cd '/tmp/x'\''; rm -rf ~; '\''' && export PIPEWIRE_NODE=yantra-mic && exec '/usr/bin/claude' --session-id 'an-id'"
         );
         assert_eq!(
             launch_command(
@@ -421,7 +425,7 @@ mod tests {
                 Mode::Resume,
                 false
             ),
-            r"cd '/tmp/x'\''; rm -rf ~; '\''' && exec '/usr/bin/claude' --continue --fork-session --session-id 'an-id'"
+            r"cd '/tmp/x'\''; rm -rf ~; '\''' && export PIPEWIRE_NODE=yantra-mic && exec '/usr/bin/claude' --continue --fork-session --session-id 'an-id'"
         );
     }
 
@@ -434,7 +438,11 @@ mod tests {
             Mode::New,
             false,
         );
-        assert!(cmd.starts_with("cd '/srv/repo' && exec "), "{cmd}");
+        assert!(cmd.starts_with("cd '/srv/repo' && "), "{cmd}");
+        assert!(
+            cmd.contains(" && exec '/home/u/.local/bin/claude' "),
+            "{cmd}"
+        );
         assert!(cmd.contains("--session-id 'abc'"), "{cmd}");
     }
 
@@ -446,11 +454,27 @@ mod tests {
         let musl = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New, true);
         assert_eq!(
             musl,
-            "cd '/srv/repo' && export USE_BUILTIN_RIPGREP=0 && exec '/usr/bin/claude' \
-             --session-id 'abc'"
+            "cd '/srv/repo' && export PIPEWIRE_NODE=yantra-mic && export USE_BUILTIN_RIPGREP=0 \
+             && exec '/usr/bin/claude' --session-id 'abc'"
         );
         let glibc = launch_command("/usr/bin/claude", "/srv/repo", "abc", Mode::New, false);
         assert!(!glibc.contains("USE_BUILTIN_RIPGREP"), "{glibc}");
+    }
+
+    /// ADR-0031 §3: every launch, on either C library, names the virtual
+    /// microphone before it execs the agent.
+    #[test]
+    fn every_launch_carries_the_microphone_variable() {
+        for musl in [false, true] {
+            for mode in [Mode::New, Mode::Resume] {
+                let cmd = launch_command("/usr/bin/claude", "/srv/repo", "abc", mode, musl);
+                let at = cmd.find("export PIPEWIRE_NODE=yantra-mic && ");
+                assert!(
+                    at.is_some_and(|at| at < cmd.find("exec ").unwrap_or(0)),
+                    "{cmd}"
+                );
+            }
+        }
     }
 
     /// The three flags are one decision, and each is load-bearing: `--continue`
@@ -467,8 +491,8 @@ mod tests {
                 Mode::Resume,
                 false
             ),
-            "cd '/srv/repo' && exec '/home/u/.local/bin/claude' --continue --fork-session \
-             --session-id 'abc'"
+            "cd '/srv/repo' && export PIPEWIRE_NODE=yantra-mic && exec \
+             '/home/u/.local/bin/claude' --continue --fork-session --session-id 'abc'"
         );
     }
 

@@ -174,14 +174,17 @@ export function useRecheckReadiness() {
   })
 }
 
-/** `POST …/install` is `yantra install <machine>`: 202 and no body, and the
- *  install runs in the background (ADR-0028 §4). Its result is an `installed`
- *  or `install_stopped` event in `/api/notifications`, so nothing is
- *  invalidated here. A 409 is an install already running on that machine. */
+/** What Install is asked to do. `mic` is ADR-0031 §1's optional item. */
+export type Install = { machine: string; mic?: boolean }
+
+/** `POST …/install` is `yantra install <machine> [--mic]`: 202 and no body,
+ *  and the install runs in the background (ADR-0028 §4). Its result is an
+ *  `installed` or `install_stopped` event in `/api/notifications`, so nothing
+ *  is invalidated here. A 409 is an install already running on that machine. */
 export function useInstall() {
-  return useMutation<void, ApiError, string>({
-    mutationFn: (machine) =>
-      fetchJson<void>(`/api/machines/${encodeURIComponent(machine)}/install`, {
+  return useMutation<void, ApiError, Install>({
+    mutationFn: ({ machine, mic }) =>
+      fetchJson<void>(`/api/machines/${encodeURIComponent(machine)}/install${mic ? '?mic=true' : ''}`, {
         method: 'POST',
       }),
   })

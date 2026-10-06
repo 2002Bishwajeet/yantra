@@ -125,6 +125,8 @@ export function ReadinessCard(props: {
   const fresh = watch ? answer(events, name, watch) : null
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [step, setStep] = useState<Step | null>(null)
+  const [mic, setMic] = useState(false)
+  const micId = useId()
 
   const answered = fresh?.at
   const { mutate: ask } = recheck
@@ -141,8 +143,9 @@ export function ReadinessCard(props: {
 
   const press = () => {
     const since = newestInstall(events, name)?.at ?? 0
-    const waiting = () => setWatch({ since, pressed: Date.now() })
-    install.mutate(name, {
+    const asked = offerMic && mic
+    const waiting = () => setWatch({ since, pressed: Date.now(), mic: asked })
+    install.mutate({ machine: name, mic: asked }, {
       onSuccess: waiting,
       // One is running already, and its result is the one to wait for.
       onError: (error) => {
@@ -152,6 +155,9 @@ export function ReadinessCard(props: {
   }
 
   const checks = readiness.looked === 'ok' ? readiness.data.checks : []
+  // ADR-0031 §1: the microphone is Install's one optional item, offered until doctor finds it.
+  const offerMic = checks.some((one) => one.check === 'mic' && one.state !== 'present')
+  const installable = verdict.kind === 'missing' || verdict.kind === 'sudo' || (startable(verdict) && offerMic)
   const counted = tally(checks)
   const lost = running && watch !== null && now - watch.pressed > LOST_MS
   const already = install.error?.status === 409
@@ -207,8 +213,9 @@ export function ReadinessCard(props: {
       {verdict.kind === 'sudo' ? (
         <>
           <Text render={<p />} className="readiness__said" scale="body-small" tone="variant">
-            sudo on {name} asks for a password, so Yantra stopped before the package step. Run this on {name}, then
-            Install again for anything still missing.
+            sudo on {name} asks for a password, so Yantra stopped before{' '}
+            {verdict.missing.includes(nameOf('mic')) ? 'a step that needs root' : 'the package step'}. Run this on{' '}
+            {name}, then Install again for anything still missing.
           </Text>
           <Commands emphasis="filled" machine={name} onTerminal={setStep} result={verdict.result} />
         </>
@@ -266,15 +273,25 @@ export function ReadinessCard(props: {
             Stop waiting
           </Button>
         ) : null}
-        {verdict.kind === 'missing' || verdict.kind === 'sudo' ? (
+        {installable && offerMic ? (
+          <label className="readiness__mic" htmlFor={micId}>
+            <input checked={mic} id={micId} onChange={(event) => setMic(event.target.checked)} type="checkbox" />
+            <Text scale="label-large">Microphone</Text>
+          </label>
+        ) : null}
+        {installable ? (
           <Button
             // Until the first read, the newest result is unknown, and an older
             // one would be taken for this press's answer.
             disabled={install.isPending || notifications.isPending}
             onClick={press}
-            variant={verdict.kind === 'sudo' ? 'tonal' : 'filled'}
+            variant={verdict.kind === 'missing' ? 'filled' : 'tonal'}
           >
-            {install.isPending ? 'Starting…' : verdict.kind === 'sudo' || verdict.result ? 'Install again' : 'Install'}
+            {install.isPending
+              ? 'Starting…'
+              : verdict.kind === 'sudo' || (verdict.kind === 'missing' && verdict.result)
+                ? 'Install again'
+                : 'Install'}
           </Button>
         ) : null}
         {verdict.kind === 'unasked' ? <Doctor machine={name} variant="tonal" /> : null}
@@ -306,7 +323,7 @@ export function ReadinessCard(props: {
   )
 }
 
-/** D7 §4.3: the ten, folded to one line. The count is already under the title. */
+/** D7 §4.3: the eleven, folded to one line. The count is already under the title. */
 function folded(checks: Check[]): string {
   const names = checks.map((one) => nameOf(one.check))
   return names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : names.join(', ')

@@ -17,6 +17,7 @@
 use crate::agent::{self, Claude};
 use crate::github;
 use crate::identity;
+use crate::install;
 use crate::ssh::{self, Exec, Os, Ssh};
 use crate::terminfo::{self, Chosen};
 use crate::tmux::{self, Tmux, sq};
@@ -33,6 +34,7 @@ const TERMINFO: &str = "terminfo";
 const PROVIDER_CLI: &str = "provider-cli";
 const PROVIDER_AUTH: &str = "provider-auth";
 const LOGIN_SESSION: &str = "login-session";
+const MIC: &str = "mic";
 /// Public because the one caller that can answer this check finds it by name —
 /// see [`heartbeat`].
 pub const HEARTBEAT: &str = "heartbeat";
@@ -42,7 +44,7 @@ pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
-const BEHIND_SSH: [&str; 7] = [
+const BEHIND_SSH: [&str; 8] = [
     TMUX,
     GIT,
     AGENT_CLI,
@@ -50,6 +52,7 @@ const BEHIND_SSH: [&str; 7] = [
     PROVIDER_CLI,
     PROVIDER_AUTH,
     LOGIN_SESSION,
+    MIC,
 ];
 
 /// What every check behind ssh says when ssh itself did not answer. The reason
@@ -141,7 +144,7 @@ pub async fn fleet(term: &str) -> Result<Vec<Report>, Error> {
 ///
 /// Never fails: a connection that cannot even be built is a report of unknowns
 /// with the reason in it, because a caller asking *what is wrong with this box*
-/// is answered better by ten states than by one error.
+/// is answered better by eleven states than by one error.
 pub async fn machine(name: &str, term: &str) -> Report {
     let ssh = ssh::machine_at(name)
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
@@ -211,6 +214,7 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         provider_cli,
         provider_auth(exec, providers).await,
         login_session(exec, found_tmux.as_ref(), found_claude.as_ref()).await,
+        mic(exec).await,
         heartbeat(),
     ]
 }
@@ -499,6 +503,58 @@ async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&C
     }
 }
 
+/// ADR-0031 §9 in one round trip. The first line is `absent` (no drop-in),
+/// `present`, or `linger=<value>` followed by what `pactl` said. It reads
+/// linger first: an ssh login starts the user manager, so a source listed
+/// without linger is gone at the next logout and is not `present`.
+fn mic_probe() -> String {
+    format!(
+        r#"[ -e "$HOME/{drop_in}" ] || {{ echo absent; exit 0; }}
+linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)
+said=$(XDG_RUNTIME_DIR=/run/user/$(id -u) pactl list short sources 2>&1)
+if [ "$linger" = yes ] && printf '%s\n' "$said" | cut -f2 | grep -qx yantra-mic; then echo present; exit 0; fi
+echo "linger=$linger"
+printf '%s\n' "$said""#,
+        drop_in = install::MIC_DROP_IN,
+    )
+}
+
+async fn mic<E: Exec>(exec: &E) -> Check {
+    match exec.exec(&mic_probe()).await {
+        Ok(out) => mic_from(&String::from_utf8_lossy(&out.stdout)),
+        Err(err) => unknown(MIC, format!("could not be asked: {err}")),
+    }
+}
+
+/// *Absent* where the microphone was never installed, which is no fault: it
+/// is optional, and the dashboard does not count it against readiness.
+fn mic_from(said: &str) -> Check {
+    let (first, rest) = said.split_once('\n').unwrap_or((said, ""));
+    let pactl = match rest.trim() {
+        "" => "nothing".to_owned(),
+        rest => rest.to_owned(),
+    };
+    match first.trim() {
+        "absent" => absent(MIC, "not installed — the microphone is optional"),
+        "present" => present(MIC, "PipeWire has the source yantra-mic"),
+        "linger=yes" => absent(
+            MIC,
+            format!("the drop-in is there and PipeWire has no yantra-mic; pactl said: {pactl}"),
+        ),
+        linger if linger.starts_with("linger=") => absent(
+            MIC,
+            format!(
+                "linger is off for this account, so PipeWire and yantra-mic stop when nobody is \
+                 logged in — run `sudo loginctl enable-linger` for it there; pactl said: {pactl}"
+            ),
+        ),
+        _ => unknown(
+            MIC,
+            format!("the probe answered nothing Yantra reads: {said}"),
+        ),
+    }
+}
+
 /// **Unknown from every caller there is today**, and it is the architecture
 /// rather than an omission: the beats live in the running daemon's memory and
 /// nothing persists them (Y-044), while the CLI calls the library in-process and
@@ -690,7 +746,7 @@ mod tests {
     #[test]
     fn a_machine_that_cannot_be_asked_is_never_reported_as_missing_anything() {
         let checks = nothing_asked("ssh could not be set up here");
-        assert_eq!(checks.len(), 10);
+        assert_eq!(checks.len(), 11);
         assert!(
             checks.iter().all(|c| c.state == State::Unknown),
             "{checks:?}"
@@ -703,6 +759,58 @@ mod tests {
             .ready(),
             "an answer nobody has is not a yes"
         );
+    }
+
+    /// ADR-0031 §9: never installed, working, and the two ways it fails —
+    /// the second names linger, which is what a logout without it costs.
+    #[test]
+    fn the_mic_check_tells_not_installed_from_broken() {
+        let none = mic_from("absent\n");
+        assert_eq!(none.state, State::Absent);
+        assert!(none.detail.contains("not installed"), "{}", none.detail);
+
+        assert_eq!(mic_from("present\n").state, State::Present);
+
+        let lingerless = mic_from("linger=no\nConnection failure: Connection refused\n");
+        assert_eq!(lingerless.state, State::Absent);
+        assert!(
+            lingerless.detail.contains("linger"),
+            "{}",
+            lingerless.detail
+        );
+        assert!(
+            lingerless.detail.contains("Connection refused"),
+            "{}",
+            lingerless.detail
+        );
+        assert!(mic_from("linger=\n").detail.contains("linger is off"));
+
+        let broken = mic_from("linger=yes\n42\tyantra-mic-sink.monitor\tPipeWire\n");
+        assert_eq!(broken.state, State::Absent);
+        assert!(!broken.detail.contains("linger"), "{}", broken.detail);
+        assert!(
+            broken.detail.contains("yantra-mic-sink.monitor"),
+            "{}",
+            broken.detail
+        );
+
+        assert_eq!(mic_from("").state, State::Unknown);
+    }
+
+    /// A listed source without linger stops at the next logout, so the probe
+    /// asks loginctl before it can say `present`.
+    #[test]
+    fn the_mic_probe_reads_linger_before_the_source() {
+        let probe = mic_probe();
+        let linger = probe.find("loginctl").expect("the probe reads linger");
+        let present = probe
+            .find("echo present")
+            .expect("the probe can say present");
+        assert!(linger < present, "{probe}");
+
+        let listed = mic_from("linger=no\n42\tyantra-mic\tPipeWire\n");
+        assert_eq!(listed.state, State::Absent);
+        assert!(listed.detail.contains("linger"), "{}", listed.detail);
     }
 
     /// R-23 on the one check that is about this host: no grant and a refused

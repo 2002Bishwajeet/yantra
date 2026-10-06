@@ -40,6 +40,9 @@ const FORKED_BY: &str = "/tmp/claude-auth-forked-by";
 /// `unset`.
 const RIPGREP_SEEN: &str = "/tmp/claude-ripgrep";
 
+/// Where the stub records `PIPEWIRE_NODE` as its own process saw it.
+const PIPEWIRE_SEEN: &str = "/tmp/claude-pipewire";
+
 struct Lab {
     _fixture: SshFixture,
     ssh: Ssh,
@@ -103,6 +106,7 @@ impl Lab {
              mkdir -p \"$dir\"\n\
              printf '{{\"cwd\":\"%s\",\"sessionId\":\"%s\"}}\\n' \"$PWD\" \"$id\" > \"$dir/$id.jsonl\"\n\
              printf '%s\\n' \"${{USE_BUILTIN_RIPGREP-unset}}\" > {RIPGREP_SEEN}\n\
+             printf '%s\\n' \"${{PIPEWIRE_NODE-unset}}\" > {PIPEWIRE_SEEN}\n\
              exec sleep 300\n"
         );
 
@@ -388,6 +392,44 @@ async fn on_musl_the_agent_is_launched_with_the_system_ripgrep() -> Result<()> {
     assert_eq!(seen, "0", "the agent's own environment carries it");
     let written = lab.ssh.exec("test -e ~/.claude/settings.json").await?;
     assert!(!written.success(), "no settings file is written");
+    Ok(())
+}
+
+/// ADR-0031 §3: the agent's own process carries `PIPEWIRE_NODE`, so ALSA's
+/// `default` records from the virtual microphone for it alone. Nothing else
+/// in the session is asked to: this container has no PipeWire, and the
+/// variable is harmless there.
+#[tokio::test]
+async fn the_agent_is_launched_hearing_the_virtual_microphone() -> Result<()> {
+    let Some(lab) = Lab::start("pipewire").await? else {
+        return Ok(());
+    };
+    lab.install_claude(true).await?;
+    lab.ssh.exec("mkdir -p /tmp/pwrepo").await?;
+    let ws = workspace("pw", "/tmp/pwrepo");
+
+    let launch = agent::prepare(&lab.ssh, "/tmp/pwrepo", &lab.tmux, Os::Other).await?;
+    up::open(&lab.ssh, &lab.tmux, &ws, Some(&launch.command), Os::Other).await?;
+
+    let mut seen = String::new();
+    for _ in 0..50 {
+        let out = lab
+            .ssh
+            .exec(&format!("cat {PIPEWIRE_SEEN} 2>/dev/null || true"))
+            .await?;
+        seen = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if !seen.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(seen, "yantra-mic", "the agent's own environment carries it");
+    let shell = lab.ssh.exec("printf %s \"${PIPEWIRE_NODE-unset}\"").await?;
+    assert_eq!(
+        String::from_utf8_lossy(&shell.stdout),
+        "unset",
+        "only the agent's start command sets it"
+    );
     Ok(())
 }
 

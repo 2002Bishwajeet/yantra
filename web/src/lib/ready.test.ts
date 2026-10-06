@@ -22,6 +22,12 @@ describe('ready', () => {
     expect(blocking(optional)).toEqual([])
   })
 
+  /** ADR-0031 §9: a microphone never installed does not make a machine unready. */
+  it('is not held back by the microphone, absent or unknown', () => {
+    expect(isReady(report({ ...seven(), mic: 'absent' }))).toBe(true)
+    expect(isReady(report({ ...seven(), mic: 'unknown' }))).toBe(true)
+  })
+
   it('is held back by any one of the seven', () => {
     for (const one of READY) {
       expect(isReady(report({ ...seven(), [one]: 'absent' }))).toBe(false)

@@ -37,6 +37,12 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     fix: () => ({ by: 'hand', words: 'Run claude on that machine and log in.' }),
     session: true,
   },
+  // ADR-0031 §9: optional, so a machine without it is still ready.
+  mic: {
+    name: 'microphone',
+    fix: () => ({ by: 'hand', words: 'Run Install with Microphone ticked.' }),
+    session: false,
+  },
   heartbeat: {
     name: 'heartbeat',
     fix: () => ({ by: 'hand', words: 'The join command offers yantra-agent, which sends it.' }),
@@ -44,7 +50,7 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
   },
 }
 
-/** `doctor`'s ten ids, in its order. */
+/** `doctor`'s eleven ids, in its order. */
 export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check

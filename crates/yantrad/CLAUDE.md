@@ -125,7 +125,7 @@ a typed box polls, and a read handler never awaits the network.
 with the grant when there is one and anonymously when there is not. A failed read is `failed`, and
 the page never draws it as *current*.
 
-**It is a class on the refresh sweep, not a handler that runs `doctor`.** Ten checks over ssh per
+**It is a class on the refresh sweep, not a handler that runs `doctor`.** Eleven checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
@@ -141,7 +141,7 @@ installed `tmux` by hand needs the answer before the next sweep, and the `GET` b
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
 type. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
-ssh destinations to refuse one against, and a name nothing answers to is ten *unknown* checks like
+ssh destinations to refuse one against, and a name nothing answers to is eleven *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
@@ -290,6 +290,8 @@ verb here starts in the CLI, and `yantra relay` was written before this route wa
 **`install` answers before its work is done too** (Y-386,
 [ADR-0028](../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) §4). It answers
 `202` with no body and runs [`install.rs`](../yantra-core/src/install.rs) in a task the daemon owns.
+`?mic=true` adds the microphone ([ADR-0031](../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md),
+Y-417), read from the URI as `force` is; a `POST` with no query installs the basics alone.
 Yantra stops waiting after 15 minutes, and the event then says the install may still be running:
 dropping the future kills only the local `ssh` (I-27). The result is an `installed` or
 `install_stopped` event in the ring, whose `commands` carries each command left for a person

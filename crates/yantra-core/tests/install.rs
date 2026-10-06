@@ -151,7 +151,7 @@ async fn a_bare_machine_with_passwordless_sudo_gets_all_three() -> Result<()> {
         assert_eq!(state(&before, check), State::Absent, "{check} before");
     }
 
-    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let report = install::of(&lab.ssh, "lab", STAND_IN, None).await?;
     assert_eq!(outcomes(&report), all(&Outcome::Installed), "{report:#?}");
     assert!(report.complete());
 
@@ -168,7 +168,7 @@ async fn a_bare_machine_with_passwordless_sudo_gets_all_three() -> Result<()> {
         "no settings file is written (owner, 2026-09-13)"
     );
 
-    let again = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let again = install::of(&lab.ssh, "lab", STAND_IN, None).await?;
     assert_eq!(
         outcomes(&again),
         all(&Outcome::Present),
@@ -189,7 +189,7 @@ async fn a_sudo_that_wants_a_password_stops_and_names_the_command() -> Result<()
     lab.fixture
         .arrange_as_root("echo 'yantra:typed-nowhere' | chpasswd")?;
 
-    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let report = install::of(&lab.ssh, "lab", STAND_IN, None).await?;
     let left = Outcome::ForYou {
         because: Because::SudoAsks,
         command: Some(format!("sudo {EVERYTHING}")),
@@ -214,7 +214,7 @@ async fn a_root_account_installs_without_sudo() -> Result<()> {
     lab.fixture.arrange_as_root(STRIP)?;
     let root = lab.as_root().await?;
 
-    let report = install::of(&root, "lab", STAND_IN).await?;
+    let report = install::of(&root, "lab", STAND_IN, None).await?;
     assert_eq!(outcomes(&report), all(&Outcome::Installed), "{report:#?}");
     Ok(())
 }
@@ -230,7 +230,7 @@ async fn no_package_manager_names_no_command() -> Result<()> {
         "{STRIP} && mv \"$(command -v apk)\" /root/apk.gone"
     ))?;
 
-    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let report = install::of(&lab.ssh, "lab", STAND_IN, None).await?;
     let left = Outcome::ForYou {
         because: Because::NoPackageManager,
         command: None,
@@ -253,7 +253,7 @@ async fn a_machine_that_has_everything_is_left_alone() -> Result<()> {
         .await?;
     anyhow::ensure!(placed.success(), "placing the claude stub failed");
 
-    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let report = install::of(&lab.ssh, "lab", STAND_IN, None).await?;
     assert_eq!(outcomes(&report), all(&Outcome::Present), "{report:#?}");
     assert!(report.complete());
     assert!(!lab.stand_in_ran().await?, "nothing ran for a present tool");
@@ -288,7 +288,7 @@ async fn a_password_sudo_step_completes_in_a_one_off_terminal() -> Result<()> {
     lab.fixture
         .arrange_as_root("echo 'yantra:typed-as-keys' | chpasswd")?;
 
-    let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
+    let report = install::of(&lab.ssh, "lab", STAND_IN, None).await?;
     let command = report
         .steps
         .iter()

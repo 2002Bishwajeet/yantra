@@ -370,6 +370,44 @@ mod tests {
         assert!(done.commands.is_empty());
     }
 
+    /// ADR-0031 §2: linger is left for the one-off terminal, so its command
+    /// travels in `commands` like a package step's, and the sentence names the
+    /// microphone.
+    #[test]
+    fn the_microphone_leaves_linger_for_the_terminal() {
+        let event = Event::install(&Report {
+            machine: "pi".to_owned(),
+            steps: vec![
+                step(Tool::Tmux, Outcome::Present),
+                step(Tool::Git, Outcome::Present),
+                step(Tool::Claude, Outcome::Present),
+                step(
+                    Tool::Mic,
+                    Outcome::ForYou {
+                        because: Because::SudoAsks,
+                        command: Some("sudo loginctl enable-linger biswa".to_owned()),
+                    },
+                ),
+            ],
+        });
+        assert_eq!(event.kind, "install_stopped");
+        assert_eq!(event.commands, ["sudo loginctl enable-linger biswa"]);
+        assert!(
+            event
+                .said
+                .starts_with("pi: mic left for you: it needs root"),
+            "{}",
+            event.said
+        );
+
+        let done = Event::install(&Report {
+            machine: "pi".to_owned(),
+            steps: vec![step(Tool::Mic, Outcome::Installed)],
+        });
+        assert_eq!(done.kind, "installed");
+        assert_eq!(done.said, "pi: mic installed");
+    }
+
     /// Y-399: a page must not infer the warning from `said` — a reworded
     /// sentence would silently change what it draws. `user`, `kept` and
     /// `logs_in_as` carry the same facts as structured fields.

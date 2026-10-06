@@ -188,7 +188,12 @@ The route answers `202` and nothing else, so the result is read off the newest
 check never counts as missing. What the page pressed lives in the page, so a
 reload forgets that it is waiting; a second press is the daemon's `409`, and
 the page waits for that one instead. **Every check has one name**, from
-[`lib/checks.ts`](src/lib/checks.ts), with what fixes it.
+[`lib/checks.ts`](src/lib/checks.ts), with what fixes it. **The microphone is
+Install's one optional item** (Y-417,
+[ADR-0031](../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md)):
+while `doctor`'s `mic` check is not present, an unticked *Microphone* checkbox
+sits beside Install, on a ready machine too, and ticking it sends `?mic=true`.
+A `mic` that is absent never makes a machine unready or titles the card.
 
 ## A workspace file that did not load (Y-141)
 

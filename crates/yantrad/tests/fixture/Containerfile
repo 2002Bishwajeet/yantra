@@ -46,6 +46,12 @@ RUN dnf -y install openssh-server tmux git && dnf clean all && \
     sed -Ei 's/^(session\s+)required(\s+pam_loginuid\.so)/\1optional\2/' /etc/pam.d/sshd && \
     sed -i '1a account    sufficient   pam_permit.so' /etc/pam.d/sshd
 
+# Y-417: linger starts `user@.service`, whose PAM stack fails on GitHub's
+# runner for the same two reasons (status 224/PAM). The test asserts the mic, not PAM.
+RUN sed -E -e '1a account    sufficient   pam_permit.so' \
+        -e 's/^(session\s+)required(\s+pam_loginuid\.so)/\1optional\2/' \
+        /usr/lib/pam.d/systemd-user > /etc/pam.d/systemd-user
+
 # PID 1 here is systemd, which takes SIGRTMIN+3 as "power off" and ignores SIGTERM.
 STOPSIGNAL SIGRTMIN+3
 CMD ["/usr/lib/systemd/systemd"]
