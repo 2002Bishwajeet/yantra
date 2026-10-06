@@ -77,6 +77,7 @@ test.describe('/ on flaky', () => {
     await expect(page.getByRole('alert').first()).toBeVisible()
     await page.getByRole('button', { name: 'Try again' }).first().click()
     await firstReading(page)
-    await expect(page.getByRole('alert')).toHaveCount(0)
+    // Try again here only invalidates, so the statuses the page then mounts fail once and clear on the 5 s poll.
+    await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 10_000 })
   })
 })
