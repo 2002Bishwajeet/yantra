@@ -229,7 +229,7 @@ pub async fn on_machine<E: Exec>(
 /// What `claude` believes is running on this machine, or nothing when it cannot
 /// be asked — a missing second opinion is not a contradiction, so the caller
 /// still has the pane to go on.
-async fn registry<E: Exec>(exec: &E) -> Vec<Running> {
+pub(crate) async fn registry<E: Exec>(exec: &E) -> Vec<Running> {
     match Claude::resolve(exec).await {
         Ok(claude) => claude.agents(exec).await.unwrap_or_default(),
         Err(_) => Vec::new(),
