@@ -270,8 +270,9 @@ fn a_redacted_transcript_is_staged_for_every_harness_and_still_resumes() -> Resu
     )?;
     let before = machine.ok(&format!("cd && {LIVE_HASHES}"))?;
 
-    // c. One pass.
-    let summary = machine.ok("yantra history stage")?;
+    // c. One pass. Stray config variables prove the job's `--config` file wins.
+    let summary =
+        machine.ok("GITLEAKS_CONFIG=/nonexistent GITLEAKS_CONFIG_TOML= yantra history stage")?;
     ensure!(summary.contains("failed:     0"), "{summary}");
     let mut staged = vec![
         format!("claude/{claude_rel}"),

@@ -156,11 +156,26 @@ pub struct Gitleaks {
     /// Where `gitleaks` looks for a `.gitleaksignore`. A directory this job owns,
     /// so no ignore file from somewhere else can hide a finding.
     pub ignore_dir: PathBuf,
+    config: PathBuf,
 }
 
-impl Scan for Gitleaks {
-    fn secrets(&self, text: &str) -> Result<Vec<String>, ScanError> {
-        let mut child = Command::new("gitleaks")
+impl Gitleaks {
+    /// Writes [`GITLEAKS_CONFIG`] to `scratch/gitleaks.toml`, which every scan
+    /// passes as `--config`.
+    pub fn new(scratch: PathBuf) -> io::Result<Self> {
+        let config = scratch.join("gitleaks.toml");
+        write_atomic(&config, &scratch, GITLEAKS_CONFIG, SystemTime::now())?;
+        Ok(Self {
+            ignore_dir: scratch,
+            config,
+        })
+    }
+
+    // `--config` outranks both GITLEAKS_CONFIG variables in every 8.x release;
+    // GITLEAKS_CONFIG_TOML is read only from 8.25.0.
+    fn command(&self) -> Command {
+        let mut command = Command::new("gitleaks");
+        command
             .args([
                 "stdin",
                 "--no-banner",
@@ -174,12 +189,19 @@ impl Scan for Gitleaks {
                 "-",
                 // A transcript can quote `gitleaks:allow`; it must not hide a line.
                 "--ignore-gitleaks-allow",
-                "--gitleaks-ignore-path",
+                "--config",
             ])
-            .arg(&self.ignore_dir)
-            // `GITLEAKS_CONFIG` outranks the TOML variable, so it must not leak in.
-            .env_remove("GITLEAKS_CONFIG")
-            .env("GITLEAKS_CONFIG_TOML", GITLEAKS_CONFIG)
+            .arg(&self.config)
+            .arg("--gitleaks-ignore-path")
+            .arg(&self.ignore_dir);
+        command
+    }
+}
+
+impl Scan for Gitleaks {
+    fn secrets(&self, text: &str) -> Result<Vec<String>, ScanError> {
+        let mut child = self
+            .command()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -232,13 +254,11 @@ pub fn stage() -> Result<Report, Error> {
         path: scratch.clone(),
         source,
     })?;
-    stage_in(
-        base.home_dir(),
-        &data,
-        &Gitleaks {
-            ignore_dir: scratch,
-        },
-    )
+    let scanner = Gitleaks::new(scratch.clone()).map_err(|source| Error::Io {
+        path: scratch.join("gitleaks.toml"),
+        source,
+    })?;
+    stage_in(base.home_dir(), &data, &scanner)
 }
 
 /// The testable half. `data` holds `history/`, which Syncthing sends, and
@@ -761,5 +781,33 @@ mod tests {
         assert_eq!(parse_report(report).unwrap(), vec!["ghp_x".to_owned()]);
         assert_eq!(parse_report(b"[]").unwrap(), Vec::<String>::new());
         assert!(matches!(parse_report(b"FTL"), Err(ScanError::Failed(_))));
+    }
+
+    #[test]
+    fn gitleaks_reads_the_yantra_rule_from_the_jobs_own_file() {
+        let scratch = temp();
+        let scanner = Gitleaks::new(scratch.clone()).unwrap();
+        let command = scanner.command();
+        let args: Vec<&std::ffi::OsStr> = command.get_args().collect();
+        let at = args.iter().position(|a| *a == "--config").unwrap();
+        let file = scratch.join("gitleaks.toml");
+        assert_eq!(args[at + 1], file.as_os_str());
+
+        let written: toml::Table = toml::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        let embedded: toml::Table = toml::from_str(GITLEAKS_CONFIG).unwrap();
+        assert_eq!(written, embedded);
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn gitleaks_gets_no_config_variable() {
+        let scanner = Gitleaks::new(temp()).unwrap();
+        let command = scanner.command();
+        let set: Vec<_> = command
+            .get_envs()
+            .filter(|(k, _)| k.to_string_lossy().starts_with("GITLEAKS_CONFIG"))
+            .collect();
+        assert!(set.is_empty(), "{set:?}");
     }
 }
