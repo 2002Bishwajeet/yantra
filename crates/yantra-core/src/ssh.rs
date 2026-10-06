@@ -257,6 +257,8 @@ impl Ssh {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
+            // A terminal's Ctrl-C would end `ssh` before the far side drains.
+            .process_group(0)
             .spawn()
             .map_err(Error::Spawn)?;
         let (Some(stdin), Some(stdout), Some(stderr)) =

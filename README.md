@@ -144,6 +144,7 @@ yantra down yantra               # stop it, giving the agent a chance to shut do
 yantra rm yantra [--force]       # delete the workspace file, refusing while a session is open
 yantra kill mac scratch          # stop a session by machine and name, workspace or not
 yantra probe mac /code/site      # is that directory there, and what git origin does it hold?
+yantra mic mac                   # stream this laptop's microphone into a session there until Ctrl-C
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine it can reach

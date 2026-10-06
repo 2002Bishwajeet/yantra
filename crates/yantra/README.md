@@ -18,6 +18,7 @@ yantra rm yantra [--force]       # delete the workspace, refusing while its sess
 yantra kill mac scratch          # stop any session by machine and name
 yantra probe mac /code/site      # is it there, and what origin does it hold?
 yantra clone <url> --machine mac --into ~/code/site   # git clone there, inside a tmux session
+yantra mic mac                   # stream this laptop's microphone into mac's virtual mic until Ctrl-C
 
 yantra ls machines               # the tailnet
 yantra ls dirs mac [/code] [--make NAME]   # one level of a machine, with the repositories marked
