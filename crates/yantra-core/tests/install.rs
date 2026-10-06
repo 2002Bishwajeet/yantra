@@ -24,8 +24,12 @@ const STAND_IN: &str = "mkdir -p \"$HOME/.local/bin\" \
     && printf '#!/bin/sh\\nexit 0\\n' > \"$HOME/.local/bin/claude\" \
     && chmod 755 \"$HOME/.local/bin/claude\" && touch /tmp/stand-in-ran";
 
-/// Everything the fixture lacks once `tmux` and `git` are removed: the two
-/// basics, then the vendor installer's prerequisites and musl's runtime ones.
+/// Strips the fixture to a bare machine. The image carries `libgcc` and
+/// `libstdc++` for opencode (Y-433), so they go too.
+const STRIP: &str = "apk del -q tmux git libstdc++ libgcc";
+
+/// Everything a stripped fixture lacks: the two basics, then the vendor
+/// installer's prerequisites and musl's runtime ones.
 const EVERYTHING: &str = "apk add tmux git curl bash libgcc libstdc++ ripgrep";
 
 const TERM: &str = "xterm-256color";
@@ -53,7 +57,7 @@ impl Lab {
     /// A machine missing both packages, with a sudoers line of its own.
     fn bare(&self, sudoers: &str) -> Result<()> {
         self.fixture.arrange_as_root(&format!(
-            "apk del -q tmux git && printf '%s\\n' '{sudoers}' > /etc/sudoers.d/yantra \
+            "{STRIP} && printf '%s\\n' '{sudoers}' > /etc/sudoers.d/yantra \
              && chmod 440 /etc/sudoers.d/yantra"
         ))
     }
@@ -207,7 +211,7 @@ async fn a_root_account_installs_without_sudo() -> Result<()> {
     let Some(mut lab) = Lab::start("root")? else {
         return Ok(());
     };
-    lab.fixture.arrange_as_root("apk del -q tmux git")?;
+    lab.fixture.arrange_as_root(STRIP)?;
     let root = lab.as_root().await?;
 
     let report = install::of(&root, "lab", STAND_IN).await?;
@@ -222,8 +226,9 @@ async fn no_package_manager_names_no_command() -> Result<()> {
     let Some(lab) = Lab::start("nomanager")? else {
         return Ok(());
     };
-    lab.fixture
-        .arrange_as_root("apk del -q tmux git && mv \"$(command -v apk)\" /root/apk.gone")?;
+    lab.fixture.arrange_as_root(&format!(
+        "{STRIP} && mv \"$(command -v apk)\" /root/apk.gone"
+    ))?;
 
     let report = install::of(&lab.ssh, "lab", STAND_IN).await?;
     let left = Outcome::ForYou {

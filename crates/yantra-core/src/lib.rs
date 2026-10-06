@@ -11,9 +11,11 @@
 //!    type; keep the rest private until something outside needs it.
 
 pub mod about;
+pub mod acp;
 pub mod agent;
 pub mod attach;
 pub mod attention;
+pub mod chat;
 pub mod clone;
 pub mod dirs;
 pub mod doctor;

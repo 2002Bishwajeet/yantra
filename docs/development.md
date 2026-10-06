@@ -271,7 +271,8 @@ touches SSH, tmux, or an agent CLI gets an integration test against the real thi
 
 The fixture is `crates/yantra-core/tests/common/mod.rs`. Its image is built from
 `crates/yantra-core/tests/fixture/Containerfile` (Alpine + `openssh-server` +
-`tmux`, ~12 MB) the first time a test needs it, then reused. Each run generates
+`tmux`, plus opencode for the ACP test, whose binary alone is 196 MB) the first
+time a test needs it, then reused. Each run generates
 its own throwaway keypair and publishes sshd on an ephemeral loopback port —
 your `~/.ssh` is never read — and the container is removed in `Drop`, so it goes
 away even when a test panics.
