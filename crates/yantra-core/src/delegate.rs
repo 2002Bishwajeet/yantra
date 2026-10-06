@@ -57,7 +57,7 @@ impl State {
 pub struct Summary {
     /// Every changed path, untracked files included.
     pub changed: Vec<String>,
-    /// `git diff --shortstat HEAD`, which counts tracked files only.
+    /// `git diff --shortstat` against [`Place::base`], which counts tracked files only.
     pub shortstat: String,
 }
 
@@ -78,6 +78,9 @@ pub struct Place {
     pub repo: String,
     pub worktree: String,
     pub branch: String,
+    /// The commit the worktree started at. The summary diffs against it, so
+    /// work the agent commits on its branch still shows.
+    pub base: String,
 }
 
 #[derive(Debug)]
@@ -162,10 +165,11 @@ impl Task {
         let shared = Shared::default();
         let runner = {
             let (agent, shared, ssh) = (Arc::clone(&agent), Arc::clone(&shared), ssh.clone());
-            let (worktree, prompt) = (place.worktree.clone(), prompt.to_owned());
+            let (worktree, base) = (place.worktree.clone(), place.base.clone());
+            let prompt = prompt.to_owned();
             tokio::spawn(async move {
                 drive(agent, events, &worktree, &prompt, &shared).await;
-                if let Ok(summary) = summarise(&ssh, &worktree).await {
+                if let Ok(summary) = summarise(&ssh, &worktree, &base).await {
                     lock(&shared).progress.summary = Some(summary);
                 }
             })
@@ -192,7 +196,7 @@ impl Task {
 
     /// Asks the machine what changed in the worktree, and keeps the answer.
     pub async fn summary(&self) -> Result<Summary, Error> {
-        let summary = summarise(&self.ssh, &self.place.worktree).await?;
+        let summary = summarise(&self.ssh, &self.place.worktree, &self.place.base).await?;
         lock(&self.shared).progress.summary = Some(summary.clone());
         Ok(summary)
     }
@@ -255,7 +259,7 @@ fn worktree_command(repo: &str, id: &str) -> String {
          wt=\"$HOME/.yantra/worktrees/{id}\"\n\
          mkdir -p \"$HOME/.yantra/worktrees\" \
          && git -C \"$top\" worktree add -q -b {branch} \"$wt\" HEAD >&2 \
-         && printf '%s\\n%s\\n' \"$top\" \"$wt\"",
+         && printf '%s\\n%s\\n' \"$top\" \"$wt\" && git -C \"$wt\" rev-parse HEAD",
         repo = destination(repo),
         branch = sq(&branch(id)),
     )
@@ -274,12 +278,13 @@ async fn prepare<E: Exec>(exec: &E, repo: &str, id: &str) -> Result<Place, Error
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let mut lines = stdout.lines();
-    match (out.success(), lines.next(), lines.next()) {
-        (true, Some(top), Some(worktree)) => Ok(Place {
+    match (out.success(), lines.next(), lines.next(), lines.next()) {
+        (true, Some(top), Some(worktree), Some(base)) => Ok(Place {
             id: id.to_owned(),
             repo: top.to_owned(),
             worktree: worktree.to_owned(),
             branch: branch(id),
+            base: base.to_owned(),
         }),
         _ => Err(Error::Worktree {
             stderr: said(&out.stderr),
@@ -297,17 +302,20 @@ fn removal(place: &Place) -> String {
     )
 }
 
-async fn summarise<E: Exec>(exec: &E, worktree: &str) -> Result<Summary, Error> {
-    let worktree = sq(worktree);
-    let status = exec
+/// Diffs the working tree against `base`, so committed and uncommitted work
+/// both count. `-z` keeps git from quoting a path with a space or non-ASCII.
+async fn summarise<E: Exec>(exec: &E, worktree: &str, base: &str) -> Result<Summary, Error> {
+    let (worktree, base) = (sq(worktree), sq(base));
+    let names = exec
         .exec(&format!(
-            "git -C {worktree} status --porcelain=v1 --untracked-files=all"
+            "git -C {worktree} diff --name-only -z {base} \
+             && git -C {worktree} ls-files -z --others --exclude-standard"
         ))
         .await?;
     let stat = exec
-        .exec(&format!("git -C {worktree} diff --shortstat HEAD"))
+        .exec(&format!("git -C {worktree} diff --shortstat {base}"))
         .await?;
-    for out in [&status, &stat] {
+    for out in [&names, &stat] {
         if !out.success() {
             return Err(Error::Worktree {
                 stderr: said(&out.stderr),
@@ -315,21 +323,17 @@ async fn summarise<E: Exec>(exec: &E, worktree: &str) -> Result<Summary, Error> 
         }
     }
     Ok(Summary {
-        changed: changed(&status.stdout),
+        changed: changed(&names.stdout),
         shortstat: String::from_utf8_lossy(&stat.stdout).trim().to_owned(),
     })
 }
 
-/// `XY path`, or `XY from -> to` for a rename, one per line.
-fn changed(porcelain: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(porcelain)
-        .lines()
-        .filter_map(|line| line.get(3..))
-        .map(|path| {
-            path.rsplit_once(" -> ")
-                .map_or(path, |(_, to)| to)
-                .to_owned()
-        })
+/// One path per NUL; a rename gives its new side only.
+fn changed(names: &[u8]) -> Vec<String> {
+    names
+        .split(|&byte| byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
         .collect()
 }
 
@@ -630,11 +634,11 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_names_every_changed_path_and_the_new_side_of_a_rename() {
-        let porcelain = b" M src/lib.rs\n?? notes/new file.md\nR  old.rs -> new.rs\nD  gone.txt\n";
+    fn the_summary_names_every_path_unquoted() {
+        let names = "src/lib.rs\0notes/new file.md\0\u{fc}.txt\0".as_bytes();
         assert_eq!(
-            changed(porcelain),
-            ["src/lib.rs", "notes/new file.md", "new.rs", "gone.txt"]
+            changed(names),
+            ["src/lib.rs", "notes/new file.md", "\u{fc}.txt"]
         );
         assert!(changed(b"").is_empty());
     }
@@ -665,7 +669,7 @@ mod tests {
     async fn prepare_reads_the_top_level_and_the_worktree_or_names_the_refusal() {
         let made = Mutex::new(Said(vec![out(
             0,
-            "/home/u/repo\n/home/u/.yantra/worktrees/ab12cd34\n",
+            "/home/u/repo\n/home/u/.yantra/worktrees/ab12cd34\n0123abcd\n",
             "",
         )]));
         assert_eq!(
@@ -677,6 +681,7 @@ mod tests {
                 repo: "/home/u/repo".to_owned(),
                 worktree: "/home/u/.yantra/worktrees/ab12cd34".to_owned(),
                 branch: "yantra/ab12cd34".to_owned(),
+                base: "0123abcd".to_owned(),
             }
         );
 
@@ -696,11 +701,13 @@ mod tests {
     #[tokio::test]
     async fn summarise_reads_both_answers_and_a_failed_git_is_a_worktree_error() {
         let said = Mutex::new(Said(vec![
-            out(0, "?? a.txt\n", ""),
+            out(0, "a.txt\0", ""),
             out(0, " 1 file changed, 2 insertions(+)\n", ""),
         ]));
         assert_eq!(
-            summarise(&said, "/w").await.expect("summarised"),
+            summarise(&said, "/w", "0123abcd")
+                .await
+                .expect("summarised"),
             Summary {
                 changed: vec!["a.txt".to_owned()],
                 shortstat: "1 file changed, 2 insertions(+)".to_owned(),
@@ -711,7 +718,7 @@ mod tests {
             out(128, "", "fatal: cannot change to '/w'\n"),
         ]));
         assert!(matches!(
-            summarise(&gone, "/w").await,
+            summarise(&gone, "/w", "0123abcd").await,
             Err(Error::Worktree { .. })
         ));
     }
@@ -730,6 +737,7 @@ mod tests {
             repo: "/srv/a b".to_owned(),
             worktree: "/h/.yantra/worktrees/x".to_owned(),
             branch: "yantra/x".to_owned(),
+            base: "0123abcd".to_owned(),
         });
         assert_eq!(
             removed,

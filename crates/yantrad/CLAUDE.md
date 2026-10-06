@@ -592,7 +592,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Seven things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Eight things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -622,13 +622,13 @@ polls. §2.2 measured the far-side filter free over 15 MB and the ssh round trip
 round trip is the whole cost** — which is the argument for reading a window on request and against
 reading one on a timer.
 
-**`/api/tasks` holds ssh on its writes and never on its reads** (Y-435,
-[`tasks.rs`](src/tasks.rs)). `yantra mcp` calls it for the main agent, and an agent polls
+**Y-435 is the eighth: `/api/tasks` holds ssh on its writes and never on its reads**
+([`tasks.rs`](src/tasks.rs)). `yantra mcp` calls it for the main agent, and an agent polls
 `GET /api/tasks/{id}` until a task ends — so that route fails ADR-0019's second half and reads memory.
 A task takes its own diff summary when its turn ends, and `POST /api/tasks/{id}/stop` takes it again.
-Starting a task and removing one await ssh, because each is a write sent once.
+Starting, stopping and removing a task await ssh, because each is a write sent once.
 
-None of the seven licenses a **read handler** that awaits ssh, which is still the bug this module
+None of the eight licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

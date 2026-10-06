@@ -103,13 +103,22 @@ async fn a_task_works_in_its_own_worktree_and_leaves_nothing_when_removed() -> R
     })
     .await?;
 
-    fixture.run(&format!("echo two > {}/delegated.txt", place.worktree))?;
+    // Work the agent commits on its branch must show as much as work it leaves.
+    fixture.run(&format!(
+        "cd {} && echo two > delegated.txt && echo three > 'committed \u{fc}.md' \
+         && git add 'committed \u{fc}.md' \
+         && git -c user.name=t -c user.email=t@example.com commit -qm three",
+        place.worktree
+    ))?;
     let summary = within("a summary", task.summary()).await?;
-    // The agent may leave files of its own; the one written here must be named.
-    assert!(
-        summary.changed.iter().any(|path| path == "delegated.txt"),
-        "{summary:?}"
-    );
+    // The agent may leave files of its own; the ones written here must be named.
+    for written in ["delegated.txt", "committed \u{fc}.md"] {
+        assert!(
+            summary.changed.iter().any(|path| path == written),
+            "{written}: {summary:?}"
+        );
+    }
+    assert!(!summary.shortstat.is_empty(), "{summary:?}");
     assert_eq!(task.progress().summary, Some(summary));
 
     within("stopping", async {
