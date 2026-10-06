@@ -87,7 +87,7 @@ describe('the chat', () => {
     expect(screen.getByText('run the tests').closest('article')?.getAttribute('data-who')).toBe('you')
     // While a turn runs, Stop stands where Send was.
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop Claude' })).toBeTruthy()
   })
 
   it('never renders raw HTML from a reply', async () => {
@@ -132,7 +132,7 @@ describe('the chat', () => {
     type('count to 400')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     say(of('turn.started'))
-    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Stop' })))
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Stop Claude' })))
 
     await settled(() => expect(frames()).toContainEqual({ type: 'cancel' }))
     expect(screen.getByRole('status').textContent).toBe('Stopping Claude…')

@@ -92,7 +92,7 @@ test.describe('the session screen, chat first', () => {
 
   test('Stop cancels a turn that is waiting', async ({ page, size }) => {
     await turn(page, size)
-    await page.getByRole('button', { name: 'Stop' }).click()
+    await page.getByRole('button', { name: 'Stop Claude' }).click()
     await expect(page.getByRole('status')).toHaveText('Claude stopped.')
     await expect(asking(page)).toHaveCount(0)
   })

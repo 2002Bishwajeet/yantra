@@ -244,7 +244,7 @@ export function Chat(props: ChatProps) {
             onChange={(event) => setDraft(event.target.value)}
             trailing={
               busy ? (
-                <IconButton disabled={timeline.turn === 'stopping'} label="Stop" onClick={chat.stop} type="button">
+                <IconButton disabled={timeline.turn === 'stopping'} label="Stop Claude" onClick={chat.stop} type="button">
                   <Square />
                 </IconButton>
               ) : (
