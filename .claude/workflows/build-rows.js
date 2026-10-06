@@ -92,7 +92,7 @@ const PLAN_SCHEMA = {
     park: { type: 'boolean' },
     parkReason: { type: 'string' },
     plan: { type: 'string' },
-    extraChecks: { type: 'array', items: { type: 'string' }, description: 'commands beyond the standard gate that prove the done condition' },
+    extraChecks: { type: 'array', items: { type: 'string' }, description: 'commands beyond the standard gate that prove the done condition. Each must run as written: `yantrad` is binary-only, so use `--bin yantrad` and never `--lib`, and a nextest filter must match a test (check with `cargo nextest list`). Leave it empty when the gate already proves the row.' },
   },
   required: ['park', 'plan', 'extraChecks'],
 }
@@ -102,6 +102,7 @@ const VERIFY_SCHEMA = {
   properties: {
     pass: { type: 'boolean' },
     failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
+    fixedChecks: { type: 'array', items: { type: 'string' }, description: 'only when a Then command is itself wrong (an unknown target, a filter that matches no test): every Then command, corrected' },
   },
   required: ['pass', 'failures'],
 }
@@ -153,7 +154,7 @@ function triagePrompt(exclude) {
   return `Run git -C ${REPO} fetch origin, then read tracker.md from origin/main with git -C ${REPO} show origin/main:tracker.md. Do not read the file in the checkout: it can be stale or on another branch.
 Rank the open rows in its §3 that an agent can finish alone today.
 
-Eligible: status ⬜ todo, every row in Depends is ✅ done, and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
+Eligible: status ⬜ todo, every row in Depends is ✅ done or 🔵 review (a 🔵 review row has merged; only a release has not marked it), and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
 Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a real Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question.
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.
@@ -180,6 +181,7 @@ async function verify(row, wt, plan, label) {
       `Run the gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
 Gate: ${gate(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
+If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
 The gate can take longer than a 10-minute Bash call: run it in the background and wait for it to finish.
 Remove leftover podman containers afterwards.`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
@@ -201,6 +203,8 @@ Find the cause before you change code. Commit the fix.${RULES(wt)}`,
 async function verifyUntilGreen(row, wt, plan, rounds) {
   for (let i = 1; i <= rounds; i++) {
     const v = await verify(row, wt, plan, String(i))
+    // A wrong check is the plan's bug, and no code fix can make it pass.
+    if (v?.fixedChecks?.length) plan.extraChecks = v.fixedChecks
     if (v && v.pass) return true
     if (i === rounds) return false
     if (v) await fix(row, wt, `The gate failed:\n${v.failures}`)
