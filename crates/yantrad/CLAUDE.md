@@ -565,7 +565,8 @@ is a worktree of a workspace's repository, and a bare session names none.
 - **A socket that closes mid-turn cancels the turn**, waits up to 10 s for it to end, then drops it.
   The worktree stays, as `thread.rs` requires.
 - **Q5 binds it as hard as the terminal.** The lifecycle is logged; no prompt, reply or tool output.
-- **It has no CLI verb**, unlike the writes: ADR-0026 decided the chat is the dashboard's.
+- **It has no CLI verb yet**, and [ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)
+  asks for one. No ADR exempts the chat, so this is an open gap and not a decision.
 - **It holds ssh after the upgrade has answered**, as the terminal does, so it is not a read handler
   that awaits ssh.
 - The four calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket

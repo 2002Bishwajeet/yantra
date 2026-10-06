@@ -31,8 +31,9 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       },
       onError: (failure) => {
         setError(failure)
-        // Busy means a turn is running, so the timeline already says so.
-        if (failure.kind === 'unreachable' || failure.kind === 'badFrame') dispatch({ type: 'refused' })
+        // Busy and badFrame never end or prevent a turn: a second tap on an
+        // answer the daemon already took is a badFrame while Claude still runs.
+        if (failure.kind === 'unreachable') dispatch({ type: 'refused' })
         if (failure.kind === 'closed' || failure.kind === 'refused' || failure.kind === 'unknownThread') {
           dispatch({ type: 'refused' })
           setLink('closed')

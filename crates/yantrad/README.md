@@ -9,7 +9,7 @@ no *read* ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README
 keeps working with no daemon running — that is a decision, not a gap
 ([ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)).
 
-Every route below but the chat socket has a CLI equivalent, and that is the rule rather than a coincidence: anything the
+Every route below has a CLI equivalent, and that is the rule rather than a coincidence: anything the
 web UI can do must be expressible in `yantra` first, which is what stops the daemon growing a richer
 API the CLI cannot reach.
 
@@ -48,7 +48,7 @@ API the CLI cannot reach.
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `stop_task`, `remove_task` (ADR-0033, Y-435). The `GET`s read memory |
-| `GET /api/workspaces/{name}/chat` | — (a WebSocket for the dashboard's Chat tab, ADR-0026; each turn is `claude -p` in the thread's own worktree, Y-356) |
+| `GET /api/workspaces/{name}/chat` | **None yet**, which breaks the rule above: an open gap, not a decision. A WebSocket for the dashboard's Chat tab; each turn is `claude -p` in the thread's own worktree (ADR-0026, Y-356) |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |
 | `GET /api/machines/{machine}/mic` | — (a WebSocket that carries push-to-talk audio into `pw-cat`, ADR-0031 §5) |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |

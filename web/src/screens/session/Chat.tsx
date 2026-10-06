@@ -92,8 +92,14 @@ function ToolCard(props: { tool: Tool }) {
 }
 
 /** Claude's own question, with the three answers the bridge offers. */
-function Asking(props: { request: RequestOpened; onAnswer: (decision: 'accept' | 'acceptAlways' | 'decline') => void }) {
+function Asking(props: { request: RequestOpened; onAnswer: (decision: 'accept' | 'acceptAlways' | 'decline') => boolean }) {
   const { request, onAnswer } = props
+  // The card stays until the daemon says `request.resolved`; a second answer
+  // before then reaches no pending request.
+  const [answered, setAnswered] = useState(false)
+  const answer = (decision: 'accept' | 'acceptAlways' | 'decline') => {
+    if (onAnswer(decision)) setAnswered(true)
+  }
   return (
     <Card className="chat__asking" surface="primary">
       <div className="chat__asking-head">
@@ -108,11 +114,13 @@ function Asking(props: { request: RequestOpened; onAnswer: (decision: 'accept' |
         ) : null}
       </div>
       <div className="chat__answers">
-        <Button onClick={() => onAnswer('accept')}>Accept</Button>
-        <Button onClick={() => onAnswer('acceptAlways')} variant="tonal">
+        <Button disabled={answered} onClick={() => answer('accept')}>
+          Accept
+        </Button>
+        <Button disabled={answered} onClick={() => answer('acceptAlways')} variant="tonal">
           Accept always
         </Button>
-        <Button onClick={() => onAnswer('decline')} variant="text">
+        <Button disabled={answered} onClick={() => answer('decline')} variant="text">
           Decline
         </Button>
       </div>

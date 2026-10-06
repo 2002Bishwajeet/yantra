@@ -127,6 +127,31 @@ describe('the chat', () => {
     await settled(() => expect(screen.queryByText('Claude asks to run')).toBeNull())
   })
 
+  it('takes one answer per request, so a double tap sends one frame', async () => {
+    await open()
+    say(of('request.opened'))
+    const accept = await settled(() => screen.getByRole('button', { name: 'Accept' }))
+    fireEvent.click(accept)
+    fireEvent.click(accept)
+    await settled(() => expect(frames()).toHaveLength(1))
+    expect(accept).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Decline' })).toHaveProperty('disabled', true)
+  })
+
+  it('keeps Stop through a badFrame, because a bad frame never ends a turn', async () => {
+    await open()
+    type('run the tests')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(of('turn.started'))
+    await settled(() => screen.getByRole('button', { name: 'Stop Claude' }))
+
+    say({ type: 'error', kind: 'badFrame', said: 'no request r1 is pending' })
+    await settled(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Stop Claude' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
+  })
+
   it('stops a running turn, and says it stopped', async () => {
     await open()
     type('count to 400')
