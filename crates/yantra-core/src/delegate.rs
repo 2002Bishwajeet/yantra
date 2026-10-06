@@ -20,7 +20,7 @@ use crate::tmux::sq;
 /// How long `stop` lets a cancelled turn end by itself before it cuts it off.
 const STOP_GRACE: Duration = Duration::from_secs(10);
 /// The exit status the worktree script gives a path that is not a work tree.
-const NOT_A_REPO: i32 = 3;
+pub(crate) const NOT_A_REPO: i32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -240,14 +240,14 @@ impl Task {
 
 /// Short and unguessable enough for a branch name. `RandomState` is seeded
 /// from the OS once and then advanced, so two calls never repeat.
-fn id() -> String {
+pub(crate) fn id() -> String {
     let bits = std::collections::hash_map::RandomState::new()
         .build_hasher()
         .finish();
     format!("{:08x}", bits >> 32)
 }
 
-fn said(stderr: &[u8]) -> String {
+pub(crate) fn said(stderr: &[u8]) -> String {
     String::from_utf8_lossy(stderr).trim().to_owned()
 }
 
@@ -256,11 +256,12 @@ fn said(stderr: &[u8]) -> String {
 fn worktree_command(repo: &str, id: &str) -> String {
     format!(
         "top=$(git -C {repo} rev-parse --show-toplevel 2>/dev/null) || exit {NOT_A_REPO}\n\
-         wt=\"$HOME/.yantra/worktrees/{id}\"\n\
+         wt=\"$HOME\"/.yantra/worktrees/{id}\n\
          mkdir -p \"$HOME/.yantra/worktrees\" \
          && git -C \"$top\" worktree add -q -b {branch} \"$wt\" HEAD >&2 \
          && printf '%s\\n%s\\n' \"$top\" \"$wt\" && git -C \"$wt\" rev-parse HEAD",
         repo = destination(repo),
+        id = sq(id),
         branch = sq(&branch(id)),
     )
 }
@@ -269,7 +270,7 @@ fn branch(id: &str) -> String {
     format!("yantra/{id}")
 }
 
-async fn prepare<E: Exec>(exec: &E, repo: &str, id: &str) -> Result<Place, Error> {
+pub(crate) async fn prepare<E: Exec>(exec: &E, repo: &str, id: &str) -> Result<Place, Error> {
     let out = exec.exec(&worktree_command(repo, id)).await?;
     if out.status == NOT_A_REPO {
         return Err(Error::NotARepo {
@@ -292,7 +293,7 @@ async fn prepare<E: Exec>(exec: &E, repo: &str, id: &str) -> Result<Place, Error
     }
 }
 
-fn removal(place: &Place) -> String {
+pub(crate) fn removal(place: &Place) -> String {
     let repo = sq(&place.repo);
     format!(
         "git -C {repo} worktree remove --force {} && git -C {repo} branch -D {} >/dev/null \
@@ -304,7 +305,11 @@ fn removal(place: &Place) -> String {
 
 /// Diffs the working tree against `base`, so committed and uncommitted work
 /// both count. `-z` keeps git from quoting a path with a space or non-ASCII.
-async fn summarise<E: Exec>(exec: &E, worktree: &str, base: &str) -> Result<Summary, Error> {
+pub(crate) async fn summarise<E: Exec>(
+    exec: &E,
+    worktree: &str,
+    base: &str,
+) -> Result<Summary, Error> {
     let (worktree, base) = (sq(worktree), sq(base));
     let names = exec
         .exec(&format!(
@@ -731,6 +736,16 @@ mod tests {
             "{made}"
         );
         assert!(made.contains("-b 'yantra/ab12cd34'"), "{made}");
+        assert!(
+            made.contains(r#"wt="$HOME"/.yantra/worktrees/'ab12cd34'"#),
+            "{made}"
+        );
+        let nested = worktree_command("/srv/r", "chat/web/ab12cd34");
+        assert!(
+            nested.contains(r#"wt="$HOME"/.yantra/worktrees/'chat/web/ab12cd34'"#),
+            "{nested}"
+        );
+        assert!(nested.contains("-b 'yantra/chat/web/ab12cd34'"), "{nested}");
         assert!(worktree_command("~/src/r", "x").contains(r#"git -C "$HOME"/'src/r' rev-parse"#));
         let removed = removal(&Place {
             id: "x".to_owned(),

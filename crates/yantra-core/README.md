@@ -25,6 +25,9 @@ let moved  = edit::edit("yantra", &workspace::Changes {
 
 `delegate::Task` is the one that does not load a workspace: it takes an `Ssh`, a harness, a
 repository and a prompt, and runs an ACP agent in a new git worktree of that repository (ADR-0033).
+`thread` gives a chat session the same kind of worktree, on `yantra/chat/<workspace>/<id>`: the
+chat edits there while the workspace's TUI keeps the repository. Ending a session deletes nothing;
+`thread::remove` does.
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.
