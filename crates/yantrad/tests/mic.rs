@@ -294,3 +294,74 @@ python3 -c 'import struct; d=open("/tmp/heard.raw","rb").read(); n=len(d)//2; pr
     let _ = std::fs::remove_dir_all(&listener_dir);
     Ok(())
 }
+
+/// 1.5 s of a 440 Hz tone at 16 kHz, s16le: what the dashboard sends.
+fn tone() -> Vec<u8> {
+    (0..24_000u32)
+        .flat_map(|i| {
+            let phase = 2.0 * std::f64::consts::PI * 440.0 * f64::from(i) / 16_000.0;
+            #[allow(clippy::cast_possible_truncation)]
+            let sample = (12_000.0 * phase.sin()) as i16;
+            sample.to_le_bytes()
+        })
+        .collect()
+}
+
+/// Y-418 (ADR-0031 §5–6): the daemon's writer, fed the way the bridge feeds
+/// it, reaches a recorder that names `yantra-mic`; and closing it leaves no
+/// `pw-cat` behind.
+#[tokio::test]
+async fn the_dashboards_writer_carries_a_tone_into_yantra_mic_and_ends_when_closed() -> Result<()> {
+    let Some(systemd) = Systemd::start()? else {
+        return Ok(());
+    };
+    let dir = state_dir("writer")?;
+    let (key, public) = keypair(&dir)?;
+    authorise(&systemd, UNPRIVILEGED, &public)?;
+    systemd.run(&["systemctl", "start", "sshd.service"])?;
+    let ssh = connect(&systemd, UNPRIVILEGED, &key, &dir).await?;
+
+    let report = install::of(&ssh, "fixture", STAND_IN, Some(NO_CARDS)).await?;
+    assert_eq!(mic(&report), &Outcome::Installed, "{report:?}");
+
+    let recorder = {
+        let ssh = ssh.clone();
+        tokio::spawn(async move {
+            said(
+                &ssh,
+                &format!(
+                    r#"{RUNTIME}PIPEWIRE_NODE=yantra-mic arecord -q -f S16_LE -r 16000 -c 1 -t raw -d 3 /tmp/pressed.raw
+python3 -c 'import struct; d=open("/tmp/pressed.raw","rb").read(); n=len(d)//2; print(max((abs(x) for x in struct.unpack("<%dh" % n, d[:n*2])), default=0))'"#
+                ),
+            )
+            .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let mut stream = yantra_core::mic::open(&ssh)?;
+    let mut pace = tokio::time::interval(std::time::Duration::from_millis(20));
+    for chunk in tone().chunks(640) {
+        pace.tick().await;
+        stream.write(chunk).await?;
+    }
+    stream.close().await?;
+
+    let peak = recorder.await??;
+    let peak: i32 = peak.parse().with_context(|| format!("a peak: {peak:?}"))?;
+    assert!(
+        peak > 6000,
+        "the tone did not reach yantra-mic: peak {peak}"
+    );
+
+    // Release closed both ends: nothing is left playing into the sink.
+    assert!(
+        !ssh.exec(&format!("pgrep -u {UNPRIVILEGED} -x pw-cat"))
+            .await?
+            .success(),
+        "a pw-cat outlived its stream"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
