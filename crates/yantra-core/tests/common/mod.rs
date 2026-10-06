@@ -297,7 +297,8 @@ fn ensure_image() -> Result<()> {
     if podman(&["image", "exists", IMAGE])?.status.success() {
         return Ok(());
     }
-    let context = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture");
+    // `yantrad`'s tasks test includes this file too, and the image is this crate's.
+    let context = Path::new(env!("CARGO_MANIFEST_DIR")).join("../yantra-core/tests/fixture");
     let mut failures = Vec::new();
     for attempt in 1..=BUILD_ATTEMPTS {
         if attempt > 1 {

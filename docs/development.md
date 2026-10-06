@@ -195,6 +195,23 @@ and the grant, and Settings → Providers has the same field (Y-393). A client i
 restarts, the relay's own rule — `client_id()` rereads the environment rather than holding a value
 live.
 
+## Delegating from Claude Code
+
+`yantra mcp` lets Claude Code, the main agent, hand a task to another harness on a fleet machine
+([ADR-0033](adr/0033-other-harnesses-speak-acp-and-claude-delegates.md), Y-435). Register it once on
+the machine where you run `claude`:
+
+```bash
+claude mcp add yantra -- yantra mcp --daemon http://<appliance>:7717
+```
+
+Use the appliance's tailnet name or address. `yantrad` authorises the call by Tailscale identity, so
+the machine must be your own untagged node. The tools are `start_task`, `task_status`, `list_tasks`,
+`stop_task` and `remove_task`. Each task runs in a new worktree at `~/.yantra/worktrees/<id>` on a
+branch `yantra/<id>`, and `remove_task` deletes both. A task answers its agent's permission requests
+with "allow once". The harness must already be logged in on that machine. The daemon keeps tasks in
+memory, so after a restart it forgets them and their worktrees stay on the machine.
+
 ## The dashboard over HTTPS
 
 `yantrad` speaks plain HTTP and will keep doing so. TLS is `tailscale serve`'s job: it already holds

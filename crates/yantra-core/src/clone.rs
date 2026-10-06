@@ -169,7 +169,7 @@ fn slug(url: &str) -> String {
 /// `~/` is completed by the far side, because `sq` would make the `~` a
 /// literal and the shell only expands it bare — and `$HOME` there is a value
 /// this side never composes (ADR-0009).
-fn destination(path: &str) -> String {
+pub(crate) fn destination(path: &str) -> String {
     match path.strip_prefix("~/") {
         Some(rest) => format!("\"$HOME\"/{}", sq(rest)),
         None => sq(path),

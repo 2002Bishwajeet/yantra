@@ -39,6 +39,7 @@ yantra join-script               # the script a new machine pipes into sh (GET /
 yantra about                     # version, target and build date of this binary
 yantra update --check            # running and published version, and whether a newer one exists
 sudo yantra update               # install the current release and restart what runs
+yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:
