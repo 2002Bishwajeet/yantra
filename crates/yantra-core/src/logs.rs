@@ -272,12 +272,21 @@ pub(crate) fn locate(repo: &str, session: Option<&str>) -> String {
              [ -f \"$f\" ] || exit {NO_TRANSCRIPT}\n",
             id = sq(id)
         ),
-        None => format!(
-            "f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -n 1)\n\
-             [ -n \"$f\" ] || exit {NO_TRANSCRIPT}\n"
-        ),
+        None => {
+            return format!("{}[ -n \"$f\" ] || exit {NO_TRANSCRIPT}\n", newest(repo));
+        }
     };
     format!("d=$HOME/.claude/projects/{slug}\n{find}", slug = slug(repo),)
+}
+
+/// The lines that put the newest transcript under `repo` in `$f`, or leave it
+/// empty. [`crate::claude`] resumes the conversation that file holds.
+pub(crate) fn newest(repo: &str) -> String {
+    format!(
+        "d=$HOME/.claude/projects/{slug}\n\
+         f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -n 1)\n",
+        slug = slug(repo)
+    )
 }
 
 /// Claude Code's own mapping from a working directory to a project directory:
@@ -336,7 +345,7 @@ fn entry(line: &str) -> Option<Entry> {
 /// What one call acted on: the first of [`TARGET_KEYS`] the input spells with a
 /// string, capped. Forwarding the whole object instead would carry a `Write`'s
 /// file contents to a phone (D5 §4.2).
-fn target_in(input: &serde_json::Value) -> Option<String> {
+pub(crate) fn target_in(input: &serde_json::Value) -> Option<String> {
     let found = TARGET_KEYS
         .iter()
         .find_map(|key| input.get(key)?.as_str())?

@@ -34,6 +34,7 @@ is a broken build rather than a reader's problem.
 | R17 | A microphone that reaches the remote machine, for Claude Code's voice dictation and any other program | Y-415 | [17-remote-microphone.md](17-remote-microphone.md) |
 | R18 | One conversation history on every device and every agent harness: a store, Syncthing, ssh reads, a sync tool, or a shared search layer | Y-425, Y-426 | [18-one-conversation-history.md](18-one-conversation-history.md) |
 | R19 | Driving every agent harness through ACP — support per harness, session lifetime over ssh, agent-calls-agent tools, and what T3 Code's chat needs | Y-427, Y-428 (no ADR yet) | [19-acp-for-every-harness.md](19-acp-for-every-harness.md) |
+| R20 | One chat turn with `claude -p` over stream-json — a permission answered on stdin, interrupt, resume from the newest transcript, and Bash refusing busybox `sh` | Y-356 | [20-claude-stream-json-turn.md](20-claude-stream-json-turn.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that

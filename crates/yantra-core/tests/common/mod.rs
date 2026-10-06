@@ -33,7 +33,7 @@ use anyhow::{Context, Result, bail};
 
 /// Bump the tag when `tests/fixture/Containerfile` changes; the image is built
 /// once and then reused from the local store.
-const IMAGE: &str = "localhost/yantra-fixture:4";
+const IMAGE: &str = "localhost/yantra-fixture:6";
 pub const USER: &str = "yantra";
 const HOST: &str = "127.0.0.1";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -119,6 +119,25 @@ impl SshFixture {
         if !out.status.success() {
             bail!(
                 "arranging `{command}` failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    /// Copies a file of the host's into the container. Setup only, as
+    /// [`Self::arrange_as_root`] is.
+    pub fn copy_in(&self, from: &Path, to: &str) -> Result<()> {
+        let out = podman(&[
+            "cp",
+            &from.to_string_lossy(),
+            &format!("{}:{to}", self.container),
+        ])?;
+        if !out.status.success() {
+            bail!(
+                "copying {} in failed ({}): {}",
+                from.display(),
                 out.status,
                 String::from_utf8_lossy(&out.stderr).trim()
             );

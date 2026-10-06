@@ -1,8 +1,8 @@
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
 import { useSessions, useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
-import { useResume } from '@/api/mutations'
 import { MISSING, statusQuery } from '@/api/queries'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -16,13 +16,12 @@ import { useFormFactor } from '@/shell/formFactor'
 import { useTick } from '@/useTick'
 import { VIEWS, type View } from '@/views'
 import { Chat } from './Chat'
-import { Delete, Header } from './Header'
+import { Header } from './Header'
 import { KeyRow } from './Keys'
 import { NotFound } from './NotFound'
 import { Spend } from './Spend'
 import { Terminal } from './Terminal'
 import { Transcript } from './Transcript'
-import { startedAt, verbs, whyNot } from './verbs'
 import './Session.css'
 
 /** `getRouteApi` rather than the route object: this module is loaded *by* the
@@ -41,13 +40,22 @@ const LABELS: Record<View, string> = {
  *  daemon is cheap and an attach is an ssh to a machine that may be asleep. */
 export function Session() {
   const { name } = route.useParams()
-  const { view } = route.useSearch()
-  return <Workspace name={name} view={view ?? 'chat'} />
+  const { view, thread } = route.useSearch()
+  const navigate = route.useNavigate()
+  // Replace, not push: naming the thread is the same page, and Back leaves it.
+  const onThread = (id: string) =>
+    void navigate({ replace: true, search: (prev) => ({ ...prev, thread: id }) })
+  return <Workspace name={name} onThread={onThread} thread={thread} view={view ?? 'chat'} />
 }
 
 /** The route's body, with the URL already read — what the tests render. */
-export function Workspace(props: { name: string; view: View }) {
-  const { name, view } = props
+export function Workspace(props: {
+  name: string
+  view: View
+  thread?: string
+  onThread?: (thread: string) => void
+}) {
+  const { name, view, thread, onThread } = props
   const client = useQueryClient()
   const listed = useWorkspaces()
 
@@ -118,11 +126,11 @@ export function Workspace(props: { name: string; view: View }) {
     )
   }
 
-  return <Loaded view={view} workspace={entry} />
+  return <Loaded onThread={onThread ?? (() => {})} thread={thread} view={view} workspace={entry} />
 }
 
-function Loaded(props: { workspace: Workspace; view: View }) {
-  const { workspace, view } = props
+function Loaded(props: { workspace: Workspace; view: View; thread?: string; onThread: (thread: string) => void }) {
+  const { workspace, view, thread, onThread } = props
   const { name } = workspace
   const sessions = useSessions()
   const factor = useFormFactor()
@@ -131,41 +139,16 @@ function Loaded(props: { workspace: Workspace; view: View }) {
   // terminal and back may not spend a second ssh (D5 §3.5, §4.3).
   const transcript = useTranscript(name)
   const spend = useSpend()
-  const resume = useResume()
+  // The chat stays mounted once opened: closing its socket cancels Claude's turn.
+  const [chatFor, setChatFor] = useState(view === 'chat' ? name : null)
+  if (view === 'chat' && chatFor !== name) setChatFor(name)
+  const chatOpened = chatFor === name
 
   const { data: agent } = useQuery(statusQuery(name))
   const status: WorkspaceStatus | null =
     agent === undefined || agent === MISSING || agent.looked !== 'ok' ? null : agent.data
   const state = status?.reached === 'yes' ? status.status : null
-  const paneOpen = startedAt(sessions, workspace) !== null
   const readAt = transcript.said.said === 'held' ? at(transcript.said.at, now) : null
-
-  const live = verbs(workspace, status).resume
-  const endActions = (
-    <div className="session__end-actions">
-      <Button
-        aria-describedby={live ? undefined : 'session-end-resume'}
-        disabled={!live || resume.isPending}
-        onClick={() => resume.mutate(name)}
-      >
-        {resume.isPending ? 'Resuming…' : 'Resume'}
-      </Button>
-      {live ? null : (
-        <span className="m3-sr-only" id="session-end-resume">
-          {whyNot(workspace, status).resume}
-        </span>
-      )}
-      <Delete
-        status={status}
-        trigger={
-          <Button tone="error" variant="text">
-            Delete
-          </Button>
-        }
-        workspace={workspace}
-      />
-    </div>
-  )
 
   return (
     <div className="session" data-view={view}>
@@ -185,7 +168,8 @@ function Loaded(props: { workspace: Workspace; view: View }) {
                     aria-current={one === view ? 'page' : undefined}
                     params={{ name }}
                     replace
-                    search={{ view: one }}
+                    // The thread rides along, so Terminal and back is the same chat.
+                    search={thread ? { view: one, thread } : { view: one }}
                     to="/w/$name"
                   />
                 }
@@ -205,20 +189,13 @@ function Loaded(props: { workspace: Workspace; view: View }) {
           </Mono>
         ) : null}
       </div>
-      {/* Only the open tab is mounted: mounting the terminal opens an ssh, and
-          tmux redraws the pane for whoever attaches next (D5 §3.5). */}
+      {/* Only the open tab is mounted, except the chat: mounting the terminal
+          opens an ssh, and tmux redraws the pane for whoever attaches next (D5 §3.5). */}
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
-        {view === 'chat' ? (
-          <Chat
-            endActions={endActions}
-            key={name}
-            now={now}
-            onRead={transcript.read}
-            paneOpen={paneOpen}
-            said={transcript.said}
-            state={state}
-            workspace={workspace}
-          />
+        {chatOpened ? (
+          <div hidden={view !== 'chat'}>
+            <Chat key={name} onThread={onThread} thread={thread} workspace={workspace} />
+          </div>
         ) : null}
         {view === 'terminal' ? (
           <div className="session__terminal">

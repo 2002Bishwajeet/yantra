@@ -9,6 +9,8 @@ import type {
   About,
   Attention,
   Broken,
+  ChatFailure,
+  ChatFrame,
   Cloning,
   Connection,
   Device,
@@ -28,6 +30,7 @@ import type {
   Stopped,
   TerminalExit,
   TerminalSize,
+  ThreadEvent,
   Transcript,
   Workspace,
   WorkspaceStatus,
@@ -728,3 +731,127 @@ export const terminalSize = {
 export const terminalExit = {
   "exit": 0
 } satisfies TerminalExit
+
+export const chatEvents = [
+  {
+    "payload": {
+      "thread": "1a2b3c4d"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.started"
+  },
+  {
+    "threadId": "1a2b3c4d",
+    "type": "turn.started"
+  },
+  {
+    "payload": {
+      "delta": "Running the tests.",
+      "itemId": "msg_1:1",
+      "streamKind": "assistant_text"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "content.delta"
+  },
+  {
+    "payload": {
+      "itemId": "toolu_1",
+      "itemType": "command_execution",
+      "status": "inProgress",
+      "title": "cargo test"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "item.started"
+  },
+  {
+    "payload": {
+      "detail": "Run the unit tests",
+      "itemId": "toolu_1",
+      "options": [
+        {
+          "decision": "accept",
+          "label": "Accept",
+          "optionId": "accept"
+        },
+        {
+          "decision": "acceptAlways",
+          "label": "Accept always",
+          "optionId": "accept_always"
+        },
+        {
+          "decision": "decline",
+          "label": "Decline",
+          "optionId": "decline"
+        }
+      ],
+      "requestId": "r1",
+      "requestType": "exec_command_approval",
+      "title": "cargo test"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "request.opened"
+  },
+  {
+    "payload": {
+      "decision": "accept",
+      "requestId": "r1",
+      "requestType": "exec_command_approval"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "request.resolved"
+  },
+  {
+    "payload": {
+      "itemId": "toolu_1",
+      "output": "test result: ok",
+      "status": "completed"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "item.completed"
+  },
+  {
+    "payload": {
+      "maxTokens": 200000,
+      "usedTokens": 29149
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.token-usage.updated"
+  },
+  {
+    "payload": {
+      "state": "completed",
+      "stopReason": "end_turn"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "turn.completed"
+  },
+  {
+    "payload": {
+      "message": "Not logged in · Please run /login",
+      "state": "failed"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "turn.completed"
+  }
+] satisfies ThreadEvent[]
+
+export const chatFailure = {
+  "kind": "busy",
+  "said": "a turn is running",
+  "type": "error"
+} satisfies ChatFailure
+
+export const chatFrames = [
+  {
+    "text": "run the tests",
+    "type": "turn"
+  },
+  {
+    "decision": "acceptAlways",
+    "requestId": "r1",
+    "type": "answer"
+  },
+  {
+    "type": "cancel"
+  }
+] satisfies ChatFrame[]

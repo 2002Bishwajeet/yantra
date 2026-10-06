@@ -35,6 +35,11 @@ pub async fn open<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Place, Err
     delegate::prepare(exec, &workspace.repo.to_string_lossy(), &id).await
 }
 
+/// The short id a caller names the thread by: the last part of [`Place::id`].
+pub fn name(place: &Place) -> &str {
+    place.id.rsplit('/').next().unwrap_or(&place.id)
+}
+
 /// Every thread of the workspace that git still knows, so a thread outlives the
 /// daemon that opened it.
 pub async fn list<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Place>, Error> {
@@ -262,6 +267,11 @@ mod tests {
         assert_eq!(place.repo, REPO);
         assert_eq!(place.worktree, WORKTREE);
         assert_eq!(place.base, "0123abcd");
+    }
+
+    #[test]
+    fn a_thread_is_named_by_the_last_part_of_its_id() {
+        assert_eq!(name(&place()), "11111111");
     }
 
     #[tokio::test]

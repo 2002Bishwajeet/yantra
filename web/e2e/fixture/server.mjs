@@ -1,6 +1,6 @@
 // Enough of yantrad for the browser to run against: every `/api` route the
 // dashboard calls, answered from contract.gen.ts's fixtures under a scenario
-// overlay, and both terminal sockets. Nothing here is the daemon's logic —
+// overlay, both terminal sockets and the chat socket. Nothing here is the daemon's logic —
 // writes mutate an in-memory copy so the next read agrees with them.
 //
 //   node e2e/fixture/server.mjs            FIXTURE_PORT=7790 FIXTURE_SCENARIO=busy
@@ -645,6 +645,83 @@ function oneOff(state, request, socket, head, machine, index, at) {
   })
 }
 
+/** chat.rs's socket (Y-356). A turn replays what yantrad really serialises,
+ *  contract.gen.ts's `chatEvents`, as far as the permission request, and the
+ *  rest once it is answered. `?thread=` attaches to the one thread here and
+ *  replays two turns of its transcript first. */
+const THREAD = '1a2b3c4d'
+const HISTORY = [
+  ['user_text', 'Is the core crate green?'],
+  ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all.'],
+]
+
+function converse(state, request, socket, head, name, thread) {
+  if (state.refuse) {
+    socket.end(
+      `HTTP/1.1 ${state.refuse.status} Refused\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${state.refuse.text}`,
+    )
+    return
+  }
+  const delta = (streamKind, text, itemId) => ({
+    threadId: THREAD,
+    type: 'content.delta',
+    payload: { streamKind, delta: text, itemId },
+  })
+  const stream = contract.chatEvents.filter(
+    (one) => one.type !== 'thread.started' && !(one.type === 'turn.completed' && one.payload.state === 'failed'),
+  )
+  const asked = stream.findIndex((one) => one.type === 'request.opened') + 1
+  sockets.handleUpgrade(request, socket, head, (ws) => {
+    const say = (frame) => ws.send(JSON.stringify(frame), { binary: false })
+    const fail = (kind, said) => say({ type: 'error', kind, said })
+    if (!findWorkspace(state, name)) {
+      fail('unreachable', notFound(name))
+      ws.close()
+      return
+    }
+    if (thread && thread !== THREAD) {
+      fail('unknownThread', `${name} has no chat thread ${thread}`)
+      ws.close()
+      return
+    }
+    if (thread) HISTORY.forEach(([kind, text], at) => say(delta(kind, text, `history:${at}`)))
+    let known = thread
+    let waiting = null
+    let sent = 0
+    ws.on('message', (data, binary) => {
+      let frame = null
+      try {
+        frame = binary ? null : JSON.parse(data.toString())
+      } catch {}
+      if (frame?.type === 'turn' && typeof frame.text === 'string') {
+        if (waiting) return fail('busy', 'a turn is running; stop it or wait for it to end')
+        if (!known) {
+          known = THREAD
+          say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD } })
+        }
+        sent += 1
+        say(delta('user_text', frame.text, `user:${sent}`))
+        stream.slice(0, asked).forEach(say)
+        waiting = stream.slice(asked)
+      } else if (frame?.type === 'answer' && waiting) {
+        const [resolved, ...rest] = waiting
+        say({ ...resolved, payload: { ...resolved.payload, decision: frame.decision } })
+        rest.forEach(say)
+        waiting = null
+      } else if (frame?.type === 'cancel') {
+        if (!waiting) return
+        say({ threadId: THREAD, type: 'request.resolved', payload: { requestId: 'r1', requestType: 'exec_command_approval', decision: 'cancel' } })
+        say({ threadId: THREAD, type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
+        waiting = null
+      } else if (frame?.type === 'answer') {
+        fail('badFrame', 'no turn is running, so nothing is waiting')
+      } else {
+        fail('badFrame', 'a frame is a turn, an answer or a cancel')
+      }
+    })
+  })
+}
+
 server.on('upgrade', (request, socket, head) => {
   const { state, url } = select(request)
   if (state.down) {
@@ -654,6 +731,11 @@ server.on('upgrade', (request, socket, head) => {
   const workspace = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/terminal$/)
   const session = url.pathname.match(/^\/api\/machines\/([^/]+)\/sessions\/([^/]+)\/terminal$/)
   const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
+  const chat = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/chat$/)
+  if (chat) {
+    converse(state, request, socket, head, decodeURIComponent(chat[1]), url.searchParams.get('thread'))
+    return
+  }
   if (step) {
     oneOff(state, request, socket, head, decodeURIComponent(step[1]), Number(step[2]), Number(url.searchParams.get('at')))
     return

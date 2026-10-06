@@ -548,6 +548,30 @@ and keep playing nothing into the sink.
 captures a TRACE subscriber and asserts that a marker sent as audio is not in it. The route has no
 JSON shape, so `contract.gen.ts` does not change.
 
+## The route that holds a chat
+
+`GET /api/workspaces/{name}/chat?thread=<id>` ([`chat.rs`](src/chat.rs), Y-356,
+[ADR-0026](../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)) upgrades to a
+WebSocket after `allowed()`, as the terminal does. Each turn is a
+[`claude::Turn`](../yantra-core/src/claude.rs) in the thread's worktree. Without `?thread=` the first
+turn calls `thread::open` and says `thread.started`; with it, the route finds the thread through
+`thread::list` and replays its transcript as deltas. **There is no session-addressed form**: a thread
+is a worktree of a workspace's repository, and a bare session names none.
+
+- **The frames are JSON both ways.** The browser sends `turn`, `answer` and `cancel`; the daemon sends
+  `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are `unknownThread`, `busy`,
+  `badFrame` and `unreachable`. All are in `contract.gen.ts`.
+- **One turn at a time.** A second `turn` while one runs is `busy`, and the socket stays open.
+- **A socket that closes mid-turn cancels the turn**, waits up to 10 s for it to end, then drops it.
+  The worktree stays, as `thread.rs` requires.
+- **Q5 binds it as hard as the terminal.** The lifecycle is logged; no prompt, reply or tool output.
+- **It has no CLI verb yet**, and [ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)
+  asks for one. No ADR exempts the chat, so this is an open gap and not a decision.
+- **It holds ssh after the upgrade has answered**, as the terminal does, so it is not a read handler
+  that awaits ssh.
+- The four calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket
+  logic against scripted turns and the real thing runs in `yantra-core/tests/claude.rs`.
+
 ## The dashboard's types are checked against these routes, not trusted to match
 
 `contract.rs` (Y-124) drives the real `api::router()` over a fake snapshot and commits every answer

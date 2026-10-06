@@ -602,7 +602,12 @@ mod tests {
         let mut inner = Inner::default();
         assert_eq!(inner.progress.state, State::Starting);
         assert!(!inner.progress.state.is_terminal());
-        fold(&mut inner, &Event::ThreadStarted);
+        fold(
+            &mut inner,
+            &Event::ThreadStarted {
+                thread: "t".to_owned(),
+            },
+        );
         assert_eq!(inner.progress.state, State::Starting);
         fold(&mut inner, &Event::TurnStarted);
         assert_eq!(inner.progress.state, State::Running);

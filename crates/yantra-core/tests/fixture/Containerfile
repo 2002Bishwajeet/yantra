@@ -14,7 +14,10 @@ FROM docker.io/library/alpine:3.22
 # `git` and `sudo` are for the install tests (Y-386): each arranges its own
 # sudoers line, and with none, sudo refuses the account. `libstdc++` and
 # `libgcc` are what opencode's musl build links against (Y-433).
-RUN apk add --no-cache openssh-server tmux ncurses git sudo libstdc++ libgcc \
+# `ripgrep` is the one claude's musl build searches with, because the one it
+# bundles does not run there, and `bash` is because its Bash tool refuses
+# busybox's sh as "no suitable shell" (Y-356).
+RUN apk add --no-cache openssh-server tmux ncurses git sudo libstdc++ libgcc ripgrep bash \
  && ssh-keygen -A \
  && adduser -D -s /bin/sh yantra \
  && passwd -u yantra \
@@ -33,6 +36,22 @@ RUN case "$(uname -m)" in \
  && echo "${sum}  /tmp/opencode.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
  && rm /tmp/opencode.tar.gz
+
+# A real claude for tests/claude.rs (Y-356): the vendor's musl native build,
+# pinned by version and by the checksum its release manifest names. It lives
+# off PATH and outside agent::CANDIDATES, so the tests that stub claude or need
+# none still find what they expect; tests/claude.rs links it into place.
+ARG CLAUDE=2.1.291
+RUN case "$(uname -m)" in \
+      x86_64) arch=x64 sum=e4b1fb39b56a6798063fa04912e838c01dd58dffeb238d6dcd31ad2d172e82c5 ;; \
+      aarch64) arch=arm64 sum=582811002a94033fb27f1a307ab893a32ebac827b4ea1b20f72eb778ccf834ab ;; \
+      *) echo "no claude build for $(uname -m)" >&2; exit 1 ;; \
+    esac \
+ && mkdir -p /opt/claude \
+ && wget -q -O /opt/claude/claude \
+      "https://downloads.claude.ai/claude-code-releases/${CLAUDE}/linux-${arch}-musl/claude" \
+ && echo "${sum}  /opt/claude/claude" | sha256sum -c - \
+ && chmod 755 /opt/claude/claude
 
 EXPOSE 22
 

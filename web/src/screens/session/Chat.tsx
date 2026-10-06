@@ -1,145 +1,183 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { Link } from '@tanstack/react-router'
-import { ArrowUp } from 'lucide-react'
-import type { AgentState, Workspace } from '@/api'
-import { LINES, type Said } from '@/api/hooks'
+import { useEffect, useId, useRef, useState } from 'react'
+import { ArrowUp, Square } from 'lucide-react'
+import Markdown from 'react-markdown'
+import rehypeSanitize from 'rehype-sanitize'
+import remarkGfm from 'remark-gfm'
+import type { Workspace } from '@/api'
+import type { ItemType, RequestOpened } from '@/api/thread'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
-import { State } from '@/m3/mark/Mark'
+import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
-import { type Prompt, usePane } from './pane'
-import { home } from './format'
-import { ending } from './verbs'
-import { Turns } from './Turns'
+import type { Message, Timeline, Tool } from './timeline'
+import { useChat } from './useChat'
 
-/** "Claude is asking": the agent's own dialog as rows. Each row types its
- *  number and Enter into the pane; the answer is Claude's, not Yantra's. */
-function Asking(props: {
-  prompt: Prompt
-  repo: string
-  phone: boolean
-  onAnswer: (number: string) => void
-}) {
-  const { prompt, repo, phone, onAnswer } = props
+// Module constants, so the renderer is not handed new plugin lists per delta.
+const REMARK = [remarkGfm]
+const REHYPE = [rehypeSanitize]
+
+const KIND: Record<ItemType, string> = {
+  command_execution: 'Command',
+  file_change: 'File change',
+  web_search: 'Web',
+  dynamic_tool_call: 'Tool',
+}
+
+const ASKS: Record<RequestOpened['requestType'], string> = {
+  exec_command_approval: 'Claude asks to run',
+  file_change_approval: 'Claude asks to change',
+  file_read_approval: 'Claude asks to read',
+  dynamic_tool_call: 'Claude asks to use a tool',
+}
+
+function Said(props: { message: Message }) {
+  const { message } = props
+  if (message.who === 'thinking') {
+    return (
+      <details className="chat__thinking">
+        <summary>Thinking</summary>
+        <p>{message.text}</p>
+      </details>
+    )
+  }
   return (
-    <Card className="chat__asking" surface="primary">
-      <div className="chat__asking-head">
-        <Eyebrow>Claude is asking</Eyebrow>
-        <Text render={<h3 />} scale="title-large">
-          {prompt.kind === 'Bash command' && prompt.subject ? (
-            <>
-              Run <Mono>{prompt.subject}</Mono> in <Mono>{home(repo)}</Mono>?
-            </>
-          ) : prompt.subject ? (
-            <>
-              {prompt.kind ?? prompt.question} <Mono>{prompt.subject}</Mono>
-            </>
-          ) : (
-            prompt.question
-          )}
-        </Text>
+    <article className="turn" data-who={message.who}>
+      <header className="turn__head">
+        <Eyebrow>{message.who}</Eyebrow>
+      </header>
+      {message.who === 'you' ? (
+        <p className="turn__text">{message.text}</p>
+      ) : (
+        // ADR-0026 decision 4: GFM, sanitised, and no raw HTML is parsed.
+        <div className="turn__text chat__markdown">
+          <Markdown rehypePlugins={REHYPE} remarkPlugins={REMARK}>
+            {message.text}
+          </Markdown>
+        </div>
+      )}
+    </article>
+  )
+}
+
+const STATUS: Record<Tool['status'], { state: MarkState; word: string }> = {
+  inProgress: { state: 'running', word: 'running' },
+  completed: { state: 'done', word: 'done' },
+  failed: { state: 'failed', word: 'failed' },
+}
+
+function ToolCard(props: { tool: Tool }) {
+  const { tool } = props
+  const status = STATUS[tool.status]
+  return (
+    <Card className="chat__tool" render={<article />} surface="low">
+      <div className="chat__tool-head">
+        <Eyebrow>{KIND[tool.itemType]}</Eyebrow>
+        <State size="small" state={status.state}>
+          {status.word}
+        </State>
       </div>
-      <ol className="chat__options">
-        {prompt.options.map((option, index) => (
-          <li key={option.number}>
-            <button className="chat__option m3-interactive" onClick={() => onAnswer(option.number)} type="button">
-              <Mono className="chat__option-number">{option.number}</Mono>
-              <span className="chat__option-label">{option.label}</span>
-              {index === 0 ? <Mono className="chat__option-hint">then Enter</Mono> : null}
-            </button>
-          </li>
-        ))}
-      </ol>
-      <Text render={<p />} scale="body-small">
-        each option types its number into the pane
-        {phone ? null : "; the answer is Claude's, not Yantra's"}
-      </Text>
+      {tool.title ? <Mono className="chat__tool-title">{tool.title}</Mono> : null}
+      {tool.output ? (
+        <details className="chat__tool-output">
+          <summary>Output</summary>
+          <pre>{tool.output}</pre>
+        </details>
+      ) : null}
     </Card>
   )
 }
 
-function Ended(props: { workspace: Workspace; state: AgentState; paneOpen: boolean; actions: ReactNode }) {
-  const { workspace, state, paneOpen, actions } = props
+/** Claude's own question, with the three answers the bridge offers. */
+function Asking(props: { request: RequestOpened; onAnswer: (decision: 'accept' | 'acceptAlways' | 'decline') => boolean }) {
+  const { request, onAnswer } = props
+  // The card stays until the daemon says `request.resolved`; a second answer
+  // before then reaches no pending request.
+  const [answered, setAnswered] = useState(false)
+  const answer = (decision: 'accept' | 'acceptAlways' | 'decline') => {
+    if (onAnswer(decision)) setAnswered(true)
+  }
   return (
-    <div className="chat__ended">
-      <Card className="chat__end" surface="high">
-        <div className="chat__end-text">
-          <State state={state.state === 'finished' || state.state === 'stopped' ? 'idle' : 'failed'}>
-            <Text scale="title-medium">{state.state}</Text>
-          </State>
-          <Text render={<p />} scale="body-small" tone="variant">
-            {ending(state)} in tmux {workspace.name} on {workspace.machine}. The transcript above is frozen;{' '}
-            {paneOpen ? 'the pane is still open on the Terminal tab.' : 'the tmux session is gone.'}
+    <Card className="chat__asking" surface="primary">
+      <div className="chat__asking-head">
+        <Eyebrow>{ASKS[request.requestType]}</Eyebrow>
+        <Text render={<h3 />} scale="title-medium">
+          {request.title ? <Mono>{request.title}</Mono> : (request.detail ?? 'a tool')}
+        </Text>
+        {request.title && request.detail ? (
+          <Text render={<p />} scale="body-medium">
+            {request.detail}
           </Text>
-        </div>
-        {actions}
-      </Card>
-      <Text render={<p />} scale="body-small" tone="variant">
-        Resume starts claude again in the same pane and does not ask. Delete removes the workspace and
-        asks first.
-      </Text>
+        ) : null}
+      </div>
+      <div className="chat__answers">
+        <Button disabled={answered} onClick={() => answer('accept')}>
+          Accept
+        </Button>
+        <Button disabled={answered} onClick={() => answer('acceptAlways')} variant="tonal">
+          Accept always
+        </Button>
+        <Button disabled={answered} onClick={() => answer('decline')} variant="text">
+          Decline
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+/** How full the context window is, from the last turn's usage. */
+function Meter(props: { usage: NonNullable<Timeline['usage']> }) {
+  const { used, max } = props.usage
+  const share = Math.round((used / max) * 100)
+  return (
+    <div className="chat__meter">
+      <meter aria-label="Context used" max={max} min={0} value={used} />
+      <Mono>
+        context {share}% · {Math.round(used / 1000)}k of {Math.round(max / 1000)}k
+      </Mono>
     </div>
   )
+}
+
+/** What the polite region says, and the line under the composer shows. */
+function status(timeline: Timeline, machine: string, phone: boolean): string {
+  if (timeline.requests.length > 0) return 'Claude is waiting for your answer.'
+  if (timeline.turn === 'stopping') return 'Stopping Claude…'
+  if (timeline.turn !== 'idle') return 'Claude is answering.'
+  if (timeline.ended?.state === 'cancelled') return 'Claude stopped.'
+  if (timeline.ended?.state === 'completed') return 'Claude finished.'
+  return phone
+    ? 'Each turn runs in this chat’s own worktree.'
+    : `Each turn runs claude in this chat’s own worktree on ${machine}, apart from the terminal’s.`
 }
 
 export type ChatProps = {
   workspace: Workspace
-  state: AgentState | null
-  said: Said
-  now: number
-  onRead: (lines: number, before: number) => void
-  paneOpen: boolean
-  /** Resume and Delete, for the end card. */
-  endActions: ReactNode
+  /** `?thread=`: the chat to continue. Read when the socket opens. */
+  thread?: string
+  /** The daemon named a new thread; the URL keeps it. */
+  onThread: (thread: string) => void
 }
 
-/** The transcript made writable (the `y332-chat` note): turns from the JSONL
- *  read over ssh, a composer that types into the tmux pane, and the trust
- *  prompt's options sending the number the agent's own dialog expects.
- *  Nothing polls: the transcript is re-read after a send and on Refresh
- *  (ADR-0019). Live chat is Y-356. */
+/** The streaming chat (ADR-0026, Y-356). Each turn is `claude -p` in the
+ *  thread's own git worktree, so it never writes the tree the Terminal tab's
+ *  agent is in. */
 export function Chat(props: ChatProps) {
-  const { workspace, state, said, now, onRead, paneOpen, endActions } = props
-
-  // Mounting the view is the request (ADR-0019), and an ended session is read
-  // here too: its turns are frozen, not absent.
-  useEffect(() => {
-    if (said.said === 'no') onRead(LINES, 0)
-  }, [said.said, onRead])
-
-  const over = state !== null && ending(state) !== null
-  return over && state ? (
-    <div className="chat">
-      <div className="chat__turns">
-        <Turns machine={workspace.machine} now={now} onRead={onRead} said={said} />
-      </div>
-      <Ended actions={endActions} paneOpen={paneOpen} state={state} workspace={workspace} />
-    </div>
-  ) : (
-    <LiveChat {...props} />
-  )
-}
-
-function LiveChat(props: ChatProps) {
-  const { workspace, said, now, onRead } = props
-  const [opened, reopen] = useState(0)
-  const pane = usePane({ workspace: workspace.name, machine: workspace.machine }, opened)
+  const { workspace, thread, onThread } = props
+  const chat = useChat(workspace.name, thread, onThread)
+  const { timeline, error, link } = chat
   const [draft, setDraft] = useState('')
-  const [typed, setTyped] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const why = useId()
-  // The phone boards write their own shorter strings; the desktop ones name
-  // the workspace and the machine, which a 390 px line has no room for.
   const phone = useFormFactor() === 'phone'
+  const busy = timeline.turn !== 'idle'
 
-  // 2.2.2: the newest turn is at the bottom, as a chat is read — but a read
-  // every five seconds must not drag a reader who has scrolled up back down.
-  // The foot leaving the viewport is what unpins it, and returning re-pins.
+  // The newest words are at the bottom, but a reader who scrolled up is not
+  // dragged down by every delta: the foot leaving the viewport unpins it.
   useEffect(() => {
     const foot = end.current
     if (!foot || typeof IntersectionObserver === 'undefined') return
@@ -151,73 +189,55 @@ function LiveChat(props: ChatProps) {
   }, [])
 
   useEffect(() => {
-    if (pinned.current) end.current?.scrollIntoView({ block: 'end' })
-  }, [said])
-
-  const refresh = () => onRead(LINES, 0)
-  const refused = pane.refused
-
-  // 4.1.3: a live region announces the text that arrived, so two identical
-  // sends are one announcement unless the region is emptied between them.
-  const announce = (words: string) => {
-    setTyped('')
-    requestAnimationFrame(() => setTyped(words))
-  }
-
-  const answer = (number: string) => {
-    pane.type(`${number}\r`)
-    announce(`Typed ${number} and Enter into the pane.`)
-    refresh()
-  }
+    if (pinned.current) end.current?.scrollIntoView?.({ block: 'end' })
+  }, [timeline.entries, timeline.requests])
 
   const send = () => {
     const text = draft.trim()
-    if (text === '') return
-    pane.type(`${text}\r`)
-    setDraft('')
-    announce('Typed your message into the pane.')
-    refresh()
+    if (text === '' || busy) return
+    if (chat.send(text)) setDraft('')
   }
 
-  const cannotSend = !pane.link.up
-    ? 'The pane is not attached, so nothing can be typed into it.'
-    : draft.trim() === ''
-      ? 'Type a message to send it.'
-      : null
-
-  const machine = (
-    <Link params={{ machine: workspace.machine }} to="/m/$machine">
-      {workspace.machine}
-    </Link>
-  )
+  const cannotSend =
+    link !== 'open'
+      ? 'The chat is not connected, so nothing can be sent.'
+      : busy
+        ? 'Claude is answering. Stop it to send something else.'
+        : draft.trim() === ''
+          ? 'Type a message to send it.'
+          : null
 
   return (
     <div className="chat">
-      <div className="chat__turns">
-        <Turns machine={workspace.machine} now={now} onRead={onRead} said={said} />
-        {pane.prompt ? (
-          <Asking onAnswer={answer} phone={phone} prompt={pane.prompt} repo={workspace.repo} />
+      <section aria-label="Conversation" className="chat__turns">
+        {timeline.entries.length === 0 && link !== 'connecting' ? (
+          <Text className="chat__empty" render={<p />} scale="body-medium" tone="variant">
+            Ask Claude something about {workspace.name}. It works on a branch of its own, so the session in the
+            terminal is untouched.
+          </Text>
         ) : null}
+        {timeline.entries.map((entry) =>
+          entry.kind === 'message' ? <Said key={entry.id} message={entry} /> : <ToolCard key={entry.id} tool={entry} />,
+        )}
+        {timeline.requests.map((request) => (
+          <Asking
+            key={request.requestId}
+            onAnswer={(decision) => chat.answer(request.requestId, decision)}
+            request={request}
+          />
+        ))}
         <div ref={end} />
-      </div>
-      {refused ? (
+      </section>
+      {error ? (
         <ErrorSurface.Inline
-          error={{ kind: refused.kind, said: refused.said, retryable: true, describe: () => refused.describe() }}
+          error={error}
           eyebrow={`on ${workspace.machine}`}
-          reset={() => reopen((n) => n + 1)}
-          title="The pane could not be reached, so nothing can be typed"
-          action={
-            <Button
-              role="link"
-              render={<Link params={{ name: workspace.name }} replace search={{ view: 'terminal' }} to="/w/$name" />}
-              variant="text"
-            >
-              Terminal
-            </Button>
-          }
+          reset={chat.retry}
+          title={error.kind === 'turnFailed' ? 'The turn failed' : 'The chat could not go on'}
         />
       ) : null}
       <div className="chat__composer">
+        {timeline.usage ? <Meter usage={timeline.usage} /> : null}
         <form
           className="chat__field"
           onSubmit={(event) => {
@@ -227,41 +247,38 @@ function LiveChat(props: ChatProps) {
         >
           <TextField
             autoComplete="off"
-            disabled={pane.refused !== null || pane.over}
+            disabled={link === 'closed'}
             label={phone ? 'Message Claude' : `Message Claude in ${workspace.name}`}
             onChange={(event) => setDraft(event.target.value)}
             trailing={
-              <IconButton
-                aria-describedby={cannotSend ? why : undefined}
-                disabled={cannotSend !== null}
-                label="Send"
-                type="submit"
-                variant="filled"
-              >
-                <ArrowUp />
-              </IconButton>
+              busy ? (
+                <IconButton disabled={timeline.turn === 'stopping'} label="Stop Claude" onClick={chat.stop} type="button">
+                  <Square />
+                </IconButton>
+              ) : (
+                <IconButton
+                  aria-describedby={cannotSend ? why : undefined}
+                  disabled={cannotSend !== null}
+                  label="Send"
+                  type="submit"
+                  variant="filled"
+                >
+                  <ArrowUp />
+                </IconButton>
+              )
             }
             value={draft}
             variant="filled"
           />
-          {/* The boards draw no line for a Send that is off, so the reason is
-              the button's description rather than a word on the screen. */}
           {cannotSend ? (
             <span className="m3-sr-only" id={why}>
               {cannotSend}
             </span>
           ) : null}
         </form>
+        {/* 4.1.3: the turn's state, said politely and shown. */}
         <p className="chat__foot" role="status">
-          {typed ??
-            (phone ? (
-              <>typed into the tmux pane · turns refresh about every 5 s</>
-            ) : (
-              <>
-                typed into the tmux pane on {machine} · turns appear when the transcript is read
-                again, after every send or on Refresh — about 5 s behind the pane
-              </>
-            ))}
+          {status(timeline, workspace.machine, phone)}
         </p>
       </div>
     </div>

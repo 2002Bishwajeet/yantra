@@ -23,6 +23,7 @@ use yantra_core::inventory::{Inventory, Tailscale};
 use yantra_core::notify::RELAY_URL;
 
 mod api;
+mod chat;
 // Y-124: it only compares the routes against the dashboard's committed fixture.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
@@ -145,6 +146,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
             api::router()
                 .with_state(fleet.clone())
                 .merge(write::router(authoriser.clone(), fleet.clone()))
+                .merge(chat::router(authoriser.clone()))
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
                 .merge(mic::router(authoriser)),
         )
