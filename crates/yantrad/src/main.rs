@@ -30,6 +30,7 @@ mod contract;
 mod events;
 mod github;
 mod heartbeat;
+mod mic;
 mod notify;
 mod refresh;
 mod tasks;
@@ -144,7 +145,8 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
             api::router()
                 .with_state(fleet.clone())
                 .merge(write::router(authoriser.clone(), fleet.clone()))
-                .merge(terminal::router(authoriser, fleet.left.clone())),
+                .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
+                .merge(mic::router(authoriser)),
         )
         .merge(heartbeat::router())
         .with_state(fleet)

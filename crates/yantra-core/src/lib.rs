@@ -30,6 +30,7 @@ pub mod install;
 pub mod inventory;
 pub mod join;
 pub mod logs;
+pub mod mic;
 pub mod notify;
 pub mod price;
 pub mod probe;

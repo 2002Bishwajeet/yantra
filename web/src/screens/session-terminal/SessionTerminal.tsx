@@ -8,6 +8,7 @@ import { IconTile } from '@/m3/tile/Tile'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { isAge } from '@/screens/fleet/clock'
 import { KeyRow } from '@/screens/session/Keys'
+import { Talk } from '@/screens/session/Talk'
 import { Terminal } from '@/screens/session/Terminal'
 import { useFormFactor } from '@/shell/formFactor'
 import { useTick } from '@/useTick'
@@ -74,6 +75,7 @@ export function SessionTerminal() {
           }
         />
       </header>
+      <Talk machine={machine} />
       <Terminal
         height={factor === 'phone' ? '55vh' : '65vh'}
         key={`${machine}/${session}`}

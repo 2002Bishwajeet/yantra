@@ -525,6 +525,29 @@ TCP peer is ours. That the peer must be a real one is why these tests bind a **r
 `WebSocketUpgrade` strips `OnUpgrade` during extraction, so a `tower::oneshot` never reaches the
 handler and would assert a status the authoriser never produced.
 
+## The route that carries a voice
+
+`GET /api/machines/{machine}/mic` is the dashboard's push-to-talk
+([ADR-0031](../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §4–6, Y-418).
+**The mic is a write.** `mic.rs` calls `allowed()` by name before the upgrade, as the terminal routes
+do, and then refuses a name outside the ssh-destination rule with a `400` (I-63).
+
+The upgrade starts [`yantra_core::mic`](../yantra-core/src/mic.rs)'s `pw-cat` at once, so the pipe
+holds the first frames while ssh connects. **Binary frames are audio**: 16 kHz mono s16le, copied to
+`pw-cat`'s stdin. There is **no pty**, because a pty changes bytes, and **no buffer** beyond the pipe.
+A text frame from the browser carries nothing and is ignored. From the daemon a text frame is the
+reason the writer could not start, stopped taking audio or exited, and a close follows it. That is
+the terminal protocol.
+
+**Closing the socket ends `pw-cat`.** The close closes stdin, and `pw-cat` exits on EOF (§6). The
+route reuses `terminal.rs`'s ping: a phone that vanished mid-press would otherwise hold `pw-cat` open
+and keep playing nothing into the sink.
+
+**No audio byte is logged, and no count of bytes either** (Q5, §5). The log says
+`mic on {machine} for {node}`, `mic on {machine} ended`, and the reason a stream stopped. A test
+captures a TRACE subscriber and asserts that a marker sent as audio is not in it. The route has no
+JSON shape, so `contract.gen.ts` does not change.
+
 ## The dashboard's types are checked against these routes, not trusted to match
 
 `contract.rs` (Y-124) drives the real `api::router()` over a fake snapshot and commits every answer
@@ -594,7 +617,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Eight things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Nine things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -630,7 +653,10 @@ reading one on a timer.
 A task takes its own diff summary when its turn ends, and `POST /api/tasks/{id}/stop` takes it again.
 Starting, stopping and removing a task await ssh, because each is a write sent once.
 
-None of the eight licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-418 is the ninth, on `terminal.rs`'s licence**: `mic.rs` holds one ssh for as long as a button
+is held, and only after the upgrade has answered.
+
+None of the nine licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

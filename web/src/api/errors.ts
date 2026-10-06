@@ -1,4 +1,4 @@
-/** The one error anything under `api/` rejects with. Five kinds, each from a
+/** The one error anything under `api/` rejects with. Nine kinds, each from a
  *  different place: what a surface draws is `describe()`, and `said` — the
  *  daemon's own words, verbatim — goes beneath it in mono, as every form
  *  already does (D3 §8.1). */
@@ -15,6 +15,13 @@ export type Kind =
   | 'contract'
   // A terminal socket's text frame: why the pty could not be opened.
   | 'socket'
+  // The four the browser itself raises on the microphone (ADR-0031 §4, §6):
+  // a page on :7717, a permission refused, no device, and a track the browser
+  // or iOS took away. `api/mic.ts` makes them.
+  | 'insecure'
+  | 'denied'
+  | 'no-device'
+  | 'stopped'
 
 /** What the status alone says, before the daemon's sentence. Each code means a
  *  different thing, and collapsing them into "failed" sends the operator
@@ -36,6 +43,10 @@ const sentences: Record<Kind, string> = {
   missing: 'The daemon knows nothing by that name.',
   contract: 'The daemon answered something this dashboard cannot read.',
   socket: 'The terminal could not be opened.',
+  insecure: 'The microphone works only on the HTTPS address.',
+  denied: 'This browser was not allowed to use the microphone.',
+  'no-device': 'This browser found no microphone to use.',
+  stopped: 'The microphone stopped.',
 }
 
 export class ApiError extends Error {

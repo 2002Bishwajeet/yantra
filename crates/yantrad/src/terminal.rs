@@ -78,13 +78,13 @@ use crate::write::{Authoriser, Left, Missed, Refused, allowed, chain, left_comma
 /// answers in microseconds; short enough that what a vanished peer holds is
 /// bounded well under the kernel's own retransmission budget.
 #[cfg(not(test))]
-const PING_EVERY: Duration = Duration::from_secs(20);
+pub(crate) const PING_EVERY: Duration = Duration::from_secs(20);
 #[cfg(test)]
-const PING_EVERY: Duration = Duration::from_millis(200);
+pub(crate) const PING_EVERY: Duration = Duration::from_millis(200);
 
 /// One unanswered ping is a phone whose radio slept or a busy main thread; two
 /// in a row is a peer that is not there.
-const MISSES: u8 = 2;
+pub(crate) const MISSES: u8 = 2;
 
 pub fn router<I, S>(authoriser: Authoriser<I>, left: Left) -> Router<S>
 where
@@ -477,7 +477,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
@@ -487,13 +487,13 @@ mod tests {
     use tokio::time::timeout;
     use yantra_core::inventory::{Caller, Fake};
 
-    const ME: u64 = 1;
+    pub(crate) const ME: u64 = 1;
 
-    const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    pub(crate) const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-    const TEXT: u8 = 0x1;
-    const BINARY: u8 = 0x2;
-    const PING: u8 = 0x9;
+    pub(crate) const TEXT: u8 = 0x1;
+    pub(crate) const BINARY: u8 = 0x2;
+    pub(crate) const PING: u8 = 0x9;
 
     /// The three addresses one bridge serves (ADR-0022, ADR-0030).
     const WORKSPACE: &str = "/api/workspaces/api/terminal";
@@ -505,7 +505,7 @@ mod tests {
 
     const WINDOW: &str = r#"{"rows":24,"cols":80,"term":"xterm-256color"}"#;
 
-    fn tailnet(callers: Vec<(IpAddr, Caller)>) -> Fake {
+    pub(crate) fn tailnet(callers: Vec<(IpAddr, Caller)>) -> Fake {
         Fake {
             machines: Vec::new(),
             addresses: Vec::new(),
@@ -517,7 +517,7 @@ mod tests {
     /// Bound to nothing, so the loopback peer is never ours and no header is
     /// read — the direct port, which is what these tests stood on before
     /// ADR-0017.
-    fn direct(caller: Option<Caller>) -> Authoriser<Fake> {
+    pub(crate) fn direct(caller: Option<Caller>) -> Authoriser<Fake> {
         Authoriser::new(
             tailnet(caller.map(|caller| (LOCAL, caller)).into_iter().collect()),
             &[],
@@ -551,7 +551,16 @@ mod tests {
         path: &str,
         forwarded: &str,
     ) -> BufReader<TcpStream> {
-        let app = Router::new().nest("/api", router(authoriser, left));
+        connect_to(router(authoriser, left), path, forwarded).await
+    }
+
+    /// Serves `api` under `/api` on a real listener and sends the upgrade.
+    pub(crate) async fn connect_to(
+        api: Router,
+        path: &str,
+        forwarded: &str,
+    ) -> BufReader<TcpStream> {
+        let app = Router::new().nest("/api", api);
 
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
         let address = listener.local_addr().expect("it is bound");
@@ -618,7 +627,7 @@ mod tests {
 
     /// Server frames are unmasked. The length is seven bits, or sixteen after
     /// a 126; nothing here sends a frame longer than that.
-    async fn frame(socket: &mut BufReader<TcpStream>) -> std::io::Result<(u8, Vec<u8>)> {
+    pub(crate) async fn frame(socket: &mut BufReader<TcpStream>) -> std::io::Result<(u8, Vec<u8>)> {
         let mut head = [0u8; 2];
         socket.read_exact(&mut head).await?;
         let length = match head[1] & 0x7f {
@@ -632,7 +641,7 @@ mod tests {
 
     /// A client frame must be masked or the far side is entitled to drop the
     /// socket; a zero mask leaves the payload as it is.
-    async fn send(socket: &mut BufReader<TcpStream>, opcode: u8, payload: &[u8]) {
+    pub(crate) async fn send(socket: &mut BufReader<TcpStream>, opcode: u8, payload: &[u8]) {
         let length = u8::try_from(payload.len()).expect("a short frame");
         assert!(length < 126, "a frame this helper can send");
         let mut out = vec![0x80 | opcode, 0x80 | length, 0, 0, 0, 0];
@@ -644,11 +653,11 @@ mod tests {
             .expect("a frame is written");
     }
 
-    async fn pong(socket: &mut BufReader<TcpStream>) {
+    pub(crate) async fn pong(socket: &mut BufReader<TcpStream>) {
         send(socket, 0xa, &[]).await;
     }
 
-    fn caller(user: u64, tags: &[&str]) -> Caller {
+    pub(crate) fn caller(user: u64, tags: &[&str]) -> Caller {
         Caller {
             node: "nSOME000000011CNTRL".to_string(),
             user,
@@ -800,7 +809,7 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
-    struct Capture(Arc<Mutex<Vec<u8>>>);
+    pub(crate) struct Capture(pub(crate) Arc<Mutex<Vec<u8>>>);
 
     impl std::io::Write for Capture {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {

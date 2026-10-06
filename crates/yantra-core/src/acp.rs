@@ -588,7 +588,7 @@ async fn write<W: AsyncWrite + Unpin>(mut writer: W, mut lines: mpsc::UnboundedR
 }
 
 /// Drains `stderr` so the agent never blocks on it, keeping only the end.
-async fn tail<R: AsyncRead + Unpin>(mut stderr: R) -> Vec<u8> {
+pub(crate) async fn tail<R: AsyncRead + Unpin>(mut stderr: R) -> Vec<u8> {
     let mut kept = Vec::new();
     let mut chunk = [0u8; 1024];
     while let Ok(read) = stderr.read(&mut chunk).await {

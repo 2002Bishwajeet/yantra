@@ -32,6 +32,10 @@ describe('what an error says', () => {
       missing: new ApiError('missing', 'no such', { status: 404 }).describe(),
       contract: new ApiError('contract', 'Unexpected token <').describe(),
       socket: new ApiError('socket', "can't find session").describe(),
+      insecure: new ApiError('insecure', 'http://pi:7717').describe(),
+      denied: new ApiError('denied', 'Permission denied').describe(),
+      'no-device': new ApiError('no-device', 'Requested device not found').describe(),
+      stopped: new ApiError('stopped', 'Built-in Microphone ended').describe(),
     }
     for (const said of Object.values(sentences)) {
       expect(said).toMatch(/^[A-Z].*\.$/)

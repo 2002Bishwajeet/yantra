@@ -1,0 +1,28 @@
+.talk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+/* A hold, not a tap: the page must not scroll, select or open a menu under it. */
+.talk__button {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.talk__status {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: 18px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.talk__said {
+  overflow-wrap: anywhere;
+}
