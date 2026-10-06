@@ -625,7 +625,7 @@ async fn linger<E: Exec>(exec: &E) -> Result<Result<bool, Outcome>, Error> {
 /// second run interrupts no stream. Prints `changed` or `unchanged`. PipeWire
 /// listens in the runtime directory, which a command over ssh may not have in
 /// its environment (R17 §2), and which linger just enabled may not have made
-/// yet.
+/// yet. A loaded CI runner took more than 10 seconds to start the user manager.
 fn configure_mic() -> String {
     format!(
         r#"export XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -635,7 +635,12 @@ heard() {{ pactl list short sources 2>/dev/null | cut -f2 | grep -qx yantra-mic;
 if [ "$(cat "$f" 2>/dev/null)" = "$want" ] && heard; then echo unchanged; exit 0; fi
 mkdir -p "${{f%/*}}" && printf '%s\n' "$want" > "$f" || exit 1
 i=0
-while [ ! -S "$XDG_RUNTIME_DIR/systemd/private" ] && [ "$i" -lt 50 ]; do
+until [ -S "$XDG_RUNTIME_DIR/systemd/private" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; do
+  [ "$i" -ge 300 ] && {{
+    echo "The user manager made no bus within 60 seconds."
+    systemctl status "user@$(id -u).service" --no-pager 2>&1 | tail -n 20
+    exit 1
+  }}
   sleep 0.2
   i=$((i + 1))
 done
@@ -850,6 +855,17 @@ mod tests {
         assert!(MIC_CONFIG.contains("sink_name=yantra-mic-sink"));
         assert!(MIC_CONFIG.contains("source_name=yantra-mic "));
         assert!(MIC_CONFIG.contains("media.class=Audio/Sink/Virtual"));
+    }
+
+    /// `systemctl --user restart` needs the user bus, not only the private
+    /// socket, and a timeout must say so rather than run on (Y-417 CI).
+    #[test]
+    fn the_drop_in_waits_for_the_user_bus() {
+        let script = configure_mic();
+        let wait = script.find(r#"-S "$XDG_RUNTIME_DIR/bus""#);
+        let restart = script.find("systemctl --user");
+        assert!(wait.is_some() && wait < restart, "{script}");
+        assert!(script.contains("made no bus"), "{script}");
     }
 
     #[test]
