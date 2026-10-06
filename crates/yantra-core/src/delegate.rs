@@ -266,7 +266,7 @@ fn worktree_command(repo: &str, id: &str) -> String {
     )
 }
 
-fn branch(id: &str) -> String {
+pub(crate) fn branch(id: &str) -> String {
     format!("yantra/{id}")
 }
 

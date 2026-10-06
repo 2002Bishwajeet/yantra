@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 
 use crate::agent::Running;
 use crate::clone::destination;
-use crate::delegate::{self, NOT_A_REPO, said};
+use crate::delegate::{self, NOT_A_REPO, branch, said};
 pub use crate::delegate::{Error, Place, Summary};
 use crate::logs::{self, Transcript};
 use crate::ssh::Exec;
@@ -69,13 +69,7 @@ pub async fn list<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Place>
 
     let asks: Vec<String> = found
         .iter()
-        .map(|(_, id)| {
-            format!(
-                "git -C {} merge-base {} HEAD",
-                sq(&top),
-                sq(&format!("yantra/{id}"))
-            )
-        })
+        .map(|(_, id)| format!("git -C {} merge-base {} HEAD", sq(&top), sq(&branch(id))))
         .collect();
     let out = exec.exec(&asks.join(" && ")).await?;
     if !out.success() {
@@ -88,7 +82,7 @@ pub async fn list<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Place>
         .into_iter()
         .zip(bases.lines())
         .map(|((worktree, id), base)| Place {
-            branch: format!("yantra/{id}"),
+            branch: branch(&id),
             id,
             repo: top.clone(),
             worktree,
