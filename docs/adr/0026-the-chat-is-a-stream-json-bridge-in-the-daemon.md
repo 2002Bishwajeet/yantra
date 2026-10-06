@@ -193,3 +193,12 @@ drawn and tested without a fleet.
 > Codex, Gemini, Grok and opencode, and maps their events into decision 1's model. Claude stays on
 > this ADR's bridge, so decisions 2 to 8 hold for it unchanged. Decision 1 said the union was
 > provider-neutral with no second agent planned. A second source is now planned.
+
+> **2026-10-06 (Y-359): the owner picks isolate.** Each chat turn runs in its own `git worktree` of the
+> workspace, so the chat and the TUI never write one tree. Two premises behind decision 8 changed
+> upstream. Worktree lifecycle code now exists: Y-435 made, summarised and removed a worktree per
+> delegated task ([`delegate.rs`](../../crates/yantra-core/src/delegate.rs), ADR-0033 decision 4).
+> And the owner wants the chat on par with T3 Code, which also runs a thread in its own worktree.
+> Refuse would refuse nearly every time, and serialize releases its lock on a guess. Isolate still
+> owes what decision 8 named: the transcript path, the spend figure and the agent registry must
+> answer for the chat's worktree, and its branch and uncommitted work need a rule.

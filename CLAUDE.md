@@ -157,6 +157,11 @@ took the first load from 170 kB gzip to 111 kB in the change that introduced it 
 **not** relax §B1's first paragraph or §B2: the daemon, the CLI and the agent are unaffected, and
 `ssh`/`tmux`/`tailscale` are still orchestrated rather than reimplemented.
 
+**For the chat, copy T3 Code before you write anything.** Owner's instruction, 2026-10-06: the Chat
+tab is to be on par with [T3 Code](https://github.com/pingdotgg/t3code), and its components are to be
+copied rather than rewritten. Both use React, Base UI, Tailwind 4 and TanStack Router. T3 Code is MIT:
+keep its copyright line, `Copyright (c) 2026 T3 Tools Inc.`, at the top of each copied file.
+
 **Rust punishes design churn**, and M0–M1 is where the design is least settled. Prefer a working ugly
 path over an elegant abstraction. Resist generalising before the third use.
 
