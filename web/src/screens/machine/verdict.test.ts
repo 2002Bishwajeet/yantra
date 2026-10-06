@@ -124,6 +124,14 @@ describe('the machine page’s verdict', () => {
     expect(titleOf(v, 'pi')).toBe('microphone needs your password')
   })
 
+  /** A package command someone ran by hand is no longer the microphone's. */
+  it('is ready once a package sudo stopped is installed by hand', () => {
+    const watch = { since: 10, pressed: 0 }
+    const v = verdict(all(), { watch, events: [stopped(20, ['sudo apk add tmux'])] })
+    expect(v.kind).toBe('ready')
+    expect(titleOf(v, 'pi')).toBe('Ready for sessions')
+  })
+
   it('is ready when nothing is absent', () => {
     const v = verdict(all())
     expect(titleOf(v, 'pi')).toBe('Ready for sessions')

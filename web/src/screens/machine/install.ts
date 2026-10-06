@@ -24,6 +24,10 @@ export function answer(events: Event[], machine: string, watch: Watch): Event | 
  *  (`Because::SudoAsks`, the one step install.rs prefixes with `sudo`). */
 export const needsSudo = (command: string) => command.startsWith('sudo ')
 
+/** The microphone's sudo step (install.rs `linger`), the one step Install
+ *  runs with every basic there. */
+export const isLinger = (command: string) => command.startsWith('sudo loginctl enable-linger ')
+
 /** The daemon waits 15 minutes (`INSTALL_BUDGET`) and then says so, so a page
  *  that has heard nothing a minute later has lost the result — a daemon
  *  restart empties the ring (ADR-0025). */
