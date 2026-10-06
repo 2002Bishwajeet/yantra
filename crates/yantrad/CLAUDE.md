@@ -622,6 +622,12 @@ polls. §2.2 measured the far-side filter free over 15 MB and the ssh round trip
 round trip is the whole cost** — which is the argument for reading a window on request and against
 reading one on a timer.
 
+**`/api/tasks` holds ssh on its writes and never on its reads** (Y-435,
+[`tasks.rs`](src/tasks.rs)). `yantra mcp` calls it for the main agent, and an agent polls
+`GET /api/tasks/{id}` until a task ends — so that route fails ADR-0019's second half and reads memory.
+A task takes its own diff summary when its turn ends, and `POST /api/tasks/{id}/stop` takes it again.
+Starting a task and removing one await ssh, because each is a write sent once.
+
 None of the seven licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the

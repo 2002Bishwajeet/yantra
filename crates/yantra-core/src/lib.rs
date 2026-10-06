@@ -17,6 +17,7 @@ pub mod attach;
 pub mod attention;
 pub mod chat;
 pub mod clone;
+pub mod delegate;
 pub mod dirs;
 pub mod doctor;
 pub mod down;

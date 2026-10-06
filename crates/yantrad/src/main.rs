@@ -32,6 +32,7 @@ mod github;
 mod heartbeat;
 mod notify;
 mod refresh;
+mod tasks;
 mod terminal;
 mod web;
 mod write;

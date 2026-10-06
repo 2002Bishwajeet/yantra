@@ -25,7 +25,7 @@ the repo.
 ## Crates
 
 - [yantra-core](crates/yantra-core/llms.txt): all the orchestration — ssh, tmux, agents, inventory, workspaces. Never prints, never exits. This is where nearly all the code is.
-- [yantra](crates/yantra/llms.txt): the CLI. Renders and chooses exit codes; decides nothing.
+- [yantra](crates/yantra/llms.txt): the CLI. Renders and chooses exit codes; decides nothing. `yantra mcp` is the one verb that calls `yantrad`: a stdio MCP server through which the main agent delegates a task to another harness in its own git worktree ([ADR-0033](docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md), Y-435).
 - [yantrad](crates/yantrad/llms.txt): the daemon. An axum server binding only this machine's Tailscale addresses: a read-only JSON API over a background snapshot, the writes (`POST /heartbeat`, `new`/`edit`/`up`/`down`/`resume`/`delete` per workspace, a re-check that asks one machine now, a spend figure summed on the far side, the ntfy relay written to the file its unit reads ([ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md)), the GitHub grant obtained by the device flow and written beside it ([ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md)), and a beacon saying a dashboard is open — all authorised by Tailscale identity), a WebSocket that bridges a workspace's session to a browser under the same authorisation, and the dashboard itself, answered gzipped from the `.gz` the build wrote — from a directory, or from the copy embedded in the binary.
 - [yantra-agent](crates/yantra-agent/llms.txt): the per-machine heartbeat — seven probes, a 10 s loop and a hand-written POST. It has a unit on Linux and a recipe that installs it.
 

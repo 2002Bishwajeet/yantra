@@ -33,6 +33,8 @@ use yantra_core::up;
 use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
+mod mcp;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "yantra",
@@ -228,6 +230,13 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Serve MCP on stdin and stdout, so a main agent can delegate tasks
+    /// through yantrad (ADR-0033)
+    Mcp {
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
 }
 
 /// Spelled out rather than a bare bool so that adding a second agent is a new
@@ -390,6 +399,7 @@ async fn main() -> ExitCode {
             update_check_with(&Github::default(), github::from_env().as_ref()).await
         }
         Some(Command::Update { check: false }) => update_apply().await,
+        Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -399,6 +409,25 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+    }
+}
+
+/// Exits 0 when stdin ends, which is how an MCP client closes the server.
+async fn serve_mcp(daemon: String) -> ExitCode {
+    let served = tokio::task::spawn_blocking(move || {
+        mcp::serve(&daemon, std::io::stdin().lock(), std::io::stdout().lock())
+    })
+    .await;
+    match served {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(error)) => {
+            eprintln!("yantra mcp: {error}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra mcp: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -2205,6 +2234,17 @@ mod tests {
     #[test]
     fn the_command_tree_is_well_formed() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn mcp_needs_the_daemons_address() {
+        let parsed = Cli::try_parse_from(["yantra", "mcp", "--daemon", "http://x:7717"])
+            .expect("`mcp --daemon <url>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Mcp { daemon }) if daemon == "http://x:7717"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "mcp"]).is_err());
     }
 
     /// `--agent` is a value enum rather than a flag, so the spelling users type

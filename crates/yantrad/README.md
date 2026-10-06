@@ -47,6 +47,7 @@ API the CLI cannot reach.
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
+| `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `stop_task`, `remove_task` (ADR-0033, Y-435). The `GET`s read memory |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |
 

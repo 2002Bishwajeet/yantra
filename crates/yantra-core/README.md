@@ -23,6 +23,9 @@ let moved  = edit::edit("yantra", &workspace::Changes {
 }).await?;   // refused while a session is open on the machine it would leave
 ```
 
+`delegate::Task` is the one that does not load a workspace: it takes an `Ssh`, a harness, a
+repository and a prompt, and runs an ACP agent in a new git worktree of that repository (ADR-0033).
+
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.
 

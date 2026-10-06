@@ -15,8 +15,10 @@ the same logic: if yes, it is not CLI code.
 
 **This crate is no longer cheap, and `yantra notify` is why**: reaching
 [`yantra_core::notify`](../yantra-core/CLAUDE.md) reaches `ureq` and its bundled root store, and the
-aarch64-musl binary went 1,256,496 → 2,451,504 bytes for it (Y-147). Nothing else here sends
-anything, and a verb that wants to should be weighed on `just appliance-size` the same way.
+aarch64-musl binary went 1,256,496 → 2,451,504 bytes for it (Y-147). `yantra mcp` (Y-435) is the second
+verb that sends. It calls `yantrad` in plain HTTP over the `ureq` this binary already carried, so its
+cost should be small; nobody has measured it yet. Weigh the next verb that sends on
+`just appliance-size` the same way.
 
 ## Exit codes are a contract
 
@@ -50,6 +52,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `github client-id --clear` when no client id line is there | **0** | absence is the state asked for — `down`'s rule |
 | `ssh-identity --machine m --user u` when ssh logs in to `m` as someone else | 1 | a block already in the config, or an owner's `Host *` above the new one, wins, so the verb did not do what it says. It names the account that wins, and it rewrites nothing (ADR-0009, ADR-0029) |
 | `ls repos` with nothing matching `--search` | **0** | a reading: the count under the table says `0 of N`, which is a filter that kept nothing and not an empty account |
+| `mcp`, when stdin ends | **0** | an MCP client closes the server by closing its stdin. A daemon that refuses or cannot be reached is a tool result with `isError`, not an exit, because the client is still talking. Only a stdout that cannot be written is 1 |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.

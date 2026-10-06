@@ -66,7 +66,9 @@ OAuth App token of its own ([ADR-0023](adr/0023-the-github-grant-lives-beside-th
 
 The CLI and the daemon are **two callers of one library**, not a stack —
 [ADR-0012](adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md). `yantra` keeps working
-on a machine where `yantrad` was never started.
+on a machine where `yantrad` was never started. **`yantra mcp` is the one exception** (Y-435): it is
+the main agent's MCP server, and it calls `yantrad`'s `/api/tasks` to delegate work to another
+harness in its own git worktree ([ADR-0033](adr/0033-other-harnesses-speak-acp-and-claude-delegates.md)).
 
 ---
 
