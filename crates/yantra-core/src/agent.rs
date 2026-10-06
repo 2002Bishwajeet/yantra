@@ -159,7 +159,7 @@ pub async fn locate<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<St
     Ok((out.success() && path.starts_with('/')).then_some(path))
 }
 
-fn probe(binary: &'static str) -> String {
+pub(crate) fn probe(binary: &'static str) -> String {
     // `$HOME` is left unquoted in the loop so the remote shell expands it;
     // every path here is a constant, so there is nothing to inject.
     format!(

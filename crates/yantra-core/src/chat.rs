@@ -7,10 +7,10 @@
 //! The provider-neutral chat event model (ADR-0026 decision 1).
 //!
 //! An agent's stream is normalised into these events, and the browser draws
-//! them without knowing which agent spoke. It carries only what ACP v1
-//! produces today ([`crate::acp`]); the Claude bridge (Y-356) adds what it
-//! needs when it is built. Serialised as `{"threadId", "type", "payload"}`, so
-//! a relay can send it on unchanged.
+//! them without knowing which agent spoke. It carries only what its two
+//! sources produce: ACP v1 ([`crate::acp`]) and Claude's stream-json
+//! ([`crate::claude`]). Serialised as `{"threadId", "type", "payload"}`, so a
+//! relay can send it on unchanged.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,9 @@ pub struct ThreadEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum Event {
+    /// `thread` is the id a caller reopens the conversation by.
     #[serde(rename = "thread.started")]
-    ThreadStarted,
+    ThreadStarted { thread: String },
     #[serde(rename = "thread.metadata.updated")]
     ThreadMetadataUpdated { name: String },
     #[serde(rename = "thread.token-usage.updated")]
@@ -60,13 +61,16 @@ pub struct TokenUsage {
     pub max_tokens: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnCompleted {
     pub state: TurnState,
     /// `None` when the turn failed rather than stopped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_reason: Option<StopReason>,
+    /// Why a failed turn failed, in the agent's or `ssh`'s own words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -173,6 +177,9 @@ pub struct RequestOpened {
     /// The tool call this request is about.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
+    /// What the tool acts on: the command, the path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub options: Vec<RequestOption>,
@@ -250,10 +257,44 @@ mod tests {
         let done = wire(Event::TurnCompleted(TurnCompleted {
             state: TurnState::Cancelled,
             stop_reason: Some(StopReason::Cancelled),
+            message: None,
         }));
         assert_eq!(
             done["payload"],
             json!({"state": "cancelled", "stopReason": "cancelled"})
+        );
+        let failed = wire(Event::TurnCompleted(TurnCompleted {
+            state: TurnState::Failed,
+            stop_reason: None,
+            message: Some("Not logged in · Please run /login".to_owned()),
+        }));
+        assert_eq!(
+            failed["payload"],
+            json!({"state": "failed", "message": "Not logged in · Please run /login"})
+        );
+    }
+
+    #[test]
+    fn a_started_thread_names_itself_and_a_request_names_its_subject() {
+        assert_eq!(
+            wire(Event::ThreadStarted {
+                thread: "1a2b3c4d".to_owned()
+            }),
+            json!({"threadId": "ses_1", "type": "thread.started",
+                   "payload": {"thread": "1a2b3c4d"}})
+        );
+        let opened = wire(Event::RequestOpened(RequestOpened {
+            request_id: "r".to_owned(),
+            request_type: RequestType::ExecCommandApproval,
+            item_id: None,
+            title: Some("touch made.txt".to_owned()),
+            detail: None,
+            options: vec![],
+        }));
+        assert_eq!(
+            opened["payload"],
+            json!({"requestId": "r", "requestType": "exec_command_approval",
+                   "title": "touch made.txt", "options": []})
         );
     }
 }

@@ -129,15 +129,12 @@ impl Agent {
             stderr,
             log,
         } = ssh.stdio(harness.command())?;
-        let diagnosis = tokio::spawn(async move {
-            let tail = tail(stderr).await;
-            [String::from_utf8_lossy(&tail).trim(), log.read().trim()]
-                .into_iter()
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
-        Ok(Self::wire(stdout, stdin, Some(diagnosis), Some(child)))
+        Ok(Self::wire(
+            stdout,
+            stdin,
+            Some(diagnosis(stderr, log)),
+            Some(child),
+        ))
     }
 
     /// The generic half: an agent on any pair of streams.
@@ -229,7 +226,12 @@ impl Agent {
 
         let params = json!({"cwd": cwd, "mcpServers": []});
         let created: Created = self.call("session/new", params).await?;
-        self.shared.emit(&created.session_id, Event::ThreadStarted);
+        self.shared.emit(
+            &created.session_id,
+            Event::ThreadStarted {
+                thread: created.session_id.clone(),
+            },
+        );
         Ok(created.session_id)
     }
 
@@ -255,18 +257,21 @@ impl Agent {
             .call::<Prompted>("session/prompt", params)
             .await
             .map(|prompted| prompted.stop_reason);
-        let completed = match result {
+        let completed = match &result {
             Ok(chat::StopReason::Cancelled) => chat::TurnCompleted {
                 state: chat::TurnState::Cancelled,
                 stop_reason: Some(chat::StopReason::Cancelled),
+                message: None,
             },
             Ok(reason) => chat::TurnCompleted {
                 state: chat::TurnState::Completed,
-                stop_reason: Some(reason),
+                stop_reason: Some(*reason),
+                message: None,
             },
-            Err(_) => chat::TurnCompleted {
+            Err(error) => chat::TurnCompleted {
                 state: chat::TurnState::Failed,
                 stop_reason: None,
+                message: Some(error.to_string()),
             },
         };
         self.shared.emit(session, Event::TurnCompleted(completed));
@@ -534,6 +539,7 @@ impl Shared {
                 request_id,
                 request_type,
                 item_id: Some(asked.tool_call.tool_call_id),
+                title: None,
                 detail: asked.tool_call.title,
                 options,
             }),
@@ -585,6 +591,22 @@ async fn write<W: AsyncWrite + Unpin>(mut writer: W, mut lines: mpsc::UnboundedR
             return;
         }
     }
+}
+
+/// The end of what the agent and `ssh` said on the way out, once stderr closes.
+/// [`crate::claude`] reads a turn's failure the same way.
+pub(crate) fn diagnosis(
+    stderr: tokio::process::ChildStderr,
+    log: ssh::LogFile,
+) -> JoinHandle<String> {
+    tokio::spawn(async move {
+        let tail = tail(stderr).await;
+        [String::from_utf8_lossy(&tail).trim(), log.read().trim()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
 }
 
 /// Drains `stderr` so the agent never blocks on it, keeping only the end.
@@ -1106,6 +1128,7 @@ mod tests {
                 request_id: "1".to_owned(),
                 request_type: RequestType::FileChangeApproval,
                 item_id: Some("toolu_1".to_owned()),
+                title: None,
                 detail: Some("Write hello.txt".to_owned()),
                 options: vec![
                     RequestOption {
@@ -1208,6 +1231,7 @@ mod tests {
             Event::TurnCompleted(TurnCompleted {
                 state: TurnState::Cancelled,
                 stop_reason: Some(StopReason::Cancelled),
+                message: None,
             })
         );
     }
@@ -1228,6 +1252,7 @@ mod tests {
             Event::TurnCompleted(TurnCompleted {
                 state: TurnState::Failed,
                 stop_reason: None,
+                message: Some("the agent refused: Internal error (-32603)".to_owned()),
             })
         );
     }
@@ -1245,7 +1270,9 @@ mod tests {
             next(&mut events).await,
             ThreadEvent {
                 thread_id: SESSION.to_owned(),
-                event: Event::ThreadStarted
+                event: Event::ThreadStarted {
+                    thread: SESSION.to_owned()
+                }
             }
         );
     }
