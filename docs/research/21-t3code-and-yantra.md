@@ -157,6 +157,23 @@ icon. Each item below is a candidate, not a decision. Item 3 needs an ADR.
    wants a phone app today is better served by T3 Code. Saying so in the README is honest, and it
    sharpens what Yantra is for: a fleet, tmux, and no cloud.
 
+## 6. Owner decisions, 2026-10-07
+
+The owner answered the five questions in §5 on 2026-10-07.
+
+1. **No route besides Tailscale.** Tailscale is the whole access model, and ADR-0016 stands.
+   Yantra is a personal tool first. A commercial use may come later, and it does not shape the
+   design now.
+2. **No native phone app now.** The PWA does what the owner needs. The owner may add a native app
+   later, if a need appears.
+3. **Yes, a Chat turn outlives its ssh pipe.** This is R19 §6 option B, the keeper. It amends
+   ADR-0033 decision 7, so it starts with an ADR (Y-446) and then the build (Y-447).
+4. **Both coding-loop features.** Checkpoints with revert (Y-448) and a PR from a Chat (Y-449)
+   become rows.
+5. **No.** Yantra is a standalone project, and its README and docs do not point to T3 Code. The
+   MIT licence still requires the notice for each copied file, so `THIRD_PARTY_NOTICES.md` and the
+   block comments that ADR-0026 decision 5 asks for stay. They are a licence duty, not a pointer.
+
 ## Sources
 
 All accessed 2026-10-07.
