@@ -6,16 +6,17 @@
 //!
 //! **No `GET` here awaits ssh** ([ADR-0019]), because the main agent polls
 //! them. A task takes its diff summary itself when its turn ends, and again on
-//! `stop`. Starting, stopping and removing await ssh, because each is a write
-//! that a caller sends once.
+//! `stop`. The wait awaits that in memory. Starting, steering, stopping and
+//! removing await ssh, because each is a write that a caller sends once.
 //!
 //! [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{ConnectInfo, Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -61,6 +62,8 @@ where
         .route("/tasks", post(start::<I>).get(list::<I>))
         .route("/tasks/{id}", get(read::<I>).delete(remove::<I>))
         .route("/tasks/{id}/stop", post(stop::<I>))
+        .route("/tasks/{id}/steer", post(steer::<I>))
+        .route("/tasks/{id}/wait", get(wait::<I>))
         .with_state(Delegates {
             authoriser,
             tasks: Tasks::default(),
@@ -74,6 +77,12 @@ struct Start {
     machine: String,
     harness: String,
     repo: String,
+    prompt: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Steer {
     prompt: String,
 }
 
@@ -106,6 +115,15 @@ struct Read {
     error: Option<String>,
     last_message: Option<String>,
     summary: Option<Summary>,
+}
+
+/// T3 Code's wait answer: the task, and whether the wait ran out first.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Waited {
+    #[serde(flatten)]
+    task: Read,
+    wait_timed_out: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -182,7 +200,7 @@ fn from_delegate(error: &delegate::Error) -> StatusCode {
         delegate::Error::NotARepo { .. } | delegate::Error::RepoPath { .. } => {
             StatusCode::BAD_REQUEST
         }
-        delegate::Error::Worktree { .. } => StatusCode::CONFLICT,
+        delegate::Error::Worktree { .. } | delegate::Error::Ended => StatusCode::CONFLICT,
         delegate::Error::Ssh(_) | delegate::Error::Acp(_) => StatusCode::SERVICE_UNAVAILABLE,
         delegate::Error::Random(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -282,12 +300,73 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let entry = find(&state.tasks, &id)?;
     tracing::info!("stop task {id} for {}", caller.node);
-    entry.task.stop().await;
-    // A summary the machine cannot give now leaves the one the turn took.
-    if let Err(error) = entry.task.summary().await {
+    if let Err(error) = entry.task.stop().await {
         tracing::warn!("task {id} has no fresh summary: {}", chain(&error));
     }
     Ok(Json(read_out(&id, &entry)))
+}
+
+async fn steer<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Delegates<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(asked): Json<Steer>,
+) -> Result<Json<Read>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    if asked.prompt.trim().is_empty() {
+        return Err(bad("a steer needs a prompt".to_owned()));
+    }
+    let entry = find(&state.tasks, &id)?;
+    tracing::info!("steer task {id} for {}", caller.node);
+    entry
+        .task
+        .steer(&asked.prompt)
+        .map_err(|error| refused(&error))?;
+    Ok(Json(read_out(&id, &entry)))
+}
+
+async fn wait<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Delegates<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    RawQuery(query): RawQuery,
+) -> Result<Json<Waited>, Refused> {
+    allowed(&state.authoriser, from.ip(), &headers).await?;
+    let limit = limit(query.as_deref()).map_err(bad)?;
+    let entry = find(&state.tasks, &id)?;
+    let settled = entry.task.wait(limit).await;
+    Ok(Json(Waited {
+        task: read_out(&id, &entry),
+        wait_timed_out: !settled,
+    }))
+}
+
+/// `timeoutMs` and nothing else, capped at [`delegate::WAIT_LIMIT`].
+fn limit(query: Option<&str>) -> Result<Duration, String> {
+    let mut asked = None;
+    for pair in query
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+    {
+        match pair.split_once('=') {
+            Some(("timeoutMs", ms)) if asked.is_none() => {
+                asked = Some(ms.parse::<u64>().map_err(|_| {
+                    format!("timeoutMs is a whole number of milliseconds, not `{ms}`")
+                })?);
+            }
+            _ => {
+                return Err(format!(
+                    "a wait takes one `timeoutMs` and nothing else, not `{pair}`"
+                ));
+            }
+        }
+    }
+    Ok(asked.map_or(delegate::WAIT, |ms| {
+        Duration::from_millis(ms).min(delegate::WAIT_LIMIT)
+    }))
 }
 
 async fn remove<I: Inventory + Clone + Send + Sync + 'static>(
@@ -396,6 +475,8 @@ mod tests {
             (Method::GET, "/tasks", None),
             (Method::GET, "/tasks/ab12cd34", None),
             (Method::POST, "/tasks/ab12cd34/stop", None),
+            (Method::POST, "/tasks/ab12cd34/steer", Some(steered())),
+            (Method::GET, "/tasks/ab12cd34/wait?timeoutMs=1", None),
             (Method::DELETE, "/tasks/ab12cd34", None),
         ] {
             let (status, _) = send(method.clone(), path, body, [100, 64, 0, 9]).await;
@@ -405,17 +486,66 @@ mod tests {
 
     #[tokio::test]
     async fn tasks_answer_404_for_an_id_this_daemon_does_not_hold() {
-        for (method, path) in [
-            (Method::GET, "/tasks/ab12cd34"),
-            (Method::POST, "/tasks/ab12cd34/stop"),
-            (Method::DELETE, "/tasks/ab12cd34"),
+        for (method, path, body) in [
+            (Method::GET, "/tasks/ab12cd34", None),
+            (Method::POST, "/tasks/ab12cd34/stop", None),
+            (Method::POST, "/tasks/ab12cd34/steer", Some(steered())),
+            (Method::GET, "/tasks/ab12cd34/wait", None),
+            (Method::DELETE, "/tasks/ab12cd34", None),
         ] {
-            let (status, said) = send(method.clone(), path, None, MINE).await;
+            let (status, said) = send(method.clone(), path, body, MINE).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
             assert!(said.contains("no task `ab12cd34`"), "{said}");
         }
         let (status, said) = send(Method::GET, "/tasks", None, MINE).await;
         assert_eq!((status, said.as_str()), (StatusCode::OK, "[]"));
+    }
+
+    fn steered() -> serde_json::Value {
+        serde_json::json!({"prompt": "and the docs"})
+    }
+
+    #[tokio::test]
+    async fn tasks_refuse_an_empty_steer_and_a_bad_wait_with_400() {
+        let (status, said) = send(
+            Method::POST,
+            "/tasks/ab12cd34/steer",
+            Some(serde_json::json!({"prompt": " \n"})),
+            MINE,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+        assert_eq!(said, "a steer needs a prompt");
+        for query in [
+            "timeoutMs=-1",
+            "timeoutMs=soon",
+            "timeout=5",
+            "timeoutMs=1&timeoutMs=2",
+        ] {
+            let (status, said) = send(
+                Method::GET,
+                &format!("/tasks/ab12cd34/wait?{query}"),
+                None,
+                MINE,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{query}: {said}");
+        }
+    }
+
+    #[test]
+    fn a_wait_defaults_to_a_minute_and_stops_at_ten() {
+        assert_eq!(limit(None), Ok(Duration::from_secs(60)));
+        assert_eq!(limit(Some("")), Ok(Duration::from_secs(60)));
+        assert_eq!(limit(Some("timeoutMs=0")), Ok(Duration::ZERO));
+        assert_eq!(
+            limit(Some("timeoutMs=1500")),
+            Ok(Duration::from_millis(1500))
+        );
+        assert_eq!(
+            limit(Some("timeoutMs=99999999999")),
+            Ok(Duration::from_secs(600))
+        );
     }
 
     /// Each refusal arrives before any machine is asked, which is also the only
@@ -459,6 +589,7 @@ mod tests {
             stderr: "fatal: invalid reference: HEAD".to_owned(),
         };
         assert_eq!(from_delegate(&git), StatusCode::CONFLICT);
+        assert_eq!(from_delegate(&delegate::Error::Ended), StatusCode::CONFLICT);
     }
 
     /// The routes `yantra mcp` calls, end to end against a real sshd, git and
@@ -656,6 +787,128 @@ mod tests {
         .expect("remove answers in time");
         assert_eq!(status, StatusCode::OK, "{said}");
         let after = left(&worktree);
+        assert!(after.trim().is_empty(), "{after}");
+
+        drop(fixture);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Steer, wait and cancel, end to end against a real sshd and a real
+    /// `opencode acp` (§B3). The fixture has no model login, so how the turns
+    /// end is not asserted; the answers, the states and the cleanup are.
+    #[tokio::test]
+    async fn a_task_is_steered_waited_for_and_cancelled_through_the_routes() {
+        const REPO: &str = "/home/yantra/steered";
+        let patience = std::time::Duration::from_secs(120);
+        let Some(fixture) = common::SshFixture::start().expect("the fixture starts") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(format!("/tmp/yx-str-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a state directory");
+        let machine = Machine {
+            host: fixture.host().to_owned(),
+            user: Some(common::USER.to_owned()),
+            port: Some(fixture.port()),
+            identity: Some(fixture.key_path()),
+            state_dir: dir.clone(),
+        };
+        let app = app_at(Arc::new(move |name: &str| {
+            (name == "fixture").then(|| machine.clone())
+        }));
+        fixture
+            .run(&format!(
+                "mkdir -p {REPO} && cd {REPO} && git init -q && echo one > README \
+                 && git add README && git -c user.name=t -c user.email=t@example.com \
+                 commit -qm one"
+            ))
+            .expect("a repository");
+        let json = |said: &str| -> serde_json::Value {
+            serde_json::from_str(said).expect("the daemon answers JSON")
+        };
+        let call = |method: Method, path: String, body: Option<serde_json::Value>| {
+            let app = app.clone();
+            async move {
+                tokio::time::timeout(patience, send_to(app, method, &path, body, MINE))
+                    .await
+                    .expect("the daemon answers in time")
+            }
+        };
+        let terminal = ["completed", "cancelled", "failed"];
+
+        let asked = serde_json::json!({"machine": "fixture", "harness": "opencode",
+                                       "repo": REPO, "prompt": "Say hello."});
+        let (status, said) = call(Method::POST, "/tasks".to_owned(), Some(asked)).await;
+        assert_eq!(status, StatusCode::CREATED, "{said}");
+        let started = json(&said);
+        let id = started["id"].as_str().expect("an id").to_owned();
+        let worktree = started["worktree"].as_str().expect("a worktree").to_owned();
+
+        // opencode takes seconds to open a session, so the task is still starting.
+        let steer = serde_json::json!({"prompt": format!("Also say yantra-steer-{id}.")});
+        let (status, said) = call(
+            Method::POST,
+            format!("/tasks/{id}/steer"),
+            Some(steer.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert_eq!(json(&said)["id"], id.as_str(), "{said}");
+
+        for ms in [1, 30_000] {
+            let (status, said) = call(
+                Method::GET,
+                format!("/tasks/{id}/wait?timeoutMs={ms}"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{said}");
+            let waited = json(&said);
+            let timed_out = waited["waitTimedOut"].as_bool().expect("waitTimedOut");
+            let state = waited["state"].as_str().expect("a state");
+            assert!(
+                timed_out || terminal.contains(&state),
+                "a wait that did not time out ends on a settled task: {said}"
+            );
+        }
+
+        let (status, said) = call(Method::POST, format!("/tasks/{id}/stop"), None).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let stopped = json(&said);
+        assert!(
+            terminal.contains(&stopped["state"].as_str().unwrap_or("")),
+            "{said}"
+        );
+        assert!(stopped["summary"].is_object(), "{said}");
+
+        let (status, said) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            send_to(
+                app.clone(),
+                Method::GET,
+                &format!("/tasks/{id}/wait?timeoutMs=600000"),
+                None,
+                MINE,
+            ),
+        )
+        .await
+        .expect("a cancelled task's wait answers at once");
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert_eq!(json(&said)["waitTimedOut"], false, "{said}");
+
+        let (status, said) = call(Method::POST, format!("/tasks/{id}/steer"), Some(steer)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{said}");
+
+        let (status, said) = call(Method::DELETE, format!("/tasks/{id}"), None).await;
+        assert_eq!(
+            (status, said.as_str()),
+            (StatusCode::OK, r#"{"removed":true}"#)
+        );
+        let after = fixture
+            .run(&format!(
+                "test -e {worktree} && echo there; git -C {REPO} branch --list 'yantra/*'"
+            ))
+            .expect("the machine answers");
         assert!(after.trim().is_empty(), "{after}");
 
         drop(fixture);

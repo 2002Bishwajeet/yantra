@@ -4,10 +4,14 @@
 //! Nobody answers the agent's questions while it works. Each permission request
 //! gets the agent's own "allow once", because the worktree is the isolation and
 //! the main agent reviews the diff before anything merges.
+//!
+//! ACP cannot steer a running turn, so a steer cancels the turn and sends its
+//! prompt as the next turn of the same session, as T3 Code does for an ACP agent.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::acp::{self, Agent, Answer, Events, Harness};
@@ -20,6 +24,10 @@ use crate::tmux::sq;
 const STOP_GRACE: Duration = Duration::from_secs(10);
 /// The exit status the worktree script gives a path that is not a work tree.
 pub(crate) const NOT_A_REPO: i32 = 3;
+/// How long a wait lasts when its caller names no limit.
+pub const WAIT: Duration = Duration::from_secs(60);
+/// The longest wait anyone gets, so a waiter cannot hold a connection for ever.
+pub const WAIT_LIMIT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -41,6 +49,9 @@ pub enum Error {
 
     #[error(transparent)]
     Acp(#[from] acp::Error),
+
+    #[error("the task has ended or is stopping, so it takes no more prompts")]
+    Ended,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,8 +104,10 @@ pub struct Place {
 struct Inner {
     progress: Progress,
     session: Option<String>,
-    /// Set by `stop`, whose caller takes the summary, so the runner does not.
+    /// Set by `stop`, which takes the summary, so the runner does not.
     stopping: bool,
+    /// Prompts for the turn after this one, joined by a blank line.
+    steer: Option<String>,
     /// The agent message being written now, and whether a tool call ended it.
     message: String,
     message_open: bool,
@@ -110,6 +123,7 @@ impl Default for Inner {
             },
             session: None,
             stopping: false,
+            steer: None,
             message: String::new(),
             message_open: false,
         }
@@ -124,7 +138,7 @@ fn lock(shared: &Shared) -> MutexGuard<'_, Inner> {
 
 #[derive(Debug)]
 struct Running {
-    // Weak, so the agent and its `ssh` end when the turn ends rather than at `stop`.
+    // Weak, so the agent and its `ssh` end when the last turn ends rather than at `stop`.
     agent: Weak<Agent>,
     runner: JoinHandle<()>,
 }
@@ -137,6 +151,8 @@ pub struct Task {
     ssh: Ssh,
     shared: Shared,
     running: Mutex<Option<Running>>,
+    /// True once the task has ended and taken its last summary.
+    settled: watch::Sender<bool>,
 }
 
 impl Drop for Task {
@@ -170,10 +186,31 @@ impl Task {
                 return Err(error.into());
             }
         };
-        let agent = Arc::new(agent);
+        Ok(Self::spawn(
+            place,
+            ssh.clone(),
+            Arc::new(agent),
+            events,
+            prompt,
+            ssh,
+        ))
+    }
+
+    /// Runs `agent` in `place`. The runner asks `machine` for its git, so a
+    /// test can script it.
+    fn spawn<E: Exec + Send + Sync + 'static>(
+        place: Place,
+        ssh: Ssh,
+        agent: Arc<Agent>,
+        events: Events,
+        prompt: &str,
+        machine: E,
+    ) -> Self {
         let shared = Shared::default();
+        let settled = watch::Sender::new(false);
         let runner = {
-            let (agent, shared, ssh) = (Arc::clone(&agent), Arc::clone(&shared), ssh.clone());
+            let (agent, shared, settled) =
+                (Arc::clone(&agent), Arc::clone(&shared), settled.clone());
             let (place, prompt) = (place.clone(), prompt.to_owned());
             tokio::spawn(async move {
                 drive(agent, events, &place.worktree, &prompt, &shared).await;
@@ -183,20 +220,23 @@ impl Task {
                 };
                 if !opened {
                     // ADR-0033 decision 4: the agent never started, so the worktree goes.
-                    let removed = ssh.exec(&removal(&place)).await;
+                    let removed = machine.exec(&removal(&place)).await;
                     if matches!(&removed, Ok(out) if out.success())
                         && let State::Failed(said) = &mut lock(&shared).progress.state
                     {
                         said.push_str("; its worktree and branch were removed");
                     }
                 } else if !stopping
-                    && let Ok(summary) = summarise(&ssh, &place.worktree, &place.base).await
+                    && let Ok(summary) = summarise(&machine, &place.worktree, &place.base).await
                 {
                     lock(&shared).progress.summary = Some(summary);
                 }
+                if !stopping {
+                    settled.send_replace(true);
+                }
             })
         };
-        Ok(Self {
+        Self {
             place,
             ssh,
             shared,
@@ -204,7 +244,8 @@ impl Task {
                 agent: Arc::downgrade(&agent),
                 runner,
             })),
-        })
+            settled,
+        }
     }
 
     pub fn place(&self) -> &Place {
@@ -223,9 +264,57 @@ impl Task {
         Ok(summary)
     }
 
-    /// Cancels the turn and ends the agent. The worktree stays for review,
-    /// and the caller takes its [`Task::summary`].
-    pub async fn stop(&self) {
+    /// Sends `prompt` to the agent as its next turn, in the same session. A
+    /// running turn is cancelled for it; a turn not yet begun runs first.
+    pub fn steer(&self, prompt: &str) -> Result<(), Error> {
+        let agent = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|running| running.agent.upgrade());
+        let mut inner = lock(&self.shared);
+        if inner.stopping || inner.progress.state.is_terminal() {
+            return Err(Error::Ended);
+        }
+        match &mut inner.steer {
+            Some(queued) => {
+                queued.push_str("\n\n");
+                queued.push_str(prompt);
+            }
+            None => inner.steer = Some(prompt.to_owned()),
+        }
+        // Sent under the lock, so it reaches the agent before the runner can
+        // send the steer, and never cancels the steered turn instead.
+        if inner.progress.state == State::Running
+            && let (Some(agent), Some(session)) = (agent, &inner.session)
+        {
+            // A failed send means the agent has gone, and its turn says so.
+            let _ = agent.cancel(session);
+        }
+        Ok(())
+    }
+
+    /// Waits up to `limit` for the task to end and take its last summary.
+    /// Reads memory only. True when the task has settled.
+    pub async fn wait(&self, limit: Duration) -> bool {
+        let mut settled = self.settled.subscribe();
+        tokio::time::timeout(limit, settled.wait_for(|settled| *settled))
+            .await
+            .is_ok_and(|seen| seen.is_ok())
+    }
+
+    /// Cancels the turn, ends the agent and takes the worktree's summary. The
+    /// worktree stays for review. A summary the machine cannot give leaves the
+    /// one the turn took, and the error says why.
+    pub async fn stop(&self) -> Result<Summary, Error> {
+        self.halt().await;
+        let summary = self.summary().await;
+        self.settled.send_replace(true);
+        summary
+    }
+
+    async fn halt(&self) {
         let running = self
             .running
             .lock()
@@ -254,7 +343,8 @@ impl Task {
 
     /// Stops the task, then removes its worktree and its branch.
     pub async fn remove(&self) -> Result<(), Error> {
-        self.stop().await;
+        self.halt().await;
+        self.settled.send_replace(true);
         let out = self.ssh.exec(&removal(&self.place)).await?;
         if !out.success() {
             return Err(Error::Worktree {
@@ -376,26 +466,48 @@ fn summary(said: &[u8]) -> Summary {
     }
 }
 
-/// Runs the agent's one turn and sets the state it ended in.
+/// Runs the first prompt, then each steer, and sets the state the last turn
+/// ended in.
 async fn drive(agent: Arc<Agent>, mut events: Events, cwd: &str, prompt: &str, shared: &Shared) {
-    let state = match turn(&agent, &mut events, cwd, prompt, shared).await {
+    let session = match open(&agent, cwd, shared).await {
+        Ok(session) => session,
+        Err(error) => return settle(&mut lock(shared), Err(error)),
+    };
+    let mut prompt = prompt.to_owned();
+    loop {
+        let ended = turn(&agent, &mut events, &session, &prompt, shared).await;
+        // One lock for the steer and the end, so a steer `steer` took is sent.
+        let mut inner = lock(shared);
+        match inner.steer.take() {
+            Some(next) if ended.is_ok() && !inner.stopping => prompt = next,
+            _ => return settle(&mut inner, ended),
+        }
+    }
+}
+
+fn settle(inner: &mut Inner, ended: Result<chat::StopReason, acp::Error>) {
+    inner.steer = None;
+    inner.progress.state = match ended {
         Ok(chat::StopReason::Cancelled) => State::Cancelled,
         Ok(_) => State::Completed,
         Err(error) => State::Failed(error.to_string()),
     };
-    lock(shared).progress.state = state;
+}
+
+async fn open(agent: &Agent, cwd: &str, shared: &Shared) -> Result<String, acp::Error> {
+    agent.initialize().await?;
+    let session = agent.new_session(cwd).await?;
+    lock(shared).session = Some(session.clone());
+    Ok(session)
 }
 
 async fn turn(
     agent: &Agent,
     events: &mut Events,
-    cwd: &str,
+    session: &str,
     prompt: &str,
     shared: &Shared,
 ) -> Result<chat::StopReason, acp::Error> {
-    agent.initialize().await?;
-    let session = agent.new_session(cwd).await?;
-    lock(shared).session = Some(session.clone());
     let watch = async {
         while let Some(update) = events.recv().await {
             if let Event::RequestOpened(opened) = &update.event {
@@ -410,7 +522,7 @@ async fn turn(
             }
         }
     };
-    let (stopped, ()) = tokio::join!(agent.prompt(&session, prompt), watch);
+    let (stopped, ()) = tokio::join!(agent.prompt(session, prompt), watch);
     stopped
 }
 
@@ -553,6 +665,149 @@ mod tests {
         assert_eq!(progress.state, State::Completed);
         assert_eq!(progress.last_message.as_deref(), Some("Fixed the bug."));
         assert_eq!(lock(&shared).session.as_deref(), Some(SESSION));
+    }
+
+    fn place() -> Place {
+        Place {
+            id: "ab12cd34".to_owned(),
+            repo: "/r".to_owned(),
+            worktree: "/w".to_owned(),
+            branch: "yantra/ab12cd34".to_owned(),
+            base: "0123abcd".to_owned(),
+        }
+    }
+
+    /// A task on the scripted agent, whose runner takes its summary from a
+    /// scripted machine. Its `ssh` goes nowhere and these tests never use it.
+    fn task(agent: Arc<Agent>, events: Events) -> Task {
+        let ssh = Ssh::new(ssh::Machine {
+            host: "nowhere.invalid".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: "/nonexistent".into(),
+        })
+        .expect("a short control path");
+        let machine = scripted(vec![out(0, " 1 file changed\n\0a.txt\0", "")]);
+        Task::spawn(place(), ssh, agent, events, "fix it", machine)
+    }
+
+    async fn until_running(task: &Task) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while task.progress().state != State::Running {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .expect("the turn starts within 5 s");
+    }
+
+    fn prompted(message: &Value) -> &Value {
+        assert_eq!(message["method"], "session/prompt", "{message}");
+        assert_eq!(message["params"]["sessionId"], SESSION, "{message}");
+        &message["params"]["prompt"][0]["text"]
+    }
+
+    #[tokio::test]
+    async fn a_steer_cancels_the_running_turn_and_prompts_again() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        let first = fake.open().await;
+        until_running(&task).await;
+        task.steer("and the docs")
+            .expect("a running task takes a steer");
+        let cancel = fake.receive().await;
+        assert_eq!(cancel["method"], "session/cancel", "{cancel}");
+        assert_eq!(cancel["params"]["sessionId"], SESSION);
+        fake.reply(&first, json!({"stopReason": "cancelled"})).await;
+        let second = fake.receive().await;
+        assert_eq!(prompted(&second), "and the docs");
+        assert_eq!(
+            task.progress().state,
+            State::Running,
+            "the steer's cancel never shows as Cancelled"
+        );
+        fake.update(chunk("Docs done.")).await;
+        fake.reply(&second, json!({"stopReason": "end_turn"})).await;
+        assert!(task.wait(Duration::from_secs(5)).await);
+        let progress = task.progress();
+        assert_eq!(progress.state, State::Completed);
+        assert_eq!(progress.last_message.as_deref(), Some("Docs done."));
+    }
+
+    #[tokio::test]
+    async fn a_steer_before_the_turn_begins_waits_for_it() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        assert_eq!(task.progress().state, State::Starting);
+        task.steer("and the docs")
+            .expect("a starting task takes a steer");
+        let first = fake.open().await;
+        fake.reply(&first, json!({"stopReason": "end_turn"})).await;
+        let second = fake.receive().await;
+        assert_eq!(prompted(&second), "and the docs", "no cancel came first");
+        fake.reply(&second, json!({"stopReason": "end_turn"})).await;
+        assert!(task.wait(Duration::from_secs(5)).await);
+        assert_eq!(task.progress().state, State::Completed);
+    }
+
+    #[tokio::test]
+    async fn two_steers_reach_the_agent_as_one_prompt() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        task.steer("and the docs").expect("taken");
+        task.steer("and the tests").expect("taken");
+        let first = fake.open().await;
+        fake.reply(&first, json!({"stopReason": "end_turn"})).await;
+        let second = fake.receive().await;
+        assert_eq!(prompted(&second), "and the docs\n\nand the tests");
+        fake.reply(&second, json!({"stopReason": "end_turn"})).await;
+        assert!(task.wait(Duration::from_secs(5)).await);
+        assert_eq!(task.progress().state, State::Completed);
+    }
+
+    #[tokio::test]
+    async fn a_steer_after_the_turn_has_ended_is_refused() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        let first = fake.open().await;
+        fake.reply(&first, json!({"stopReason": "end_turn"})).await;
+        assert!(task.wait(Duration::from_secs(5)).await);
+        assert!(matches!(task.steer("more"), Err(Error::Ended)));
+
+        let (agent, events, mut fake) = pair();
+        let stopping = self::task(agent, events);
+        let first = fake.open().await;
+        lock(&stopping.shared).stopping = true;
+        assert!(
+            matches!(stopping.steer("more"), Err(Error::Ended)),
+            "a task being stopped takes no steer"
+        );
+        fake.reply(&first, json!({"stopReason": "end_turn"})).await;
+    }
+
+    /// The runner's summary lands before the wait returns, so a read after
+    /// it has the diff.
+    #[tokio::test]
+    async fn wait_returns_when_the_task_settles_and_times_out_otherwise() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        let first = fake.open().await;
+        assert!(!task.wait(Duration::from_millis(20)).await, "the turn runs");
+        assert_eq!(task.progress().summary, None);
+        fake.reply(&first, json!({"stopReason": "end_turn"})).await;
+        assert!(task.wait(Duration::from_secs(5)).await);
+        assert_eq!(
+            task.progress().summary,
+            Some(Summary {
+                changed: vec!["a.txt".to_owned()],
+                shortstat: "1 file changed".to_owned(),
+            })
+        );
+        assert!(
+            task.wait(Duration::ZERO).await,
+            "a settled task answers at once"
+        );
     }
 
     #[tokio::test]

@@ -207,7 +207,8 @@ claude mcp add yantra -- yantra mcp --daemon http://<appliance>:7717
 
 Use the appliance's tailnet name or address. `yantrad` authorises the call by Tailscale identity, so
 the machine must be your own untagged node. The tools are `start_task`, `task_status`, `list_tasks`,
-`stop_task` and `remove_task`. Each task runs in a new worktree at `~/.yantra/worktrees/<id>` on a
+`steer_task`, `wait_task`, `cancel_task` and `remove_task`. `steer_task` cancels a running turn and
+sends its prompt as the next turn, and `wait_task` waits up to `timeoutMs` for the task to end. Each task runs in a new worktree at `~/.yantra/worktrees/<id>` on a
 branch `yantra/<id>`, and `remove_task` deletes both. A task answers its agent's permission requests
 with "allow once". The harness must already be logged in on that machine. The daemon keeps tasks in
 memory, so after a restart it forgets them and their worktrees stay on the machine.
