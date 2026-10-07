@@ -573,8 +573,11 @@ is a worktree of a workspace's repository, and a bare session names none.
   does not start. When a turn ends, the route keeps the tree and sends
   `turn.diff.updated{turn, unifiedDiff, truncated}`. A socket that closes mid-turn keeps it too, and
   tells no one. `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
-  `thread.reverted{turn}`; it is `busy` while a turn runs and `badFrame` with no thread. The
-  conversation is not rewound. A git that refused is a `checkpoint` failure. No diff is logged.
+  `thread.reverted{turn}`; it is `badFrame` with no thread. A turn or a revert is `busy` while
+  any tab of the daemon runs one in the thread, until that turn's checkpoint is kept. The
+  conversation is not rewound. A git that refused, or did not answer in 60 s, is a `checkpoint`
+  failure, except after a turn that failed: the turn's own error stays, and the log has the
+  checkpoint's. No diff is logged.
 - **A binary frame is an image** (Y-424). The upgrade's limit is 16 MiB a message and a frame, so a
   10 MB screenshot fits. The route sends the bytes to the machine through
   [`image::Images`](../yantra-core/src/image.rs): one directory per socket under the machine's

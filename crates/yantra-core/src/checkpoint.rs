@@ -28,6 +28,11 @@ const NO_CHECKPOINT: i32 = 3;
 /// `commit-tree` refuses on a machine with no git identity.
 const IDENTITY: &str = "GIT_AUTHOR_NAME=Yantra GIT_AUTHOR_EMAIL=yantra@localhost \
                         GIT_COMMITTER_NAME=Yantra GIT_COMMITTER_EMAIL=yantra@localhost";
+/// The browser reads `a/` and `b/`, so no user config may change the format.
+const DIFF_FLAGS: &str =
+    "--no-color --no-ext-diff --no-textconv --no-relative --src-prefix=a/ --dst-prefix=b/";
+/// `git diff` dies of SIGPIPE when `head` has read enough, which is no failure.
+const SIGPIPE: i32 = 128 + 13;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -80,24 +85,35 @@ fn number(stdout: &str) -> Result<u32, Error> {
 
 /// The next number is the count of the thread's refs. `cp -p` keeps the
 /// index's time, so git's racy check still sees a file changed in its second.
+/// The empty old value makes `update-ref` refuse a ref that exists, so two
+/// captures at once never overwrite each other; the loser counts again once.
 fn keep(place: &Place, first: bool) -> String {
     let refs = sq(&refs(place));
-    let only_first = if first {
-        "[ \"$n\" -eq 0 ] || exit 0\n"
+    let count = format!("n=$(git for-each-ref --format=x {refs} | wc -l) && n=$((n)) || exit\n");
+    let (only_first, again) = if first {
+        (
+            "[ \"$n\" -eq 0 ] || exit 0\n".to_owned(),
+            // Another caller kept checkpoint 0 first.
+            format!("git rev-parse -q --verify {refs}/0 >/dev/null && exit 0\n"),
+        )
     } else {
-        ""
+        (String::new(), count.clone())
     };
     format!(
         "cd {worktree} || exit\n\
-         n=$(git for-each-ref --format=x {refs} | wc -l) && n=$((n)) || exit\n\
+         {count}\
          {only_first}\
          tmp=$(mktemp) || exit\n\
          trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
          cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n\
          GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
          && tree=$(GIT_INDEX_FILE=$tmp git write-tree) \
-         && commit=$({IDENTITY} git commit-tree -m 'yantra checkpoint' \"$tree\") \
-         && git update-ref {refs}/\"$n\" \"$commit\" && echo \"$n\"",
+         && commit=$({IDENTITY} git commit-tree -m 'yantra checkpoint' \"$tree\") || exit\n\
+         if ! git update-ref {refs}/\"$n\" \"$commit\" '' 2>/dev/null; then\n\
+         {again}\
+         git update-ref {refs}/\"$n\" \"$commit\" '' || exit\n\
+         fi\n\
+         echo \"$n\"",
         worktree = sq(&place.worktree),
     )
 }
@@ -113,7 +129,10 @@ pub async fn diff<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<Diff, E
             "cd {worktree} || exit\n\
              for c in {from} {to}; do \
              git rev-parse -q --verify \"$c\" >/dev/null || exit {NO_CHECKPOINT}; done\n\
-             git diff --no-color --no-ext-diff {from} {to} | head -c {over}",
+             exec 3>&1\n\
+             s=$({{ {{ git -c core.quotePath=false diff {DIFF_FLAGS} {from} {to}; echo $? >&4; }} \
+             | head -c {over} >&3; }} 4>&1)\n\
+             [ \"$s\" -eq 0 ] || [ \"$s\" -eq {SIGPIPE} ] || exit \"$s\"",
             worktree = sq(&place.worktree),
             over = LIMIT + 1,
         ))
@@ -158,8 +177,8 @@ pub async fn revert<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<(), E
              git restore --source \"$c\" --worktree --staged -- . || exit; fi\n\
              git clean -fdq -- . || exit\n\
              if git rev-parse -q --verify HEAD >/dev/null; then git reset -q -- . || exit; fi\n\
-             git for-each-ref --format='%(refname)' {refs} | while read -r r; do \
-             [ \"${{r##*/}}\" -le {turn} ] || echo \"delete $r\"; done | git update-ref --stdin",
+             git for-each-ref --format='%(refname) %(objectname)' {refs} | while read -r r o; do \
+             [ \"${{r##*/}}\" -le {turn} ] || echo \"delete $r $o\"; done | git update-ref --stdin",
             worktree = sq(&place.worktree),
             at = named(place, turn),
             refs = sq(&refs(place)),
@@ -259,10 +278,14 @@ mod tests {
         }
     }
 
-    fn kept(guard: &str) -> String {
+    const COUNT: &str = "n=$(git for-each-ref --format=x \
+                         'refs/yantra/checkpoints/chat/web/11111111' | wc -l) \
+                         && n=$((n)) || exit\n";
+
+    fn kept(guard: &str, again: &str) -> String {
         format!(
             "cd '{WORKTREE}' || exit\n\
-             n=$(git for-each-ref --format=x {REFS} | wc -l) && n=$((n)) || exit\n\
+             {COUNT}\
              {guard}\
              tmp=$(mktemp) || exit\n\
              trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
@@ -271,8 +294,12 @@ mod tests {
              && tree=$(GIT_INDEX_FILE=$tmp git write-tree) \
              && commit=$(GIT_AUTHOR_NAME=Yantra GIT_AUTHOR_EMAIL=yantra@localhost \
              GIT_COMMITTER_NAME=Yantra GIT_COMMITTER_EMAIL=yantra@localhost \
-             git commit-tree -m 'yantra checkpoint' \"$tree\") \
-             && git update-ref {REFS}/\"$n\" \"$commit\" && echo \"$n\""
+             git commit-tree -m 'yantra checkpoint' \"$tree\") || exit\n\
+             if ! git update-ref {REFS}/\"$n\" \"$commit\" '' 2>/dev/null; then\n\
+             {again}\
+             git update-ref {REFS}/\"$n\" \"$commit\" '' || exit\n\
+             fi\n\
+             echo \"$n\""
         )
     }
 
@@ -280,7 +307,11 @@ mod tests {
     async fn capture_commits_the_tree_through_a_private_index_and_names_its_number() {
         let machine = Machine::answering(vec![out(0, b"2\n", "")]);
         assert_eq!(capture(&machine, &place()).await.expect("kept"), 2);
-        assert_eq!(machine.asked(), [kept("")]);
+        assert_eq!(
+            machine.asked(),
+            [kept("", COUNT)],
+            "a lost race counts again"
+        );
     }
 
     #[tokio::test]
@@ -288,13 +319,11 @@ mod tests {
         let machine = Machine::answering(vec![out(0, b"0\n", ""), out(0, b"", "")]);
         assert_eq!(base(&machine, &place()).await.expect("kept"), Some(0));
         assert_eq!(base(&machine, &place()).await.expect("had one"), None);
-        assert_eq!(
-            machine.asked(),
-            [
-                kept("[ \"$n\" -eq 0 ] || exit 0\n"),
-                kept("[ \"$n\" -eq 0 ] || exit 0\n")
-            ]
+        let base = kept(
+            "[ \"$n\" -eq 0 ] || exit 0\n",
+            &format!("git rev-parse -q --verify {REFS}/0 >/dev/null && exit 0\n"),
         );
+        assert_eq!(machine.asked(), [base.clone(), base]);
     }
 
     #[tokio::test]
@@ -333,7 +362,11 @@ mod tests {
                 "cd '{WORKTREE}' || exit\n\
                  for c in {one} {two}; do \
                  git rev-parse -q --verify \"$c\" >/dev/null || exit 3; done\n\
-                 git diff --no-color --no-ext-diff {one} {two} | head -c 262145"
+                 exec 3>&1\n\
+                 s=$({{ {{ git -c core.quotePath=false diff --no-color --no-ext-diff \
+                 --no-textconv --no-relative --src-prefix=a/ --dst-prefix=b/ {one} {two}; \
+                 echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
+                 [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\""
             )]
         );
     }
@@ -390,8 +423,9 @@ mod tests {
                  git restore --source \"$c\" --worktree --staged -- . || exit; fi\n\
                  git clean -fdq -- . || exit\n\
                  if git rev-parse -q --verify HEAD >/dev/null; then git reset -q -- . || exit; fi\n\
-                 git for-each-ref --format='%(refname)' {REFS} | while read -r r; do \
-                 [ \"${{r##*/}}\" -le 1 ] || echo \"delete $r\"; done | git update-ref --stdin"
+                 git for-each-ref --format='%(refname) %(objectname)' {REFS} \
+                 | while read -r r o; do \
+                 [ \"${{r##*/}}\" -le 1 ] || echo \"delete $r $o\"; done | git update-ref --stdin"
             )]
         );
     }
