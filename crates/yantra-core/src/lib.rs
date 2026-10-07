@@ -27,6 +27,7 @@ pub mod github;
 pub mod heartbeat;
 pub mod history;
 pub mod identity;
+pub mod image;
 pub mod install;
 pub mod inventory;
 pub mod join;

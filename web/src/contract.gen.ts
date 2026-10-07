@@ -9,8 +9,10 @@ import type {
   About,
   Attention,
   Broken,
+  ChatAttached,
   ChatFailure,
   ChatFrame,
+  ChatNotAttached,
   Cloning,
   Connection,
   Device,
@@ -850,6 +852,17 @@ export const chatNotLoggedIn = {
   "said": "the agent refused: Authentication required (-32000)",
   "type": "error"
 } satisfies ChatFailure
+
+export const chatAttached = {
+  "path": "/tmp/yantra-chat-Y0123456789abcdef/1.png",
+  "type": "attached"
+} satisfies ChatAttached
+
+export const chatNotAttached = {
+  "kind": "notAnImage",
+  "said": "that is not a PNG, JPEG, GIF or WebP image",
+  "type": "notAttached"
+} satisfies ChatNotAttached
 
 export const chatFrames = [
   {

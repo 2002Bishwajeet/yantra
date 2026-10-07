@@ -69,15 +69,21 @@ impl Drop for Turn {
 
 impl Turn {
     /// Sends `text` to Claude in the thread's worktree on the machine `ssh`
-    /// reaches.
-    pub fn start(ssh: &Ssh, place: &Place, text: &str) -> Result<(Self, Events), Error> {
+    /// reaches. `images` is the directory the chat's images landed in, which
+    /// Claude may then read without asking.
+    pub fn start(
+        ssh: &Ssh,
+        place: &Place,
+        text: &str,
+        images: Option<&str>,
+    ) -> Result<(Self, Events), Error> {
         let ssh::Piped {
             child,
             stdin,
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree))?;
+        } = ssh.stdio(&command(&place.worktree, images))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let (turn, events) = Self::wire(
             stdout,
@@ -171,16 +177,18 @@ impl Turn {
 /// `cd` because `claude` has no cwd flag, and the transcript directory is
 /// derived from the cwd. `claude` is searched for as I-34 requires, and a musl
 /// machine gets the ripgrep variable `agent::launch_command` gives the TUI.
-fn command(worktree: &str) -> String {
+/// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
+fn command(worktree: &str, images: Option<&str>) -> String {
     format!(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" -p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
+        add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
@@ -1140,7 +1148,7 @@ mod tests {
     /// the slug, which holds nothing a shell acts on.
     #[test]
     fn the_command_cds_into_the_worktree_and_resumes_the_newest_transcript() {
-        let script = command("/home/u/.yantra/worktrees/chat/w/11111111");
+        let script = command("/home/u/.yantra/worktrees/chat/w/11111111", None);
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
             "{script}"
@@ -1155,7 +1163,23 @@ mod tests {
              --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
         ));
 
-        let hostile = command("/tmp/x'; touch /tmp/pwned; '");
+        let hostile = command("/tmp/x'; touch /tmp/pwned; '", None);
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
+    }
+
+    /// Y-424: Claude reads the chat's images without asking, and the
+    /// directory reaches the shell quoted.
+    #[test]
+    fn the_images_directory_is_added_before_the_other_flags() {
+        let script = command("/w", Some("/tmp/yantra-chat-Y01"));
+        assert!(
+            script.contains("exec \"$c\" --add-dir '/tmp/yantra-chat-Y01' -p --input-format"),
+            "{script}"
+        );
+        let hostile = command("/w", Some("/tmp/a'; touch /tmp/pwned; '"));
+        assert!(
+            hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' -p "),
+            "{hostile}"
+        );
     }
 }

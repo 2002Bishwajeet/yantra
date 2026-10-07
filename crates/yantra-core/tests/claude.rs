@@ -1,5 +1,6 @@
 //! Y-356 against a real `claude` in the podman fixture, per §B3: a chat turn
-//! streams, resumes, asks before a tool and stops when it is cancelled.
+//! streams, resumes, asks before a tool and stops when it is cancelled, and
+//! (Y-424) reads an image pasted into the chat.
 //!
 //! It logs in with the owner's own credentials, copied in read-only
 //! (docs/development.md#testing). Without them it skips, and
@@ -16,6 +17,7 @@ use anyhow::{Context, Result, bail};
 use common::{SshFixture, USER};
 use yantra_core::chat::{Decision, Event, StreamKind, TurnCompleted, TurnState};
 use yantra_core::claude::{Events, Turn};
+use yantra_core::image::Images;
 use yantra_core::ssh::{Machine, Ssh};
 use yantra_core::thread::{self, Place};
 use yantra_core::workspace::Workspace;
@@ -55,8 +57,14 @@ fn state_dir(label: &str) -> Result<PathBuf> {
 }
 
 /// Every event of one turn, answering each permission request with `answer`.
-async fn run(ssh: &Ssh, place: &Place, text: &str, answer: Option<Decision>) -> Result<Vec<Event>> {
-    let (turn, mut events) = Turn::start(ssh, place, text)?;
+async fn run(
+    ssh: &Ssh,
+    place: &Place,
+    text: &str,
+    images: Option<&str>,
+    answer: Option<Decision>,
+) -> Result<Vec<Event>> {
+    let (turn, mut events) = Turn::start(ssh, place, text, images)?;
     let mut seen = Vec::new();
     tokio::time::timeout(PATIENCE, async {
         while let Some(next) = events.recv().await {
@@ -110,13 +118,13 @@ async fn next_delta(events: &mut Events) -> Result<()> {
     .context("no delta arrived")?
 }
 
-#[tokio::test]
-async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() -> Result<()> {
+/// A container signed in to claude, with a repository and one thread in it.
+async fn signed_in(label: &str) -> Result<Option<(SshFixture, Ssh, Place)>> {
     let Some(login) = credentials()? else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(fixture) = SshFixture::start()? else {
-        return Ok(());
+        return Ok(None);
     };
     fixture.arrange_as_root(&format!(
         "install -d -o {USER} -g {USER} -m 700 /home/{USER}/.claude"
@@ -139,7 +147,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         user: Some(USER.to_owned()),
         port: Some(fixture.port()),
         identity: Some(fixture.key_path()),
-        state_dir: state_dir("chat")?,
+        state_dir: state_dir(label)?,
     })?;
     let workspace = Workspace {
         name: "chatws".to_owned(),
@@ -148,12 +156,21 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         startup: None,
     };
     let place = thread::open(&ssh, &workspace).await?;
+    Ok(Some((fixture, ssh, place)))
+}
+
+#[tokio::test]
+async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() -> Result<()> {
+    let Some((fixture, ssh, place)) = signed_in("chat").await? else {
+        return Ok(());
+    };
 
     // Streams: more than one partial delta before the turn ends.
     let first = run(
         &ssh,
         &place,
         "Write three short sentences about the sea. One of them must contain the word periwinkle.",
+        None,
         None,
     )
     .await?;
@@ -178,6 +195,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &place,
         "Which unusual flower word did your sentences contain? Answer with that one word.",
         None,
+        None,
     )
     .await?;
     assert!(
@@ -190,6 +208,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &ssh,
         &place,
         "Use the Bash tool to run exactly this command: touch accepted.txt",
+        None,
         Some(Decision::Accept),
     )
     .await?;
@@ -209,6 +228,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &ssh,
         &place,
         "Use the Bash tool to run exactly this command: touch declined.txt. If it is refused, say so and stop.",
+        None,
         Some(Decision::Decline),
     )
     .await?;
@@ -229,6 +249,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &ssh,
         &place,
         "Count from 1 to 400, one number per line, with no tools.",
+        None,
     )?;
     next_delta(&mut events).await?;
     turn.cancel();
@@ -262,5 +283,37 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+    Ok(())
+}
+
+/// Y-424: a pasted image lands over ssh, and Claude reads it. Every request is
+/// declined, so a pass proves `--add-dir` let the read go without a prompt.
+#[tokio::test]
+async fn a_real_claude_reads_a_pasted_image() -> Result<()> {
+    let Some((_fixture, ssh, place)) = signed_in("img").await? else {
+        return Ok(());
+    };
+    let red = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixture/red.png"
+    ))?;
+    let mut images = Images::new();
+    let path = images.put(&ssh, &red).await?;
+
+    let seen = run(
+        &ssh,
+        &place,
+        &format!("What colour fills the image at {path}? Answer in one word."),
+        images.dir(),
+        Some(Decision::Decline),
+    )
+    .await?;
+    assert_eq!(
+        completed(&seen).map(|done| done.state),
+        Some(TurnState::Completed),
+        "{seen:?}"
+    );
+    assert!(text(&seen).to_lowercase().contains("red"), "{seen:?}");
+    images.remove(&ssh).await?;
     Ok(())
 }

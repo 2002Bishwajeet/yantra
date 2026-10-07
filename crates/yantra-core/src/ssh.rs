@@ -453,7 +453,7 @@ fn split_sentinel(stderr: &[u8], nonce: &str) -> Option<(Vec<u8>, i32)> {
     Some((stderr[..at].to_vec(), status))
 }
 
-fn nonce() -> Result<String, Error> {
+pub(crate) fn nonce() -> Result<String, Error> {
     let mut bytes = [0u8; 8];
     // getrandom only fails if the OS entropy source is unavailable, which on a
     // machine that just booted a daemon means something is deeply wrong.
