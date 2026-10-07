@@ -30,7 +30,8 @@ const INVALID_PARAMS: i64 = -32602;
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// The MCP revisions this server speaks, newest first.
 const SUPPORTED: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-/// What a wait's answer may take beyond the wait itself.
+/// The daemon caps a wait at [`delegate::WAIT_LIMIT`]; this is what its
+/// answer may take beyond that.
 const WAIT_SLACK: Duration = Duration::from_secs(30);
 
 /// Answers requests from `input` until it ends.
@@ -120,7 +121,8 @@ fn tools() -> Value {
          "description": "Send a task's agent a follow-up prompt. A running turn is cancelled and the prompt \
                          starts a new turn in the same session, so the agent keeps its context. A task that \
                          has not begun its first turn gets the prompt when that turn ends. A task that has \
-                         ended refuses it.",
+                         ended refuses it. A task that ends before its agent reads the prompt \
+                         shows steerDropped: true.",
          "inputSchema": {"type": "object", "additionalProperties": false, "required": ["id", "prompt"],
              "properties": {
                  "id": id["properties"]["id"],
@@ -184,19 +186,17 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
         "wait_task" => {
             let ms = arguments
                 .get("timeoutMs")
+                .filter(|ms| !ms.is_null())
                 .map(|ms| {
                     ms.as_u64()
                         .ok_or("wait_task's `timeoutMs` is a whole number of milliseconds")
                 })
                 .transpose()?;
-            let (path, wait) = match ms {
-                Some(ms) => (
-                    format!("/api/tasks/{}/wait?timeoutMs={ms}", task()?),
-                    Duration::from_millis(ms).min(delegate::WAIT_LIMIT),
-                ),
-                None => (format!("/api/tasks/{}/wait", task()?), delegate::WAIT),
+            let path = match ms {
+                Some(ms) => format!("/api/tasks/{}/wait?timeoutMs={ms}", task()?),
+                None => format!("/api/tasks/{}/wait", task()?),
             };
-            daemon.send(Method::Wait(wait + WAIT_SLACK), &path)
+            daemon.send(Method::Wait, &path)
         }
         "cancel_task" => daemon.send(Method::Post(None), &format!("/api/tasks/{}/stop", task()?)),
         "remove_task" => daemon.send(Method::Delete, &format!("/api/tasks/{}", task()?)),
@@ -209,8 +209,8 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
 
 enum Method {
     Get,
-    /// A `GET` that may take this long, past the usual [`TIMEOUT`].
-    Wait(Duration),
+    /// A `GET` that may last as long as the daemon's longest wait.
+    Wait,
     Post(Option<Value>),
     Delete,
 }
@@ -238,11 +238,11 @@ impl Daemon {
         let url = format!("{}{path}", self.base);
         let sent = match method {
             Method::Get => self.agent.get(&url).call(),
-            Method::Wait(limit) => self
+            Method::Wait => self
                 .agent
                 .get(&url)
                 .config()
-                .timeout_global(Some(limit))
+                .timeout_global(Some(delegate::WAIT_LIMIT + WAIT_SLACK))
                 .build()
                 .call(),
             Method::Delete => self.agent.delete(&url).call(),
@@ -561,9 +561,14 @@ mod tests {
         let body: Value = serde_json::from_str(text(&waited)).expect("JSON");
         assert_eq!(body["query"], "timeoutMs=1500", "{waited}");
         assert_eq!(body["waitTimedOut"], false);
-        let waited = one_call(daemon, "wait_task", json!({"id": "ab12cd34"})).await;
-        let body: Value = serde_json::from_str(text(&waited)).expect("JSON");
-        assert_eq!(body["query"], Value::Null, "the daemon's default: {waited}");
+        for arguments in [
+            json!({"id": "ab12cd34"}),
+            json!({"id": "ab12cd34", "timeoutMs": null}),
+        ] {
+            let waited = one_call(daemon.clone(), "wait_task", arguments).await;
+            let body: Value = serde_json::from_str(text(&waited)).expect("JSON");
+            assert_eq!(body["query"], Value::Null, "the daemon's default: {waited}");
+        }
     }
 
     #[tokio::test]
