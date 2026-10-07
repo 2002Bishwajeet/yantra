@@ -317,7 +317,8 @@ type Prompt = Pin<Box<dyn Future<Output = Result<StopReason, acp::Error>> + Send
 struct Acp {
     harness: Harness,
     agent: Arc<Agent>,
-    events: acp::Events,
+    /// `None` once the agent has gone and its events have ended.
+    events: Option<acp::Events>,
     session: String,
     /// The agent's own words on how to log in, from `initialize`.
     login: Option<String>,
@@ -477,8 +478,17 @@ async fn listen(here: &mut Option<Conversation>) -> Step {
         Some(Speaker::Claude(Some((_, events)))) => Step::Event(events.recv().await),
         Some(Speaker::Acp(acp)) => {
             let Acp { events, prompt, .. } = acp.as_mut();
+            let Some(open) = events else {
+                return Step::Prompted(finish(prompt).await);
+            };
             tokio::select! {
-                event = events.recv() => Step::Event(event),
+                event = open.recv() => {
+                    if event.is_none() {
+                        // Polled again, an ended channel answers at once, forever.
+                        *events = None;
+                    }
+                    Step::Event(event)
+                }
                 result = finish(prompt) => Step::Prompted(result),
             }
         }
@@ -559,7 +569,11 @@ fn relabel(acp: &mut Acp, id: &str, mut event: ThreadEvent) -> Option<ThreadEven
 /// Sends on what the agent said before it answered, so the browser reads
 /// every event in order. `false` is a socket that went away.
 async fn drain<P: Peer>(acp: &mut Acp, id: &str, peer: &mut P) -> bool {
-    while let Ok(event) = acp.events.try_recv() {
+    while let Some(event) = acp
+        .events
+        .as_mut()
+        .and_then(|events| events.try_recv().ok())
+    {
         if let Some(event) = relabel(acp, id, event)
             && !peer.say(&event).await
         {
@@ -803,7 +817,7 @@ async fn start_session<M: Machine>(
     Ok(Acp {
         harness,
         agent: Arc::new(agent),
-        events,
+        events: Some(events),
         session,
         login,
         asked: HashMap::new(),
@@ -1836,6 +1850,32 @@ mod tests {
                    "harness": "claude", "machine": "m",
                    "command": "run claude and type /login"})
         );
+    }
+
+    /// An agent that has gone ends its events once, and the loop does not
+    /// spin on the end.
+    #[tokio::test]
+    async fn listen_stops_reading_events_that_have_ended() {
+        let (ours, _theirs) = tokio::io::duplex(64);
+        let (read, write) = tokio::io::split(ours);
+        let (agent, _) = Agent::over(Harness::Opencode, read, write);
+        let (sender, events) = tokio::sync::mpsc::unbounded_channel();
+        drop(sender);
+        let mut here = Some(Conversation {
+            place: place(),
+            speaker: Speaker::Acp(Box::new(super::Acp {
+                harness: Harness::Opencode,
+                agent: Arc::new(agent),
+                events: Some(events),
+                session: SESSION.to_owned(),
+                login: None,
+                asked: HashMap::new(),
+                prompt: None,
+            })),
+        });
+        assert!(matches!(listen(&mut here).await, Step::Event(None)));
+        let again = tokio::time::timeout(Duration::from_millis(100), listen(&mut here)).await;
+        assert!(again.is_err(), "nothing runs, so nothing is heard");
     }
 
     #[tokio::test]

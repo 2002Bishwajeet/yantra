@@ -290,7 +290,8 @@ impl Ssh {
     fn stdio_argv(&self, command: &str, log: &Path) -> Vec<String> {
         let mut args = vec!["-E".to_owned(), log.display().to_string()];
         args.extend(self.machine.connection_args());
-        args.extend(["-o", "LogLevel=ERROR", "-o", "RequestTTY=no"].map(str::to_owned));
+        // INFO, as in `exec`: Tailscale's policy refusal is a banner (Y-412).
+        args.extend(["-o", "LogLevel=INFO", "-o", "RequestTTY=no"].map(str::to_owned));
         args.extend(self.machine.destination_args());
         args.push(stdio_payload(command));
         args
@@ -402,11 +403,12 @@ fn payload(command: &str, nonce: &str) -> String {
 }
 
 /// Still base64 (I-26, I-35), but not `payload`'s pipe into `/bin/sh`: that
-/// gives the command the pipe as its stdin, and here stdin must be ssh's.
+/// gives the command the pipe as its stdin, and here stdin must be ssh's. The
+/// expansion sits in single quotes, so a csh or fish login shell never parses it.
 fn stdio_payload(command: &str) -> String {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(command);
-    format!("exec /bin/sh -c \"$(echo {encoded} | base64 -d)\"")
+    format!("exec /bin/sh -c 'exec /bin/sh -c \"$(echo {encoded} | base64 -d)\"'")
 }
 
 /// Splits what `ssh` printed before the command started off the command's own
@@ -664,7 +666,7 @@ mod tests {
         assert_eq!(&argv[..2], ["-E", "/tmp/ssh.log"]);
         assert!(argv.iter().any(|arg| arg.starts_with("ControlPath=")));
         assert!(argv.contains(&"RequestTTY=no".to_owned()), "{argv:?}");
-        assert!(argv.contains(&"LogLevel=ERROR".to_owned()), "{argv:?}");
+        assert!(argv.contains(&"LogLevel=INFO".to_owned()), "{argv:?}");
         let at = argv
             .iter()
             .position(|arg| arg == "-oProxyCommand=evil")
@@ -681,8 +683,37 @@ mod tests {
             !wire.contains("opencode") && !wire.contains("id -un"),
             "{wire}"
         );
-        assert!(wire.starts_with("exec /bin/sh -c \"$(echo "), "{wire}");
         assert!(!wire.contains("| /bin/sh"), "stdin must stay ssh's: {wire}");
+        // The login shell may be csh or fish: it reads one word and one
+        // single-quoted string, and no `$`, `"` or `(` outside it.
+        let quoted = wire
+            .strip_prefix("exec /bin/sh -c '")
+            .and_then(|rest| rest.strip_suffix('\''))
+            .expect("one single-quoted string after `exec /bin/sh -c`");
+        assert!(!quoted.contains('\''), "{wire}");
+        assert!(quoted.starts_with("exec /bin/sh -c \"$(echo "), "{wire}");
+    }
+
+    /// The wire under a real `/bin/sh`: the command still reads ssh's stdin.
+    #[test]
+    fn the_stdio_payload_hands_its_stdin_to_the_command() {
+        use std::io::Write as _;
+        let mut shell = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(stdio_payload("cat"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("/bin/sh starts");
+        shell
+            .stdin
+            .take()
+            .expect("a stdin")
+            .write_all(b"hello\n")
+            .expect("the pipe writes");
+        let out = shell.wait_with_output().expect("the shell ends");
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"hello\n");
     }
 
     fn pgid(pid: u32) -> String {

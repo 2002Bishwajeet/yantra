@@ -219,7 +219,7 @@ impl Agent {
         let shared = Arc::new(Shared {
             state: Mutex::default(),
             out,
-            events,
+            events: Mutex::new(Some(events)),
         });
         let tasks = [
             tokio::spawn(read(reader, stderr, Arc::clone(&shared))),
@@ -318,15 +318,18 @@ impl Agent {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Prompted {
-            stop_reason: chat::StopReason,
+            stop_reason: StopReason,
         }
 
-        self.shared.emit(session, Event::TurnStarted);
+        // Its own sender, so the turn's end still arrives after `close`.
+        let events = self.shared.sender();
+        let emit = |event| emit(events.as_ref(), session, event);
+        emit(Event::TurnStarted);
         let params = json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]});
         let result = self
             .call::<Prompted>("session/prompt", params)
             .await
-            .map(|prompted| prompted.stop_reason);
+            .map(|prompted| prompted.stop_reason.into());
         let completed = match &result {
             Ok(chat::StopReason::Cancelled) => chat::TurnCompleted {
                 state: chat::TurnState::Cancelled,
@@ -344,16 +347,20 @@ impl Agent {
                 message: Some(error.to_string()),
             },
         };
-        self.shared.emit(session, Event::TurnCompleted(completed));
+        emit(Event::TurnCompleted(completed));
         result
     }
 
     /// Asks the agent to stop the turn, and withdraws every permission request
     /// it is waiting on, as ACP requires of the client.
+    /// Every request is resolved even when a send fails, and the first
+    /// failure is returned.
     pub fn cancel(&self, session: &str) -> Result<(), Error> {
-        self.shared
+        let mut failed = self
+            .shared
             .send(json!({"jsonrpc": "2.0", "method": "session/cancel",
-                         "params": {"sessionId": session}}))?;
+                         "params": {"sessionId": session}}))
+            .err();
         let waiting: Vec<(String, Permission)> = self
             .shared
             .lock()
@@ -361,14 +368,17 @@ impl Agent {
             .extract_if(|_, permission| permission.session == session)
             .collect();
         for (request, permission) in waiting {
-            self.shared.resolve(
+            let resolved = self.shared.resolve(
                 &request,
                 permission,
                 &Answer::Cancelled,
                 chat::Decision::Cancel,
-            )?;
+            );
+            if let Err(error) = resolved {
+                failed.get_or_insert(error);
+            }
         }
-        Ok(())
+        failed.map_or(Ok(()), Err)
     }
 
     /// Answers the permission request `request`, by the id
@@ -457,7 +467,18 @@ struct Permission {
 struct Shared {
     state: Mutex<State>,
     out: mpsc::UnboundedSender<String>,
-    events: mpsc::UnboundedSender<ThreadEvent>,
+    /// Taken by `close`, so [`Events`] ends once the last turn has.
+    events: Mutex<Option<mpsc::UnboundedSender<ThreadEvent>>>,
+}
+
+fn emit(events: Option<&mpsc::UnboundedSender<ThreadEvent>>, session: &str, event: Event) {
+    // Nobody listening is not this client's failure.
+    if let Some(events) = events {
+        let _ = events.send(ThreadEvent {
+            thread_id: session.to_owned(),
+            event,
+        });
+    }
 }
 
 impl Shared {
@@ -465,12 +486,15 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn sender(&self) -> Option<mpsc::UnboundedSender<ThreadEvent>> {
+        self.events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     fn emit(&self, session: &str, event: Event) {
-        // Nobody listening is not this client's failure.
-        let _ = self.events.send(ThreadEvent {
-            thread_id: session.to_owned(),
-            event,
-        });
+        emit(self.sender().as_ref(), session, event);
     }
 
     fn send(&self, message: Value) -> Result<(), Error> {
@@ -496,8 +520,19 @@ impl Shared {
             Answer::Selected(option) => json!({"outcome": "selected", "optionId": option}),
             Answer::Cancelled => json!({"outcome": "cancelled"}),
         };
-        self.send(json!({"jsonrpc": "2.0", "id": permission.rpc_id,
-                         "result": {"outcome": outcome}}))?;
+        let sent = self.send(json!({"jsonrpc": "2.0", "id": permission.rpc_id,
+                                    "result": {"outcome": outcome}}));
+        // A send that failed means the agent has gone, which cancels the request.
+        let decision = if sent.is_ok() {
+            decision
+        } else {
+            chat::Decision::Cancel
+        };
+        self.emit_resolved(request, &permission, decision);
+        sent
+    }
+
+    fn emit_resolved(&self, request: &str, permission: &Permission, decision: chat::Decision) {
         self.emit(
             &permission.session,
             Event::RequestResolved(chat::RequestResolved {
@@ -506,7 +541,6 @@ impl Shared {
                 decision,
             }),
         );
-        Ok(())
     }
 
     fn dispatch(&self, line: &[u8]) {
@@ -616,16 +650,30 @@ impl Shared {
         );
     }
 
-    /// Fails every call still waiting, now and later, with `stderr`.
+    /// Cancels every waiting request, ends [`Events`] and fails every call
+    /// still waiting, now and later, with `stderr`.
     fn close(&self, stderr: String) {
-        let mut state = self.lock();
-        for (_, reply) in state.pending.drain() {
+        let (pending, permissions) = {
+            let mut state = self.lock();
+            state.closed = Some(stderr.clone());
+            (
+                std::mem::take(&mut state.pending),
+                std::mem::take(&mut state.permissions),
+            )
+        };
+        // Before the replies, so a turn's failure follows its requests.
+        for (request, permission) in permissions {
+            self.emit_resolved(&request, &permission, chat::Decision::Cancel);
+        }
+        self.events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        for (_, reply) in pending {
             let _ = reply.send(Err(Error::Closed {
                 stderr: stderr.clone(),
             }));
         }
-        state.permissions.clear();
-        state.closed = Some(stderr);
     }
 }
 
@@ -696,6 +744,30 @@ pub(crate) async fn tail<R: AsyncRead + Unpin>(mut stderr: R) -> Vec<u8> {
 
 // The ACP v1 shapes. Only the fields acted on are named: `rawInput` and
 // `rawOutput` carry file contents and are never read.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StopReason {
+    EndTurn,
+    MaxTokens,
+    MaxTurnRequests,
+    Refusal,
+    Cancelled,
+    #[serde(other)]
+    Other,
+}
+
+impl From<StopReason> for chat::StopReason {
+    fn from(reason: StopReason) -> Self {
+        match reason {
+            StopReason::EndTurn | StopReason::Other => Self::EndTurn,
+            StopReason::MaxTokens => Self::MaxTokens,
+            StopReason::MaxTurnRequests => Self::MaxTurnRequests,
+            StopReason::Refusal => Self::Refusal,
+            StopReason::Cancelled => Self::Cancelled,
+        }
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1388,6 +1460,104 @@ mod tests {
                 message: Some("the agent refused: Internal error (-32603)".to_owned()),
             })
         );
+    }
+
+    /// A newer agent's stop reason is not a malformed answer.
+    #[tokio::test]
+    async fn an_unknown_stop_reason_completes_the_turn() {
+        let (agent, mut events, mut fake) = pair();
+        let (stopped, ()) = tokio::join!(agent.prompt(SESSION, "hi"), async {
+            let prompt = fake.receive().await;
+            fake.reply(&prompt, json!({"stopReason": "paused_for_coffee"}))
+                .await;
+        });
+        assert_eq!(stopped.expect("the turn ended"), StopReason::EndTurn);
+        assert_eq!(next(&mut events).await.event, Event::TurnStarted);
+        assert_eq!(
+            next(&mut events).await.event,
+            Event::TurnCompleted(TurnCompleted {
+                state: TurnState::Completed,
+                stop_reason: Some(StopReason::EndTurn),
+                message: None,
+            })
+        );
+    }
+
+    fn cancelled(event: &Event) -> bool {
+        matches!(
+            event,
+            Event::RequestResolved(RequestResolved {
+                decision: Decision::Cancel,
+                ..
+            })
+        )
+    }
+
+    async fn ended(events: &mut Events) {
+        let end = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("the channel ends within 5 s");
+        assert_eq!(end, None);
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_dies_idle_cancels_its_requests_and_ends_the_events() {
+        let (_agent, mut events, mut fake) = pair();
+        fake.send(asked(3)).await;
+        assert!(matches!(
+            next(&mut events).await.event,
+            Event::RequestOpened(_)
+        ));
+        drop(fake);
+        assert!(cancelled(&next(&mut events).await.event));
+        ended(&mut events).await;
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_dies_mid_turn_cancels_then_fails_the_turn_then_ends() {
+        let (agent, mut events, mut fake) = pair();
+        let (stopped, ()) = tokio::join!(agent.prompt(SESSION, "hi"), async {
+            fake.receive().await;
+            assert_eq!(next(&mut events).await.event, Event::TurnStarted);
+            fake.send(asked(4)).await;
+            assert!(matches!(
+                next(&mut events).await.event,
+                Event::RequestOpened(_)
+            ));
+            drop(fake);
+        });
+        assert!(matches!(stopped, Err(Error::Closed { .. })), "{stopped:?}");
+        assert!(cancelled(&next(&mut events).await.event));
+        assert!(matches!(
+            next(&mut events).await.event,
+            Event::TurnCompleted(TurnCompleted {
+                state: TurnState::Failed,
+                ..
+            })
+        ));
+        ended(&mut events).await;
+    }
+
+    #[tokio::test]
+    async fn cancel_resolves_every_request_when_the_writer_has_gone() {
+        let (mut agent, mut events, mut fake) = pair();
+        fake.send(asked(5)).await;
+        fake.send(asked(6)).await;
+        for _ in 0..2 {
+            assert!(matches!(
+                next(&mut events).await.event,
+                Event::RequestOpened(_)
+            ));
+        }
+        agent.tasks[1].abort();
+        let _ = (&mut agent.tasks[1]).await;
+
+        let cancel = agent.cancel(SESSION);
+        assert!(matches!(cancel, Err(Error::Closed { .. })), "{cancel:?}");
+        for _ in 0..2 {
+            assert!(cancelled(&next(&mut events).await.event));
+        }
+        assert!(agent.shared.lock().permissions.is_empty());
     }
 
     #[tokio::test]

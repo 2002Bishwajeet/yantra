@@ -31,8 +31,9 @@ fn ssh_to(fixture: &SshFixture, state_dir: &std::path::Path) -> Result<Ssh> {
 }
 
 /// Short on purpose: `%C` adds 40 characters and the socket path budget is 90.
+/// The pid keeps two runs apart.
 fn state_dir(label: &str) -> Result<std::path::PathBuf> {
-    let dir = std::path::PathBuf::from("/tmp").join(format!("yx-{label}"));
+    let dir = std::path::PathBuf::from("/tmp").join(format!("yx-{label}-{}", std::process::id()));
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
     }
@@ -57,6 +58,21 @@ async fn until(what: &str, limit: Duration, mut done: impl FnMut() -> Result<boo
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+    Ok(())
+}
+
+/// No folder, no worktree in git's list and no `yantra/*` branch.
+fn left_nothing(fixture: &SshFixture, worktree: &str) -> Result<()> {
+    assert_eq!(
+        fixture
+            .run(&format!("test -e {worktree} && echo there || true"))?
+            .trim(),
+        ""
+    );
+    let listed = fixture.run(&format!("git -C {REPO} worktree list"))?;
+    assert!(!listed.contains(worktree), "{listed}");
+    let branches = fixture.run(&format!("git -C {REPO} branch --list 'yantra/*'"))?;
+    assert!(branches.trim().is_empty(), "{branches}");
     Ok(())
 }
 
@@ -135,19 +151,30 @@ async fn a_task_works_in_its_own_worktree_and_leaves_nothing_when_removed() -> R
     .await?;
     fixture.run(&format!("test -f {}/delegated.txt", place.worktree))?;
 
+    // A folder someone already deleted does not stop the removal.
+    fixture.run(&format!("rm -rf {}", place.worktree))?;
     within("removing", task.remove()).await?;
-    assert_eq!(
-        fixture
-            .run(&format!("test -e {} && echo there || true", place.worktree))?
-            .trim(),
-        ""
-    );
-    let listed = fixture.run(&format!("git -C {REPO} worktree list"))?;
-    assert!(!listed.contains(&place.worktree), "{listed}");
-    let branches = fixture.run(&format!("git -C {REPO} branch --list 'yantra/*'"))?;
-    assert!(branches.trim().is_empty(), "{branches}");
-
+    left_nothing(&fixture, &place.worktree)?;
     drop(task);
+
+    // The fixture has no `codex-acp`, so this agent never starts, and its
+    // worktree goes with it. A second removal still succeeds.
+    let missing = within(
+        "starting a harness the machine lacks",
+        Task::start(ssh.clone(), Harness::Codex, REPO, "hi"),
+    )
+    .await?;
+    let worktree = missing.place().worktree.clone();
+    until("the worktree being removed", PATIENCE, || {
+        Ok(matches!(&missing.progress().state,
+            State::Failed(said) if said.ends_with("its worktree and branch were removed")))
+    })
+    .await?;
+    left_nothing(&fixture, &worktree)?;
+    within("removing again", missing.remove()).await?;
+    left_nothing(&fixture, &worktree)?;
+
+    drop(missing);
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }

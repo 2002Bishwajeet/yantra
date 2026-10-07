@@ -30,8 +30,9 @@ fn ssh_to(fixture: &SshFixture, state_dir: &std::path::Path) -> Result<Ssh> {
 }
 
 /// Short on purpose: `%C` adds 40 characters and the socket path budget is 90.
+/// The pid keeps two runs apart.
 fn state_dir(label: &str) -> Result<std::path::PathBuf> {
-    let dir = std::path::PathBuf::from("/tmp").join(format!("yx-{label}"));
+    let dir = std::path::PathBuf::from("/tmp").join(format!("yx-{label}-{}", std::process::id()));
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
     }
@@ -104,20 +105,24 @@ async fn opencode_initializes_reloads_and_cancels_over_ssh() -> Result<()> {
     let (agent, mut events) = Agent::start(&ssh, Harness::Opencode)?;
     within("initialize again", agent.initialize()).await?;
     within("session/load", agent.load_session(&session, CWD)).await?;
+    // The replayed history is already here, and is not the turn's.
+    while events.try_recv().is_ok() {}
 
     let turn = agent.prompt(&session, "Count slowly from 1 to 500, one number per line.");
     let cancel = async {
         // The turn's first update says it has begun, so the cancel cannot
-        // arrive before it. Without one, the cancel goes after a short wait.
-        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        // arrive before it.
+        tokio::time::timeout(PATIENCE, async {
             while let Some(update) = events.recv().await {
                 if update.event != Event::TurnStarted {
-                    return;
+                    return Ok(());
                 }
             }
+            bail!("the events ended before the turn's first update")
         })
-        .await;
-        agent.cancel(&session)
+        .await
+        .context("the turn's first update took too long")??;
+        Ok::<_, anyhow::Error>(agent.cancel(&session)?)
     };
     let (stopped, cancelled) = tokio::join!(within("a cancelled prompt", turn), cancel);
     cancelled?;

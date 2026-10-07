@@ -5,7 +5,6 @@
 //! gets the agent's own "allow once", because the worktree is the isolation and
 //! the main agent reviews the diff before anything merges.
 
-use std::hash::{BuildHasher as _, Hasher as _};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
@@ -26,6 +25,13 @@ pub(crate) const NOT_A_REPO: i32 = 3;
 pub enum Error {
     #[error("`{repo}` is not a git work tree on that machine")]
     NotARepo { repo: String },
+
+    /// Not `/…` or `~/…`: git would read anything else from the home directory.
+    #[error("`{repo}` is not a path from `/` or from `~/`")]
+    RepoPath { repo: String },
+
+    #[error("the operating system gave no random bytes for an id")]
+    Random(#[source] std::io::Error),
 
     #[error("git could not prepare or remove the task's worktree: {stderr}")]
     Worktree { stderr: String },
@@ -87,6 +93,8 @@ pub struct Place {
 struct Inner {
     progress: Progress,
     session: Option<String>,
+    /// Set by `stop`, whose caller takes the summary, so the runner does not.
+    stopping: bool,
     /// The agent message being written now, and whether a tool call ended it.
     message: String,
     message_open: bool,
@@ -101,6 +109,7 @@ impl Default for Inner {
                 summary: None,
             },
             session: None,
+            stopping: false,
             message: String::new(),
             message_open: false,
         }
@@ -152,7 +161,7 @@ impl Task {
         repo: &str,
         prompt: &str,
     ) -> Result<Self, Error> {
-        let place = prepare(&ssh, repo, &id()).await?;
+        let place = prepare(&ssh, repo, &id()?).await?;
         let (agent, events) = match Agent::start(&ssh, harness) {
             Ok(started) => started,
             Err(error) => {
@@ -165,11 +174,24 @@ impl Task {
         let shared = Shared::default();
         let runner = {
             let (agent, shared, ssh) = (Arc::clone(&agent), Arc::clone(&shared), ssh.clone());
-            let (worktree, base) = (place.worktree.clone(), place.base.clone());
-            let prompt = prompt.to_owned();
+            let (place, prompt) = (place.clone(), prompt.to_owned());
             tokio::spawn(async move {
-                drive(agent, events, &worktree, &prompt, &shared).await;
-                if let Ok(summary) = summarise(&ssh, &worktree, &base).await {
+                drive(agent, events, &place.worktree, &prompt, &shared).await;
+                let (opened, stopping) = {
+                    let inner = lock(&shared);
+                    (inner.session.is_some(), inner.stopping)
+                };
+                if !opened {
+                    // ADR-0033 decision 4: the agent never started, so the worktree goes.
+                    let removed = ssh.exec(&removal(&place)).await;
+                    if matches!(&removed, Ok(out) if out.success())
+                        && let State::Failed(said) = &mut lock(&shared).progress.state
+                    {
+                        said.push_str("; its worktree and branch were removed");
+                    }
+                } else if !stopping
+                    && let Ok(summary) = summarise(&ssh, &place.worktree, &place.base).await
+                {
                     lock(&shared).progress.summary = Some(summary);
                 }
             })
@@ -201,7 +223,8 @@ impl Task {
         Ok(summary)
     }
 
-    /// Cancels the turn and ends the agent. The worktree stays for review.
+    /// Cancels the turn and ends the agent. The worktree stays for review,
+    /// and the caller takes its [`Task::summary`].
     pub async fn stop(&self) {
         let running = self
             .running
@@ -209,7 +232,11 @@ impl Task {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         if let Some(Running { agent, mut runner }) = running {
-            let session = lock(&self.shared).session.clone();
+            let session = {
+                let mut inner = lock(&self.shared);
+                inner.stopping = true;
+                inner.session.clone()
+            };
             let cancelled = match (agent.upgrade(), session) {
                 (Some(agent), Some(session)) => agent.cancel(&session).is_ok(),
                 // No turn has begun, or the agent has already gone.
@@ -238,13 +265,11 @@ impl Task {
     }
 }
 
-/// Short and unguessable enough for a branch name. `RandomState` is seeded
-/// from the OS once and then advanced, so two calls never repeat.
-pub(crate) fn id() -> String {
-    let bits = std::collections::hash_map::RandomState::new()
-        .build_hasher()
-        .finish();
-    format!("{:08x}", bits >> 32)
+/// 64 random bits, so two live tasks never share an id.
+pub(crate) fn id() -> Result<String, Error> {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|error| Error::Random(std::io::Error::other(error)))?;
+    Ok(format!("{:016x}", u64::from_ne_bytes(bytes)))
 }
 
 pub(crate) fn said(stderr: &[u8]) -> String {
@@ -271,6 +296,11 @@ pub(crate) fn branch(id: &str) -> String {
 }
 
 pub(crate) async fn prepare<E: Exec>(exec: &E, repo: &str, id: &str) -> Result<Place, Error> {
+    if !(repo.starts_with('/') || repo.starts_with("~/")) {
+        return Err(Error::RepoPath {
+            repo: repo.to_owned(),
+        });
+    }
     let out = exec.exec(&worktree_command(repo, id)).await?;
     if out.status == NOT_A_REPO {
         return Err(Error::NotARepo {
@@ -293,53 +323,57 @@ pub(crate) async fn prepare<E: Exec>(exec: &E, repo: &str, id: &str) -> Result<P
     }
 }
 
+/// Succeeds when the worktree or the branch is already gone, so a removal
+/// that runs twice, or after someone deleted the folder, still ends clean.
 pub(crate) fn removal(place: &Place) -> String {
-    let repo = sq(&place.repo);
+    let (repo, worktree, branch) = (sq(&place.repo), sq(&place.worktree), sq(&place.branch));
+    let head = sq(&format!("refs/heads/{}", place.branch));
     format!(
-        "git -C {repo} worktree remove --force {} && git -C {repo} branch -D {} >/dev/null \
-         && git -C {repo} worktree prune",
-        sq(&place.worktree),
-        sq(&place.branch),
+        "{{ [ ! -e {worktree} ] || git -C {repo} worktree remove --force {worktree}; }} \
+         && git -C {repo} worktree prune \
+         && {{ ! git -C {repo} rev-parse -q --verify {head} >/dev/null \
+         || git -C {repo} branch -D {branch} >/dev/null; }}"
     )
 }
 
 /// Diffs the working tree against `base`, so committed and uncommitted work
-/// both count. `-z` keeps git from quoting a path with a space or non-ASCII.
+/// both count, in one round trip: the shortstat, a NUL, then the paths.
 pub(crate) async fn summarise<E: Exec>(
     exec: &E,
     worktree: &str,
     base: &str,
 ) -> Result<Summary, Error> {
     let (worktree, base) = (sq(worktree), sq(base));
-    let names = exec
+    let out = exec
         .exec(&format!(
-            "git -C {worktree} diff --name-only -z {base} \
+            "git -C {worktree} diff --shortstat {base} && printf '\\0' \
+             && git -C {worktree} diff --name-only -z {base} \
              && git -C {worktree} ls-files -z --others --exclude-standard"
         ))
         .await?;
-    let stat = exec
-        .exec(&format!("git -C {worktree} diff --shortstat {base}"))
-        .await?;
-    for out in [&names, &stat] {
-        if !out.success() {
-            return Err(Error::Worktree {
-                stderr: said(&out.stderr),
-            });
-        }
+    if !out.success() {
+        return Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        });
     }
-    Ok(Summary {
-        changed: changed(&names.stdout),
-        shortstat: String::from_utf8_lossy(&stat.stdout).trim().to_owned(),
-    })
+    Ok(summary(&out.stdout))
 }
 
-/// One path per NUL; a rename gives its new side only.
-fn changed(names: &[u8]) -> Vec<String> {
-    names
-        .split(|&byte| byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| String::from_utf8_lossy(path).into_owned())
-        .collect()
+/// `-z` keeps git from quoting a path with a space or non-ASCII, so a path is
+/// whatever lies between two NULs. A rename gives its new side only.
+fn summary(said: &[u8]) -> Summary {
+    let (stat, names) = said
+        .iter()
+        .position(|&byte| byte == 0)
+        .map_or((said, &[][..]), |at| (&said[..at], &said[at + 1..]));
+    Summary {
+        changed: names
+            .split(|&byte| byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(|path| String::from_utf8_lossy(path).into_owned())
+            .collect(),
+        shortstat: String::from_utf8_lossy(stat).trim().to_owned(),
+    }
 }
 
 /// Runs the agent's one turn and sets the state it ended in.
@@ -645,23 +679,50 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_names_every_path_unquoted() {
-        let names = "src/lib.rs\0notes/new file.md\0\u{fc}.txt\0".as_bytes();
+    fn the_summary_reads_the_shortstat_then_every_path_unquoted() {
+        let said = " 2 files changed, 3 insertions(+)\n\0src/lib.rs\0notes/new file.md\0\
+                    untracked \u{fc}.txt\0"
+            .as_bytes();
         assert_eq!(
-            changed(names),
-            ["src/lib.rs", "notes/new file.md", "\u{fc}.txt"]
+            summary(said),
+            Summary {
+                changed: vec![
+                    "src/lib.rs".to_owned(),
+                    "notes/new file.md".to_owned(),
+                    "untracked \u{fc}.txt".to_owned(),
+                ],
+                shortstat: "2 files changed, 3 insertions(+)".to_owned(),
+            }
         );
-        assert!(changed(b"").is_empty());
+        assert_eq!(summary(b"\0"), Summary::default(), "an empty diff");
+        assert_eq!(
+            summary(b"\0new.txt\0"),
+            Summary {
+                changed: vec!["new.txt".to_owned()],
+                shortstat: String::new(),
+            },
+            "an untracked file alone has no shortstat"
+        );
     }
 
     /// A scripted machine, so the parsing of each answer is tested here and
-    /// the git behind it in tests/delegate.rs.
-    struct Said(Vec<ssh::Output>);
+    /// the git behind it in tests/delegate.rs. It counts what it was asked.
+    struct Said(Vec<ssh::Output>, usize);
 
     impl Exec for Mutex<Said> {
         async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
-            Ok(lock_said(self).0.remove(0))
+            let mut said = lock_said(self);
+            said.1 += 1;
+            Ok(said.0.remove(0))
         }
+    }
+
+    fn scripted(replies: Vec<ssh::Output>) -> Mutex<Said> {
+        Mutex::new(Said(replies, 0))
+    }
+
+    fn count(said: &Mutex<Said>) -> usize {
+        lock_said(said).1
     }
 
     fn lock_said(said: &Mutex<Said>) -> MutexGuard<'_, Said> {
@@ -678,11 +739,11 @@ mod tests {
 
     #[tokio::test]
     async fn prepare_reads_the_top_level_and_the_worktree_or_names_the_refusal() {
-        let made = Mutex::new(Said(vec![out(
+        let made = scripted(vec![out(
             0,
             "/home/u/repo\n/home/u/.yantra/worktrees/ab12cd34\n0123abcd\n",
             "",
-        )]));
+        )]);
         assert_eq!(
             prepare(&made, "~/repo/src", "ab12cd34")
                 .await
@@ -696,25 +757,43 @@ mod tests {
             }
         );
 
-        let not = Mutex::new(Said(vec![out(NOT_A_REPO, "", "")]));
+        let not = scripted(vec![out(NOT_A_REPO, "", "")]);
         assert!(matches!(
             prepare(&not, "/tmp", "x").await,
             Err(Error::NotARepo { repo }) if repo == "/tmp"
         ));
 
-        let empty = Mutex::new(Said(vec![out(128, "", "fatal: invalid reference: HEAD\n")]));
+        let empty = scripted(vec![out(128, "", "fatal: invalid reference: HEAD\n")]);
         assert!(matches!(
             prepare(&empty, "/srv/r", "x").await,
             Err(Error::Worktree { stderr }) if stderr == "fatal: invalid reference: HEAD"
         ));
     }
 
+    /// `git -C ''` is the home directory, so a path git would read from there
+    /// is refused before the machine is asked.
     #[tokio::test]
-    async fn summarise_reads_both_answers_and_a_failed_git_is_a_worktree_error() {
-        let said = Mutex::new(Said(vec![
-            out(0, "a.txt\0", ""),
-            out(0, " 1 file changed, 2 insertions(+)\n", ""),
-        ]));
+    async fn prepare_refuses_a_repo_that_is_not_from_the_root_or_home() {
+        for repo in ["", "repo", "~", "./repo", "~user/repo"] {
+            let machine = scripted(vec![]);
+            assert!(
+                matches!(
+                    prepare(&machine, repo, "x").await,
+                    Err(Error::RepoPath { repo: refused }) if refused == repo
+                ),
+                "{repo:?}"
+            );
+            assert_eq!(count(&machine), 0, "{repo:?} reached the machine");
+        }
+    }
+
+    #[tokio::test]
+    async fn summarise_asks_once_and_a_failed_git_is_a_worktree_error() {
+        let said = scripted(vec![out(
+            0,
+            " 1 file changed, 2 insertions(+)\n\0a.txt\0",
+            "",
+        )]);
         assert_eq!(
             summarise(&said, "/w", "0123abcd")
                 .await
@@ -724,14 +803,13 @@ mod tests {
                 shortstat: "1 file changed, 2 insertions(+)".to_owned(),
             }
         );
-        let gone = Mutex::new(Said(vec![
-            out(128, "", "fatal: cannot change to '/w'\n"),
-            out(128, "", "fatal: cannot change to '/w'\n"),
-        ]));
+        assert_eq!(count(&said), 1, "one round trip");
+        let gone = scripted(vec![out(128, "", "fatal: cannot change to '/w'\n")]);
         assert!(matches!(
             summarise(&gone, "/w", "0123abcd").await,
-            Err(Error::Worktree { .. })
+            Err(Error::Worktree { stderr }) if stderr == "fatal: cannot change to '/w'"
         ));
+        assert_eq!(count(&gone), 1);
     }
 
     #[test]
@@ -762,16 +840,18 @@ mod tests {
         });
         assert_eq!(
             removed,
-            "git -C '/srv/a b' worktree remove --force '/h/.yantra/worktrees/x' \
-             && git -C '/srv/a b' branch -D 'yantra/x' >/dev/null \
-             && git -C '/srv/a b' worktree prune"
+            "{ [ ! -e '/h/.yantra/worktrees/x' ] \
+             || git -C '/srv/a b' worktree remove --force '/h/.yantra/worktrees/x'; } \
+             && git -C '/srv/a b' worktree prune \
+             && { ! git -C '/srv/a b' rev-parse -q --verify 'refs/heads/yantra/x' >/dev/null \
+             || git -C '/srv/a b' branch -D 'yantra/x' >/dev/null; }"
         );
     }
 
     #[test]
-    fn ids_are_eight_hex_digits_and_differ() {
-        let (a, b) = (id(), id());
-        assert_eq!(a.len(), 8);
+    fn ids_are_sixteen_hex_digits_and_differ() {
+        let (a, b) = (id().expect("an id"), id().expect("an id"));
+        assert_eq!(a.len(), 16);
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
     }
