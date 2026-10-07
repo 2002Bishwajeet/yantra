@@ -54,6 +54,9 @@ use crate::write::{Authoriser, Refused, allowed, chain};
 const HISTORY: usize = 200;
 /// How long a cancelled turn has to end by itself before its `ssh` is dropped.
 const STOP_GRACE: Duration = Duration::from_secs(10);
+/// How long a harness may take to start and open its session. Meanwhile no
+/// frame is read, so a hung agent must not hold the socket for good.
+const CONNECT_WITHIN: Duration = Duration::from_secs(60);
 /// How a Claude turn that has no login ends, in Claude's own words.
 const CLAUDE_NOT_LOGGED_IN: &str = "Not logged in";
 
@@ -164,17 +167,14 @@ fn failure(kind: Kind, said: impl Into<String>) -> Failure {
     }
 }
 
-fn not_logged_in(
-    harness: Option<Harness>,
-    machine: &str,
-    command: Option<String>,
-    said: String,
-) -> Failure {
+// The command is always ours: an agent's auth-method description is prose,
+// and pasted into a shell its backticks run.
+fn not_logged_in(harness: Option<Harness>, machine: &str, said: String) -> Failure {
     Failure {
         login: Some(Login {
             harness: name_of(harness),
             machine: machine.to_owned(),
-            command: command.unwrap_or_else(|| acp::login_command(harness).to_owned()),
+            command: acp::login_command(harness).to_owned(),
         }),
         ..failure(Kind::NotLoggedIn, said)
     }
@@ -525,7 +525,7 @@ async fn relay<M: Machine, P: Peer>(
             }
             match logged_out {
                 Some(said) => {
-                    let refusal = not_logged_in(None, machine.machine(), None, said);
+                    let refusal = not_logged_in(None, machine.machine(), said);
                     peer.say(&refusal).await
                 }
                 None => true,
@@ -608,7 +608,11 @@ fn refused<M: Machine>(
     error: &acp::Error,
 ) -> Failure {
     if error.is_auth() {
-        not_logged_in(Some(harness), machine.machine(), login, error.to_string())
+        let said = match login {
+            Some(hint) => format!("{error}. {hint}"),
+            None => error.to_string(),
+        };
+        not_logged_in(Some(harness), machine.machine(), said)
     } else {
         failure(Kind::Unreachable, chain(error))
     }
@@ -744,6 +748,26 @@ async fn connect<M: Machine>(
     harness: Harness,
     session: Option<String>,
 ) -> Result<Acp, Failure> {
+    tokio::time::timeout(CONNECT_WITHIN, start_session(machine, place, harness, session))
+        .await
+        .unwrap_or_else(|_| {
+            Err(failure(
+                Kind::Unreachable,
+                format!(
+                    "{} did not open a session within {} seconds",
+                    harness.name(),
+                    CONNECT_WITHIN.as_secs()
+                ),
+            ))
+        })
+}
+
+async fn start_session<M: Machine>(
+    machine: &M,
+    place: &Place,
+    harness: Harness,
+    session: Option<String>,
+) -> Result<Acp, Failure> {
     let (agent, events) = machine
         .start_acp(harness)
         .map_err(|said| failure(Kind::Unreachable, said))?;
@@ -752,7 +776,8 @@ async fn connect<M: Machine>(
         .await
         .map_err(|error| refused(machine, harness, None, &error))?;
     let login = capabilities.login;
-    let session = match session {
+    // An agent that cannot load starts a new conversation in the same worktree.
+    let session = match session.filter(|_| capabilities.load_session) {
         Some(session) => {
             agent
                 .load_session(&session, &place.worktree)
@@ -1012,7 +1037,6 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             serde_json::to_value(not_logged_in(
                 Some(Harness::Opencode),
                 "cachyos-g14",
-                None,
                 "the agent refused: Authentication required (-32000)".to_owned(),
             ))
             .expect("a failure serialises"),
@@ -1777,7 +1801,8 @@ mod tests {
             .await;
         let said = tab.next().await;
         assert_eq!(said["harness"], "codex");
-        assert_eq!(said["command"], "Run `codex login` on this machine");
+        assert_eq!(said["command"], "codex login");
+        assert!(said["said"].as_str().is_some_and(|s| s.contains("Run `codex login` on this machine")));
     }
 
     #[tokio::test]
@@ -1873,6 +1898,39 @@ mod tests {
         );
         served.await.expect("the socket ends");
         assert_eq!(*script.removed.lock().expect("a lock"), 0);
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_cannot_load_starts_a_new_session_in_the_thread() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            ..Script::default()
+        });
+        let (_tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        let mut agent = script.agent().await;
+        let initialize = agent.heard().await;
+        agent
+            .reply(&initialize, json!({"protocolVersion": 1, "agentCapabilities": {}}))
+            .await;
+        assert_eq!(agent.heard().await["method"], "session/new");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_agent_that_never_answers_is_unreachable_and_frees_the_socket() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            ..Script::default()
+        });
+        let (mut tab, served) = connect(Arc::clone(&script), Some(THREAD));
+        let mut agent = script.agent().await;
+        assert_eq!(agent.heard().await["method"], "initialize");
+        tokio::time::advance(CONNECT_WITHIN + Duration::from_secs(1)).await;
+        let said = tab.next().await;
+        assert_eq!(said["kind"], "unreachable", "{said}");
+        assert!(said["said"].as_str().is_some_and(|s| s.contains("within 60 seconds")));
+        served.await.expect("the socket ends");
     }
 
     #[tokio::test]

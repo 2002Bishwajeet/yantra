@@ -150,8 +150,8 @@ function Meter(props: { usage: NonNullable<Timeline['usage']> }) {
 }
 
 /** What the polite region says, and the line under the composer shows. */
-function status(timeline: Timeline, harness: Harness, machine: string, phone: boolean): string {
-  const agent = LABEL[harness]
+function status(timeline: Timeline, harness: Harness | null, machine: string, phone: boolean): string {
+  const agent = harness ? LABEL[harness] : 'The agent'
   if (timeline.requests.length > 0) return `${agent} is waiting for your answer.`
   if (timeline.turn === 'stopping') return `Stopping ${agent}…`
   if (timeline.turn !== 'idle') return `${agent} is answering.`
@@ -159,7 +159,7 @@ function status(timeline: Timeline, harness: Harness, machine: string, phone: bo
   if (timeline.ended?.state === 'completed') return `${agent} finished.`
   return phone
     ? 'Each turn runs in this chat’s own worktree.'
-    : `Each turn runs ${harness} in this chat’s own worktree on ${machine}, apart from the terminal’s.`
+    : `Each turn runs ${harness ?? 'the agent'} in this chat’s own worktree on ${machine}, apart from the terminal’s.`
 }
 
 /** A harness with no login: the command to run on its machine, and a Retry
@@ -201,10 +201,17 @@ export function Chat(props: ChatProps) {
   const { timeline, error, link } = chat
   const [draft, setDraft] = useState('')
   const [picked, setPicked] = useState<Harness>('claude')
-  // An attach knows its thread before the daemon says whose it is.
+  // An attach knows its thread before the daemon says whose it is, so until
+  // then it names no harness rather than the picker's default.
   const locked = timeline.thread !== null
-  const harness = timeline.harness ?? picked
-  const agent = LABEL[harness]
+  const harness = timeline.harness ?? error?.login?.harness ?? (locked ? null : picked)
+  const agent = harness ? LABEL[harness] : 'the agent'
+  // A first turn refused for its login never reaches the timeline, so the
+  // words it carried come back to the composer.
+  const lastSent = useRef('')
+  useEffect(() => {
+    if (error?.kind === 'notLoggedIn' && timeline.entries.length === 0) setDraft((now) => now || lastSent.current)
+  }, [error, timeline.entries.length])
   const end = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const why = useId()
@@ -230,7 +237,10 @@ export function Chat(props: ChatProps) {
   const send = () => {
     const text = draft.trim()
     if (text === '' || busy) return
-    if (chat.send(text, locked ? undefined : picked)) setDraft('')
+    if (chat.send(text, locked ? undefined : picked)) {
+      lastSent.current = text
+      setDraft('')
+    }
   }
 
   const cannotSend =
@@ -276,12 +286,14 @@ export function Chat(props: ChatProps) {
       ) : null}
       <div className="chat__composer">
         <div className="chat__controls">
-          <HarnessPicker
-            disabled={busy || link !== 'open'}
-            locked={locked}
-            onChange={setPicked}
-            value={harness}
-          />
+          {harness ? (
+            <HarnessPicker
+              disabled={busy || link !== 'open'}
+              locked={locked}
+              onChange={setPicked}
+              value={harness}
+            />
+          ) : null}
           {timeline.usage ? <Meter usage={timeline.usage} /> : null}
         </div>
         <form

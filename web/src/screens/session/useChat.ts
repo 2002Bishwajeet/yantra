@@ -44,6 +44,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         ) {
           dispatch({ type: 'refused' })
           setLink('closed')
+          // The daemon still holds the agent's ssh for a refused prompt; Retry opens a new socket.
+          if (failure.kind === 'notLoggedIn') socket.current?.close()
         }
       },
     })

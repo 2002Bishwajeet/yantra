@@ -102,6 +102,9 @@ describe('the harness picker', () => {
 
   it('draws a missing login with the machine and the command, and Retry reopens the socket', async () => {
     await open()
+    type('list the files')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(frames()).toHaveLength(1))
     say(chatNotLoggedIn)
     const alert = await settled(() => screen.getByRole('alert'))
     expect(within(alert).getByRole('heading').textContent).toBe('opencode is not logged in on cachyos-g14')
@@ -110,7 +113,10 @@ describe('the harness picker', () => {
     expect(within(alert).getByRole('button', { name: 'Copy how to log opencode in' })).toBeTruthy()
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
     // Every turn would fail the same way until someone logs in.
-    expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').disabled).toBe(true)
+    // The composer names the harness that refused, and the refused words come back.
+    const composer = screen.getByLabelText<HTMLInputElement>('Message opencode in yantra-web')
+    expect(composer.disabled).toBe(true)
+    await settled(() => expect(composer.value).toBe('list the files'))
 
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
     await settled(() => expect(server.asked).toHaveLength(2))
