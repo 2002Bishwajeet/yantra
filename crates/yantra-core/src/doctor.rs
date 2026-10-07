@@ -504,7 +504,7 @@ async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&C
 }
 
 /// ADR-0031 §9 in one round trip. The first line is `absent` (no drop-in),
-/// `present`, or `linger=<value>` followed by what `pactl` said. It reads
+/// `present`, or `linger=<value> <account>` followed by what `pactl` said. It reads
 /// linger first: an ssh login starts the user manager, so a source listed
 /// without linger is gone at the next logout and is not `present`.
 fn mic_probe() -> String {
@@ -513,7 +513,7 @@ fn mic_probe() -> String {
 linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)
 said=$(XDG_RUNTIME_DIR=/run/user/$(id -u) pactl list short sources 2>&1)
 if [ "$linger" = yes ] && printf '%s\n' "$said" | cut -f2 | grep -qx yantra-mic; then echo present; exit 0; fi
-echo "linger=$linger"
+echo "linger=$linger $(id -un)"
 printf '%s\n' "$said""#,
         drop_in = install::MIC_DROP_IN,
     )
@@ -534,20 +534,32 @@ fn mic_from(said: &str) -> Check {
         "" => "nothing".to_owned(),
         rest => rest.to_owned(),
     };
-    match first.trim() {
-        "absent" => absent(MIC, "not installed — the microphone is optional"),
-        "present" => present(MIC, "PipeWire has the source yantra-mic"),
-        "linger=yes" => absent(
-            MIC,
-            format!("the drop-in is there and PipeWire has no yantra-mic; pactl said: {pactl}"),
-        ),
-        linger if linger.starts_with("linger=") => absent(
+    let first = first.trim();
+    if let Some(linger) = first.strip_prefix("linger=") {
+        let (linger, account) = linger.split_once(' ').unwrap_or((linger, ""));
+        if linger == "yes" {
+            return absent(
+                MIC,
+                format!("the drop-in is there and PipeWire has no yantra-mic; pactl said: {pactl}"),
+            );
+        }
+        let account = account.trim();
+        let command = if account.is_empty() {
+            "`sudo loginctl enable-linger` for it".to_owned()
+        } else {
+            format!("`sudo loginctl enable-linger {account}`")
+        };
+        return absent(
             MIC,
             format!(
                 "linger is off for this account, so PipeWire and yantra-mic stop when nobody is \
-                 logged in — run `sudo loginctl enable-linger` for it there; pactl said: {pactl}"
+                 logged in — run {command} there; pactl said: {pactl}"
             ),
-        ),
+        );
+    }
+    match first {
+        "absent" => absent(MIC, "not installed — the microphone is optional"),
+        "present" => present(MIC, "PipeWire has the source yantra-mic"),
         _ => unknown(
             MIC,
             format!("the probe answered nothing Yantra reads: {said}"),
@@ -771,8 +783,15 @@ mod tests {
 
         assert_eq!(mic_from("present\n").state, State::Present);
 
-        let lingerless = mic_from("linger=no\nConnection failure: Connection refused\n");
+        let lingerless = mic_from("linger=no biswa\nConnection failure: Connection refused\n");
         assert_eq!(lingerless.state, State::Absent);
+        assert!(
+            lingerless
+                .detail
+                .contains("run `sudo loginctl enable-linger biswa` there"),
+            "{}",
+            lingerless.detail
+        );
         assert!(
             lingerless.detail.contains("linger"),
             "{}",
@@ -783,9 +802,10 @@ mod tests {
             "{}",
             lingerless.detail
         );
+        assert!(mic_from("linger= biswa\n").detail.contains("linger is off"));
         assert!(mic_from("linger=\n").detail.contains("linger is off"));
 
-        let broken = mic_from("linger=yes\n42\tyantra-mic-sink.monitor\tPipeWire\n");
+        let broken = mic_from("linger=yes biswa\n42\tyantra-mic-sink.monitor\tPipeWire\n");
         assert_eq!(broken.state, State::Absent);
         assert!(!broken.detail.contains("linger"), "{}", broken.detail);
         assert!(
@@ -808,7 +828,7 @@ mod tests {
             .expect("the probe can say present");
         assert!(linger < present, "{probe}");
 
-        let listed = mic_from("linger=no\n42\tyantra-mic\tPipeWire\n");
+        let listed = mic_from("linger=no biswa\n42\tyantra-mic\tPipeWire\n");
         assert_eq!(listed.state, State::Absent);
         assert!(listed.detail.contains("linger"), "{}", listed.detail);
     }

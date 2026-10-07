@@ -1360,37 +1360,52 @@ async fn install_basics(machine: &str, mic: bool) -> ExitCode {
 
 /// ADR-0031 §7. Ctrl-C is how it ends, so that is the one 0.
 async fn mic_stream(machine: &str) -> ExitCode {
-    let mut stream = match mic::open_at(machine) {
-        Ok(stream) => stream,
+    use tokio::signal::unix::{SignalKind, signal};
+    // Before anything starts, so a Ctrl-C during the connect still drains.
+    let mut interrupt = match signal(SignalKind::interrupt()) {
+        Ok(interrupt) => interrupt,
+        Err(err) => {
+            eprintln!("yantra: could not listen for Ctrl-C: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (recorder, audio) = match mic::record() {
+        Ok(recorder) => recorder,
         Err(err) => {
             report_error(&err);
             return ExitCode::FAILURE;
         }
     };
-    let (mut recorder, audio) = match mic::record() {
-        Ok(recorder) => recorder,
+    let mut stream = match mic::open_at(machine) {
+        Ok(stream) => stream,
         Err(err) => {
             report_error(&err);
-            let _ = stream.close().await;
+            let _ = recorder.end().await;
             return ExitCode::FAILURE;
         }
     };
     eprintln!(
         "streaming the microphone to {machine}; Ctrl-C stops. The microphone stays open until then"
     );
-    let ended = mic::relay(audio, &mut stream, tokio::signal::ctrl_c()).await;
-    let _ = recorder.start_kill();
-    let recorder = recorder.wait_with_output().await;
-    let closed = stream.close().await;
+    let ended = mic::relay(audio, &mut stream, interrupt.recv()).await;
+    let said = recorder.end().await;
+    // Dropping the close drops `ssh`, which `kill_on_drop` ends.
+    let closed = tokio::select! {
+        closed = stream.close() => closed,
+        _ = interrupt.recv() => {
+            eprintln!(
+                "yantra: a second Ctrl-C cut the close short; \
+                 the machine may not have played the last of the audio"
+            );
+            return ExitCode::FAILURE;
+        }
+    };
     match (ended, closed) {
         (Ok(mic::Ended::Stopped), Ok(())) => ExitCode::SUCCESS,
         (Ok(mic::Ended::Recorder), _) => {
             eprintln!("yantra: the microphone's recorder on this laptop ended on its own");
-            if let Ok(output) = recorder {
-                let said = String::from_utf8_lossy(&output.stderr);
-                if !said.trim().is_empty() {
-                    eprintln!("  it said: {}", said.trim());
-                }
+            if !said.is_empty() {
+                eprintln!("  it said: {said}");
             }
             ExitCode::FAILURE
         }

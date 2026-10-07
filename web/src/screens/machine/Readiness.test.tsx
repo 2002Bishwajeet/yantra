@@ -126,6 +126,35 @@ describe('the Readiness card', () => {
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi/install?mic=true'))
   })
 
+  /** On a ready machine the microphone is all Install could do, so Install
+   *  waits for the box; the optional microphone is not counted against it. */
+  it.each([
+    ['ready', [] as string[], 'Ready for sessions', '10 of 10'],
+    ['manual', ['provider-auth'], 'gh is not signed in', '9 of 10'],
+  ])('enables Install on a %s machine only while Microphone is ticked', async (_, absent, title, count) => {
+    daemon()
+    await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))
+    expect(card().getByRole('heading', { name: title })).toBeTruthy()
+    expect(card().getByText(new RegExp(`^${count} · asked`))).toBeTruthy()
+    const install = card().getByRole('button', { name: 'Install' })
+    expect(install.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    expect(install.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    expect(install.hasAttribute('disabled')).toBe(true)
+  })
+
+  /** A Mac has no PipeWire, so its install can never set the microphone up. */
+  it('never offers the microphone on a Mac', async () => {
+    daemon()
+    await draw(report([...checks(), { check: 'mic', state: 'absent', detail: 'not installed' }]), [earlier], {
+      machine: machine({ os: 'macOS' }),
+    })
+    expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
+    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
+    expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
+  })
+
   /** ADR-0031 §2: linger is the step sudo stopped, and the one-off terminal runs it. */
   it('leaves linger for a person when sudo asks, with a terminal for it', async () => {
     const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }

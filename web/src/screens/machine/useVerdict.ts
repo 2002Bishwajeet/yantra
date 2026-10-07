@@ -13,7 +13,7 @@ export function useVerdict(name: string, machine: Machine | undefined, readiness
   const events = asEvents(notifications.data)
   const [watch, setWatch] = useState<Watch | null>(null)
   const verdict = verdictOf({ name, machine, readiness, events, watch })
-  return { verdict, events, watch, setWatch, notifications }
+  return { verdict, events, watch, setWatch, notifications, os: machine?.os }
 }
 
 export type Verdicted = ReturnType<typeof useVerdict>

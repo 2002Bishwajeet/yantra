@@ -155,9 +155,12 @@ export function ReadinessCard(props: {
   }
 
   const checks = readiness.looked === 'ok' ? readiness.data.checks : []
-  // ADR-0031 §1: the microphone is Install's one optional item, offered until doctor finds it.
-  const offerMic = checks.some((one) => one.check === 'mic' && one.state !== 'present')
+  // ADR-0031 §1: the microphone is Install's one optional item, offered until
+  // doctor finds it. A Mac has no PipeWire, so it is never offered there.
+  const offerMic = state.os !== 'macOS' && checks.some((one) => one.check === 'mic' && one.state !== 'present')
   const installable = verdict.kind === 'missing' || verdict.kind === 'sudo' || (startable(verdict) && offerMic)
+  // On a startable machine the microphone is all Install could do.
+  const nothingAsked = startable(verdict) && !mic
   const counted = tally(checks)
   const lost = running && watch !== null && now - watch.pressed > LOST_MS
   const already = install.error?.status === 409
@@ -283,7 +286,7 @@ export function ReadinessCard(props: {
           <Button
             // Until the first read, the newest result is unknown, and an older
             // one would be taken for this press's answer.
-            disabled={install.isPending || notifications.isPending}
+            disabled={install.isPending || notifications.isPending || nothingAsked}
             onClick={press}
             variant={verdict.kind === 'missing' ? 'filled' : 'tonal'}
           >

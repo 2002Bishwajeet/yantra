@@ -7,7 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { answer } from '@/test/daemon'
-import { browser } from '@/test/mic'
+import { browser, FakeContext } from '@/test/mic'
 import { Talk } from './Talk'
 
 const report = (state: string | null) => ({
@@ -123,6 +123,35 @@ describe('a press', () => {
     fake.allow()
     await waitFor(() => expect(fake.track.stop).toHaveBeenCalled())
     expect(fake.node()).toBeUndefined()
+    // Safari's prompt ended the hold; the grant says to hold again rather than nothing.
+    await waitFor(() =>
+      expect(status().textContent).toBe('The browser now allows the microphone. Hold the button again to talk.'),
+    )
+    expect(hold.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('returns to idle when the setup throws, and a second press can try again', async () => {
+    const fake = browser()
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        constructor() {
+          throw new DOMException('no audio', 'NotSupportedError')
+        }
+      },
+    )
+    draw()
+    const hold = await button()
+    fireEvent.pointerDown(hold, { button: 0, pointerId: 1 })
+    expect(hold.getAttribute('aria-pressed')).toBe('false')
+    expect(status().textContent).toContain('The browser could not open the microphone.')
+    expect(status().textContent).toContain('no audio')
+    fireEvent.pointerUp(hold, { button: 0, pointerId: 1 })
+
+    vi.stubGlobal('AudioContext', FakeContext)
+    fireEvent.pointerDown(hold, { button: 0, pointerId: 2 })
+    expect(hold.getAttribute('aria-pressed')).toBe('true')
+    expect(fake.asked).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -150,6 +179,8 @@ describe('a press that ends on its own says why', () => {
   it.each([
     ['NotAllowedError', 'This browser was not allowed to use the microphone.'],
     ['NotFoundError', 'This browser found no microphone to use.'],
+    ['NotReadableError', 'Another app is using the microphone.'],
+    ['AbortError', 'The browser could not open the microphone.'],
   ])('draws %s as its sentence', async (name, sentence) => {
     const hold = await pressed((fake) => fake.refuse(name, 'the browser said so'))
     await waitFor(() => expect(status().textContent).toContain(sentence))

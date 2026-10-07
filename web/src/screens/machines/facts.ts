@@ -33,7 +33,9 @@ export const wordOf = (state: CheckState): string => words[state]
 
 export type Tally = { present: number; absent: number; unknown: number; total: number }
 
-export function tally(checks: Check[]): Tally {
+/** The microphone is optional (ADR-0031 §9), so it counts only once it is there. */
+export function tally(all: Check[]): Tally {
+  const checks = all.filter((one) => one.check !== 'mic' || one.state === 'present')
   const count = (state: CheckState) => checks.filter((one) => one.state === state).length
   return {
     present: count('present'),

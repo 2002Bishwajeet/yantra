@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { Mic as MicIcon } from 'lucide-react'
-import type { ApiError } from '@/api/errors'
+import { type ApiError, micError } from '@/api/errors'
 import { useMachineReadiness } from '@/api/hooks'
-import { type Mic, micError, type MicState, openMic } from '@/api/mic'
+import { type Mic, type MicState, openMic } from '@/api/mic'
 import { Button } from '@/m3/button/Button'
 import { Mono } from '@/m3/text/Text'
 import './Talk.css'
@@ -30,16 +30,25 @@ function Hold({ machine }: { machine: string }) {
     if (mic.current || insecure) return
     setError(null)
     setState('opening')
-    mic.current = openMic(machine, {
+    let ended = false
+    const opened = openMic(machine, {
       onState: setState,
-      onEnd: (ended) => {
+      onEnd: (error) => {
+        ended = true
         mic.current = null
         setState('idle')
-        setError(ended)
+        setError(error)
       },
     })
+    // A setup that threw has already ended, and must not hold the button.
+    if (!ended) mic.current = opened
   }
-  const stop = () => mic.current?.close()
+  // The button is up at once; `onEnd` may come later, once a prompt is answered.
+  const stop = () => {
+    if (!mic.current) return
+    mic.current.close()
+    setState('idle')
+  }
 
   // Leaving the page is a release.
   useEffect(() => () => mic.current?.close(), [])
