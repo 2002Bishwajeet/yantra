@@ -27,6 +27,7 @@ describe('a popup chunk that fails to load', () => {
     mount('desktop')
     fireEvent.click(await screen.findByRole('button', { name: 'Account' }))
     expect(await screen.findByText('Account could not be drawn')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Account' })).toBeTruthy()
     expect(within(navigation()).getByRole('link', { name: 'Fleet' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Search anything/ })).toBeTruthy()
   })
@@ -35,6 +36,7 @@ describe('a popup chunk that fails to load', () => {
     mount('desktop')
     fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }))
     expect(await screen.findByText('Notifications could not be drawn')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Notifications/ })).toBeTruthy()
     expect(within(navigation()).getByRole('link', { name: 'Fleet' })).toBeTruthy()
   })
 

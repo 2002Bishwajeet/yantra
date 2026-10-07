@@ -1,33 +1,15 @@
-import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Info, Settings as SettingsIcon, User } from 'lucide-react'
-import { IconButton } from '@/m3/icon-button/IconButton'
-import { Menu, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
+import { Info, Settings as SettingsIcon } from 'lucide-react'
+import { Menu, MenuLinkItem, MenuPopup } from '@/m3/menu/Menu'
+import { guardOutsidePress, useReady, type PopupProps } from './useReady'
 
-/** The avatar and its menu. A generic mark rather than an initial: nothing
- *  on the wire names the person (inventory §C). */
-export function Account(props: { openOnMount?: boolean }) {
-  // Opens two frames after mount, not defaultOpen: a menu born open skips the
-  // enter transition, and the arrow keys would find no focus inside it.
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (!props.openOnMount) return
-    // Two frames: the closed popup must be styled once, or the spring has no start.
-    let b = 0
-    const a = requestAnimationFrame(() => {
-      b = requestAnimationFrame(() => setOpen(true))
-    })
-    return () => {
-      cancelAnimationFrame(a)
-      cancelAnimationFrame(b)
-    }
-  }, [props.openOnMount])
+/** The avatar's menu, without its trigger: the shell owns that element. */
+export function AccountMenu(props: PopupProps) {
+  // Never born open: a menu born open skips the enter transition and takes no focus.
+  const ready = useReady()
   return (
-    <Menu onOpenChange={setOpen} open={open}>
-      <MenuTrigger render={<IconButton label="Account" variant="tonal" />}>
-        <User />
-      </MenuTrigger>
-      <MenuPopup>
+    <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
+      <MenuPopup anchor={props.anchor} finalFocus={props.anchor}>
         <MenuLinkItem icon={<SettingsIcon />} render={<Link to="/settings" />}>
           Settings
         </MenuLinkItem>

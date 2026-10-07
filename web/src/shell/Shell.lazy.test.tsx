@@ -15,8 +15,8 @@ const spy = <T extends object>(name: string, key: string, mod: T) =>
       return Reflect.get(target, prop, receiver)
     },
   })
-vi.mock('./Account', async (orig) => spy('account', 'Account', await orig<object>()))
-vi.mock('./BellPopover', async (orig) => spy('popover', 'BellPopover', await orig<object>()))
+vi.mock('./Account', async (orig) => spy('account', 'AccountMenu', await orig<object>()))
+vi.mock('./BellPopover', async (orig) => spy('popover', 'BellPopup', await orig<object>()))
 vi.mock('./Notifications', async (orig) => spy('list', 'NotificationsList', await orig<object>()))
 
 let harness: typeof import('./harness')

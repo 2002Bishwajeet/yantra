@@ -791,8 +791,9 @@ a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1.
   chunk and none of them is `/`'s.
 - **A popup's chunk arrives with its first press, not with the shell.** The
   avatar, the desktop bell and the tablet sheet's list draw an eager trigger,
-  start the import on pointer or focus, and mount the lazy part on the click
-  (`Palette` does the same).
+  start the import on pointer or focus, and mount the lazy part on the click.
+  The trigger is one element for the shell's life; the lazy chunk draws only
+  the popup, anchored to it, and focus returns to it (`Palette` does the same).
 - **A loader warms its screen's reads and is never awaited.** `prefetchQuery`
   rather than `ensureQueryData`, so a warm read is cancelled when the last
   observer leaves, and `defaultPreload: 'intent'` starts it on a hover. The

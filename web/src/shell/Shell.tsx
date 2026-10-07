@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { HeadContent, Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
 import { ArrowLeft, Download, Plus, User } from 'lucide-react'
 import { useResetOnRouteChange, useViewing } from '@/api/hooks'
@@ -34,8 +34,8 @@ import './Shell.css'
 const loadAccount = () => import('./Account')
 const loadBellPopover = () => import('./BellPopover')
 const loadList = () => import('./Notifications')
-const Account = lazy(() => loadAccount().then((it) => ({ default: it.Account })))
-const BellPopover = lazy(() => loadBellPopover().then((it) => ({ default: it.BellPopover })))
+const AccountMenu = lazy(() => loadAccount().then((it) => ({ default: it.AccountMenu })))
+const BellPopup = lazy(() => loadBellPopover().then((it) => ({ default: it.BellPopup })))
 const NotificationsList = lazy(() => loadList().then((it) => ({ default: it.NotificationsList })))
 // A failed warm-up is the real import's to report, behind its boundary.
 const warm = (load: () => Promise<unknown>) => () => void load().catch(() => {})
@@ -144,52 +144,68 @@ function Guarded(props: { title: string; children: ReactNode }) {
   )
 }
 
-/** The avatar. The menu arrives with the first press and then stays mounted.
- *  The trigger is not swapped on focus: a swap would drop the focus. */
+/** The avatar. The button lives as long as the shell; only the menu is lazy,
+ *  and it anchors to the button, so a press never swaps the element or drops focus. */
 function AccountButton() {
+  const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
-  const trigger = (
-    <IconButton aria-haspopup="menu" label="Account" variant="tonal">
-      <User />
-    </IconButton>
-  )
-  if (!armed) {
-    const load = warm(loadAccount)
-    return (
+  const [open, setOpen] = useState(false)
+  const load = warm(loadAccount)
+  return (
+    <>
       <IconButton
+        aria-expanded={open}
         aria-haspopup="menu"
         label="Account"
-        onClick={() => setArmed(true)}
+        onClick={() => {
+          setArmed(true)
+          setOpen((it) => !it)
+        }}
         onFocus={load}
         onPointerEnter={load}
+        ref={ref}
         variant="tonal"
       >
         <User />
       </IconButton>
-    )
-  }
-  return (
-    <Guarded title="Account could not be drawn">
-      <Suspense fallback={trigger}>
-        <Account openOnMount />
-      </Suspense>
-    </Guarded>
+      {armed ? (
+        <Guarded title="Account could not be drawn">
+          <Suspense fallback={null}>
+            <AccountMenu anchor={ref} onOpenChange={setOpen} open={open} />
+          </Suspense>
+        </Guarded>
+      ) : null}
+    </>
   )
 }
 
 /** The desktop bell, on the same terms as the avatar. */
 function BellButton() {
+  const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
-  if (!armed) {
-    const load = warm(loadBellPopover)
-    return (
-      <Bell aria-haspopup="dialog" onClick={() => setArmed(true)} onFocus={load} onPointerEnter={load} />
-    )
-  }
+  const [open, setOpen] = useState(false)
+  const load = warm(loadBellPopover)
   return (
-    <Suspense fallback={<Bell aria-haspopup="dialog" />}>
-      <BellPopover openOnMount />
-    </Suspense>
+    <>
+      <Bell
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => {
+          setArmed(true)
+          setOpen((it) => !it)
+        }}
+        onFocus={load}
+        onPointerEnter={load}
+        ref={ref}
+      />
+      {armed ? (
+        <Guarded title="Notifications could not be drawn">
+          <Suspense fallback={null}>
+            <BellPopup anchor={ref} onOpenChange={setOpen} open={open} />
+          </Suspense>
+        </Guarded>
+      ) : null}
+    </>
   )
 }
 

@@ -196,6 +196,26 @@ test.describe('the shell on busy', () => {
     expect(fetched(size === 'desktop' ? /\/BellPopover-/ : /\/Notifications-/)).toHaveLength(1)
   })
 
+  /** Y-375: the trigger is one element for the shell's life, so the first
+   *  press never drops the focus to the body. */
+  test('keeps the focus on the account trigger or in its menu', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: 'Account' })
+    await trigger.click()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const active = document.activeElement
+          return active !== document.body && (active?.getAttribute('aria-haspopup') === 'menu' || !!active?.closest('[role="menu"]'))
+        }),
+      )
+      .toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
+    await expect(trigger).toBeFocused()
+  })
+
   test('opens notifications, and Mark all read empties Unread', async ({ page, size }) => {
     const bell = page.getByRole(size === 'phone' ? 'link' : 'button', { name: /^Notifications/ })
     await expect(bell).toHaveAccessibleName(/unread/)
