@@ -57,7 +57,7 @@ what is in progress, and what is still an open question.
 
 ## Install
 
-**[v0.5.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.5.0)** is the current release. It
+**[v0.6.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.6.0)** is the current release. It
 has static musl archives for `aarch64` and `x86_64`, and a `yantra-agent` for macOS on both. We
 verified all of them against `SHA256SUMS`. **There is no Windows build**, because the probes refuse to
 compile there while Q4 is open. **The released `yantrad` carries the dashboard inside it.** The
@@ -73,7 +73,7 @@ dashboard's address ([docs/appliance.md](docs/appliance.md)). `install.sh --unin
 **From v0.4.0, the box updates itself.** Settings → About shows *Update to vX* when a newer release is
 published. `yantra update` on the box does the same
 ([docs/appliance.md](docs/appliance.md#update-from-the-dashboard)). A box on v0.3.3 or older has no
-updater. To reach v0.5.0, run `install.sh` on that box once more.
+updater. To reach v0.6.0, run `install.sh` on that box once more.
 
 To build from source, you need [rustup](https://rustup.rs). The file `rust-toolchain.toml` pins the
 toolchain version.
