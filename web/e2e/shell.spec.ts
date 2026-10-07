@@ -167,6 +167,55 @@ test.describe('the shell on busy', () => {
     await expect(rail.getByRole('link', { name: /^landing running/ })).toHaveAttribute('data-tone', 'selected')
   })
 
+  /** Y-375: the menu, the popover and the sheet's list are chunks that arrive
+   *  with the first press of their trigger, not with a cold `/`. */
+  test('fetches a popup chunk with its first press, not with the shell', async ({ page, size }) => {
+    const scripts: string[] = []
+    page.on('request', (request) => {
+      if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname)
+    })
+    await page.goto('/')
+    await expect(page.getByRole('button', { name: 'Account' })).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    const fetched = (name: RegExp) => scripts.filter((one) => name.test(one))
+    expect(fetched(/\/(Account|BellPopover|Notifications)-/)).toEqual([])
+
+    await page.getByRole('button', { name: 'Account' }).click()
+    await expect(page.getByRole('menu')).toBeVisible()
+    expect(fetched(/\/Account-/)).toHaveLength(1)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toBeHidden()
+
+    if (size === 'phone') return
+    await page.getByRole('button', { name: /^Notifications/ }).click()
+    const list =
+      size === 'desktop'
+        ? page.getByRole('dialog', { name: 'Notifications' })
+        : page.getByRole('complementary', { name: 'Notifications' })
+    await expect(list.getByText('yantra-web is waiting for trust')).toBeVisible()
+    expect(fetched(size === 'desktop' ? /\/BellPopover-/ : /\/Notifications-/)).toHaveLength(1)
+  })
+
+  /** Y-375: the trigger is one element for the shell's life, so the first
+   *  press never drops the focus to the body. */
+  test('keeps the focus on the account trigger or in its menu', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: 'Account' })
+    await trigger.click()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const active = document.activeElement
+          return active !== document.body && (active?.getAttribute('aria-haspopup') === 'menu' || !!active?.closest('[role="menu"]'))
+        }),
+      )
+      .toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
+    await expect(trigger).toBeFocused()
+  })
+
   test('opens notifications, and Mark all read empties Unread', async ({ page, size }) => {
     const bell = page.getByRole(size === 'phone' ? 'link' : 'button', { name: /^Notifications/ })
     await expect(bell).toHaveAccessibleName(/unread/)
@@ -264,6 +313,9 @@ test.describe('the shell on busy', () => {
     const hot = page.locator('[role="menuitem"][data-highlighted]')
     const cold = page.locator('[role="menuitem"]:not([data-highlighted])')
 
+    // Visible is not focused: the popup takes focus a frame later, and an arrow
+    // pressed before that lands on the avatar and moves nothing.
+    await expect(page.locator('[role="menu"]:focus-within')).toHaveCount(1)
     await page.keyboard.press('ArrowDown')
     await expect(hot).toHaveCount(1)
     await expect.poll(() => layer(hot)).toBeGreaterThan(0)

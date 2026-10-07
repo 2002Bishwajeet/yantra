@@ -14,15 +14,16 @@ export type PopoverPopupProps = Base.Popup.Props & {
   showTitle?: boolean
   side?: Base.Positioner.Props['side']
   align?: Base.Positioner.Props['align']
+  anchor?: Base.Positioner.Props['anchor']
   children: ReactNode
 }
 
 /** The notifications popover: 420 wide, surface-container-low, hairline. */
 export function PopoverPopup(props: PopoverPopupProps) {
-  const { title, showTitle, side, align, className, children, ...rest } = props
+  const { title, showTitle, side, align, anchor, className, children, ...rest } = props
   return (
     <Base.Portal>
-      <Base.Positioner className="m3-popover__positioner" side={side ?? 'bottom'} align={align ?? 'end'} sideOffset={8}>
+      <Base.Positioner anchor={anchor} className="m3-popover__positioner" side={side ?? 'bottom'} align={align ?? 'end'} sideOffset={8}>
         <Base.Popup className={clsx('m3-popover', className)} {...rest}>
           <Base.Title className={showTitle ? 'm3-popover__title' : 'm3-sr-only'}>{title}</Base.Title>
           {children}

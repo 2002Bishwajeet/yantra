@@ -742,10 +742,10 @@ src/
     gallery/         every component on one page, for the reviewer and
                      Playwright. Dev builds only
   shell/
-    Shell.tsx        the three shells, and the outlet under one boundary that a
+    Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
                      navigation resets
     Palette.tsx      the search pill and `⌘K`; the popup is its own chunk
-    Bell.tsx  BellPopover.tsx  NotificationsSheet.tsx  NotificationsScreen.tsx
+    Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from two media queries
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
@@ -789,6 +789,11 @@ a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1.
 - **One route is eager and the rest are `lazyRouteComponent`.** xterm.js, the
   stepper's form, the tables and the virtualiser are each a third of somebody's
   chunk and none of them is `/`'s.
+- **A popup's chunk arrives with its first press, not with the shell.** The
+  avatar, the desktop bell and the tablet sheet's list draw an eager trigger,
+  start the import on pointer or focus, and mount the lazy part on the click.
+  The trigger is one element for the shell's life; the lazy chunk draws only
+  the popup, anchored to it, and focus returns to it (`Palette` does the same).
 - **A loader warms its screen's reads and is never awaited.** `prefetchQuery`
   rather than `ensureQueryData`, so a warm read is cancelled when the last
   observer leaves, and `defaultPreload: 'intent'` starts it on a hover. The
