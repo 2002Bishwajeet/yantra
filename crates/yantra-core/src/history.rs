@@ -7,6 +7,11 @@
 //! reports, and refuses a file when it cannot do that and keep the JSON whole.
 //! A pass that cannot be sure a copy is clean does not stage it.
 //!
+//! A copy is rewritten when the live file's mtime moves, and every copy is
+//! rewritten when the rules or the gitleaks version change, because an old
+//! copy keeps what the old rules missed. The staging folders are 0700, and a
+//! directory that cannot be read fails only itself.
+//!
 //! opencode is not here: it keeps its sessions in one SQLite database, not in
 //! transcript files.
 //!
@@ -15,9 +20,10 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write as _};
+use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 /// What replaces each secret in a staging copy.
 pub const REDACTED: &str = "[REDACTED]";
@@ -26,14 +32,15 @@ pub const REDACTED: &str = "[REDACTED]";
 /// `DATABASE_PASSWORD=<17 characters>`: it has no known shape and too little
 /// entropy, so this rule has no entropy gate. A backslash ends the value
 /// because a JSON line escapes the newline or quote after it; it may also
-/// come before the opening quote, as `\"` in a JSON line.
+/// come before the opening quote, as `\"` in a JSON line. A quote may close
+/// the name too, as in a JSON or dict key.
 pub const GITLEAKS_CONFIG: &str = r#"[extend]
 useDefault = true
 
 [[rules]]
 id = "yantra-assignment"
 description = "A name that says secret, assigned a value"
-regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Z0-9_]*\s*[=:]\s*(?:\\?["'])?([^\s"'\\]{8,})'''
+regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Z0-9_]*(?:\\?["'])?\s*[=:]\s*(?:\\?["'])?([^\s"'\\]{8,})'''
 secretGroup = 2
 "#;
 
@@ -144,6 +151,9 @@ pub enum ScanError {
 pub trait Scan {
     /// Each secret in `text`, spelled as it appears there.
     fn secrets(&self, text: &str) -> Result<Vec<String>, ScanError>;
+
+    /// A string that changes whenever the rules or the scanner change.
+    fn rules(&self) -> Result<String, ScanError>;
 }
 
 /// The real scanner: `gitleaks stdin`, with [`GITLEAKS_CONFIG`].
@@ -157,6 +167,7 @@ pub struct Gitleaks {
     /// so no ignore file from somewhere else can hide a finding.
     pub ignore_dir: PathBuf,
     config: PathBuf,
+    program: PathBuf,
 }
 
 impl Gitleaks {
@@ -168,13 +179,14 @@ impl Gitleaks {
         Ok(Self {
             ignore_dir: scratch,
             config,
+            program: PathBuf::from("gitleaks"),
         })
     }
 
     // `--config` outranks both GITLEAKS_CONFIG variables in every 8.x release;
     // GITLEAKS_CONFIG_TOML is read only from 8.25.0.
     fn command(&self) -> Command {
-        let mut command = Command::new("gitleaks");
+        let mut command = Command::new(&self.program);
         command
             .args([
                 "stdin",
@@ -206,17 +218,16 @@ impl Scan for Gitleaks {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| match e.kind() {
-                io::ErrorKind::NotFound => ScanError::Missing,
-                _ => ScanError::Failed(e.to_string()),
-            })?;
-        let fed = child
-            .stdin
-            .take()
-            .map(|mut stdin| stdin.write_all(text.as_bytes()));
-        let out = child
-            .wait_with_output()
-            .map_err(|e| ScanError::Failed(e.to_string()))?;
+            .map_err(spawn_error)?;
+        let stdin = child.stdin.take();
+        // Fed from its own thread: gitleaks can fill the stderr pipe before it
+        // has read all of stdin, and then neither side moves.
+        let (fed, out) = std::thread::scope(|scope| {
+            let feeder = scope.spawn(move || stdin.map(|mut i| i.write_all(text.as_bytes())));
+            let out = child.wait_with_output();
+            (feeder.join(), out)
+        });
+        let out = out.map_err(|e| ScanError::Failed(e.to_string()))?;
         if !out.status.success() {
             return Err(ScanError::Failed(format!(
                 "{}: {}",
@@ -224,10 +235,39 @@ impl Scan for Gitleaks {
                 String::from_utf8_lossy(&out.stderr).trim()
             )));
         }
-        if let Some(Err(e)) = fed {
-            return Err(ScanError::Failed(format!("writing to gitleaks: {e}")));
+        match fed {
+            Ok(Some(Err(e))) => {
+                return Err(ScanError::Failed(format!("writing to gitleaks: {e}")));
+            }
+            Err(_) => return Err(ScanError::Failed("writing to gitleaks panicked".into())),
+            Ok(_) => {}
         }
         parse_report(&out.stdout)
+    }
+
+    fn rules(&self) -> Result<String, ScanError> {
+        let out = Command::new(&self.program)
+            .arg("version")
+            .stdin(Stdio::null())
+            .output()
+            .map_err(spawn_error)?;
+        if !out.status.success() {
+            return Err(ScanError::Failed(format!(
+                "gitleaks version: {}",
+                out.status
+            )));
+        }
+        Ok(format!(
+            "{GITLEAKS_CONFIG}\n{}",
+            String::from_utf8_lossy(&out.stdout).trim()
+        ))
+    }
+}
+
+fn spawn_error(e: io::Error) -> ScanError {
+    match e.kind() {
+        io::ErrorKind::NotFound => ScanError::Missing,
+        _ => ScanError::Failed(e.to_string()),
     }
 }
 
@@ -250,7 +290,7 @@ pub fn stage() -> Result<Report, Error> {
     let base = etcetera::choose_base_strategy().map_err(|_| Error::NoHome)?;
     let data = base.data_dir().join("yantra");
     let scratch = data.join("history.tmp");
-    fs::create_dir_all(&scratch).map_err(|source| Error::Io {
+    private_dir(&scratch).map_err(|source| Error::Io {
         path: scratch.clone(),
         source,
     })?;
@@ -265,36 +305,72 @@ pub fn stage() -> Result<Report, Error> {
 /// `history.tmp/`, which it does not: a write lands there first and a rename on
 /// the same filesystem moves it into place, so a half-written file is never
 /// in the folder Syncthing watches.
+///
+/// `history.tmp/rules` records the rules the copies were made with. It is
+/// written only after a pass with no failure, so a failed copy is retried.
 pub fn stage_in<S: Scan>(home: &Path, data: &Path, scanner: &S) -> Result<Report, Error> {
+    // Asked before any mtime, so a missing gitleaks fails every pass.
+    let rules = match scanner.rules() {
+        Ok(rules) => Some(rules),
+        Err(ScanError::Missing) => return Err(Error::NoGitleaks),
+        Err(ScanError::Failed(_)) => None,
+    };
     let staging = data.join("history");
     let scratch = data.join("history.tmp");
-    fs::create_dir_all(&scratch).map_err(|source| Error::Io {
-        path: scratch.clone(),
-        source,
-    })?;
+    for dir in [&staging, &scratch] {
+        // `set_permissions` also tightens a folder an older version made 0755.
+        private_dir(dir)
+            .and_then(|()| fs::set_permissions(dir, fs::Permissions::from_mode(0o700)))
+            .map_err(|source| Error::Io {
+                path: dir.clone(),
+                source,
+            })?;
+    }
+    let stamp = scratch.join("rules");
+    let stale = rules.is_none() || fs::read_to_string(&stamp).ok() != rules;
     let mut report = Report::default();
     for harness in &HARNESSES {
         let root = home.join(harness.root);
         let into = staging.join(harness.name);
-        for rel in files(&root)? {
+        let live_files = files(&root);
+        let mut unread = Vec::new();
+        for (dir, source) in live_files.unreadable {
+            report.failed.push(Failure {
+                live: root.join(&dir),
+                reason: Refusal::Io(source),
+            });
+            unread.push(dir);
+        }
+        for rel in live_files.found {
             if !(harness.keeps)(&rel) {
                 continue;
             }
             let live = root.join(&rel);
             let staged = into.join(&rel);
-            match stage_one(&live, &staged, &scratch, scanner) {
+            match stage_one(&live, &staged, &scratch, scanner, stale) {
                 Ok(None) => report.unchanged += 1,
                 Ok(Some(count)) => {
                     report.redactions += count;
                     report.written.push(staged);
                 }
+                Err(Step::Gone) => {}
                 Err(Step::Stop) => return Err(Error::NoGitleaks),
                 Err(Step::Refused(reason)) => report.failed.push(Failure { live, reason }),
             }
         }
-        for rel in files(&into)? {
+        let staged_files = files(&into);
+        if let Some((dir, source)) = staged_files.unreadable.into_iter().next() {
+            return Err(Error::Io {
+                path: into.join(dir),
+                source,
+            });
+        }
+        for rel in staged_files.found {
             let live = root.join(&rel);
-            if (harness.keeps)(&rel) && live.is_file() {
+            // Unreadable is not gone: keep what was staged under it.
+            if unread.iter().any(|dir| rel.starts_with(dir))
+                || ((harness.keeps)(&rel) && live.is_file())
+            {
                 continue;
             }
             let staged = into.join(&rel);
@@ -306,10 +382,26 @@ pub fn stage_in<S: Scan>(home: &Path, data: &Path, scanner: &S) -> Result<Report
         }
         prune_empty(&into)?;
     }
+    if let (Some(rules), true) = (rules, report.failed.is_empty()) {
+        write_atomic(&stamp, &scratch, &rules, SystemTime::now()).map_err(|source| Error::Io {
+            path: stamp.clone(),
+            source,
+        })?;
+    }
     Ok(report)
 }
 
+/// Creates `dir` and any parent it lacks, each 0700.
+fn private_dir(dir: &Path) -> io::Result<()> {
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
 enum Step {
+    /// The live file went during the pass, so the removal step owns it.
+    Gone,
     Stop,
     Refused(Refusal),
 }
@@ -317,6 +409,14 @@ enum Step {
 impl From<io::Error> for Step {
     fn from(e: io::Error) -> Self {
         Self::Refused(Refusal::Io(e))
+    }
+}
+
+/// A live file that is not there went during the pass; any other error is one.
+fn live_error(e: io::Error) -> Step {
+    match e.kind() {
+        io::ErrorKind::NotFound => Step::Gone,
+        _ => e.into(),
     }
 }
 
@@ -329,24 +429,38 @@ impl From<Refusal> for Step {
 /// `Ok(None)` when the staging copy is current, `Ok(Some(redactions))` when it
 /// was written.
 ///
-/// "Current" is the mtime alone: the staging copy carries the live file's
-/// mtime, and its size differs whenever something was redacted.
+/// "Current" is the mtime, unless the rules are `stale`: the staging copy
+/// carries the live file's mtime, and its size differs whenever something
+/// was redacted.
 fn stage_one<S: Scan>(
     live: &Path,
     staged: &Path,
     scratch: &Path,
     scanner: &S,
+    stale: bool,
 ) -> Result<Option<usize>, Step> {
     // Read the mtime before the bytes: a write in between moves the mtime on,
     // so the next pass stages again rather than keeping a stale copy.
-    let mtime = fs::metadata(live)?.modified()?;
-    if fs::metadata(staged)
-        .and_then(|m| m.modified())
-        .is_ok_and(|staged_mtime| staged_mtime == mtime)
+    let mtime = fs::metadata(live).map_err(live_error)?.modified()?;
+    if !stale
+        && fs::metadata(staged)
+            .and_then(|m| m.modified())
+            .is_ok_and(|staged_mtime| staged_mtime == mtime)
     {
         return Ok(None);
     }
-    let text = String::from_utf8(fs::read(live)?).map_err(|_| Refusal::NotText)?;
+    let bytes = fs::read(live).map_err(live_error)?;
+    let text = String::from_utf8(bytes).map_err(|_| Refusal::NotText)?;
+    // A write within one coarse mtime tick of the read leaves the mtime as it
+    // was, so a copy of so new a file is marked stale for the next pass.
+    let settled = SystemTime::now()
+        .duration_since(mtime)
+        .is_ok_and(|age| age >= Duration::from_secs(2));
+    let mtime = if settled {
+        mtime
+    } else {
+        SystemTime::UNIX_EPOCH
+    };
     let secrets = scanner.secrets(&text).map_err(|e| match e {
         ScanError::Missing => Step::Stop,
         ScanError::Failed(why) => Step::Refused(Refusal::Scan(why)),
@@ -408,42 +522,54 @@ fn write_atomic(staged: &Path, scratch: &Path, text: &str, mtime: SystemTime) ->
     file.set_modified(mtime)?;
     drop(file);
     if let Some(parent) = staged.parent() {
-        fs::create_dir_all(parent)?;
+        private_dir(parent)?;
     }
     fs::rename(&temp, staged)
 }
 
-/// Every regular file under `root`, relative to it. Symlinks are not followed.
-/// A root that is not there holds nothing.
-fn files(root: &Path) -> Result<Vec<PathBuf>, Error> {
-    let mut found = Vec::new();
+/// What [`files`] found under a root, relative to it.
+struct Listing {
+    found: Vec<PathBuf>,
+    /// Directories it could not read, so what is under them is unknown.
+    unreadable: Vec<(PathBuf, io::Error)>,
+}
+
+/// Every regular file under `root`. Symlinks are not followed. A root that is
+/// not there holds nothing.
+fn files(root: &Path) -> Listing {
+    let mut listing = Listing {
+        found: Vec::new(),
+        unreadable: Vec::new(),
+    };
     let mut pending = vec![PathBuf::new()];
     while let Some(rel) = pending.pop() {
-        let dir = root.join(&rel);
-        let entries = match fs::read_dir(&dir) {
+        let entries = match fs::read_dir(root.join(&rel)) {
             Ok(entries) => entries,
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-            Err(source) => return Err(Error::Io { path: dir, source }),
+            Err(e) => {
+                listing.unreadable.push((rel, e));
+                continue;
+            }
         };
         for entry in entries {
-            let entry = entry.map_err(|source| Error::Io {
-                path: dir.clone(),
-                source,
-            })?;
-            let kind = entry.file_type().map_err(|source| Error::Io {
-                path: entry.path(),
-                source,
-            })?;
-            let child = rel.join(entry.file_name());
+            let (name, kind) =
+                match entry.and_then(|entry| Ok((entry.file_name(), entry.file_type()?))) {
+                    Ok(named) => named,
+                    Err(e) => {
+                        listing.unreadable.push((rel.clone(), e));
+                        continue;
+                    }
+                };
+            let child = rel.join(name);
             if kind.is_dir() {
                 pending.push(child);
             } else if kind.is_file() {
-                found.push(child);
+                listing.found.push(child);
             }
         }
     }
-    found.sort();
-    Ok(found)
+    listing.found.sort();
+    listing
 }
 
 /// Removes the empty directories under `dir`, and `dir` when it ends empty.
@@ -482,8 +608,7 @@ fn prune_empty(dir: &Path) -> Result<bool, Error> {
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-    use std::os::unix::fs::PermissionsExt as _;
+    use std::cell::{Cell, RefCell};
 
     /// R18 §11.3's three fake secrets, in the shapes that test used.
     const GHP: &str = "ghp_aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6";
@@ -495,13 +620,22 @@ mod tests {
     struct Fake {
         calls: Cell<usize>,
         fail: bool,
+        rules: &'static str,
+        /// Deleted on the first scan, as a live file can go mid-pass.
+        delete: RefCell<Option<PathBuf>>,
     }
 
     impl Fake {
         fn new() -> Self {
+            Self::with_rules("v1")
+        }
+
+        fn with_rules(rules: &'static str) -> Self {
             Self {
                 calls: Cell::new(0),
                 fail: false,
+                rules,
+                delete: RefCell::new(None),
             }
         }
     }
@@ -509,6 +643,9 @@ mod tests {
     impl Scan for Fake {
         fn secrets(&self, text: &str) -> Result<Vec<String>, ScanError> {
             self.calls.set(self.calls.get() + 1);
+            if let Some(path) = self.delete.borrow_mut().take() {
+                fs::remove_file(path).unwrap();
+            }
             if self.fail {
                 return Err(ScanError::Failed("exit status: 1".into()));
             }
@@ -518,11 +655,19 @@ mod tests {
                 .map(str::to_owned)
                 .collect())
         }
+
+        fn rules(&self) -> Result<String, ScanError> {
+            Ok(self.rules.to_owned())
+        }
     }
 
     struct Missing;
     impl Scan for Missing {
         fn secrets(&self, _: &str) -> Result<Vec<String>, ScanError> {
+            Err(ScanError::Missing)
+        }
+
+        fn rules(&self) -> Result<String, ScanError> {
             Err(ScanError::Missing)
         }
     }
@@ -541,9 +686,20 @@ mod tests {
         dir
     }
 
+    /// Writes a file whose mtime is a minute old, past the coarse-tick window.
     fn put(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
+        set_mtime(path, SystemTime::now() - Duration::from_secs(60));
+    }
+
+    fn set_mtime(path: &Path, mtime: SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
     }
 
     fn line(text: &str) -> String {
@@ -587,6 +743,16 @@ mod tests {
                 format!(r#""DATABASE_PASSWORD=\"{DB_PASSWORD}\"""#),
                 DB_PASSWORD,
             ),
+            // A quoted key: a JSON line escapes its quotes, a document does not.
+            (
+                format!(r#"{{\"db_password\": \"{DB_PASSWORD}\"}}"#),
+                DB_PASSWORD,
+            ),
+            (
+                format!(r#"{{"db_password": "{DB_PASSWORD}"}}"#),
+                DB_PASSWORD,
+            ),
+            (format!("'api_key': '{API_TOKEN}'"), API_TOKEN),
         ] {
             let found = re.captures(&text).and_then(|c| c.get(group));
             assert_eq!(found.map(|m| m.as_str()), Some(secret), "in {text}");
@@ -690,7 +856,11 @@ mod tests {
             fs::metadata(&staged).unwrap().modified().unwrap(),
             fs::metadata(&live).unwrap().modified().unwrap()
         );
-        assert_eq!(fs::read_dir(data.join("history.tmp")).unwrap().count(), 0);
+        let left: Vec<_> = fs::read_dir(data.join("history.tmp"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["rules"]);
     }
 
     #[test]
@@ -746,8 +916,8 @@ mod tests {
         let data = temp();
         put(&home.join(".claude/projects/-w/s.jsonl"), &secret_line());
         let fake = Fake {
-            calls: Cell::new(0),
             fail: true,
+            ..Fake::new()
         };
 
         let report = stage_in(&home, &data, &fake).unwrap();
@@ -772,7 +942,159 @@ mod tests {
             stage_in(&home, &data, &Missing),
             Err(Error::NoGitleaks)
         ));
-        assert!(files(&data.join("history")).unwrap().is_empty());
+        assert!(files(&data.join("history")).found.is_empty());
+    }
+
+    #[test]
+    fn no_gitleaks_fails_even_when_every_copy_is_current() {
+        let home = temp();
+        let data = temp();
+        put(&home.join(".codex/sessions/s.jsonl"), &line("hi"));
+        stage_in(&home, &data, &Fake::new()).unwrap();
+
+        assert!(matches!(
+            stage_in(&home, &data, &Missing),
+            Err(Error::NoGitleaks)
+        ));
+    }
+
+    #[test]
+    fn a_rule_change_rewrites_every_copy() {
+        let home = temp();
+        let data = temp();
+        put(&home.join(".codex/sessions/a.jsonl"), &line("hi"));
+        put(&home.join(".claude/projects/-w/b.jsonl"), &secret_line());
+        stage_in(&home, &data, &Fake::new()).unwrap();
+
+        let same = stage_in(&home, &data, &Fake::new()).unwrap();
+        assert_eq!((same.written.len(), same.unchanged), (0, 2));
+
+        let newer = stage_in(&home, &data, &Fake::with_rules("v2")).unwrap();
+        assert_eq!((newer.written.len(), newer.unchanged), (2, 0));
+        let after = stage_in(&home, &data, &Fake::with_rules("v2")).unwrap();
+        assert_eq!((after.written.len(), after.unchanged), (0, 2));
+    }
+
+    #[test]
+    fn a_failed_pass_keeps_the_old_rules_stamp() {
+        let home = temp();
+        let data = temp();
+        put(&home.join(".codex/sessions/a.jsonl"), &line("hi"));
+        stage_in(&home, &data, &Fake::new()).unwrap();
+
+        let failing = Fake {
+            fail: true,
+            ..Fake::with_rules("v2")
+        };
+        let report = stage_in(&home, &data, &failing).unwrap();
+        assert_eq!(report.failed.len(), 1);
+        let stamp = fs::read_to_string(data.join("history.tmp/rules")).unwrap();
+        assert_eq!(stamp, "v1");
+
+        let retried = stage_in(&home, &data, &Fake::with_rules("v2")).unwrap();
+        assert_eq!(retried.written.len(), 1);
+    }
+
+    #[test]
+    fn an_unreadable_directory_fails_only_itself() {
+        let home = temp();
+        let data = temp();
+        let project = home.join(".claude/projects/-w");
+        put(&project.join("s.jsonl"), &line("hi"));
+        stage_in(&home, &data, &Fake::new()).unwrap();
+        put(&home.join(".codex/sessions/c.jsonl"), &line("hi"));
+
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&project).is_ok() {
+            // root reads it anyway, so there is nothing to test.
+            fs::set_permissions(&project, fs::Permissions::from_mode(0o700)).unwrap();
+            return;
+        }
+        let report = stage_in(&home, &data, &Fake::new());
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o700)).unwrap();
+        let report = report.unwrap();
+
+        assert_eq!(report.written, vec![data.join("history/codex/c.jsonl")]);
+        assert!(matches!(
+            report.failed.as_slice(),
+            [Failure { live, reason: Refusal::Io(_) }] if *live == project
+        ));
+        assert!(report.removed.is_empty());
+        assert!(data.join("history/claude/-w/s.jsonl").exists());
+    }
+
+    #[test]
+    fn a_transcript_deleted_mid_pass_is_gone_not_failed() {
+        let home = temp();
+        let data = temp();
+        put(&home.join(".codex/sessions/a.jsonl"), &line("hi"));
+        let second = home.join(".codex/sessions/b.jsonl");
+        put(&second, &line("hi"));
+        stage_in(&home, &data, &Fake::new()).unwrap();
+
+        // New rules make both stale, so the scan of `a` runs before `b` is read.
+        let fake = Fake::with_rules("v2");
+        *fake.delete.borrow_mut() = Some(second);
+        let report = stage_in(&home, &data, &fake).unwrap();
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(report.removed, vec![data.join("history/codex/b.jsonl")]);
+        assert!(!data.join("history/codex/b.jsonl").exists());
+    }
+
+    #[test]
+    fn a_file_written_this_second_is_staged_again() {
+        let home = temp();
+        let data = temp();
+        let fresh = home.join(".codex/sessions/fresh.jsonl");
+        put(&fresh, &line("hi"));
+        set_mtime(&fresh, SystemTime::now());
+        put(&home.join(".codex/sessions/old.jsonl"), &line("hi"));
+
+        stage_in(&home, &data, &Fake::new()).unwrap();
+        let again = stage_in(&home, &data, &Fake::new()).unwrap();
+        assert_eq!(again.written, vec![data.join("history/codex/fresh.jsonl")]);
+        assert_eq!(again.unchanged, 1);
+    }
+
+    #[test]
+    fn the_staging_folders_are_private() {
+        let home = temp();
+        let data = temp();
+        put(&home.join(".claude/projects/-w/s.jsonl"), &line("hi"));
+        // As an older version left them.
+        for dir in ["history", "history.tmp"] {
+            fs::create_dir_all(data.join(dir)).unwrap();
+            fs::set_permissions(data.join(dir), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        stage_in(&home, &data, &Fake::new()).unwrap();
+        for dir in ["history", "history.tmp", "history/claude/-w"] {
+            let mode = fs::metadata(data.join(dir)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "{dir} is {mode:o}");
+        }
+    }
+
+    #[test]
+    fn gitleaks_does_not_deadlock_on_a_full_stderr() {
+        let bin = temp();
+        let script = bin.join("gitleaks");
+        fs::write(
+            &script,
+            "#!/bin/sh\nhead -c 200000 /dev/zero >&2; cat >/dev/null; echo []\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut scanner = Gitleaks::new(temp()).unwrap();
+        scanner.program = script;
+
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(scanner.secrets(&"x".repeat(200_000)));
+        });
+        let result = receive
+            .recv_timeout(Duration::from_secs(30))
+            .expect("gitleaks deadlocked");
+        assert_eq!(result.unwrap(), Vec::<String>::new());
     }
 
     #[test]
