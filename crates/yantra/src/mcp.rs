@@ -182,13 +182,13 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
             daemon.send(Method::Post(Some(json!({"prompt": prompt}))), &path)
         }
         "wait_task" => {
-            let ms = match arguments.get("timeoutMs") {
-                None => None,
-                Some(ms) => Some(
+            let ms = arguments
+                .get("timeoutMs")
+                .map(|ms| {
                     ms.as_u64()
-                        .ok_or("wait_task's `timeoutMs` is a whole number of milliseconds")?,
-                ),
-            };
+                        .ok_or("wait_task's `timeoutMs` is a whole number of milliseconds")
+                })
+                .transpose()?;
             let (path, wait) = match ms {
                 Some(ms) => (
                     format!("/api/tasks/{}/wait?timeoutMs={ms}", task()?),
