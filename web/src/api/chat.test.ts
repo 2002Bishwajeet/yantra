@@ -4,7 +4,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
-import { chatAttached, chatEvents, chatFailure, chatFrames, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
+import {
+  chatAttached,
+  chatCheckpoints,
+  chatEvents,
+  chatFailure,
+  chatFrames,
+  chatNotAttached,
+  chatNotLoggedIn,
+} from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
 import { AttachError, ChatError, IMAGE_LIMIT, chatAddress, frameOf, openChat } from './chat'
 import type { ThreadEvent } from './thread'
@@ -85,6 +93,7 @@ describe('the chat socket', () => {
     ['busy', false],
     ['badFrame', false],
     ['unreachable', true],
+    ['checkpoint', false],
   ] as const)('types a %s frame from the daemon', async (kind, retryable) => {
     const { errors, opened } = connect()
     await settled(() => expect(opened).toHaveBeenCalled())
@@ -119,6 +128,25 @@ describe('the chat socket', () => {
     expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual(
       chatFrames.slice(0, 2),
     )
+  })
+
+  it('sends a revert with the checkpoint it names, and nothing when the socket is not open', async () => {
+    const { socket, opened } = connect()
+    expect(socket.revert(0)).toBe(false)
+    await settled(() => expect(opened).toHaveBeenCalled())
+    expect(socket.revert(0)).toBe(true)
+    await settled(() => expect(server.heard).toHaveLength(1))
+    expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual([
+      chatFrames.find((frame) => frame.type === 'revert'),
+    ])
+  })
+
+  it('passes on a turn diff and a revert as events', async () => {
+    const { events, errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    for (const event of chatCheckpoints) server.say(JSON.stringify(event))
+    await settled(() => expect(events).toEqual(chatCheckpoints))
+    expect(errors).toEqual([])
   })
 
   it('says an unknown thread once, not again as a close', async () => {

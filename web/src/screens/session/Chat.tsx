@@ -17,6 +17,7 @@ import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { HarnessPicker } from './HarnessPicker'
 import type { Message, Timeline, Tool } from './timeline'
+import { TurnDiff } from './TurnDiff'
 import { useChat, type Link } from './useChat'
 
 // Module constants, so the renderer is not handed new plugin lists per delta.
@@ -374,7 +375,13 @@ export function Chat(props: ChatProps) {
           </Text>
         ) : null}
         {timeline.entries.map((entry) =>
-          entry.kind === 'message' ? <Said agent={agent} key={entry.id} message={entry} /> : <ToolCard key={entry.id} tool={entry} />,
+          entry.kind === 'message' ? (
+            <Said agent={agent} key={entry.id} message={entry} />
+          ) : entry.kind === 'tool' ? (
+            <ToolCard key={entry.id} tool={entry} />
+          ) : (
+            <TurnDiff disabled={busy || link !== 'open'} diff={entry} key={entry.id} onRevert={chat.revert} />
+          ),
         )}
         {timeline.requests.map((request) => (
           <Asking
@@ -393,7 +400,13 @@ export function Chat(props: ChatProps) {
           error={error}
           eyebrow={`on ${workspace.machine}`}
           reset={chat.retry}
-          title={error.kind === 'turnFailed' ? 'The turn failed' : 'The chat could not go on'}
+          title={
+            error.kind === 'turnFailed'
+              ? 'The turn failed'
+              : error.kind === 'checkpoint'
+                ? 'The files could not be kept or put back'
+                : 'The chat could not go on'
+          }
         />
       ) : null}
       <div

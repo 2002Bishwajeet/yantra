@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 
 use crate::acp::Harness;
 use crate::agent::Running;
+use crate::checkpoint;
 use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO, branch, said};
 pub use crate::delegate::{Error, Place, Summary};
@@ -178,10 +179,16 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
     }
 }
 
-/// Removes the worktree and the branch, uncommitted work included. The only
-/// path that deletes a thread.
+/// Removes the worktree, the branch and the checkpoints, uncommitted work
+/// included. The only path that deletes a thread.
 pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
-    let out = exec.exec(&delegate::removal(place)).await?;
+    let out = exec
+        .exec(&format!(
+            "{} && {}",
+            delegate::removal(place),
+            checkpoint::forget(place)
+        ))
+        .await?;
     if !out.success() {
         return Err(Error::Worktree {
             stderr: said(&out.stderr),
@@ -456,7 +463,10 @@ mod tests {
                  && git -C '{REPO}' worktree prune \
                  && {{ ! git -C '{REPO}' rev-parse -q --verify \
                  'refs/heads/yantra/chat/web/11111111' >/dev/null \
-                 || git -C '{REPO}' branch -D 'yantra/chat/web/11111111' >/dev/null; }}"
+                 || git -C '{REPO}' branch -D 'yantra/chat/web/11111111' >/dev/null; }} \
+                 && git -C '{REPO}' for-each-ref --format='delete %(refname)' \
+                 'refs/yantra/checkpoints/chat/web/11111111' \
+                 | git -C '{REPO}' update-ref --stdin"
             )]
         );
 

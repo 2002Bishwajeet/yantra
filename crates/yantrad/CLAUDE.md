@@ -564,10 +564,17 @@ the route finds the thread, says `thread.started` too, and replays it: Claude's 
 or ACP's `session/load`. **There is no session-addressed form**: a thread
 is a worktree of a workspace's repository, and a bare session names none.
 
-- **The text frames are JSON both ways.** The browser sends `turn`, `answer` and `cancel`; the daemon sends
-  `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are `unknownThread`, `busy`,
-  `badFrame`, `unreachable` and `notLoggedIn`. `notLoggedIn` adds `harness`, `machine` and the
-  `command` to run there. All are in `contract.gen.ts`.
+- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel` and
+  `revert`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
+  `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn` and `checkpoint`. `notLoggedIn`
+  adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`.
+- **Each turn ends in a checkpoint** (Y-448, [`checkpoint`](../yantra-core/src/checkpoint.rs)).
+  Before a turn starts, the route keeps checkpoint 0 if the thread has none, and a turn without it
+  does not start. When a turn ends, the route keeps the tree and sends
+  `turn.diff.updated{turn, unifiedDiff, truncated}`. A socket that closes mid-turn keeps it too, and
+  tells no one. `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
+  `thread.reverted{turn}`; it is `busy` while a turn runs and `badFrame` with no thread. The
+  conversation is not rewound. A git that refused is a `checkpoint` failure. No diff is logged.
 - **A binary frame is an image** (Y-424). The upgrade's limit is 16 MiB a message and a frame, so a
   10 MB screenshot fits. The route sends the bytes to the machine through
   [`image::Images`](../yantra-core/src/image.rs): one directory per socket under the machine's

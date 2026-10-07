@@ -320,7 +320,7 @@ in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
 from T3 Code's provider picker, and the thread keeps it (Y-434). Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
-harness. Five things about the code:
+harness. Six things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -329,7 +329,8 @@ harness. Five things about the code:
   folds events into messages, tool cards, open requests, usage and the turn's
   state; `useChat` owns the socket and the URL's `?thread=`.
 - **Every failure is a `ChatError` of its own kind**: refused, unreachable,
-  not logged in, unknown thread, busy, bad frame, turn failed and closed.
+  not logged in, unknown thread, busy, bad frame, checkpoint, turn failed and
+  closed.
   Not logged in shows the command to run on the machine and a Retry that
   reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
   back, because the daemon cancels a turn whose socket closed.
@@ -342,6 +343,16 @@ harness. Five things about the code:
   on a line of its own. The daemon removes a socket's images when it closes,
   so an attached image turns to closed when the link drops, and a turn
   refused for its login gives back its words without the paths.
+- **Each turn's changes are a card** (Y-448).
+  [`TurnDiff.tsx`](src/screens/session/TurnDiff.tsx) draws
+  `turn.diff.updated`: the changed files, the unified diff in a disclosure, and
+  "Cut at 256 KiB" when the daemon cut it. "Revert to before this turn" asks
+  first, then sends `revert` for the checkpoint before it; `thread.reverted`
+  marks every later card Reverted. A revert puts the files back and leaves the
+  conversation as it is. The button waits while a turn runs or the socket is
+  not open. A card is drawn only for a turn run on this socket, because a
+  replayed transcript names no turn numbers. No diff library: the lines are
+  read by their first character.
 - **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
   `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it
   costs about 48 KB gzip (15 KB to 63 KB). The first load did not move.

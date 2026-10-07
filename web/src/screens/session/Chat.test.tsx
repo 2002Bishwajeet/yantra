@@ -8,7 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
 import { IMAGE_LIMIT } from '@/api/chat'
-import { chatAttached, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
+import { chatAttached, chatCheckpointFailed, chatCheckpoints, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -302,6 +302,118 @@ describe('the chat', () => {
 
     say({ type: 'error', kind: 'busy', said: 'a turn is running' })
     await settled(() => expect(screen.getByRole('alert').textContent).toContain('The agent is still answering'))
+  })
+})
+
+describe('checkpoints', () => {
+  const [diff, reverted] = chatCheckpoints
+
+  async function aTurnChanged() {
+    await open()
+    say(started())
+    say(diff)
+    return settled(() => screen.getByRole('article', { name: 'What turn 1 changed' }))
+  }
+
+  it("draws a turn's changed files, and its diff on request", async () => {
+    const card = await aTurnChanged()
+    expect(within(card).getByText('Changed files')).toBeTruthy()
+    expect(within(card).getByText('1')).toBeTruthy()
+    const show = within(card).getByRole('button', { name: 'Diff Changed files 1' })
+    expect(show.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(show)
+    expect(show.getAttribute('aria-expanded')).toBe('true')
+    const files = within(card).getByRole('list', { name: 'Changed files' })
+    expect(within(files).getByText('a.txt')).toBeTruthy()
+    const added = within(card).getByText('+two')
+    expect(added.getAttribute('data-tone')).toBe('add')
+    expect(within(card).getByText('-one').getAttribute('data-tone')).toBe('del')
+    expect(within(card).getByText('--- a/a.txt').getAttribute('data-tone')).toBe('meta')
+    expect(within(card).queryByText('Cut at 256 KiB')).toBeNull()
+  })
+
+  it('says when a diff was cut, and draws no card for a turn that changed nothing', async () => {
+    await open()
+    say({ ...diff, payload: { ...diff!.payload, truncated: true } })
+    say({ ...diff, payload: { turn: 2, unifiedDiff: '', truncated: false } })
+    const card = await settled(() => screen.getByRole('article', { name: 'What turn 1 changed' }))
+    fireEvent.click(within(card).getByRole('button', { name: /^Diff/ }))
+    expect(within(card).getByText('Cut at 256 KiB')).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'What turn 2 changed' })).toBeNull()
+  })
+
+  it('reverts only after the confirm, which says the conversation stays', async () => {
+    const card = await aTurnChanged()
+    fireEvent.click(within(card).getByRole('button', { name: 'Revert to before this turn' }))
+    const dialog = await settled(() => screen.getByRole('dialog', { name: 'Revert to before turn 1?' }))
+    expect(dialog.textContent).toContain('The conversation stays as it is.')
+    expect(frames()).toEqual([])
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Revert' }))
+    await settled(() => expect(frames()).toEqual([{ type: 'revert', turn: 0 }]))
+    await settled(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    say(reverted)
+    await settled(() => expect(within(card).getByText('Reverted')).toBeTruthy())
+    expect(within(card).queryByRole('button', { name: 'Revert to before this turn' })).toBeNull()
+  })
+
+  it('sends nothing when the confirm is cancelled', async () => {
+    const card = await aTurnChanged()
+    fireEvent.click(within(card).getByRole('button', { name: 'Revert to before this turn' }))
+    const dialog = await settled(() => screen.getByRole('dialog'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await settled(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(frames()).toEqual([])
+  })
+
+  it('reaches the revert by keyboard, and Escape closes the confirm without sending', async () => {
+    const card = await aTurnChanged()
+    const revert = within(card).getByRole('button', { name: 'Revert to before this turn' })
+    expect(revert.tagName).toBe('BUTTON')
+    revert.focus()
+    expect(document.activeElement).toBe(revert)
+    fireEvent.click(revert)
+    const dialog = await settled(() => screen.getByRole('dialog', { name: 'Revert to before turn 1?' }))
+    await settled(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    await settled(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(frames()).toEqual([])
+  })
+
+  it('holds the revert while a turn runs, and says why', async () => {
+    const card = await aTurnChanged()
+    type('and the docs')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    const revert = within(card).getByRole('button', { name: 'Revert to before this turn' })
+    await settled(() => expect(revert).toHaveProperty('disabled', true))
+    expect(revert.getAttribute('aria-describedby')).toBeTruthy()
+    expect(screen.getByText('A revert waits until no turn runs and the chat is connected.')).toBeTruthy()
+
+    say({ threadId: '1a2b3c4d', type: 'turn.completed', payload: { state: 'completed', stopReason: 'end_turn' } })
+    await settled(() => expect(revert).toHaveProperty('disabled', false))
+  })
+
+  it('holds the revert when the socket closed', async () => {
+    const card = await aTurnChanged()
+    server.hangUp()
+    await settled(() => screen.getByRole('alert'))
+    expect(within(card).getByRole('button', { name: 'Revert to before this turn' })).toHaveProperty('disabled', true)
+  })
+
+  it("draws a checkpoint that failed in git's own words, and frees the composer", async () => {
+    await open()
+    type('fix it')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude is answering.'))
+    say(chatCheckpointFailed)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByRole('heading').textContent).toBe('The files could not be kept or put back')
+    expect(alert.textContent).toContain("could not keep or restore this chat's files")
+    expect(alert.textContent).toContain('fatal: unable to write new index file')
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
   })
 })
 
