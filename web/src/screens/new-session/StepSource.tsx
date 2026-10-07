@@ -79,7 +79,7 @@ export function StepSource(props: { form: SessionForm; values: Values }) {
       <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         {values.provider === 'local'
           ? `the session's working directory is this folder on ${values.machine}. Nothing is cloned and nothing is written into it.`
-          : 'a repository that is not on the machine is cloned under ~/Github, after the provider it came from. Local directory lets you pick or make any folder instead.'}
+          : 'a repository that is not on the machine is cloned into the clone folder, which you can change. Local directory lets you pick or make any folder instead.'}
       </Text>
     </Card>
   )

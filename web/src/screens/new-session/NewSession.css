@@ -143,7 +143,8 @@
   list-style: none;
 }
 
-.ns__list > li > .m3-row {
+.ns__list > li > .m3-row,
+.ns__node > .m3-row {
   width: 100%;
   border: 0;
   text-align: left;
@@ -155,8 +156,64 @@
   cursor: default;
 }
 
+.ns__node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ns__node > .m3-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.ns__toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+}
+
+span.ns__toggle {
+  cursor: default;
+}
+
+.ns__toggle svg {
+  transition: transform 150ms;
+}
+
+.ns__toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ns__toggle svg {
+    transition: none;
+  }
+}
+
+/* Subfolders sit one toggle-width in from the folder that holds them. */
+.ns__sub {
+  margin-top: var(--m3-list-gap);
+  padding-left: 44px;
+}
+
+.ns__clone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* A file or a closed folder: listed, and not a choice. */
-.ns__list > li > .ns__inert {
+.ns__list .ns__inert {
   cursor: default;
 }
 
@@ -411,7 +468,8 @@ span.ns__crumb {
   text-align: left;
 }
 
-[data-shell="phone"] .ns__list > li > .m3-row {
+[data-shell="phone"] .ns__list > li > .m3-row,
+[data-shell="phone"] .ns__node > .m3-row {
   flex-wrap: wrap;
 }
 

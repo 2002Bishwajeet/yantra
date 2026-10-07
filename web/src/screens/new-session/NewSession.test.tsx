@@ -153,7 +153,7 @@ describe('step 2, where the code comes from', () => {
     press(/Local directory/)
 
     const folders = within(await screen.findByRole('list', { name: 'Folders' }))
-    fireEvent.click(folders.getByRole('button', { name: /Github/ }))
+    fireEvent.click(folders.getByRole('button', { name: /^Github/ }))
     await screen.findByText(/2002Bishwajeet\/yantra/)
 
     type('New folder', 'landing')
@@ -196,7 +196,7 @@ describe('step 2, the local browser', () => {
     const toggle = screen.getByRole('button', { name: 'Show hidden' })
     expect(toggle.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(toggle)
-    expect(await folders.findByRole('button', { name: /\.config/ })).toBeTruthy()
+    expect(await folders.findByRole('button', { name: /^\.config/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Show hidden' }))
     await waitFor(() => expect(folders.queryByText('.config')).toBeNull())
   })
@@ -226,11 +226,11 @@ describe('step 2, the local browser', () => {
     expect(where.getAllByRole('button').map((one) => one.textContent)).toEqual(['/', 'home'])
 
     fireEvent.click(where.getByRole('button', { name: '/' }))
-    await folders.findByRole('button', { name: /srv/ })
+    await folders.findByRole('button', { name: /^srv/ })
     expect(sent).toContain('/')
     expect(folders.getByText('root').closest('button')).toBeNull()
 
-    fireEvent.click(folders.getByRole('button', { name: /srv/ }))
+    fireEvent.click(folders.getByRole('button', { name: /^srv/ }))
     await waitFor(() => expect(sent).toContain('/srv'))
   })
 
@@ -247,7 +247,7 @@ describe('step 2, the local browser', () => {
 
     const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
     fireEvent.click(where.getByRole('button', { name: '/' }))
-    fireEvent.click(await folders.findByRole('button', { name: /srv/ }))
+    fireEvent.click(await folders.findByRole('button', { name: /^srv/ }))
     expect(await folders.findByText('cachyos-g14 does not let this account read this folder')).toBeTruthy()
     expect(folders.queryByText('this folder is empty')).toBeNull()
   })

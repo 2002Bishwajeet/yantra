@@ -74,10 +74,8 @@ export function reachable(values: Values): Step {
 export const repoName = (repo: Repo): string => repo.full_name.split('/').pop() ?? repo.full_name
 
 /** Where a repository is cloned when it is not on the machine: under the
- *  provider's own directory (canvas note `y332-new-session`). */
-export const cloneHome = (home: string): string => `${home}/Github`
-export const cloneInto = (home: string, repo: Repo): string =>
-  `${cloneHome(home)}/${repoName(repo)}`
+ *  machine's clone folder (clonePath.ts). */
+export const cloneInto = (folder: string, repo: Repo): string => `${folder}/${repoName(repo)}`
 
 /** `/home/you/Github/x` drawn as `~/Github/x`, as the boards write paths. */
 export function tilde(path: string, home: string | null): string {

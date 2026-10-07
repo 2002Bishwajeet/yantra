@@ -95,7 +95,7 @@ test.describe('the four steps', () => {
     await page.getByRole('button', { name: /Local directory/ }).click()
 
     const folders = page.getByRole('list', { name: 'Folders' })
-    await folders.getByRole('button', { name: /Github/ }).click()
+    await folders.getByRole('button', { name: /^Github/ }).click()
     await expect(folders.getByText('git · 2002Bishwajeet/yantra')).toBeVisible()
     // Y-414: a file and a closed folder are drawn and are not buttons.
     await expect(folders.getByText('README.md')).toBeVisible()

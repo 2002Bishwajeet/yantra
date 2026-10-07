@@ -52,21 +52,21 @@ describe('what a machine already holds', () => {
 
   it('joins the clone home by origin, however the origin is written', () => {
     expect([...held.keys()]).toEqual(['2002bishwajeet/yantra'])
-    expect(place(repo('2002Bishwajeet/yantra'), '/home/biswa', held)).toEqual({
+    expect(place(repo('2002Bishwajeet/yantra'), '/home/biswa/Github', held)).toEqual({
       path: '/home/biswa/Github/yantra',
       here: 'yes',
     })
   })
 
   it('places what is not there under the clone home', () => {
-    expect(place(repo('2002Bishwajeet/landing'), '/home/biswa', held)).toEqual({
+    expect(place(repo('2002Bishwajeet/landing'), '/home/biswa/Github', held)).toEqual({
       path: '/home/biswa/Github/landing',
       here: 'no',
     })
   })
 
   it('a machine that could not be asked is unchecked, not absent', () => {
-    expect(place(repo('a/b'), '/home/biswa', byOrigin(undefined), 'ssh: no route')).toEqual({
+    expect(place(repo('a/b'), '/home/biswa/Github', byOrigin(undefined), 'ssh: no route')).toEqual({
       path: '/home/biswa/Github/b',
       here: 'unknown',
       because: 'ssh: no route',

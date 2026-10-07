@@ -127,9 +127,9 @@ describe('what will happen', () => {
 })
 
 describe('paths', () => {
-  it('writes a clone home under the provider, and a path as the boards write it', () => {
+  it('writes a clone under the clone folder, and a path as the boards write it', () => {
     expect(repoName(repo)).toBe('homelab-k8s')
-    expect(cloneInto('/home/biswa', repo)).toBe('/home/biswa/Github/homelab-k8s')
+    expect(cloneInto('/home/biswa/Documents/Github', repo)).toBe('/home/biswa/Documents/Github/homelab-k8s')
     expect(tilde('/home/biswa/Github/x', '/home/biswa')).toBe('~/Github/x')
     expect(tilde('/home/biswa', '/home/biswa')).toBe('~')
     expect(tilde('/srv/x', '/home/biswa')).toBe('/srv/x')
