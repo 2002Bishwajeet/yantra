@@ -38,6 +38,14 @@ describe('the card summary', () => {
   it('says so when nothing has been asked', () => {
     expect(summary(tally([]))).toBe('not asked yet')
   })
+
+  /** ADR-0031 §9: the optional microphone is counted only once it is there. */
+  it('leaves out a microphone that is not there', () => {
+    const ok = check('tmux', 'present')
+    expect(tally([ok, check('mic', 'absent')])).toEqual({ present: 1, absent: 0, unknown: 0, total: 1 })
+    expect(tally([ok, check('mic', 'unknown')]).total).toBe(1)
+    expect(summary(tally([ok, check('mic', 'present')]))).toBe('2 of 2 checks')
+  })
 })
 
 describe('a machine', () => {

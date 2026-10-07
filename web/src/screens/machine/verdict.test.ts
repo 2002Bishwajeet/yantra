@@ -145,6 +145,27 @@ describe('the machine page’s verdict', () => {
     expect(v.kind).toBe('ready')
   })
 
+  /** A microphone install that stopped without a sudo step is not ready: it
+   *  names the microphone and carries the answer that says why. */
+  it.each([
+    ['a command that needs no sudo', ['systemctl --user restart pipewire']],
+    ['no command at all', []],
+  ])('says the microphone is missing when the install stopped with %s', (_, commands) => {
+    const watch = { since: 10, pressed: 0, mic: true }
+    const answer = stopped(20, commands)
+    const v = verdict(withMic('absent'), { watch, events: [answer] })
+    expect(v).toEqual({ kind: 'missing', missing: ['microphone'], result: answer, fresh: true })
+    expect(titleOf(v, 'pi')).toBe('microphone is missing')
+    expect(startable(v)).toBe(false)
+  })
+
+  it('says the microphone is missing when an install that asked for it finished without it', () => {
+    const watch = { since: 10, pressed: 0, mic: true }
+    const done: Event = { ...stopped(20, []), kind: 'installed', said: 'pi: mic installed' }
+    expect(verdict(withMic('absent'), { watch, events: [done] })).toMatchObject({ kind: 'missing', missing: ['microphone'] })
+    expect(verdict(withMic('present'), { watch, events: [done] }).kind).toBe('ready')
+  })
+
   /** A package command someone ran by hand is no longer the microphone's. */
   it('is ready once a package sudo stopped is installed by hand', () => {
     const watch = { since: 10, pressed: 0, mic: false }
