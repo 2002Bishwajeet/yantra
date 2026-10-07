@@ -5,7 +5,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { Workspace } from '@/api'
 import { AttachError, IMAGE_TYPES, type ChatError } from '@/api/chat'
-import { LABEL, type Harness, type ItemType, type RequestOpened } from '@/api/thread'
+import { LABEL, type Harness, type ItemType, type PermissionMode, type RequestOpened } from '@/api/thread'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -16,6 +16,8 @@ import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { HarnessPicker } from './HarnessPicker'
+import { keepMode, recallMode } from './mode'
+import { ModePicker } from './ModePicker'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat, type Link } from './useChat'
@@ -302,6 +304,11 @@ export function Chat(props: ChatProps) {
   const { timeline, error, link } = chat
   const [draft, setDraft] = useState('')
   const [picked, setPicked] = useState<Harness>('claude')
+  const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
+  // A new thread is named on its first turn, and keeps the mode it was sent with.
+  useEffect(() => {
+    if (timeline.thread) keepMode(timeline.thread, mode)
+  }, [timeline.thread, mode])
   // An attach knows its thread before the daemon says whose it is, so until
   // then it names no harness rather than the picker's default.
   const locked = timeline.thread !== null
@@ -347,7 +354,7 @@ export function Chat(props: ChatProps) {
 
   const send = () => {
     if (text === '' || busy || uploading) return
-    if (chat.send(text, locked ? undefined : picked)) {
+    if (chat.send(text, locked ? undefined : picked, mode)) {
       lastSent.current = draft.trim()
       setDraft('')
       clear()
@@ -461,6 +468,7 @@ export function Chat(props: ChatProps) {
               value={harness}
             />
           ) : null}
+          <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
           {timeline.usage ? <Meter usage={timeline.usage} /> : null}
         </div>
         {images.length > 0 ? <Images images={images} onRemove={remove} /> : null}

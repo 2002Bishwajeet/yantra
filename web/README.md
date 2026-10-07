@@ -317,7 +317,10 @@ socket that [`api/chat.ts`](src/api/chat.ts) opens
 ([ADR-0026](../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)).
 The first turn picks the harness — Claude, Codex, Gemini, Grok or opencode —
 in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
-from T3 Code's provider picker, and the thread keeps it (Y-434). Each turn runs
+from T3 Code's provider picker, and the thread keeps it (Y-434).
+[`ModePicker.tsx`](src/screens/session/ModePicker.tsx) picks T3 Code's
+permission mode, Supervised by default (Y-453). Each turn frame carries it, and
+this browser keeps it per thread. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. Six things about the code:

@@ -76,6 +76,7 @@ impl Turn {
         place: &Place,
         text: &str,
         images: Option<&str>,
+        mode: chat::PermissionMode,
     ) -> Result<(Self, Events), Error> {
         let ssh::Piped {
             child,
@@ -83,7 +84,7 @@ impl Turn {
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree, images))?;
+        } = ssh.stdio(&command(&place.worktree, images, mode))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let (turn, events) = Self::wire(
             stdout,
@@ -178,17 +179,23 @@ impl Turn {
 /// derived from the cwd. `claude` is searched for as I-34 requires, and a musl
 /// machine gets the ripgrep variable `agent::launch_command` gives the TUI.
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
-fn command(worktree: &str, images: Option<&str>) -> String {
+/// Only `Auto` changes Claude's own mode; the daemon answers for the others (Y-453).
+fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
     format!(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}-p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}{auto}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
+        auto = if mode == chat::PermissionMode::Auto {
+            "--permission-mode auto "
+        } else {
+            ""
+        },
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
@@ -752,8 +759,8 @@ struct ModelUsage {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Item, ItemStatus, ItemType, RequestOpened, RequestResolved,
-        RequestType, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
+        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, RequestOpened,
+        RequestResolved, RequestType, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
 
@@ -1148,7 +1155,11 @@ mod tests {
     /// the slug, which holds nothing a shell acts on.
     #[test]
     fn the_command_cds_into_the_worktree_and_resumes_the_newest_transcript() {
-        let script = command("/home/u/.yantra/worktrees/chat/w/11111111", None);
+        let script = command(
+            "/home/u/.yantra/worktrees/chat/w/11111111",
+            None,
+            PermissionMode::Supervised,
+        );
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
             "{script}"
@@ -1163,7 +1174,11 @@ mod tests {
              --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
         ));
 
-        let hostile = command("/tmp/x'; touch /tmp/pwned; '", None);
+        let hostile = command(
+            "/tmp/x'; touch /tmp/pwned; '",
+            None,
+            PermissionMode::Supervised,
+        );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
 
@@ -1171,15 +1186,43 @@ mod tests {
     /// directory reaches the shell quoted.
     #[test]
     fn the_images_directory_is_added_before_the_other_flags() {
-        let script = command("/w", Some("/tmp/yantra-chat-Y01"));
+        let script = command(
+            "/w",
+            Some("/tmp/yantra-chat-Y01"),
+            PermissionMode::Supervised,
+        );
         assert!(
             script.contains("exec \"$c\" --add-dir '/tmp/yantra-chat-Y01' -p --input-format"),
             "{script}"
         );
-        let hostile = command("/w", Some("/tmp/a'; touch /tmp/pwned; '"));
+        let hostile = command(
+            "/w",
+            Some("/tmp/a'; touch /tmp/pwned; '"),
+            PermissionMode::Supervised,
+        );
         assert!(
             hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' -p "),
             "{hostile}"
         );
+    }
+
+    /// Y-453: only Auto hands Claude a mode; every other mode the daemon answers.
+    #[test]
+    fn the_auto_permission_mode_adds_the_flag() {
+        let auto = command("/w", Some("/tmp/i"), PermissionMode::Auto);
+        assert!(
+            auto.contains(
+                "exec \"$c\" --add-dir '/tmp/i' --permission-mode auto -p --input-format"
+            ),
+            "{auto}"
+        );
+        for mode in [
+            PermissionMode::Supervised,
+            PermissionMode::AutoAcceptEdits,
+            PermissionMode::FullAccess,
+        ] {
+            let script = command("/w", None, mode);
+            assert!(!script.contains("--permission-mode"), "{mode:?}: {script}");
+        }
     }
 }

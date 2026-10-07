@@ -236,6 +236,38 @@ pub enum Decision {
     Cancel,
 }
 
+/*
+ * The four modes and their names are T3 Code's, at commit 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/user/permission-modes.md
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+/// When a thread's agent needs a person's approval (Y-453). Unlike T3 Code,
+/// the default is `Supervised`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionMode {
+    #[default]
+    Supervised,
+    AutoAcceptEdits,
+    /// Claude's own review decides; a harness without one asks.
+    Auto,
+    FullAccess,
+}
+
+impl PermissionMode {
+    /// The answer this mode gives a request, or `None` to ask the person.
+    #[must_use]
+    pub fn answers(self, request: RequestType) -> Option<Decision> {
+        match (self, request) {
+            (Self::FullAccess, _) | (Self::AutoAcceptEdits, RequestType::FileChangeApproval) => {
+                Some(Decision::Accept)
+            }
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -332,5 +364,70 @@ mod tests {
             json!({"requestId": "r", "requestType": "exec_command_approval",
                    "title": "touch made.txt", "options": []})
         );
+    }
+
+    const EVERY: [RequestType; 4] = [
+        RequestType::ExecCommandApproval,
+        RequestType::FileReadApproval,
+        RequestType::FileChangeApproval,
+        RequestType::DynamicToolCall,
+    ];
+
+    #[test]
+    fn permission_mode_supervised_asks_about_every_request() {
+        assert_eq!(PermissionMode::default(), PermissionMode::Supervised);
+        for request in EVERY {
+            assert_eq!(
+                PermissionMode::Supervised.answers(request),
+                None,
+                "{request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_mode_auto_accept_edits_accepts_an_edit_and_asks_about_the_rest() {
+        for request in EVERY {
+            let expected = (request == RequestType::FileChangeApproval).then_some(Decision::Accept);
+            assert_eq!(
+                PermissionMode::AutoAcceptEdits.answers(request),
+                expected,
+                "{request:?}"
+            );
+        }
+    }
+
+    /// Claude's own review answers in this mode, so what reaches the daemon is asked.
+    #[test]
+    fn permission_mode_auto_asks_about_what_reaches_the_daemon() {
+        for request in EVERY {
+            assert_eq!(PermissionMode::Auto.answers(request), None, "{request:?}");
+        }
+    }
+
+    #[test]
+    fn permission_mode_full_access_accepts_every_request() {
+        for request in EVERY {
+            assert_eq!(
+                PermissionMode::FullAccess.answers(request),
+                Some(Decision::Accept),
+                "{request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_mode_is_kebab_case_on_the_wire() {
+        for (mode, name) in [
+            (PermissionMode::Supervised, "supervised"),
+            (PermissionMode::AutoAcceptEdits, "auto-accept-edits"),
+            (PermissionMode::Auto, "auto"),
+            (PermissionMode::FullAccess, "full-access"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(mode).expect("a mode serialises"),
+                json!(name)
+            );
+        }
     }
 }

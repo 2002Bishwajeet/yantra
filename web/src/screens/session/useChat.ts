@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
 import { AttachError, ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
-import type { Decision, Harness } from '@/api/thread'
+import type { Decision, Harness, PermissionMode } from '@/api/thread'
 import { empty, reduce, type Timeline } from './timeline'
 
 export type Link = 'connecting' | 'open' | 'closed'
@@ -61,8 +61,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
     timeline,
     error,
     link,
-    send: (text: string, harness?: Harness) => {
-      if (!socket.current?.send(text, harness)) return false
+    send: (text: string, harness?: Harness, mode?: PermissionMode) => {
+      if (!socket.current?.send(text, harness, mode)) return false
       setError(null)
       dispatch({ type: 'sent' })
       return true

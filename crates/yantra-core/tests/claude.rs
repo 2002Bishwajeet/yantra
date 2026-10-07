@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use common::{SshFixture, USER};
-use yantra_core::chat::{Decision, Event, StreamKind, TurnCompleted, TurnState};
+use yantra_core::chat::{Decision, Event, PermissionMode, StreamKind, TurnCompleted, TurnState};
 use yantra_core::claude::{Events, Turn};
 use yantra_core::image::Images;
 use yantra_core::ssh::{Machine, Ssh};
@@ -64,7 +64,7 @@ async fn run(
     images: Option<&str>,
     answer: Option<Decision>,
 ) -> Result<Vec<Event>> {
-    let (turn, mut events) = Turn::start(ssh, place, text, images)?;
+    let (turn, mut events) = Turn::start(ssh, place, text, images, PermissionMode::Supervised)?;
     let mut seen = Vec::new();
     tokio::time::timeout(PATIENCE, async {
         while let Some(next) = events.recv().await {
@@ -250,6 +250,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &place,
         "Count from 1 to 400, one number per line, with no tools.",
         None,
+        PermissionMode::Supervised,
     )?;
     next_delta(&mut events).await?;
     turn.cancel();
