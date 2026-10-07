@@ -2504,6 +2504,8 @@ mod tests {
         let writer = capture.clone();
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
+            // A timestamp can hold the image size's digits.
+            .without_time()
             .with_max_level(tracing::Level::TRACE)
             .with_writer(move || writer.clone())
             .finish();
