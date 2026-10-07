@@ -69,7 +69,6 @@ const onTheMic: Partial<Record<MicKind, string>> = {
   socket: 'The microphone on the machine stopped.',
 }
 
-
 export class ApiError extends Error {
   readonly kind: Kind
   readonly status?: number

@@ -127,14 +127,15 @@ pub fn open(ssh: &Ssh) -> Result<Stream, Error> {
     Ok(piped(ssh.stdio_detached(WRITER)?))
 }
 
-fn piped(piped: ssh::Piped) -> Stream {
-    let ssh::Piped {
+fn piped(
+    ssh::Piped {
         child,
         stdin,
         mut stdout,
         stderr,
         log,
-    } = piped;
+    }: ssh::Piped,
+) -> Stream {
     // A closed stdout would end `ssh` at the first line the far side prints.
     tokio::spawn(async move { tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await });
     let diagnosis = tokio::spawn(async move {
