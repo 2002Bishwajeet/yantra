@@ -199,6 +199,20 @@ pub struct RequestOpened {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub options: Vec<RequestOption>,
+    #[serde(skip)]
+    pub scope: Scope,
+}
+
+/// What a request reaches, which decides the modes that may answer it
+/// without the person. Never sent: the source works it out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Scope {
+    /// A question to the person, which no mode answers.
+    Question,
+    #[default]
+    Other,
+    /// An edit whose every path lies inside the thread's worktree.
+    WorktreeEdit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -258,11 +272,10 @@ pub enum PermissionMode {
 impl PermissionMode {
     /// The answer this mode gives a request, or `None` to ask the person.
     #[must_use]
-    pub fn answers(self, request: RequestType) -> Option<Decision> {
-        match (self, request) {
-            (Self::FullAccess, _) | (Self::AutoAcceptEdits, RequestType::FileChangeApproval) => {
-                Some(Decision::Accept)
-            }
+    pub fn answers(self, scope: Scope) -> Option<Decision> {
+        match (self, scope) {
+            (Self::FullAccess, Scope::Other | Scope::WorktreeEdit)
+            | (Self::AutoAcceptEdits, Scope::WorktreeEdit) => Some(Decision::Accept),
             _ => None,
         }
     }
@@ -358,6 +371,7 @@ mod tests {
             title: Some("touch made.txt".to_owned()),
             detail: None,
             options: vec![],
+            scope: Scope::Other,
         }));
         assert_eq!(
             opened["payload"],
@@ -366,33 +380,24 @@ mod tests {
         );
     }
 
-    const EVERY: [RequestType; 4] = [
-        RequestType::ExecCommandApproval,
-        RequestType::FileReadApproval,
-        RequestType::FileChangeApproval,
-        RequestType::DynamicToolCall,
-    ];
+    const EVERY: [Scope; 3] = [Scope::Question, Scope::Other, Scope::WorktreeEdit];
 
     #[test]
     fn permission_mode_supervised_asks_about_every_request() {
         assert_eq!(PermissionMode::default(), PermissionMode::Supervised);
-        for request in EVERY {
-            assert_eq!(
-                PermissionMode::Supervised.answers(request),
-                None,
-                "{request:?}"
-            );
+        for scope in EVERY {
+            assert_eq!(PermissionMode::Supervised.answers(scope), None, "{scope:?}");
         }
     }
 
     #[test]
-    fn permission_mode_auto_accept_edits_accepts_an_edit_and_asks_about_the_rest() {
-        for request in EVERY {
-            let expected = (request == RequestType::FileChangeApproval).then_some(Decision::Accept);
+    fn permission_mode_auto_accept_edits_accepts_only_an_edit_inside_the_worktree() {
+        for scope in EVERY {
+            let expected = (scope == Scope::WorktreeEdit).then_some(Decision::Accept);
             assert_eq!(
-                PermissionMode::AutoAcceptEdits.answers(request),
+                PermissionMode::AutoAcceptEdits.answers(scope),
                 expected,
-                "{request:?}"
+                "{scope:?}"
             );
         }
     }
@@ -400,18 +405,20 @@ mod tests {
     /// Claude's own review answers in this mode, so what reaches the daemon is asked.
     #[test]
     fn permission_mode_auto_asks_about_what_reaches_the_daemon() {
-        for request in EVERY {
-            assert_eq!(PermissionMode::Auto.answers(request), None, "{request:?}");
+        for scope in EVERY {
+            assert_eq!(PermissionMode::Auto.answers(scope), None, "{scope:?}");
         }
     }
 
+    /// A question is not a permission, so Full access leaves it to the person.
     #[test]
-    fn permission_mode_full_access_accepts_every_request() {
-        for request in EVERY {
+    fn permission_mode_full_access_accepts_every_request_but_a_question() {
+        for scope in EVERY {
+            let expected = (scope != Scope::Question).then_some(Decision::Accept);
             assert_eq!(
-                PermissionMode::FullAccess.answers(request),
-                Some(Decision::Accept),
-                "{request:?}"
+                PermissionMode::FullAccess.answers(scope),
+                expected,
+                "{scope:?}"
             );
         }
     }
