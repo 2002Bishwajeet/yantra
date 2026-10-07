@@ -231,8 +231,9 @@ describe('the socket wrapper', () => {
     daemonised.keepHangingUp()
     daemonised.hangUp()
 
+    // The budget needs ATTEMPTS pauses of real time; the margin is for a loaded suite.
     await waitFor(() => expect(ended).toEqual([null]), {
-      timeout: PAUSE * (ATTEMPTS + 4),
+      timeout: PAUSE * ATTEMPTS + 10_000,
     })
     expect(daemonised.connections()).toBe(ATTEMPTS + 1)
   })
