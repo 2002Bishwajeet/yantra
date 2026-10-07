@@ -170,7 +170,9 @@ Four rules bind anything that touches it:
 - **The reading is in the model before anything is sent**, and the whole pass has a budget well under
   the refresh interval. A notifier that makes a browser wait on a relay is worse than one that drops.
 
-**The body names the workspace and the verdict and nothing else**: `Notification`
+**The body names the workspace and a phase-worded detail and nothing else**, and the `Title`
+header is the phase's fixed headline (Y-451). A failed run's detail is the fixed string *The agent run
+failed.*, and the body is cut at 160 characters. The event log keeps the full verdict. `Notification`
 has no field for a machine or a repo, so widening what a public relay is told is an edit here. The
 destination is a `Relay`, whose `Debug` is hand-written because both halves of it are secrets — the
 token by §B4 and Q5, and the topic because on ntfy.sh the topic *is* the password. No error below it

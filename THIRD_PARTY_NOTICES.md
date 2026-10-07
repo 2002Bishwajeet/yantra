@@ -16,7 +16,13 @@ shape of
 onto Yantra's own menu and tokens.
 [`crates/yantra-core/src/placement.rs`](crates/yantra-core/src/placement.rs) copies the shape of
 [`packages/client-runtime/src/load-balancing.ts`](https://github.com/pingdotgg/t3code/blob/main/packages/client-runtime/src/load-balancing.ts)
-at commit `72d5c32`, with Yantra's own score terms. Its name, wordmark and icon are not used.
+at commit `72d5c32`, with Yantra's own score terms.
+[`crates/yantra-core/src/notify.rs`](crates/yantra-core/src/notify.rs) copies the activity phases and
+headlines of
+[`packages/shared/src/agentAwareness.ts`](https://github.com/pingdotgg/t3code/blob/main/packages/shared/src/agentAwareness.ts)
+and the failed-run redaction of
+[`apps/server/src/relay/AgentAwarenessRelay.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/relay/AgentAwarenessRelay.ts)
+at commit `72d5c32`, without the `stale` phase. Its name, wordmark and icon are not used.
 
 ```text
 MIT License
