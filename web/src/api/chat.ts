@@ -1,4 +1,13 @@
-import { HARNESSES, type ChatFailure, type ChatFrame, type Decision, type Harness, type ThreadEvent } from '@/api/thread'
+import {
+  HARNESSES,
+  type ChatAttached,
+  type ChatFailure,
+  type ChatFrame,
+  type ChatNotAttached,
+  type Decision,
+  type Harness,
+  type ThreadEvent,
+} from '@/api/thread'
 
 /** Every way the chat can fail, each from a different place (ADR-0026, Y-356). */
 export type ChatErrorKind =
@@ -62,6 +71,48 @@ export class ChatError extends Error {
   }
 }
 
+/** The largest image a frame carries: `chat.rs`'s `IMAGE_LIMIT`. */
+export const IMAGE_LIMIT = 16 * 1024 * 1024
+
+/** The formats Claude's Read takes. The daemon checks the bytes again. */
+export const IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+/** Every way one image can fail to attach (Y-424). */
+export type AttachErrorKind =
+  // Over IMAGE_LIMIT, so it was not sent.
+  | 'tooLarge'
+  // Not PNG, JPEG, GIF or WebP, by its type here or its bytes on the daemon.
+  | 'notAnImage'
+  // The machine could not be reached, or did not write it.
+  | 'unreachable'
+  // The socket was not open, closed before the daemon replied, or closed
+  // after, which removed the image from the machine.
+  | 'closed'
+
+const attachSentences: Record<AttachErrorKind, string> = {
+  tooLarge: 'The image is larger than 16 MiB, the most the chat takes.',
+  notAnImage: 'The chat takes PNG, JPEG, GIF and WebP images only.',
+  unreachable: "The workspace's machine did not take the image.",
+  closed: 'The chat socket closed, so the image is not attached. Add it again.',
+}
+
+/** Why one image did not attach. `said` is the daemon's words, when it spoke. */
+export class AttachError extends Error {
+  readonly kind: AttachErrorKind
+  readonly said: string
+
+  constructor(kind: AttachErrorKind, said = '') {
+    super(said || attachSentences[kind])
+    this.name = 'AttachError'
+    this.kind = kind
+    this.said = said
+  }
+
+  describe(): string {
+    return attachSentences[this.kind]
+  }
+}
+
 export function chatAddress(workspace: string, thread?: string): string {
   const daemon = location.origin.replace(/^http/, 'ws')
   const base = `${daemon}/api/workspaces/${encodeURIComponent(workspace)}/chat`
@@ -74,6 +125,9 @@ export type ChatSocket = {
   send: (text: string, harness?: Harness) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
+  /** Sends an image and resolves to its path on the machine, or rejects with
+   *  an `AttachError`. The daemon replies to images in the order they went. */
+  attach: (file: Blob) => Promise<string>
   /** The one end that means it: nothing more is reported. */
   close: () => void
 }
@@ -93,7 +147,7 @@ function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
 }
 
 /** A daemon frame, or `null` for one this dashboard cannot read. */
-export function frameOf(text: string): ThreadEvent | ChatFailure | null {
+export function frameOf(text: string): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | null {
   let said: unknown
   try {
     said = JSON.parse(text)
@@ -101,6 +155,15 @@ export function frameOf(text: string): ThreadEvent | ChatFailure | null {
     return null
   }
   if (typeof said !== 'object' || said === null || !('type' in said)) return null
+  if (said.type === 'attached') {
+    return 'path' in said && typeof said.path === 'string' && said.path !== '' ? (said as ChatAttached) : null
+  }
+  if (said.type === 'notAttached') {
+    const refused = said as Partial<ChatNotAttached>
+    return (refused.kind === 'notAnImage' || refused.kind === 'unreachable') && typeof refused.said === 'string'
+      ? (said as ChatNotAttached)
+      : null
+  }
   if (said.type === 'error') {
     const failure = said as Partial<ChatFailure> & Partial<Record<keyof Login, unknown>>
     if (typeof failure.kind !== 'string' || !KINDS.has(failure.kind) || typeof failure.said !== 'string') return null
@@ -133,6 +196,12 @@ export function openChat(
   // An unknown thread is said, and then the daemon closes; that close is not
   // a second failure.
   let said = false
+  // One per image sent and not yet answered, oldest first.
+  const pending: { resolve: (path: string) => void; reject: (error: AttachError) => void }[] = []
+
+  const abandon = () => {
+    for (const waiting of pending.splice(0)) waiting.reject(new AttachError('closed'))
+  }
 
   const send = (frame: ChatFrame) => {
     if (socket?.readyState !== WebSocket.OPEN) return false
@@ -167,6 +236,17 @@ export function openChat(
         )
         return
       }
+      if (frame.type === 'attached' || frame.type === 'notAttached') {
+        const waiting = pending.shift()
+        if (!waiting) {
+          onError(new ChatError('badFrame', message.data as string, 'The daemon answered an image this dashboard did not send.'))
+        } else if (frame.type === 'attached') {
+          waiting.resolve(frame.path)
+        } else {
+          waiting.reject(new AttachError(frame.kind, frame.said))
+        }
+        return
+      }
       if (frame.type === 'error') {
         said = frame.kind === 'unknownThread' || frame.kind === 'unreachable' || frame.kind === 'notLoggedIn'
         onError(
@@ -187,6 +267,7 @@ export function openChat(
       }
     }
     live.onclose = () => {
+      abandon()
       if (finished) return
       finished = true
       if (!wasOpen) onError(new ChatError('refused', 'the daemon refused the chat'))
@@ -202,7 +283,18 @@ export function openChat(
     send: (text, harness) => send(harness ? { type: 'turn', text, harness } : { type: 'turn', text }),
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
+    attach: (file) => {
+      if (file.size > IMAGE_LIMIT) return Promise.reject(new AttachError('tooLarge'))
+      if (!IMAGE_TYPES.includes(file.type)) return Promise.reject(new AttachError('notAnImage'))
+      if (socket?.readyState !== WebSocket.OPEN) return Promise.reject(new AttachError('closed'))
+      const live = socket
+      return new Promise<string>((resolve, reject) => {
+        pending.push({ resolve, reject })
+        live.send(file)
+      })
+    },
     close: () => {
+      abandon()
       finished = true
       clearTimeout(waiting)
       socket?.close()

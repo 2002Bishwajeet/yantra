@@ -562,10 +562,19 @@ the route finds the thread, says `thread.started` too, and replays it: Claude's 
 or ACP's `session/load`. **There is no session-addressed form**: a thread
 is a worktree of a workspace's repository, and a bare session names none.
 
-- **The frames are JSON both ways.** The browser sends `turn`, `answer` and `cancel`; the daemon sends
+- **The text frames are JSON both ways.** The browser sends `turn`, `answer` and `cancel`; the daemon sends
   `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are `unknownThread`, `busy`,
   `badFrame`, `unreachable` and `notLoggedIn`. `notLoggedIn` adds `harness`, `machine` and the
   `command` to run there. All are in `contract.gen.ts`.
+- **A binary frame is an image** (Y-424). The upgrade's limit is 16 MiB a message and a frame, so a
+  10 MB screenshot fits. The route sends the bytes to the machine through
+  [`image::Images`](../yantra-core/src/image.rs): one directory per socket under the machine's
+  `TMPDIR`, outside every repository and worktree, under a name the daemon generates. It writes
+  nothing on the appliance. Each frame is awaited inline for up to 60 s and gets exactly one reply,
+  in order: `{"type":"attached","path"}` or `{"type":"notAttached","kind","said"}`, whose kinds are
+  `notAnImage` and `unreachable`. Every Claude turn after the first image gets `--add-dir` on the
+  directory, so Claude reads it without a prompt. The socket's close removes the directory, after the
+  turn is cancelled, within 10 s. The log says `image attached` and never a byte or a size.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
   `thread.started` is dropped. A browser's decision is answered with the option the agent offered.
@@ -582,7 +591,7 @@ is a worktree of a workspace's repository, and a bare session names none.
   that awaits ssh.
 - The calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket
   logic against scripted turns and scripted ACP agents, and the real things run in
-  `yantra-core/tests/claude.rs`, `tests/acp.rs` and `tests/thread.rs`.
+  `yantra-core/tests/claude.rs`, `tests/acp.rs`, `tests/thread.rs` and `tests/image.rs`.
 
 ## The dashboard's types are checked against these routes, not trusted to match
 

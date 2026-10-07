@@ -16,6 +16,11 @@
 //! A socket that closes mid-turn cancels the turn; the worktree stays, as
 //! `thread.rs` requires.
 //!
+//! **A binary frame is an image** (Y-424). It goes to the machine through
+//! [`Images`], one directory per socket, and gets exactly one [`Attachment`]
+//! in reply, in order. Every Claude turn may read that directory, and the
+//! socket's close removes it. The daemon writes nothing of it to disk.
+//!
 //! **An upgrade is a `GET`**, so [`allowed`] is called by name before it, as
 //! in [`crate::terminal`]. Q5 holds: the socket's lifecycle is logged, and not
 //! one word of a prompt, a reply or a tool's output is.
@@ -31,6 +36,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, Uri};
@@ -42,6 +48,7 @@ use yantra_core::chat::{
     ContentDelta, Decision, Event, RequestOption, StopReason, StreamKind, ThreadEvent, TurnState,
 };
 use yantra_core::claude::{Events, Turn};
+use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
 use yantra_core::logs::{self, Who};
 use yantra_core::ssh::{self, Ssh};
@@ -59,6 +66,12 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 const CONNECT_WITHIN: Duration = Duration::from_secs(60);
 /// How a Claude turn that has no login ends, in Claude's own words.
 const CLAUDE_NOT_LOGGED_IN: &str = "Not logged in";
+/// The largest image a frame carries, above a 10 MB screenshot.
+const IMAGE_LIMIT: usize = 16 * 1024 * 1024;
+/// How long one image may take to land. Meanwhile no frame is read.
+const PUT_WITHIN: Duration = Duration::from_secs(60);
+/// How long the socket's close waits for its images to be removed.
+const CLEAR_WITHIN: Duration = Duration::from_secs(10);
 
 pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
 where
@@ -82,7 +95,7 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
     let thread = read_thread(&uri);
     tracing::info!("chat {name} for {}", caller.node);
 
-    Ok(upgrade.on_upgrade(move |mut socket| async move {
+    Ok(sized(upgrade).on_upgrade(move |mut socket| async move {
         match Fleet::of(&name) {
             Ok(fleet) => converse(&fleet, &name, thread, &mut socket).await,
             Err(said) => {
@@ -92,6 +105,13 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
         }
         tracing::info!("chat {name} ended");
     }))
+}
+
+/// tungstenite's own limits are 64 MiB a message and 16 MiB a frame.
+fn sized(upgrade: WebSocketUpgrade) -> WebSocketUpgrade {
+    upgrade
+        .max_message_size(IMAGE_LIMIT)
+        .max_frame_size(IMAGE_LIMIT)
 }
 
 /// `?thread=`, read by hand as `terminal.rs` reads `?at=`. It is compared with
@@ -133,6 +153,29 @@ struct Failure {
     said: String,
     #[serde(flatten)]
     login: Option<Login>,
+}
+
+/// The one reply to each image, in the order the images came.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum Attachment {
+    /// `path` is where Claude reads it on the machine.
+    Attached {
+        path: String,
+    },
+    NotAttached {
+        kind: NotAttached,
+        said: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum NotAttached {
+    /// The bytes are not a PNG, JPEG, GIF or WebP.
+    NotAnImage,
+    /// The machine could not be reached, or did not write it.
+    Unreachable,
 }
 
 /// What a `notLoggedIn` failure names: whose login, where, and how to make it.
@@ -205,7 +248,17 @@ trait Machine: Sync {
     /// a Claude thread later.
     async fn remove(&self, place: &Place) -> Result<(), String>;
     async fn history(&self, place: &Place) -> Result<Vec<logs::Entry>, String>;
-    fn start(&self, place: &Place, text: &str) -> Result<(Turn, Events), String>;
+    /// `images` is the directory a Claude turn may read.
+    fn start(
+        &self,
+        place: &Place,
+        text: &str,
+        images: Option<&str>,
+    ) -> Result<(Turn, Events), String>;
+    /// Writes one image on the machine and returns its path.
+    async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error>;
+    /// Removes the socket's images.
+    async fn clear(&self, images: &Images) -> Result<(), String>;
     async fn recall(&self, place: &Place) -> Result<Option<(Harness, String)>, String>;
     async fn remember(&self, place: &Place, harness: Harness, session: &str) -> Result<(), String>;
     fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String>;
@@ -259,8 +312,24 @@ impl Machine for Fleet {
         }
     }
 
-    fn start(&self, place: &Place, text: &str) -> Result<(Turn, Events), String> {
-        Turn::start(&self.ssh, place, text).map_err(|error| chain(&error))
+    fn start(
+        &self,
+        place: &Place,
+        text: &str,
+        images: Option<&str>,
+    ) -> Result<(Turn, Events), String> {
+        Turn::start(&self.ssh, place, text, images).map_err(|error| chain(&error))
+    }
+
+    async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
+        images.put(&self.ssh, bytes).await
+    }
+
+    async fn clear(&self, images: &Images) -> Result<(), String> {
+        images
+            .remove(&self.ssh)
+            .await
+            .map_err(|error| chain(&error))
     }
 
     async fn recall(&self, place: &Place) -> Result<Option<(Harness, String)>, String> {
@@ -280,10 +349,15 @@ impl Machine for Fleet {
     }
 }
 
-/// The browser's end of the socket. Only text frames carry anything; `None`
-/// is a socket that closed or failed.
+/// What the browser sent: a JSON frame, or an image.
+enum Heard {
+    Text(String),
+    Binary(Bytes),
+}
+
+/// The browser's end of the socket. `None` is a socket that closed or failed.
 trait Peer {
-    async fn hear(&mut self) -> Option<String>;
+    async fn hear(&mut self) -> Option<Heard>;
     async fn say_text(&mut self, text: String) -> bool;
 
     async fn say<T: Serialize + Sync>(&mut self, frame: &T) -> bool {
@@ -295,10 +369,11 @@ trait Peer {
 }
 
 impl Peer for WebSocket {
-    async fn hear(&mut self) -> Option<String> {
+    async fn hear(&mut self) -> Option<Heard> {
         loop {
             match self.recv().await? {
-                Ok(Message::Text(text)) => return Some(text.to_string()),
+                Ok(Message::Text(text)) => return Some(Heard::Text(text.to_string())),
+                Ok(Message::Binary(bytes)) => return Some(Heard::Binary(bytes)),
                 Ok(Message::Close(_)) | Err(_) => return None,
                 // A ping is still axum's to answer.
                 Ok(_) => {}
@@ -380,6 +455,7 @@ async fn converse<M: Machine, P: Peer>(
         }
     }
 
+    let mut images = Images::new();
     let mut sent = 0usize;
     loop {
         let step = tokio::select! {
@@ -388,7 +464,11 @@ async fn converse<M: Machine, P: Peer>(
         };
         let open = match step {
             Step::Heard(None) => false,
-            Step::Heard(Some(text)) => match serde_json::from_str::<Frame>(&text) {
+            Step::Heard(Some(Heard::Binary(bytes))) => {
+                let reply = land(machine, name, &mut images, &bytes).await;
+                peer.say(&reply).await
+            }
+            Step::Heard(Some(Heard::Text(text))) => match serde_json::from_str::<Frame>(&text) {
                 Ok(Frame::Turn { text, harness }) => {
                     let asked = harness.as_deref().map(harness_named).transpose();
                     let theirs = here
@@ -414,7 +494,12 @@ async fn converse<M: Machine, P: Peer>(
                         (Ok(asked), _) => {
                             sent += 1;
                             let pick = asked.flatten();
-                            begin(machine, name, &mut here, pick, text, sent, peer).await
+                            let turn = Said {
+                                text,
+                                sent,
+                                images: images.dir(),
+                            };
+                            begin(machine, name, &mut here, pick, turn, peer).await
                         }
                     }
                 }
@@ -464,10 +549,51 @@ async fn converse<M: Machine, P: Peer>(
     if let Some(running) = here {
         hang_up(name, running).await;
     }
+    if images.used() {
+        match tokio::time::timeout(CLEAR_WITHIN, machine.clear(&images)).await {
+            Ok(Ok(())) => tracing::info!("chat {name}: its images were removed"),
+            Ok(Err(said)) => tracing::warn!("chat {name}: its images stay: {said}"),
+            Err(_) => tracing::warn!("chat {name}: its images stay: the machine did not answer"),
+        }
+    }
+}
+
+/// Writes one image and says where it landed. Never a byte or a size in the log.
+async fn land<M: Machine>(
+    machine: &M,
+    name: &str,
+    images: &mut Images,
+    bytes: &[u8],
+) -> Attachment {
+    let unreachable = |said: String| {
+        tracing::warn!("chat {name}: an image was not attached: {said}");
+        Attachment::NotAttached {
+            kind: NotAttached::Unreachable,
+            said,
+        }
+    };
+    match tokio::time::timeout(PUT_WITHIN, machine.put(images, bytes)).await {
+        Ok(Ok(path)) => {
+            tracing::info!("chat {name}: image attached");
+            Attachment::Attached { path }
+        }
+        Ok(Err(error @ image::Error::NotAnImage)) => {
+            tracing::info!("chat {name}: a frame was not an image");
+            Attachment::NotAttached {
+                kind: NotAttached::NotAnImage,
+                said: error.to_string(),
+            }
+        }
+        Ok(Err(error)) => unreachable(chain(&error)),
+        Err(_) => unreachable(format!(
+            "the machine did not take the image within {} seconds",
+            PUT_WITHIN.as_secs()
+        )),
+    }
 }
 
 enum Step {
-    Heard(Option<String>),
+    Heard(Option<Heard>),
     Event(Option<ThreadEvent>),
     Prompted(Result<StopReason, acp::Error>),
 }
@@ -862,6 +988,14 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: String) -> 
     }
 }
 
+/// One turn the person sent: what they wrote, its number on this socket, and
+/// the directory of the images it may read.
+struct Said<'a> {
+    text: String,
+    sent: usize,
+    images: Option<&'a str>,
+}
+
 /// Opens the thread on the first turn with the harness `pick` names, repeats
 /// what the person wrote, and starts the turn. `false` is a socket that went
 /// away.
@@ -870,8 +1004,7 @@ async fn begin<M: Machine, P: Peer>(
     name: &str,
     here: &mut Option<Conversation>,
     pick: Option<Harness>,
-    text: String,
-    sent: usize,
+    Said { text, sent, images }: Said<'_>,
     peer: &mut P,
 ) -> bool {
     let running = match here {
@@ -896,7 +1029,7 @@ async fn begin<M: Machine, P: Peer>(
         return false;
     }
     match &mut running.speaker {
-        Speaker::Claude(turn) => match machine.start(&running.place, &text) {
+        Speaker::Claude(turn) => match machine.start(&running.place, &text, images) {
             Ok(started) => {
                 tracing::info!("chat {name}: a turn started");
                 *turn = Some(started);
@@ -1059,6 +1192,23 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             .expect("a failure serialises"),
         ),
         (
+            "chatAttached",
+            "ChatAttached",
+            serde_json::to_value(Attachment::Attached {
+                path: "/tmp/yantra-chat-Y0123456789abcdef/1.png".to_owned(),
+            })
+            .expect("an attachment serialises"),
+        ),
+        (
+            "chatNotAttached",
+            "ChatNotAttached",
+            serde_json::to_value(Attachment::NotAttached {
+                kind: NotAttached::NotAnImage,
+                said: image::Error::NotAnImage.to_string(),
+            })
+            .expect("an attachment serialises"),
+        ),
+        (
             "chatFrames",
             "ChatFrame[]",
             serde_json::Value::Array(vec![
@@ -1096,6 +1246,7 @@ mod tests {
     const ME: u64 = 1;
     const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
     const THREAD: &str = "1a2b3c4d";
+    const IMAGES: &str = "/tmp/yantra-chat-Y0123456789abcdef";
 
     fn place() -> Place {
         Place {
@@ -1197,6 +1348,13 @@ mod tests {
         opened: Mutex<usize>,
         removed: Mutex<usize>,
         remembered: Mutex<Vec<(Harness, String)>>,
+        /// Each write of an image fails, as a full disk would.
+        put_fails: bool,
+        /// The size of each image that reached the machine.
+        put: Mutex<Vec<usize>>,
+        cleared: Mutex<usize>,
+        /// The images directory each Claude turn was started with.
+        started_with: Mutex<Vec<Option<String>>>,
     }
 
     impl Script {
@@ -1287,7 +1445,16 @@ mod tests {
             Ok(self.history.clone())
         }
 
-        fn start(&self, place: &Place, text: &str) -> Result<(Turn, Events), String> {
+        fn start(
+            &self,
+            place: &Place,
+            text: &str,
+            images: Option<&str>,
+        ) -> Result<(Turn, Events), String> {
+            self.started_with
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(images.map(str::to_owned));
             let (ours, theirs) = tokio::io::duplex(1 << 16);
             let (read, write) = tokio::io::split(ours);
             let (hears, says) = tokio::io::split(theirs);
@@ -1300,16 +1467,39 @@ mod tests {
                 });
             Ok(Turn::over(read, write, thread::name(place), text))
         }
+
+        async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
+            let fails = self.put_fails;
+            images
+                .put_with(bytes, |_| async move {
+                    let mut put = self.put.lock().unwrap_or_else(PoisonError::into_inner);
+                    put.push(bytes.len());
+                    if fails {
+                        return Err(image::Error::Put {
+                            status: Some(1),
+                            said: "mkdir: can't create directory: No space left on device"
+                                .to_owned(),
+                        });
+                    }
+                    Ok(format!("{IMAGES}/{}.png", put.len()))
+                })
+                .await
+        }
+
+        async fn clear(&self, _: &Images) -> Result<(), String> {
+            *self.cleared.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            Ok(())
+        }
     }
 
     /// The browser, as two channels.
     struct Browser {
-        from: mpsc::UnboundedReceiver<String>,
+        from: mpsc::UnboundedReceiver<Heard>,
         to: mpsc::UnboundedSender<String>,
     }
 
     impl Peer for Browser {
-        async fn hear(&mut self) -> Option<String> {
+        async fn hear(&mut self) -> Option<Heard> {
             self.from.recv().await
         }
 
@@ -1319,7 +1509,7 @@ mod tests {
     }
 
     struct Tab {
-        send: Option<mpsc::UnboundedSender<String>>,
+        send: Option<mpsc::UnboundedSender<Heard>>,
         heard: mpsc::UnboundedReceiver<String>,
     }
 
@@ -1328,7 +1518,15 @@ mod tests {
             self.send
                 .as_ref()
                 .expect("the tab is open")
-                .send(frame.to_string())
+                .send(Heard::Text(frame.to_string()))
+                .expect("the socket listens");
+        }
+
+        fn send_image(&self, bytes: Vec<u8>) {
+            self.send
+                .as_ref()
+                .expect("the tab is open")
+                .send(Heard::Binary(Bytes::from(bytes)))
                 .expect("the socket listens");
         }
 
@@ -2183,5 +2381,199 @@ mod tests {
         }
         let owner = handshake(Some(caller(ME, &[]))).await;
         assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
+    }
+
+    /// A PNG's magic, then `len` bytes in all.
+    fn png(len: usize) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.resize(len, 0x5a);
+        bytes
+    }
+
+    /// Y-424: a screenshot reaches the machine whole, and the reply names
+    /// where it landed.
+    #[tokio::test]
+    async fn a_10_mb_image_reaches_the_machine_and_the_reply_names_its_path() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send_image(png(10_000_000));
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "attached", "path": format!("{IMAGES}/1.png")})
+        );
+        assert_eq!(*script.put.lock().expect("a lock"), [10_000_000]);
+    }
+
+    #[tokio::test]
+    async fn a_frame_that_is_not_an_image_is_refused_and_the_socket_stays_open() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send_image(b"<svg onload=alert(1)>".to_vec());
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "notAttached", "kind": "notAnImage",
+                   "said": "that is not a PNG, JPEG, GIF or WebP image"})
+        );
+        assert!(script.put.lock().expect("a lock").is_empty());
+
+        tab.send(json!({"type": "turn", "text": "still here"}));
+        assert_eq!(tab.next().await["type"], "thread.started");
+    }
+
+    #[tokio::test]
+    async fn an_image_the_machine_cannot_write_is_unreachable() {
+        let script = Arc::new(Script {
+            put_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send_image(png(64));
+        let said = tab.next().await;
+        assert_eq!(said["type"], "notAttached", "{said}");
+        assert_eq!(said["kind"], "unreachable", "{said}");
+        assert!(
+            said["said"]
+                .as_str()
+                .is_some_and(|said| said.contains("No space left on device")),
+            "{said}"
+        );
+    }
+
+    /// Two images and a junk frame between them: one reply each, in order.
+    #[tokio::test]
+    async fn every_image_gets_one_reply_in_order() {
+        let (mut tab, _served) = connect(Arc::new(Script::default()), None);
+        tab.send_image(png(64));
+        tab.send_image(b"GIF8".to_vec());
+        tab.send_image(png(128));
+        assert_eq!(tab.next().await["path"], format!("{IMAGES}/1.png"));
+        assert_eq!(tab.next().await["kind"], "notAnImage");
+        assert_eq!(tab.next().await["path"], format!("{IMAGES}/2.png"));
+    }
+
+    #[tokio::test]
+    async fn a_claude_turn_after_an_image_may_read_its_directory() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "before"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude();
+        claude.heard().await;
+        claude
+            .say(json!({"type": "result", "subtype": "success", "is_error": false}))
+            .await;
+        assert_eq!(tab.next().await["type"], "turn.completed");
+
+        tab.send_image(png(64));
+        assert_eq!(tab.next().await["type"], "attached");
+        tab.send(json!({"type": "turn", "text": format!("what is in {IMAGES}/1.png?")}));
+        tab.next().await;
+        assert_eq!(
+            *script.started_with.lock().expect("a lock"),
+            [None, Some(IMAGES.to_owned())]
+        );
+    }
+
+    async fn closed(script: Arc<Script>, image: bool) -> usize {
+        let (mut tab, served) = connect(Arc::clone(&script), None);
+        if image {
+            tab.send_image(png(64));
+            tab.next().await;
+        }
+        tab.close();
+        tokio::time::timeout(Duration::from_secs(5), served)
+            .await
+            .expect("the socket's task ends")
+            .expect("it did not panic");
+        *script.cleared.lock().expect("a lock")
+    }
+
+    #[tokio::test]
+    async fn a_close_removes_the_images_and_a_socket_with_none_removes_nothing() {
+        assert_eq!(closed(Arc::new(Script::default()), true).await, 1);
+        assert_eq!(closed(Arc::new(Script::default()), false).await, 0);
+    }
+
+    /// **Q5 for an image**: the log says one landed, and never a byte of it
+    /// or its size.
+    #[tokio::test]
+    async fn an_image_is_logged_as_attached_and_never_as_bytes() {
+        use crate::terminal::tests::Capture;
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let script = Arc::new(Script::default());
+        let (mut tab, served) = connect(Arc::clone(&script), None);
+        let mut marked = png(8);
+        marked.extend_from_slice(b"pasted-as-image-bytes");
+        let size = marked.len();
+        tab.send_image(marked);
+        assert_eq!(tab.next().await["type"], "attached");
+        tab.close();
+        tokio::time::timeout(Duration::from_secs(5), served)
+            .await
+            .expect("the socket's task ends")
+            .expect("it did not panic");
+
+        let logged = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        assert!(logged.contains("chat web: image attached"), "{logged}");
+        assert!(!logged.contains("pasted-as-image-bytes"), "{logged}");
+        assert!(!logged.contains(&size.to_string()), "{logged}");
+    }
+
+    /// A client frame with a 64-bit length and a zero mask.
+    async fn send_big(socket: &mut BufReader<TcpStream>, payload: &[u8]) {
+        let mut head = vec![0x82, 0x80 | 127];
+        head.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+        head.extend_from_slice(&[0, 0, 0, 0]);
+        // The daemon may drop a socket whose frame is over the limit mid-write.
+        let _ = socket.get_mut().write_all(&head).await;
+        let _ = socket.get_mut().write_all(payload).await;
+    }
+
+    /// What a socket with the route's limits says to one binary frame: its
+    /// length, or nothing when the frame was refused.
+    async fn heard_of(payload: &[u8]) -> Option<String> {
+        use crate::terminal::tests::{TEXT, connect_to, frame};
+        let api = Router::new().route(
+            "/big",
+            get(|upgrade: WebSocketUpgrade| async move {
+                sized(upgrade).on_upgrade(|mut socket| async move {
+                    if let Some(Ok(Message::Binary(bytes))) = socket.recv().await {
+                        let _ = socket
+                            .send(Message::Text(bytes.len().to_string().into()))
+                            .await;
+                    }
+                })
+            }),
+        );
+        let mut socket = connect_to(api, "/api/big", "").await;
+        let mut line = String::new();
+        while line != "\r\n" {
+            line.clear();
+            socket.read_line(&mut line).await.expect("a header");
+        }
+        send_big(&mut socket, payload).await;
+        match tokio::time::timeout(Duration::from_secs(10), frame(&mut socket)).await {
+            Ok(Ok((TEXT, said))) => Some(String::from_utf8_lossy(&said).into_owned()),
+            _ => None,
+        }
+    }
+
+    /// The route's own limit holds a 10 MB screenshot and refuses what is over it.
+    #[tokio::test]
+    async fn the_socket_takes_a_10_mb_screenshot_and_nothing_over_its_limit() {
+        assert_eq!(
+            heard_of(&png(10_000_000)).await.as_deref(),
+            Some("10000000")
+        );
+        assert_eq!(heard_of(&png(IMAGE_LIMIT + 1)).await, None);
     }
 }

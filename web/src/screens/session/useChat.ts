@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
-import { ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
+import { AttachError, ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
 import type { Decision, Harness } from '@/api/thread'
 import { empty, reduce, type Timeline } from './timeline'
 
@@ -67,6 +67,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       return true
     },
     answer: (requestId: string, decision: Decision) => socket.current?.answer(requestId, decision) ?? false,
+    /** Sends an image; it resolves to the path on the machine. */
+    attach: (file: Blob) => socket.current?.attach(file) ?? Promise.reject(new AttachError('closed')),
     stop: () => {
       if (socket.current?.stop()) dispatch({ type: 'stopping' })
     },

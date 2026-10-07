@@ -64,6 +64,19 @@ export async function daemon() {
   }
 }
 
+/** `ws`'s client, sending a `Blob` as a browser does. jsdom's `Blob` is not
+ *  Node's, so `ws` refuses it; this reads it first, and queues every send so
+ *  the frames still leave in the order the page sent them. */
+class BrowserSocket extends Ws {
+  private queue: Promise<void> = Promise.resolve()
+
+  override send(data: unknown) {
+    this.queue = this.queue.then(async () => {
+      super.send(data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : (data as string))
+    })
+  }
+}
+
 const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 1440 }
 
 /** Two things jsdom cannot do for a terminal, and the second one is a trap.
@@ -77,6 +90,7 @@ const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 14
  *  *"must be an instance of Event. Received an instance of Event"* and the
  *  socket times out. `ws`'s client is a second RFC-6455 implementation rather
  *  than a stand-in for this one: it really connects to the server above.
+ *  `BrowserSocket` adds the one thing a browser's has that it lacks.
  *
  *  `size` answers the shell's width queries, so a view whose copy is shorter
  *  on the phone can be mounted at 390 as well. */
@@ -90,5 +104,5 @@ export function browser(size: FormFactor = 'desktop') {
     addListener: () => {},
     removeListener: () => {},
   }))
-  vi.stubGlobal('WebSocket', Ws)
+  vi.stubGlobal('WebSocket', BrowserSocket)
 }
