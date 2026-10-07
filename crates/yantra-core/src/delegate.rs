@@ -480,7 +480,7 @@ mod tests {
         let (client, agent) = tokio::io::duplex(1 << 16);
         let (client_read, client_write) = tokio::io::split(client);
         let (agent_read, agent_write) = tokio::io::split(agent);
-        let (client, events) = Agent::over(client_read, client_write);
+        let (client, events) = Agent::over(Harness::Opencode, client_read, client_write);
         let fake = Fake {
             from_client: BufReader::new(agent_read),
             to_client: agent_write,
@@ -606,6 +606,7 @@ mod tests {
             &mut inner,
             &Event::ThreadStarted {
                 thread: "t".to_owned(),
+                harness: "opencode".to_owned(),
             },
         );
         assert_eq!(inner.progress.state, State::Starting);

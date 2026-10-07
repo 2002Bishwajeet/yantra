@@ -735,6 +735,7 @@ export const terminalExit = {
 export const chatEvents = [
   {
     "payload": {
+      "harness": "opencode",
       "thread": "1a2b3c4d"
     },
     "threadId": "1a2b3c4d",
@@ -841,9 +842,23 @@ export const chatFailure = {
   "type": "error"
 } satisfies ChatFailure
 
+export const chatNotLoggedIn = {
+  "command": "opencode auth login",
+  "harness": "opencode",
+  "kind": "notLoggedIn",
+  "machine": "cachyos-g14",
+  "said": "the agent refused: Authentication required (-32000)",
+  "type": "error"
+} satisfies ChatFailure
+
 export const chatFrames = [
   {
+    "harness": "opencode",
     "text": "run the tests",
+    "type": "turn"
+  },
+  {
+    "text": "and the docs",
     "type": "turn"
   },
   {

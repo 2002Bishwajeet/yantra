@@ -12,8 +12,9 @@ describe('the timeline', () => {
     const timeline = fold(chatEvents.slice(0, -1).map(event))
 
     expect(timeline.thread).toBe('1a2b3c4d')
+    expect(timeline.harness).toBe('opencode')
     expect(timeline.entries).toEqual([
-      { kind: 'message', id: 'msg_1:1', who: 'claude', text: 'Running the tests.' },
+      { kind: 'message', id: 'msg_1:1', who: 'agent', text: 'Running the tests.' },
       {
         kind: 'tool',
         id: 'toolu_1',
@@ -42,7 +43,7 @@ describe('the timeline', () => {
     ])
     expect(timeline.entries.map((one) => (one.kind === 'message' ? [one.who, one.text] : null))).toEqual([
       ['you', 'hi'],
-      ['claude', 'Hello there!'],
+      ['agent', 'Hello there!'],
       ['you', 'again'],
     ])
   })
@@ -74,9 +75,17 @@ describe('the timeline', () => {
     expect(reduce(started, { type: 'refused' }).turn).toBe('idle')
   })
 
-  it('starts over on a reset and keeps the thread', () => {
+  it('starts over on a reset and keeps the thread and its harness', () => {
     const timeline = fold(chatEvents.map(event))
-    expect(reduce(timeline, { type: 'reset' })).toEqual({ ...empty, thread: '1a2b3c4d' })
+    expect(reduce(timeline, { type: 'reset' })).toEqual({ ...empty, thread: '1a2b3c4d', harness: 'opencode' })
+  })
+
+  it('keeps the harness the daemon names, Claude included', () => {
+    const started = (harness: 'claude' | 'grok') =>
+      event({ threadId: 't', type: 'thread.started', payload: { thread: 't', harness } })
+    expect(fold([started('claude')]).harness).toBe('claude')
+    expect(fold([started('grok')]).harness).toBe('grok')
+    expect(empty.harness).toBeNull()
   })
 
   it('draws nothing for a plan or a title', () => {

@@ -50,6 +50,43 @@ impl Harness {
             Self::Opencode => "opencode acp",
         }
     }
+
+    /// The name a caller sends and a thread's git config keeps.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+            Self::Grok => "grok",
+            Self::Opencode => "opencode",
+        }
+    }
+}
+
+impl std::str::FromStr for Harness {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        [Self::Codex, Self::Gemini, Self::Grok, Self::Opencode]
+            .into_iter()
+            .find(|harness| harness.name() == name)
+            .ok_or_else(|| {
+                format!(
+                    "`{name}` is not a harness Yantra drives over ACP: codex, gemini, grok or opencode"
+                )
+            })
+    }
+}
+
+/// What a person runs on the machine to log a harness in (R19 §1). `None` is
+/// Claude, which is not an ACP harness.
+pub fn login_command(harness: Option<Harness>) -> &'static str {
+    match harness {
+        None => "run claude and type /login",
+        Some(Harness::Codex) => "codex login",
+        Some(Harness::Gemini) => "run gemini and sign in",
+        Some(Harness::Grok) => "run grok and sign in",
+        Some(Harness::Opencode) => "opencode auth login",
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -79,6 +116,21 @@ pub enum Error {
     NotOffered { request: String, option: String },
 }
 
+impl Error {
+    /// The agent refused because nobody is logged in. These are the spellings
+    /// R19 §1 saw: codex-acp and Grok send -32000, Gemini names the key.
+    pub fn is_auth(&self) -> bool {
+        match self {
+            Self::Rpc { code, message } => {
+                *code == -32000
+                    || message.contains("Authentication required")
+                    || message.contains("API key is missing")
+            }
+            _ => false,
+        }
+    }
+}
+
 fn said(stderr: &str) -> String {
     if stderr.is_empty() {
         String::new()
@@ -88,9 +140,12 @@ fn said(stderr: &str) -> String {
 }
 
 /// What `initialize` learned that a caller acts on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
     pub load_session: bool,
+    /// The first auth method's description, such as opencode's "Run
+    /// `opencode auth login` in the terminal".
+    pub login: Option<String>,
 }
 
 /// The answer to a permission request.
@@ -106,6 +161,7 @@ pub type Events = mpsc::UnboundedReceiver<ThreadEvent>;
 /// One running agent. Dropping it closes its stdin and kills the local `ssh`.
 #[derive(Debug)]
 pub struct Agent {
+    harness: Harness,
     shared: Arc<Shared>,
     tasks: [JoinHandle<()>; 2],
     child: Option<tokio::process::Child>,
@@ -130,6 +186,7 @@ impl Agent {
             log,
         } = ssh.stdio(harness.command())?;
         Ok(Self::wire(
+            harness,
             stdout,
             stdin,
             Some(diagnosis(stderr, log)),
@@ -138,15 +195,16 @@ impl Agent {
     }
 
     /// The generic half: an agent on any pair of streams.
-    pub fn over<R, W>(reader: R, writer: W) -> (Self, Events)
+    pub fn over<R, W>(harness: Harness, reader: R, writer: W) -> (Self, Events)
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        Self::wire(reader, writer, None, None)
+        Self::wire(harness, reader, writer, None, None)
     }
 
     fn wire<R, W>(
+        harness: Harness,
         reader: R,
         writer: W,
         stderr: Option<JoinHandle<String>>,
@@ -169,6 +227,7 @@ impl Agent {
         ];
         (
             Self {
+                harness,
                 shared,
                 tasks,
                 child,
@@ -189,6 +248,12 @@ impl Agent {
             protocol_version: Value,
             #[serde(default)]
             agent_capabilities: AgentCapabilities,
+            #[serde(default)]
+            auth_methods: Vec<AuthMethod>,
+        }
+        #[derive(Deserialize)]
+        struct AuthMethod {
+            description: Option<String>,
         }
         #[derive(Default, Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -213,6 +278,10 @@ impl Agent {
         }
         Ok(Capabilities {
             load_session: answer.agent_capabilities.load_session,
+            login: answer
+                .auth_methods
+                .into_iter()
+                .find_map(|method| method.description.filter(|said| !said.is_empty())),
         })
     }
 
@@ -230,6 +299,7 @@ impl Agent {
             &created.session_id,
             Event::ThreadStarted {
                 thread: created.session_id.clone(),
+                harness: self.harness.name().to_owned(),
             },
         );
         Ok(created.session_id)
@@ -926,7 +996,8 @@ mod tests {
         let (client, agent) = tokio::io::duplex(1 << 16);
         let (client_read, client_write) = tokio::io::split(client);
         let (agent_read, agent_write) = tokio::io::split(agent);
-        let (client, events) = Agent::wire(client_read, client_write, stderr, None);
+        let (client, events) =
+            Agent::wire(Harness::Opencode, client_read, client_write, stderr, None);
         let fake = Fake {
             from_client: BufReader::new(agent_read),
             to_client: agent_write,
@@ -972,7 +1043,69 @@ mod tests {
         });
         assert_eq!(
             answer.expect("version 1 is accepted"),
-            Capabilities { load_session: true }
+            Capabilities {
+                load_session: true,
+                login: Some("Run `opencode auth login` in the terminal".to_owned()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn an_auth_method_without_a_description_names_no_login() {
+        let (agent, _events, mut fake) = pair();
+        let (answer, ()) = tokio::join!(agent.initialize(), async {
+            let request = fake.receive().await;
+            fake.reply(
+                &request,
+                json!({"protocolVersion": 1, "agentCapabilities": {},
+                       "authMethods": [{"id": "api-key", "name": "API key"},
+                                       {"id": "chat-gpt", "name": "ChatGPT", "description": ""}]}),
+            )
+            .await;
+        });
+        assert_eq!(answer.expect("read").login, None);
+    }
+
+    #[test]
+    fn a_harness_is_named_and_read_back_and_an_unknown_one_is_refused() {
+        for harness in [
+            Harness::Codex,
+            Harness::Gemini,
+            Harness::Grok,
+            Harness::Opencode,
+        ] {
+            assert_eq!(harness.name().parse::<Harness>(), Ok(harness));
+        }
+        assert!("claude".parse::<Harness>().is_err());
+        assert!("Codex".parse::<Harness>().is_err());
+    }
+
+    #[test]
+    fn each_harness_names_its_login() {
+        assert_eq!(
+            login_command(Some(Harness::Opencode)),
+            "opencode auth login"
+        );
+        assert_eq!(login_command(Some(Harness::Codex)), "codex login");
+        assert_eq!(login_command(None), "run claude and type /login");
+    }
+
+    /// R19 §1's verified refusals, and two that are not about a login.
+    #[test]
+    fn an_auth_refusal_is_told_apart() {
+        let rpc = |code, message: &str| Error::Rpc {
+            code,
+            message: message.to_owned(),
+        };
+        assert!(rpc(-32000, "Authentication required").is_auth());
+        assert!(rpc(-32603, "Gemini API key is missing or not configured.").is_auth());
+        assert!(rpc(-32603, "Authentication required").is_auth());
+        assert!(!rpc(-32603, "Internal error").is_auth());
+        assert!(
+            !Error::Closed {
+                stderr: "sh: opencode: not found".to_owned()
+            }
+            .is_auth()
         );
     }
 
@@ -1271,7 +1404,8 @@ mod tests {
             ThreadEvent {
                 thread_id: SESSION.to_owned(),
                 event: Event::ThreadStarted {
-                    thread: SESSION.to_owned()
+                    thread: SESSION.to_owned(),
+                    harness: "opencode".to_owned(),
                 }
             }
         );

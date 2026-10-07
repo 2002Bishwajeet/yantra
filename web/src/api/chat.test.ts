@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
-import { chatEvents, chatFailure } from '@/contract.gen'
+import { chatEvents, chatFailure, chatFrames, chatNotLoggedIn } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
 import { ChatError, chatAddress, frameOf, openChat } from './chat'
 import type { ThreadEvent } from './thread'
@@ -78,7 +78,7 @@ describe('the chat socket', () => {
     expect(errors[0]?.kind).toBe('turnFailed')
     expect(errors[0]?.said).toBe('Not logged in · Please run /login')
     expect(errors[0]?.retryable).toBe(false)
-    expect(errors[0]?.describe()).toBe('Claude could not finish the turn.')
+    expect(errors[0]?.describe()).toBe('The agent could not finish the turn.')
   })
 
   it.each([
@@ -94,6 +94,31 @@ describe('the chat socket', () => {
     expect(errors[0]?.kind).toBe(kind)
     expect(errors[0]?.said).toBe(`the daemon said ${kind}`)
     expect(errors[0]?.retryable).toBe(retryable)
+  })
+
+  it('types a missing login with whose it is, where, and the command, and says it once', async () => {
+    const { errors, opened } = connect(chatAddress('yantra-web', '1a2b3c4d'))
+    await settled(() => expect(opened).toHaveBeenCalled())
+    server.say(JSON.stringify(chatNotLoggedIn))
+    server.hangUp()
+    await settled(() => expect(errors).toHaveLength(1))
+    await new Promise((done) => setTimeout(done, 100))
+    expect(errors.map((error) => error.kind)).toEqual(['notLoggedIn'])
+    expect(errors[0]?.login).toEqual({ harness: 'opencode', machine: 'cachyos-g14', command: 'opencode auth login' })
+    expect(errors[0]?.said).toBe('the agent refused: Authentication required (-32000)')
+    expect(errors[0]?.describe()).toBe('Run this on cachyos-g14, then retry.')
+    expect(errors[0]?.retryable).toBe(false)
+  })
+
+  it('sends the harness on a turn only when it is given', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    socket.send('run the tests', 'opencode')
+    socket.send('and the docs')
+    await settled(() => expect(server.heard).toHaveLength(2))
+    expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual(
+      chatFrames.slice(0, 2),
+    )
   })
 
   it('says an unknown thread once, not again as a close', async () => {
@@ -155,5 +180,18 @@ describe('a daemon frame', () => {
     expect(frameOf('[]')).toBeNull()
     expect(frameOf('{"type":"turn.started"}')).toBeNull()
     expect(frameOf('{"type":"error","kind":"busy"}')).toBeNull()
+  })
+
+  it('is a missing login only with a known harness, a machine and a command', () => {
+    expect(frameOf(JSON.stringify(chatNotLoggedIn))).toEqual(chatNotLoggedIn)
+    for (const broken of [
+      { harness: 'aider' },
+      { harness: undefined },
+      { machine: 7 },
+      { command: '' },
+      { command: undefined },
+    ]) {
+      expect(frameOf(JSON.stringify({ ...chatNotLoggedIn, ...broken }))).toBeNull()
+    }
   })
 })
