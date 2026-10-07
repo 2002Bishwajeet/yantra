@@ -43,7 +43,7 @@ export function HarnessPicker(props: HarnessPickerProps) {
       <MenuPopup align="start" aria-label="Harness" side="top">
         <Base.RadioGroup onValueChange={(picked) => onChange(picked as Harness)} value={value}>
           {HARNESSES.map((harness) => (
-            <Base.RadioItem className="m3-menu-item m3-interactive" key={harness} value={harness}>
+            <Base.RadioItem className="m3-menu-item m3-interactive" closeOnClick key={harness} value={harness}>
               <span className="m3-menu-item__icon" aria-hidden="true">
                 <Base.RadioItemIndicator>
                   <Check />

@@ -61,6 +61,8 @@ describe('the harness picker', () => {
     expect(options[0].getAttribute('aria-checked')).toBe('true')
     fireEvent.click(options[4])
     await settled(() => expect(screen.getByRole('button', { name: 'Harness: opencode' })).toBeTruthy())
+    // An open menu's backdrop covers Send, so the pick closes it.
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
 
     fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list the files' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
