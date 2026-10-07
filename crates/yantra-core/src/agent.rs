@@ -270,7 +270,8 @@ fn auth_command(claude: &str, tmux: &str, os: Os) -> String {
 /// Whether the agent opens a new conversation or picks up the last one in
 /// `repo`. See [`crate::resume`] for why resuming is spelled `--continue`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
+#[doc(hidden)]
+pub enum Mode {
     New,
     Resume,
 }
@@ -335,7 +336,15 @@ async fn ready<E: Exec>(
 /// `PIPEWIRE_NODE=yantra-mic` on every launch makes ALSA's `default` record
 /// from the virtual microphone for the agent alone (ADR-0031 §3). Where there
 /// is no such node, nothing reads it.
-fn launch_command(claude: &str, repo: &str, session_id: &str, mode: Mode, musl: bool) -> String {
+// Public for `yantra`'s mic test, which must start the session the way Yantra does.
+#[doc(hidden)]
+pub fn launch_command(
+    claude: &str,
+    repo: &str,
+    session_id: &str,
+    mode: Mode,
+    musl: bool,
+) -> String {
     // Measured on 2.1.220: `--session-id` beside `--continue` is refused outright
     // unless `--fork-session` is there too.
     let resuming = match mode {

@@ -47,6 +47,8 @@ const CHUNK: usize = 640;
 const CLOSE_WITHIN: Duration = Duration::from_secs(5);
 /// How long an exited `ssh` waits for stderr's last words.
 const STDERR_GRACE: Duration = Duration::from_secs(5);
+/// How long one chunk may wait for a pipe that `ssh` no longer drains.
+const WRITE_WITHIN: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -70,6 +72,9 @@ pub enum Error {
     /// It exited with status 0 while the button was held.
     #[error("the microphone's writer ended on its own")]
     Ended,
+
+    #[error("the microphone on the machine took no audio for {} seconds", WRITE_WITHIN.as_secs())]
+    Stalled,
 
     #[error("the microphone's writer did not end within {} seconds of its input closing", CLOSE_WITHIN.as_secs())]
     Hung,
@@ -119,13 +124,19 @@ impl std::fmt::Debug for Stream {
 
 /// Starts [`WRITER`] on the machine `ssh` reaches.
 pub fn open(ssh: &Ssh) -> Result<Stream, Error> {
+    Ok(piped(ssh.stdio_detached(WRITER)?))
+}
+
+fn piped(piped: ssh::Piped) -> Stream {
     let ssh::Piped {
         child,
         stdin,
-        stdout: _,
+        mut stdout,
         stderr,
         log,
-    } = ssh.stdio(WRITER)?;
+    } = piped;
+    // A closed stdout would end `ssh` at the first line the far side prints.
+    tokio::spawn(async move { tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await });
     let diagnosis = tokio::spawn(async move {
         let tail = acp::tail(stderr).await;
         [String::from_utf8_lossy(&tail).trim(), log.read().trim()]
@@ -134,11 +145,11 @@ pub fn open(ssh: &Ssh) -> Result<Stream, Error> {
             .collect::<Vec<_>>()
             .join("\n")
     });
-    Ok(Stream {
+    Stream {
         writer: Box::new(stdin),
         child: Some(child),
         diagnosis: Some(diagnosis),
-    })
+    }
 }
 
 /// The same for a machine named the way `~/.ssh/config` names it (ADR-0009).
@@ -147,13 +158,33 @@ pub fn open_at(machine: &str) -> Result<Stream, Error> {
     open(&Ssh::new(machine)?)
 }
 
-/// Starts [`RECORDER`] on this laptop. Its stdout is the audio; its stderr
-/// stays on the child.
-pub fn record() -> Result<(Child, ChildStdout), Error> {
+/// A running [`RECORDER`], and the end of what it said on stderr.
+#[derive(Debug)]
+pub struct Recorder {
+    child: Child,
+    said: JoinHandle<Vec<u8>>,
+}
+
+impl Recorder {
+    /// Stops the recorder and returns the end of its stderr.
+    pub async fn end(mut self) -> String {
+        let _ = self.child.start_kill();
+        let _ = self.child.wait().await;
+        let said = tokio::time::timeout(STDERR_GRACE, self.said)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        String::from_utf8_lossy(&said).trim().to_owned()
+    }
+}
+
+/// Starts [`RECORDER`] on this laptop. Its stdout is the audio.
+pub fn record() -> Result<(Recorder, ChildStdout), Error> {
     spawn(RECORDER[0], &RECORDER[1..])
 }
 
-fn spawn(program: &str, args: &[&str]) -> Result<(Child, ChildStdout), Error> {
+fn spawn(program: &str, args: &[&str]) -> Result<(Recorder, ChildStdout), Error> {
     let mut child = tokio::process::Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -167,12 +198,14 @@ fn spawn(program: &str, args: &[&str]) -> Result<(Child, ChildStdout), Error> {
             std::io::ErrorKind::NotFound => Error::NoRecorder,
             _ => Error::Record(error),
         })?;
-    let Some(stdout) = child.stdout.take() else {
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(Error::Record(std::io::Error::other(
-            "the recorder started without the pipe it was given",
+            "the recorder started without the pipes it was given",
         )));
     };
-    Ok((child, stdout))
+    // An undrained stderr blocks the recorder once the pipe fills.
+    let said = tokio::spawn(acp::tail(stderr));
+    Ok((Recorder { child, said }, stdout))
 }
 
 /// Copies `recorder` into `stream` one chunk at a time until the recorder
@@ -213,8 +246,14 @@ impl Stream {
     }
 
     pub async fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        self.writer.write_all(bytes).await.map_err(Error::Write)?;
-        self.writer.flush().await.map_err(Error::Write)
+        let written = async {
+            self.writer.write_all(bytes).await?;
+            self.writer.flush().await
+        };
+        match tokio::time::timeout(WRITE_WITHIN, written).await {
+            Ok(written) => written.map_err(Error::Write),
+            Err(_) => Err(Error::Stalled),
+        }
     }
 
     /// Resolves when the writer's process exits on its own, and never for a
@@ -293,6 +332,85 @@ mod tests {
         let mut stream = Stream::over(writer);
         let error = stream.write(&[0; 640]).await.expect_err("nobody reads");
         assert!(matches!(error, Error::Write(_)), "{error}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pipe_nobody_drains_is_a_stall_not_a_hang() {
+        let (writer, _reader) = tokio::io::duplex(16);
+        let mut stream = Stream::over(writer);
+        let error = stream.write(&[0; 640]).await.expect_err("nobody reads");
+        assert!(matches!(error, Error::Stalled), "{error}");
+    }
+
+    /// The far side may print before it reads: a dropped stdout would end
+    /// `ssh` on that line, and every write after it would fail.
+    #[tokio::test]
+    async fn a_writer_that_prints_still_takes_audio() {
+        let dir = std::env::temp_dir().join(format!("yantra-mic-stdout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a dir");
+        let heard = dir.join("heard");
+        let mut child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "sleep 0.2; echo the far side said hello; cat > '{}'",
+                heard.display()
+            ))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("sh starts");
+        let stdin = child.stdin.take().expect("stdin");
+        let stdout = child.stdout.take().expect("stdout");
+        let stderr = child.stderr.take().expect("stderr");
+        let log = ssh::LogFile::new(&dir).expect("a log");
+        let mut stream = piped(ssh::Piped {
+            child,
+            stdin,
+            stdout,
+            stderr,
+            log,
+        });
+
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        stream.write(&[5; CHUNK]).await.expect("the pipe takes it");
+        stream
+            .close()
+            .await
+            .expect("pw-cat's stand-in ended cleanly");
+        assert_eq!(std::fs::read(&heard).expect("it heard"), [5; CHUNK]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A recorder that talks a lot on stderr fills the pipe at 64 KiB, and an
+    /// undrained pipe would block it before its audio arrived.
+    #[tokio::test]
+    async fn a_recorder_that_fills_stderr_still_delivers_its_audio() {
+        let (recorder, audio) = spawn(
+            "sh",
+            &[
+                "-c",
+                "yes 'pw-record says' | head -c 200000 >&2; printf abc",
+            ],
+        )
+        .expect("sh starts");
+        let (writer, mut heard) = tokio::io::duplex(64 * 1024);
+        let mut stream = Stream::over(writer);
+        let ended = tokio::time::timeout(
+            Duration::from_secs(10),
+            relay(audio, &mut stream, std::future::pending::<()>()),
+        )
+        .await
+        .expect("the recorder was not blocked on stderr")
+        .expect("nothing failed");
+        assert_eq!(ended, Ended::Recorder);
+        stream.close().await.expect("nothing to wait for");
+        let mut got = Vec::new();
+        heard.read_to_end(&mut got).await.expect("a read");
+        assert_eq!(got, b"abc");
+        let said = recorder.end().await;
+        assert!(said.contains("pw-record says"), "{said}");
     }
 
     #[test]

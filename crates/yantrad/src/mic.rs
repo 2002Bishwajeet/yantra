@@ -358,6 +358,28 @@ mod tests {
         assert!(!logged.contains("15 bytes"), "a count was logged: {logged}");
     }
 
+    /// A pipe that `ssh` no longer drains is a reason and a close, not a
+    /// bridge that stops pinging and never hears the release.
+    #[tokio::test]
+    async fn a_writer_that_stops_draining_is_one_text_frame_and_a_close() {
+        let (writer, _undrained) = tokio::io::duplex(16);
+        let writer = Mutex::new(Some(writer));
+        let open: Open = Arc::new(move |_: &str| {
+            let writer = writer.lock().expect("the pipe").take().expect("one press");
+            Ok(Stream::over(writer))
+        });
+        let api = router_with(direct(Some(caller(ME, &[]))), open);
+        let mut socket = upgraded(api, MIC).await;
+        send(&mut socket, BINARY, &[0; 100]).await;
+
+        let seen = until_closed(&mut socket).await;
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        let (opcode, said) = &seen[0];
+        assert_eq!(*opcode, TEXT);
+        let said = String::from_utf8_lossy(said);
+        assert!(said.contains("took no audio"), "{said}");
+    }
+
     /// The terminal's ping, on the mic: a vanished phone does not hold
     /// `pw-cat` open, because its socket ends and that closes the writer.
     #[tokio::test]

@@ -55,7 +55,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `mcp`, when stdin ends | **0** | an MCP client closes the server by closing its stdin. A daemon that refuses or cannot be reached is a tool result with `isError`, not an exit, because the client is still talking. Only a stdout that cannot be written is 1 |
 | `history stage`, unless every transcript has a current redacted copy | 1 | `doctor`'s rule, so a timer's failure shows. A file it could not stage is named on stderr, and no `gitleaks` on PATH stages nothing ([ADR-0032](../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md)) |
 | `mic`, after Ctrl-C | **0** | Ctrl-C is how the verb ends ([ADR-0031](../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §7). It closes the writer's stdin and waits for `pw-cat` to drain first |
-| `mic` with no `pw-record` here, a machine it cannot reach, a writer that exits, or a recorder that ends on its own | 1 | each stops the stream before it was asked to stop. A writer that exits names `yantra install <machine> --mic`, unless `ssh` itself failed with 255 |
+| `mic` with no `pw-record` here, a machine it cannot reach, a writer that exits, a recorder that ends on its own, or a second Ctrl-C during the close | 1 | each stops the stream before it was asked to stop. A writer that exits names `yantra install <machine> --mic`, unless `ssh` itself failed with 255 |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.

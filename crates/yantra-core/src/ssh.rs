@@ -248,19 +248,29 @@ impl Ssh {
     /// the conversation, as an ACP agent's are. No sentinel, because the
     /// command's status is not the answer; the stream is.
     pub(crate) fn stdio(&self, command: &str) -> Result<Piped, Error> {
+        self.piped("ssh", command, false)
+    }
+
+    /// [`Ssh::stdio`] in its own process group, for `yantra mic`: a terminal's
+    /// Ctrl-C would end `ssh` before the far side drains.
+    pub(crate) fn stdio_detached(&self, command: &str) -> Result<Piped, Error> {
+        self.piped("ssh", command, true)
+    }
+
+    fn piped(&self, program: &str, command: &str, detached: bool) -> Result<Piped, Error> {
         self.machine.prepare_sockets()?;
         let log = LogFile::new(&self.machine.state_dir)?;
 
-        let mut child = tokio::process::Command::new("ssh")
-            .args(self.stdio_argv(command, log.path()))
+        let mut ssh = tokio::process::Command::new(program);
+        ssh.args(self.stdio_argv(command, log.path()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            // A terminal's Ctrl-C would end `ssh` before the far side drains.
-            .process_group(0)
-            .spawn()
-            .map_err(Error::Spawn)?;
+            .kill_on_drop(true);
+        if detached {
+            ssh.process_group(0);
+        }
+        let mut child = ssh.spawn().map_err(Error::Spawn)?;
         let (Some(stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {
@@ -461,7 +471,7 @@ pub(crate) struct LogFile {
 }
 
 impl LogFile {
-    fn new(state_dir: &Path) -> Result<Self, Error> {
+    pub(crate) fn new(state_dir: &Path) -> Result<Self, Error> {
         let logs = state_dir.join("log");
         std::fs::create_dir_all(&logs).map_err(|source| Error::StateDir {
             path: logs.clone(),
@@ -673,6 +683,44 @@ mod tests {
         );
         assert!(wire.starts_with("exec /bin/sh -c \"$(echo "), "{wire}");
         assert!(!wire.contains("| /bin/sh"), "stdin must stay ssh's: {wire}");
+    }
+
+    fn pgid(pid: u32) -> String {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).expect("a stat");
+        let after = &stat[stat.rfind(')').expect("the name ends") + 2..];
+        after.split(' ').nth(2).expect("the group").to_owned()
+    }
+
+    /// Only `yantra mic` takes `ssh` out of the terminal's process group: an
+    /// ACP agent or a chat turn stays in the caller's.
+    #[tokio::test]
+    async fn only_the_detached_shape_has_its_own_process_group() {
+        let dir = std::env::temp_dir().join(format!("yantra-pgid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a dir");
+        let fake = dir.join("ssh");
+        std::fs::write(&fake, "#!/bin/sh\nexec sleep 30\n").expect("the fake");
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("executable");
+        let ssh = Ssh::new(Machine {
+            host: "fixture".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: dir.join("state"),
+        })
+        .expect("the path is short enough");
+        let program = fake.to_str().expect("utf-8");
+
+        let ours = pgid(std::process::id());
+        let shared = ssh.piped(program, "true", false).expect("it starts");
+        let shared_pid = shared.child.id().expect("running");
+        let detached = ssh.piped(program, "true", true).expect("it starts");
+        let detached_pid = detached.child.id().expect("running");
+
+        assert_eq!(pgid(shared_pid), ours);
+        assert_eq!(pgid(detached_pid), detached_pid.to_string());
+        drop((shared, detached));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
