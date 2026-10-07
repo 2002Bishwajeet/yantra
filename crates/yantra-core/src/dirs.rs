@@ -211,13 +211,17 @@ pub async fn list_on<E: Exec>(
 /// nothing stays literal, and the `-e`/`-L` test drops it. Only `test` builtins
 /// classify, so GNU and BSD far sides answer alike. `$p` gives the base exactly
 /// one trailing slash, so `/` lists as `/bin` rather than `//bin`.
+///
+/// **`ls` asks whether the read itself works** (Y-458): macOS refuses an ssh
+/// login `~/Documents` with mode bits that say yes, and the glob then reads as
+/// an empty folder.
 fn command(path: Option<&str>) -> String {
     let base = base(path);
     format!(
         r#"b={base}
 if ! test -d "$b"; then
   printf 'no\0%s\0' "$b"
-elif ! {{ [ -r "$b" ] && [ -x "$b" ]; }}; then
+elif ! {{ [ -r "$b" ] && [ -x "$b" ] && ls -A "$b" >/dev/null 2>&1; }}; then
   printf 'shut\0%s\0' "$b"
 else
   printf 'yes\0%s\0' "$b"

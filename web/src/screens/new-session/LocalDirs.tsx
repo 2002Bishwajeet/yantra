@@ -12,7 +12,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
-import { crumbs, under } from './dirs'
+import { crumbs, noAccess, under } from './dirs'
 import { FolderTree } from './FolderTree'
 import { slug, tilde, type Values } from './form'
 import type { SessionForm } from './useSessionForm'
@@ -80,7 +80,7 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
 /** Why a listing draws no rows: three different answers, never one sentence
  *  true of all of them (R-23). */
 function nothing(listing: Listing, machine: string): string {
-  if (!listing.access) return `${machine} does not let this account read this folder`
+  if (!listing.access) return noAccess(machine)
   if (listing.entries.length === 0) return 'this folder is empty'
   return 'nothing here but hidden entries'
 }
