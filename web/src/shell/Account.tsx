@@ -1,17 +1,15 @@
 import { Link } from '@tanstack/react-router'
-import { Info, Settings as SettingsIcon, User } from 'lucide-react'
-import { IconButton } from '@/m3/icon-button/IconButton'
-import { Menu, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
+import { Info, Settings as SettingsIcon } from 'lucide-react'
+import { Menu, MenuLinkItem, MenuPopup } from '@/m3/menu/Menu'
+import { guardOutsidePress, useReady, type PopupProps } from './useReady'
 
-/** The avatar and its menu. A generic mark rather than an initial: nothing
- *  on the wire names the person (inventory §C). */
-export function Account() {
+/** The avatar's menu, without its trigger: the shell owns that element. */
+export function AccountMenu(props: PopupProps) {
+  // Never born open: a menu born open skips the enter transition and takes no focus.
+  const ready = useReady()
   return (
-    <Menu>
-      <MenuTrigger render={<IconButton label="Account" variant="tonal" />}>
-        <User />
-      </MenuTrigger>
-      <MenuPopup>
+    <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
+      <MenuPopup anchor={props.anchor} finalFocus={props.anchor}>
         <MenuLinkItem icon={<SettingsIcon />} render={<Link to="/settings" />}>
           Settings
         </MenuLinkItem>

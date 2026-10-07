@@ -12,7 +12,7 @@ await Promise.all([
   import('@/m3/theme/scheme'),
   import('@/shell/Account'),
   import('@/shell/BellPopover'),
-  import('@/shell/NotificationsSheet'),
+  import('@/shell/Notifications'),
 ])
 
 // The one eager route. These tests never open it, and its own row is still

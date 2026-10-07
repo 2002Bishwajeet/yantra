@@ -9,15 +9,16 @@ export const MenuTrigger = Base.Trigger
 export type MenuPopupProps = Base.Popup.Props & {
   side?: Base.Positioner.Props['side']
   align?: Base.Positioner.Props['align']
+  anchor?: Base.Positioner.Props['anchor']
   children: ReactNode
 }
 
 /** The avatar and overflow menus: surface-container, 48 px items. */
 export function MenuPopup(props: MenuPopupProps) {
-  const { side, align, className, ...rest } = props
+  const { side, align, anchor, className, ...rest } = props
   return (
     <Base.Portal>
-      <Base.Positioner className="m3-menu__positioner" side={side ?? 'bottom'} align={align ?? 'end'} sideOffset={4}>
+      <Base.Positioner anchor={anchor} className="m3-menu__positioner" side={side ?? 'bottom'} align={align ?? 'end'} sideOffset={4}>
         <Base.Popup className={clsx('m3-menu', className)} {...rest} />
       </Base.Positioner>
     </Base.Portal>
