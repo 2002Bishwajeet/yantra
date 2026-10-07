@@ -15,13 +15,20 @@ const INVALID_PARAMS: i64 = -32602;
 /// Starting a task connects to the machine and makes a worktree; stopping one
 /// waits up to ten seconds for its turn to end.
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// The MCP revisions this server speaks, newest first.
+const SUPPORTED: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// Answers requests from `input` until it ends.
-pub fn serve(daemon: &str, input: impl BufRead, mut output: impl Write) -> io::Result<()> {
+pub fn serve(daemon: &str, mut input: impl BufRead, mut output: impl Write) -> io::Result<()> {
     let daemon = Daemon::new(daemon);
-    for line in input.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        // Bytes, not `lines()`: a line that is not UTF-8 is a parse error, not the end.
+        if input.read_until(b'\n', &mut line)? == 0 {
+            return Ok(());
+        }
+        if line.trim_ascii().is_empty() {
             continue;
         }
         if let Some(answer) = answer(&daemon, &line) {
@@ -29,11 +36,10 @@ pub fn serve(daemon: &str, input: impl BufRead, mut output: impl Write) -> io::R
             output.flush()?;
         }
     }
-    Ok(())
 }
 
-fn answer(daemon: &Daemon, line: &str) -> Option<Value> {
-    let Ok(message) = serde_json::from_str::<Value>(line) else {
+fn answer(daemon: &Daemon, line: &[u8]) -> Option<Value> {
+    let Ok(message) = serde_json::from_slice::<Value>(line) else {
         return Some(error(&Value::Null, PARSE_ERROR, "Parse error"));
     };
     // A notification, or a response to nothing this server asked, gets no answer.
@@ -42,10 +48,12 @@ fn answer(daemon: &Daemon, line: &str) -> Option<Value> {
     let params = message.get("params").unwrap_or(&Value::Null);
     Some(match method {
         "initialize" => {
+            // The MCP lifecycle: echo a version this server speaks, else offer its newest.
             let version = params
                 .get("protocolVersion")
-                .cloned()
-                .unwrap_or_else(|| json!("2025-06-18"));
+                .and_then(Value::as_str)
+                .and_then(|asked| SUPPORTED.into_iter().find(|known| *known == asked))
+                .unwrap_or(SUPPORTED[0]);
             result(
                 id,
                 json!({"protocolVersion": version,
@@ -325,6 +333,58 @@ mod tests {
                 "list_tasks",
                 "stop_task",
                 "remove_task"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_offers_its_newest_version_for_one_it_does_not_speak() {
+        let initialize = |id: u64, params: Value| json!({"jsonrpc": "2.0", "id": id, "method": "initialize", "params": params});
+        let answers = exchange(
+            fake_daemon().await,
+            vec![
+                initialize(0, json!({"protocolVersion": "2024-11-05"})),
+                initialize(1, json!({"protocolVersion": "1999-01-01"})),
+                initialize(2, json!({})),
+                initialize(3, json!({"protocolVersion": 7})),
+            ],
+        )
+        .await;
+        let versions: Vec<&Value> = answers
+            .iter()
+            .map(|answer| &answer["result"]["protocolVersion"])
+            .collect();
+        assert_eq!(
+            versions,
+            ["2024-11-05", "2025-11-25", "2025-11-25", "2025-11-25"]
+        );
+    }
+
+    /// One bad line costs one parse error, and the next request is answered.
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_is_a_parse_error_and_serving_goes_on() {
+        let daemon = fake_daemon().await;
+        let mut input = b"\xff\xfe\n".to_vec();
+        input.extend_from_slice(
+            format!("{}\n", json!({"jsonrpc": "2.0", "id": 9, "method": "ping"})).as_bytes(),
+        );
+        let output = tokio::task::spawn_blocking(move || {
+            let mut output = Vec::new();
+            serve(&daemon, input.as_slice(), &mut output).map(|()| output)
+        })
+        .await
+        .expect("the server thread")
+        .expect("serve returns Ok");
+        let answers: Vec<Value> = String::from_utf8(output)
+            .expect("UTF-8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON"))
+            .collect();
+        assert_eq!(
+            answers,
+            [
+                error(&Value::Null, PARSE_ERROR, "Parse error"),
+                result(&json!(9), json!({})),
             ]
         );
     }

@@ -179,9 +179,12 @@ fn bad(said: String) -> Refused {
 /// on a machine the caller named correctly is not the caller's fault.
 fn from_delegate(error: &delegate::Error) -> StatusCode {
     match error {
-        delegate::Error::NotARepo { .. } => StatusCode::BAD_REQUEST,
+        delegate::Error::NotARepo { .. } | delegate::Error::RepoPath { .. } => {
+            StatusCode::BAD_REQUEST
+        }
         delegate::Error::Worktree { .. } => StatusCode::CONFLICT,
         delegate::Error::Ssh(_) | delegate::Error::Acp(_) => StatusCode::SERVICE_UNAVAILABLE,
+        delegate::Error::Random(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -214,21 +217,30 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
         caller.node
     );
 
-    let task = Task::start(ssh, harness, &asked.repo, &asked.prompt)
-        .await
-        .map_err(|error| refused(&error))?;
-    let id = task.place().id.clone();
-    let entry = Arc::new(Entry {
-        machine: asked.machine,
-        harness: harness_name,
-        task: Arc::new(task),
-    });
-    let answer = started(&id, &entry);
-    state
-        .tasks
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(id, entry);
+    // Spawned, so a caller that hangs up mid-prepare still leaves a task that
+    // `DELETE` can find, rather than a worktree no task records.
+    let tasks = Arc::clone(&state.tasks);
+    let recorded = tokio::spawn(async move {
+        let task = Task::start(ssh, harness, &asked.repo, &asked.prompt).await?;
+        let id = task.place().id.clone();
+        let entry = Arc::new(Entry {
+            machine: asked.machine,
+            harness: harness_name,
+            task: Arc::new(task),
+        });
+        let answer = started(&id, &entry);
+        tasks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id, entry);
+        Ok::<_, delegate::Error>(answer)
+    })
+    .await
+    .map_err(|error| Refused::Verb {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        said: format!("starting the task failed: {error}"),
+    })?;
+    let answer = recorded.map_err(|error| refused(&error))?;
     Ok((StatusCode::CREATED, Json(answer)))
 }
 
@@ -432,6 +444,12 @@ mod tests {
             repo: "/tmp".to_owned(),
         };
         assert_eq!(from_delegate(&not), StatusCode::BAD_REQUEST);
+        let relative = delegate::Error::RepoPath {
+            repo: "repo".to_owned(),
+        };
+        assert_eq!(from_delegate(&relative), StatusCode::BAD_REQUEST);
+        let random = delegate::Error::Random(std::io::Error::other("no entropy"));
+        assert_eq!(from_delegate(&random), StatusCode::INTERNAL_SERVER_ERROR);
         let ssh = delegate::Error::Ssh(ssh::Error::Transport {
             host: "pi".to_owned(),
             diagnosis: "timed out".to_owned(),
@@ -454,7 +472,7 @@ mod tests {
             return;
         };
         // Short on purpose: `%C` adds 40 characters and the socket path budget is 90.
-        let dir = std::path::PathBuf::from("/tmp/yx-tsk");
+        let dir = std::path::PathBuf::from(format!("/tmp/yx-tsk-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a state directory");
         let machine = Machine {
@@ -588,12 +606,57 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
-        let left = fixture
-            .run(&format!(
-                "test -e {worktree} && echo there; git -C {REPO} branch --list 'yantra/*'"
-            ))
-            .expect("the machine answers");
-        assert!(left.trim().is_empty(), "{left}");
+        let left = |worktree: &str| {
+            fixture
+                .run(&format!(
+                    "test -e {worktree} && echo there; git -C {REPO} branch --list 'yantra/*'"
+                ))
+                .expect("the machine answers")
+        };
+        let after = left(&worktree);
+        assert!(after.trim().is_empty(), "{after}");
+
+        // A caller that hangs up while the worktree is made still leaves a
+        // task to find and remove.
+        let asked = serde_json::json!({"machine": "fixture", "harness": "opencode",
+                                       "repo": REPO, "prompt": "Say hello."});
+        let dropped = tokio::time::timeout(
+            std::time::Duration::ZERO,
+            send_to(app.clone(), Method::POST, "/tasks", Some(asked), MINE),
+        )
+        .await;
+        assert!(dropped.is_err(), "the request was dropped mid-prepare");
+        let begun = std::time::Instant::now();
+        let listed = loop {
+            let (status, said) = send_to(app.clone(), Method::GET, "/tasks", None, MINE).await;
+            assert_eq!(status, StatusCode::OK, "{said}");
+            let listed = json(&said);
+            if listed.as_array().is_some_and(|all| !all.is_empty()) {
+                break listed;
+            }
+            assert!(begun.elapsed() < patience, "no task was recorded");
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        };
+        let id = listed[0]["id"].as_str().expect("an id").to_owned();
+        let worktree = listed[0]["worktree"]
+            .as_str()
+            .expect("a worktree")
+            .to_owned();
+        let (status, said) = tokio::time::timeout(
+            patience,
+            send_to(
+                app.clone(),
+                Method::DELETE,
+                &format!("/tasks/{id}"),
+                None,
+                MINE,
+            ),
+        )
+        .await
+        .expect("remove answers in time");
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let after = left(&worktree);
+        assert!(after.trim().is_empty(), "{after}");
 
         drop(fixture);
         let _ = std::fs::remove_dir_all(&dir);

@@ -36,7 +36,7 @@ pub struct Status {
 /// Makes a new worktree of the workspace's repository, at its `HEAD`. A live
 /// session in the repository does not stop it.
 pub async fn open<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Place, Error> {
-    let id = format!("chat/{}/{}", workspace.name, delegate::id());
+    let id = format!("chat/{}/{}", workspace.name, delegate::id()?);
     delegate::prepare(exec, &workspace.repo.to_string_lossy(), &id).await
 }
 
@@ -303,7 +303,7 @@ mod tests {
         let id = asked[0]
             .split("worktrees/'chat/web/")
             .nth(1)
-            .and_then(|rest| rest.get(..8))
+            .and_then(|rest| rest.get(..16))
             .expect("the worktree is under chat/<workspace>/")
             .to_owned();
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "{id}");
@@ -451,9 +451,12 @@ mod tests {
         assert_eq!(
             machine.asked(),
             [format!(
-                "git -C '{REPO}' worktree remove --force '{WORKTREE}' \
-                 && git -C '{REPO}' branch -D 'yantra/chat/web/11111111' >/dev/null \
-                 && git -C '{REPO}' worktree prune"
+                "{{ [ ! -e '{WORKTREE}' ] \
+                 || git -C '{REPO}' worktree remove --force '{WORKTREE}'; }} \
+                 && git -C '{REPO}' worktree prune \
+                 && {{ ! git -C '{REPO}' rev-parse -q --verify \
+                 'refs/heads/yantra/chat/web/11111111' >/dev/null \
+                 || git -C '{REPO}' branch -D 'yantra/chat/web/11111111' >/dev/null; }}"
             )]
         );
 
@@ -564,8 +567,7 @@ mod tests {
         let machine = Machine::answering(vec![
             out(0, b"/usr/bin/claude\n", ""),
             out(0, registry.as_bytes(), ""),
-            out(0, b"a.txt\0", ""),
-            out(0, b" 1 file changed, 1 insertion(+)\n", ""),
+            out(0, b" 1 file changed, 1 insertion(+)\n\0a.txt\0", ""),
         ]);
         let status = status(&machine, &place()).await.expect("asked");
         assert_eq!(status.agent.map(|agent| agent.pid), Some(2));
@@ -581,26 +583,23 @@ mod tests {
         assert_eq!(
             asked[2],
             format!(
-                "git -C '{WORKTREE}' diff --name-only -z '0123abcd' \
+                "git -C '{WORKTREE}' diff --shortstat '0123abcd' && printf '\\0' \
+                 && git -C '{WORKTREE}' diff --name-only -z '0123abcd' \
                  && git -C '{WORKTREE}' ls-files -z --others --exclude-standard"
             )
         );
-        assert_eq!(
-            asked[3],
-            format!("git -C '{WORKTREE}' diff --shortstat '0123abcd'")
-        );
+        assert_eq!(asked.len(), 3);
     }
 
     #[tokio::test]
     async fn status_without_claude_still_summarises_and_a_gone_worktree_is_an_error() {
-        let alone = Machine::answering(vec![out(1, b"", ""), out(0, b"", ""), out(0, b"", "")]);
+        let alone = Machine::answering(vec![out(1, b"", ""), out(0, b"\0", "")]);
         let status_alone = status(&alone, &place()).await.expect("asked");
         assert_eq!(status_alone.agent, None);
         assert_eq!(status_alone.summary, Summary::default());
 
         let gone = Machine::answering(vec![
             out(1, b"", ""),
-            out(128, b"", "fatal: cannot change to\n"),
             out(128, b"", "fatal: cannot change to\n"),
         ]);
         assert!(matches!(
