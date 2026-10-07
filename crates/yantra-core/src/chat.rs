@@ -9,8 +9,8 @@
 //! An agent's stream is normalised into these events, and the browser draws
 //! them without knowing which agent spoke. It carries only what its sources
 //! produce: ACP v1 ([`crate::acp`]), Claude's stream-json ([`crate::claude`])
-//! and a thread's checkpoints ([`crate::checkpoint`]). Serialised as `{"threadId", "type", "payload"}`, so a
-//! relay can send it on unchanged.
+//! and a thread's checkpoints ([`crate::checkpoint`]). Serialised as
+//! `{"threadId", "type", "payload"}`, so a relay can send it on unchanged.
 
 use serde::{Deserialize, Serialize};
 

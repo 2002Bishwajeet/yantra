@@ -133,10 +133,10 @@ fn cut(stdout: &[u8]) -> Diff {
             truncated: false,
         };
     }
-    let kept = match std::str::from_utf8(&stdout[..LIMIT]) {
-        Ok(_) => &stdout[..LIMIT],
-        Err(error) if error.error_len().is_none() => &stdout[..error.valid_up_to()],
-        Err(_) => &stdout[..LIMIT],
+    let head = &stdout[..LIMIT];
+    let kept = match std::str::from_utf8(head) {
+        Err(error) if error.error_len().is_none() => &head[..error.valid_up_to()],
+        _ => head,
     };
     let unified = String::from_utf8_lossy(kept);
     let end = unified.floor_char_boundary(LIMIT);
