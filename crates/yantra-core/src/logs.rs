@@ -292,14 +292,39 @@ pub(crate) fn newest(repo: &str) -> String {
 /// Claude Code's own mapping from a working directory to a project directory:
 /// every byte that is not `[A-Za-z0-9]` becomes `-`. Checked against this
 /// machine, where `/home/<user>/Github/homelab` is stored under
-/// `-home-<user>-Github-homelab`.
+/// `-home-<user>-Github-homelab`. Over 200 characters, Claude Code cuts it and
+/// appends `-` and `Math.abs(javaHash(repo)).toString(36)` (read from 2.1.291).
 ///
 /// It is also why [`probe`] needs no quoting around `$d`: the result cannot
 /// contain a character a shell would act on.
 fn slug(repo: &str) -> String {
-    repo.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
+    // JavaScript counts UTF-16 code units, so a non-BMP character is two `-`.
+    let mut slug: String = repo
+        .encode_utf16()
+        .map(|u| match u8::try_from(u) {
+            Ok(b) if b.is_ascii_alphanumeric() => char::from(b),
+            _ => '-',
+        })
+        .collect();
+    if slug.len() <= 200 {
+        return slug;
+    }
+    slug.truncate(200);
+    let hash = repo
+        .encode_utf16()
+        .fold(0i32, |h, u| h.wrapping_mul(31).wrapping_add(i32::from(u)));
+    let mut n = hash.unsigned_abs();
+    let mut digits = Vec::new();
+    loop {
+        digits.push(b"0123456789abcdefghijklmnopqrstuvwxyz"[(n % 36) as usize]);
+        n /= 36;
+        if n == 0 {
+            break;
+        }
+    }
+    slug.push('-');
+    slug.extend(digits.iter().rev().map(|&d| char::from(d)));
+    slug
 }
 
 /// One JSONL record, or `None` if it is not a turn worth showing.
@@ -408,6 +433,28 @@ mod tests {
     fn a_repo_path_becomes_the_directory_claude_code_actually_uses() {
         assert_eq!(slug("/home/u/Github/homelab"), "-home-u-Github-homelab");
         assert_eq!(slug("/srv/repo.git"), "-srv-repo-git");
+    }
+
+    /// The expected name is the directory a real `claude -p` (2.1.291) run
+    /// created under `~/.claude/projects/` for this 249-character path.
+    #[test]
+    fn a_long_repo_path_gets_the_hash_claude_code_appends() {
+        let scratch = "claude-1000/-home-biswa-Github-homelab-yantra/8844de2a-3388-4909-8b10-964876e40aa0/scratchpad/y440/";
+        let repo = format!(
+            "/tmp/{scratch}{}/{}/repo.with-dots_and_more",
+            "a".repeat(60),
+            "b".repeat(60)
+        );
+        let expected = format!(
+            "-tmp-claude-1000--home-biswa-Github-homelab-yantra-8844de2a-3388-4909-8b10-964876e40aa0-scratchpad-y440-{}-{}-t27oub",
+            "a".repeat(60),
+            "b".repeat(35)
+        );
+        assert_eq!(repo.len(), 249);
+        assert_eq!(slug(&repo), expected);
+
+        let exact = format!("/{}", "c".repeat(199));
+        assert_eq!(slug(&exact), format!("-{}", "c".repeat(199)));
     }
 
     /// The slug is what makes [`probe`] safe without quoting, so a path that
