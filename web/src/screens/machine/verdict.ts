@@ -62,6 +62,10 @@ export function verdictOf(input: {
   if (watch?.mic && stopped?.commands.some(needsSudo) && mic?.state !== 'present') {
     return { kind: 'sudo', missing: [nameOf('mic')], result: stopped }
   }
+  // A press that asked for the microphone and answered without it says so.
+  if (watch?.mic && fresh && mic?.state !== 'present') {
+    return { kind: 'missing', missing: [nameOf('mic')], result: fresh, fresh: true }
+  }
 
   // ADR-0031 §9: the microphone is optional, so its absence never titles the card.
   const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check) && one.check !== 'mic')

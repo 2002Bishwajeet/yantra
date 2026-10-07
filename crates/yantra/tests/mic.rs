@@ -18,6 +18,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail, ensure};
+use yantra_core::agent;
 use yantra_core::install::{self, Outcome, Report, Tool};
 use yantra_core::ssh::{Exec as _, Machine, Ssh};
 
@@ -193,9 +194,12 @@ async fn yantra_mic_carries_speech_into_a_yantra_session_until_ctrl_c() -> Resul
         ),
     )
     .await?;
-    let launch = format!(
-        "cd '/home/{UNPRIVILEGED}' && export PIPEWIRE_NODE=yantra-mic && \
-         exec '/home/{UNPRIVILEGED}/.local/bin/claude' --session-id 'y419'"
+    let launch = agent::launch_command(
+        &format!("/home/{UNPRIVILEGED}/.local/bin/claude"),
+        &format!("/home/{UNPRIVILEGED}"),
+        "y419",
+        agent::Mode::New,
+        false,
     );
     // A tmux server a person starts has their login's runtime directory.
     let started = machine

@@ -29,6 +29,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # The redaction rule's unit test runs the regex it ships (Y-430).
 regex.workspace = true
+# The mic's write timeout is tested on a paused clock (Y-442).
+tokio = { workspace = true, features = ["test-util"] }
 
 # `build.rs` stamps the build date; `time` is already in the tree.
 [build-dependencies]

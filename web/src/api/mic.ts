@@ -1,4 +1,4 @@
-import { ApiError, type Kind } from '@/api/errors'
+import { type ApiError, micError, type MicKind } from '@/api/errors'
 import tap from './mic.worklet.ts?worker&url'
 
 /** ADR-0031 §4: what the daemon's `pw-cat` plays. 16 kHz mono s16le. */
@@ -41,24 +41,31 @@ export function toPcm16(
   }
 }
 
-const sentences = {
-  insecure: 'The microphone works only on the HTTPS address, on port 8443.',
-  denied: 'This browser was not allowed to use the microphone.',
-  'no-device': 'This browser found no microphone to use.',
-  stopped: 'The browser took the microphone away, so the stream stopped.',
-  refused: 'The daemon refused the microphone.',
-  socket: 'The microphone on the machine stopped.',
-} satisfies Partial<Record<Kind, string>>
+const nameOf = (cause: unknown) =>
+  typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : ''
+const wordsOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause))
 
-export type MicKind = keyof typeof sentences
-
-export const micError = (kind: MicKind, said: string) =>
-  new ApiError(kind, said, { sentence: sentences[kind] })
+const captured: Record<string, MicKind> = {
+  NotAllowedError: 'denied',
+  SecurityError: 'denied',
+  NotFoundError: 'no-device',
+  OverconstrainedError: 'no-device',
+  NotReadableError: 'busy',
+}
 
 function fromCapture(cause: unknown): ApiError {
-  const name = cause instanceof Error ? cause.name : ''
-  const said = cause instanceof Error ? cause.message : String(cause)
-  return micError(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'no-device', said)
+  return micError(captured[nameOf(cause)] ?? 'capture', wordsOf(cause))
+}
+
+/** The context first, so a socket that cannot be made leaves no context open. */
+function connect(machine: string): { context: AudioContext; socket: WebSocket } {
+  const context = new AudioContext()
+  try {
+    return { context, socket: new WebSocket(micAddress(machine)) }
+  } catch (cause) {
+    void context.close().catch(() => {})
+    throw cause
+  }
 }
 
 export type MicState = 'opening' | 'listening'
@@ -68,9 +75,10 @@ export type Mic = { close: () => void }
 
 /** Opens the microphone and the socket together, from inside the press so iOS
  *  lets the `AudioContext` start. `close` is the release: it stops every
- *  track, closes the context and the socket, and works before either has
- *  resolved, so the microphone is never open while the button is up (§6).
- *  `onEnd` runs once — `null` for a release, the reason for anything else. */
+ *  track and closes the context at once, so the microphone is never open
+ *  while the button is up (§6). The socket closes once it has sent what was
+ *  heard. `onEnd` runs once — `null` for a release, the reason for anything
+ *  else, including a permission that a prompt granted after the release. */
 export function openMic(
   machine: string,
   { onEnd, onState }: { onEnd: (error: ApiError | null) => void; onState: (state: MicState) => void },
@@ -80,7 +88,21 @@ export function openMic(
     return { close: () => {} }
   }
 
+  let made: ReturnType<typeof connect>
+  try {
+    made = connect(machine)
+  } catch (cause) {
+    onEnd(micError('capture', wordsOf(cause)))
+    return { close: () => {} }
+  }
+  const { context, socket } = made
+
   let ended = false
+  let released = false
+  let asking = true
+  let hungUp = false
+  // Unknown counts as a prompt: Safari's prompt is what ends the first hold.
+  let prompted = true
   let stream: MediaStream | undefined
   let heard = false
   let opened = false
@@ -88,33 +110,66 @@ export function openMic(
   let carry = START
   // Frames made while the socket connects; the daemon's pipe takes it from there.
   const waiting: Uint8Array<ArrayBuffer>[] = []
-  const context = new AudioContext()
-  const socket = new WebSocket(micAddress(machine))
   socket.binaryType = 'arraybuffer'
   // Inside the gesture, which is the only place iOS lets a context start.
   void context.resume().catch(() => {})
+  void navigator.permissions
+    ?.query({ name: 'microphone' as PermissionName })
+    .then((status) => (prompted = status.state !== 'granted'))
+    .catch(() => {})
 
   const send = (frame: Uint8Array<ArrayBuffer>) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(frame)
     else if (socket.readyState === WebSocket.CONNECTING) waiting.push(frame)
   }
 
-  const end = (error: ApiError | null) => {
+  const finish = (error: ApiError | null) => {
     if (ended) return
     ended = true
-    for (const track of stream?.getTracks() ?? []) track.stop()
-    void context.close().catch(() => {})
-    if (batch.length > 0) send(new Uint8Array(batch))
-    socket.close()
     onEnd(error)
   }
 
+  const stopAudio = () => {
+    for (const track of stream?.getTracks() ?? []) track.stop()
+    void context.close().catch(() => {})
+    if (batch.length > 0) send(new Uint8Array(batch))
+    batch = new Uint8Array(0)
+  }
+
+  const hangUp = () => {
+    hungUp = true
+    socket.close()
+  }
+
+  const fail = (error: ApiError) => {
+    if (ended) return
+    stopAudio()
+    hangUp()
+    finish(error)
+  }
+
+  const release = () => {
+    if (ended || released) return
+    released = true
+    stopAudio()
+    if (asking) {
+      hangUp()
+      // A prompt that is still open ends this press when it is answered.
+      if (!prompted) finish(null)
+      return
+    }
+    // `onopen` sends what is waiting, then closes.
+    if (socket.readyState === WebSocket.CONNECTING && waiting.length > 0) return
+    hangUp()
+    finish(null)
+  }
+
   const ready = () => {
-    if (!ended && heard && socket.readyState === WebSocket.OPEN) onState('listening')
+    if (!ended && !released && heard && socket.readyState === WebSocket.OPEN) onState('listening')
   }
 
   const take = (block: Float32Array) => {
-    if (ended) return
+    if (ended || released) return
     const made = toPcm16(block, context.sampleRate, carry)
     carry = made.carry
     const joined = new Uint8Array(batch.length + made.bytes.length)
@@ -128,16 +183,21 @@ export function openMic(
   socket.onopen = () => {
     opened = true
     for (const frame of waiting.splice(0)) socket.send(frame)
+    if (released && !ended) {
+      hangUp()
+      finish(null)
+      return
+    }
     ready()
   }
   socket.onmessage = (frame: MessageEvent<string | ArrayBuffer>) => {
-    if (typeof frame.data === 'string') end(micError('socket', frame.data))
+    if (typeof frame.data === 'string') fail(micError('socket', frame.data))
   }
   // A refused upgrade is an error event and then the close that ends it.
   socket.onerror = () => {}
   socket.onclose = () => {
-    if (ended) return
-    end(
+    if (ended || hungUp) return
+    fail(
       opened
         ? micError('socket', 'the daemon closed the microphone')
         : micError('refused', 'the daemon refused the microphone'),
@@ -150,25 +210,28 @@ export function openMic(
       const got = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       })
+      asking = false
       stream = got
-      if (ended) {
+      if (ended || released) {
         for (const track of got.getTracks()) track.stop()
+        finish(micError('allowed', ''))
         return
       }
       for (const track of got.getTracks()) {
-        track.addEventListener('ended', () => end(micError('stopped', `${track.label || 'the microphone'} ended`)))
+        track.addEventListener('ended', () => fail(micError('stopped', `${track.label || 'the microphone'} ended`)))
       }
       await context.audioWorklet.addModule(tap)
-      if (ended) return
+      if (ended || released) return
       const node = new AudioWorkletNode(context, 'yantra-tap', { numberOfOutputs: 0 })
       node.port.onmessage = (block: MessageEvent<Float32Array>) => take(block.data)
       context.createMediaStreamSource(got).connect(node)
       heard = true
       ready()
     } catch (cause) {
-      end(fromCapture(cause))
+      asking = false
+      fail(fromCapture(cause))
     }
   })()
 
-  return { close: () => end(null) }
+  return { close: release }
 }
