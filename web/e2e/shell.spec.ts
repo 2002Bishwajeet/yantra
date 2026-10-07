@@ -313,6 +313,9 @@ test.describe('the shell on busy', () => {
     const hot = page.locator('[role="menuitem"][data-highlighted]')
     const cold = page.locator('[role="menuitem"]:not([data-highlighted])')
 
+    // Visible is not focused: the popup takes focus a frame later, and an arrow
+    // pressed before that lands on the avatar and moves nothing.
+    await expect(page.locator('[role="menu"]:focus-within')).toHaveCount(1)
     await page.keyboard.press('ArrowDown')
     await expect(hot).toHaveCount(1)
     await expect.poll(() => layer(hot)).toBeGreaterThan(0)
