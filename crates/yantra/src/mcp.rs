@@ -1,3 +1,15 @@
+/*
+ * The tool shapes below follow T3 Code's orchestrator MCP server, at commit 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/orchestration-v2/orchestrator-mcp-server.md
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ *
+ * Kept: a steer to a running ACP turn is a cancel and a restart in the same session, and one sent
+ * before the turn begins waits for it (`t3_thread_send`'s `auto`); a wait takes `timeoutMs`,
+ * answers `waitTimedOut` and never cancels the task; a cancel of an ended task returns its state
+ * (`task_cancel`). Changed: the tasks are the daemon's, not threads; a steer to an ended task is
+ * refused, and a cancel has no child tasks to reach.
+ */
 //! `yantra mcp`: a stdio MCP server whose tools call `yantrad`'s `/api/tasks`,
 //! so the main agent can delegate work (ADR-0033 decision 5).
 //!
@@ -8,6 +20,7 @@ use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use yantra_core::delegate;
 
 const PARSE_ERROR: i64 = -32700;
 const METHOD_NOT_FOUND: i64 = -32601;
@@ -17,6 +30,8 @@ const INVALID_PARAMS: i64 = -32602;
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// The MCP revisions this server speaks, newest first.
 const SUPPORTED: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+/// What a wait's answer may take beyond the wait itself.
+const WAIT_SLACK: Duration = Duration::from_secs(30);
 
 /// Answers requests from `input` until it ends.
 pub fn serve(daemon: &str, mut input: impl BufRead, mut output: impl Write) -> io::Result<()> {
@@ -101,8 +116,26 @@ fn tools() -> Value {
         {"name": "list_tasks",
          "description": "List the tasks the daemon holds, with their state.",
          "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}}},
-        {"name": "stop_task",
-         "description": "Cancel a task's turn and end its agent. The worktree stays, so its diff can be reviewed.",
+        {"name": "steer_task",
+         "description": "Send a task's agent a follow-up prompt. A running turn is cancelled and the prompt \
+                         starts a new turn in the same session, so the agent keeps its context. A task that \
+                         has not begun its first turn gets the prompt when that turn ends. A task that has \
+                         ended refuses it.",
+         "inputSchema": {"type": "object", "additionalProperties": false, "required": ["id", "prompt"],
+             "properties": {
+                 "id": id["properties"]["id"],
+                 "prompt": {"type": "string", "description": "What the agent reads next"}}}},
+        {"name": "wait_task",
+         "description": "Wait for a task to end, then return what task_status returns, with waitTimedOut. \
+                         A timeout does not cancel the task; wait again or read task_status.",
+         "inputSchema": {"type": "object", "additionalProperties": false, "required": ["id"],
+             "properties": {
+                 "id": id["properties"]["id"],
+                 "timeoutMs": {"type": "integer", "minimum": 0,
+                               "description": "How long to wait, in milliseconds: 60000 if left out, 600000 at most"}}}},
+        {"name": "cancel_task",
+         "description": "Cancel a task's turn and end its agent. The worktree stays, so its diff can be reviewed. \
+                         A task that has already ended returns its state.",
          "inputSchema": id},
         {"name": "remove_task",
          "description": "Stop a task, then delete its worktree and its branch on the machine.",
@@ -139,7 +172,33 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
         }
         "task_status" => daemon.send(Method::Get, &format!("/api/tasks/{}", task()?)),
         "list_tasks" => daemon.send(Method::Get, "/api/tasks"),
-        "stop_task" => daemon.send(Method::Post(None), &format!("/api/tasks/{}/stop", task()?)),
+        "steer_task" => {
+            let prompt = arguments
+                .get("prompt")
+                .and_then(Value::as_str)
+                .filter(|prompt| !prompt.trim().is_empty())
+                .ok_or("steer_task needs a `prompt`")?;
+            let path = format!("/api/tasks/{}/steer", task()?);
+            daemon.send(Method::Post(Some(json!({"prompt": prompt}))), &path)
+        }
+        "wait_task" => {
+            let ms = arguments
+                .get("timeoutMs")
+                .map(|ms| {
+                    ms.as_u64()
+                        .ok_or("wait_task's `timeoutMs` is a whole number of milliseconds")
+                })
+                .transpose()?;
+            let (path, wait) = match ms {
+                Some(ms) => (
+                    format!("/api/tasks/{}/wait?timeoutMs={ms}", task()?),
+                    Duration::from_millis(ms).min(delegate::WAIT_LIMIT),
+                ),
+                None => (format!("/api/tasks/{}/wait", task()?), delegate::WAIT),
+            };
+            daemon.send(Method::Wait(wait + WAIT_SLACK), &path)
+        }
+        "cancel_task" => daemon.send(Method::Post(None), &format!("/api/tasks/{}/stop", task()?)),
         "remove_task" => daemon.send(Method::Delete, &format!("/api/tasks/{}", task()?)),
         _ => return Err(format!("no tool `{name}`")),
     };
@@ -150,6 +209,8 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
 
 enum Method {
     Get,
+    /// A `GET` that may take this long, past the usual [`TIMEOUT`].
+    Wait(Duration),
     Post(Option<Value>),
     Delete,
 }
@@ -177,6 +238,13 @@ impl Daemon {
         let url = format!("{}{path}", self.base);
         let sent = match method {
             Method::Get => self.agent.get(&url).call(),
+            Method::Wait(limit) => self
+                .agent
+                .get(&url)
+                .config()
+                .timeout_global(Some(limit))
+                .build()
+                .call(),
             Method::Delete => self.agent.delete(&url).call(),
             Method::Post(None) => self.agent.post(&url).send_empty(),
             Method::Post(Some(body)) => self
@@ -211,7 +279,7 @@ impl Daemon {
 mod tests {
     use super::*;
     use axum::Router;
-    use axum::extract::Path;
+    use axum::extract::{Path, RawQuery};
     use axum::http::StatusCode;
     use axum::routing::{get, post};
 
@@ -256,7 +324,30 @@ mod tests {
                     }
                 }),
             )
-            .route("/api/tasks/{id}/stop", post(one));
+            .route("/api/tasks/{id}/stop", post(one))
+            .route(
+                "/api/tasks/{id}/steer",
+                post(
+                    |Path(id): Path<String>, axum::Json(body): axum::Json<Value>| async move {
+                        if id == "ab12cd34" {
+                            (
+                                StatusCode::OK,
+                                json!({"id": id, "steered": body}).to_string(),
+                            )
+                        } else {
+                            (StatusCode::CONFLICT, format!("task `{id}` has ended"))
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/api/tasks/{id}/wait",
+                get(
+                    |Path(id): Path<String>, RawQuery(query): RawQuery| async move {
+                        json!({"id": id, "query": query, "waitTimedOut": false}).to_string()
+                    },
+                ),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("a loopback port");
@@ -296,7 +387,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_handshake_echoes_the_version_and_lists_five_tools() {
+    async fn the_handshake_echoes_the_version_and_lists_seven_tools() {
         let answers = exchange(
             fake_daemon().await,
             vec![
@@ -331,9 +422,18 @@ mod tests {
                 "start_task",
                 "task_status",
                 "list_tasks",
-                "stop_task",
+                "steer_task",
+                "wait_task",
+                "cancel_task",
                 "remove_task"
             ]
+        );
+        let tools = &answers[1]["result"]["tools"];
+        assert_eq!(tools[3]["inputSchema"]["required"], json!(["id", "prompt"]));
+        assert_eq!(
+            tools[4]["inputSchema"]["properties"]["timeoutMs"],
+            json!({"type": "integer", "minimum": 0,
+                   "description": "How long to wait, in milliseconds: 60000 if left out, 600000 at most"})
         );
     }
 
@@ -407,7 +507,7 @@ mod tests {
         assert!(text(&status).contains("Fixed it."), "{status}");
         let listed = one_call(daemon.clone(), "list_tasks", json!({})).await;
         assert!(text(&listed).contains("running"), "{listed}");
-        let stopped = one_call(daemon.clone(), "stop_task", json!({"id": "ab12cd34"})).await;
+        let stopped = one_call(daemon.clone(), "cancel_task", json!({"id": "ab12cd34"})).await;
         assert!(text(&stopped).contains("completed"), "{stopped}");
         let removed = one_call(daemon, "remove_task", json!({"id": "ab12cd34"})).await;
         assert_eq!(text(&removed), r#"{"removed":true}"#);
@@ -419,7 +519,7 @@ mod tests {
         let daemon = fake_daemon().await;
         for (name, arguments) in [
             ("task_status", json!({"id": "ffff0000"})),
-            ("stop_task", json!({"id": "ffff0000"})),
+            ("cancel_task", json!({"id": "ffff0000"})),
             ("remove_task", json!({"id": "ffff0000"})),
         ] {
             let refused = one_call(daemon.clone(), name, arguments).await;
@@ -437,6 +537,76 @@ mod tests {
             text(&refused).starts_with("yantrad answered 400: `claude`"),
             "{refused}"
         );
+    }
+
+    #[tokio::test]
+    async fn steer_and_wait_reach_their_routes_with_the_body_and_the_query() {
+        let daemon = fake_daemon().await;
+        let steered = one_call(
+            daemon.clone(),
+            "steer_task",
+            json!({"id": "ab12cd34", "prompt": "and the docs"}),
+        )
+        .await;
+        assert_eq!(steered["isError"], false, "{steered}");
+        let body: Value = serde_json::from_str(text(&steered)).expect("JSON");
+        assert_eq!(body["steered"], json!({"prompt": "and the docs"}));
+
+        let waited = one_call(
+            daemon.clone(),
+            "wait_task",
+            json!({"id": "ab12cd34", "timeoutMs": 1500}),
+        )
+        .await;
+        let body: Value = serde_json::from_str(text(&waited)).expect("JSON");
+        assert_eq!(body["query"], "timeoutMs=1500", "{waited}");
+        assert_eq!(body["waitTimedOut"], false);
+        let waited = one_call(daemon, "wait_task", json!({"id": "ab12cd34"})).await;
+        let body: Value = serde_json::from_str(text(&waited)).expect("JSON");
+        assert_eq!(body["query"], Value::Null, "the daemon's default: {waited}");
+    }
+
+    #[tokio::test]
+    async fn a_steer_to_an_ended_task_is_a_tool_error_carrying_the_daemons_words() {
+        let refused = one_call(
+            fake_daemon().await,
+            "steer_task",
+            json!({"id": "ffff0000", "prompt": "more"}),
+        )
+        .await;
+        assert_eq!(refused["isError"], true, "{refused}");
+        assert_eq!(
+            text(&refused),
+            "yantrad answered 409: task `ffff0000` has ended"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_steer_with_no_prompt_or_a_wait_with_a_bad_timeout_is_invalid_params() {
+        let daemon = fake_daemon().await;
+        let calls = [
+            ("steer_task", json!({"id": "ab12cd34"})),
+            ("steer_task", json!({"id": "ab12cd34", "prompt": "  "})),
+            ("wait_task", json!({"id": "ab12cd34", "timeoutMs": -1})),
+            ("wait_task", json!({"id": "ab12cd34", "timeoutMs": 1.5})),
+            ("wait_task", json!({"id": "ab12cd34", "timeoutMs": "soon"})),
+        ];
+        let lines = calls
+            .iter()
+            .enumerate()
+            .map(|(id, (name, arguments))| {
+                json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+                       "params": {"name": name, "arguments": arguments}})
+            })
+            .collect();
+        let answers = exchange(daemon, lines).await;
+        assert_eq!(answers.len(), calls.len());
+        for (answer, (name, arguments)) in answers.iter().zip(&calls) {
+            assert_eq!(
+                answer["error"]["code"], INVALID_PARAMS,
+                "{name} {arguments}: {answer}"
+            );
+        }
     }
 
     #[tokio::test]

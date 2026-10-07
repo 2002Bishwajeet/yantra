@@ -36,6 +36,12 @@ permission modes, their names and their descriptions from
 [`docs/user/permission-modes.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/user/permission-modes.md)
 at commit `72d5c32`. Yantra's default is Supervised, where T3 Code's is Full access.
 
+[`crates/yantra/src/mcp.rs`](crates/yantra/src/mcp.rs) copies the shapes of `steer_task`, `wait_task`
+and `cancel_task` from
+[`docs/orchestration-v2/orchestrator-mcp-server.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/orchestration-v2/orchestrator-mcp-server.md)
+at commit `72d5c32`: a steer is a cancel and a restart, a wait answers `waitTimedOut`, and a cancel of
+an ended task returns its state.
+
 ```text
 MIT License
 

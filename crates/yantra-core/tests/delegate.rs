@@ -137,11 +137,7 @@ async fn a_task_works_in_its_own_worktree_and_leaves_nothing_when_removed() -> R
     assert!(!summary.shortstat.is_empty(), "{summary:?}");
     assert_eq!(task.progress().summary, Some(summary));
 
-    within("stopping", async {
-        task.stop().await;
-        Ok::<_, Error>(())
-    })
-    .await?;
+    within("stopping", task.stop()).await?;
     assert!(task.progress().state.is_terminal(), "{:?}", task.progress());
     until(
         "opencode exiting on the machine",
