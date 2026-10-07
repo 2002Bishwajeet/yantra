@@ -18,8 +18,9 @@
 //!
 //! **Each `turn` carries the thread's [`PermissionMode`]** (Y-453), so the
 //! daemon still keeps nothing. A request the mode answers is answered here and
-//! never relayed, so the browser shows no card for it. `auto` alone reaches
-//! the harness, as Claude's `--permission-mode auto`.
+//! never relayed, so the browser shows no card for it. On a Claude thread,
+//! `auto` and `auto-accept-edits` reach the harness as Claude's own
+//! `--permission-mode`, and the daemon answers nothing for them.
 //!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
@@ -59,7 +60,7 @@ use yantra_core::chat::{
     ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, Diff};
-use yantra_core::claude::{Events, Turn};
+use yantra_core::claude::{self, Events, Turn};
 use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
 use yantra_core::logs::{self, Who};
@@ -724,7 +725,7 @@ async fn relay<M: Machine, P: Peer>(
                 return true;
             };
             if let Event::RequestOpened(opened) = &event.event
-                && let Some(decision) = mode.answers(opened.request_type)
+                && let Some(decision) = claude::answers(*mode, opened.request_type)
                 && let Some((running, _)) = turn.as_ref()
             {
                 match running.answer(&opened.request_id, decision) {
@@ -3068,17 +3069,26 @@ mod tests {
         assert_eq!(command["payload"]["requestType"], "exec_command_approval");
     }
 
+    /// Claude's own acceptEdits accepts an edit inside the worktree, so an edit
+    /// that reaches the daemon is outside it and still opens a card.
     #[tokio::test]
-    async fn auto_accept_edits_mode_answers_an_edit_and_asks_about_a_command() {
+    async fn auto_accept_edits_mode_relays_an_edit_claude_still_asks_about() {
         let script = Arc::new(Script::default());
         let (mut tab, mut claude) = a_claude_turn_in(&script, Some("auto-accept-edits")).await;
-        claude.say(an_edit("r1")).await;
-        let answer = claude.heard().await.expect("the daemon's answer");
-        assert_eq!(answer["response"]["request_id"], "r1");
-        assert_eq!(answer["response"]["response"]["behavior"], "allow");
-        let resolved = tab.next().await;
-        assert_eq!(resolved["type"], "request.resolved", "no card: {resolved}");
-        assert_eq!(resolved["payload"]["decision"], "accept");
+        assert_eq!(
+            *script.modes.lock().expect("a lock"),
+            [PermissionMode::AutoAcceptEdits]
+        );
+        claude
+            .say(can_use(
+                "r1",
+                "Edit",
+                json!({"file_path": "/home/u/.bashrc", "old_string": "a", "new_string": "b"}),
+            ))
+            .await;
+        let edit = tab.next().await;
+        assert_eq!(edit["type"], "request.opened", "{edit}");
+        assert_eq!(edit["payload"]["requestType"], "file_change_approval");
 
         claude.say(a_command("r2")).await;
         let command = tab.next().await;

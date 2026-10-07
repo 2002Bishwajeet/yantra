@@ -28,7 +28,7 @@ export const LABEL: Record<Harness, string> = {
 }
 
 /** When the agent asks a person first (Y-453). The daemon answers what the
- *  mode allows, and `auto` hands Claude its own review. */
+ *  mode allows; on Claude, `auto` and `auto-accept-edits` are Claude's own. */
 export type PermissionMode = 'supervised' | 'auto-accept-edits' | 'auto' | 'full-access'
 
 /** Unlike T3 Code, a new thread starts supervised. */

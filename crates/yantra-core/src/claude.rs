@@ -179,7 +179,7 @@ impl Turn {
 /// derived from the cwd. `claude` is searched for as I-34 requires, and a musl
 /// machine gets the ripgrep variable `agent::launch_command` gives the TUI.
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
-/// Only `Auto` changes Claude's own mode; the daemon answers for the others (Y-453).
+/// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
     format!(
         "cd {worktree} || exit 1\n\
@@ -187,19 +187,36 @@ fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> 
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}{auto}-p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}{mode}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
-        auto = if mode == chat::PermissionMode::Auto {
-            "--permission-mode auto "
-        } else {
-            ""
-        },
+        mode = flag(mode).map_or_else(String::new, |flag| format!("--permission-mode {flag} ")),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
     )
+}
+
+/// T3 Code maps the same two modes to Claude's own (`ClaudeAdapter.ts`).
+fn flag(mode: chat::PermissionMode) -> Option<&'static str> {
+    match mode {
+        chat::PermissionMode::Auto => Some("auto"),
+        chat::PermissionMode::AutoAcceptEdits => Some("acceptEdits"),
+        chat::PermissionMode::Supervised | chat::PermissionMode::FullAccess => None,
+    }
+}
+
+/// The daemon's answer to a Claude request in `mode`. In a mode Claude runs
+/// itself, a request that reaches the daemon is one Claude still asks about,
+/// such as an edit outside the worktree, so the person sees it.
+#[must_use]
+pub fn answers(mode: chat::PermissionMode, request: chat::RequestType) -> Option<chat::Decision> {
+    if flag(mode).is_some() {
+        None
+    } else {
+        mode.answers(request)
+    }
 }
 
 fn prompt(text: &str) -> Value {
@@ -1206,23 +1223,49 @@ mod tests {
         );
     }
 
-    /// Y-453: only Auto hands Claude a mode; every other mode the daemon answers.
+    /// Y-453: Auto and Auto-accept edits run in Claude's own mode.
     #[test]
-    fn the_auto_permission_mode_adds_the_flag() {
-        let auto = command("/w", Some("/tmp/i"), PermissionMode::Auto);
-        assert!(
-            auto.contains(
-                "exec \"$c\" --add-dir '/tmp/i' --permission-mode auto -p --input-format"
-            ),
-            "{auto}"
-        );
-        for mode in [
-            PermissionMode::Supervised,
-            PermissionMode::AutoAcceptEdits,
-            PermissionMode::FullAccess,
+    fn the_auto_permission_modes_add_claudes_flag() {
+        for (mode, flag) in [
+            (PermissionMode::Auto, "auto"),
+            (PermissionMode::AutoAcceptEdits, "acceptEdits"),
         ] {
+            let script = command("/w", Some("/tmp/i"), mode);
+            assert!(
+                script.contains(&format!(
+                    "exec \"$c\" --add-dir '/tmp/i' --permission-mode {flag} -p --input-format"
+                )),
+                "{script}"
+            );
+        }
+        for mode in [PermissionMode::Supervised, PermissionMode::FullAccess] {
             let script = command("/w", None, mode);
             assert!(!script.contains("--permission-mode"), "{mode:?}: {script}");
         }
+    }
+
+    /// Claude's acceptEdits still asks about an edit outside its directories,
+    /// so the daemon must not accept that edit for it.
+    #[test]
+    fn the_daemon_answers_claude_only_in_a_mode_claude_does_not_run() {
+        assert_eq!(
+            answers(
+                PermissionMode::AutoAcceptEdits,
+                RequestType::FileChangeApproval
+            ),
+            None
+        );
+        assert_eq!(
+            answers(PermissionMode::Auto, RequestType::FileChangeApproval),
+            None
+        );
+        assert_eq!(
+            answers(PermissionMode::FullAccess, RequestType::ExecCommandApproval),
+            Some(Decision::Accept)
+        );
+        assert_eq!(
+            answers(PermissionMode::Supervised, RequestType::FileChangeApproval),
+            None
+        );
     }
 }
