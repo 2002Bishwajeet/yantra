@@ -73,18 +73,46 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
     ))?;
     let contents = fixture.run(&tree)?;
 
-    assert_eq!(checkpoint::base(&ssh, &place).await?, Some(0));
+    // Two tabs at once: one keeps checkpoint 0 and the other finds it kept.
+    let (one, two) = tokio::join!(
+        checkpoint::base(&ssh, &place),
+        checkpoint::base(&ssh, &place)
+    );
+    let mut bases = [one?, two?];
+    bases.sort_unstable();
+    assert_eq!(bases, [None, Some(0)]);
     assert_eq!(checkpoint::base(&ssh, &place).await?, None, "one baseline");
 
     fixture.run(&format!(
         "cd {wt} && printf 'two\\n' >> kept.txt && rm gone.txt \
-         && printf 'new\\n' > made.txt && mkdir -p deep/er && printf 'x\\n' > deep/er/file.txt"
+         && printf 'new\\n' > made.txt && mkdir -p deep/er && printf 'x\\n' > deep/er/file.txt \
+         && printf 'u\\n' > é.txt"
     ))?;
-    assert_eq!(checkpoint::capture(&ssh, &place).await?, 1);
+    // Two captures at once take two numbers, and neither overwrites the other.
+    let (one, two) = tokio::join!(
+        checkpoint::capture(&ssh, &place),
+        checkpoint::capture(&ssh, &place)
+    );
+    let mut turns = [one?, two?];
+    turns.sort_unstable();
+    assert_eq!(turns, [1, 2]);
+    assert_eq!(checkpoint::diff(&ssh, &place, 2).await?.unified, "");
 
+    // A user's config must not change the format the browser reads.
+    fixture.run(&format!(
+        "git -C {REPO} config diff.noprefix true && git -C {REPO} config diff.mnemonicPrefix true \
+         && git -C {REPO} config color.ui always && git -C {REPO} config core.quotePath true \
+         && git -C {REPO} config diff.external /bin/false"
+    ))?;
     let diff = checkpoint::diff(&ssh, &place, 1).await?;
     assert!(!diff.truncated);
-    for changed in ["kept.txt", "gone.txt", "made.txt", "deep/er/file.txt"] {
+    for changed in [
+        "kept.txt",
+        "gone.txt",
+        "made.txt",
+        "deep/er/file.txt",
+        "é.txt",
+    ] {
         assert!(
             diff.unified
                 .contains(&format!("diff --git a/{changed} b/{changed}")),
@@ -131,6 +159,17 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
     let again = checkpoint::diff(&ssh, &place, 1).await?;
     assert!(again.unified.contains("a/again.txt"), "{}", again.unified);
     assert!(!again.unified.contains("made.txt"), "{}", again.unified);
+
+    // A git diff that fails is a failure, not an empty diff.
+    fixture.run(&format!(
+        "cd {wt} && h=$(git rev-parse refs/yantra/checkpoints/{}/1:again.txt) \
+         && rm \"$(git rev-parse --git-common-dir)/objects/$(echo $h | cut -c1-2)/$(echo $h | cut -c3-)\"",
+        place.id
+    ))?;
+    assert!(matches!(
+        checkpoint::diff(&ssh, &place, 1).await,
+        Err(Error::Git { stderr }) if !stderr.is_empty()
+    ));
 
     thread::remove(&ssh, &place).await?;
     assert_eq!(
