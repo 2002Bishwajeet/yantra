@@ -104,10 +104,41 @@ describe('one press', () => {
     expect(fake.socket().sent.at(-1)?.byteLength).toBe(86)
   })
 
-  it('leaves nothing open when released before the permission resolves', async () => {
+  it('says a permission granted after the release was granted, and leaves nothing open', async () => {
+    // Safari's prompt takes the focus, which ends the first hold.
     const fake = browser()
+    const onEnd = vi.fn<(error: ApiError | null) => void>()
+    const mic = openMic('pi', { onEnd, onState: () => {} })
+    mic.close()
+    expect(fake.socket().closed).toBe(true)
+    expect(fake.context().closed).toBe(true)
+    expect(onEnd).not.toHaveBeenCalled()
+
+    fake.allow()
+    await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1))
+    expect(fake.track.stop).toHaveBeenCalled()
+    expect(fake.node()).toBeUndefined()
+    const error = onEnd.mock.calls[0][0]
+    expect(error?.kind).toBe('allowed')
+    expect(error?.describe()).toBe('The browser now allows the microphone. Hold the button again to talk.')
+  })
+
+  it('says why when a prompt answered after the release refuses', async () => {
+    const fake = browser()
+    const onEnd = vi.fn<(error: ApiError | null) => void>()
+    openMic('pi', { onEnd, onState: () => {} }).close()
+    fake.refuse('NotAllowedError', 'Permission denied')
+    await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1))
+    expect(onEnd.mock.calls[0][0]?.kind).toBe('denied')
+  })
+
+  it('is a silent release before the request resolves when the permission was already granted', async () => {
+    const fake = browser({ permission: 'granted' })
     const onEnd = vi.fn()
     const mic = openMic('pi', { onEnd, onState: () => {} })
+    // The Permissions API answers on a later turn.
+    await Promise.resolve()
+    await Promise.resolve()
     mic.close()
     expect(onEnd).toHaveBeenCalledWith(null)
     expect(fake.socket().closed).toBe(true)
@@ -116,6 +147,69 @@ describe('one press', () => {
     fake.allow()
     await waitFor(() => expect(fake.track.stop).toHaveBeenCalled())
     expect(fake.node()).toBeUndefined()
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends what was heard before the socket opened, then closes it', async () => {
+    const fake = browser()
+    const onEnd = vi.fn()
+    const mic = openMic('pi', { onEnd, onState: () => {} })
+    fake.allow()
+    await waitFor(() => expect(fake.node()).toBeDefined())
+    let carry = START
+    let made = 0
+    for (let from = 0; from < 48_000 * 0.05; from += 128) {
+      fake.node().push(sine(128, 48_000, from))
+      const block = toPcm16(sine(128, 48_000, from), 48_000, carry)
+      carry = block.carry
+      made += block.bytes.byteLength
+    }
+
+    mic.close()
+    // The microphone is off at once (§6); the socket is not, because it holds the audio.
+    expect(fake.track.stop).toHaveBeenCalled()
+    expect(fake.context().closed).toBe(true)
+    expect(fake.socket().closed).toBe(false)
+    expect(onEnd).not.toHaveBeenCalled()
+
+    fake.socket().open()
+    const sent = fake.socket().sent
+    expect(sent.reduce((total, frame) => total + frame.byteLength, 0)).toBe(made)
+    expect(fake.socket().closed).toBe(true)
+    expect(onEnd).toHaveBeenCalledWith(null)
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('is refused when a socket released while connecting never opens', async () => {
+    const fake = browser()
+    const onEnd = vi.fn<(error: ApiError | null) => void>()
+    const mic = openMic('pi', { onEnd, onState: () => {} })
+    fake.allow()
+    await waitFor(() => expect(fake.node()).toBeDefined())
+    fake.node().push(sine(1024, 48_000))
+    mic.close()
+    fake.socket().hangUp()
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(onEnd.mock.calls[0][0]?.kind).toBe('refused')
+  })
+})
+
+describe('a press whose setup throws', () => {
+  it.each([
+    ['AudioContext', () => vi.stubGlobal('AudioContext', class { constructor() { throw new DOMException('no audio', 'NotSupportedError') } })],
+    ['WebSocket', () => vi.stubGlobal('WebSocket', class { constructor() { throw new DOMException('bad address', 'SyntaxError') } })],
+  ])('ends with a capture error when the %s constructor throws', (_, broken) => {
+    const fake = browser()
+    broken()
+    const onEnd = vi.fn<(error: ApiError | null) => void>()
+    const mic = openMic('pi', { onEnd, onState: () => {} })
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    const error = onEnd.mock.calls[0][0]
+    expect(error?.kind).toBe('capture')
+    expect(error?.describe()).toBe('The browser could not open the microphone.')
+    expect(fake.asked).not.toHaveBeenCalled()
+    expect(fake.context()?.closed ?? true).toBe(true)
+    mic.close()
     expect(onEnd).toHaveBeenCalledTimes(1)
   })
 })
@@ -152,6 +246,21 @@ describe('a press that ends on its own', () => {
     const { error } = await ended((fake) => fake.refuse('NotFoundError', 'Requested device not found'))
     expect(error.kind).toBe('no-device')
     expect(error.describe()).toBe('This browser found no microphone to use.')
+  })
+
+  it.each([
+    ['NotAllowedError', 'denied', 'This browser was not allowed to use the microphone.'],
+    ['SecurityError', 'denied', 'This browser was not allowed to use the microphone.'],
+    ['NotFoundError', 'no-device', 'This browser found no microphone to use.'],
+    ['OverconstrainedError', 'no-device', 'This browser found no microphone to use.'],
+    ['NotReadableError', 'busy', 'Another app is using the microphone.'],
+    ['AbortError', 'capture', 'The browser could not open the microphone.'],
+    ['TypeError', 'capture', 'The browser could not open the microphone.'],
+  ])('reads %s as %s', async (name, kind, sentence) => {
+    const { error } = await ended((fake) => fake.refuse(name, 'the browser said so'))
+    expect(error.kind).toBe(kind)
+    expect(error.describe()).toBe(sentence)
+    expect(error.said).toBe('the browser said so')
   })
 
   it('is stopped when the browser takes the track away', async () => {

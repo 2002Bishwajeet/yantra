@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { answer } from '../test/daemon'
-import { ApiError, asApiError, isApiError, type Kind } from './errors'
+import { ApiError, asApiError, isApiError, type Kind, micError } from './errors'
 import { attention, machines, notLooked, opened, spend } from './fixtures'
 import {
   aboutQuery,
@@ -36,6 +36,9 @@ describe('what an error says', () => {
       denied: new ApiError('denied', 'Permission denied').describe(),
       'no-device': new ApiError('no-device', 'Requested device not found').describe(),
       stopped: new ApiError('stopped', 'Built-in Microphone ended').describe(),
+      busy: new ApiError('busy', 'Could not start audio source').describe(),
+      capture: new ApiError('capture', 'AbortError').describe(),
+      allowed: new ApiError('allowed', '').describe(),
     }
     for (const said of Object.values(sentences)) {
       expect(said).toMatch(/^[A-Z].*\.$/)
@@ -45,6 +48,19 @@ describe('what an error says', () => {
     expect(sentences.network).toBe('The daemon did not answer.')
     expect(sentences.missing).toBe('The daemon knows nothing by that name.')
     expect(sentences.socket).toBe('The terminal could not be opened.')
+    expect(sentences.busy).toBe('Another app is using the microphone.')
+    expect(sentences.allowed).toBe('The browser now allows the microphone. Hold the button again to talk.')
+  })
+
+  /** Every sentence lives here: on the microphone's socket, `refused` and
+   *  `socket` name the microphone rather than a terminal. */
+  it('says the microphone’s refused and socket in its own words', () => {
+    expect(micError('refused', 'no').describe()).toBe('The daemon refused the microphone.')
+    expect(micError('socket', 'gone').describe()).toBe('The microphone on the machine stopped.')
+    expect(micError('denied', 'no').describe()).toBe(new ApiError('denied', 'no').describe())
+    expect(micError('insecure', 'http://pi:7717').describe()).toBe(
+      'The microphone works only on the HTTPS address, on port 8443.',
+    )
   })
 
   /** Each code the write authoriser answers means a different thing. */

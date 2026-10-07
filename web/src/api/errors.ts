@@ -1,4 +1,4 @@
-/** The one error anything under `api/` rejects with. Nine kinds, each from a
+/** The one error anything under `api/` rejects with. Twelve kinds, each from a
  *  different place: what a surface draws is `describe()`, and `said` — the
  *  daemon's own words, verbatim — goes beneath it in mono, as every form
  *  already does (D3 §8.1). */
@@ -22,6 +22,11 @@ export type Kind =
   | 'denied'
   | 'no-device'
   | 'stopped'
+  // The rest of the microphone's: a device another app holds, a capture that
+  // failed some other way, and a permission granted after the button was let go.
+  | 'busy'
+  | 'capture'
+  | 'allowed'
 
 /** What the status alone says, before the daemon's sentence. Each code means a
  *  different thing, and collapsing them into "failed" sends the operator
@@ -43,11 +48,27 @@ const sentences: Record<Kind, string> = {
   missing: 'The daemon knows nothing by that name.',
   contract: 'The daemon answered something this dashboard cannot read.',
   socket: 'The terminal could not be opened.',
-  insecure: 'The microphone works only on the HTTPS address.',
+  insecure: 'The microphone works only on the HTTPS address, on port 8443.',
   denied: 'This browser was not allowed to use the microphone.',
   'no-device': 'This browser found no microphone to use.',
-  stopped: 'The microphone stopped.',
+  stopped: 'The browser took the microphone away, so the stream stopped.',
+  busy: 'Another app is using the microphone.',
+  capture: 'The browser could not open the microphone.',
+  allowed: 'The browser now allows the microphone. Hold the button again to talk.',
 }
+
+/** The kinds a press of the microphone ends with. */
+export type MicKind = Extract<
+  Kind,
+  'insecure' | 'denied' | 'no-device' | 'stopped' | 'busy' | 'capture' | 'allowed' | 'refused' | 'socket'
+>
+
+/** On the microphone's socket, `refused` and `socket` are about the microphone, not a terminal. */
+const onTheMic: Partial<Record<MicKind, string>> = {
+  refused: 'The daemon refused the microphone.',
+  socket: 'The microphone on the machine stopped.',
+}
+
 
 export class ApiError extends Error {
   readonly kind: Kind
@@ -97,3 +118,5 @@ export function asApiError(error: unknown): ApiError {
     sentence: 'The dashboard hit something it did not expect.',
   })
 }
+
+export const micError = (kind: MicKind, said: string) => new ApiError(kind, said, { sentence: onTheMic[kind] })

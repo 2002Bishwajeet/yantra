@@ -100,8 +100,9 @@ export function track(): FakeTrack {
   }
 }
 
-/** Installs the fakes. `permission` settles when the test says so. */
-export function browser({ secure = true } = {}) {
+/** Installs the fakes. The microphone's request settles when the test says
+ *  so; `permission` is what the Permissions API reports, and none by default. */
+export function browser({ secure = true, permission }: { secure?: boolean; permission?: PermissionState } = {}) {
   FakeSocket.made = []
   FakeContext.made = []
   FakeNode.made = []
@@ -119,7 +120,11 @@ export function browser({ secure = true } = {}) {
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('AudioContext', FakeContext)
   vi.stubGlobal('AudioWorkletNode', FakeNode)
-  vi.stubGlobal('navigator', { ...navigator, mediaDevices: { getUserMedia: asked } })
+  vi.stubGlobal('navigator', {
+    ...navigator,
+    mediaDevices: { getUserMedia: asked },
+    ...(permission ? { permissions: { query: () => Promise.resolve({ state: permission }) } } : {}),
+  })
   return {
     track: one,
     asked,
