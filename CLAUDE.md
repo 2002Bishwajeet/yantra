@@ -125,7 +125,7 @@ person. Give the reason. Say what you do not know.
 3. **Each crate has its own [`CLAUDE.md`](crates/), `tracker.md`, `llms.txt` and `README.md`.** Read
    the ones for the crate you are changing — the root documents are the map, not the territory, and
    the crate files hold the rules that actually bind the code in front of you. **The invariants live
-   in the crate trackers**, not in the root one. [`llms.txt`](llms.txt) at the root indexes
+   in the crate trackers**, not in the root one. Each `CLAUDE.md` has an `AGENTS.md` symlink beside it, and `just agents` enforces it. [`llms.txt`](llms.txt) at the root indexes
    everything.
 4. **[`docs/development.md`](docs/development.md) is the local setup + daily-command reference.**
 5. **[`docs/research/`](docs/research/) holds dated evidence.** Notes reflect the world on their

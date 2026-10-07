@@ -35,6 +35,7 @@
 - [ADR-0013](../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md): what `POST /heartbeat` accepts, why it answers nothing, and why the source address is the identity.
 - [ADR-0004](../../docs/adr/0004-rust-for-the-daemon.md): Rust, with axum and tokio. TypeScript belongs to the browser — do not introduce a second runtime here.
 - [CLAUDE.md](CLAUDE.md): what is already settled, and what to read before starting — including why there is no `--bind` flag.
+- [AGENTS.md](AGENTS.md): a symlink to CLAUDE.md, for agents that read AGENTS.md.
 
 ## Optional
 

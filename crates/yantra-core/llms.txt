@@ -72,6 +72,7 @@ half taking an `Exec`, which is what the tests drive.
 
 - [tracker.md](tracker.md): this crate's invariants — the largest share in the project. The single most useful thing to read before changing anything here.
 - [CLAUDE.md](CLAUDE.md): the crate's own working rules, including which invariant binds which module.
+- [AGENTS.md](AGENTS.md): a symlink to CLAUDE.md, for agents that read AGENTS.md.
 - [../../tracker.md](../../tracker.md): project state — milestones, open tasks, decisions, risks.
 - [tests/common/mod.rs](tests/common/mod.rs): the disposable sshd + tmux container every integration test runs against.
 - [tests/manual_macbook.rs](tests/manual_macbook.rs): the `#[ignore]`d checks that need the real MacBook rather than a container — `just test-mac <machine>`. Two need a person at that machine and refuse without one: Y-139's measures whether a transcript keeps advancing while the tmux session is detached (Q12, R-1), and Y-151's asks whether the gate finds a credential inside a GUI-login tmux server where ssh finds none (ADR-0018 §5, I-44). Both need that server started from a GUI login, which is the one thing no container can stand in for.

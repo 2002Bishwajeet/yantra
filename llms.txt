@@ -9,7 +9,7 @@
 **Read `tracker.md` first.** It is the single source of truth for project state, and it wins over
 anything else — including this file — when they disagree.
 
-Each crate carries its own `CLAUDE.md`, `tracker.md`, `llms.txt` and `README.md`. Start at the crate
+Each crate carries its own `CLAUDE.md` (with an `AGENTS.md` symlink beside it), `tracker.md`, `llms.txt` and `README.md`. Start at the crate
 you are changing rather than reading the root documents end to end. **The invariants live in the
 crate trackers** — non-obvious rules, most earned by a bug that presented as something else, and
 [`tracker.md` §1b](tracker.md) indexes which crate holds which. They are the highest-value thing in
@@ -19,6 +19,7 @@ the repo.
 
 - [tracker.md](tracker.md): project state — milestones, open tasks, decisions, open questions, risks, and an index of where the invariants live.
 - [CLAUDE.md](CLAUDE.md): how to work in this repo — think before coding, surgical changes, and what "verification" means here (a real sshd and a real tmux, never a mock).
+- [AGENTS.md](AGENTS.md): a symlink to CLAUDE.md, for agents that read AGENTS.md instead (Codex, Grok, opencode).
 - [README.md](README.md): what Yantra is, for a human — install, usage, the workspace schema.
 - [docs/architecture.md](docs/architecture.md): the structure, the `up` sequence, the trust boundaries and where the live risks sit, as rendered diagrams. The fastest way to orient.
 
