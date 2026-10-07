@@ -258,15 +258,13 @@ fn lost(loser: &Scored, winner: &Scored) -> String {
             format!("POWER: {} against {}", power(l.power), power(w.power)),
         ),
     ];
-    let mut largest = &gaps[0];
-    for gap in &gaps[1..] {
-        if gap.0 > largest.0 {
-            largest = gap;
-        }
-    }
+    let largest = gaps
+        .iter()
+        .reduce(|a, b| if b.0 > a.0 { b } else { a })
+        .map_or("", |gap| gap.1.as_str());
     format!(
-        "lost: {behind:.1} behind {}; the largest gap is {}",
-        winner.machine, largest.1
+        "lost: {behind:.1} behind {}; the largest gap is {largest}",
+        winner.machine
     )
 }
 
