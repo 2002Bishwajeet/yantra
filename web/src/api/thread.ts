@@ -106,3 +106,9 @@ export type ChatFrame =
 export type ChatFailure =
   | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable'; said: string }
   | { type: 'error'; kind: 'notLoggedIn'; said: string; harness: Harness; machine: string; command: string }
+
+/** The one reply to each image the browser sends as a binary frame (Y-424),
+ *  in the order they were sent. `path` is where the agent reads it. */
+export type ChatAttached = { type: 'attached'; path: string }
+
+export type ChatNotAttached = { type: 'notAttached'; kind: 'notAnImage' | 'unreachable'; said: string }

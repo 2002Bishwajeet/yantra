@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
-import { chatEvents, chatNotLoggedIn } from '@/contract.gen'
+import { IMAGE_LIMIT } from '@/api/chat'
+import { chatAttached, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -301,5 +302,185 @@ describe('the chat', () => {
 
     say({ type: 'error', kind: 'busy', said: 'a turn is running' })
     await settled(() => expect(screen.getByRole('alert').textContent).toContain('The agent is still answering'))
+  })
+})
+
+/** A PNG's magic and a little more, as a pasted screenshot starts. */
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7]
+const png = (name = 'shot.png') => new File([new Uint8Array(PNG)], name, { type: 'image/png' })
+const images = () => server.heard.filter((frame) => 'bytes' in frame)
+const turns = () => server.heard.flatMap((frame) => ('text' in frame ? [JSON.parse(frame.text)] : []))
+const composerBox = () => document.querySelector<HTMLElement>('.chat__composer')!
+const picker = () => document.querySelector<HTMLInputElement>('input[type="file"]')!
+
+describe('images in the composer', () => {
+  let made: string[]
+  let revoked: string[]
+
+  beforeEach(() => {
+    made = []
+    revoked = []
+    // jsdom has neither; a browser makes a `blob:` URL for the preview.
+    URL.createObjectURL = (() => {
+      const url = `blob:preview/${made.length + 1}`
+      made.push(url)
+      return url
+    }) as typeof URL.createObjectURL
+    URL.revokeObjectURL = (url: string) => {
+      revoked.push(url)
+    }
+  })
+
+  const ways = {
+    button: (file: File) => {
+      fireEvent.click(screen.getByRole('button', { name: 'Attach an image' }))
+      fireEvent.change(picker(), { target: { files: [file] } })
+    },
+    paste: (file: File) => {
+      fireEvent.paste(screen.getByLabelText('Message Claude in yantra-web'), { clipboardData: { files: [file] } })
+    },
+    drop: (file: File) => {
+      fireEvent.dragOver(composerBox(), { dataTransfer: { types: ['Files'], files: [] } })
+      expect(composerBox().hasAttribute('data-dropping')).toBe(true)
+      expect(screen.getByText('Drop an image to attach it.')).toBeTruthy()
+      fireEvent.drop(composerBox(), { dataTransfer: { types: ['Files'], files: [file] } })
+      expect(composerBox().hasAttribute('data-dropping')).toBe(false)
+    },
+  }
+
+  it.each(Object.keys(ways) as (keyof typeof ways)[])('takes an image by %s, with a thumbnail', async (way) => {
+    await open()
+    ways[way](png())
+    const thumbnail = await settled(() => screen.getByRole('img', { name: 'Image 1' }))
+    expect(thumbnail.getAttribute('src')).toBe('blob:preview/1')
+    expect(screen.getByText('Uploading…')).toBeTruthy()
+    await settled(() => expect(images()).toEqual([{ bytes: PNG }]))
+    say(chatAttached)
+    await settled(() => expect(screen.getByText('Attached')).toBeTruthy())
+  })
+
+  it('leaves a paste of text to the field', async () => {
+    await open()
+    fireEvent.paste(screen.getByLabelText('Message Claude in yantra-web'), { clipboardData: { files: [] } })
+    expect(screen.queryByRole('list', { name: 'Images' })).toBeNull()
+  })
+
+  it('sends the draft with each path on a line of its own, then clears the images', async () => {
+    await open()
+    type('what differs?')
+    ways.button(png('a.png'))
+    ways.paste(png('b.png'))
+    await settled(() => expect(images()).toHaveLength(2))
+    say({ type: 'attached', path: '/tmp/yantra-chat-Y1/1.png' })
+    say({ type: 'attached', path: '/tmp/yantra-chat-Y1/2.png' })
+    await settled(() => expect(screen.getAllByText('Attached')).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(turns()).toEqual([
+        { type: 'turn', text: 'what differs?\n/tmp/yantra-chat-Y1/1.png\n/tmp/yantra-chat-Y1/2.png', harness: 'claude' },
+      ]),
+    )
+    expect(screen.queryByRole('list', { name: 'Images' })).toBeNull()
+    expect(revoked).toEqual(['blob:preview/1', 'blob:preview/2'])
+  })
+
+  it('sends an image with no words', async () => {
+    await open()
+    ways.drop(png())
+    await settled(() => expect(images()).toHaveLength(1))
+    say(chatAttached)
+    const send = screen.getByRole('button', { name: 'Send' })
+    await settled(() => expect(send).toHaveProperty('disabled', false))
+    fireEvent.click(send)
+    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: chatAttached.path, harness: 'claude' }]))
+  })
+
+  it('removes an image, its preview and its path', async () => {
+    await open()
+    ways.button(png('a.png'))
+    ways.button(png('b.png'))
+    await settled(() => expect(images()).toHaveLength(2))
+    say({ type: 'attached', path: '/tmp/yantra-chat-Y1/1.png' })
+    say({ type: 'attached', path: '/tmp/yantra-chat-Y1/2.png' })
+    await settled(() => expect(screen.getAllByText('Attached')).toHaveLength(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove image 1' }))
+    expect(revoked).toEqual(['blob:preview/1'])
+    expect(screen.getAllByRole('img').map((one) => one.getAttribute('src'))).toEqual(['blob:preview/2'])
+    expect(screen.getByRole('img', { name: 'Image 1' })).toBeTruthy()
+    type('this one')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(turns()).toEqual([{ type: 'turn', text: 'this one\n/tmp/yantra-chat-Y1/2.png', harness: 'claude' }]),
+    )
+  })
+
+  it('holds Send while an image uploads, and says why', async () => {
+    await open()
+    type('look')
+    ways.button(png())
+    const send = screen.getByRole('button', { name: 'Send' })
+    await settled(() => expect(send).toHaveProperty('disabled', true))
+    expect(screen.getByText('An image is still uploading. Send once it is attached.')).toBeTruthy()
+    fireEvent.submit(send.closest('form')!)
+    expect(turns()).toEqual([])
+
+    say(chatAttached)
+    await settled(() => expect(send).toHaveProperty('disabled', false))
+  })
+
+  it('revokes every preview when the chat goes', async () => {
+    await open()
+    ways.button(png())
+    await settled(() => expect(made).toHaveLength(1))
+    cleanup()
+    expect(revoked).toEqual(['blob:preview/1'])
+  })
+
+  const failures: [string, (file?: File) => void, string][] = [
+    [
+      'an image over 16 MiB',
+      () => ways.button(new File([new Uint8Array(IMAGE_LIMIT + 1)], 'big.png', { type: 'image/png' })),
+      'The image is larger than 16 MiB, the most the chat takes.',
+    ],
+    [
+      'a file that is not an image',
+      () => ways.drop(new File(['%PDF-1.7'], 'notes.pdf', { type: 'application/pdf' })),
+      'The chat takes PNG, JPEG, GIF and WebP images only.',
+    ],
+  ]
+
+  it.each(failures)('draws %s as failed, before anything is sent', async (_, attach, sentence) => {
+    await open()
+    attach()
+    await settled(() => expect(screen.getByText(sentence)).toBeTruthy())
+    expect(screen.getByRole('listitem').getAttribute('data-state')).toBe('failed')
+    expect(images()).toEqual([])
+    // A failed image holds nothing up.
+    type('anyway')
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false)
+  })
+
+  it.each([
+    ['bytes that are not an image', chatNotAttached, 'The chat takes PNG, JPEG, GIF and WebP images only.'],
+    [
+      'a machine that did not take it',
+      { type: 'notAttached', kind: 'unreachable', said: 'ssh: connection reset' },
+      "The workspace's machine did not take the image.",
+    ],
+  ])('draws %s as the daemon said it', async (_, reply, sentence) => {
+    await open()
+    ways.button(png())
+    await settled(() => expect(images()).toHaveLength(1))
+    say(reply)
+    await settled(() => expect(screen.getByText(sentence)).toBeTruthy())
+  })
+
+  it('draws an image whose socket closed before it landed', async () => {
+    await open()
+    ways.button(png())
+    await settled(() => expect(images()).toHaveLength(1))
+    server.hangUp()
+    await settled(() => expect(screen.getByText('The chat socket closed, so the image was not attached.')).toBeTruthy())
   })
 })

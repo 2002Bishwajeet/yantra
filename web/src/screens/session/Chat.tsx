@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Square } from 'lucide-react'
+import { ArrowUp, ImagePlus, Square, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { Workspace } from '@/api'
-import type { ChatError } from '@/api/chat'
+import { AttachError, IMAGE_TYPES, type ChatError } from '@/api/chat'
 import { LABEL, type Harness, type ItemType, type RequestOpened } from '@/api/thread'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -183,6 +183,92 @@ function LoggedOut(props: { error: ChatError; login: NonNullable<ChatError['logi
   )
 }
 
+/** One image in the composer: a local preview, and how its upload went. */
+type Picked = { id: number; url: string } & (
+  | { state: 'uploading' }
+  | { state: 'attached'; path: string }
+  | { state: 'failed'; error: AttachError }
+)
+
+/** The composer's images (Y-424). Each uploads as it is added, and its
+ *  preview URL is revoked when it goes or the chat does. */
+function useImages(attach: (file: Blob) => Promise<string>) {
+  const [images, setImages] = useState<Picked[]>([])
+  const next = useRef(1)
+  const urls = useRef(new Map<number, string>())
+
+  useEffect(() => {
+    const held = urls.current
+    return () => {
+      for (const url of held.values()) URL.revokeObjectURL(url)
+      held.clear()
+    }
+  }, [])
+
+  const settle = (id: number, change: (one: Picked) => Picked) =>
+    setImages((now) => now.map((one) => (one.id === id ? change(one) : one)))
+
+  const forget = (ids: Iterable<number>) => {
+    for (const id of ids) {
+      const url = urls.current.get(id)
+      if (url) URL.revokeObjectURL(url)
+      urls.current.delete(id)
+    }
+  }
+
+  return {
+    images,
+    add: (files: Iterable<File>) => {
+      for (const file of files) {
+        const id = next.current++
+        const url = URL.createObjectURL(file)
+        urls.current.set(id, url)
+        setImages((now) => [...now, { id, url, state: 'uploading' }])
+        attach(file).then(
+          (path) => settle(id, ({ url }) => ({ id, url, state: 'attached', path })),
+          (cause: unknown) =>
+            settle(id, ({ url }) => ({
+              id,
+              url,
+              state: 'failed',
+              error: cause instanceof AttachError ? cause : new AttachError('unreachable', String(cause)),
+            })),
+        )
+      }
+    },
+    remove: (id: number) => {
+      forget([id])
+      setImages((now) => now.filter((one) => one.id !== id))
+    },
+    clear: () => {
+      forget([...urls.current.keys()])
+      setImages([])
+    },
+  }
+}
+
+const UPLOAD: Record<Exclude<Picked['state'], 'failed'>, string> = {
+  uploading: 'Uploading…',
+  attached: 'Attached',
+}
+
+function Images(props: { images: Picked[]; onRemove: (id: number) => void }) {
+  const { images, onRemove } = props
+  return (
+    <ul aria-label="Images" aria-live="polite" className="chat__images">
+      {images.map((one, at) => (
+        <li className="chat__image" data-state={one.state} key={one.id}>
+          <img alt={`Image ${at + 1}`} src={one.url} />
+          <span className="chat__image-state">{one.state === 'failed' ? one.error.describe() : UPLOAD[one.state]}</span>
+          <IconButton label={`Remove image ${at + 1}`} onClick={() => onRemove(one.id)} type="button">
+            <X />
+          </IconButton>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export type ChatProps = {
   workspace: Workspace
   /** `?thread=`: the chat to continue. Read when the socket opens. */
@@ -212,6 +298,9 @@ export function Chat(props: ChatProps) {
   useEffect(() => {
     if (error?.kind === 'notLoggedIn' && timeline.entries.length === 0) setDraft((now) => now || lastSent.current)
   }, [error, timeline.entries.length])
+  const { images, add, remove, clear } = useImages(chat.attach)
+  const [dropping, setDropping] = useState(false)
+  const picker = useRef<HTMLInputElement>(null)
   const end = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const why = useId()
@@ -234,12 +323,18 @@ export function Chat(props: ChatProps) {
     if (pinned.current) end.current?.scrollIntoView?.({ block: 'end' })
   }, [timeline.entries, timeline.requests])
 
+  const uploading = images.some((one) => one.state === 'uploading')
+  // The agent reads an image by its path, so each goes on a line of its own.
+  const text = [draft.trim(), ...images.flatMap((one) => (one.state === 'attached' ? [one.path] : []))]
+    .filter((line) => line !== '')
+    .join('\n')
+
   const send = () => {
-    const text = draft.trim()
-    if (text === '' || busy) return
+    if (text === '' || busy || uploading) return
     if (chat.send(text, locked ? undefined : picked)) {
       lastSent.current = text
       setDraft('')
+      clear()
     }
   }
 
@@ -248,9 +343,11 @@ export function Chat(props: ChatProps) {
       ? 'The chat is not connected, so nothing can be sent.'
       : busy
         ? `${agent} is answering. Stop it to send something else.`
-        : draft.trim() === ''
-          ? 'Type a message to send it.'
-          : null
+        : uploading
+          ? 'An image is still uploading. Send once it is attached.'
+          : text === ''
+            ? 'Type a message to send it.'
+            : null
 
   return (
     <div className="chat">
@@ -284,8 +381,50 @@ export function Chat(props: ChatProps) {
           title={error.kind === 'turnFailed' ? 'The turn failed' : 'The chat could not go on'}
         />
       ) : null}
-      <div className="chat__composer">
+      <div
+        className="chat__composer"
+        data-dropping={dropping ? '' : undefined}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false)
+        }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          setDropping(true)
+        }}
+        onDrop={(event) => {
+          if (event.dataTransfer.files.length === 0) return
+          event.preventDefault()
+          setDropping(false)
+          add(event.dataTransfer.files)
+        }}
+      >
+        {dropping ? (
+          <p aria-hidden="true" className="chat__drop">
+            Drop an image to attach it.
+          </p>
+        ) : null}
         <div className="chat__controls">
+          <IconButton
+            disabled={link !== 'open'}
+            label="Attach an image"
+            onClick={() => picker.current?.click()}
+            type="button"
+          >
+            <ImagePlus />
+          </IconButton>
+          <input
+            accept={IMAGE_TYPES.join(',')}
+            hidden
+            multiple
+            onChange={(event) => {
+              if (event.target.files) add(event.target.files)
+              // The same file picked twice is a second image.
+              event.target.value = ''
+            }}
+            ref={picker}
+            type="file"
+          />
           {harness ? (
             <HarnessPicker
               disabled={busy || link !== 'open'}
@@ -296,6 +435,7 @@ export function Chat(props: ChatProps) {
           ) : null}
           {timeline.usage ? <Meter usage={timeline.usage} /> : null}
         </div>
+        {images.length > 0 ? <Images images={images} onRemove={remove} /> : null}
         <form
           className="chat__field"
           onSubmit={(event) => {
@@ -308,6 +448,11 @@ export function Chat(props: ChatProps) {
             disabled={link === 'closed'}
             label={phone ? `Message ${agent}` : `Message ${agent} in ${workspace.name}`}
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={(event) => {
+              if (event.clipboardData.files.length === 0) return
+              event.preventDefault()
+              add(event.clipboardData.files)
+            }}
             trailing={
               busy ? (
                 <IconButton

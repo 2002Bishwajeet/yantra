@@ -650,7 +650,8 @@ function oneOff(state, request, socket, head, machine, index, at) {
  *  rest once it is answered. The first turn's harness is the thread's (Y-434),
  *  and Gemini has no login on the fixture's machine, so a turn for it is
  *  refused as yantrad refuses it. `?thread=` attaches to the one thread here,
- *  a Claude thread, and replays two turns of its transcript first. */
+ *  a Claude thread, and replays two turns of its transcript first. An image
+ *  is attached as yantrad attaches it. */
 const THREAD = '1a2b3c4d'
 const LOGGED_OUT = { gemini: 'run gemini and sign in' }
 const HISTORY = [
@@ -694,7 +695,13 @@ function converse(state, request, socket, head, name, thread) {
     let known = thread
     let waiting = null
     let sent = 0
+    let images = 0
     ws.on('message', (data, binary) => {
+      // An image (Y-424): yantrad's reply, under the name its counter gives.
+      if (binary) {
+        images += 1
+        return say({ ...contract.chatAttached, path: contract.chatAttached.path.replace(/\d+\.png$/, `${images}.png`) })
+      }
       let frame = null
       try {
         frame = binary ? null : JSON.parse(data.toString())
