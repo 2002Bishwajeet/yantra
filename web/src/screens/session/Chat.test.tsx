@@ -67,7 +67,7 @@ describe('the harness picker', () => {
 
     fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list the files' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'list the files', harness: 'opencode' }]))
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'list the files', harness: 'opencode', mode: 'supervised' }]))
     expect(screen.getByRole('status').textContent).toBe('opencode is answering.')
   })
 
@@ -80,7 +80,7 @@ describe('the harness picker', () => {
 
     fireEvent.change(screen.getByLabelText('Message Codex in yantra-web'), { target: { value: 'again' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'again' }]))
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'again', mode: 'supervised' }]))
   })
 
   it("draws opencode's events on the same timeline as Claude's", async () => {
@@ -133,6 +133,100 @@ describe('the harness picker', () => {
   })
 })
 
+describe('permission modes', () => {
+  beforeEach(() => localStorage.clear())
+
+  async function pick(label: string) {
+    fireEvent.click(screen.getByRole('button', { name: /^Permissions: / }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    fireEvent.click(options.find((one) => one.getAttribute('aria-label') === label)!)
+    await settled(() => expect(screen.getByRole('button', { name: `Permissions: ${label}` })).toBeTruthy())
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+  }
+
+  it('starts a new thread supervised, and sends the mode picked on the turn', async () => {
+    await open()
+    expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toBeTruthy()
+    await pick('Full access')
+    type('run the tests')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([{ type: 'turn', text: 'run the tests', harness: 'claude', mode: 'full-access' }]),
+    )
+  })
+
+  it('changes the mode between turns, and the next turn carries it', async () => {
+    await open()
+    type('first')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(started())
+    say(of('turn.started'))
+    // A change while a turn runs holds from the next one.
+    await pick('Auto-accept edits')
+    say({ ...of('turn.completed'), payload: { state: 'completed', stopReason: 'end_turn' } })
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude finished.'))
+    type('second')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'turn', text: 'first', harness: 'claude', mode: 'supervised' },
+        { type: 'turn', text: 'second', mode: 'auto-accept-edits' },
+      ]),
+    )
+  })
+
+  it('keeps each thread its own mode', async () => {
+    await open()
+    await pick('Auto')
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Permissions: Auto' })).toBeTruthy())
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toBeTruthy())
+  })
+
+  it('falls back to Supervised when the browser refuses site data, and still sends', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    try {
+      render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+      // The picker waits for the socket to open.
+      await settled(() =>
+        expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toHaveProperty('disabled', false),
+      )
+      say(started())
+      await pick('Full access')
+      type('go')
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+      await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'go', mode: 'full-access' }]))
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('draws the bad frame a daemon sends for a mode it cannot read', async () => {
+    await open()
+    await pick('Auto')
+    type('go')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say({ type: 'error', kind: 'badFrame', said: 'a frame is a turn, an answer, a cancel or a revert: unknown variant `auto`' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
+    expect(alert.textContent).toContain('unknown variant `auto`')
+    // A bad frame ends nothing: the picker still answers.
+    expect(screen.getByRole('button', { name: 'Permissions: Auto' })).toHaveProperty('disabled', false)
+  })
+})
+
 describe('the chat', () => {
   it('opens on an empty conversation, and says why Send is off', async () => {
     await open()
@@ -153,7 +247,7 @@ describe('the chat', () => {
     type('run the tests')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'run the tests', harness: 'claude' }]))
+    await settled(() => expect(frames()).toEqual([{ type: 'turn', text: 'run the tests', harness: 'claude', mode: 'supervised' }]))
     expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').value).toBe('')
     expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
 
@@ -489,7 +583,7 @@ describe('images in the composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await settled(() =>
       expect(turns()).toEqual([
-        { type: 'turn', text: 'what differs?\n/tmp/yantra-chat-Y1/1.png\n/tmp/yantra-chat-Y1/2.png', harness: 'claude' },
+        { type: 'turn', text: 'what differs?\n/tmp/yantra-chat-Y1/1.png\n/tmp/yantra-chat-Y1/2.png', harness: 'claude', mode: 'supervised' },
       ]),
     )
     expect(screen.queryByRole('list', { name: 'Images' })).toBeNull()
@@ -504,7 +598,7 @@ describe('images in the composer', () => {
     const send = screen.getByRole('button', { name: 'Send' })
     await settled(() => expect(send).toHaveProperty('disabled', false))
     fireEvent.click(send)
-    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: chatAttached.path, harness: 'claude' }]))
+    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: chatAttached.path, harness: 'claude', mode: 'supervised' }]))
   })
 
   it('removes an image, its preview and its path', async () => {
@@ -523,7 +617,7 @@ describe('images in the composer', () => {
     type('this one')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await settled(() =>
-      expect(turns()).toEqual([{ type: 'turn', text: 'this one\n/tmp/yantra-chat-Y1/2.png', harness: 'claude' }]),
+      expect(turns()).toEqual([{ type: 'turn', text: 'this one\n/tmp/yantra-chat-Y1/2.png', harness: 'claude', mode: 'supervised' }]),
     )
   })
 
@@ -607,7 +701,7 @@ describe('images in the composer', () => {
     const send = screen.getByRole('button', { name: 'Send' })
     await settled(() => expect(send).toHaveProperty('disabled', false))
     fireEvent.click(send)
-    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: 'look', harness: 'claude' }]))
+    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: 'look', harness: 'claude', mode: 'supervised' }]))
   })
 
   it('fails an attached image when Try again replaces a socket the daemon left open', async () => {

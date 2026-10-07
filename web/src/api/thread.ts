@@ -2,6 +2,8 @@
  * The event names and payload vocabulary below are T3 Code's, as
  * crates/yantra-core/src/chat.rs re-expresses them:
  * https://github.com/pingdotgg/t3code/blob/main/packages/contracts/src/providerRuntime.ts
+ * The permission modes' names and descriptions are T3 Code's at 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/user/permission-modes.md
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
@@ -24,6 +26,29 @@ export const LABEL: Record<Harness, string> = {
   grok: 'Grok',
   opencode: 'opencode',
 }
+
+/** When the agent asks a person first (Y-453). The daemon answers what the
+ *  mode allows; on Claude, `auto` and `auto-accept-edits` are Claude's own. */
+export type PermissionMode = 'supervised' | 'auto-accept-edits' | 'auto' | 'full-access'
+
+/** Unlike T3 Code, a new thread starts supervised. */
+export const DEFAULT_MODE: PermissionMode = 'supervised'
+
+/** T3 Code's names and words for each mode, in its order. */
+export const MODES: readonly { mode: PermissionMode; label: string; description: string }[] = [
+  { mode: 'supervised', label: 'Supervised', description: 'Requests approval for commands and file changes.' },
+  {
+    mode: 'auto-accept-edits',
+    label: 'Auto-accept edits',
+    description: 'Approves file edits automatically; other actions can still require approval.',
+  },
+  {
+    mode: 'auto',
+    label: 'Auto',
+    description: "Uses the provider's automatic review to approve routine actions and ask about others.",
+  },
+  { mode: 'full-access', label: 'Full access', description: 'Allows commands and edits without approval prompts.' },
+]
 
 export type StreamKind = 'assistant_text' | 'reasoning_text' | 'user_text'
 
@@ -103,8 +128,9 @@ export type ThreadEvent = { threadId: string } & (
 
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =
-  /** `harness` is read only on the turn that opens a thread. */
-  | { type: 'turn'; text: string; harness?: Harness }
+  /** `harness` is read only on the turn that opens a thread. `mode` holds for
+   *  this turn; an absent one is supervised. */
+  | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode }
   | { type: 'answer'; requestId: string; decision: Decision }
   | { type: 'cancel' }
   /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */

@@ -892,10 +892,12 @@ export const chatNotAttached = {
 export const chatFrames = [
   {
     "harness": "opencode",
+    "mode": "auto-accept-edits",
     "text": "run the tests",
     "type": "turn"
   },
   {
+    "mode": "supervised",
     "text": "and the docs",
     "type": "turn"
   },

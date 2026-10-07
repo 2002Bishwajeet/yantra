@@ -498,6 +498,25 @@
   height: 18px;
 }
 
+/* A mode's description sits under its name, so the menu reads as T3 Code's. */
+.chat__mode {
+  align-items: flex-start;
+  max-width: 22rem;
+}
+
+.chat__mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat__mode-description {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  white-space: normal;
+}
+
 .chat__meter {
   display: flex;
   flex: 1;

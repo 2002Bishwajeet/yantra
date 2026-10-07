@@ -16,6 +16,12 @@
 //! [`Failure`]. A socket that closes mid-turn cancels the turn; the worktree
 //! stays, as `thread.rs` requires.
 //!
+//! **Each `turn` carries the thread's [`PermissionMode`]** (Y-453), so the
+//! daemon still keeps nothing. A request the mode answers is answered here and
+//! never relayed, so the browser shows no card for it. On a Claude thread,
+//! `auto` and `auto-accept-edits` reach the harness as Claude's own
+//! `--permission-mode`, and the daemon answers nothing for them.
+//!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
 //! `turn.diff.updated`, and `revert` puts the files back as a checkpoint kept
@@ -50,11 +56,11 @@ use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Event, RequestOption, StopReason, StreamKind, ThreadEvent, TurnDiff,
-    TurnState,
+    ContentDelta, Decision, Event, PermissionMode, RequestOption, StopReason, StreamKind,
+    ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, Diff};
-use yantra_core::claude::{Events, Turn};
+use yantra_core::claude::{self, Events, Turn};
 use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
 use yantra_core::logs::{self, Who};
@@ -142,6 +148,9 @@ enum Frame {
         #[serde(default)]
         #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
         harness: Option<String>,
+        /// Holds for this turn; the browser keeps it between turns.
+        #[serde(default)]
+        mode: PermissionMode,
     },
     Answer {
         #[serde(rename = "requestId")]
@@ -267,6 +276,7 @@ trait Machine: Sync {
         place: &Place,
         text: &str,
         images: Option<&str>,
+        mode: PermissionMode,
     ) -> Result<(Turn, Events), String>;
     /// Writes one image on the machine and returns its path.
     async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error>;
@@ -334,8 +344,9 @@ impl Machine for Fleet {
         place: &Place,
         text: &str,
         images: Option<&str>,
+        mode: PermissionMode,
     ) -> Result<(Turn, Events), String> {
-        Turn::start(&self.ssh, place, text, images).map_err(|error| chain(&error))
+        Turn::start(&self.ssh, place, text, images, mode).map_err(|error| chain(&error))
     }
 
     async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
@@ -452,6 +463,8 @@ enum Speaker {
 struct Conversation {
     place: Place,
     speaker: Speaker,
+    /// The mode the running turn was sent with.
+    mode: PermissionMode,
 }
 
 impl Conversation {
@@ -510,7 +523,11 @@ async fn converse<M: Machine, P: Peer>(
                 peer.say(&reply).await
             }
             Step::Heard(Some(Heard::Text(text))) => match serde_json::from_str::<Frame>(&text) {
-                Ok(Frame::Turn { text, harness }) => {
+                Ok(Frame::Turn {
+                    text,
+                    harness,
+                    mode,
+                }) => {
                     let asked = harness.as_deref().map(harness_named).transpose();
                     let theirs = here
                         .as_ref()
@@ -539,6 +556,7 @@ async fn converse<M: Machine, P: Peer>(
                                 text,
                                 sent,
                                 images: images.dir(),
+                                mode,
                             };
                             begin(machine, name, &mut here, pick, turn, peer).await
                         }
@@ -694,7 +712,11 @@ async fn relay<M: Machine, P: Peer>(
     event: Option<ThreadEvent>,
     peer: &mut P,
 ) -> bool {
-    let Conversation { place, speaker } = running;
+    let Conversation {
+        place,
+        speaker,
+        mode,
+    } = running;
     let id = thread::name(place).to_owned();
     match speaker {
         Speaker::Claude(turn) => {
@@ -702,6 +724,15 @@ async fn relay<M: Machine, P: Peer>(
                 *turn = None;
                 return true;
             };
+            if let Event::RequestOpened(opened) = &event.event
+                && let Some(decision) = claude::answers(*mode, opened.request_type)
+                && let Some((running, _)) = turn.as_ref()
+            {
+                match running.answer(&opened.request_id, decision) {
+                    Ok(()) => return true,
+                    Err(error) => tracing::warn!("chat {name}: {mode:?} could not answer: {error}"),
+                }
+            }
             let ended = matches!(event.event, Event::TurnCompleted(_));
             let mut logged_out = None;
             if let Event::TurnCompleted(done) = &event.event {
@@ -727,10 +758,21 @@ async fn relay<M: Machine, P: Peer>(
             }
             !ended || checkpointed(machine, name, place, peer).await
         }
-        Speaker::Acp(acp) => match event.and_then(|event| relabel(acp, &id, event)) {
-            Some(event) => peer.say(&event).await,
-            None => true,
-        },
+        Speaker::Acp(acp) => {
+            let Some(event) = event.and_then(|event| relabel(acp, &id, event)) else {
+                return true;
+            };
+            if let Event::RequestOpened(opened) = &event.event
+                && let Some(decision) = mode.answers(opened.request_type)
+            {
+                // An agent that offered no such option is asked by the person.
+                match answer(acp, &opened.request_id, decision) {
+                    Ok(()) => return true,
+                    Err(said) => tracing::warn!("chat {name}: {mode:?} could not answer: {said}"),
+                }
+            }
+            peer.say(&event).await
+        }
     }
 }
 
@@ -987,11 +1029,13 @@ async fn attach<M: Machine, P: Peer>(
         None => Conversation {
             place,
             speaker: Speaker::Claude(None),
+            mode: PermissionMode::default(),
         },
         Some((harness, session)) => match connect(machine, &place, harness, Some(session)).await {
             Ok(acp) => Conversation {
                 place,
                 speaker: Speaker::Acp(Box::new(acp)),
+                mode: PermissionMode::default(),
             },
             Err(refusal) => {
                 let _ = peer.say(&refusal).await;
@@ -1117,12 +1161,13 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: String) -> 
     }
 }
 
-/// One turn the person sent: what they wrote, its number on this socket, and
-/// the directory of the images it may read.
+/// One turn the person sent: what they wrote, its number on this socket, the
+/// directory of the images it may read, and the thread's permission mode.
 struct Said<'a> {
     text: String,
     sent: usize,
     images: Option<&'a str>,
+    mode: PermissionMode,
 }
 
 /// Opens the thread on the first turn with the harness `pick` names, repeats
@@ -1133,7 +1178,12 @@ async fn begin<M: Machine, P: Peer>(
     name: &str,
     here: &mut Option<Conversation>,
     pick: Option<Harness>,
-    Said { text, sent, images }: Said<'_>,
+    Said {
+        text,
+        sent,
+        images,
+        mode,
+    }: Said<'_>,
     peer: &mut P,
 ) -> bool {
     let running = match here {
@@ -1148,6 +1198,7 @@ async fn begin<M: Machine, P: Peer>(
             Err(refusal) => return peer.say(&refusal).await,
         },
     };
+    running.mode = mode;
     // A turn with no checkpoint before it could not be reverted.
     match machine.base(&running.place).await {
         Ok(Some(turn)) => tracing::info!("chat {name}: checkpoint {turn} kept"),
@@ -1167,7 +1218,7 @@ async fn begin<M: Machine, P: Peer>(
         return false;
     }
     match &mut running.speaker {
-        Speaker::Claude(turn) => match machine.start(&running.place, &text, images) {
+        Speaker::Claude(turn) => match machine.start(&running.place, &text, images, mode) {
             Ok(started) => {
                 tracing::info!("chat {name}: a turn started");
                 *turn = Some(started);
@@ -1206,6 +1257,7 @@ async fn open<M: Machine>(
         return Ok(Conversation {
             place,
             speaker: Speaker::Claude(None),
+            mode: PermissionMode::default(),
         });
     };
     match connect(machine, &place, harness, None).await {
@@ -1214,6 +1266,7 @@ async fn open<M: Machine>(
             Ok(Conversation {
                 place,
                 speaker: Speaker::Acp(Box::new(acp)),
+                mode: PermissionMode::default(),
             })
         }
         Err(refusal) => {
@@ -1376,10 +1429,12 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 frame(Frame::Turn {
                     text: "run the tests".to_owned(),
                     harness: Some("opencode".to_owned()),
+                    mode: PermissionMode::AutoAcceptEdits,
                 }),
                 frame(Frame::Turn {
                     text: "and the docs".to_owned(),
                     harness: None,
+                    mode: PermissionMode::Supervised,
                 }),
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
@@ -1517,6 +1572,8 @@ mod tests {
         cleared: Mutex<usize>,
         /// The images directory each Claude turn was started with.
         started_with: Mutex<Vec<Option<String>>>,
+        /// The permission mode each Claude turn was started with.
+        modes: Mutex<Vec<PermissionMode>>,
         /// Each makes one checkpoint call fail, as git would.
         base_fails: bool,
         capture_fails: bool,
@@ -1619,11 +1676,16 @@ mod tests {
             place: &Place,
             text: &str,
             images: Option<&str>,
+            mode: PermissionMode,
         ) -> Result<(Turn, Events), String> {
             self.started_with
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(images.map(str::to_owned));
+            self.modes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(mode);
             let (ours, theirs) = tokio::io::duplex(1 << 16);
             let (read, write) = tokio::io::split(ours);
             let (hears, says) = tokio::io::split(theirs);
@@ -1853,13 +1915,15 @@ mod tests {
                 Frame::Turn {
                     text: "hi".to_owned(),
                     harness: None,
+                    mode: PermissionMode::Supervised,
                 },
             ),
             (
-                r#"{"type":"turn","text":"hi","harness":"codex"}"#,
+                r#"{"type":"turn","text":"hi","harness":"codex","mode":"full-access"}"#,
                 Frame::Turn {
                     text: "hi".to_owned(),
                     harness: Some("codex".to_owned()),
+                    mode: PermissionMode::FullAccess,
                 },
             ),
             (
@@ -1985,8 +2049,15 @@ mod tests {
 
     /// The first turn of an opencode thread, up to its `session/prompt`.
     async fn an_opencode_thread(script: &Arc<Script>) -> (Tab, Acp, Value) {
+        an_opencode_thread_in(script, "supervised").await
+    }
+
+    async fn an_opencode_thread_in(script: &Arc<Script>, mode: &str) -> (Tab, Acp, Value) {
         let (mut tab, _served) = connect(Arc::clone(script), None);
-        tab.send(json!({"type": "turn", "text": "list the files", "harness": "opencode"}));
+        tab.send(
+            json!({"type": "turn", "text": "list the files", "harness": "opencode",
+                        "mode": mode}),
+        );
         let mut agent = script.agent().await;
         agent.initialized().await;
         let new = agent.heard().await;
@@ -2286,6 +2357,7 @@ mod tests {
                 asked: HashMap::new(),
                 prompt: None,
             })),
+            mode: PermissionMode::default(),
         });
         assert!(matches!(listen(&mut here).await, Step::Event(None)));
         let again = tokio::time::timeout(Duration::from_millis(100), listen(&mut here)).await;
@@ -2943,5 +3015,144 @@ mod tests {
             json!({"type": "error", "kind": "checkpoint",
                    "said": "the thread has no checkpoint 4"})
         );
+    }
+
+    /// The first turn of a Claude thread in `mode`, up to Claude's prompt.
+    async fn a_claude_turn_in(script: &Arc<Script>, mode: Option<&str>) -> (Tab, Claude) {
+        let (mut tab, _served) = connect(Arc::clone(script), None);
+        let mut turn = json!({"type": "turn", "text": "fix it"});
+        if let Some(mode) = mode {
+            turn["mode"] = json!(mode);
+        }
+        tab.send(turn);
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
+        let mut claude = script.claude();
+        claude.heard().await.expect("the prompt");
+        (tab, claude)
+    }
+
+    fn can_use(request: &str, tool: &str, input: Value) -> Value {
+        json!({"type": "control_request", "request_id": request, "request": {
+               "subtype": "can_use_tool", "tool_name": tool, "input": input,
+               "tool_use_id": format!("t-{request}")}})
+    }
+
+    fn an_edit(request: &str) -> Value {
+        can_use(
+            request,
+            "Edit",
+            json!({"file_path": "a.txt", "old_string": "one", "new_string": "two"}),
+        )
+    }
+
+    fn a_command(request: &str) -> Value {
+        can_use(request, "Bash", json!({"command": "cargo test"}))
+    }
+
+    /// Y-453: the default asks about every request the harness sends.
+    #[tokio::test]
+    async fn supervised_mode_relays_every_request_as_a_card() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, None).await;
+        assert_eq!(
+            *script.modes.lock().expect("a lock"),
+            [PermissionMode::Supervised]
+        );
+        claude.say(an_edit("r1")).await;
+        let edit = tab.next().await;
+        assert_eq!(edit["type"], "request.opened", "{edit}");
+        assert_eq!(edit["payload"]["requestType"], "file_change_approval");
+        claude.say(a_command("r2")).await;
+        let command = tab.next().await;
+        assert_eq!(command["type"], "request.opened", "{command}");
+        assert_eq!(command["payload"]["requestType"], "exec_command_approval");
+    }
+
+    /// Claude's own acceptEdits accepts an edit inside the worktree, so an edit
+    /// that reaches the daemon is outside it and still opens a card.
+    #[tokio::test]
+    async fn auto_accept_edits_mode_relays_an_edit_claude_still_asks_about() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, Some("auto-accept-edits")).await;
+        assert_eq!(
+            *script.modes.lock().expect("a lock"),
+            [PermissionMode::AutoAcceptEdits]
+        );
+        claude
+            .say(can_use(
+                "r1",
+                "Edit",
+                json!({"file_path": "/home/u/.bashrc", "old_string": "a", "new_string": "b"}),
+            ))
+            .await;
+        let edit = tab.next().await;
+        assert_eq!(edit["type"], "request.opened", "{edit}");
+        assert_eq!(edit["payload"]["requestType"], "file_change_approval");
+
+        claude.say(a_command("r2")).await;
+        let command = tab.next().await;
+        assert_eq!(command["type"], "request.opened", "{command}");
+        assert_eq!(command["payload"]["requestId"], "r2");
+    }
+
+    #[tokio::test]
+    async fn full_access_mode_answers_every_request_without_a_card() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, Some("full-access")).await;
+        for (request, line) in [("r1", an_edit("r1")), ("r2", a_command("r2"))] {
+            claude.say(line).await;
+            let answer = claude.heard().await.expect("the daemon's answer");
+            assert_eq!(answer["response"]["request_id"], request);
+            assert_eq!(answer["response"]["response"]["behavior"], "allow");
+            let resolved = tab.next().await;
+            assert_eq!(resolved["type"], "request.resolved", "no card: {resolved}");
+            assert_eq!(resolved["payload"]["requestId"], request);
+        }
+        assert_eq!(
+            *script.modes.lock().expect("a lock"),
+            [PermissionMode::FullAccess],
+            "Claude itself still runs in its own default mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_mode_starts_claude_in_auto_and_relays_what_it_asks() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, Some("auto")).await;
+        assert_eq!(
+            *script.modes.lock().expect("a lock"),
+            [PermissionMode::Auto]
+        );
+        claude.say(a_command("r1")).await;
+        let asked = tab.next().await;
+        assert_eq!(asked["type"], "request.opened", "{asked}");
+        assert_eq!(asked["payload"]["requestId"], "r1");
+    }
+
+    /// An ACP harness has no review of its own, so Auto asks, as T3 Code does.
+    #[tokio::test]
+    async fn auto_mode_on_an_acp_thread_asks() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, _prompt) = an_opencode_thread_in(&script, "auto").await;
+        agent.say(asked(7)).await;
+        let opened = tab.next().await;
+        assert_eq!(opened["type"], "request.opened", "{opened}");
+        assert_eq!(opened["threadId"], THREAD);
+    }
+
+    #[tokio::test]
+    async fn full_access_mode_on_an_acp_thread_picks_the_agents_allow_once() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, _prompt) = an_opencode_thread_in(&script, "full-access").await;
+        agent.say(asked(7)).await;
+        assert_eq!(
+            agent.heard().await,
+            json!({"jsonrpc": "2.0", "id": 7,
+                   "result": {"outcome": {"outcome": "selected", "optionId": "once"}}})
+        );
+        let resolved = tab.next().await;
+        assert_eq!(resolved["type"], "request.resolved", "no card: {resolved}");
+        assert_eq!(resolved["payload"]["decision"], "accept");
     }
 }

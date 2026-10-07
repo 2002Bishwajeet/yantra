@@ -6,6 +6,7 @@ import {
   type ChatNotAttached,
   type Decision,
   type Harness,
+  type PermissionMode,
   type ThreadEvent,
 } from '@/api/thread'
 
@@ -125,7 +126,7 @@ export function chatAddress(workspace: string, thread?: string): string {
 export type ChatSocket = {
   /** `false` when the socket is not open, so nothing was sent. */
   /** `harness` opens a thread; the daemon ignores it on a later turn. */
-  send: (text: string, harness?: Harness) => boolean
+  send: (text: string, harness?: Harness, mode?: PermissionMode) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
@@ -285,7 +286,7 @@ export function openChat(
   const waiting = setTimeout(open, 0)
 
   return {
-    send: (text, harness) => send(harness ? { type: 'turn', text, harness } : { type: 'turn', text }),
+    send: (text, harness, mode) => send({ type: 'turn', text, ...(harness ? { harness } : {}), ...(mode ? { mode } : {}) }),
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
     revert: (turn) => send({ type: 'revert', turn }),

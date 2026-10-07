@@ -30,6 +30,12 @@ and the checkpoint operations of
 [`apps/server/src/vcs/GitVcsDriver.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/vcs/GitVcsDriver.ts)
 at commit `72d5c32`. Its name, wordmark and icon are not used.
 
+`PermissionMode` in [`crates/yantra-core/src/chat.rs`](crates/yantra-core/src/chat.rs) and
+[`web/src/screens/session/ModePicker.tsx`](web/src/screens/session/ModePicker.tsx) copy the four
+permission modes, their names and their descriptions from
+[`docs/user/permission-modes.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/user/permission-modes.md)
+at commit `72d5c32`. Yantra's default is Supervised, where T3 Code's is Full access.
+
 ```text
 MIT License
 

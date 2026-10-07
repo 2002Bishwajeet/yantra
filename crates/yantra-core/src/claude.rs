@@ -76,6 +76,7 @@ impl Turn {
         place: &Place,
         text: &str,
         images: Option<&str>,
+        mode: chat::PermissionMode,
     ) -> Result<(Self, Events), Error> {
         let ssh::Piped {
             child,
@@ -83,7 +84,7 @@ impl Turn {
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree, images))?;
+        } = ssh.stdio(&command(&place.worktree, images, mode))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let (turn, events) = Self::wire(
             stdout,
@@ -178,21 +179,44 @@ impl Turn {
 /// derived from the cwd. `claude` is searched for as I-34 requires, and a musl
 /// machine gets the ripgrep variable `agent::launch_command` gives the TUI.
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
-fn command(worktree: &str, images: Option<&str>) -> String {
+/// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
+fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
     format!(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}-p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}{mode}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
+        mode = flag(mode).map_or_else(String::new, |flag| format!("--permission-mode {flag} ")),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
     )
+}
+
+/// T3 Code maps the same two modes to Claude's own (`ClaudeAdapter.ts`).
+fn flag(mode: chat::PermissionMode) -> Option<&'static str> {
+    match mode {
+        chat::PermissionMode::Auto => Some("auto"),
+        chat::PermissionMode::AutoAcceptEdits => Some("acceptEdits"),
+        chat::PermissionMode::Supervised | chat::PermissionMode::FullAccess => None,
+    }
+}
+
+/// The daemon's answer to a Claude request in `mode`. In a mode Claude runs
+/// itself, a request that reaches the daemon is one Claude still asks about,
+/// such as an edit outside the worktree, so the person sees it.
+#[must_use]
+pub fn answers(mode: chat::PermissionMode, request: chat::RequestType) -> Option<chat::Decision> {
+    if flag(mode).is_some() {
+        None
+    } else {
+        mode.answers(request)
+    }
 }
 
 fn prompt(text: &str) -> Value {
@@ -752,8 +776,8 @@ struct ModelUsage {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Item, ItemStatus, ItemType, RequestOpened, RequestResolved,
-        RequestType, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
+        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, RequestOpened,
+        RequestResolved, RequestType, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
 
@@ -1148,7 +1172,11 @@ mod tests {
     /// the slug, which holds nothing a shell acts on.
     #[test]
     fn the_command_cds_into_the_worktree_and_resumes_the_newest_transcript() {
-        let script = command("/home/u/.yantra/worktrees/chat/w/11111111", None);
+        let script = command(
+            "/home/u/.yantra/worktrees/chat/w/11111111",
+            None,
+            PermissionMode::Supervised,
+        );
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
             "{script}"
@@ -1163,7 +1191,11 @@ mod tests {
              --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
         ));
 
-        let hostile = command("/tmp/x'; touch /tmp/pwned; '", None);
+        let hostile = command(
+            "/tmp/x'; touch /tmp/pwned; '",
+            None,
+            PermissionMode::Supervised,
+        );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
 
@@ -1171,15 +1203,69 @@ mod tests {
     /// directory reaches the shell quoted.
     #[test]
     fn the_images_directory_is_added_before_the_other_flags() {
-        let script = command("/w", Some("/tmp/yantra-chat-Y01"));
+        let script = command(
+            "/w",
+            Some("/tmp/yantra-chat-Y01"),
+            PermissionMode::Supervised,
+        );
         assert!(
             script.contains("exec \"$c\" --add-dir '/tmp/yantra-chat-Y01' -p --input-format"),
             "{script}"
         );
-        let hostile = command("/w", Some("/tmp/a'; touch /tmp/pwned; '"));
+        let hostile = command(
+            "/w",
+            Some("/tmp/a'; touch /tmp/pwned; '"),
+            PermissionMode::Supervised,
+        );
         assert!(
             hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' -p "),
             "{hostile}"
+        );
+    }
+
+    /// Y-453: Auto and Auto-accept edits run in Claude's own mode.
+    #[test]
+    fn the_auto_permission_modes_add_claudes_flag() {
+        for (mode, flag) in [
+            (PermissionMode::Auto, "auto"),
+            (PermissionMode::AutoAcceptEdits, "acceptEdits"),
+        ] {
+            let script = command("/w", Some("/tmp/i"), mode);
+            assert!(
+                script.contains(&format!(
+                    "exec \"$c\" --add-dir '/tmp/i' --permission-mode {flag} -p --input-format"
+                )),
+                "{script}"
+            );
+        }
+        for mode in [PermissionMode::Supervised, PermissionMode::FullAccess] {
+            let script = command("/w", None, mode);
+            assert!(!script.contains("--permission-mode"), "{mode:?}: {script}");
+        }
+    }
+
+    /// Claude's acceptEdits still asks about an edit outside its directories,
+    /// so the daemon must not accept that edit for it.
+    #[test]
+    fn the_daemon_answers_claude_only_in_a_mode_claude_does_not_run() {
+        assert_eq!(
+            answers(
+                PermissionMode::AutoAcceptEdits,
+                RequestType::FileChangeApproval
+            ),
+            None
+        );
+        assert_eq!(
+            answers(PermissionMode::Auto, RequestType::FileChangeApproval),
+            None
+        );
+        assert_eq!(
+            answers(PermissionMode::FullAccess, RequestType::ExecCommandApproval),
+            Some(Decision::Accept)
+        );
+        assert_eq!(
+            answers(PermissionMode::Supervised, RequestType::FileChangeApproval),
+            None
         );
     }
 }
