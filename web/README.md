@@ -315,8 +315,12 @@ button, in the workspace header and above an unclaimed session's terminal.
 [`Chat.tsx`](src/screens/session/Chat.tsx) streams one conversation over the chat
 socket that [`api/chat.ts`](src/api/chat.ts) opens
 ([ADR-0026](../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)).
-Each turn is `claude -p` in the thread's own git worktree, so it never writes
-the tree the Terminal tab's agent is in. Four things about the code:
+The first turn picks the harness — Claude, Codex, Gemini, Grok or opencode —
+in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
+from T3 Code's provider picker, and the thread keeps it (Y-434). Each turn runs
+in the thread's own git worktree, so it never writes the tree the Terminal
+tab's agent is in. Every harness draws on the one timeline, with no branch per
+harness. Four things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -325,8 +329,9 @@ the tree the Terminal tab's agent is in. Four things about the code:
   folds events into messages, tool cards, open requests, usage and the turn's
   state; `useChat` owns the socket and the URL's `?thread=`.
 - **Every failure is a `ChatError` of its own kind**: refused, unreachable,
-  unknown thread, busy, bad frame, turn failed and closed. Only unreachable and
-  closed offer Try again, and a socket is never reopened behind the person's
+  not logged in, unknown thread, busy, bad frame, turn failed and closed.
+  Not logged in shows the command to run on the machine and a Retry that
+  reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
   back, because the daemon cancels a turn whose socket closed.
 - **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
   `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it

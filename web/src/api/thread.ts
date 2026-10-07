@@ -10,6 +10,21 @@
  *  sends and takes. `contract.gen.ts` checks every shape here against what
  *  `yantrad` serialises. */
 
+/** Who speaks in a thread: Claude over the stream-json bridge, or an ACP
+ *  harness (ADR-0033). A thread keeps the one its first turn picked. */
+export type Harness = 'claude' | 'codex' | 'gemini' | 'grok' | 'opencode'
+
+export const HARNESSES: readonly Harness[] = ['claude', 'codex', 'gemini', 'grok', 'opencode']
+
+/** How the chat names each harness: opencode writes its own name in lower case. */
+export const LABEL: Record<Harness, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  gemini: 'Gemini',
+  grok: 'Grok',
+  opencode: 'opencode',
+}
+
 export type StreamKind = 'assistant_text' | 'reasoning_text' | 'user_text'
 
 export type ItemType = 'command_execution' | 'file_change' | 'web_search' | 'dynamic_tool_call'
@@ -56,12 +71,12 @@ export type RequestOpened = {
 export type TurnCompleted = {
   state: TurnState
   stopReason?: StopReason
-  /** Why a failed turn failed, in Claude's or ssh's own words. */
+  /** Why a failed turn failed, in the agent's or ssh's own words. */
   message?: string
 }
 
 export type ThreadEvent = { threadId: string } & (
-  | { type: 'thread.started'; payload: { thread: string } }
+  | { type: 'thread.started'; payload: { thread: string; harness: Harness } }
   | { type: 'thread.metadata.updated'; payload: { name: string } }
   | { type: 'thread.token-usage.updated'; payload: { usedTokens: number; maxTokens: number } }
   | { type: 'turn.started' }
@@ -81,13 +96,13 @@ export type ThreadEvent = { threadId: string } & (
 
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =
-  | { type: 'turn'; text: string }
+  /** `harness` is read only on the turn that opens a thread. */
+  | { type: 'turn'; text: string; harness?: Harness }
   | { type: 'answer'; requestId: string; decision: Decision }
   | { type: 'cancel' }
 
-/** The one daemon frame that is not an event. */
-export type ChatFailure = {
-  type: 'error'
-  kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable'
-  said: string
-}
+/** The one daemon frame that is not an event. `notLoggedIn` names the
+ *  command to run on the machine, because the login stays there (ADR-0033 §6). */
+export type ChatFailure =
+  | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable'; said: string }
+  | { type: 'error'; kind: 'notLoggedIn'; said: string; harness: Harness; machine: string; command: string }

@@ -36,3 +36,5 @@ yantra-core.workspace = true
 # way the sshd one in `yantra-core` does.
 anyhow.workspace = true
 tower.workspace = true
+# A paused clock, as yantra-core has, for the chat's connect timeout.
+tokio = { workspace = true, features = ["test-util"] }

@@ -29,7 +29,8 @@ repository and a prompt, and runs an ACP agent in a new git worktree of that rep
 chat edits there while the workspace's TUI keeps the repository. Ending a session deletes nothing;
 `thread::remove` does. `claude::Turn` is one chat turn in that worktree: `claude -p` over
 stream-json, resumed from the newest transcript there, with permission requests answered on its
-stdin.
+stdin. A thread for any other harness runs an ACP agent there instead, and `thread::remember` keeps
+its harness and session id in git config under the thread's branch.
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.

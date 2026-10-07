@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
 import { ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
-import type { Decision } from '@/api/thread'
+import type { Decision, Harness } from '@/api/thread'
 import { empty, reduce, type Timeline } from './timeline'
 
 export type Link = 'connecting' | 'open' | 'closed'
@@ -32,11 +32,20 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       onError: (failure) => {
         setError(failure)
         // Busy and badFrame never end or prevent a turn: a second tap on an
-        // answer the daemon already took is a badFrame while Claude still runs.
+        // answer the daemon already took is a badFrame while the agent still runs.
         if (failure.kind === 'unreachable') dispatch({ type: 'refused' })
-        if (failure.kind === 'closed' || failure.kind === 'refused' || failure.kind === 'unknownThread') {
+        // A missing login fails every turn the same way until a person logs
+        // in, so the composer waits for Retry.
+        if (
+          failure.kind === 'closed' ||
+          failure.kind === 'refused' ||
+          failure.kind === 'unknownThread' ||
+          failure.kind === 'notLoggedIn'
+        ) {
           dispatch({ type: 'refused' })
           setLink('closed')
+          // The daemon still holds the agent's ssh for a refused prompt; Retry opens a new socket.
+          if (failure.kind === 'notLoggedIn') socket.current?.close()
         }
       },
     })
@@ -51,8 +60,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
     timeline,
     error,
     link,
-    send: (text: string) => {
-      if (!socket.current?.send(text)) return false
+    send: (text: string, harness?: Harness) => {
+      if (!socket.current?.send(text, harness)) return false
       setError(null)
       dispatch({ type: 'sent' })
       return true

@@ -552,15 +552,26 @@ JSON shape, so `contract.gen.ts` does not change.
 
 `GET /api/workspaces/{name}/chat?thread=<id>` ([`chat.rs`](src/chat.rs), Y-356,
 [ADR-0026](../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)) upgrades to a
-WebSocket after `allowed()`, as the terminal does. Each turn is a
-[`claude::Turn`](../yantra-core/src/claude.rs) in the thread's worktree. Without `?thread=` the first
-turn calls `thread::open` and says `thread.started`; with it, the route finds the thread through
-`thread::list` and replays its transcript as deltas. **There is no session-addressed form**: a thread
+WebSocket after `allowed()`, as the terminal does. The turn that opens a thread names its harness
+(Y-434, [ADR-0033](../../docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md)), and the
+thread keeps it. A Claude turn is a [`claude::Turn`](../yantra-core/src/claude.rs) in the thread's
+worktree. Any other harness is one [`acp::Agent`](../yantra-core/src/acp.rs) for the socket's life,
+and `thread::remember` keeps its name and session id in the repository's git config. Without
+`?thread=` the first turn calls `thread::open` and says `thread.started{thread, harness}`; with it,
+the route finds the thread, says `thread.started` too, and replays it: Claude's transcript as deltas,
+or ACP's `session/load`. **There is no session-addressed form**: a thread
 is a worktree of a workspace's repository, and a bare session names none.
 
 - **The frames are JSON both ways.** The browser sends `turn`, `answer` and `cancel`; the daemon sends
   `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are `unknownThread`, `busy`,
-  `badFrame` and `unreachable`. All are in `contract.gen.ts`.
+  `badFrame`, `unreachable` and `notLoggedIn`. `notLoggedIn` adds `harness`, `machine` and the
+  `command` to run there. All are in `contract.gen.ts`.
+- **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
+  `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
+  `thread.started` is dropped. A browser's decision is answered with the option the agent offered.
+- **Login state is reactive.** The route sends `notLoggedIn` when an agent refuses with
+  `acp::Error::is_auth()`, or a Claude turn fails "Not logged in". It probes no harness up front. An
+  ACP thread whose agent never started is removed, so it is not read as a Claude thread later.
 - **One turn at a time.** A second `turn` while one runs is `busy`, and the socket stays open.
 - **A socket that closes mid-turn cancels the turn**, waits up to 10 s for it to end, then drops it.
   The worktree stays, as `thread.rs` requires.
@@ -569,8 +580,9 @@ is a worktree of a workspace's repository, and a bare session names none.
   asks for one. No ADR exempts the chat, so this is an open gap and not a decision.
 - **It holds ssh after the upgrade has answered**, as the terminal does, so it is not a read handler
   that awaits ssh.
-- The four calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket
-  logic against scripted turns and the real thing runs in `yantra-core/tests/claude.rs`.
+- The calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket
+  logic against scripted turns and scripted ACP agents, and the real things run in
+  `yantra-core/tests/claude.rs`, `tests/acp.rs` and `tests/thread.rs`.
 
 ## The dashboard's types are checked against these routes, not trusted to match
 

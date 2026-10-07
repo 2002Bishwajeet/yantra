@@ -97,10 +97,35 @@ test.describe('the session screen, chat first', () => {
     await expect(asking(page)).toHaveCount(0)
   })
 
+  test('the picker sends the harness picked, and the thread keeps it', async ({ page, size }) => {
+    await page.getByRole('button', { name: 'Harness: Claude' }).click()
+    await page.getByRole('menuitemradio', { name: 'opencode' }).click()
+    const label = size === 'phone' ? 'Message opencode' : `Message opencode in ${NAME}`
+    await page.getByLabel(label, { exact: true }).fill('list the files')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await expect(page.getByText('opencode asks to run')).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: 'Harness: opencode, kept by this chat' }),
+    ).toBeDisabled()
+  })
+
+  test('a harness with no login names the command to run on the machine', async ({ page, size }) => {
+    await page.getByRole('button', { name: 'Harness: Claude' }).click()
+    await page.getByRole('menuitemradio', { name: 'Gemini' }).click()
+    const label = size === 'phone' ? 'Message Gemini' : `Message Gemini in ${NAME}`
+    await page.getByLabel(label, { exact: true }).fill('hello')
+    await page.getByRole('button', { name: 'Send' }).click()
+    const alert = page.getByRole('alert')
+    await expect(alert.getByRole('heading')).toHaveText('Gemini is not logged in on cachyos-g14')
+    await expect(alert.getByText('run gemini and sign in')).toBeVisible()
+    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible()
+  })
+
   test('a thread in the URL replays its transcript', async ({ page }) => {
     await page.goto(`${PATH}?thread=${THREAD}`)
     await expect(page.getByText('Is the core crate green?')).toBeVisible()
     await expect(page.locator('.chat__markdown strong')).toHaveText('326')
+    await expect(page.getByRole('button', { name: 'Harness: Claude, kept by this chat' })).toBeDisabled()
   })
 
   test('a thread the workspace does not have is refused by name', async ({ page }) => {

@@ -26,9 +26,10 @@ pub struct ThreadEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum Event {
-    /// `thread` is the id a caller reopens the conversation by.
+    /// `thread` is the id a caller reopens the conversation by. `harness` is
+    /// the agent that speaks in it: claude, codex, gemini, grok or opencode.
     #[serde(rename = "thread.started")]
-    ThreadStarted { thread: String },
+    ThreadStarted { thread: String, harness: String },
     #[serde(rename = "thread.metadata.updated")]
     ThreadMetadataUpdated { name: String },
     #[serde(rename = "thread.token-usage.updated")]
@@ -279,10 +280,11 @@ mod tests {
     fn a_started_thread_names_itself_and_a_request_names_its_subject() {
         assert_eq!(
             wire(Event::ThreadStarted {
-                thread: "1a2b3c4d".to_owned()
+                thread: "1a2b3c4d".to_owned(),
+                harness: "opencode".to_owned(),
             }),
             json!({"threadId": "ses_1", "type": "thread.started",
-                   "payload": {"thread": "1a2b3c4d"}})
+                   "payload": {"thread": "1a2b3c4d", "harness": "opencode"}})
         );
         let opened = wire(Event::RequestOpened(RequestOpened {
             request_id: "r".to_owned(),

@@ -7,6 +7,7 @@ mod common;
 
 use anyhow::Result;
 use common::{SshFixture, USER};
+use yantra_core::acp::Harness;
 use yantra_core::ssh::{Exec, Machine, Os, Ssh};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::Workspace;
@@ -197,6 +198,54 @@ async fn a_thread_edits_its_own_worktree_while_the_tui_keeps_the_repo() -> Resul
 
     thread::remove(&ssh, &two).await?;
     tmux.kill(&ssh, NAME).await?;
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Y-434: an ACP thread's harness and session live in git config under its
+/// branch, and removing the thread forgets them.
+#[tokio::test]
+async fn a_thread_remembers_its_harness_and_acp_session() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    let dir = state_dir("thk")?;
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(USER.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.clone(),
+    })?;
+    let repo = "/home/yantra/keeps";
+    fixture.run(&format!(
+        "mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
+         && git add README && git -c user.name=t -c user.email=t@example.com \
+         commit -qm one"
+    ))?;
+    let workspace = Workspace {
+        name: "keeps".to_owned(),
+        machine: "fixture".to_owned(),
+        repo: repo.into(),
+        startup: None,
+    };
+
+    let place = thread::open(&ssh, &workspace).await?;
+    assert_eq!(thread::recall(&ssh, &place).await?, None, "a Claude thread");
+
+    // A quote and a `$` in the session reach git as they are.
+    let session = "ses_'$(id)'";
+    thread::remember(&ssh, &place, Harness::Opencode, session).await?;
+    assert_eq!(
+        thread::recall(&ssh, &place).await?,
+        Some((Harness::Opencode, session.to_owned()))
+    );
+
+    thread::remove(&ssh, &place).await?;
+    let left = fixture.run(&format!(
+        "git -C {repo} config --get-regexp '^branch\\.' || true"
+    ))?;
+    assert_eq!(left.trim(), "", "branch -D drops the section");
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }
