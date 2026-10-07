@@ -174,6 +174,12 @@ The owner answered the five questions in §5 on 2026-10-07.
    MIT licence still requires the notice for each copied file, so `THIRD_PARTY_NOTICES.md` and the
    block comments that ADR-0026 decision 5 asks for stay. They are a licence duty, not a pointer.
 
+**§4, 2026-10-07.** The owner asked to copy the candidates in §4. Five became rows: the
+activity phases (Y-451), the placement score (Y-452), checkpoints (Y-448), permission modes (Y-453)
+and the orchestrator tools (Y-454). Three do not: the route list, because decision 1 keeps
+Tailscale as the only route; the terminal history bounds, because tmux keeps the scrollback and
+Y-132 put no buffer in Yantra; and the provider update, because ADR-0028 has no update in it.
+
 ## Sources
 
 All accessed 2026-10-07.
