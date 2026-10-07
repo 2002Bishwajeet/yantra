@@ -40,6 +40,8 @@ const NotificationsList = lazy(() => loadList().then((it) => ({ default: it.Noti
 // A failed warm-up is the real import's to report, behind its boundary.
 const warm = (load: () => Promise<unknown>) => () => void load().catch(() => {})
 const warmList = warm(loadList)
+const warmAccount = warm(loadAccount)
+const warmBell = warm(loadBellPopover)
 
 const usePathname = () => useRouterState({ select: (state) => state.location.pathname })
 
@@ -150,7 +152,6 @@ function AccountButton() {
   const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
-  const load = warm(loadAccount)
   return (
     <>
       <IconButton
@@ -161,8 +162,8 @@ function AccountButton() {
           setArmed(true)
           setOpen((it) => !it)
         }}
-        onFocus={load}
-        onPointerEnter={load}
+        onFocus={warmAccount}
+        onPointerEnter={warmAccount}
         ref={ref}
         variant="tonal"
       >
@@ -184,7 +185,6 @@ function BellButton() {
   const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
-  const load = warm(loadBellPopover)
   return (
     <>
       <Bell
@@ -194,8 +194,8 @@ function BellButton() {
           setArmed(true)
           setOpen((it) => !it)
         }}
-        onFocus={load}
-        onPointerEnter={load}
+        onFocus={warmBell}
+        onPointerEnter={warmBell}
         ref={ref}
       />
       {armed ? (
