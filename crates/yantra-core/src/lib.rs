@@ -16,6 +16,7 @@ pub mod agent;
 pub mod attach;
 pub mod attention;
 pub mod chat;
+pub mod checkpoint;
 pub mod claude;
 pub mod clone;
 pub mod delegate;

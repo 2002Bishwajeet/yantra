@@ -24,6 +24,12 @@ and the failed-run redaction of
 [`apps/server/src/relay/AgentAwarenessRelay.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/relay/AgentAwarenessRelay.ts)
 at commit `72d5c32`, without the `stale` phase. Its name, wordmark and icon are not used.
 
+[`crates/yantra-core/src/checkpoint.rs`](crates/yantra-core/src/checkpoint.rs) copies the shape of
+[`apps/server/src/checkpointing/CheckpointStore.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/checkpointing/CheckpointStore.ts)
+and the checkpoint operations of
+[`apps/server/src/vcs/GitVcsDriver.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/vcs/GitVcsDriver.ts)
+at commit `72d5c32`. Its name, wordmark and icon are not used.
+
 ```text
 MIT License
 

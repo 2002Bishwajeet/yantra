@@ -33,7 +33,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         setError(failure)
         // Busy and badFrame never end or prevent a turn: a second tap on an
         // answer the daemon already took is a badFrame while the agent still runs.
-        if (failure.kind === 'unreachable') dispatch({ type: 'refused' })
+        // A turn whose first checkpoint failed never starts.
+        if (failure.kind === 'unreachable' || failure.kind === 'checkpoint') dispatch({ type: 'refused' })
         // A missing login fails every turn the same way until a person logs
         // in, so the composer waits for Retry.
         if (
@@ -71,6 +72,12 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
     attach: (file: Blob) => socket.current?.attach(file) ?? Promise.reject(new AttachError('closed')),
     stop: () => {
       if (socket.current?.stop()) dispatch({ type: 'stopping' })
+    },
+    /** Puts the files back as checkpoint `turn` kept them (Y-448). */
+    revert: (turn: number) => {
+      if (!socket.current?.revert(turn)) return false
+      setError(null)
+      return true
     },
     /** Opens the socket again; an attach replays the transcript, so the
      *  timeline starts over. */

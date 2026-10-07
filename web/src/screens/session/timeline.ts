@@ -25,7 +25,18 @@ export type Tool = {
   output: string | null
 }
 
-export type Entry = Message | Tool
+/** What one turn changed in the worktree (Y-448). `reverted` is a turn whose
+ *  files a revert put back. */
+export type TurnDiff = {
+  kind: 'diff'
+  id: string
+  turn: number
+  unified: string
+  truncated: boolean
+  reverted: boolean
+}
+
+export type Entry = Message | Tool | TurnDiff
 
 /** What the chat draws, folded from the socket's events. */
 export type Timeline = {
@@ -99,6 +110,28 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
       return { ...timeline, entries: tool(timeline.entries, event.payload) }
     case 'request.opened':
       return { ...timeline, requests: [...timeline.requests, event.payload] }
+    case 'turn.diff.updated': {
+      const { turn, unifiedDiff, truncated } = event.payload
+      // A turn's number comes back after a revert, so the id cannot be it.
+      const diff: TurnDiff = {
+        kind: 'diff',
+        id: `diff:${timeline.entries.length}`,
+        turn,
+        unified: unifiedDiff,
+        truncated,
+        reverted: false,
+      }
+      return { ...timeline, entries: [...timeline.entries, diff] }
+    }
+    case 'thread.reverted': {
+      const kept = event.payload.turn
+      return {
+        ...timeline,
+        entries: timeline.entries.map((one) =>
+          one.kind === 'diff' && one.turn > kept && !one.reverted ? { ...one, reverted: true } : one,
+        ),
+      }
+    }
     case 'request.resolved':
       return {
         ...timeline,

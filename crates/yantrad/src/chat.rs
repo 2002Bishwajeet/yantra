@@ -11,10 +11,15 @@
 //! the conversation and continues there. **There is no session-addressed
 //! form**: a bare session names no worktree.
 //!
-//! The browser sends three frames, `turn`, `answer` and `cancel`, and one turn
-//! runs at a time. The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
-//! A socket that closes mid-turn cancels the turn; the worktree stays, as
-//! `thread.rs` requires.
+//! The browser sends four frames, `turn`, `answer`, `cancel` and `revert`, and
+//! one turn runs at a time. The daemon sends [`ThreadEvent`]s and one typed
+//! [`Failure`]. A socket that closes mid-turn cancels the turn; the worktree
+//! stays, as `thread.rs` requires.
+//!
+//! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
+//! keeps the tree before it, each turn's end keeps the tree after it and sends
+//! `turn.diff.updated`, and `revert` puts the files back as a checkpoint kept
+//! them. The conversation is not rewound.
 //!
 //! **A binary frame is an image** (Y-424). It goes to the machine through
 //! [`Images`], one directory per socket, and gets exactly one [`Attachment`]
@@ -45,8 +50,10 @@ use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Event, RequestOption, StopReason, StreamKind, ThreadEvent, TurnState,
+    ContentDelta, Decision, Event, RequestOption, StopReason, StreamKind, ThreadEvent, TurnDiff,
+    TurnState,
 };
+use yantra_core::checkpoint::{self, Diff};
 use yantra_core::claude::{Events, Turn};
 use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
@@ -142,6 +149,10 @@ enum Frame {
         decision: Decision,
     },
     Cancel,
+    /// Puts the thread's files back as checkpoint `turn` kept them.
+    Revert {
+        turn: u32,
+    },
 }
 
 /// The one frame the daemon sends that is not a [`ThreadEvent`].
@@ -199,6 +210,8 @@ enum Kind {
     Unreachable,
     /// The harness has no login on the machine (ADR-0033 decision 6).
     NotLoggedIn,
+    /// git could not keep, diff or restore a checkpoint.
+    Checkpoint,
 }
 
 fn failure(kind: Kind, said: impl Into<String>) -> Failure {
@@ -262,6 +275,10 @@ trait Machine: Sync {
     async fn recall(&self, place: &Place) -> Result<Option<(Harness, String)>, String>;
     async fn remember(&self, place: &Place, harness: Harness, session: &str) -> Result<(), String>;
     fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String>;
+    async fn base(&self, place: &Place) -> Result<Option<u32>, String>;
+    async fn capture(&self, place: &Place) -> Result<u32, String>;
+    async fn diff(&self, place: &Place, turn: u32) -> Result<Diff, String>;
+    async fn revert(&self, place: &Place, turn: u32) -> Result<(), String>;
 }
 
 struct Fleet {
@@ -346,6 +363,30 @@ impl Machine for Fleet {
 
     fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String> {
         Agent::start(&self.ssh, harness).map_err(|error| chain(&error))
+    }
+
+    async fn base(&self, place: &Place) -> Result<Option<u32>, String> {
+        checkpoint::base(&self.ssh, place)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn capture(&self, place: &Place) -> Result<u32, String> {
+        checkpoint::capture(&self.ssh, place)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn diff(&self, place: &Place, turn: u32) -> Result<Diff, String> {
+        checkpoint::diff(&self.ssh, place, turn)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn revert(&self, place: &Place, turn: u32) -> Result<(), String> {
+        checkpoint::revert(&self.ssh, place, turn)
+            .await
+            .map_err(|error| chain(&error))
     }
 }
 
@@ -523,8 +564,24 @@ async fn converse<M: Machine, P: Peer>(
                     cancel(name, here.as_ref());
                     true
                 }
+                // A `&Conversation` held across an await is not `Send`.
+                Ok(Frame::Revert { turn }) => match here
+                    .as_ref()
+                    .map(|running| (running.busy(), running.place.clone()))
+                {
+                    None => {
+                        let said = "no thread is open, so there is nothing to revert";
+                        peer.say(&failure(Kind::BadFrame, said)).await
+                    }
+                    Some((true, _)) => {
+                        let said = "a turn is running; stop it or wait for it to end";
+                        peer.say(&failure(Kind::Busy, said)).await
+                    }
+                    Some((false, place)) => revert(machine, name, &place, turn, peer).await,
+                },
                 Err(error) => {
-                    let said = format!("a frame is a turn, an answer or a cancel: {error}");
+                    let said =
+                        format!("a frame is a turn, an answer, a cancel or a revert: {error}");
                     peer.say(&failure(Kind::BadFrame, said)).await
                 }
             },
@@ -547,7 +604,7 @@ async fn converse<M: Machine, P: Peer>(
     }
 
     if let Some(running) = here {
-        hang_up(name, running).await;
+        hang_up(machine, name, running).await;
     }
     if images.used() {
         match tokio::time::timeout(CLEAR_WITHIN, machine.clear(&images)).await {
@@ -637,13 +694,15 @@ async fn relay<M: Machine, P: Peer>(
     event: Option<ThreadEvent>,
     peer: &mut P,
 ) -> bool {
-    let id = thread::name(&running.place).to_owned();
-    match &mut running.speaker {
+    let Conversation { place, speaker } = running;
+    let id = thread::name(place).to_owned();
+    match speaker {
         Speaker::Claude(turn) => {
             let Some(event) = event else {
                 *turn = None;
                 return true;
             };
+            let ended = matches!(event.event, Event::TurnCompleted(_));
             let mut logged_out = None;
             if let Event::TurnCompleted(done) = &event.event {
                 tracing::info!("chat {name}: the turn ended {:?}", done.state);
@@ -659,13 +718,14 @@ async fn relay<M: Machine, P: Peer>(
             if !peer.say(&event).await {
                 return false;
             }
-            match logged_out {
-                Some(said) => {
-                    let refusal = not_logged_in(None, machine.machine(), said);
-                    peer.say(&refusal).await
-                }
-                None => true,
+            if let Some(said) = logged_out
+                && !peer
+                    .say(&not_logged_in(None, machine.machine(), said))
+                    .await
+            {
+                return false;
             }
+            !ended || checkpointed(machine, name, place, peer).await
         }
         Speaker::Acp(acp) => match event.and_then(|event| relabel(acp, &id, event)) {
             Some(event) => peer.say(&event).await,
@@ -726,7 +786,7 @@ async fn prompted<M: Machine, P: Peer>(
     if !drain(acp, &id, peer).await {
         return false;
     }
-    match result {
+    let open = match result {
         Ok(reason) => {
             tracing::info!("chat {name}: the turn ended {reason:?}");
             true
@@ -735,6 +795,63 @@ async fn prompted<M: Machine, P: Peer>(
             tracing::info!("chat {name}: the turn failed");
             peer.say(&refused(machine, acp.harness, acp.login.clone(), &error))
                 .await
+        }
+    };
+    open && checkpointed(machine, name, &running.place, peer).await
+}
+
+/// Keeps the tree a turn left and sends what the turn changed. `false` is a
+/// socket that went away. The diff is never logged (Q5).
+async fn checkpointed<M: Machine, P: Peer>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    peer: &mut P,
+) -> bool {
+    let kept = match machine.capture(place).await {
+        Ok(turn) => machine.diff(place, turn).await.map(|diff| (turn, diff)),
+        Err(said) => Err(said),
+    };
+    match kept {
+        Ok((turn, Diff { unified, truncated })) => {
+            tracing::info!("chat {name}: checkpoint {turn} kept");
+            peer.say(&ThreadEvent {
+                thread_id: thread::name(place).to_owned(),
+                event: Event::TurnDiffUpdated(TurnDiff {
+                    turn,
+                    unified_diff: unified,
+                    truncated,
+                }),
+            })
+            .await
+        }
+        Err(said) => {
+            tracing::warn!("chat {name}: no checkpoint: {said}");
+            peer.say(&failure(Kind::Checkpoint, said)).await
+        }
+    }
+}
+
+/// Puts the files back as checkpoint `turn` kept them. The conversation stays.
+async fn revert<M: Machine, P: Peer>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    turn: u32,
+    peer: &mut P,
+) -> bool {
+    match machine.revert(place, turn).await {
+        Ok(()) => {
+            tracing::info!("chat {name}: reverted to checkpoint {turn}");
+            peer.say(&ThreadEvent {
+                thread_id: thread::name(place).to_owned(),
+                event: Event::ThreadReverted { turn },
+            })
+            .await
+        }
+        Err(said) => {
+            tracing::warn!("chat {name}: no revert: {said}");
+            peer.say(&failure(Kind::Checkpoint, said)).await
         }
     }
 }
@@ -793,9 +910,10 @@ fn cancel(name: &str, here: Option<&Conversation>) {
     }
 }
 
-/// The socket closed: a running turn is cancelled and given a moment to end.
-async fn hang_up(name: &str, running: Conversation) {
-    match running.speaker {
+/// The socket closed: a running turn is cancelled and given a moment to end,
+/// and the tree it left is kept with no one to tell.
+async fn hang_up<M: Machine>(machine: &M, name: &str, running: Conversation) {
+    let ran = match running.speaker {
         Speaker::Claude(Some((turn, mut events))) => {
             tracing::info!("chat {name}: the socket closed mid-turn, so the turn is cancelled");
             turn.cancel();
@@ -807,15 +925,26 @@ async fn hang_up(name: &str, running: Conversation) {
                 }
             })
             .await;
+            true
         }
-        Speaker::Acp(mut acp) => {
-            if let Some(prompt) = acp.prompt.take() {
+        Speaker::Acp(mut acp) => match acp.prompt.take() {
+            Some(prompt) => {
                 tracing::info!("chat {name}: the socket closed mid-turn, so the turn is cancelled");
                 let _ = acp.agent.cancel(&acp.session);
                 let _ = tokio::time::timeout(STOP_GRACE, prompt).await;
+                true
             }
-        }
-        Speaker::Claude(None) => {}
+            None => false,
+        },
+        Speaker::Claude(None) => false,
+    };
+    if !ran {
+        return;
+    }
+    match tokio::time::timeout(STOP_GRACE, machine.capture(&running.place)).await {
+        Ok(Ok(turn)) => tracing::info!("chat {name}: checkpoint {turn} kept"),
+        Ok(Err(said)) => tracing::warn!("chat {name}: no checkpoint: {said}"),
+        Err(_) => tracing::warn!("chat {name}: no checkpoint: the machine did not answer"),
     }
 }
 
@@ -1019,6 +1148,15 @@ async fn begin<M: Machine, P: Peer>(
             Err(refusal) => return peer.say(&refusal).await,
         },
     };
+    // A turn with no checkpoint before it could not be reverted.
+    match machine.base(&running.place).await {
+        Ok(Some(turn)) => tracing::info!("chat {name}: checkpoint {turn} kept"),
+        Ok(None) => {}
+        Err(said) => {
+            tracing::warn!("chat {name}: no checkpoint: {said}");
+            return peer.say(&failure(Kind::Checkpoint, said)).await;
+        }
+    }
     let said = delta(
         &running.place,
         StreamKind::UserText,
@@ -1176,10 +1314,33 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             ]),
         ),
         (
+            "chatCheckpoints",
+            "ThreadEvent[]",
+            serde_json::Value::Array(vec![
+                event(Event::TurnDiffUpdated(TurnDiff {
+                    turn: 1,
+                    unified_diff: "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n\
+                                   @@ -1 +1 @@\n-one\n+two\n"
+                        .to_owned(),
+                    truncated: false,
+                })),
+                event(Event::ThreadReverted { turn: 0 }),
+            ]),
+        ),
+        (
             "chatFailure",
             "ChatFailure",
             serde_json::to_value(failure(Kind::Busy, "a turn is running"))
                 .expect("a failure serialises"),
+        ),
+        (
+            "chatCheckpointFailed",
+            "ChatFailure",
+            serde_json::to_value(failure(
+                Kind::Checkpoint,
+                "git could not keep or restore a checkpoint: fatal: unable to write new index file",
+            ))
+            .expect("a failure serialises"),
         ),
         (
             "chatNotLoggedIn",
@@ -1225,6 +1386,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     decision: Decision::AcceptAlways,
                 }),
                 frame(Frame::Cancel),
+                frame(Frame::Revert { turn: 0 }),
             ]),
         ),
     ]
@@ -1355,6 +1517,13 @@ mod tests {
         cleared: Mutex<usize>,
         /// The images directory each Claude turn was started with.
         started_with: Mutex<Vec<Option<String>>>,
+        /// Each makes one checkpoint call fail, as git would.
+        base_fails: bool,
+        capture_fails: bool,
+        revert_fails: bool,
+        /// How many checkpoints the thread holds.
+        checkpoints: Mutex<u32>,
+        reverted: Mutex<Vec<u32>>,
     }
 
     impl Script {
@@ -1488,6 +1657,51 @@ mod tests {
 
         async fn clear(&self, _: &Images) -> Result<(), String> {
             *self.cleared.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            Ok(())
+        }
+
+        async fn base(&self, _: &Place) -> Result<Option<u32>, String> {
+            if self.base_fails {
+                return Err("git: fatal: Unable to create index.lock: File exists".to_owned());
+            }
+            let mut held = self
+                .checkpoints
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if *held > 0 {
+                return Ok(None);
+            }
+            *held = 1;
+            Ok(Some(0))
+        }
+
+        async fn capture(&self, _: &Place) -> Result<u32, String> {
+            if self.capture_fails {
+                return Err("git: fatal: unable to write new index file".to_owned());
+            }
+            let mut held = self
+                .checkpoints
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            *held += 1;
+            Ok(*held - 1)
+        }
+
+        async fn diff(&self, _: &Place, turn: u32) -> Result<Diff, String> {
+            Ok(Diff {
+                unified: format!("diff for turn {turn}\n"),
+                truncated: false,
+            })
+        }
+
+        async fn revert(&self, _: &Place, turn: u32) -> Result<(), String> {
+            if self.revert_fails {
+                return Err("the thread has no checkpoint 4".to_owned());
+            }
+            self.reverted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(turn);
             Ok(())
         }
     }
@@ -1656,6 +1870,7 @@ mod tests {
                 },
             ),
             (r#"{"type":"cancel"}"#, Frame::Cancel),
+            (r#"{"type":"revert","turn":2}"#, Frame::Revert { turn: 2 }),
         ] {
             let parsed: Frame = serde_json::from_str(text).expect("a frame parses");
             assert_eq!(format!("{parsed:?}"), format!("{frame:?}"));
@@ -1894,6 +2109,7 @@ mod tests {
             .reply(&prompt, json!({"stopReason": "cancelled"}))
             .await;
         assert_eq!(tab.next().await["payload"]["state"], "cancelled");
+        assert_eq!(tab.next().await["type"], "turn.diff.updated");
 
         tab.send(json!({"type": "turn", "text": "again"}));
         assert_eq!(tab.next().await["payload"]["itemId"], "user:2");
@@ -2464,6 +2680,7 @@ mod tests {
             .say(json!({"type": "result", "subtype": "success", "is_error": false}))
             .await;
         assert_eq!(tab.next().await["type"], "turn.completed");
+        assert_eq!(tab.next().await["type"], "turn.diff.updated");
 
         tab.send_image(png(64));
         assert_eq!(tab.next().await["type"], "attached");
@@ -2577,5 +2794,154 @@ mod tests {
             Some("10000000")
         );
         assert_eq!(heard_of(&png(IMAGE_LIMIT + 1)).await, None);
+    }
+
+    /// A Claude turn on a new thread, from the prompt to `turn.completed`.
+    async fn a_claude_turn_that_ends(script: &Arc<Script>) -> (Tab, Claude) {
+        let (mut tab, _served) = connect(Arc::clone(script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
+        let mut claude = script.claude();
+        claude.heard().await;
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": false,
+                        "stop_reason": "end_turn"}),
+            )
+            .await;
+        assert_eq!(tab.next().await["type"], "turn.completed");
+        (tab, claude)
+    }
+
+    #[tokio::test]
+    async fn checkpoint_a_claude_turn_sends_completed_then_its_diff() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _claude) = a_claude_turn_that_ends(&script).await;
+        assert_eq!(
+            tab.next().await,
+            json!({"threadId": THREAD, "type": "turn.diff.updated", "payload":
+                {"turn": 1, "unifiedDiff": "diff for turn 1\n", "truncated": false}})
+        );
+        assert_eq!(*script.checkpoints.lock().expect("a lock"), 2, "0 and 1");
+    }
+
+    #[tokio::test]
+    async fn checkpoint_an_acp_turn_sends_completed_then_its_diff() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        assert_eq!(tab.next().await["type"], "turn.completed");
+        let diff = tab.next().await;
+        assert_eq!(diff["type"], "turn.diff.updated");
+        assert_eq!(diff["threadId"], THREAD);
+        assert_eq!(diff["payload"]["turn"], 1);
+    }
+
+    #[tokio::test]
+    async fn checkpoint_a_capture_that_fails_says_so_in_gits_words() {
+        let script = Arc::new(Script {
+            capture_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _claude) = a_claude_turn_that_ends(&script).await;
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "checkpoint",
+                   "said": "git: fatal: unable to write new index file"})
+        );
+    }
+
+    #[tokio::test]
+    async fn checkpoint_a_turn_with_no_baseline_does_not_start() {
+        let script = Arc::new(Script {
+            base_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        assert_eq!(tab.next().await["type"], "thread.started");
+        let said = tab.next().await;
+        assert_eq!(said["kind"], "checkpoint", "{said}");
+        assert!(
+            script.turns.lock().expect("a lock").is_empty(),
+            "no turn ran"
+        );
+    }
+
+    #[tokio::test]
+    async fn checkpoint_a_socket_closed_mid_turn_still_keeps_the_tree() {
+        let script = Arc::new(Script::default());
+        let (mut tab, served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude();
+        claude.heard().await;
+        tab.close();
+        assert_eq!(
+            claude.heard().await.expect("an interrupt")["request"]["subtype"],
+            "interrupt"
+        );
+        drop(claude);
+        tokio::time::timeout(Duration::from_secs(5), served)
+            .await
+            .expect("the socket's task ends")
+            .expect("it did not panic");
+        assert_eq!(*script.checkpoints.lock().expect("a lock"), 2, "0 and 1");
+    }
+
+    #[tokio::test]
+    async fn revert_while_a_turn_runs_is_refused_as_busy() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let said = tab.next_after(json!({"type": "revert", "turn": 0})).await;
+        assert_eq!(said["kind"], "busy", "{said}");
+        assert!(script.reverted.lock().expect("a lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn revert_with_no_thread_is_a_bad_frame() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        let said = tab.next_after(json!({"type": "revert", "turn": 0})).await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+        assert!(script.reverted.lock().expect("a lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn revert_that_succeeds_sends_thread_reverted() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(
+            tab.next_after(json!({"type": "revert", "turn": 2})).await,
+            json!({"threadId": THREAD, "type": "thread.reverted", "payload": {"turn": 2}})
+        );
+        assert_eq!(*script.reverted.lock().expect("a lock"), [2]);
+    }
+
+    #[tokio::test]
+    async fn revert_that_fails_is_a_checkpoint_failure() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            revert_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        tab.next().await;
+        assert_eq!(
+            tab.next_after(json!({"type": "revert", "turn": 4})).await,
+            json!({"type": "error", "kind": "checkpoint",
+                   "said": "the thread has no checkpoint 4"})
+        );
     }
 }

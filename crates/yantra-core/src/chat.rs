@@ -7,9 +7,9 @@
 //! The provider-neutral chat event model (ADR-0026 decision 1).
 //!
 //! An agent's stream is normalised into these events, and the browser draws
-//! them without knowing which agent spoke. It carries only what its two
-//! sources produce: ACP v1 ([`crate::acp`]) and Claude's stream-json
-//! ([`crate::claude`]). Serialised as `{"threadId", "type", "payload"}`, so a
+//! them without knowing which agent spoke. It carries only what its sources
+//! produce: ACP v1 ([`crate::acp`]), Claude's stream-json ([`crate::claude`])
+//! and a thread's checkpoints ([`crate::checkpoint`]). Serialised as `{"threadId", "type", "payload"}`, so a
 //! relay can send it on unchanged.
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,11 @@ pub enum Event {
     TurnStarted,
     #[serde(rename = "turn.completed")]
     TurnCompleted(TurnCompleted),
+    #[serde(rename = "turn.diff.updated")]
+    TurnDiffUpdated(TurnDiff),
+    /// Not T3 Code's: the thread's files are back as checkpoint `turn` kept them.
+    #[serde(rename = "thread.reverted")]
+    ThreadReverted { turn: u32 },
     #[serde(rename = "turn.plan.updated")]
     PlanUpdated { plan: Vec<PlanStep> },
     #[serde(rename = "content.delta")]
@@ -72,6 +77,16 @@ pub struct TurnCompleted {
     /// Why a failed turn failed, in the agent's or `ssh`'s own words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// What turn `turn` changed in the worktree, as a unified diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnDiff {
+    pub turn: u32,
+    pub unified_diff: String,
+    /// The diff was cut at [`crate::checkpoint::LIMIT`].
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -273,6 +288,24 @@ mod tests {
         assert_eq!(
             failed["payload"],
             json!({"state": "failed", "message": "Not logged in · Please run /login"})
+        );
+    }
+
+    #[test]
+    fn a_turns_diff_and_a_revert_name_their_turn() {
+        assert_eq!(
+            wire(Event::TurnDiffUpdated(TurnDiff {
+                turn: 2,
+                unified_diff: "diff --git a/a b/a\n".to_owned(),
+                truncated: false,
+            })),
+            json!({"threadId": "ses_1", "type": "turn.diff.updated",
+                   "payload": {"turn": 2, "unifiedDiff": "diff --git a/a b/a\n",
+                               "truncated": false}})
+        );
+        assert_eq!(
+            wire(Event::ThreadReverted { turn: 1 }),
+            json!({"threadId": "ses_1", "type": "thread.reverted", "payload": {"turn": 1}})
         );
     }
 

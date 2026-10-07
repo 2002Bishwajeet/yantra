@@ -75,12 +75,19 @@ export type TurnCompleted = {
   message?: string
 }
 
+/** What turn `turn` changed in the thread's worktree (Y-448). `truncated` is a
+ *  diff cut at 256 KiB. */
+export type TurnDiff = { turn: number; unifiedDiff: string; truncated: boolean }
+
 export type ThreadEvent = { threadId: string } & (
   | { type: 'thread.started'; payload: { thread: string; harness: Harness } }
   | { type: 'thread.metadata.updated'; payload: { name: string } }
   | { type: 'thread.token-usage.updated'; payload: { usedTokens: number; maxTokens: number } }
   | { type: 'turn.started' }
   | { type: 'turn.completed'; payload: TurnCompleted }
+  | { type: 'turn.diff.updated'; payload: TurnDiff }
+  /** Not T3 Code's: the files are back as checkpoint `turn` kept them. */
+  | { type: 'thread.reverted'; payload: { turn: number } }
   | {
       type: 'turn.plan.updated'
       payload: { plan: { step: string; status: 'pending' | 'inProgress' | 'completed' }[] }
@@ -100,11 +107,13 @@ export type ChatFrame =
   | { type: 'turn'; text: string; harness?: Harness }
   | { type: 'answer'; requestId: string; decision: Decision }
   | { type: 'cancel' }
+  /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */
+  | { type: 'revert'; turn: number }
 
 /** The one daemon frame that is not an event. `notLoggedIn` names the
  *  command to run on the machine, because the login stays there (ADR-0033 §6). */
 export type ChatFailure =
-  | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable'; said: string }
+  | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable' | 'checkpoint'; said: string }
   | { type: 'error'; kind: 'notLoggedIn'; said: string; harness: Harness; machine: string; command: string }
 
 /** The one reply to each image the browser sends as a binary frame (Y-424),

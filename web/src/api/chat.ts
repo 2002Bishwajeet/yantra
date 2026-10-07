@@ -23,6 +23,8 @@ export type ChatErrorKind =
   | 'busy'
   // A frame one side could not read.
   | 'badFrame'
+  // git could not keep, diff or restore a checkpoint (Y-448).
+  | 'checkpoint'
   // The agent's turn ended failed: ssh refused, the harness not found.
   | 'turnFailed'
   // The socket closed after it opened.
@@ -35,6 +37,7 @@ const sentences: Record<ChatErrorKind, string> = {
   unknownThread: 'This workspace has no chat with that id. Its worktree may have been removed.',
   busy: 'The agent is still answering. Stop it, or wait for it to end.',
   badFrame: 'The daemon could not read what the dashboard sent.',
+  checkpoint: "git on the workspace's machine could not keep or restore this chat's files.",
   turnFailed: 'The agent could not finish the turn.',
   closed: 'The chat socket closed. A turn that was running was stopped.',
 }
@@ -125,6 +128,8 @@ export type ChatSocket = {
   send: (text: string, harness?: Harness) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
+  /** Puts the files back as checkpoint `turn` kept them. */
+  revert: (turn: number) => boolean
   /** Sends an image and resolves to its path on the machine, or rejects with
    *  an `AttachError`. The daemon replies to images in the order they went. */
   attach: (file: Blob) => Promise<string>
@@ -132,7 +137,7 @@ export type ChatSocket = {
   close: () => void
 }
 
-const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn'])
+const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn', 'checkpoint'])
 const NAMES: ReadonlySet<string> = new Set(HARNESSES)
 
 function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
@@ -283,6 +288,7 @@ export function openChat(
     send: (text, harness) => send(harness ? { type: 'turn', text, harness } : { type: 'turn', text }),
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
+    revert: (turn) => send({ type: 'revert', turn }),
     attach: (file) => {
       if (file.size > IMAGE_LIMIT) return Promise.reject(new AttachError('tooLarge'))
       if (!IMAGE_TYPES.includes(file.type)) return Promise.reject(new AttachError('notAnImage'))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ThreadEvent } from '@/api/thread'
-import { chatEvents } from '@/contract.gen'
+import { chatCheckpoints, chatEvents } from '@/contract.gen'
 import { empty, reduce, type Action, type Timeline } from './timeline'
 
 const event = (e: ThreadEvent): Action => ({ type: 'event', event: e })
@@ -86,6 +86,34 @@ describe('the timeline', () => {
     expect(fold([started('claude')]).harness).toBe('claude')
     expect(fold([started('grok')]).harness).toBe('grok')
     expect(empty.harness).toBeNull()
+  })
+
+  it("appends a card for each turn's diff, and a revert marks the turns above it", () => {
+    const [diff, reverted] = chatCheckpoints
+    const turn = (n: number) => event({ threadId: 't', type: 'turn.diff.updated', payload: { turn: n, unifiedDiff: `+${n}\n`, truncated: n === 2 } })
+    const two = fold([event(diff!), turn(2)])
+    expect(two.entries).toEqual([
+      {
+        kind: 'diff',
+        id: 'diff:0',
+        turn: 1,
+        unified: 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n',
+        truncated: false,
+        reverted: false,
+      },
+      { kind: 'diff', id: 'diff:1', turn: 2, unified: '+2\n', truncated: true, reverted: false },
+    ])
+
+    const back = fold([event({ threadId: 't', type: 'thread.reverted', payload: { turn: 1 } })], two)
+    expect(back.entries.map((one) => one.kind === 'diff' && one.reverted)).toEqual([false, true])
+    // The next turn takes number 2 again, and gets a card of its own.
+    const again = fold([turn(2), event(reverted!)], back)
+    expect(again.entries.map((one) => (one.kind === 'diff' ? [one.id, one.turn, one.reverted] : null))).toEqual([
+      ['diff:0', 1, true],
+      ['diff:1', 2, true],
+      ['diff:2', 2, true],
+    ])
+    expect(again.turn).toBe('idle')
   })
 
   it('draws nothing for a plan or a title', () => {

@@ -838,9 +838,34 @@ export const chatEvents = [
   }
 ] satisfies ThreadEvent[]
 
+export const chatCheckpoints = [
+  {
+    "payload": {
+      "truncated": false,
+      "turn": 1,
+      "unifiedDiff": "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n"
+    },
+    "threadId": "1a2b3c4d",
+    "type": "turn.diff.updated"
+  },
+  {
+    "payload": {
+      "turn": 0
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.reverted"
+  }
+] satisfies ThreadEvent[]
+
 export const chatFailure = {
   "kind": "busy",
   "said": "a turn is running",
+  "type": "error"
+} satisfies ChatFailure
+
+export const chatCheckpointFailed = {
+  "kind": "checkpoint",
+  "said": "git could not keep or restore a checkpoint: fatal: unable to write new index file",
   "type": "error"
 } satisfies ChatFailure
 
@@ -881,5 +906,9 @@ export const chatFrames = [
   },
   {
     "type": "cancel"
+  },
+  {
+    "turn": 0,
+    "type": "revert"
   }
 ] satisfies ChatFrame[]
