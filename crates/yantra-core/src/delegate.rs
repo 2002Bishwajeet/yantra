@@ -85,6 +85,8 @@ pub struct Progress {
     pub last_message: Option<String>,
     /// Taken when the turn ends and on each [`Task::summary`], never on a read.
     pub summary: Option<Summary>,
+    /// A steer was taken but the task ended before the agent got it.
+    pub steer_dropped: bool,
 }
 
 /// Where a task works.
@@ -120,6 +122,7 @@ impl Default for Inner {
                 state: State::Starting,
                 last_message: None,
                 summary: None,
+                steer_dropped: false,
             },
             session: None,
             stopping: false,
@@ -153,6 +156,8 @@ pub struct Task {
     running: Mutex<Option<Running>>,
     /// True once the task has ended and taken its last summary.
     settled: watch::Sender<bool>,
+    /// Held by `stop` and `remove`, so a second one settles after the first.
+    ending: tokio::sync::Mutex<()>,
 }
 
 impl Drop for Task {
@@ -245,6 +250,7 @@ impl Task {
                 runner,
             })),
             settled,
+            ending: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -296,7 +302,8 @@ impl Task {
     }
 
     /// Waits up to `limit` for the task to end and take its last summary.
-    /// Reads memory only. True when the task has settled.
+    /// A stop whose caller hung up settles without its summary. Reads memory
+    /// only. True when the task has settled.
     pub async fn wait(&self, limit: Duration) -> bool {
         let mut settled = self.settled.subscribe();
         tokio::time::timeout(limit, settled.wait_for(|settled| *settled))
@@ -308,10 +315,10 @@ impl Task {
     /// worktree stays for review. A summary the machine cannot give leaves the
     /// one the turn took, and the error says why.
     pub async fn stop(&self) -> Result<Summary, Error> {
+        let _ending = self.ending.lock().await;
+        let _settle = Settle(self);
         self.halt().await;
-        let summary = self.summary().await;
-        self.settled.send_replace(true);
-        summary
+        self.summary().await
     }
 
     async fn halt(&self) {
@@ -321,6 +328,8 @@ impl Task {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         if let Some(Running { agent, mut runner }) = running {
+            // Dropping a handle detaches the runner, so a caller that hangs up must abort it.
+            let _abort = Abort(runner.abort_handle());
             let session = {
                 let mut inner = lock(&self.shared);
                 inner.stopping = true;
@@ -331,11 +340,16 @@ impl Task {
                 // No turn has begun, or the agent has already gone.
                 _ => false,
             };
-            if !cancelled || tokio::time::timeout(STOP_GRACE, &mut runner).await.is_err() {
-                runner.abort();
+            if cancelled {
+                let _ = tokio::time::timeout(STOP_GRACE, &mut runner).await;
             }
         }
+        self.end();
+    }
+
+    fn end(&self) {
         let mut inner = lock(&self.shared);
+        unsent(&mut inner);
         if !inner.progress.state.is_terminal() {
             inner.progress.state = State::Cancelled;
         }
@@ -343,8 +357,11 @@ impl Task {
 
     /// Stops the task, then removes its worktree and its branch.
     pub async fn remove(&self) -> Result<(), Error> {
-        self.halt().await;
-        self.settled.send_replace(true);
+        {
+            let _ending = self.ending.lock().await;
+            let _settle = Settle(self);
+            self.halt().await;
+        }
         let out = self.ssh.exec(&removal(&self.place)).await?;
         if !out.success() {
             return Err(Error::Worktree {
@@ -352,6 +369,25 @@ impl Task {
             });
         }
         Ok(())
+    }
+}
+
+/// Ends and settles the task when `stop` or `remove` finishes or is dropped,
+/// so a caller that hangs up never leaves a wait to run its full limit.
+struct Settle<'a>(&'a Task);
+
+impl Drop for Settle<'_> {
+    fn drop(&mut self) {
+        self.0.end();
+        self.0.settled.send_replace(true);
+    }
+}
+
+struct Abort(tokio::task::AbortHandle);
+
+impl Drop for Abort {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -478,20 +514,30 @@ async fn drive(agent: Arc<Agent>, mut events: Events, cwd: &str, prompt: &str, s
         let ended = turn(&agent, &mut events, &session, &prompt, shared).await;
         // One lock for the steer and the end, so a steer `steer` took is sent.
         let mut inner = lock(shared);
-        match inner.steer.take() {
-            Some(next) if ended.is_ok() && !inner.stopping => prompt = next,
-            _ => return settle(&mut inner, ended),
+        if ended.is_ok()
+            && !inner.stopping
+            && let Some(next) = inner.steer.take()
+        {
+            prompt = next;
+        } else {
+            return settle(&mut inner, ended);
         }
     }
 }
 
 fn settle(inner: &mut Inner, ended: Result<chat::StopReason, acp::Error>) {
-    inner.steer = None;
+    unsent(inner);
     inner.progress.state = match ended {
         Ok(chat::StopReason::Cancelled) => State::Cancelled,
         Ok(_) => State::Completed,
         Err(error) => State::Failed(error.to_string()),
     };
+}
+
+fn unsent(inner: &mut Inner) {
+    if inner.steer.take().is_some() {
+        inner.progress.steer_dropped = true;
+    }
 }
 
 async fn open(agent: &Agent, cwd: &str, shared: &Shared) -> Result<String, acp::Error> {
@@ -749,6 +795,57 @@ mod tests {
         fake.reply(&second, json!({"stopReason": "end_turn"})).await;
         assert!(task.wait(Duration::from_secs(5)).await);
         assert_eq!(task.progress().state, State::Completed);
+        assert!(!task.progress().steer_dropped);
+    }
+
+    #[tokio::test]
+    async fn a_steer_the_failed_turn_never_sent_is_reported_dropped() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        task.steer("and the docs").expect("taken");
+        let first = fake.open().await;
+        fake.send(json!({"jsonrpc": "2.0", "id": first["id"],
+                         "error": {"code": -32000, "message": "out of credit"}}))
+            .await;
+        assert!(task.wait(Duration::from_secs(5)).await);
+        let progress = task.progress();
+        assert!(matches!(progress.state, State::Failed(_)), "{progress:?}");
+        assert!(progress.steer_dropped);
+    }
+
+    /// The fake never answers the cancel, so each stop sits in its grace until dropped.
+    #[tokio::test]
+    async fn a_stop_dropped_mid_way_still_settles_and_a_second_stop_waits_for_the_first() {
+        let (agent, events, mut fake) = pair();
+        let task = task(agent, events);
+        task.steer("and the docs").expect("taken");
+        let _first = fake.open().await;
+        until_running(&task).await;
+        let mut stopping = Box::pin(task.stop());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut stopping)
+                .await
+                .is_err()
+        );
+        assert_eq!(fake.receive().await["method"], "session/cancel");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), task.stop())
+                .await
+                .is_err(),
+            "the second stop waits for the first"
+        );
+        assert!(!task.wait(Duration::ZERO).await, "nothing has settled yet");
+        drop(stopping);
+        assert!(
+            task.wait(Duration::from_secs(1)).await,
+            "a hung-up stop leaves no wait running its full limit"
+        );
+        let progress = task.progress();
+        assert_eq!(progress.state, State::Cancelled);
+        assert!(
+            progress.steer_dropped,
+            "the stop came before the steer was sent"
+        );
     }
 
     #[tokio::test]

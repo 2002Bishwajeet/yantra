@@ -152,7 +152,7 @@ where
             fleet: fleet.clone(),
         });
 
-    let tasks = crate::tasks::router(authoriser.clone());
+    let tasks = crate::tasks::router(authoriser.clone(), fleet.closing.clone());
 
     let installs: Router<S> = Router::new()
         .route("/machines/{machine}/install", post(put_basics::<I>))

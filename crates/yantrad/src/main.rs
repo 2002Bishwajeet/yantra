@@ -193,6 +193,12 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         ),
     }
     refresh::spawn(&fleet, inventory.clone(), fleet.github.clone(), relay);
+    let closing = fleet.closing.clone();
+    tokio::spawn(async move {
+        shutdown().await;
+        closing.send_replace(true);
+    });
+    let closing = fleet.closing.subscribe();
     let app = app(fleet, authoriser, dashboard(web::from_env())?);
 
     let mut servers = tokio::task::JoinSet::new();
@@ -206,9 +212,12 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         let app = app
             .clone()
             .into_make_service_with_connect_info::<SocketAddr>();
+        let mut closing = closing.clone();
         servers.spawn(async move {
             axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown())
+                .with_graceful_shutdown(async move {
+                    let _ = closing.wait_for(|closing| *closing).await;
+                })
                 .await
         });
     }
