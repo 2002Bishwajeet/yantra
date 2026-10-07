@@ -25,5 +25,12 @@ describe('Y-441 budget figures', () => {
   it('D3 9.1 says its byte counts are dated and points to npm run budget', () => {
     const d3 = read('../docs/design/03-dashboard-surface.md')
     expect(d3).toContain('2026-10-07, Y-441')
+    expect(d3).toContain('`npm run budget`')
+  })
+
+  it('the Y-325 row quotes no byte figure', () => {
+    const row = read('../tracker.md').split('\n').find((line) => line.startsWith('| Y-325 |')) ?? ''
+    expect(row).toContain('npm run budget')
+    expect(row).not.toMatch(/\d[\d,.]* ?(B|KiB)\b/)
   })
 })
