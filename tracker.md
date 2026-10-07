@@ -292,6 +292,7 @@ deleted everywhere else.
 | Y-442 | Microphone hardening | ⬜ todo | claude | — | **Done** when each finding in [#408](https://github.com/2002Bishwajeet/yantra/issues/408) that still holds on `main` is fixed with a test, and the rest are closed in the issue with the reason. |
 | Y-443 | ACP and delegation hardening | ⬜ todo | claude | — | **Done** when each finding in [#409](https://github.com/2002Bishwajeet/yantra/issues/409) that still holds on `main` is fixed with a test, and the rest are closed in the issue with the reason. |
 | Y-444 | History redaction hardening | ⬜ todo | claude | — | **Done** when each finding in [#410](https://github.com/2002Bishwajeet/yantra/issues/410) that still holds on `main` is fixed with a test, and the rest are closed in the issue with the reason. Privacy findings first. |
+| Y-445 | Research: T3 Code with Connect, against Yantra | 🔵 review | claude | — | **Owner, 2026-10-07:** keep building, credit T3 Code where due. **Done** when [R21](docs/research/21-t3code-and-yantra.md) compares the two feature by feature with evidence, and names where Yantra can be better. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
