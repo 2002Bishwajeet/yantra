@@ -1,3 +1,15 @@
+/*
+ * The phases and their headlines are T3 Code's, at commit 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/main/packages/shared/src/agentAwareness.ts
+ * and the redaction of a failed run is from
+ * https://github.com/pingdotgg/t3code/blob/main/apps/server/src/relay/AgentAwarenessRelay.ts
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ *
+ * Kept: six phases with fixed headlines, a failed run's detail replaced by one fixed string,
+ * and a detail cut at 160 characters. Changed: `stale` is dropped, and the phase comes from a
+ * `Verdict` rather than from a thread shell.
+ */
 //! The difference between two consecutive looks at the fleet, and the channel
 //! that difference goes out on.
 //!
@@ -50,11 +62,64 @@ impl fmt::Display for Notification {
     }
 }
 
+/// What a relay is told in place of a failed run's verdict, because an exit code
+/// or a signal says more about the machine than a public topic needs to.
+const FAILED: &str = "The agent run failed.";
+const BODY_MAX: usize = 160;
+
+/// Where an agent is in its run, which names the notification's `Title`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    Starting,
+    Running,
+    WaitingForApproval,
+    WaitingForInput,
+    Completed,
+    Failed,
+}
+
+impl Phase {
+    pub fn headline(self) -> &'static str {
+        match self {
+            Phase::Starting => "Starting agent",
+            Phase::Running => "Agent is working",
+            Phase::WaitingForApproval => "Approval needed",
+            Phase::WaitingForInput => "Waiting for input",
+            Phase::Completed => "Agent finished",
+            Phase::Failed => "Agent failed",
+        }
+    }
+}
+
 impl Notification {
+    /// Named rather than wildcarded, like [`phrase`], so a new [`Verdict`] has to
+    /// pick a phase before it can be sent.
+    pub fn phase(&self) -> Phase {
+        match self.verdict {
+            Verdict::AwaitingTrust => Phase::WaitingForApproval,
+            Verdict::Running => Phase::Running,
+            Verdict::Finished | Verdict::Stopped => Phase::Completed,
+            Verdict::Crashed { .. }
+            | Verdict::Killed { .. }
+            | Verdict::NoSession
+            | Verdict::Unclear { .. } => Phase::Failed,
+            // `notable` never sends it; the arm only makes the match total.
+            Verdict::NoAgent => Phase::Completed,
+        }
+    }
+
+    /// The relay's rendering. [`fmt::Display`] keeps the full verdict for the
+    /// event log; the redaction applies only here, at the relay boundary.
     pub fn message(&self) -> Message {
+        let phase = self.phase();
+        let body = match phase {
+            Phase::Failed => format!("{}: {FAILED}", self.workspace),
+            _ => self.to_string(),
+        };
+        let body: String = body.trim().chars().take(BODY_MAX).collect();
         Message {
-            body: self.to_string(),
-            title: None,
+            body: body.trim().to_owned(),
+            title: Some(phase.headline().to_owned()),
             priority: None,
         }
     }
@@ -768,10 +833,80 @@ mod tests {
             .expect("the dialog is news")
     }
 
-    /// The fleet path, unchanged by the channel underneath it: one line, no
-    /// `Title`, no `Priority`, and neither the machine nor the repo.
+    #[test]
+    fn each_phase_has_its_fixed_headline() {
+        for (phase, headline) in [
+            (Phase::Starting, "Starting agent"),
+            (Phase::Running, "Agent is working"),
+            (Phase::WaitingForApproval, "Approval needed"),
+            (Phase::WaitingForInput, "Waiting for input"),
+            (Phase::Completed, "Agent finished"),
+            (Phase::Failed, "Agent failed"),
+        ] {
+            assert_eq!(phase.headline(), headline);
+        }
+    }
+
+    fn told(workspace: &str, verdict: Verdict) -> Notification {
+        Notification {
+            workspace: workspace.to_owned(),
+            verdict,
+        }
+    }
+
+    #[test]
+    fn each_verdict_sent_has_a_phase_and_its_title() {
+        for (verdict, phase) in [
+            (Verdict::AwaitingTrust, Phase::WaitingForApproval),
+            (Verdict::Finished, Phase::Completed),
+            (Verdict::Crashed { status: 1 }, Phase::Failed),
+            (
+                Verdict::Killed {
+                    signal: "KILL".to_owned(),
+                },
+                Phase::Failed,
+            ),
+            (Verdict::NoSession, Phase::Failed),
+            (Verdict::Unclear { because: "why" }, Phase::Failed),
+        ] {
+            let notification = told("api", verdict.clone());
+            assert_eq!(notification.phase(), phase, "{verdict:?}");
+            assert_eq!(
+                notification.message().title.as_deref(),
+                Some(phase.headline()),
+                "{verdict:?}"
+            );
+        }
+    }
+
+    /// Upstream's redaction: the exit code and the signal stay in the event
+    /// log and never reach the relay.
+    #[test]
+    fn a_failed_run_sends_the_fixed_string_and_not_the_verdict() {
+        for verdict in [
+            Verdict::Crashed { status: 137 },
+            Verdict::Killed {
+                signal: "KILL".to_owned(),
+            },
+        ] {
+            let body = told("api", verdict.clone()).message().body;
+            assert_eq!(body, "api: The agent run failed.", "{verdict:?}");
+            assert!(!body.contains("exit") && !body.contains("KILL"), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_long_body_is_cut_at_160_characters_on_a_character_boundary() {
+        let body = told(&"ワーク".repeat(80), Verdict::Finished).message().body;
+
+        assert_eq!(body.chars().count(), 160, "{body}");
+        assert!(body.starts_with("ワーク"), "{body}");
+    }
+
+    /// The fleet path: one line under a fixed `Title`, no `Priority`, and
+    /// neither the machine nor the repo.
     #[tokio::test]
-    async fn the_relay_reads_the_workspace_the_verdict_and_the_token() {
+    async fn the_relay_reads_the_title_the_workspace_the_verdict_and_the_token() {
         let (listener, address) = listener();
         let served = serve(listener, "200 OK");
         let relay = Relay::new(
@@ -793,10 +928,8 @@ mod tests {
             headers.contains("authorization: bearer tk_notarealtoken"),
             "{request}"
         );
-        assert!(
-            !headers.contains("title:") && !headers.contains("priority:"),
-            "{request}"
-        );
+        assert!(headers.contains("title: approval needed\r\n"), "{request}");
+        assert!(!headers.contains("priority:"), "{request}");
         assert!(
             request.ends_with("api: waiting at claude's trust prompt"),
             "{request}"

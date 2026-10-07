@@ -266,7 +266,7 @@ mod tests {
         let address = listener.local_addr().expect("the port it got");
         let served = thread::spawn(move || {
             ["503 Service Unavailable", "200 OK"]
-                .map(|status| answer(&listener, status))
+                .map(|status| request(&listener, status))
                 .to_vec()
         });
         let mut notifier = Notifier::new(Some(relay(address)));
@@ -291,12 +291,22 @@ mod tests {
 
         let seen = served.join().expect("the listener thread");
         assert_eq!(
-            seen,
+            seen.iter().map(|request| body(request)).collect::<Vec<_>>(),
             [
-                "api: waiting at claude's trust prompt".to_owned(),
-                "api: crashed (exit 1)".to_owned()
+                Some("api: waiting at claude's trust prompt".to_owned()),
+                Some("api: The agent run failed.".to_owned())
             ],
             "the refused notification must not be replayed behind the next one"
+        );
+        assert!(
+            seen[1].to_lowercase().contains("title: agent failed\r\n"),
+            "{}",
+            seen[1]
+        );
+        let said = events::newest_first(&events).await;
+        assert_eq!(
+            said[0].said, "api: crashed (exit 1)",
+            "the event log keeps the verdict the relay is not told"
         );
     }
 
@@ -368,6 +378,11 @@ mod tests {
     /// and body arrive in separate writes, so it reads until the request is as
     /// long as it said it would be.
     fn answer(listener: &TcpListener, status: &str) -> String {
+        body(&request(listener, status)).unwrap_or_default()
+    }
+
+    /// The whole request [`answer`] reads, headers and all.
+    fn request(listener: &TcpListener, status: &str) -> String {
         let (mut stream, _) = listener.accept().expect("the notifier connects");
         let mut request = String::new();
         let mut byte = [0u8; 1];
@@ -380,7 +395,7 @@ mod tests {
         stream
             .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n").as_bytes())
             .expect("the relay answers");
-        body(&request).unwrap_or_default()
+        request
     }
 
     /// The body once all of it has arrived, and [`None`] until then.
