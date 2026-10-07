@@ -13,7 +13,10 @@ in Rust ([ADR-0026](docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon
 [`web/src/screens/session/HarnessPicker.tsx`](web/src/screens/session/HarnessPicker.tsx) copies the
 shape of
 [`apps/web/src/components/chat/ProviderModelPicker.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/ProviderModelPicker.tsx)
-onto Yantra's own menu and tokens. Its name, wordmark and icon are not used.
+onto Yantra's own menu and tokens.
+[`crates/yantra-core/src/placement.rs`](crates/yantra-core/src/placement.rs) copies the shape of
+[`packages/client-runtime/src/load-balancing.ts`](https://github.com/pingdotgg/t3code/blob/main/packages/client-runtime/src/load-balancing.ts)
+at commit `72d5c32`, with Yantra's own score terms. Its name, wordmark and icon are not used.
 
 ```text
 MIT License

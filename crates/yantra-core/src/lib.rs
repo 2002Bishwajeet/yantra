@@ -34,6 +34,7 @@ pub mod join;
 pub mod logs;
 pub mod mic;
 pub mod notify;
+pub mod placement;
 pub mod price;
 pub mod probe;
 pub mod pty;

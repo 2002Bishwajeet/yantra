@@ -36,6 +36,7 @@ use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
 mod mcp;
+mod why;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -252,6 +253,15 @@ enum Command {
         #[arg(long)]
         daemon: String,
     },
+    /// Rank the machines whose heartbeat is fresh, and say why each one won
+    /// or lost. Exits 1 when none can be placed
+    Why {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
 }
 
 /// Spelled out rather than a bare bool so that adding a second agent is a new
@@ -426,6 +436,7 @@ async fn main() -> ExitCode {
         }
         Some(Command::Update { check: false }) => update_apply().await,
         Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
+        Some(Command::Why { workspace, daemon }) => why(workspace, daemon).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -452,6 +463,29 @@ async fn serve_mcp(daemon: String) -> ExitCode {
         }
         Err(error) => {
             eprintln!("yantra mcp: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn why(name: String, daemon: String) -> ExitCode {
+    let answered =
+        tokio::task::spawn_blocking(move || why::why(workspace::load(&name), &daemon)).await;
+    match answered {
+        Ok(Ok(report)) => {
+            print!("{}", report.text);
+            if report.placed {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Ok(Err(err)) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+        Err(err) => {
+            eprintln!("yantra why: {err}");
             ExitCode::FAILURE
         }
     }
@@ -2394,6 +2428,18 @@ mod tests {
             Some(Command::Mcp { daemon }) if daemon == "http://x:7717"
         ));
         assert!(Cli::try_parse_from(["yantra", "mcp"]).is_err());
+    }
+
+    #[test]
+    fn why_needs_a_workspace_and_the_daemons_address() {
+        let parsed = Cli::try_parse_from(["yantra", "why", "demo", "--daemon", "http://x:7717"])
+            .expect("`why <workspace> --daemon <url>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Why { workspace, daemon }) if workspace == "demo" && daemon == "http://x:7717"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "why", "demo"]).is_err());
+        assert!(Cli::try_parse_from(["yantra", "why", "--daemon", "http://x:7717"]).is_err());
     }
 
     #[test]
