@@ -436,21 +436,13 @@ mod tests {
     }
 
     /// The expected name is the directory a real `claude -p` (2.1.291) run
-    /// created under `~/.claude/projects/` for this 249-character path.
+    /// created under `~/.claude/projects/` for this 211-character path.
     #[test]
     fn a_long_repo_path_gets_the_hash_claude_code_appends() {
-        let scratch = "claude-1000/-home-biswa-Github-homelab-yantra/8844de2a-3388-4909-8b10-964876e40aa0/scratchpad/y440/";
-        let repo = format!(
-            "/tmp/{scratch}{}/{}/repo.with-dots_and_more",
-            "a".repeat(60),
-            "b".repeat(60)
-        );
-        let expected = format!(
-            "-tmp-claude-1000--home-biswa-Github-homelab-yantra-8844de2a-3388-4909-8b10-964876e40aa0-scratchpad-y440-{}-{}-t27oub",
-            "a".repeat(60),
-            "b".repeat(35)
-        );
-        assert_eq!(repo.len(), 249);
+        let (a, b, c) = ("a".repeat(60), "b".repeat(60), "c".repeat(40));
+        let repo = format!("/tmp/yantra-slug-fixture/{a}/{b}/{c}/repo.with-dots_and_more");
+        let expected = format!("-tmp-yantra-slug-fixture-{a}-{b}-{c}-repo-with-do-k9n2jb");
+        assert_eq!(repo.len(), 211);
         assert_eq!(slug(&repo), expected);
 
         let exact = format!("/{}", "c".repeat(199));
