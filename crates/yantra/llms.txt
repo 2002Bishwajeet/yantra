@@ -46,7 +46,7 @@
 ## Source
 
 - [src/main.rs](src/main.rs): the crate. Clap definitions at the top, one `async fn` per command, then the `render_*` and `describe` helpers, then tests.
-- [src/mcp.rs](src/mcp.rs): `yantra mcp` — the JSON-RPC loop, the five tools and their schemas, and the HTTP calls to `yantrad` over `ureq`. Its tests answer from a loopback axum daemon.
+- [src/mcp.rs](src/mcp.rs): `yantra mcp` — the JSON-RPC loop, the seven tools and their schemas, and the HTTP calls to `yantrad` over `ureq`. Its tests answer from a loopback axum daemon.
 - [src/why.rs](src/why.rs): `yantra why` — the `GET /api/machines` call over `ureq`, a serde struct that reads only the fields the scorer needs, and `render`, which is pure. Its tests answer from a loopback axum daemon too.
 
 ## Conventions that are contracts
