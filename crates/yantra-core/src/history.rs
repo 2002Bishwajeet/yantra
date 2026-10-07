@@ -8,9 +8,10 @@
 //! A pass that cannot be sure a copy is clean does not stage it.
 //!
 //! A copy is rewritten when the live file's mtime moves, and every copy is
-//! rewritten when the rules or the gitleaks version change, because an old
-//! copy keeps what the old rules missed. The staging folders are 0700, and a
-//! directory that cannot be read fails only itself.
+//! rewritten, or removed if it cannot be, when the rules or the gitleaks
+//! version change, because an old copy keeps what the old rules missed. The
+//! staging folders are 0700, and a directory that cannot be read fails only
+//! itself.
 //!
 //! opencode is not here: it keeps its sessions in one SQLite database, not in
 //! transcript files.
@@ -32,15 +33,16 @@ pub const REDACTED: &str = "[REDACTED]";
 /// `DATABASE_PASSWORD=<17 characters>`: it has no known shape and too little
 /// entropy, so this rule has no entropy gate. A backslash ends the value
 /// because a JSON line escapes the newline or quote after it; it may also
-/// come before the opening quote, as `\"` in a JSON line. A quote may close
-/// the name too, as in a JSON or dict key.
+/// come before the opening quote, as `\"` in a JSON line. A quoted name, as
+/// in a JSON or dict key, needs a quoted value: an unquoted one is a number
+/// such as `"cache_read_input_tokens":123456789`, and redacting it breaks the line.
 pub const GITLEAKS_CONFIG: &str = r#"[extend]
 useDefault = true
 
 [[rules]]
 id = "yantra-assignment"
 description = "A name that says secret, assigned a value"
-regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Z0-9_]*(?:\\?["'])?\s*[=:]\s*(?:\\?["'])?([^\s"'\\]{8,})'''
+regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Z0-9_]*(?:\\?["']\s*[=:]\s*\\?["']|\s*[=:]\s*(?:\\?["'])?)([^\s"'\\]{8,})'''
 secretGroup = 2
 "#;
 
@@ -306,8 +308,10 @@ pub fn stage() -> Result<Report, Error> {
 /// the same filesystem moves it into place, so a half-written file is never
 /// in the folder Syncthing watches.
 ///
-/// `history.tmp/rules` records the rules the copies were made with. It is
-/// written only after a pass with no failure, so a failed copy is retried.
+/// `history.tmp/rules` records the rules the copies were made with. A pass
+/// under new rules removes each old copy it cannot replace, because the old
+/// rules may have missed what the new ones refuse it for. With no copy, the
+/// file is retried on the next pass.
 pub fn stage_in<S: Scan>(home: &Path, data: &Path, scanner: &S) -> Result<Report, Error> {
     // Asked before any mtime, so a missing gitleaks fails every pass.
     let rules = match scanner.rules() {
@@ -355,7 +359,12 @@ pub fn stage_in<S: Scan>(home: &Path, data: &Path, scanner: &S) -> Result<Report
                 }
                 Err(Step::Gone) => {}
                 Err(Step::Stop) => return Err(Error::NoGitleaks),
-                Err(Step::Refused(reason)) => report.failed.push(Failure { live, reason }),
+                Err(Step::Refused(reason)) => {
+                    if stale {
+                        remove_stale(&staged)?;
+                    }
+                    report.failed.push(Failure { live, reason });
+                }
             }
         }
         let staged_files = files(&into);
@@ -367,8 +376,9 @@ pub fn stage_in<S: Scan>(home: &Path, data: &Path, scanner: &S) -> Result<Report
         }
         for rel in staged_files.found {
             let live = root.join(&rel);
-            // Unreadable is not gone: keep what was staged under it.
-            if unread.iter().any(|dir| rel.starts_with(dir))
+            // Unreadable is not gone: keep what was staged under it, unless
+            // the rules it was staged with are old.
+            if (!stale && unread.iter().any(|dir| rel.starts_with(dir)))
                 || ((harness.keeps)(&rel) && live.is_file())
             {
                 continue;
@@ -382,13 +392,23 @@ pub fn stage_in<S: Scan>(home: &Path, data: &Path, scanner: &S) -> Result<Report
         }
         prune_empty(&into)?;
     }
-    if let (Some(rules), true) = (rules, report.failed.is_empty()) {
+    if let Some(rules) = rules {
         write_atomic(&stamp, &scratch, &rules, SystemTime::now()).map_err(|source| Error::Io {
             path: stamp.clone(),
             source,
         })?;
     }
     Ok(report)
+}
+
+fn remove_stale(staged: &Path) -> Result<(), Error> {
+    match fs::remove_file(staged) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(Error::Io {
+            path: staged.to_owned(),
+            source: e,
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// Creates `dir` and any parent it lacks, each 0700.
@@ -719,15 +739,13 @@ mod tests {
     fn the_embedded_rule_catches_the_r18_fixtures() {
         let config: toml::Table = toml::from_str(GITLEAKS_CONFIG).unwrap();
         let rule = &config["rules"].as_array().unwrap()[0];
-        let pattern = rule["regex"].as_str().unwrap();
-        let group = usize::try_from(rule["secretGroup"].as_integer().unwrap()).unwrap();
         assert!(
             rule.get("entropy").is_none(),
             "an entropy gate is R18's miss"
         );
         assert!(config["extend"]["useDefault"].as_bool().unwrap());
 
-        let re = regex::Regex::new(pattern).unwrap();
+        let Rule { re, group } = Rule::embedded();
         for (text, secret) in [
             (format!("GITHUB_TOKEN={GHP}"), GHP),
             (format!("API_TOKEN={API_TOKEN}"), API_TOKEN),
@@ -758,6 +776,61 @@ mod tests {
             assert_eq!(found.map(|m| m.as_str()), Some(secret), "in {text}");
         }
         assert!(re.captures("PASSWORD=short").is_none());
+    }
+
+    /// The embedded Yantra rule alone, as a scanner.
+    struct Rule {
+        re: regex::Regex,
+        group: usize,
+    }
+
+    impl Rule {
+        fn embedded() -> Self {
+            let config: toml::Table = toml::from_str(GITLEAKS_CONFIG).unwrap();
+            let rule = &config["rules"].as_array().unwrap()[0];
+            Self {
+                re: regex::Regex::new(rule["regex"].as_str().unwrap()).unwrap(),
+                group: usize::try_from(rule["secretGroup"].as_integer().unwrap()).unwrap(),
+            }
+        }
+    }
+
+    impl Scan for Rule {
+        fn secrets(&self, text: &str) -> Result<Vec<String>, ScanError> {
+            Ok(self
+                .re
+                .captures_iter(text)
+                .filter_map(|c| c.get(self.group))
+                .map(|m| m.as_str().to_owned())
+                .collect())
+        }
+
+        fn rules(&self) -> Result<String, ScanError> {
+            Ok("rule".into())
+        }
+    }
+
+    /// Token counts are numbers under a quoted key that says TOKEN. Redacting one
+    /// would leave `"input_tokens":[REDACTED]`, which is not JSON.
+    #[test]
+    fn a_usage_line_is_staged_whole() {
+        let home = temp();
+        let data = temp();
+        let claude = r#"{"type":"assistant","message":{"usage":{"input_tokens":3,"cache_creation_input_tokens":1234567,"cache_read_input_tokens":123456789,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":123456},"output_tokens":42,"service_tier":"standard"}}}"#;
+        let codex = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12345678,"cached_input_tokens":9876543,"output_tokens":45678,"total_tokens":12391356},"last_token_usage":{"input_tokens":12345678}}}}"#;
+        put(
+            &home.join(".claude/projects/-w/s.jsonl"),
+            &format!("{claude}\n"),
+        );
+        put(&home.join(".codex/sessions/s.jsonl"), &format!("{codex}\n"));
+
+        let report = stage_in(&home, &data, &Rule::embedded()).unwrap();
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!((report.written.len(), report.redactions), (2, 0));
+        assert_eq!(
+            fs::read_to_string(data.join("history/claude/-w/s.jsonl")).unwrap(),
+            format!("{claude}\n")
+        );
     }
 
     #[test]
@@ -976,11 +1049,13 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_pass_keeps_the_old_rules_stamp() {
+    fn a_rule_change_and_a_refusal_leave_no_old_copy() {
         let home = temp();
         let data = temp();
         put(&home.join(".codex/sessions/a.jsonl"), &line("hi"));
         stage_in(&home, &data, &Fake::new()).unwrap();
+        let staged = data.join("history/codex/a.jsonl");
+        assert!(staged.exists());
 
         let failing = Fake {
             fail: true,
@@ -988,11 +1063,30 @@ mod tests {
         };
         let report = stage_in(&home, &data, &failing).unwrap();
         assert_eq!(report.failed.len(), 1);
+        assert!(!staged.exists(), "a copy made under the old rules is left");
+        // The stamp moves on, so one bad file does not make every pass rescan all.
         let stamp = fs::read_to_string(data.join("history.tmp/rules")).unwrap();
-        assert_eq!(stamp, "v1");
+        assert_eq!(stamp, "v2");
 
         let retried = stage_in(&home, &data, &Fake::with_rules("v2")).unwrap();
-        assert_eq!(retried.written.len(), 1);
+        assert_eq!(retried.written, vec![staged]);
+    }
+
+    #[test]
+    fn a_refusal_under_the_same_rules_keeps_the_copy() {
+        let home = temp();
+        let data = temp();
+        let live = home.join(".codex/sessions/a.jsonl");
+        put(&live, &line("hi"));
+        stage_in(&home, &data, &Fake::new()).unwrap();
+        set_mtime(&live, SystemTime::now() - Duration::from_secs(30));
+
+        let failing = Fake {
+            fail: true,
+            ..Fake::new()
+        };
+        assert_eq!(stage_in(&home, &data, &failing).unwrap().failed.len(), 1);
+        assert!(data.join("history/codex/a.jsonl").exists());
     }
 
     #[test]
@@ -1021,6 +1115,16 @@ mod tests {
         ));
         assert!(report.removed.is_empty());
         assert!(data.join("history/claude/-w/s.jsonl").exists());
+
+        // Under new rules the copy is old, so it goes even though its live file
+        // cannot be read.
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o000)).unwrap();
+        let report = stage_in(&home, &data, &Fake::with_rules("v2"));
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            report.unwrap().removed,
+            vec![data.join("history/claude/-w/s.jsonl")]
+        );
     }
 
     #[test]
