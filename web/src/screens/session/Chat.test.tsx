@@ -476,11 +476,72 @@ describe('images in the composer', () => {
     await settled(() => expect(screen.getByText(sentence)).toBeTruthy())
   })
 
+  // The daemon removes a socket's images when it closes, so their paths name nothing.
+  it('fails an attached image when its socket closes, and Try again sends no path', async () => {
+    await open()
+    ways.button(png())
+    await settled(() => expect(images()).toHaveLength(1))
+    say(chatAttached)
+    await settled(() => expect(screen.getByText('Attached')).toBeTruthy())
+    server.hangUp()
+    await settled(() =>
+      expect(screen.getByText('The chat socket closed, so the image is not attached. Add it again.')).toBeTruthy(),
+    )
+    expect(screen.getByRole('listitem').getAttribute('data-state')).toBe('failed')
+
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }))
+    await settled(() => expect(server.asked).toHaveLength(2))
+    type('look')
+    const send = screen.getByRole('button', { name: 'Send' })
+    await settled(() => expect(send).toHaveProperty('disabled', false))
+    fireEvent.click(send)
+    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: 'look', harness: 'claude' }]))
+  })
+
+  it('fails an attached image when Try again replaces a socket the daemon left open', async () => {
+    await open()
+    ways.button(png())
+    await settled(() => expect(images()).toHaveLength(1))
+    say(chatAttached)
+    await settled(() => expect(screen.getByText('Attached')).toBeTruthy())
+    say({ type: 'error', kind: 'unreachable', said: 'ssh: connection reset' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await settled(() =>
+      expect(screen.getByText('The chat socket closed, so the image is not attached. Add it again.')).toBeTruthy(),
+    )
+    await settled(() => expect(server.asked).toHaveLength(2))
+    expect(screen.queryByText('Attached')).toBeNull()
+  })
+
+  it('gives back the words of a turn refused for its login, and not its image paths', async () => {
+    await open()
+    type('what is this?')
+    ways.button(png())
+    await settled(() => expect(images()).toHaveLength(1))
+    say(chatAttached)
+    await settled(() => expect(screen.getByText('Attached')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(turns()).toHaveLength(1))
+    say(chatNotLoggedIn)
+    const alert = await settled(() => screen.getByRole('alert'))
+    const composer = screen.getByLabelText<HTMLInputElement>('Message opencode in yantra-web')
+    await settled(() => expect(composer.value).toBe('what is this?'))
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await settled(() => expect(server.asked).toHaveLength(2))
+    const send = screen.getByRole('button', { name: 'Send' })
+    await settled(() => expect(send).toHaveProperty('disabled', false))
+    fireEvent.click(send)
+    await settled(() => expect(turns()).toHaveLength(2))
+    expect(turns()[1].text).toBe('what is this?')
+  })
+
   it('draws an image whose socket closed before it landed', async () => {
     await open()
     ways.button(png())
     await settled(() => expect(images()).toHaveLength(1))
     server.hangUp()
-    await settled(() => expect(screen.getByText('The chat socket closed, so the image was not attached.')).toBeTruthy())
+    await settled(() => expect(screen.getByText('The chat socket closed, so the image is not attached. Add it again.')).toBeTruthy())
   })
 })

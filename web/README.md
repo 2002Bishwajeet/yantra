@@ -339,7 +339,9 @@ harness. Five things about the code:
   images in order, so a queue matches each reply. Each failure is an
   `AttachError`: too large (over 16 MiB), not an image, unreachable, or closed.
   Send waits while one uploads, and the sent turn is the draft with each path
-  on a line of its own.
+  on a line of its own. The daemon removes a socket's images when it closes,
+  so an attached image turns to closed when the link drops, and a turn
+  refused for its login gives back its words without the paths.
 - **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
   `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it
   costs about 48 KB gzip (15 KB to 63 KB). The first load did not move.

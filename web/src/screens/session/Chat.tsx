@@ -17,7 +17,7 @@ import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { HarnessPicker } from './HarnessPicker'
 import type { Message, Timeline, Tool } from './timeline'
-import { useChat } from './useChat'
+import { useChat, type Link } from './useChat'
 
 // Module constants, so the renderer is not handed new plugin lists per delta.
 const REMARK = [remarkGfm]
@@ -192,10 +192,24 @@ type Picked = { id: number; url: string } & (
 
 /** The composer's images (Y-424). Each uploads as it is added, and its
  *  preview URL is revoked when it goes or the chat does. */
-function useImages(attach: (file: Blob) => Promise<string>) {
+function useImages(attach: (file: Blob) => Promise<string>, link: Link) {
   const [images, setImages] = useState<Picked[]>([])
   const next = useRef(1)
   const urls = useRef(new Map<number, string>())
+
+  // The daemon removes a socket's images when the socket closes, and Retry
+  // opens a socket with none, so a path from the old socket names nothing.
+  const [was, setWas] = useState(link)
+  if (link !== was) {
+    setWas(link)
+    if (link !== 'open') {
+      setImages((now) =>
+        now.map((one) =>
+          one.state === 'attached' ? { id: one.id, url: one.url, state: 'failed', error: new AttachError('closed') } : one,
+        ),
+      )
+    }
+  }
 
   useEffect(() => {
     const held = urls.current
@@ -293,12 +307,13 @@ export function Chat(props: ChatProps) {
   const harness = timeline.harness ?? error?.login?.harness ?? (locked ? null : picked)
   const agent = harness ? LABEL[harness] : 'the agent'
   // A first turn refused for its login never reaches the timeline, so the
-  // words it carried come back to the composer.
+  // words it carried come back to the composer. Its images do not: the
+  // daemon removes them when the client closes the socket.
   const lastSent = useRef('')
   useEffect(() => {
     if (error?.kind === 'notLoggedIn' && timeline.entries.length === 0) setDraft((now) => now || lastSent.current)
   }, [error, timeline.entries.length])
-  const { images, add, remove, clear } = useImages(chat.attach)
+  const { images, add, remove, clear } = useImages(chat.attach, link)
   const [dropping, setDropping] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const end = useRef<HTMLDivElement>(null)
@@ -332,7 +347,7 @@ export function Chat(props: ChatProps) {
   const send = () => {
     if (text === '' || busy || uploading) return
     if (chat.send(text, locked ? undefined : picked)) {
-      lastSent.current = text
+      lastSent.current = draft.trim()
       setDraft('')
       clear()
     }

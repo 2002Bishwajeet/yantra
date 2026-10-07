@@ -85,14 +85,15 @@ export type AttachErrorKind =
   | 'notAnImage'
   // The machine could not be reached, or did not write it.
   | 'unreachable'
-  // The socket was not open, or closed before the daemon replied.
+  // The socket was not open, closed before the daemon replied, or closed
+  // after, which removed the image from the machine.
   | 'closed'
 
 const attachSentences: Record<AttachErrorKind, string> = {
   tooLarge: 'The image is larger than 16 MiB, the most the chat takes.',
   notAnImage: 'The chat takes PNG, JPEG, GIF and WebP images only.',
   unreachable: "The workspace's machine did not take the image.",
-  closed: 'The chat socket closed, so the image was not attached.',
+  closed: 'The chat socket closed, so the image is not attached. Add it again.',
 }
 
 /** Why one image did not attach. `said` is the daemon's words, when it spoke. */
