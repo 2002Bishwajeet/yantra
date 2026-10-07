@@ -295,6 +295,10 @@ impl Agent {
 
         let params = json!({"cwd": cwd, "mcpServers": []});
         let created: Created = self.call("session/new", params).await?;
+        self.shared
+            .lock()
+            .worktrees
+            .insert(created.session_id.clone(), cwd.to_owned());
         self.shared.emit(
             &created.session_id,
             Event::ThreadStarted {
@@ -308,6 +312,10 @@ impl Agent {
     /// Reopens a conversation. Its history arrives on [`Events`] before this
     /// returns.
     pub async fn load_session(&self, session: &str, cwd: &str) -> Result<(), Error> {
+        self.shared
+            .lock()
+            .worktrees
+            .insert(session.to_owned(), cwd.to_owned());
         let params = json!({"sessionId": session, "cwd": cwd, "mcpServers": []});
         let _: Value = self.call("session/load", params).await?;
         Ok(())
@@ -450,6 +458,8 @@ struct State {
     pending: HashMap<u64, oneshot::Sender<Result<Value, Error>>>,
     next_request: u64,
     permissions: HashMap<String, Permission>,
+    /// Each session's `cwd`, the thread's worktree.
+    worktrees: HashMap<String, String>,
     /// Set once stdout ends, to what the agent said on the way out.
     closed: Option<String>,
 }
@@ -622,8 +632,19 @@ impl Shared {
             }
             _ => chat::RequestType::DynamicToolCall,
         };
-        let request_id = {
+        let (request_id, scope) = {
             let mut state = self.lock();
+            let worktree = state.worktrees.get(&asked.session_id);
+            let paths = (asked.tool_call.locations.iter().flatten())
+                .chain(asked.tool_call.content.iter().flatten())
+                .filter_map(|pathed| pathed.path.as_deref());
+            // Auto-accept edits may not delete, move, or write outside the worktree.
+            let scope = match (&asked.tool_call.kind, worktree) {
+                (Some(ToolKind::Edit), Some(worktree)) if inside(worktree, paths) => {
+                    chat::Scope::WorktreeEdit
+                }
+                _ => chat::Scope::Other,
+            };
             state.next_request += 1;
             let request_id = state.next_request.to_string();
             state.permissions.insert(
@@ -635,7 +656,7 @@ impl Shared {
                     options: options.clone(),
                 },
             );
-            request_id
+            (request_id, scope)
         };
         self.emit(
             &asked.session_id,
@@ -646,6 +667,7 @@ impl Shared {
                 title: None,
                 detail: asked.tool_call.title,
                 options,
+                scope,
             }),
         );
     }
@@ -897,6 +919,44 @@ struct AskedAbout {
     tool_call_id: String,
     title: Option<String>,
     kind: Option<ToolKind>,
+    locations: Option<Vec<Pathed>>,
+    content: Option<Vec<Pathed>>,
+}
+
+/// A location, or a content block, of which only a diff names a path.
+#[derive(Deserialize)]
+struct Pathed {
+    path: Option<String>,
+}
+
+/// Whether there is a path, and every one lies below `worktree`. Lexical,
+/// since the machine is not asked: a `..` above the root, or a relative
+/// path, is outside.
+fn inside<'a>(worktree: &str, paths: impl Iterator<Item = &'a str>) -> bool {
+    fn parts(path: &str) -> Option<Vec<&str>> {
+        let mut parts = Vec::new();
+        for part in path.strip_prefix('/')?.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    parts.pop()?;
+                }
+                part => parts.push(part),
+            }
+        }
+        Some(parts)
+    }
+    let Some(root) = parts(worktree) else {
+        return false;
+    };
+    let mut any = false;
+    for path in paths {
+        match parts(path) {
+            Some(path) if path.len() > root.len() && path.starts_with(&root) => any = true,
+            _ => return false,
+        }
+    }
+    any
 }
 
 #[derive(Deserialize)]
@@ -1017,7 +1077,7 @@ mod tests {
     use super::*;
     use chat::{
         ContentDelta, Decision, FileChange, Item, ItemStatus, ItemType, PlanStep, PlanStepStatus,
-        RequestOpened, RequestOption, RequestResolved, RequestType, StopReason, StreamKind,
+        RequestOpened, RequestOption, RequestResolved, RequestType, Scope, StopReason, StreamKind,
         TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
@@ -1352,6 +1412,7 @@ mod tests {
                         decision: Decision::Decline,
                     },
                 ],
+                scope: Scope::Other,
             })
         );
         let wire = serde_json::to_string(&opened).expect("serialises");
@@ -1381,6 +1442,64 @@ mod tests {
             agent.answer("1", Answer::Cancelled),
             Err(Error::NotPending(_))
         ));
+    }
+
+    #[test]
+    fn inside_holds_only_when_every_path_is_below_the_worktree() {
+        let inside = |paths: &[&str]| super::inside("/w/t", paths.iter().copied());
+        assert!(inside(&["/w/t/a.txt", "/w/t/./src/../b.txt"]));
+        assert!(!inside(&[]), "no path");
+        assert!(!inside(&["/w/t/a.txt", "/w/u/a.txt"]), "one outside");
+        assert!(!inside(&["/w/t/../u/a.txt"]), "climbs out");
+        assert!(!inside(&["/w/t2/a.txt"]), "a sibling sharing a prefix");
+        assert!(!inside(&["/w/t"]), "the worktree itself");
+        assert!(!inside(&["/../../w/t/a.txt"]), "a `..` above the root");
+        assert!(!inside(&["w/t/a.txt"]), "relative");
+    }
+
+    /// Y-453: Auto-accept edits may skip the person only for an edit whose
+    /// every path is inside the session's worktree.
+    #[tokio::test]
+    async fn only_an_edit_inside_the_worktree_is_a_worktree_edit() {
+        let (agent, mut events, mut fake) = pair();
+        let ((), ()) = tokio::join!(
+            async {
+                agent.load_session(SESSION, "/w").await.expect("loads");
+            },
+            async {
+                let request = fake.receive().await;
+                fake.send(json!({"jsonrpc": "2.0", "id": request["id"], "result": null}))
+                    .await;
+            }
+        );
+        let ask = |id: u64, kind: &str, path: &str| {
+            let mut asked = asked(id);
+            asked["params"]["toolCall"]["kind"] = json!(kind);
+            asked["params"]["toolCall"]["locations"] = json!([{"path": path}]);
+            asked
+        };
+        for (id, kind, path, scope) in [
+            (0, "edit", "/w/hello.txt", Scope::WorktreeEdit),
+            (1, "delete", "/w/hello.txt", Scope::Other),
+            (2, "move", "/w/hello.txt", Scope::Other),
+            (3, "edit", "/w/../etc/hosts", Scope::Other),
+            (4, "edit", "/etc/hosts", Scope::Other),
+        ] {
+            fake.send(ask(id, kind, path)).await;
+            let Event::RequestOpened(opened) = next(&mut events).await.event else {
+                panic!("a request opens");
+            };
+            assert_eq!(opened.scope, scope, "{kind} {path}");
+        }
+
+        // A diff names a path too, and one outside is enough to ask.
+        let mut asked = ask(5, "edit", "/w/hello.txt");
+        asked["params"]["toolCall"]["content"][0]["path"] = json!("/home/u/.bashrc");
+        fake.send(asked).await;
+        let Event::RequestOpened(opened) = next(&mut events).await.event else {
+            panic!("a request opens");
+        };
+        assert_eq!(opened.scope, Scope::Other);
     }
 
     /// R19 §2: cancel, then the prompt returns `cancelled`. A question the

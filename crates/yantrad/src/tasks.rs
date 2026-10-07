@@ -6,12 +6,14 @@
 //!
 //! **No `GET` here awaits ssh** ([ADR-0019]), because the main agent polls
 //! them. A task takes its diff summary itself when its turn ends, and again on
-//! `stop`. The wait awaits that in memory. Starting, steering, stopping and
-//! removing await ssh, because each is a write that a caller sends once.
+//! `stop`. The wait awaits that in memory, and ends when the daemon begins to
+//! shut down. Starting, stopping and removing await ssh, because each is a
+//! write that a caller sends once. A steer only queues the prompt in memory.
 //!
 //! [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -20,6 +22,7 @@ use axum::extract::{ConnectInfo, Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use tokio::sync::watch;
 use yantra_core::acp::Harness;
 use yantra_core::delegate::{self, Progress, Task};
 use yantra_core::install;
@@ -43,17 +46,23 @@ struct Delegates<I> {
     authoriser: Authoriser<I>,
     tasks: Tasks,
     locate: Locate,
+    /// [`crate::heartbeat::Fleet::closing`].
+    closing: watch::Sender<bool>,
 }
 
-pub fn router<I, S>(authoriser: Authoriser<I>) -> Router<S>
+pub fn router<I, S>(authoriser: Authoriser<I>, closing: watch::Sender<bool>) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
-    routes(authoriser, Arc::new(ssh::machine_at))
+    routes(authoriser, Arc::new(ssh::machine_at), closing)
 }
 
-fn routes<I, S>(authoriser: Authoriser<I>, locate: Locate) -> Router<S>
+fn routes<I, S>(
+    authoriser: Authoriser<I>,
+    locate: Locate,
+    closing: watch::Sender<bool>,
+) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
@@ -68,6 +77,7 @@ where
             authoriser,
             tasks: Tasks::default(),
             locate,
+            closing,
         })
 }
 
@@ -115,6 +125,8 @@ struct Read {
     error: Option<String>,
     last_message: Option<String>,
     summary: Option<Summary>,
+    /// A steer was answered 200 but the task ended before its agent got it.
+    steer_dropped: bool,
 }
 
 /// T3 Code's wait answer: the task, and whether the wait ran out first.
@@ -171,6 +183,7 @@ fn read_out(id: &str, entry: &Entry) -> Read {
             changed: summary.changed,
             shortstat: summary.shortstat,
         }),
+        steer_dropped: progress.steer_dropped,
     }
 }
 
@@ -336,11 +349,27 @@ async fn wait<I: Inventory + Clone + Send + Sync + 'static>(
     allowed(&state.authoriser, from.ip(), &headers).await?;
     let limit = limit(query.as_deref()).map_err(bad)?;
     let entry = find(&state.tasks, &id)?;
-    let settled = entry.task.wait(limit).await;
+    let settled = until_closing(&state.closing, entry.task.wait(limit))
+        .await
+        .ok_or_else(|| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said: "yantrad is shutting down; wait again once it is back".to_owned(),
+        })?;
     Ok(Json(Waited {
         task: read_out(&id, &entry),
         wait_timed_out: !settled,
     }))
+}
+
+/// `None` once the daemon begins to shut down, because axum's graceful
+/// shutdown waits for every request in flight and systemd would kill it.
+async fn until_closing<F: Future>(closing: &watch::Sender<bool>, wait: F) -> Option<F::Output> {
+    let mut closing = closing.subscribe();
+    tokio::select! {
+        biased;
+        done = wait => Some(done),
+        _ = closing.wait_for(|closing| *closing) => None,
+    }
 }
 
 /// `timeoutMs` and nothing else, capped at [`delegate::WAIT_LIMIT`].
@@ -423,7 +452,11 @@ mod tests {
             callers: [(IpAddr::from(MINE), caller)].into_iter().collect(),
             owner: ME,
         };
-        routes(Authoriser::new(fake, &[]), locate)
+        routes(
+            Authoriser::new(fake, &[]),
+            locate,
+            watch::Sender::new(false),
+        )
     }
 
     async fn send(
@@ -545,6 +578,33 @@ mod tests {
         assert_eq!(
             limit(Some("timeoutMs=99999999999")),
             Ok(Duration::from_secs(600))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wait_in_flight_ends_when_the_daemon_begins_to_shut_down() {
+        let closing = watch::Sender::new(false);
+        let waiting = tokio::spawn({
+            let closing = closing.clone();
+            async move { until_closing(&closing, std::future::pending::<bool>()).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!waiting.is_finished());
+        closing.send_replace(true);
+        let ended = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("the wait ends at once")
+            .expect("the wait does not panic");
+        assert_eq!(ended, None);
+        assert_eq!(
+            until_closing(&closing, std::future::ready(true)).await,
+            Some(true),
+            "a wait that is already done is not lost to the race"
+        );
+        let open = watch::Sender::new(false);
+        assert_eq!(
+            until_closing(&open, std::future::ready(true)).await,
+            Some(true)
         );
     }
 

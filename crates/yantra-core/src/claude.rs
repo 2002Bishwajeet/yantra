@@ -180,6 +180,8 @@ impl Turn {
 /// machine gets the ripgrep variable `agent::launch_command` gives the TUI.
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
+/// The other two name `default`, so a machine's `permissions.defaultMode`
+/// cannot turn approval off.
 fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
     format!(
         "cd {worktree} || exit 1\n\
@@ -187,11 +189,11 @@ fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> 
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}{mode}-p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
-        mode = flag(mode).map_or_else(String::new, |flag| format!("--permission-mode {flag} ")),
+        mode = flag(mode),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
@@ -199,11 +201,11 @@ fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> 
 }
 
 /// T3 Code maps the same two modes to Claude's own (`ClaudeAdapter.ts`).
-fn flag(mode: chat::PermissionMode) -> Option<&'static str> {
+fn flag(mode: chat::PermissionMode) -> &'static str {
     match mode {
-        chat::PermissionMode::Auto => Some("auto"),
-        chat::PermissionMode::AutoAcceptEdits => Some("acceptEdits"),
-        chat::PermissionMode::Supervised | chat::PermissionMode::FullAccess => None,
+        chat::PermissionMode::Auto => "auto",
+        chat::PermissionMode::AutoAcceptEdits => "acceptEdits",
+        chat::PermissionMode::Supervised | chat::PermissionMode::FullAccess => "default",
     }
 }
 
@@ -211,11 +213,10 @@ fn flag(mode: chat::PermissionMode) -> Option<&'static str> {
 /// itself, a request that reaches the daemon is one Claude still asks about,
 /// such as an edit outside the worktree, so the person sees it.
 #[must_use]
-pub fn answers(mode: chat::PermissionMode, request: chat::RequestType) -> Option<chat::Decision> {
-    if flag(mode).is_some() {
-        None
-    } else {
-        mode.answers(request)
+pub fn answers(mode: chat::PermissionMode, scope: chat::Scope) -> Option<chat::Decision> {
+    match mode {
+        chat::PermissionMode::Auto | chat::PermissionMode::AutoAcceptEdits => None,
+        chat::PermissionMode::Supervised | chat::PermissionMode::FullAccess => mode.answers(scope),
     }
 }
 
@@ -425,6 +426,11 @@ impl Shared {
             title,
             detail: request.description,
             options: options(),
+            scope: if tool == "AskUserQuestion" {
+                chat::Scope::Question
+            } else {
+                chat::Scope::Other
+            },
         }));
     }
 
@@ -777,7 +783,8 @@ mod tests {
     use super::*;
     use chat::{
         ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, RequestOpened,
-        RequestResolved, RequestType, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
+        RequestResolved, RequestType, Scope, StopReason, StreamKind, TokenUsage, TurnCompleted,
+        TurnState,
     };
     use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
 
@@ -873,6 +880,7 @@ mod tests {
             title: Some("touch made.txt".to_owned()),
             detail: Some("Create a file named made.txt".to_owned()),
             options: options(),
+            scope: Scope::Other,
         })));
         assert!(seen.contains(&Event::ItemCompleted(Item {
             item_id: TOOL.to_owned(),
@@ -968,6 +976,21 @@ mod tests {
             turn.answer(REQUEST, Decision::Accept),
             Err(Error::NotPending(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn a_question_to_the_person_is_no_mode_answers() {
+        let (_turn, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(&up_to_the_request(ACCEPT).replace(
+            r#""tool_name":"Bash","display_name":"Bash""#,
+            r#""tool_name":"AskUserQuestion","display_name":"AskUserQuestion""#,
+        ))
+        .await;
+        let asked = opened(&mut events).await;
+
+        assert_eq!(asked.scope, Scope::Question);
+        assert_eq!(answers(PermissionMode::FullAccess, asked.scope), None);
     }
 
     #[tokio::test]
@@ -1187,8 +1210,8 @@ mod tests {
              [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n"
         ));
         assert!(script.ends_with(
-            "exec \"$c\" -p --input-format stream-json --output-format stream-json --verbose \
-             --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
+            "exec \"$c\" --permission-mode default -p --input-format stream-json \
+             --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
         ));
 
         let hostile = command(
@@ -1209,7 +1232,9 @@ mod tests {
             PermissionMode::Supervised,
         );
         assert!(
-            script.contains("exec \"$c\" --add-dir '/tmp/yantra-chat-Y01' -p --input-format"),
+            script.contains(
+                "exec \"$c\" --add-dir '/tmp/yantra-chat-Y01' --permission-mode default -p"
+            ),
             "{script}"
         );
         let hostile = command(
@@ -1218,17 +1243,21 @@ mod tests {
             PermissionMode::Supervised,
         );
         assert!(
-            hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' -p "),
+            hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' --permission-mode "),
             "{hostile}"
         );
     }
 
-    /// Y-453: Auto and Auto-accept edits run in Claude's own mode.
+    /// Y-453: Auto and Auto-accept edits run in Claude's own mode, and the
+    /// other two name `default`, so `permissions.defaultMode` in a machine's
+    /// settings cannot turn approval off.
     #[test]
-    fn the_auto_permission_modes_add_claudes_flag() {
+    fn every_permission_mode_names_claudes_flag() {
         for (mode, flag) in [
             (PermissionMode::Auto, "auto"),
             (PermissionMode::AutoAcceptEdits, "acceptEdits"),
+            (PermissionMode::Supervised, "default"),
+            (PermissionMode::FullAccess, "default"),
         ] {
             let script = command("/w", Some("/tmp/i"), mode);
             assert!(
@@ -1237,10 +1266,7 @@ mod tests {
                 )),
                 "{script}"
             );
-        }
-        for mode in [PermissionMode::Supervised, PermissionMode::FullAccess] {
-            let script = command("/w", None, mode);
-            assert!(!script.contains("--permission-mode"), "{mode:?}: {script}");
+            assert_eq!(script.matches("--permission-mode").count(), 1, "{script}");
         }
     }
 
@@ -1249,23 +1275,15 @@ mod tests {
     #[test]
     fn the_daemon_answers_claude_only_in_a_mode_claude_does_not_run() {
         assert_eq!(
-            answers(
-                PermissionMode::AutoAcceptEdits,
-                RequestType::FileChangeApproval
-            ),
+            answers(PermissionMode::AutoAcceptEdits, Scope::WorktreeEdit),
             None
         );
+        assert_eq!(answers(PermissionMode::Auto, Scope::WorktreeEdit), None);
         assert_eq!(
-            answers(PermissionMode::Auto, RequestType::FileChangeApproval),
-            None
-        );
-        assert_eq!(
-            answers(PermissionMode::FullAccess, RequestType::ExecCommandApproval),
+            answers(PermissionMode::FullAccess, Scope::Other),
             Some(Decision::Accept)
         );
-        assert_eq!(
-            answers(PermissionMode::Supervised, RequestType::FileChangeApproval),
-            None
-        );
+        assert_eq!(answers(PermissionMode::FullAccess, Scope::Question), None);
+        assert_eq!(answers(PermissionMode::Supervised, Scope::Other), None);
     }
 }

@@ -708,8 +708,10 @@ reading one on a timer.
 ([`tasks.rs`](src/tasks.rs)). `yantra mcp` calls it for the main agent, and an agent polls
 `GET /api/tasks/{id}` until a task ends — so that route fails ADR-0019's second half and reads memory.
 A task takes its own diff summary when its turn ends, and `POST /api/tasks/{id}/stop` takes it again.
-`GET /api/tasks/{id}/wait` (Y-454) awaits that summary in memory, never ssh.
-Starting, steering, stopping and removing a task await ssh, because each is a write sent once.
+`GET /api/tasks/{id}/wait` (Y-454) awaits that summary in memory, never ssh. It answers `503` when
+the daemon begins to shut down, because a graceful shutdown waits for every request in flight.
+Starting, stopping and removing a task await ssh, because each is a write sent once. A steer only
+queues its prompt in memory; a steer the task ended before sending shows as `steerDropped`.
 
 **Y-418 is the ninth, on `terminal.rs`'s licence**: `mic.rs` holds one ssh for as long as a button
 is held, and only after the upgrade has answered.

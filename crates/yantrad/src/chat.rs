@@ -20,7 +20,9 @@
 //! daemon still keeps nothing. A request the mode answers is answered here and
 //! never relayed, so the browser shows no card for it. On a Claude thread,
 //! `auto` and `auto-accept-edits` reach the harness as Claude's own
-//! `--permission-mode`, and the daemon answers nothing for them.
+//! `--permission-mode`, and the daemon answers nothing for them. On an ACP
+//! thread, `auto-accept-edits` accepts only an edit inside the worktree. No
+//! mode answers a question to the person.
 //!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
@@ -791,7 +793,7 @@ async fn relay<M: Machine, P: Peer>(
                 return true;
             };
             if let Event::RequestOpened(opened) = &event.event
-                && let Some(decision) = claude::answers(*mode, opened.request_type)
+                && let Some(decision) = claude::answers(*mode, opened.scope)
                 && let Some((running, _)) = turn.as_ref()
             {
                 match running.answer(&opened.request_id, decision) {
@@ -831,7 +833,7 @@ async fn relay<M: Machine, P: Peer>(
                 return true;
             };
             if let Event::RequestOpened(opened) = &event.event
-                && let Some(decision) = mode.answers(opened.request_type)
+                && let Some(decision) = mode.answers(opened.scope)
             {
                 // An agent that offered no such option is asked by the person.
                 match answer(acp, &opened.request_id, decision) {
@@ -1383,7 +1385,7 @@ async fn open<M: Machine>(
 #[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
     use yantra_core::chat::{
-        Item, ItemStatus, ItemType, RequestOpened, RequestResolved, RequestType, TokenUsage,
+        Item, ItemStatus, ItemType, RequestOpened, RequestResolved, RequestType, Scope, TokenUsage,
         TurnCompleted,
     };
     let event = |event| {
@@ -1435,6 +1437,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     title: Some("cargo test".to_owned()),
                     detail: Some("Run the unit tests".to_owned()),
                     options,
+                    scope: Scope::Other,
                 })),
                 event(Event::RequestResolved(RequestResolved {
                     request_id: "r1".to_owned(),
@@ -3341,5 +3344,67 @@ mod tests {
         let resolved = tab.next().await;
         assert_eq!(resolved["type"], "request.resolved", "no card: {resolved}");
         assert_eq!(resolved["payload"]["decision"], "accept");
+    }
+
+    fn asked_to(id: u64, kind: &str, path: &str) -> Value {
+        json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission",
+               "params": {"sessionId": SESSION,
+                   "toolCall": {"toolCallId": "call_1", "title": path, "kind": kind,
+                       "locations": [{"path": path}]},
+                   "options": [
+                       {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
+                       {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]}})
+    }
+
+    #[tokio::test]
+    async fn auto_accept_edits_on_an_acp_thread_accepts_an_edit_inside_the_worktree() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, _prompt) =
+            an_opencode_thread_in(&script, "auto-accept-edits").await;
+        agent
+            .say(asked_to(7, "edit", &format!("{WORKTREE}/src/./a.txt")))
+            .await;
+        assert_eq!(
+            agent.heard().await,
+            json!({"jsonrpc": "2.0", "id": 7,
+                   "result": {"outcome": {"outcome": "selected", "optionId": "once"}}})
+        );
+        let resolved = tab.next().await;
+        assert_eq!(resolved["type"], "request.resolved", "no card: {resolved}");
+    }
+
+    /// Y-453: only an edit inside the worktree is the person's to skip.
+    #[tokio::test]
+    async fn auto_accept_edits_on_an_acp_thread_asks_about_the_rest() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, _prompt) =
+            an_opencode_thread_in(&script, "auto-accept-edits").await;
+        let inside = format!("{WORKTREE}/a.txt");
+        let escape = format!("{WORKTREE}/../1a2b3c4e/a.txt");
+        for (id, kind, path) in [
+            (1, "delete", inside.as_str()),
+            (2, "move", inside.as_str()),
+            (3, "edit", escape.as_str()),
+            (4, "edit", "/home/u/.bashrc"),
+            (5, "edit", "a.txt"),
+            (6, "execute", inside.as_str()),
+        ] {
+            agent.say(asked_to(id, kind, path)).await;
+            let opened = tab.next().await;
+            assert_eq!(opened["type"], "request.opened", "{kind} {path}: {opened}");
+        }
+    }
+
+    /// A question to the person is not a permission, so Full access asks it.
+    #[tokio::test]
+    async fn full_access_mode_relays_a_question_to_the_person() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, Some("full-access")).await;
+        claude
+            .say(can_use("r1", "AskUserQuestion", json!({"questions": []})))
+            .await;
+        let asked = tab.next().await;
+        assert_eq!(asked["type"], "request.opened", "{asked}");
+        assert_eq!(asked["payload"]["requestId"], "r1");
     }
 }

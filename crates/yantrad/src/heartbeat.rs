@@ -80,6 +80,9 @@ pub struct Fleet {
     /// ADR-0030: what the latest install on each machine left for a person,
     /// the only commands the one-off terminal runs.
     pub left: crate::write::Left,
+    /// True once the daemon has begun to shut down, so a long wait ends
+    /// rather than holding the graceful shutdown open.
+    pub closing: tokio::sync::watch::Sender<bool>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -119,6 +122,7 @@ impl Default for Fleet {
             joins: Arc::default(),
             env: Arc::default(),
             left: Arc::default(),
+            closing: tokio::sync::watch::Sender::new(false),
         }
     }
 }
