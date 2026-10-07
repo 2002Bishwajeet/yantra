@@ -8,6 +8,7 @@ import { Lead } from '@/m3/lead/Lead'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
+import { noAccess } from './dirs'
 import { slug } from './form'
 
 const badge = (entry: Entry): string =>
@@ -37,6 +38,7 @@ function Children(props: Walk & { entry: Entry }) {
     const said = asApiError(listing.error).status === 409 ? 'not a directory' : `${walk.machine} could not be asked`
     return <div className="ns__sub">{note(said)}</div>
   }
+  if (!listing.data.access) return <div className="ns__sub">{note(noAccess(walk.machine))}</div>
   const shown = listing.data.entries.filter((one) => one.kind === 'dir' && (walk.hidden || !one.name.startsWith('.')))
   return (
     <ul aria-label={`Folders in ${entry.name}`} className="ns__list ns__sub">

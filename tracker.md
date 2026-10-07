@@ -305,6 +305,7 @@ deleted everywhere else.
 | Y-455 | v0.7.0, and the owner's pass on the real fleet | ✅ done | owner | Y-450 | **Owner, 2026-10-07.** **Done** when v0.7.0 is published, the owner installs it, and walks the v0.7.0 pass on the real fleet. Each failure becomes a row. **Closed 2026-10-07:** v0.7.0 is published, and the owner walks its pass on v0.7.1 instead (Y-457). |
 | Y-456 | The New session picker shows subfolders and reuses the clone folder | ✅ done | claude | — | **Owner, 2026-10-07.** **Done** when a Local folder row expands to show its subfolders, the GitHub step finds an existing `~/Github` or `~/Documents/Github`, a person can change that folder, and the choice is kept per machine in the browser. |
 | Y-457 | v0.7.1, and the owner's pass on the real fleet | 🔵 review | owner | Y-455 | **Owner, 2026-10-07.** **Done** when v0.7.1 is published with Y-456, the owner installs it, and walks [the v0.7.1 pass](docs/plans/v0.7.1-qa-pass.md) on the real fleet. Each failure becomes a row. |
+| Y-458 | A folder the Mac refuses over ssh says why | 🔵 review | claude | — | **Owner, 2026-10-08.** **Done** when a folder that the machine refuses to read (macOS `~/Documents` over ssh) shows as no access, not as empty, and the picker names the Remote Login setting. Checked on the real Mac. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

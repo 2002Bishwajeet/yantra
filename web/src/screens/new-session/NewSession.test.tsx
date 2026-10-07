@@ -248,7 +248,7 @@ describe('step 2, the local browser', () => {
     const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
     fireEvent.click(where.getByRole('button', { name: '/' }))
     fireEvent.click(await folders.findByRole('button', { name: /^srv/ }))
-    expect(await folders.findByText('cachyos-g14 does not let this account read this folder')).toBeTruthy()
+    expect(await folders.findByText(/^cachyos-g14 does not let this account read this folder\./)).toBeTruthy()
     expect(folders.queryByText('this folder is empty')).toBeNull()
   })
 

@@ -33,7 +33,8 @@ const mac = (path: string) => {
   if (path === `${DOCS}/GitHub`) return of(path, [at(path, 'yantra', 'git@github.com:2002Bishwajeet/yantra.git')])
   if (path === DOCS) return of(path, [at(DOCS, 'GitHub'), at(DOCS, 'notes.txt', null, 'file')])
   if (path === `${HOME}/Projects`) return of(path, [])
-  if (path === HOME) return of(HOME, [at(HOME, 'Documents'), at(HOME, 'Projects')])
+  if (path === `${HOME}/Desktop`) return { ...of(path, []), access: false }
+  if (path === HOME) return of(HOME, [at(HOME, 'Desktop'), at(HOME, 'Documents'), at(HOME, 'Projects')])
   return listing(path)
 }
 
@@ -67,6 +68,13 @@ describe('step 2, subfolders in the local browser', () => {
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(folders.queryByText('GitHub')).toBeNull()
+  })
+
+  it('a folder the machine refuses to read says why, and does not read as empty', async () => {
+    const folders = await toLocal()
+    fireEvent.click(await folders.findByRole('button', { name: 'Show folders in Desktop' }))
+    expect(await folders.findByText(/Allow full disk access for remote users/)).toBeTruthy()
+    expect(folders.queryByText('no folders here')).toBeNull()
   })
 
   it('opens a subfolder inside a subfolder, and pressing its name walks into it', async () => {
