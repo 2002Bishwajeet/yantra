@@ -40,6 +40,10 @@ const named = [
 
 const gz = (buffer) => gzipSync(buffer, { level: 9 }).length
 const kib = (bytes) => (bytes / KIB).toFixed(1)
+const headroomLine = (ceiling, total) => {
+  const [label, n] = total <= ceiling ? ['headroom', ceiling - total] : ['over by', total - ceiling]
+  return `  ${label.padEnd(44)} ${String(n).padStart(8)} B  (${kib(n)} KiB)`
+}
 
 const chunks = named.map((url) => {
   const file = join(dist, url)
@@ -63,21 +67,22 @@ console.log('first load of /  (gzip -9, which is the wire since Y-357)')
 for (const c of chunks) {
   console.log(`  ${c.url.padEnd(44)} ${String(c.gzip).padStart(8)} B  (${kib(c.gzip)} KiB)`)
 }
-console.log(`  ${'total'.padEnd(44)} ${String(firstLoad).padStart(8)} B  (${kib(firstLoad)} KiB, ceiling 200 KiB = ${FIRST_LOAD_CEILING} B)`)
-console.log(`  ${'headroom'.padEnd(44)} ${String(FIRST_LOAD_CEILING - firstLoad).padStart(8)} B  (${kib(FIRST_LOAD_CEILING - firstLoad)} KiB)`)
+console.log(`  ${'total'.padEnd(44)} ${String(firstLoad).padStart(8)} B  (${kib(firstLoad)} KiB, ceiling ${kib(FIRST_LOAD_CEILING)} KiB = ${FIRST_LOAD_CEILING} B)`)
+console.log(headroomLine(FIRST_LOAD_CEILING, firstLoad))
 console.log('fonts the stylesheet names (raw woff2)')
 for (const [file, size] of fonts) {
   console.log(`  ${file.slice(dist.length + 1).padEnd(44)} ${String(size).padStart(8)} B  (${kib(size)} KiB)`)
 }
-console.log(`  ${'total'.padEnd(44)} ${String(fontBytes).padStart(8)} B  (${kib(fontBytes)} KiB, ceiling 80 KiB = ${FONTS_CEILING} B)`)
+console.log(`  ${'total'.padEnd(44)} ${String(fontBytes).padStart(8)} B  (${kib(fontBytes)} KiB, ceiling ${kib(FONTS_CEILING)} KiB = ${FONTS_CEILING} B)`)
+console.log(headroomLine(FONTS_CEILING, fontBytes))
 
 let failed = false
 if (firstLoad > FIRST_LOAD_CEILING) {
-  console.error(`\nfirst load is ${firstLoad - FIRST_LOAD_CEILING} B over the 200 KiB ceiling`)
+  console.error(`\nfirst load is ${firstLoad - FIRST_LOAD_CEILING} B over the ${kib(FIRST_LOAD_CEILING)} KiB ceiling`)
   failed = true
 }
 if (fontBytes > FONTS_CEILING) {
-  console.error(`\nfonts are ${fontBytes - FONTS_CEILING} B over the 80 KiB ceiling`)
+  console.error(`\nfonts are ${fontBytes - FONTS_CEILING} B over the ${kib(FONTS_CEILING)} KiB ceiling`)
   failed = true
 }
 process.exit(failed ? 1 : 0)
