@@ -748,18 +748,21 @@ async fn connect<M: Machine>(
     harness: Harness,
     session: Option<String>,
 ) -> Result<Acp, Failure> {
-    tokio::time::timeout(CONNECT_WITHIN, start_session(machine, place, harness, session))
-        .await
-        .unwrap_or_else(|_| {
-            Err(failure(
-                Kind::Unreachable,
-                format!(
-                    "{} did not open a session within {} seconds",
-                    harness.name(),
-                    CONNECT_WITHIN.as_secs()
-                ),
-            ))
-        })
+    tokio::time::timeout(
+        CONNECT_WITHIN,
+        start_session(machine, place, harness, session),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(failure(
+            Kind::Unreachable,
+            format!(
+                "{} did not open a session within {} seconds",
+                harness.name(),
+                CONNECT_WITHIN.as_secs()
+            ),
+        ))
+    })
 }
 
 async fn start_session<M: Machine>(
@@ -1802,7 +1805,11 @@ mod tests {
         let said = tab.next().await;
         assert_eq!(said["harness"], "codex");
         assert_eq!(said["command"], "codex login");
-        assert!(said["said"].as_str().is_some_and(|s| s.contains("Run `codex login` on this machine")));
+        assert!(
+            said["said"]
+                .as_str()
+                .is_some_and(|s| s.contains("Run `codex login` on this machine"))
+        );
     }
 
     #[tokio::test]
@@ -1911,7 +1918,10 @@ mod tests {
         let mut agent = script.agent().await;
         let initialize = agent.heard().await;
         agent
-            .reply(&initialize, json!({"protocolVersion": 1, "agentCapabilities": {}}))
+            .reply(
+                &initialize,
+                json!({"protocolVersion": 1, "agentCapabilities": {}}),
+            )
             .await;
         assert_eq!(agent.heard().await["method"], "session/new");
     }
@@ -1929,7 +1939,11 @@ mod tests {
         tokio::time::advance(CONNECT_WITHIN + Duration::from_secs(1)).await;
         let said = tab.next().await;
         assert_eq!(said["kind"], "unreachable", "{said}");
-        assert!(said["said"].as_str().is_some_and(|s| s.contains("within 60 seconds")));
+        assert!(
+            said["said"]
+                .as_str()
+                .is_some_and(|s| s.contains("within 60 seconds"))
+        );
         served.await.expect("the socket ends");
     }
 
