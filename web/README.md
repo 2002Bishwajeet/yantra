@@ -320,7 +320,7 @@ in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
 from T3 Code's provider picker, and the thread keeps it (Y-434). Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
-harness. Four things about the code:
+harness. Five things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -333,6 +333,13 @@ harness. Four things about the code:
   Not logged in shows the command to run on the machine and a Retry that
   reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
   back, because the daemon cancels a turn whose socket closed.
+- **An image goes on the same socket** (Y-424). The composer takes one by
+  paste, drag and drop, or the Attach button. `ChatSocket.attach` sends it as a
+  binary frame and resolves to its path on the machine; the daemon answers
+  images in order, so a queue matches each reply. Each failure is an
+  `AttachError`: too large (over 16 MiB), not an image, unreachable, or closed.
+  Send waits while one uploads, and the sent turn is the draft with each path
+  on a line of its own.
 - **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
   `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it
   costs about 48 KB gzip (15 KB to 63 KB). The first load did not move.
