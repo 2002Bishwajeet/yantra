@@ -7,7 +7,6 @@ import { asApiError } from '@/api/errors'
 import { useGithub, useRepos } from '@/api/hooks'
 import { dirsQuery } from '@/api/queries'
 import { derive } from '@/lib/name'
-import { trimSlash } from '@/lib/path'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -17,7 +16,9 @@ import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { IconTile } from '@/m3/tile/Tile'
 import { useTick } from '@/useTick'
-import { cloneHome, tilde, type Values } from './form'
+import { CloneFolder } from './CloneFolder'
+import { rememberCloneFolder, useCloneFolder } from './clonePath'
+import { tilde, type Values } from './form'
 import { byOrigin, filterRepos, place, SHOWN } from './repos'
 import type { SessionForm } from './useSessionForm'
 
@@ -51,15 +52,14 @@ function SignedIn(props: { login: string | null }) {
 function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: string }) {
   const { form, values, repos, query } = props
   const machine = values.machine
-  const home = useQuery({ ...dirsQuery(machine, null), enabled: true })
-  const root = home.data ? trimSlash(home.data.path) : null
-  // One listing of the clone home answers every row: a repository whose
+  const { root, folder, home } = useCloneFolder(machine)
+  // One listing of the clone folder answers every row: a repository whose
   // `origin` is already there is already there (the boards' "already on").
   const clones = useQuery({
-    ...dirsQuery(machine, root === null ? null : cloneHome(root)),
-    enabled: root !== null,
+    ...dirsQuery(machine, folder),
+    enabled: folder !== null,
   })
-  // A machine with no clone home yet is not a machine that could not be
+  // A machine with no clone folder yet is not a machine that could not be
   // asked: `dirs` answers 409 for a path that is not a directory.
   const missing = clones.error !== null && asApiError(clones.error).status === 409
   const because = clones.error && !missing ? asApiError(clones.error).said : undefined
@@ -85,9 +85,21 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
 
   return (
     <>
+      {folder !== null ? (
+        <CloneFolder
+          folder={folder}
+          machine={machine}
+          onUse={(path) => {
+            rememberCloneFolder(machine, path)
+            // The chosen repository's path was worked out under the old folder.
+            if (values.source?.kind === 'github') form.setFieldValue('source', null)
+          }}
+          root={root}
+        />
+      ) : null}
       <ul aria-label="Repositories" className="ns__list">
         {shown.map((repo) => {
-          const where = root === null || clones.isFetching ? null : place(repo, root, held, because)
+          const where = folder === null || clones.isFetching ? null : place(repo, folder, held, because)
           const selected = values.source?.kind === 'github' && values.source.repo.full_name === repo.full_name
           const said =
             where === null

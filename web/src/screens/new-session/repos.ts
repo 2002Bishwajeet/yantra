@@ -17,7 +17,7 @@ export function filterRepos(repos: Repo[], query: string): Repo[] {
 export type Placement = { path: string; here: Checked; because?: string }
 
 /** `owner/name` → the directory that holds it, from one listing of the clone
- *  home. One ssh round trip answers every row, where a probe each would be
+ *  folder. One ssh round trip answers every row, where a probe each would be
  *  eight. */
 export function byOrigin(listing: Listing | undefined): Map<string, string> {
   const out = new Map<string, string>()
@@ -29,12 +29,12 @@ export function byOrigin(listing: Listing | undefined): Map<string, string> {
 
 export function place(
   repo: Repo,
-  home: string,
+  folder: string,
   held: Map<string, string>,
   because?: string,
 ): Placement {
   const at = held.get(repo.full_name.toLowerCase())
   if (at !== undefined) return { path: at, here: 'yes' }
-  const path = cloneInto(home, repo)
+  const path = cloneInto(folder, repo)
   return because === undefined ? { path, here: 'no' } : { path, here: 'unknown', because }
 }

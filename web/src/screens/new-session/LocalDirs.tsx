@@ -1,6 +1,5 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { File, Folder, FolderGit2, FolderLock } from 'lucide-react'
 import type { Entry, Listing, Probed } from '@/api'
 import { asApiError, isApiError } from '@/api/errors'
 import { useMakeDir } from '@/api/mutations'
@@ -10,19 +9,15 @@ import { trimSlash } from '@/lib/path'
 import { Button } from '@/m3/button/Button'
 import { FilterChip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { Lead } from '@/m3/lead/Lead'
-import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { crumbs, under } from './dirs'
+import { FolderTree } from './FolderTree'
 import { slug, tilde, type Values } from './form'
 import type { SessionForm } from './useSessionForm'
 
-const badge = (entry: Entry): string =>
-  entry.origin ? `git · ${slug(entry.origin)}` : entry.repo ? 'git · no origin' : 'not a repository'
-
-function Breadcrumb(props: { here: string; home: string | null; onGo: (path: string | null) => void }) {
+export function Breadcrumb(props: { here: string; home: string | null; onGo: (path: string | null) => void }) {
   const { here, home, onGo } = props
   const parts = crumbs(here, home)
   return (
@@ -79,38 +74,6 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
         {make.isPending ? 'making…' : 'Make'}
       </Button>
     </div>
-  )
-}
-
-/** A folder that can be entered is a button; a closed folder and a file are
- *  drawn and marked, and nothing happens when one is pressed (Y-414). */
-function EntryRow(props: { entry: Entry; onWalk: (entry: Entry) => void }) {
-  const { entry, onWalk } = props
-  if (entry.kind === 'file') {
-    return (
-      <Row className="ns__inert" tone="plain">
-        <Lead>
-          <File />
-        </Lead>
-        <RowText headline={entry.name} supporting="file" />
-      </Row>
-    )
-  }
-  if (!entry.access) {
-    return (
-      <Row className="ns__inert" tone="plain">
-        <Lead tone="error">
-          <FolderLock />
-        </Lead>
-        <RowText headline={entry.name} supporting="no access" />
-      </Row>
-    )
-  }
-  return (
-    <Row onClick={() => onWalk(entry)} render={<button type="button" />}>
-      <Lead tone={entry.repo ? 'primary' : undefined}>{entry.repo ? <FolderGit2 /> : <Folder />}</Lead>
-      <RowText headline={entry.name} supporting={badge(entry)} />
-    </Row>
   )
 }
 
@@ -222,11 +185,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
               </Text>
             </li>
           ) : null}
-          {shown.map((entry) => (
-            <li key={entry.path}>
-              <EntryRow entry={entry} onWalk={walk} />
-            </li>
-          ))}
+          <FolderTree entries={shown} hidden={hidden} machine={machine} onWalk={walk} />
           {listing.data.truncated ? (
             <li>
               <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
