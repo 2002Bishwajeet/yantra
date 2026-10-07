@@ -140,6 +140,30 @@ test.describe('the session screen, chat first', () => {
     await axe(page)
   })
 
+  /** Y-424: the image goes to the daemon, and the turn carries its path. */
+  test('attaches an image, removes it, and sends the path of the one kept', async ({ page, size }) => {
+    const shot = {
+      name: 'shot.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+    }
+    const picker = page.locator('input[type="file"]')
+    await picker.setInputFiles(shot)
+    await expect(page.getByRole('img', { name: 'Image 1' })).toBeVisible()
+    await expect(page.getByText('Attached')).toBeVisible()
+    await page.getByRole('button', { name: 'Remove image 1' }).click()
+    await expect(page.getByRole('img', { name: 'Image 1' })).toHaveCount(0)
+
+    await picker.setInputFiles(shot)
+    await expect(page.getByText('Attached')).toBeVisible()
+    await composer(page, size).fill('what is in it?')
+    await page.getByRole('button', { name: 'Send' }).click()
+    const you = page.locator('.turn[data-who="you"]')
+    await expect(you).toContainText('what is in it?')
+    await expect(you).toContainText('/tmp/yantra-chat-Y0123456789abcdef/2.png')
+    await expect(page.getByRole('list', { name: 'Images' })).toHaveCount(0)
+  })
+
   /** **Finding 114.** The PhoneSessionChat board shortens the strings the
    *  desktop boards write in full. */
   test('writes the phone board’s strings at 390 and the desktop ones above it', async ({

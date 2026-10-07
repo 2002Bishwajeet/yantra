@@ -190,6 +190,9 @@
 .turn[data-who="you"] .turn__text {
   color: var(--md-sys-color-on-secondary-container);
   background: var(--md-sys-color-secondary-container);
+  /* An attached image's path is a line of its own (Y-424). */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .turn__calls {
@@ -355,11 +358,69 @@
 }
 
 .chat__composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.chat__composer[data-dropping] {
+  outline: 2px dashed var(--md-sys-color-primary);
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+
+.chat__drop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  border-radius: 16px;
+  font: var(--md-sys-typescale-title-small);
+  color: var(--md-sys-color-on-primary-container);
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 92%, transparent);
+  pointer-events: none;
+}
+
+.chat__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0 8px;
+  list-style: none;
+}
+
+.chat__image {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 0 4px 4px;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container);
+}
+
+.chat__image img {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.chat__image-state {
+  min-width: 0;
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.chat__image[data-state="failed"] .chat__image-state {
+  color: var(--md-sys-color-error);
 }
 
 .chat__controls {

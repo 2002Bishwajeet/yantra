@@ -4,9 +4,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
-import { chatEvents, chatFailure, chatFrames, chatNotLoggedIn } from '@/contract.gen'
+import { chatAttached, chatEvents, chatFailure, chatFrames, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
-import { ChatError, chatAddress, frameOf, openChat } from './chat'
+import { AttachError, ChatError, IMAGE_LIMIT, chatAddress, frameOf, openChat } from './chat'
 import type { ThreadEvent } from './thread'
 
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 5_000 })
@@ -193,5 +193,120 @@ describe('a daemon frame', () => {
     ]) {
       expect(frameOf(JSON.stringify({ ...chatNotLoggedIn, ...broken }))).toBeNull()
     }
+  })
+})
+
+/** A PNG's magic and a little more, as a pasted screenshot starts. */
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]
+const png = (name = 'shot.png') => new File([new Uint8Array(PNG)], name, { type: 'image/png' })
+
+async function refusedWith(landing: Promise<string>) {
+  const error = await landing.then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(error).toBeInstanceOf(AttachError)
+  return error as AttachError
+}
+
+describe('attaching an image', () => {
+  it('sends it as one binary frame and resolves to the path the daemon names', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const landing = socket.attach(png())
+    await settled(() => expect(server.heard).toHaveLength(1))
+    expect(server.heard[0]).toEqual({ bytes: PNG })
+    server.say(JSON.stringify(chatAttached))
+    await expect(landing).resolves.toBe(chatAttached.path)
+  })
+
+  it('matches each reply to the image it answers, in the order they went', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const first = socket.attach(png('a.png'))
+    const second = socket.attach(png('b.png'))
+    await settled(() => expect(server.heard).toHaveLength(2))
+    server.say(JSON.stringify(chatNotAttached))
+    server.say(JSON.stringify(chatAttached))
+    const refused = await refusedWith(first)
+    expect(refused.kind).toBe('notAnImage')
+    expect(refused.said).toBe('that is not a PNG, JPEG, GIF or WebP image')
+    expect(refused.describe()).toBe('The chat takes PNG, JPEG, GIF and WebP images only.')
+    await expect(second).resolves.toBe(chatAttached.path)
+  })
+
+  it('refuses an image over the limit before it is sent', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const big = new File([new Uint8Array(IMAGE_LIMIT + 1)], 'big.png', { type: 'image/png' })
+    const refused = await refusedWith(socket.attach(big))
+    expect(refused.kind).toBe('tooLarge')
+    expect(refused.describe()).toBe('The image is larger than 16 MiB, the most the chat takes.')
+    expect(server.heard).toEqual([])
+  })
+
+  it('refuses a file that is not one of the four formats before it is sent', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const svg = new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })
+    expect((await refusedWith(socket.attach(svg))).kind).toBe('notAnImage')
+    expect(server.heard).toEqual([])
+  })
+
+  it('types an image the machine did not take as unreachable, in its own words', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const landing = socket.attach(png())
+    await settled(() => expect(server.heard).toHaveLength(1))
+    server.say(JSON.stringify({ type: 'notAttached', kind: 'unreachable', said: 'ssh: connection reset' }))
+    const refused = await refusedWith(landing)
+    expect(refused.kind).toBe('unreachable')
+    expect(refused.said).toBe('ssh: connection reset')
+    expect(refused.describe()).toBe("The workspace's machine did not take the image.")
+  })
+
+  it('refuses an image while the socket is not open', async () => {
+    const { socket } = connect()
+    expect((await refusedWith(socket.attach(png()))).kind).toBe('closed')
+    socket.close()
+  })
+
+  it('rejects every image still waiting when the socket closes', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const first = socket.attach(png('a.png'))
+    const second = socket.attach(png('b.png'))
+    await settled(() => expect(server.heard).toHaveLength(2))
+    server.hangUp()
+    expect((await refusedWith(first)).kind).toBe('closed')
+    expect((await refusedWith(second)).kind).toBe('closed')
+  })
+
+  it('rejects an image still waiting when the page closes the socket', async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const landing = socket.attach(png())
+    socket.close()
+    expect((await refusedWith(landing)).kind).toBe('closed')
+  })
+
+  it('reports a reply to no image as badFrame', async () => {
+    const { errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    server.say(JSON.stringify(chatAttached))
+    await settled(() => expect(errors).toHaveLength(1))
+    expect(errors[0]?.kind).toBe('badFrame')
+    expect(errors[0]?.describe()).toBe('The daemon answered an image this dashboard did not send.')
+  })
+})
+
+describe('a reply to an image', () => {
+  it('is attached with a path, or not attached with a known kind and words', () => {
+    expect(frameOf(JSON.stringify(chatAttached))).toEqual(chatAttached)
+    expect(frameOf(JSON.stringify(chatNotAttached))).toEqual(chatNotAttached)
+    expect(frameOf('{"type":"attached"}')).toBeNull()
+    expect(frameOf('{"type":"attached","path":""}')).toBeNull()
+    expect(frameOf('{"type":"notAttached","kind":"tooBig","said":"x"}')).toBeNull()
+    expect(frameOf('{"type":"notAttached","kind":"unreachable"}')).toBeNull()
   })
 })
