@@ -47,6 +47,7 @@ bind where:
 | `edit.rs` | **I-30** — a session the field no longer points at is one every later verb reports as absent, and absence is success |
 | `inventory.rs` | I-5 (the stable id is the only safe key), **I-52** (`whois` and `status` spell that id, and the owner, differently) |
 | `heartbeat.rs` | ADR-0013 `deny_unknown_fields`, **I-9** (unknown power is unrepresentable, not a convention) |
+| `placement.rs` | **I-10** — every term that moves the rank is in `Terms`, and the score is their sum. ADR-0013 §2: power is a score term and never a filter. ADR-0013 §7: the only filter is a beat that *arrived* within 30 s, and a rejection names which of its three reasons applies. The block comment and [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) credit T3 Code ([ADR-0026](../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md) decision 5) |
 | `notify.rs` | **I-49** through `status.rs` — the trust dialog is the notification that matters — and I-47's lesson one layer up: a machine that could not be asked keeps what it had, because unknown is not changed. **I-59** is the hole this leaves ([`yantrad/tracker.md`](../yantrad/tracker.md)). §B4 binds the other half (Y-147): the relay's URL and token are read from the environment and from nowhere else, and the body is the caller's — nothing here composes a workspace's resolved secret into one |
 
 ## What `yantra-agent` may call

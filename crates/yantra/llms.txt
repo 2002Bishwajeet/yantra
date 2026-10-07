@@ -3,7 +3,7 @@
 > The command-line client, and the daemon's first client. It renders and chooses exit codes; every
 > decision about what is true belongs to `yantra-core` (ADR-0005). It calls that crate in-process
 > today and becomes an HTTP client of `yantrad` later — a change of *where* the work is called from,
-> not *what* it does. `src/main.rs`, and `src/mcp.rs` for the one verb that calls the daemon.
+> not *what* it does. `src/main.rs`, and `src/mcp.rs` and `src/why.rs` for the two verbs that call the daemon.
 
 ## Commands
 
@@ -40,12 +40,14 @@
 - `yantra update`: installs the current release on this box and restarts what runs (ADR-0027 §3, Y-368). It starts `yantra-update.service`, the same root unit the dashboard's trigger starts, and waits for it. It needs root: without it, it prints `sudo systemctl start yantra-update.service`. A unit that failed exits 1 and names `journalctl -u yantra-update`, and a box with no `/usr/local/bin/yantra-update` exits 1 naming `install.sh`.
 - `yantra ssh-identity`: prepare this account's `~/.ssh` — a key, and a `Host` block per machine a workspace names — and print the key's kind and `SHA256` fingerprint, the same fields `GET /api/ssh-identity` serves (Y-343), and print the public key to place in each `authorized_keys` ([D2 §2](../../docs/design/02-setup.md)). Idempotent. **`--machine <m> --user <u>`** writes that one machine's block with `User`, which is what `POST /api/join` does for a machine that ran the join command ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md)); the first join makes the key, so generation is no longer only this verb's. It writes no `known_hosts`, because [yantra-core's `ssh`](../yantra-core/src/ssh.rs) already gives every connection its own.
 - `yantra mcp --daemon <url>`: a stdio MCP server for the main agent ([ADR-0033](../../docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md) decision 5, Y-435). Its five tools — `start_task`, `task_status`, `list_tasks`, `stop_task`, `remove_task` — call `yantrad`'s `/api/tasks`, so this one verb is a client of the daemon. Stdout carries JSON-RPC and nothing else. A daemon's refusal is a tool result with `isError` and the daemon's words; it exits 0 when stdin ends.
+- `yantra why <workspace> --daemon <url>`: ranks the machines whose heartbeat arrived within 30 s, and says why each one won, lost or was rejected (Y-452). It reads `yantrad`'s `GET /api/machines`, because the beats live only in the daemon's memory. The table prints RAM, CPU and power, each term the score sums (I-10); a loser's line names its largest gap with both raw readings, and a rejection gives ADR-0013 §7's reason and the beat's age. It marks the workspace's own machine. It exits 1 when no machine ranks, when the daemon cannot be reached or answers badly, and when the workspace is missing.
 - `yantra join-script`: print the join command's script — the bytes `GET /join` serves — for this account's key and this machine's tailnet address, making the key if there is none. Only the script goes to stdout (Y-387).
 
 ## Source
 
 - [src/main.rs](src/main.rs): the crate. Clap definitions at the top, one `async fn` per command, then the `render_*` and `describe` helpers, then tests.
 - [src/mcp.rs](src/mcp.rs): `yantra mcp` — the JSON-RPC loop, the five tools and their schemas, and the HTTP calls to `yantrad` over `ureq`. Its tests answer from a loopback axum daemon.
+- [src/why.rs](src/why.rs): `yantra why` — the `GET /api/machines` call over `ureq`, a serde struct that reads only the fields the scorer needs, and `render`, which is pure. Its tests answer from a loopback axum daemon too.
 
 ## Conventions that are contracts
 
