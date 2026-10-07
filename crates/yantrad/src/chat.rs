@@ -1145,6 +1145,10 @@ mod tests {
         threads: Vec<Place>,
         history: Vec<logs::Entry>,
         unreachable: bool,
+        /// Each makes one call of the machine fail, as ssh would.
+        recall_fails: bool,
+        remember_fails: bool,
+        start_acp_fails: bool,
         /// What the thread's git config keeps.
         kept: Option<(Harness, String)>,
         turns: Mutex<Vec<Claude>>,
@@ -1188,10 +1192,16 @@ mod tests {
         }
 
         async fn recall(&self, _: &Place) -> Result<Option<(Harness, String)>, String> {
+            if self.recall_fails {
+                return Err("git config: ssh: connection reset".to_owned());
+            }
             Ok(self.kept.clone())
         }
 
         async fn remember(&self, _: &Place, harness: Harness, session: &str) -> Result<(), String> {
+            if self.remember_fails {
+                return Err("git config: could not lock config file".to_owned());
+            }
             self.remembered
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -1200,6 +1210,9 @@ mod tests {
         }
 
         fn start_acp(&self, harness: Harness) -> Result<(Agent, acp::Events), String> {
+            if self.start_acp_fails {
+                return Err("ssh: could not start the agent".to_owned());
+            }
             let (ours, theirs) = tokio::io::duplex(1 << 16);
             let (read, write) = tokio::io::split(ours);
             let (hears, says) = tokio::io::split(theirs);
@@ -1805,6 +1818,184 @@ mod tests {
                    "said": "the agent closed the connection"})
         );
         assert_eq!(*script.removed.lock().expect("a lock"), 1);
+    }
+
+    fn refusal(id: &Value, code: i64, message: &str) -> Value {
+        json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+    }
+
+    /// R19 §1: opencode's `session/new` needs no login, so a lapsed one
+    /// arrives as the refusal of a prompt.
+    #[tokio::test]
+    async fn a_prompt_the_agent_refuses_ends_the_turn_and_then_says_why() {
+        for (code, message, then) in [
+            (
+                -32000,
+                "Authentication required",
+                json!({"type": "error", "kind": "notLoggedIn",
+                       "said": "the agent refused: Authentication required (-32000)",
+                       "harness": "opencode", "machine": "m", "command": "opencode auth login"}),
+            ),
+            (
+                -32603,
+                "Internal error",
+                json!({"type": "error", "kind": "unreachable",
+                       "said": "the agent refused: Internal error (-32603)"}),
+            ),
+        ] {
+            let script = Arc::new(Script::default());
+            let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+            agent.say(refusal(&prompt["id"], code, message)).await;
+            let ended = tab.next().await;
+            assert_eq!(ended["type"], "turn.completed", "{ended}");
+            assert_eq!(ended["payload"]["state"], "failed", "{ended}");
+            assert_eq!(tab.next().await, then);
+            assert_eq!(
+                *script.removed.lock().expect("a lock"),
+                0,
+                "the thread stays"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_attach_that_cannot_recall_the_harness_is_unreachable() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            recall_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, served) = connect(Arc::clone(&script), Some(THREAD));
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "unreachable",
+                   "said": "git config: ssh: connection reset"})
+        );
+        served.await.expect("the socket ends");
+        assert_eq!(*script.removed.lock().expect("a lock"), 0);
+    }
+
+    #[tokio::test]
+    async fn a_session_the_agent_will_not_load_is_named_and_the_thread_stays() {
+        for (code, message, kind) in [
+            (-32000, "Authentication required", "notLoggedIn"),
+            (-32603, "Internal error", "unreachable"),
+        ] {
+            let script = Arc::new(Script {
+                threads: vec![place()],
+                kept: Some((Harness::Opencode, SESSION.to_owned())),
+                ..Script::default()
+            });
+            let (mut tab, served) = connect(Arc::clone(&script), Some(THREAD));
+            let mut agent = script.agent().await;
+            agent.initialized().await;
+            let load = agent.heard().await;
+            assert_eq!(load["method"], "session/load");
+            agent.say(refusal(&load["id"], code, message)).await;
+            let said = tab.next().await;
+            assert_eq!(said["kind"], kind, "{said}");
+            assert_eq!(
+                said["said"],
+                format!("the agent refused: {message} ({code})")
+            );
+            served.await.expect("the socket ends");
+            assert_eq!(
+                *script.removed.lock().expect("a lock"),
+                0,
+                "the thread stays"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_will_not_start_is_unreachable() {
+        let script = Arc::new(Script {
+            start_acp_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi", "harness": "gemini"}));
+        let unreachable = json!({"type": "error", "kind": "unreachable",
+                                 "said": "ssh: could not start the agent"});
+        assert_eq!(tab.next().await, unreachable);
+        assert_eq!(
+            *script.removed.lock().expect("a lock"),
+            1,
+            "a new thread goes"
+        );
+
+        let kept = Arc::new(Script {
+            threads: vec![place()],
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            start_acp_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, served) = connect(Arc::clone(&kept), Some(THREAD));
+        assert_eq!(tab.next().await, unreachable);
+        served.await.expect("the socket ends");
+        assert_eq!(
+            *kept.removed.lock().expect("a lock"),
+            0,
+            "a kept thread stays"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_it_cannot_remember_is_unreachable_and_the_thread_goes() {
+        let script = Arc::new(Script {
+            remember_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi", "harness": "opencode"}));
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        agent
+            .reply(&new, json!({"sessionId": SESSION, "configOptions": []}))
+            .await;
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "unreachable",
+                   "said": "git config: could not lock config file"})
+        );
+        assert_eq!(*script.removed.lock().expect("a lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_decision_the_agent_did_not_offer_is_a_bad_frame_and_reaches_nobody() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, _prompt) = an_opencode_thread(&script).await;
+        agent
+            .say(
+                json!({"jsonrpc": "2.0", "id": 8, "method": "session/request_permission",
+                   "params": {"sessionId": SESSION,
+                       "toolCall": {"toolCallId": "call_1", "title": "ls", "kind": "execute"},
+                       "options": [
+                           {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
+                           {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]}}),
+            )
+            .await;
+        let request = tab.next().await["payload"]["requestId"].clone();
+        let said = tab
+            .next_after(json!({"type": "answer", "requestId": request, "decision": "acceptAlways"}))
+            .await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+        assert_eq!(
+            said["said"],
+            format!(
+                "request `{}` offered no AcceptAlways",
+                request.as_str().expect("an id")
+            )
+        );
+
+        // The next line the agent hears is the answer it was offered.
+        tab.send(json!({"type": "answer", "requestId": request, "decision": "accept"}));
+        assert_eq!(
+            agent.heard().await,
+            json!({"jsonrpc": "2.0", "id": 8,
+                   "result": {"outcome": {"outcome": "selected", "optionId": "once"}}})
+        );
     }
 
     #[test]
