@@ -18,7 +18,7 @@ default:
     @just --list
 
 # The gate. Run before every commit.
-check: fmt-check lint test deny no-node pinned
+check: fmt-check lint test deny no-node pinned agents
 
 # Everything CI runs — the workflow calls these same recipes, so they cannot drift.
 ci: check appliance
@@ -109,6 +109,25 @@ pinned:
     fi
     echo "pinned: every action names a commit"
 
+# Codex, Grok and opencode read AGENTS.md, not CLAUDE.md (ADR-0033), so each one is a symlink to the rules.
+agents:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for f in $(git ls-files '*CLAUDE.md' 'CLAUDE.md' | grep -v '^\.claude/'); do
+      dir=$(dirname "$f")
+      link="$dir/AGENTS.md"
+      if [ ! -L "$link" ]; then
+        echo "agents: $link is not a symlink to CLAUDE.md" >&2; exit 1
+      fi
+      if [ "$(readlink "$link")" != CLAUDE.md ]; then
+        echo "agents: $link does not point at CLAUDE.md" >&2; exit 1
+      fi
+      if [ ! -e "$link" ]; then
+        echo "agents: $link does not resolve" >&2; exit 1
+      fi
+    done
+    echo "agents: every CLAUDE.md has an AGENTS.md"
+
 no-node:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -116,10 +135,10 @@ no-node:
     forbidden="--all-features|$feature|npm |npx "
 
     # Every recipe `just ci` reaches except this one — `ci` is `check` plus
-    # `appliance`, and `check` is the five below plus `no-node`. `--dry-run`
+    # `appliance`, and `check` is the six below plus `no-node`. `--dry-run`
     # renders each with its dependencies and runs none of them, so what is read
     # here is what would actually run.
-    for recipe in fmt-check lint test test-ci deny build appliance; do
+    for recipe in fmt-check lint test test-ci deny agents build appliance; do
       if just --dry-run "$recipe" 2>&1 | grep -qE -- "$forbidden"; then
         echo "no-node: \`just $recipe\` would need npm, so the Rust gate no longer builds without Node (R-24)" >&2
         exit 1

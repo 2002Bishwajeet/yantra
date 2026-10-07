@@ -109,6 +109,17 @@ jobs:
           tool: just
       - run: just pinned
 
+  agents:
+    # Codex, Grok and opencode read AGENTS.md. Needs no toolchain: it reads symlinks.
+    name: agents
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: just
+      - run: just agents
+
   no-node:
     # R-24's assertion, and it is the negative one the other jobs cannot make:
     # that this file is green proves the default build works, never that no job

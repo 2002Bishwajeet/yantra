@@ -22,6 +22,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Bytes;
@@ -157,6 +158,11 @@ async fn refuse(socket: &mut WebSocket, machine: &str, error: &mic::Error) {
     tracing::warn!("mic on {machine} stopped: {said}");
     let _ = socket.send(Message::Text(said.into())).await;
     let _ = socket.send(Message::Close(None)).await;
+    // Unread client data (a pong) at drop makes the kernel reset the socket and lose the reason.
+    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+        while let Some(Ok(_)) = socket.recv().await {}
+    })
+    .await;
 }
 
 #[cfg(test)]
@@ -165,7 +171,6 @@ mod tests {
     use super::*;
     use std::net::IpAddr;
     use std::sync::Mutex;
-    use std::time::Duration;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, DuplexStream};
     use tokio::net::TcpStream;
     use tokio::time::timeout;
