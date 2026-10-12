@@ -63,7 +63,7 @@ jobs:
         with:
           tool: just,cargo-nextest,cargo-zigbuild
       # One invocation, so the npm build both recipes depend on happens once.
-      - run: just test-embedded appliance-embedded
+      - run: just test-embedded appliance-embedded aarch64-unknown-linux-musl
 
       # A feature that silently embedded nothing would pass every other check
       # here. Assert the built bundle's own name is in the binary, the way the
