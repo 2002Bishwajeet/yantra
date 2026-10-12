@@ -317,6 +317,8 @@ deleted everywhere else.
 | Y-467 | Laya latency and RSS on the appliance | ⬜ todo | owner, claude | Y-461 | **Parks:** needs the appliance. **Done** when [plan §5.3](docs/plans/decision-model.md#53-the-appliance-benchmark) ran on the appliance for fp32 and INT8 and the p50, p95 and peak RSS are in the plan. |
 | Y-468 | ADR: a decision model behind one trait | ⬜ todo | owner, claude | Y-465, Y-466, Y-467 | **Parks:** needs a new ADR and the owner. **Done** when an accepted ADR records the backend, the decision, the pass mark it met and the [plan §6](docs/plans/decision-model.md#6-integration-sketch) seam, or records that no arm passed and closes the subject. |
 | Y-469 | The decision model behind the trait | ⬜ todo | claude | Y-468 | **Done** when the trait, its fake and the ADR's backend are in `yantra-core`, the caller treats the answer as a hint that rules override, and the tests the ADR names pass. |
+| Y-470 | The opencode ACP test skips when the hosted model refuses | 🔵 review | claude | — | **Red suite, 2026-10-12:** opencode's free model answers "Invalid credential" to every prompt, on 1.18.34 and 1.19.0. **Done** when that refusal skips the cancel half with a SKIPPED line, and every other step of the test still runs. |
+| Y-471 | The opencode ACP test runs against a local model stub | ⬜ todo | claude | Y-470 | **Done** when the fixture points opencode at a local OpenAI-compatible stub that streams slowly, the cancel half runs on every CI run, and Y-470's skip is gone. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
