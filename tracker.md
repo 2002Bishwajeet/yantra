@@ -308,6 +308,8 @@ deleted everywhere else.
 | Y-458 | A folder the Mac refuses over ssh says why | ✅ done | claude | — | **Owner, 2026-10-08.** **Done** when a folder that the machine refuses to read (macOS `~/Documents` over ssh) shows as no access, not as empty, and the picker names the Remote Login setting. Checked on the real Mac. |
 | Y-459 | v0.7.2, and the owner's pass on the real fleet | 🔵 review | owner | Y-457 | **Owner, 2026-10-08.** **Done** when v0.7.2 is published with Y-458, the owner installs it, and walks [the v0.7.2 pass](docs/plans/v0.7.2-qa-pass.md) on the real fleet. Each failure becomes a row. |
 | Y-460 | Q15 again: the appliance is the HP EliteDesk 800 G5 Mini | 🔵 review | claude | — | **Owner, 2026-10-12.** **Done** when Q15 names the EliteDesk, M7 names it, `just appliance*` defaults to x86_64, CI still cross-builds aarch64, and `docs/appliance.md` and `docs/development.md` agree. |
+| Y-470 | The opencode ACP test skips when the hosted model refuses | 🔵 review | claude | — | **Red suite, 2026-10-12:** opencode's free model answers "Invalid credential" to every prompt, on 1.18.34 and 1.19.0. **Done** when that refusal skips the cancel half with a SKIPPED line, and every other step of the test still runs. |
+| Y-471 | The opencode ACP test runs against a local model stub | ⬜ todo | claude | Y-470 | **Done** when the fixture points opencode at a local OpenAI-compatible stub that streams slowly, the cancel half runs on every CI run, and Y-470's skip is gone. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
