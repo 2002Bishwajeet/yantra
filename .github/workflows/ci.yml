@@ -170,7 +170,7 @@ jobs:
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: just,cargo-zigbuild
-      - run: just appliance
+      - run: just appliance aarch64-unknown-linux-musl
 
       # A cross-build that silently produces x86_64 binaries would pass every
       # other check in this file. Assert the ELF header instead of trusting it.

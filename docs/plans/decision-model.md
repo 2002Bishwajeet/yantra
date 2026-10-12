@@ -442,8 +442,12 @@ proposal that ADR starts from, not a decision.
 - **Q23.** Which decision first? This plan proposes session state (§2.1). May a Claude judge label
   it, with your 200-row audit as the check? Will you run the Chat in Supervised mode, so that tool
   permission gains labels?
+  **Answered 2026-10-12: yes.** Session state first, labelled by a Claude judge and audited by the
+  owner. Supervised mode is not promised, so tool permission stays a candidate.
 - **Q24.** May redacted eval rows go to TypeSafe for a Jev baseline (§5.2)? The plan's default is no.
-- **The appliance.** Which box runs Y-467? The research note assumed the i5-9500T mini PC.
+  **Answered 2026-10-12: yes**, offline and opt-in, on redacted rows only.
+- **The appliance.** Which box runs Y-467? **Answered by Q15 (Y-460):** the HP EliteDesk 800 G5 Mini,
+  i5-9500T.
 
 ## Sources
 

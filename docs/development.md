@@ -337,15 +337,14 @@ container can show is the boot ordering against a real `tailscaled`.
 ## Cross-compiling for the appliance
 
 ```bash
-just appliance
+just appliance aarch64-unknown-linux-musl
 file target/aarch64-unknown-linux-musl/release/yantrad
 # ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
 ```
 
-**Every `appliance*` recipe takes a target and defaults to `aarch64-unknown-linux-musl`**, because
-[Q15](../tracker.md#6-open-questions) has not answered which box and *Pi 5 / N100* is two
-architectures. `just appliance x86_64-unknown-linux-musl` builds the mini-PC's, after one
-`rustup target add x86_64-unknown-linux-musl`.
+**Every `appliance*` recipe takes a target and defaults to `x86_64-unknown-linux-musl`**, because
+[Q15](../tracker.md#6-open-questions) picked an x86_64 mini PC. `just appliance aarch64-unknown-linux-musl`
+builds the Pi's, after one `rustup target add aarch64-unknown-linux-musl`.
 
 Getting those binaries onto a box is `just appliance-install <host>`, which is also the update.
 [`appliance.md`](appliance.md) is the runbook: what the box needs first, where the workspace TOMLs
@@ -400,8 +399,8 @@ real `tailscale` answers over its socket, which crosses the namespace, so the
 refusal is *satisfied* rather than worked around, and the bind is a real one on a
 port nobody else holds. No root, and nothing of the daemon is stubbed.
 
-**These are not the appliance's numbers.** Q15 has not picked a box, and this is
-a laptop: slower cores and an SD card would move cold-start most. It is a floor
+**These are not the appliance's numbers.** Q15 picked an x86_64 mini PC, but this is
+a laptop: slower cores would move cold-start most. It is a floor
 in the other direction too — an empty workspace directory buys no ssh, and a
 daemon holding a real fleet's snapshot costs more than this by whatever the
 snapshot weighs.
