@@ -16,13 +16,13 @@ units in the same places. `install.sh` also leaves its updater and two more unit
 
 ## Which architecture
 
-**[Q15](../tracker.md#6-open-questions) is answered — the Pi 5, 2 GB** (2026-08-09), which is what
-`aarch64-unknown-linux-musl` already was. The recipes still take a target, so an x86_64 box is one
-argument rather than a second set of recipes:
+**[Q15](../tracker.md#6-open-questions) is answered — an HP EliteDesk 800 G5 Mini** (2026-10-12),
+so the default is `x86_64-unknown-linux-musl`. It replaces the 2026-08-09 answer, the Pi 5. The recipes
+still take a target, so an arm64 box is one argument rather than a second set of recipes:
 
 ```bash
-just appliance                                   # arm64: a Pi 5
-just appliance x86_64-unknown-linux-musl         # x86_64: an N100 mini-PC
+just appliance                                   # x86_64: the EliteDesk mini PC
+just appliance aarch64-unknown-linux-musl        # arm64: a Pi 5
 ```
 
 `appliance-embedded`, `appliance-size` and `appliance-install` take the same argument. A target other

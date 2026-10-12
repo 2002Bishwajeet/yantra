@@ -4,9 +4,8 @@
 # worktree's stale test binary to another (Y-326), so the profile's must not leak in.
 export CARGO_TARGET_DIR := justfile_directory() / "target"
 
-# Q15 has not answered which box and `Pi 5 / N100` is two architectures, so
-# this is the default rather than the answer (docs/appliance.md).
-appliance_target := "aarch64-unknown-linux-musl"
+# Q15: the appliance is an HP EliteDesk 800 G5 Mini (docs/appliance.md).
+appliance_target := "x86_64-unknown-linux-musl"
 
 # The image the web e2e baselines are rendered in; web.yml pins it, and every local run reads it from there.
 # `|| true` because just evaluates this on every load: a miss must fail the Playwright recipes, not all of them.
@@ -79,8 +78,8 @@ https-off:
 deny:
     cargo deny check
 
-# Cross-compile the appliance binaries. Defaults to arm64; `just appliance
-# x86_64-unknown-linux-musl` is the mini-PC that M7's own `Pi 5 / N100` implies.
+# Build the appliance binaries. Defaults to x86_64 (Q15); `just appliance
+# aarch64-unknown-linux-musl` is the arm64 build for a Pi.
 appliance target=appliance_target:
     cargo zigbuild --release --target {{target}} \
         -p yantrad -p yantra -p yantra-agent
@@ -268,8 +267,8 @@ appliance-size target=appliance_target: (appliance target)
 # A binary that is only cross-compiled cannot be run, so the other three numbers
 # ADR-0004 owes M7 — idle RSS, idle CPU, CLI cold-start — are measured on the
 # target this machine executes. musl rather than the host toolchain because
-# mallocng is what the appliance links and it is most of the RSS. Whichever box
-# Q15 picks, this is a floor and not its answer.
+# mallocng is what the appliance links and it is most of the RSS. The appliance
+# is x86_64 (Q15), but this is still a laptop's number and not the box's.
 runtime_target := "x86_64-unknown-linux-musl"
 
 # Three settings, all of them arguable, so they are named rather than inline.
