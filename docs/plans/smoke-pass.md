@@ -20,10 +20,10 @@ Each check is something a container cannot prove. The Twin test column names the
 | 6 | Turn one machine off or let it sleep. | The dashboard shows it as asleep or off. | `web/e2e/setup.spec.ts`, `draws asleep machines as asleep, with nothing to press` |
 | 7 | Start a new session on a real machine. | The session opens in the chosen folder and attaches. | `crates/yantra-core/tests/up_walking_skeleton.rs`, `the_session_opens_in_the_workspace_repo` |
 | 8 | In Chat, send a prompt that needs a permission. | The reply streams and a permission card appears. | `web/e2e/chat.spec.ts`, `Full access draws no permission card` |
-| 9 | Press Stop during a turn. | The turn ends and the session stays. | `crates/yantra-core/tests/down.rs`, `the_session_and_the_process_in_it_are_both_gone` |
+| 9 | Press Stop during a turn. | The turn ends and the session stays. | `crates/yantra-core/src/claude.rs`, `cancel_interrupts_closes_stdin_and_the_turn_ends_cancelled` |
 | 10 | Start a turn, open Terminal, then go back to Chat. | The turn kept running. | `web/e2e/chat.spec.ts`, `Terminal and back keeps a turn running` |
 | 11 | Trigger a ntfy push. | The push arrives on the phone. | `web/e2e/notifications.spec.ts`, `shows every command via Copyable, the full warning, and Open` |
-| 12 | Connect GitHub with the device code. | The code is accepted and GitHub shows as connected. | `crates/yantra-core/tests/github_api.rs`, `the_real_api_answers_in_the_shapes_this_crate_reads` |
+| 12 | Connect GitHub with the device code. | The code is accepted and GitHub shows as connected. | `web/e2e/settings.spec.ts`, `walks the device flow and never draws a token` |
 | 13 | Speak into the mic in the dashboard. | The words reach the session. | `crates/yantrad/tests/mic.rs`, `the_dashboards_writer_carries_a_tone_into_yantra_mic_and_ends_when_closed` |
 | 14 | Open Setup on a real machine. | Every check reads true to the machine. | `crates/yantra-core/tests/doctor.rs`, `a_machine_with_everything_reports_present_except_the_beat` |
 | 15 | Open Settings → About. | The version equals the tag and the facts are right. | `web/e2e/settings.spec.ts`, `asks for an update after saying what the restart ends` |
