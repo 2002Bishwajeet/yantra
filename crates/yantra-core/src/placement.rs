@@ -177,13 +177,12 @@ pub fn rank(candidates: Vec<Candidate>) -> Ranking {
 fn terms(beat: &Beat, repo: &Here, ran_here: bool) -> Terms {
     let ram = (beat.free_ram_mb as f64 / RAM_FULL_MB as f64).clamp(0.0, 1.0);
     let cpu = 1.0 - f64::from(beat.cpu_busy_pct.min(100)) / 100.0;
-    let flag = |on: bool| if on { 1.0 } else { 0.0 };
     Terms {
         ram: round1(RAM_WEIGHT * ram),
         cpu: round1(CPU_WEIGHT * cpu),
         power: round1(POWER_WEIGHT * power(beat.power)),
-        repo: REPO_WEIGHT * flag(matches!(repo, Here::Yes(_))),
-        affinity: AFFINITY_WEIGHT * flag(ran_here),
+        repo: REPO_WEIGHT * f64::from(matches!(repo, Here::Yes(_))),
+        affinity: AFFINITY_WEIGHT * f64::from(ran_here),
     }
 }
 
