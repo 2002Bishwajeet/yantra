@@ -50,6 +50,8 @@ test.describe('the four steps', () => {
   })
 
   test('passes axe on each step', async ({ page }) => {
+    // Y-517: the suggestion enables Continue after load; axe must not sample its colour transition.
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
     await axe(page)
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
@@ -143,11 +145,8 @@ test.describe('the four steps', () => {
 
   /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
   test('the clone folder survives a reload', async ({ page }) => {
-    const fillStep1 = async () => {
-      await page.getByLabel('Name').fill('quiet-otter')
-      await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    }
-    await fillStep1()
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
     const line = page.locator('.ns__clone', { hasText: 'Clone folder:' })
     await expect(line).toContainText('~/Github')
@@ -164,8 +163,7 @@ test.describe('the four steps', () => {
 
     await page.reload()
     await expect(heading(page, 'New session')).toBeVisible()
-    // The reload keeps ?step=2, so step 2 draws as soon as step 1 is complete.
-    await fillStep1()
+    // The reload keeps ?step=2, and the generated name with the suggested machine (Y-517) completes step 1.
     await expect(line).toContainText('~/notes')
   })
 })
