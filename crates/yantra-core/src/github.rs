@@ -213,10 +213,11 @@ impl FromStr for IssueRef {
         };
         let (owner, rest) = input.split_once('/').ok_or_else(refused)?;
         let (repo, number) = rest.split_once('#').ok_or_else(refused)?;
-        let number = Some(number)
-            .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-            .and_then(|n| n.parse::<u64>().ok())
-            .filter(|&n| n > 0)
+        let digits = !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit());
+        let number = number
+            .parse::<u64>()
+            .ok()
+            .filter(|&n| digits && n > 0)
             .ok_or_else(refused)?;
         if !named(owner) || !named(repo) {
             return Err(refused());
