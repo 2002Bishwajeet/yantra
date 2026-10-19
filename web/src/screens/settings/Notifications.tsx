@@ -1,34 +1,47 @@
-import { type FormEvent, useState } from 'react'
-import { Bell, BellRing, CircleSlash, Eye, EyeOff, MoonStar, SquareCheck } from 'lucide-react'
-import { useAbout } from '@/api/hooks'
-import { useSetRelay } from '@/api/mutations'
-import { Button } from '@/m3/button/Button'
-import { IconButton } from '@/m3/icon-button/IconButton'
-import { Lead } from '@/m3/lead/Lead'
-import { ListItem, ListValue } from '@/m3/list/List'
-import { Mono, Text } from '@/m3/text/Text'
-import { TextField } from '@/m3/text-field/TextField'
-import { Group, Note } from './Group'
-import { Sheet } from './Sheet'
+import { type FormEvent, lazy, Suspense, useState } from "react";
+import {
+  Bell,
+  BellRing,
+  CircleSlash,
+  Eye,
+  EyeOff,
+  MoonStar,
+  SquareCheck,
+} from "lucide-react";
+import { useAbout } from "@/api/hooks";
+import { useSetRelay } from "@/api/mutations";
+import { Button } from "@/m3/button/Button";
+import { IconButton } from "@/m3/icon-button/IconButton";
+import { Lead } from "@/m3/lead/Lead";
+import { ListItem, ListValue } from "@/m3/list/List";
+import { Mono, Text } from "@/m3/text/Text";
+import { TextField } from "@/m3/text-field/TextField";
+import { Group, Note } from "./Group";
+import { Sheet } from "./Sheet";
+import { newTopic, publicTopic, subscribeLink, topicUrl } from "./topic";
+
+const Qr = lazy(() =>
+  import("qrcode.react").then((it) => ({ default: it.QRCodeSVG })),
+);
 
 /** Where the daemon writes it, named here because the sheet is the only
  *  place a person learns the token is on disk in plain text (ADR-0021). */
-const FILE = '/etc/yantra/daemon.env'
+const FILE = "/etc/yantra/daemon.env";
 
 /** The daemon writes before it sends, so **502 is not a failed save** — the
  *  relay is on disk and the message did not arrive. Collapsing that into
  *  "failed" would have someone type it all in again. */
 const refusals: Record<number, string> = {
-  400: 'That is not a usable topic URL or token.',
+  400: "That is not a usable topic URL or token.",
   403: "This browser is not on a node this tailnet's owner holds.",
   500: `The relay could not be written to ${FILE}.`,
-  502: 'The relay is written down, and the test message did not arrive.',
-  503: 'The daemon could not ask Tailscale who is calling, so nothing about you was decided.',
-}
+  502: "The relay is written down, and the test message did not arrive.",
+  503: "The daemon could not ask Tailscale who is calling, so nothing about you was decided.",
+};
 
 function refusal(status: number | undefined): string {
-  if (status === undefined) return 'The daemon did not answer.'
-  return refusals[status] ?? 'The daemon did not take it.'
+  if (status === undefined) return "The daemon did not answer.";
+  return refusals[status] ?? "The daemon did not take it.";
 }
 
 /** What `notify::Watch` sends, in the daemon's own terms. The daemon decides
@@ -38,46 +51,52 @@ function refusal(status: number | undefined): string {
 const WHEN = [
   {
     icon: <BellRing />,
-    headline: 'When an agent needs you',
-    supporting: 'a trust prompt, and only the first time one appears',
+    headline: "When an agent needs you",
+    supporting: "a trust prompt, and only the first time one appears",
     sent: true,
   },
   {
     icon: <SquareCheck />,
-    headline: 'When a session ends',
-    supporting: 'finished, crashed with its exit code, killed by a signal, or gone',
+    headline: "When a session ends",
+    supporting:
+      "finished, crashed with its exit code, killed by a signal, or gone",
     sent: true,
   },
   {
     icon: <CircleSlash />,
-    headline: 'When a machine goes unreachable',
-    supporting: 'a look the daemon could not make is not a change it can report',
+    headline: "When a machine goes unreachable",
+    supporting:
+      "a look the daemon could not make is not a change it can report",
     sent: false,
   },
-]
+];
 
 /** `about.relay` says whether the running daemon holds one; `saved` says a
  *  save happened in this session (§B4: nothing reads the relay itself back,
  *  so a save cannot move `relay` until yantrad restarts and this page is read
  *  again, ADR-0021). */
 function relaySupporting(relay: boolean | undefined, saved: boolean): string {
-  if (relay === undefined) return 'asking the daemon'
-  const base = relay ? 'On · the daemon holds a relay and pushes to it' : 'Off · nothing is pushed'
-  return saved ? `${base} · saved, used after yantrad restarts` : base
+  if (relay === undefined) return "asking the daemon";
+  const base = relay
+    ? "On · the daemon holds a relay and pushes to it"
+    : "Off · nothing is pushed";
+  return saved ? `${base} · saved, used after yantrad restarts` : base;
 }
 
 export function Notifications() {
-  const about = useAbout()
-  const [savedAtUptime, setSavedAtUptime] = useState<number | null>(null)
-  const [open, setOpen] = useState(false)
-  if (about.error) throw about.error
+  const about = useAbout();
+  const [savedAtUptime, setSavedAtUptime] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
+  if (about.error) throw about.error;
 
   // uptime_seconds only grows while yantrad runs and resets on a restart, so
   // a read lower than the value at save time proves the restart happened —
   // the daemon is now running with whatever this page last wrote, and the
   // note has done its job. A steady climb (still the same process) never
   // triggers it, including a save that changes nothing (on -> on).
-  const saved = savedAtUptime !== null && (about.data === undefined || about.data.uptime_seconds >= savedAtUptime)
+  const saved =
+    savedAtUptime !== null &&
+    (about.data === undefined || about.data.uptime_seconds >= savedAtUptime);
 
   return (
     <>
@@ -105,9 +124,11 @@ export function Notifications() {
           <ListItem
             headline={one.headline}
             key={one.headline}
-            leading={<Lead tone={one.sent ? 'primary' : undefined}>{one.icon}</Lead>}
+            leading={
+              <Lead tone={one.sent ? "primary" : undefined}>{one.icon}</Lead>
+            }
             supporting={one.supporting}
-            trailing={<ListValue>{one.sent ? 'Sent' : 'Not sent'}</ListValue>}
+            trailing={<ListValue>{one.sent ? "Sent" : "Not sent"}</ListValue>}
           />
         ))}
       </Group>
@@ -123,41 +144,54 @@ export function Notifications() {
           trailing={<ListValue>Always</ListValue>}
         />
       </Group>
-      <Note>An open dashboard tells the daemon so every 20 seconds, and the push stops while one is.</Note>
-      <RelaySheet onOpenChange={setOpen} onSaved={() => setSavedAtUptime(about.data?.uptime_seconds ?? 0)} open={open} />
+      <Note>
+        An open dashboard tells the daemon so every 20 seconds, and the push
+        stops while one is.
+      </Note>
+      <RelaySheet
+        onOpenChange={setOpen}
+        onSaved={() => setSavedAtUptime(about.data?.uptime_seconds ?? 0)}
+        open={open}
+      />
     </>
-  )
+  );
 }
 
-function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => void }) {
-  const { open, onOpenChange, onSaved } = props
-  const relay = useSetRelay()
-  const [shown, setShown] = useState(false)
+function RelaySheet(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const { open, onOpenChange, onSaved } = props;
+  const relay = useSetRelay();
+  const [shown, setShown] = useState(false);
+  const [url, setUrl] = useState("");
+  const topic = publicTopic(url);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const read = (name: string) => String(form.get(name) ?? '').trim()
-    const url = read('url')
-    const token = read('token')
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const read = (name: string) => String(form.get(name) ?? "").trim();
+    const url = read("url");
+    const token = read("token");
     // Omitted rather than sent empty: an open topic and a topic with a blank
     // password are not the same thing.
     relay.mutate(
-      { url, ...(token === '' ? {} : { token }) },
+      { url, ...(token === "" ? {} : { token }) },
       {
         onSuccess: () => onSaved(),
         // The daemon writes before it sends, so a 502 is still a save (§B4).
         onError: (error) => {
-          if (error.status === 502) onSaved()
+          if (error.status === 502) onSaved();
         },
       },
-    )
-  }
+    );
+  };
 
   const close = (next: boolean) => {
-    if (!next) relay.reset()
-    onOpenChange(next)
-  }
+    if (!next) relay.reset();
+    onOpenChange(next);
+  };
 
   return (
     <Sheet
@@ -171,11 +205,31 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
           autoComplete="off"
           label="Topic URL"
           name="url"
+          onChange={(event) => setUrl(event.target.value)}
           placeholder="https://ntfy.sh/a-topic-nobody-guesses"
           required
           supporting="On the public server the topic is the only password there is, so make it one nobody guesses, or point this at your own ntfy."
+          trailing={
+            <Button onClick={() => setUrl(topicUrl(newTopic()))} variant="text">
+              Generate
+            </Button>
+          }
           type="url"
+          value={url}
         />
+        {topic ? (
+          <div className="settings__subscribe">
+            <Suspense fallback={<div className="settings__qr-wait" />}>
+              <Qr
+                aria-label={`A QR code that subscribes the ntfy app to ${topic}`}
+                role="img"
+                size={112}
+                value={subscribeLink(topic)}
+              />
+            </Suspense>
+            <a href={subscribeLink(topic)}>Open in the ntfy app</a>
+          </div>
+        ) : null}
         <TextField
           autoComplete="off"
           label="Token"
@@ -183,11 +237,14 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
           placeholder="tk_…"
           supporting="Only a protected topic needs one. It is kept on the appliance in plain text, readable by the account the daemon runs as."
           trailing={
-            <IconButton label={shown ? 'Hide token' : 'Show token'} onClick={() => setShown((was) => !was)}>
+            <IconButton
+              label={shown ? "Hide token" : "Show token"}
+              onClick={() => setShown((was) => !was)}
+            >
               {shown ? <EyeOff /> : <Eye />}
             </IconButton>
           }
-          type={shown ? 'text' : 'password'}
+          type={shown ? "text" : "password"}
         />
         <div aria-live="polite" className="settings__outcome">
           {relay.isSuccess ? (
@@ -196,15 +253,18 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
                 The test message arrived at the relay.
               </Text>
               <Text render={<p />} scale="body-small" tone="variant">
-                It is written in {FILE}. The daemon reads that file when systemd starts it, so run{' '}
-                <Mono>sudo systemctl restart yantrad</Mono> on the appliance before it notifies you from this relay.
+                It is written in {FILE}. The daemon reads that file when systemd
+                starts it, so run <Mono>sudo systemctl restart yantrad</Mono> on
+                the appliance before it notifies you from this relay.
               </Text>
             </>
           ) : null}
           {relay.error ? (
             <>
               <Text render={<p />} scale="body-medium" tone="error" emphasized>
-                {relay.error.kind === 'network' ? refusal(undefined) : refusal(relay.error.status)}
+                {relay.error.kind === "network"
+                  ? refusal(undefined)
+                  : refusal(relay.error.status)}
               </Text>
               {/* The daemon's own words: they name the file or what the relay
                   said, and never the topic or the token. */}
@@ -214,13 +274,13 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
         </div>
         <div className="m3-dialog__actions">
           <Button onClick={() => close(false)} variant="text">
-            {relay.isSuccess ? 'Done' : 'Cancel'}
+            {relay.isSuccess ? "Done" : "Cancel"}
           </Button>
           <Button disabled={relay.isPending} type="submit">
-            {relay.isPending ? 'Sending…' : 'Save and send a test'}
+            {relay.isPending ? "Sending…" : "Save and send a test"}
           </Button>
         </div>
       </form>
     </Sheet>
-  )
+  );
 }
