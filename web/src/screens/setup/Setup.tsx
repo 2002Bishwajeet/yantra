@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Check, GitBranch, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
 import type { Event, Machine, Readiness } from '@/api'
@@ -60,6 +60,12 @@ const newest = (events: Event[], machine: string) =>
   events.find((one) => one.machine === machine && (one.kind === 'installed' || one.kind === 'install_stopped')) ??
   null
 
+const blockedBy = (stop: Event | null) => stop?.kind === 'install_stopped' && stop.commands.length > 0
+
+/** What one line can do on a bulk press right now; null when it offers nothing. */
+type Presses = { check: (() => void) | null; install: (() => void) | null }
+type Register = (name: string, presses: Presses | null) => void
+
 /** D7 §4.1's machine lines: what each state says and the one action it
  *  offers. An asleep machine offers none, since ssh cannot answer it. */
 function MachineLine(props: {
@@ -70,16 +76,25 @@ function MachineLine(props: {
   read: boolean
   target: boolean
   join: ReactNode
+  register: Register
 }) {
-  const { machine, line: said, report, events, read, target, join } = props
+  const { machine, line: said, report, events, read, target, join, register } = props
   const name = machine.name
   const recheck = useRecheckReadiness()
   const install = useInstallOn(name, events)
   const carried = useFab() !== null
   useAskOnArrival(name, events, read, recheck.mutate)
   const stop = newest(events, name)
-  const blocked = said.kind === 'missing' && stop?.kind === 'install_stopped' && stop.commands.length > 0
+  const blocked = said.kind === 'missing' && blockedBy(stop)
   const view = said.kind === 'missing' && install.running ? 'installing' : blocked ? 'blocked' : said.kind
+
+  useEffect(() => {
+    register(name, {
+      check: said.kind === 'unchecked' ? () => recheck.mutate(name) : null,
+      install: said.kind === 'missing' && said.installable && view === 'missing' ? install.press : null,
+    })
+    return () => register(name, null)
+  })
 
   const mark: Record<typeof view, MarkState> = {
     asleep: 'unknown',
@@ -184,6 +199,18 @@ export function Setup() {
   const { about, identity, machines, sweep, notifications, events, all, lines, steps, later: optional, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
+  const presses = useRef(new Map<string, Presses>())
+  const register = useCallback<Register>((name, one) => {
+    if (one) presses.current.set(name, one)
+    else presses.current.delete(name)
+  }, [])
+  const press = (which: keyof Presses) => {
+    for (const one of presses.current.values()) one[which]?.()
+  }
+  const unchecked = lines.some((one) => one.line.kind === 'unchecked')
+  const installable = lines.some(
+    (one) => one.line.kind === 'missing' && one.line.installable && !blockedBy(newest(events, one.machine.name)),
+  )
 
   const others = all.filter((one) => one.ownership === 'yours' && !runsSessions(one))
   // Y-404: listed with the reason, never counted.
@@ -287,7 +314,22 @@ export function Setup() {
               {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
               ) : lines.length > 0 ? (
-                <ul className="setup__lines">
+                <>
+                  {unchecked || installable ? (
+                    <div className="setup__bulk">
+                      {unchecked ? (
+                        <Button onClick={() => press('check')} variant="tonal">
+                          Check all
+                        </Button>
+                      ) : null}
+                      {installable ? (
+                        <Button onClick={() => press('install')} variant="tonal">
+                          Install on all
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <ul className="setup__lines">
                   {lines.map((one) => (
                     <MachineLine
                       events={events}
@@ -296,11 +338,13 @@ export function Setup() {
                       line={one.line}
                       machine={one.machine}
                       read={notifications.data !== undefined}
+                      register={register}
                       report={one.report}
                       target={next === 'install' && one.machine.name === target}
                     />
                   ))}
-                </ul>
+                  </ul>
+                </>
               ) : null}
               {others.length > 0 ? (
                 <>

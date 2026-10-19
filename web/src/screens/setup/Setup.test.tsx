@@ -23,9 +23,11 @@ const phone = aMachine({ name: 'iphone', os: 'iOS', online: true })
 const tablet = aMachine({ name: 'pixel-tablet', os: 'android', online: false })
 const windows = aMachine({ name: 'gaming-pc', os: 'windows', online: false })
 const up = { ...linux, online: true }
+const upToo = { ...mac, online: true }
+const linux2 = aMachine({ name: 'ubuntu', os: 'linux', online: true })
 
-const checks = (states: Record<string, 'present' | 'absent'>, detail = ''): Readiness => ({
-  machine: up.name,
+const checks = (states: Record<string, 'present' | 'absent'>, detail = '', machine = up.name): Readiness => ({
+  machine,
   checks: Object.entries(states).map(([check, state]) => ({ check, state, detail })),
 })
 /** The seven checks a session needs (`lib/ready`). */
@@ -345,5 +347,97 @@ describe('the machine lines', () => {
     })
     expect(screen.getByText('ready · 7 of 8')).toBeTruthy()
     expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+  })
+})
+
+/** Y-478: one press fires each line's own mutation, so each keeps its own ring and error. */
+describe('the bulk buttons', () => {
+  const both = [up, upToo]
+  const keyed = { 'GET /api/ssh-identity': [200, contract.sshIdentity] } as Routes
+  const missing = (machine: string) => checks({ ...tools, tmux: 'absent' }, '', machine)
+
+  it('checks every online machine that was not asked, then goes away', async () => {
+    const routes: Routes = {
+      ...base(both),
+      ...keyed,
+      'POST /api/machines/cachyos-g14/readiness': [200, looked.ok(checks(tools))],
+      'POST /api/machines/macbook/readiness': [200, looked.ok(checks(tools, '', 'macbook'))],
+    }
+    const asked = await draw(routes)
+    fireEvent.click(screen.getByRole('button', { name: 'Check all' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Check all' })).toBeNull())
+    expect(asked).toContain('POST /api/machines/cachyos-g14/readiness')
+    expect(asked).toContain('POST /api/machines/macbook/readiness')
+    expect(filled().length).toBeLessThanOrEqual(1)
+  })
+
+  it('installs on every machine that offers Install, and leaves the others alone', async () => {
+    const routes: Routes = {
+      ...base([up, upToo, linux2]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([missing('cachyos-g14'), missing('macbook'), checks(tools, '', 'ubuntu')])],
+      'POST /api/machines/cachyos-g14/install': [202, undefined],
+      'POST /api/machines/macbook/install': [202, undefined],
+    }
+    const asked = await draw(routes)
+    fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
+    expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
+    expect(await screen.findByText('installing on macbook…')).toBeTruthy()
+    expect(asked.filter((one) => one.endsWith('/install'))).toHaveLength(2)
+    expect(asked).not.toContain('POST /api/machines/ubuntu/install')
+  })
+
+  it('skips a machine whose install stopped on a password', async () => {
+    const stopped: Event = {
+      at: 9,
+      kind: 'install_stopped',
+      workspace: null,
+      machine: up.name,
+      said: 'x',
+      commands: ['sudo pacman -S --noconfirm tmux'],
+    }
+    const asked = await draw({
+      ...base(both),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([missing('cachyos-g14'), missing('macbook')])],
+      'GET /api/notifications': [200, looked.ok([stopped])],
+      'POST /api/machines/macbook/install': [202, undefined],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
+    expect(await screen.findByText('installing on macbook…')).toBeTruthy()
+    expect(asked).not.toContain('POST /api/machines/cachyos-g14/install')
+  })
+
+  it('lets one machine fail without stopping the others', async () => {
+    await draw({
+      ...base(both),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([missing('cachyos-g14'), missing('macbook')])],
+      'POST /api/machines/cachyos-g14/install': [500, 'ssh did not answer'],
+      'POST /api/machines/macbook/install': [202, undefined],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
+    expect(await screen.findByText('The install on cachyos-g14 did not start')).toBeTruthy()
+    expect(await screen.findByText('installing on macbook…')).toBeTruthy()
+  })
+
+  it('lets one check fail without stopping the others', async () => {
+    await draw({
+      ...base(both),
+      ...keyed,
+      'POST /api/machines/cachyos-g14/readiness': [500, 'ssh did not answer'],
+      'POST /api/machines/macbook/readiness': [200, looked.ok(checks(tools, '', 'macbook'))],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Check all' }))
+    expect(await screen.findByText('cachyos-g14 was not asked')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('ready · 7 of 7')).toBeTruthy())
+  })
+
+  it('shows neither button when every machine is asleep or ready', async () => {
+    await draw(base([linux, mac]))
+    expect(screen.queryByRole('button', { name: /all$/ })).toBeNull()
+    cleanup()
+    await draw({ ...base(both), ...keyed, 'GET /api/readiness': [200, looked.ok([checks(tools), checks(tools, '', 'macbook')])] })
+    expect(screen.queryByRole('button', { name: /all$/ })).toBeNull()
   })
 })
