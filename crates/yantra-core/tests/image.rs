@@ -76,8 +76,11 @@ async fn an_image_lands_at_the_path_it_names_and_goes_with_the_session() -> Resu
         first.starts_with(&format!("{dir}/")),
         "{first} is not in {dir}"
     );
+    // Busybox's adduser makes the home 2755, and `mkdir` inherits the setgid
+    // bit; only the access bits say who can read the images.
     let mode = fixture.run(&format!("stat -c %a '{dir}'"))?;
-    ensure!(mode.trim() == "700", "the directory is {mode}");
+    let mode = u32::from_str_radix(mode.trim(), 8)?;
+    ensure!(mode & 0o777 == 0o700, "the directory is {mode:o}");
 
     let second = images.put(&ssh, &blob[..4096]).await?;
     ensure!(
