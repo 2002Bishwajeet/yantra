@@ -37,6 +37,13 @@ for the steps that need it.
 curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash
 ```
 
+Debian 13 ships `wget` and no `curl`. Use this form there; the script installs `curl` with `apt-get`
+before it goes on:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash
+```
+
 Read it first if you would rather — it is one file:
 
 ```bash
