@@ -80,3 +80,14 @@ remove it, or worktrees fill the disk.
 
 **Not yet measured.** A full turn on Codex, Gemini or Grok, because no login existed in R19. Every
 figure on arm64. Grok takes no images.
+
+> **2026-10-19 ([Y-446](../../tracker.md)): a Chat turn now outlives a dropped connection.**
+> [ADR-0035](0035-a-chat-turn-outlives-its-ssh-pipe.md) puts each Chat agent in a keeper: a shell
+> script in its own tmux session on the machine. The agent's stdout goes to a file there, and
+> `yantrad` reads it again from a byte offset after a drop or a restart. Two premises behind this
+> decision changed upstream. The owner chose on 2026-10-07 that a Chat turn outlives its ssh pipe
+> ([R21](../research/21-t3code-and-yantra.md) §6 decision 3). And M16 runs turns that nobody
+> watches, from an appliance far from the machines. So a dropped link, a closed browser and a
+> daemon restart no longer cancel a Chat turn. `session/load` still restores the history when a
+> keeper starts. Delegated tasks (decision 5) still end with their connection until a row moves
+> them into the keeper.

@@ -120,6 +120,34 @@ test.describe('the four steps', () => {
     await expect(page.getByText('~/Github/landing-copy')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
+
+  /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
+  test('the clone folder survives a reload', async ({ page }) => {
+    const fillStep1 = async () => {
+      await page.getByLabel('Name').fill('quiet-otter')
+      await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    }
+    await fillStep1()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    const line = page.locator('.ns__clone', { hasText: 'Clone folder:' })
+    await expect(line).toContainText('~/Github')
+
+    await line.getByRole('button', { name: 'Change' }).click()
+    const where = page.getByRole('navigation', { name: 'Where you are' })
+    await where.getByRole('button', { name: '~', exact: true }).click()
+    await page
+      .getByRole('list', { name: 'Clone folder choices' })
+      .getByRole('button', { name: /^notes/ })
+      .click()
+    await page.getByRole('button', { name: 'Use ~/notes' }).click()
+    await expect(line).toContainText('~/notes')
+
+    await page.reload()
+    await expect(heading(page, 'New session')).toBeVisible()
+    // The reload keeps ?step=2, so step 2 draws as soon as step 1 is complete.
+    await fillStep1()
+    await expect(line).toContainText('~/notes')
+  })
 })
 
 test.describe('all four steps, to a workspace that is running', () => {

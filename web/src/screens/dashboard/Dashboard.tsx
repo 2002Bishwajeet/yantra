@@ -605,6 +605,16 @@ function Idle(props: {
   const workspaces = rows.flatMap((row) => (row.kind === 'workspace' ? [row] : []))
   const words = `${plural(workspaces.length, 'workspace')}, nothing running`
   const none = fleetEmpty ? 'no workspaces yet' : 'no idle workspaces'
+  const empty = (
+    <>
+      <State state="idle">{none}</State>
+      {fleetEmpty ? (
+        <Button className="dash__new" render={<Link to="/new" />} role="link" variant="text">
+          New →
+        </Button>
+      ) : null}
+    </>
+  )
   const list = (
     <ul className={compact ? 'dash__grid' : 'dash__idle-list'}>
       {workspaces.map((row) => (
@@ -616,7 +626,7 @@ function Idle(props: {
     return (
       <Card aria-labelledby="dash-idle" className="dash__idle" variant="outlined">
         <CardHead id="dash-idle" title="Idle" words={<State state="idle">{words}</State>} />
-        {workspaces.length === 0 ? <State state="idle">{none}</State> : list}
+        {workspaces.length === 0 ? <div className="dash__idle-empty">{empty}</div> : list}
       </Card>
     )
   }
@@ -626,12 +636,7 @@ function Idle(props: {
     return (
       <div className="dash__line">
         <Eyebrow render={<h2 />}>Idle</Eyebrow>
-        <State state="idle">{none}</State>
-        {fleetEmpty ? (
-          <Button className="dash__new" render={<Link to="/new" />} role="link" variant="text">
-            New →
-          </Button>
-        ) : null}
+        {empty}
       </div>
     )
   }

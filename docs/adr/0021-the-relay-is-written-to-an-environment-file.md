@@ -137,3 +137,7 @@ for.
 > that New session must list the owner's private repositories, which no machine can answer for the
 > daemon. Decision 3 does not carry over: that grant is live when its device flow completes, because
 > the daemon obtained it itself. The exposure paragraph now covers two credentials with one mode.
+
+> **A second file, recorded 2026-10-19 (Y-515).** The daemon now also writes `dashboard.json`, the
+> owner's dashboard layout, in its account's config directory. It is a preference, not fleet state,
+> and holds no secret: [ADR-0036](0036-the-dashboard-layout-syncs-through-the-daemon.md).

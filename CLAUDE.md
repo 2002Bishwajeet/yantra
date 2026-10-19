@@ -142,7 +142,8 @@ Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`,
 never built (Y-044); see its 2026-08-02 amendment. It writes exactly one file, and that file is
 configuration rather than state —
 [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) and the 2026-08-22 amendment
-beside the first. The appliance may keep a conversation history that the daemon never touches —
+beside the first. **Since 2026-10-19 it also writes the owner's dashboard layout**, a preference
+with no fleet state and no secret ([ADR-0036](docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)). The appliance may keep a conversation history that the daemon never touches —
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
@@ -162,6 +163,12 @@ tab is to be on par with [T3 Code](https://github.com/pingdotgg/t3code), and its
 copied rather than rewritten. Both use React, Base UI, Tailwind 4 and TanStack Router. T3 Code is MIT:
 attribute each copied file as [ADR-0026](docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)
 decision 5 says.
+
+**The coding loop adapts T3 Code too, for the owner's own use.** Owner's instruction, 2026-10-19:
+Yantra is where the owner works from an issue to a merged PR ([M16](docs/plans/m16-the-coding-loop.md)).
+It does not compete with T3 Code and does not chase parity. Copy a T3 feature only when the owner
+will use it, and improve it where Yantra can: tmux, the machine choice, the phone, the appliance.
+Copy the web files; re-express the server logic in Rust.
 
 **Rust punishes design churn**, and M0–M1 is where the design is least settled. Prefer a working ugly
 path over an elegant abstraction. Resist generalising before the third use.

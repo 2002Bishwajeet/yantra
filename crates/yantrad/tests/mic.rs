@@ -9,6 +9,8 @@
 //! **One stand-in, as in `yantra-core/tests/install.rs`:** `claude`'s
 //! installer writes a stub, so nothing is fetched from claude.ai. The audio
 //! packages are fetched by the container's own `dnf`.
+//!
+//! Y-486 adds a logout: the microphone outlives it with linger, and not without.
 
 // `expect` in a test is a deliberate abort with a message.
 #![allow(clippy::expect_used)]
@@ -290,8 +292,71 @@ python3 -c 'import struct; d=open("/tmp/heard.raw","rb").read(); n=len(d)//2; pr
     assert_eq!(check.state, State::Absent, "{}", check.detail);
     assert!(check.detail.contains("linger"), "{}", check.detail);
 
+    // (j) both log out. Per session, because `terminate-user` kills the whole
+    // user slice, a lingering manager too. Since systemd 256 that manager is
+    // a session of class `manager`, so only `user` sessions are logins.
+    drop(ssh);
+    drop(listener);
+    let logins = format!(
+        "loginctl list-sessions --no-legend \\
+           | awk '$6 == \"user\" && ($3 == \"{UNPRIVILEGED}\" || $3 == \"{LISTENER}\") {{ print $1 }}'"
+    );
+    sh(
+        &systemd,
+        &format!("{logins} | xargs -r -n1 loginctl terminate-session"),
+    )?;
+    let listener_manager = format!("user@$(id -u {LISTENER}).service");
+    let mut gone = false;
+    for _ in 0..60 {
+        let left = sh(&systemd, &logins)?;
+        let manager = sh(
+            &systemd,
+            &format!("systemctl is-active {listener_manager} || true"),
+        )?;
+        if left.trim().is_empty() && manager.trim() != "active" {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    // Without this the check below proves nothing: logout must really stop a
+    // manager that has no linger.
+    assert!(gone, "the logout left a session or the listener's manager");
+
+    // Asked from root with no login session: a fresh ssh login would start a
+    // new manager and hide a lost one.
+    assert_eq!(
+        sh(
+            &systemd,
+            &format!("systemctl is-active user@$(id -u {UNPRIVILEGED}).service")
+        )?
+        .trim(),
+        "active"
+    );
+    let sources = sh(
+        &systemd,
+        &format!(
+            "runuser -u {UNPRIVILEGED} -- env XDG_RUNTIME_DIR=/run/user/$(id -u {UNPRIVILEGED}) \
+             pactl list short sources"
+        ),
+    )?;
+    assert_eq!(
+        sources
+            .lines()
+            .filter(|line| line.split('\t').nth(1) == Some("yantra-mic"))
+            .count(),
+        1,
+        "{sources}"
+    );
+    let relogin_dir = state_dir("relogin")?;
+    let relogin = connect(&systemd, UNPRIVILEGED, &key, &relogin_dir).await?;
+    let survived = doctor::of(&relogin, TERM).await;
+    let check = mic_check(&survived);
+    assert_eq!(check.state, State::Present, "{}", check.detail);
+
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&listener_dir);
+    let _ = std::fs::remove_dir_all(&relogin_dir);
     Ok(())
 }
 
