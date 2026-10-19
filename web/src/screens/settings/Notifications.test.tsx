@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { focusManager } from '@tanstack/react-query'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
-import { type Answers, mountSettings, sent, unmountSettings } from './harness'
+import { type Answer, type Answers, mountSettings, sent, unmountSettings } from './harness'
 
 afterEach(() => {
   cleanup()
@@ -196,5 +196,101 @@ describe('the relay sheet', () => {
     await screen.findByRole('button', { name: 'Edit' })
     await waitFor(() => expect(asked).toContain('POST /api/viewing'))
     expect(asked.filter((one) => one.includes('/api/relay'))).toHaveLength(0)
+  })
+})
+
+describe('restart now (Y-479)', () => {
+  const RESTART = { name: 'Restart now' }
+  const restartNow = async (sheet: ReturnType<typeof within>) => {
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    fireEvent.click(sheet.getByRole('button', { name: 'Restart' }))
+  }
+
+  it('offers no restart before a save', async () => {
+    mountSettings('desktop', '/settings/notifications')
+    const sheet = await open()
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+  })
+
+  it('asks the daemon to restart after a save, and says it is restarting', async () => {
+    const asked = mountSettings('desktop', '/settings/notifications', { ...relay(204), 'POST /api/update': [202] })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    await restartNow(sheet)
+    await waitFor(() => expect(asked).toContain('POST /api/update'))
+    expect(await sheet.findByText('yantrad is restarting. The page reconnects on its own.')).toBeTruthy()
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+  })
+
+  it('offers the restart after a 502, because the relay is written', async () => {
+    mountSettings('desktop', '/settings/notifications', relay(502, 'the test message did not arrive'))
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    expect(await sheet.findByRole('button', RESTART)).toBeTruthy()
+  })
+
+  it('offers no restart after a save that failed', async () => {
+    mountSettings('desktop', '/settings/notifications', relay(500, 'cannot write'))
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    await sheet.findByText('The relay could not be written to /etc/yantra/daemon.env.')
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+  })
+
+  it('offers the restart again after a second save', async () => {
+    mountSettings('desktop', '/settings/notifications', { ...relay(204), 'POST /api/update': [202] })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    await restartNow(sheet)
+    await sheet.findByText(/yantrad is restarting/)
+    fill(sheet, 'https://ntfy.sh/b-topic')
+    expect(await sheet.findByRole('button', RESTART)).toBeTruthy()
+    expect(sheet.queryByText(/yantrad is restarting/)).toBeNull()
+  })
+
+  it('keeps the page when the about poll fails during the restart', async () => {
+    let down = false
+    const asked = mountSettings('desktop', '/settings/notifications', {
+      ...relay(204),
+      'GET /api/about': () => (down ? [503, 'restarting'] : [200, contract.about]),
+      'POST /api/update': () => {
+        down = true
+        return [202]
+      },
+    })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    await restartNow(sheet)
+    await sheet.findByText(/yantrad is restarting/)
+    const before = asked.filter((one) => one === 'GET /api/about').length
+    await waitFor(() => expect(asked.filter((one) => one === 'GET /api/about').length).toBeGreaterThan(before + 1), {
+      timeout: 8_000,
+    })
+    expect(screen.queryByText('Notifications could not be drawn')).toBeNull()
+    expect(sheet.getByText(/yantrad is restarting/)).toBeTruthy()
+  }, 15_000)
+
+  const refusals: [string, Answer | (() => Answer), RegExp][] = [
+    ['a box with no updater', [409, 'no updater'], /cannot update itself/],
+    ['a device that may not update', [403, 'not yours'], /may not update the daemon/],
+    ['a daemon that cannot tell who asks', [503, 'no whois'], /could not tell who is asking/],
+    [
+      'a daemon that does not answer',
+      () => {
+        throw new TypeError('Failed to fetch')
+      },
+      /did not answer, so it was not restarted/,
+    ],
+    ['a refusal', [500, 'boom'], /update was refused/],
+  ]
+
+  it.each(refusals)('draws %s, and names the manual command', async (_, answered, title) => {
+    mountSettings('desktop', '/settings/notifications', { ...relay(204), 'POST /api/update': answered })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    expect(sheet.queryByText(/sudo systemctl restart yantrad/)).toBeNull()
+    await restartNow(sheet)
+    expect(await sheet.findByText(title)).toBeTruthy()
+    expect(sheet.getByText('sudo systemctl restart yantrad')).toBeTruthy()
   })
 })
