@@ -382,6 +382,10 @@ deleted everywhere else.
 | Y-530 | claude-mem redaction against the Y-430 fixtures | ⬜ todo | claude | Y-527 | **Done** when R22 lists each Y-430 secret that claude-mem's patterns miss, and `CLAUDE_MEM_REDACT_CUSTOM_PATTERNS` catches each one. |
 | Y-531 | ADR: the appliance hosts the shared memory | ⬜ todo | owner, claude | Y-527, Y-530 | **Done** when the owner accepts an ADR that amends ADR-0032 with the hub, or drops it and opens the §9.5 fallback rows. |
 | Y-532 | Landing shows the wget install form | ⬜ todo | claude | Y-473 | **Parks:** needs the landing's visual baselines regenerated. **Done** when the landing's last beat shows the `wget` form beside the `curl` one and `landing-desktop-last.png` and `landing-mobile-last.png` are regenerated. |
+| Y-533 | Plan and ADR-0038: rooms and guest devices | 🔵 review | owner, claude | — | **Owner, 2026-10-20:** accepted. Live sessions talk to each other across machines, and a friend's device joins with limited rights. **Done** when both are accepted. |
+| Y-534 | Rooms inside the tailnet | ⬜ todo | claude | Y-533, Y-447 | **Done** when `yantrad` serves `room_send` and `room_read` at `/api/mcp` (ADR-0038), Chat turns get it by `--mcp-config`, messages pass between sessions on two machines, a Chat thread wakes on a message in a capped mode, and a room pauses at its turn budget. A podman test covers it. |
+| Y-535 | A friend's device joins with a scoped grant | ⬜ todo | claude | Y-534 | **Done** when every route refuses a non-owner without a scope (the `Inventory` fake proves each one), a knock shows in Settings → Devices → Add a friend, the owner grants scopes into a guest file with no secret, guest messages arrive labelled, and a revoke cuts the device off at once. **Parks** its last step: the owner's walk with a real friend's device. |
+| Y-536 | The owner sees and steers rooms | ⬜ todo | claude | Y-534 | **Done** when the dashboard lists live rooms with their messages and budgets, and the owner posts into a room and resumes a paused one from the phone. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
