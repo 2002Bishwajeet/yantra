@@ -123,12 +123,12 @@ test.describe('the four steps', () => {
 
   /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
   test('the clone folder survives a reload', async ({ page }) => {
-    const toSource = async () => {
+    const fillStep1 = async () => {
       await page.getByLabel('Name').fill('quiet-otter')
       await page.getByRole('button', { name: 'cachyos-g14' }).click()
-      await page.getByRole('button', { name: 'Continue' }).click()
     }
-    await toSource()
+    await fillStep1()
+    await page.getByRole('button', { name: 'Continue' }).click()
     const line = page.locator('.ns__clone', { hasText: 'Clone folder:' })
     await expect(line).toContainText('~/Github')
 
@@ -144,7 +144,8 @@ test.describe('the four steps', () => {
 
     await page.reload()
     await expect(heading(page, 'New session')).toBeVisible()
-    await toSource()
+    // The reload keeps ?step=2, so step 2 draws as soon as step 1 is complete.
+    await fillStep1()
     await expect(line).toContainText('~/notes')
   })
 })
