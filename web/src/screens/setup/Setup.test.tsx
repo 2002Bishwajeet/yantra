@@ -97,6 +97,24 @@ describe('the steps', () => {
     expect(later.getByRole('link', { name: 'Connect' }).dataset.variant).toBe('tonal')
   })
 
+  /** Y-477: the appliance is the node the daemon is bound to. */
+  it('shows the appliance key expiry with a link to the admin console, and no link when expiry is off', async () => {
+    const node = aMachine({ name: 'pi', address: '100.64.0.1', key_expires: '2026-09-12T12:00:00Z' })
+    await draw(base([node]))
+    let later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
+    expect(later.getByText("The appliance's Tailscale key")).toBeTruthy()
+    expect(later.getByText(/soon · expires on 2026-09-12, in 6 days/)).toBeTruthy()
+    const link = later.getByRole('link', { name: 'Admin console' })
+    expect(link.getAttribute('href')).toBe('https://login.tailscale.com/admin/machines')
+    expect(link.getAttribute('target')).toBe('_blank')
+    cleanup()
+
+    await draw(base([{ ...node, key_expires: null }]))
+    later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
+    expect(later.getByText(/done · key expiry is off/)).toBeTruthy()
+    expect(later.queryByRole('link', { name: 'Admin console' })).toBeNull()
+  })
+
   /** D7 B5: a step that is not done draws its number, never a tick. */
   it('leads each step with its state', async () => {
     await draw(base())

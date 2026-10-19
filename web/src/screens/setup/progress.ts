@@ -9,12 +9,14 @@ import {
   useSshIdentity,
   useWorkspaces,
 } from '@/api/hooks'
+import { fromReading } from '@/api/client'
 import { machineReadinessQuery } from '@/api/queries'
+import { appliance } from '@/lib/appliance'
 import { runsSessions } from '@/lib/platform'
 import { isReady } from '@/lib/ready'
 import { at } from '@/lib/time'
 import { asEvents } from '@/shell/notifications'
-import { added, failed, firstSession, github, line, machines as readied, push, tailnet } from './steps'
+import { added, failed, firstSession, github, keyExpiry, line, machines as readied, push, tailnet } from './steps'
 
 /** D7 §4.1: four steps are required; GitHub and push wait for later. */
 export const REQUIRED = 4
@@ -102,7 +104,12 @@ export function useChecklist(now: number) {
     ready: readied(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
     first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount),
   }
-  const later = { github: github(connection), push: push(about) }
+  const key = keyExpiry(
+    { data: machines.looked === 'ok' ? machines.data : undefined, error: fromReading(machines), isPending: machines.looked === 'pending' },
+    appliance(all, about.data),
+    now,
+  )
+  const later = { github: github(connection), push: push(about), key }
   const done = Object.values(steps).filter((one) => one.status === 'done').length
   const target =
     lines.find((one) => one.line.kind === 'missing' && one.line.installable)?.machine.name ?? null

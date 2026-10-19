@@ -3,7 +3,7 @@ import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
 import { joinCommand, joinUrl } from '@/lib/join'
-import { added, github, line, machines, push, ready, tailnet } from './steps'
+import { added, github, keyExpiry, line, machines, push, ready, tailnet } from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -187,5 +187,43 @@ describe('the join command', () => {
 
   it('pipes the script to sh', () => {
     expect(joinCommand('http://100.64.0.1:7717/join')).toBe('curl -fsSL http://100.64.0.1:7717/join | sh')
+  })
+})
+
+describe('the appliance key', () => {
+  const NOW = Date.parse('2026-10-19T12:00:00Z')
+  const pi = (key_expires: string | null) => machine({ key_expires })
+  const step = (key: string | null) => keyExpiry(got([pi(key)]), pi(key), NOW)
+
+  it('is done when key expiry is off', () => {
+    expect(step(null)).toEqual({ status: 'done', words: 'key expiry is off' })
+  })
+
+  it('is a todo with the date when the key is far off', () => {
+    expect(step('2027-01-18T10:11:44Z')).toEqual({
+      status: 'todo',
+      words: 'the key expires on 2027-01-18 · turn key expiry off in the admin console',
+    })
+  })
+
+  it('warns within 30 days, in UTC days', () => {
+    expect(step('2026-11-18T12:00:00Z')).toEqual({ status: 'due', words: 'expires on 2026-11-18, in 30 days' })
+    expect(step('2026-11-19T12:00:00Z').status).toBe('todo')
+    expect(step('2026-10-20T11:00:00Z').words).toBe('expires on 2026-10-20, in 1 day')
+  })
+
+  it('warns that an expired key needs a new login', () => {
+    expect(step('2026-10-01T08:00:00Z')).toEqual({
+      status: 'due',
+      words: 'expired on 2026-10-01 · log in to Tailscale on the appliance again',
+    })
+  })
+
+  it('says so when the daemon has not found its node, reads while pending, and fails with the daemon words', () => {
+    expect(keyExpiry(got([pi(null)]), null, NOW).words).toBe('the daemon has not found its own node')
+    expect(keyExpiry(reading, null, NOW)).toEqual({ status: 'todo', words: 'reading…' })
+    const failed = keyExpiry(broke(new ApiError('refused', 'boom', { status: 503 })), null, NOW)
+    expect(failed.status).toBe('failed')
+    expect(failed.words).toContain('boom')
   })
 })
