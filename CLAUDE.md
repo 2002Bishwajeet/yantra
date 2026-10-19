@@ -163,6 +163,12 @@ copied rather than rewritten. Both use React, Base UI, Tailwind 4 and TanStack R
 attribute each copied file as [ADR-0026](docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)
 decision 5 says.
 
+**The coding loop adapts T3 Code too, for the owner's own use.** Owner's instruction, 2026-10-19:
+Yantra is where the owner works from an issue to a merged PR ([M16](docs/plans/m16-the-coding-loop.md)).
+It does not compete with T3 Code and does not chase parity. Copy a T3 feature only when the owner
+will use it, and improve it where Yantra can: tmux, the machine choice, the phone, the appliance.
+Copy the web files; re-express the server logic in Rust.
+
 **Rust punishes design churn**, and M0–M1 is where the design is least settled. Prefer a working ugly
 path over an elegant abstraction. Resist generalising before the third use.
 
