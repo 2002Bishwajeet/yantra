@@ -177,7 +177,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
       </div>
 
       {gone ? (
-        <Text render={<p />} className="ns__note" role="status" scale="body-medium" tone="variant">
+        <Text render={<p role="status" />} className="ns__note" scale="body-medium" tone="variant">
           {`${where} is gone; showing home`}
         </Text>
       ) : null}

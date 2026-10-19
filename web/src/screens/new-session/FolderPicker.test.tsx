@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import type { ByRoleMatcher, ByRoleOptions, Matcher } from '@testing-library/dom'
 import * as contract from '@/contract.gen'
 import { readPrefs, writePrefs } from '@/shell/prefs'
 import { type Answers, HOME, listing, mountNew, unmountNew } from './harness'
@@ -177,14 +178,14 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
   }
 
   // The list is replaced by a skeleton on every walk, so each query finds it again.
-  type Q = ReturnType<typeof within>
+  type Args = [role: ByRoleMatcher, options?: ByRoleOptions]
   const list = () => within(screen.getByRole('list', { name: 'Folders' }))
   const folders = {
-    getByRole: (...a: Parameters<Q['getByRole']>) => list().getByRole(...a),
-    queryByRole: (...a: Parameters<Q['queryByRole']>) => list().queryByRole(...a),
-    getAllByRole: (...a: Parameters<Q['getAllByRole']>) => list().getAllByRole(...a),
-    queryByText: (...a: Parameters<Q['queryByText']>) => list().queryByText(...a),
-    findByRole: (...a: Parameters<Q['getByRole']>) => waitFor(() => list().getByRole(...a)),
+    getByRole: (...a: Args) => list().getByRole(...a),
+    queryByRole: (...a: Args) => list().queryByRole(...a),
+    getAllByRole: (...a: Args) => list().getAllByRole(...a),
+    queryByText: (text: Matcher) => list().queryByText(text),
+    findByRole: (...a: Args) => waitFor(() => list().getByRole(...a)),
   }
 
   async function toLocal(extra: Answers = {}, name = 'quiet-otter') {
