@@ -1,7 +1,7 @@
 # ADR-0034 — The coding loop writes to GitHub
 
 - **Date:** 2026-10-19
-- **Status:** Proposed 2026-10-19 ([Y-487](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Accepted 2026-10-19 by the owner ([Y-487](../../tracker.md)), with no changes.
 - **Evidence:** [the M16 plan](../plans/m16-the-coding-loop.md) §2 and §5, which reads T3 Code at
   `1451e7c`.
 - **Amends** [ADR-0023](0023-the-github-grant-lives-beside-the-relay.md) (the grant now writes) and

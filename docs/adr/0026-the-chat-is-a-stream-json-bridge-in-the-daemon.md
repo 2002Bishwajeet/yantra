@@ -208,3 +208,8 @@ drawn and tested without a fleet.
 > copied components still sit in `web/src/m3/`, use the tokens, and are tested as ADR-0024 §6
 > requires. Decision 5's attribution covers them: the notice file, and a block comment naming the
 > upstream path.
+
+> **The diff surface is decided, recorded 2026-10-19 (Y-487).** The owner chose to make the Chat
+> the place where they review an agent's work. The Chat gets a diff panel on `@pierre/diffs` and
+> `@pierre/trees` (Apache-2.0), loaded in a lazy chunk:
+> [ADR-0034](0034-the-coding-loop-writes-to-github.md) decision 6.
