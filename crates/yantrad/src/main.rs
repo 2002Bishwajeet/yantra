@@ -146,7 +146,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
             api::router()
                 .with_state(fleet.clone())
                 .merge(write::router(authoriser.clone(), fleet.clone()))
-                .merge(chat::router(authoriser.clone()))
+                .merge(chat::router(authoriser.clone(), fleet.chats.clone()))
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
                 .merge(mic::router(authoriser)),
         )
@@ -176,6 +176,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             updater: PathBuf::from(yantra_core::update::UPDATER),
         }),
         github: github::Grant::from_env(),
+        chats: chats(),
         ..heartbeat::Fleet::default()
     };
 
@@ -249,6 +250,19 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
 
 /// M7 runs this under a supervisor, and I-27 is a standing reminder about
 /// processes nobody reaps.
+/// The chat registry, whose waits go to the relay when there is one. The
+/// relay is read again because a `Relay` is not `Clone`, by design.
+fn chats() -> chat::Registry {
+    match yantra_core::notify::from_env() {
+        Some(relay) => {
+            let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(chat::tell(relay, heard));
+            chat::Registry::telling(waits)
+        }
+        None => chat::Registry::default(),
+    }
+}
+
 async fn shutdown() {
     let interrupt = async {
         let _ = tokio::signal::ctrl_c().await;

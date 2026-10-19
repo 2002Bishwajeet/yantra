@@ -81,9 +81,10 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     });
 
     let sessions = model.clone();
+    let chats = fleet.chats.clone();
     tokio::spawn(async move {
         loop {
-            look_at_sessions(&sessions).await;
+            look_at_sessions(&sessions, &chats).await;
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -176,8 +177,22 @@ async fn look_at_workspaces(model: &Model) {
     model.write().await.workspaces = Some(Arc::new(reading));
 }
 
-async fn look_at_sessions(model: &Model) {
+/// Also adopts each Chat keeper no task of this daemon reads, so a turn that
+/// outlived a restart is read again within one pass (ADR-0035 decision 9).
+async fn look_at_sessions(model: &Model, chats: &crate::chat::Registry) {
     let reading = Reading::new(sessions::list().await);
+    if let Ok(machines) = reading.value() {
+        for session in machines.iter().flat_map(|machine| &machine.keepers) {
+            if !chats.holds(session)
+                && let Some(keeper) = yantra_core::keep::Keeper::parse(session)
+            {
+                let chats = chats.clone();
+                tokio::spawn(async move {
+                    crate::chat::adopt(&chats, keeper.workspace(), keeper.thread()).await;
+                });
+            }
+        }
+    }
     model.write().await.sessions = Some(Arc::new(reading));
 }
 
@@ -382,6 +397,7 @@ mod tests {
             MachineSessions {
                 machine: "pi".into(),
                 sessions: Ok(Vec::new()),
+                keepers: Vec::new(),
             },
             MachineSessions {
                 machine: "macbook".into(),
@@ -389,6 +405,7 @@ mod tests {
                     machine: "macbook".into(),
                     reason: "connection timed out".into(),
                 }),
+                keepers: Vec::new(),
             },
         ]))));
 

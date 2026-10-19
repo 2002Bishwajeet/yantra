@@ -62,6 +62,7 @@ import type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatQuery,
   Cloning,
   Connection,
   Device,
@@ -260,6 +261,7 @@ async fn fleet() -> Fleet {
                     created: "Thu Jul 30 13:02:31 2026".into(),
                     created_at: 1_785_502_951,
                 }]),
+                keepers: Vec::new(),
             },
             MachineSessions {
                 machine: "pi".into(),
@@ -267,6 +269,7 @@ async fn fleet() -> Fleet {
                     machine: "pi".into(),
                     reason: "connection timed out".into(),
                 }),
+                keepers: Vec::new(),
             },
         ])))),
         agents: Some(Arc::new(Reading::new(Ok(status::Fleet {
