@@ -167,7 +167,7 @@ by number, which is also the better answer when the network works.
 ### With no terminal
 
 A run with nothing at `/dev/tty` — a container, a CI job, an `ssh host 'curl … | bash'` without
-`-t` — asks nothing and starts nothing. It installs the release, writes both environment files if
+`-t` — without `--yes` asks nothing and starts nothing. It installs the release, writes both environment files if
 they are absent (`agent.env` with a placeholder rather than an address), enables no unit, and
 ends with a numbered list of what is left. When `yantrad.service` is already enabled — which is
 how `yantra-update.service` runs it — it says that instead, and restarts nothing itself. That is the path
