@@ -9,7 +9,7 @@ How to get Yantra building and running on your machine. For *how to contribute*
 Arch / CachyOS:
 
 ```bash
-sudo pacman -S --needed rustup just zig mold podman
+sudo pacman -S --needed rustup just zig mold podman shellcheck
 rustup default stable
 rustup target add aarch64-unknown-linux-musl
 cargo install --locked cargo-zigbuild cargo-deny cargo-nextest
@@ -58,6 +58,7 @@ just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
 just pinned       # every GitHub action names a commit, never a tag
+just shellcheck   # lint install.sh and join.sh (CI only; needs shellcheck)
 just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
 just appliance    # cross-compile the appliance binaries (arm64 by default)
 just appliance-runtime  # idle RSS, idle CPU and CLI cold-start, on this machine

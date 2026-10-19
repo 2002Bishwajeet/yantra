@@ -20,7 +20,7 @@ default:
 check: fmt-check lint test deny no-node pinned agents
 
 # Everything CI runs — the workflow calls these same recipes, so they cannot drift.
-ci: check appliance
+ci: check appliance shellcheck
 
 fmt:
     cargo fmt --all
@@ -91,6 +91,10 @@ appliance target=appliance_target:
 # Every `uses:` names a 40-hex commit. A tag is mutable — a major tag is
 # repointed at every release, and any tag can be force-pushed — and an action
 # runs arbitrary code with the job's token, which for `release.yml` can publish.
+# Lint the shell scripts users pipe into sh; no --severity, so any finding fails.
+shellcheck:
+    shellcheck install.sh crates/yantra-core/src/join.sh
+
 pinned:
     #!/usr/bin/env bash
     set -euo pipefail
