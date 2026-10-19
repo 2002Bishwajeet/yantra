@@ -10,7 +10,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { FolderTree } from './FolderTree'
 import { tilde } from './form'
-import { Breadcrumb } from './LocalDirs'
+import { PathBar } from './PathBar'
 
 /** The folder picker behind "Change": the Local browser's rows, and the
  *  folder you are in is the one that is used. */
@@ -31,7 +31,7 @@ function Picker(props: {
   return (
     <div className="ns__picker">
       <div className="ns__where">
-        {here !== null ? <Breadcrumb here={here} home={root} onGo={(path) => setWhere(path ?? root ?? '/')} /> : null}
+        {here !== null ? <PathBar here={here} home={root} onGo={(path) => setWhere(path ?? root ?? '/')} /> : null}
         <FilterChip onPressedChange={setHidden} pressed={hidden}>
           Show hidden
         </FilterChip>

@@ -1,48 +1,25 @@
-import { useEffect, useEffectEvent, useState } from 'react'
+import { type KeyboardEvent, useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Entry, Listing, Probed } from '@/api'
 import { asApiError, isApiError } from '@/api/errors'
 import { useMakeDir } from '@/api/mutations'
 import { dirsQuery, probeQuery } from '@/api/queries'
 import { derive } from '@/lib/name'
-import { trimSlash } from '@/lib/path'
+import { dirOf, trimSlash } from '@/lib/path'
 import { Button } from '@/m3/button/Button'
 import { FilterChip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
-import { crumbs, noAccess, under } from './dirs'
+import { usePrefs } from '@/shell/prefs'
+import { noAccess, under } from './dirs'
 import { FolderTree } from './FolderTree'
 import { slug, tilde, type Values } from './form'
+import { FOLDER_KEYS, folderKeys, typing } from './keys'
+import { PathBar } from './PathBar'
+import { arrange, lastFolder, recentFolders } from './picker'
 import type { SessionForm } from './useSessionForm'
-
-export function Breadcrumb(props: { here: string; home: string | null; onGo: (path: string | null) => void }) {
-  const { here, home, onGo } = props
-  const parts = crumbs(here, home)
-  return (
-    <nav aria-label="Where you are" className="ns__crumbs">
-      <ol>
-        {parts.map((part, index) => {
-          const last = index === parts.length - 1
-          return (
-            <li key={part.path}>
-              {last ? (
-                <span aria-current="location" className="ns__crumb">
-                  {part.label}
-                </span>
-              ) : (
-                <button className="ns__crumb m3-interactive" onClick={() => onGo(part.path === home ? null : part.path)} type="button">
-                  {part.label}
-                </button>
-              )}
-            </li>
-          )
-        })}
-      </ol>
-    </nav>
-  )
-}
 
 function NewFolder(props: { machine: string; here: string; name: string; onMade: (path: string) => void }) {
   const { machine, here, name, onMade } = props
@@ -77,29 +54,39 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
   )
 }
 
-/** Why a listing draws no rows: three different answers, never one sentence
+/** Why a listing draws no rows: four different answers, never one sentence
  *  true of all of them (R-23). */
-function nothing(listing: Listing, machine: string): string {
+function nothing(listing: Listing, machine: string, filter: string, folder: string): string {
   if (!listing.access) return noAccess(machine)
   if (listing.entries.length === 0) return 'this folder is empty'
+  if (filter.trim() !== '') return `nothing in ${folder} matches ${filter.trim()}`
   return 'nothing here but hidden entries'
 }
 
 /** The local half of step 2 (NewSessionLocal): one level per walk, the
- *  folder you are in is the choice, and typing a path is the way in when
- *  the listing is long or the machine cannot list (D4 §4.2). */
+ *  folder you are in is the choice, and it behaves like a file browser: a
+ *  path bar, a filter, arrow keys, and a start at the last folder used on
+ *  this machine (Y-516). */
 export function LocalDirs(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
   const machine = values.machine
   const client = useQueryClient()
+  const prefs = usePrefs()
+  // The folder this machine opened at last time; if it is gone, `$HOME` and a note.
+  const [remembered] = useState(() => lastFolder(prefs, machine))
   // `null` is the machine's own `$HOME`, which only the far side can name.
-  const [where, setWhere] = useState<string | null>(null)
-  const [typed, setTyped] = useState('')
-  const [probing, setProbing] = useState(false)
+  const [where, setWhere] = useState<string | null>(remembered)
+  const [filter, setFilter] = useState('')
+  const [active, setActive] = useState<string | null>(null)
   // Off by default: a home's dotfiles outnumber its projects (Y-414).
   const [hidden, setHidden] = useState(false)
+  const list = useRef<HTMLUListElement>(null)
+  const keys = useId()
   const home = useQuery({ ...dirsQuery(machine, null), enabled: true })
-  const listing = useQuery({ ...dirsQuery(machine, where), enabled: true })
+  const asked = useQuery({ ...dirsQuery(machine, where), enabled: true })
+  const refusedAt = asked.error ? asApiError(asked.error).status : null
+  const gone = where !== null && where === remembered && (refusedAt === 404 || refusedAt === 409)
+  const listing = gone ? home : asked
   const root = home.data ? trimSlash(home.data.path) : null
   const here = listing.data ? trimSlash(listing.data.path) : null
 
@@ -118,47 +105,97 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
     if (here !== null) arrived(here)
   }, [here])
 
+  const go = (path: string | null) => {
+    setWhere(path)
+    setFilter('')
+    setActive(null)
+  }
+
   const walk = (entry: Entry) => {
-    setWhere(entry.path)
-    setTyped('')
+    go(entry.path)
     choose(entry.path, entry.origin, 'yes')
   }
 
-  const takeTyped = async () => {
+  // Typing a path and pressing a recent folder both ask the machine first.
+  const visit = async (typed: string) => {
     const path = trimSlash(typed.trim())
-    if (!path.startsWith('/')) return
-    setProbing(true)
     // R-23: a machine that could not be asked is not the path being absent —
     // D4 §5 lets that through and says so.
     const probed: Probed | Error = await client
       .fetchQuery(probeQuery(machine, path))
       .catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))))
-    setProbing(false)
     if (probed instanceof Error) {
       choose(path, null, 'unknown', isApiError(probed) ? probed.said : probed.message)
-    } else {
-      choose(path, probed.origin, probed.exists ? 'yes' : 'no')
+      return
     }
+    if (probed.exists) go(path === root ? null : path)
+    choose(path, probed.origin, probed.exists ? 'yes' : 'no')
   }
 
   const source = values.source?.kind === 'local' ? values.source : null
-  const shown = listing.data
-    ? hidden
-      ? listing.data.entries
-      : listing.data.entries.filter((entry) => !entry.name.startsWith('.'))
-    : []
+  const shown = listing.data ? arrange(listing.data.entries, { hidden, filter }) : []
+  const first = shown.find((entry) => entry.kind === 'dir' && entry.access)?.path
+  const tab = (path: string): 0 | -1 => (path === (active ?? first) ? 0 : -1)
+  const recent = recentFolders(prefs, machine)
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Backspace' || typing(event.target) || event.altKey || event.ctrlKey || event.metaKey) return
+    const up = here === null ? null : dirOf(here)
+    if (here === null || here === '/' || up === null) return
+    event.preventDefault()
+    go(up === root ? null : up)
+  }
 
   return (
-    <div className="ns__local">
+    <div className="ns__local" onKeyDown={onKeyDown} role="presentation">
       <Text render={<p />} scale="body-medium" tone="variant">
         browsing {machine} over the open ssh connection
       </Text>
+
+      {recent.length > 0 ? (
+        <section aria-labelledby={`${keys}-recent`} className="ns__recents">
+          <Text id={`${keys}-recent`} render={<h3 />} scale="label-large" tone="variant">
+            Recent on {machine}
+          </Text>
+          <ul>
+            {recent.map((path) => (
+              <li key={path}>
+                <button className="ns__crumb m3-interactive" onClick={() => void visit(path)} type="button">
+                  {tilde(path, root)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <div className="ns__where">
-        {here !== null ? <Breadcrumb here={here} home={root} onGo={setWhere} /> : null}
+        {here !== null ? <PathBar here={here} home={root} onEdit={visit} onGo={go} /> : null}
         <FilterChip onPressedChange={setHidden} pressed={hidden}>
           Show hidden
         </FilterChip>
       </div>
+
+      {gone ? (
+        <Text render={<p />} className="ns__note" role="status" scale="body-medium" tone="variant">
+          {`${where} is gone; showing home`}
+        </Text>
+      ) : null}
+
+      <TextField
+        autoComplete="off"
+        label="Filter this folder"
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowDown') return
+          event.preventDefault()
+          list.current?.querySelector<HTMLElement>('[data-row]')?.focus()
+        }}
+        onValueChange={(value) => {
+          setFilter(value)
+          setActive(null)
+        }}
+        value={filter}
+      />
 
       {listing.isPending ? (
         <div aria-busy="true" className="ns__list">
@@ -170,30 +207,42 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
         <ErrorSurface.Inline
           error={asApiError(listing.error)}
           reset={() => void listing.refetch()}
-          title={
-            asApiError(listing.error).status === 409
-              ? `${machine} has no directory there`
-              : `${machine} could not be asked what is there`
-          }
+          title={listing.error && asApiError(listing.error).status === 409 ? `${machine} has no directory there` : `${machine} could not be asked what is there`}
         />
       ) : (
-        <ul aria-label="Folders" className="ns__list">
-          {shown.length === 0 ? (
-            <li>
-              <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                {nothing(listing.data, machine)}
-              </Text>
-            </li>
-          ) : null}
-          <FolderTree entries={shown} hidden={hidden} machine={machine} onWalk={walk} />
-          {listing.data.truncated ? (
-            <li>
-              <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Type a path to reach the rest.`}
-              </Text>
-            </li>
-          ) : null}
-        </ul>
+        <>
+          <span className="m3-sr-only" id={keys}>
+            {FOLDER_KEYS}
+          </span>
+          <ul
+            aria-describedby={keys}
+            aria-label="Folders"
+            className="ns__list"
+            onFocus={(event) => {
+              const at = event.target instanceof HTMLElement ? event.target.closest('.ns__node') : null
+              const path = at?.querySelector<HTMLElement>('[data-row]')?.dataset.path
+              if (path) setActive(path)
+            }}
+            onKeyDown={folderKeys}
+            ref={list}
+          >
+            {shown.length === 0 ? (
+              <li>
+                <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
+                  {nothing(listing.data, machine, filter, tilde(here ?? '', root))}
+                </Text>
+              </li>
+            ) : null}
+            <FolderTree entries={shown} hidden={hidden} machine={machine} onWalk={walk} tab={tab} />
+            {listing.data.truncated ? (
+              <li>
+                <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
+                  {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Type a path to reach the rest.`}
+                </Text>
+              </li>
+            ) : null}
+          </ul>
+        </>
       )}
 
       {here !== null ? (
@@ -203,29 +252,11 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
           machine={machine}
           name={values.name}
           onMade={(path) => {
-            setWhere(path)
+            go(path)
             choose(path, null, 'yes')
           }}
         />
       ) : null}
-
-      <div className="ns__make">
-        <TextField
-          autoComplete="off"
-          label="Or type a path"
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return
-            event.preventDefault()
-            void takeTyped()
-          }}
-          onValueChange={setTyped}
-          supporting="absolute, on this machine; it is checked before anything is written"
-          value={typed}
-        />
-        <Button disabled={probing || !typed.trim().startsWith('/')} onClick={() => void takeTyped()} type="button" variant="tonal">
-          {probing ? 'checking…' : 'Use'}
-        </Button>
-      </div>
 
       {source ? (
         <p className="ns__chosen">
