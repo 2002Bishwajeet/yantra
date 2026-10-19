@@ -3,6 +3,7 @@
 # Install or update Yantra on an always-on Linux box from a published release.
 #
 #     curl -fsSL <url>/install.sh | bash
+#     wget -qO- <url>/install.sh | bash        # Debian 13 has no curl
 #
 # At a terminal it asks before it installs Tailscale, logs the box in, turns on
 # HTTPS, starts the units and prints the dashboard's address (Y-384). With no
@@ -45,6 +46,14 @@ else
     command -v sudo >/dev/null 2>&1 ||
         fail "this needs root and there is no sudo on this box"
     as_root() { sudo "$@"; }
+fi
+
+# Debian 13 ships wget and no curl; the script itself then needs curl.
+if ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    echo "install: curl is missing, so apt-get installs it" >&2
+    as_root apt-get update -qq || fail "apt-get update failed, so curl was not installed"
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates ||
+        fail "apt-get could not install curl"
 fi
 
 for tool in curl tar sha256sum systemctl; do
