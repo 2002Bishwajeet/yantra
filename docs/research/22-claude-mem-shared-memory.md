@@ -115,13 +115,14 @@ If the owner wants the (b2) reader later, it is small and safe, but it should be
 - Whether hooks work against a remote worker with `CLAUDE_MEM_WORKER_AUTOSTART=false`. No test host.
 - Whether a 100.x address is rejected at runtime. I read the validator text only.
 - ~~The code of `services/sync-api`, and whether it self-hosts.~~ Answered in §9.
+- ~~No stock worker run against the hub.~~ Done in §9.6.
 - Summary quality from a local model through the OpenAI-compatible provider.
 - `ctx` today. The R18 figures are from 2026-10-05, on version 2.2.7.
 - The date of issue #233's closing: I give the date as the fetched page stated it.
 
 ## 9. Self-hosting the sync hub, 2026-10-19
 
-The owner asked for one common memory on every device (Y-527). This section answers the `services/sync-api` item in §8. I cloned `thedotmack/claude-mem` at commit `3fae1eb` (version 14.0.1) and read the hub and the client sync code. I ran the hub's test suite in throwaway podman containers (`postgres:17`, `oven/bun:1`): 52 pass, 0 fail. I did **not** run a stock worker against the hub, so §9.2 is from code.
+The owner asked for one common memory on every device (Y-527). This section answers the `services/sync-api` item in §8. I cloned `thedotmack/claude-mem` at commit `3fae1eb` (version 14.0.1) and read the hub and the client sync code. I ran the hub's test suite in throwaway podman containers (`postgres:17`, `oven/bun:1`): 52 pass, 0 fail. I did not run a stock worker in this first pass, so §9.2 was from code. §9.6 records the run that checks it.
 
 ### 9.1 The hub self-hosts, with two stubs
 
@@ -169,6 +170,48 @@ CLAUDE_MEM_REDACT_ENABLED=true
 
 Spike the self-hosted hub first (Y-527). It gives the owner claude-mem on every device with nothing leaving the tailnet except the observer's model calls. If the spike fails, or upstream breaks the contract, use §7 option (c): redacted transcripts to the appliance by Syncthing (Y-430, Y-431) and a search server there. Do not merge SQLite files in Yantra (option b). `ctx` and other memory servers were not re-checked today.
 
+### 9.6 The spike, 2026-10-19
+
+**Result: pass.** Two stock workers shared one observation through a self-hosted hub. No Pro licence, no cmem.ai sign-in and no model call was needed.
+
+- **Version.** `thedotmack/claude-mem` tag `v14.0.1`, commit `3fae1eb45`. It was still the newest 14.x tag on 2026-10-19.
+- **Setup.** One podman network, `postgres:17` with a throwaway volume, the hub (`services/sync-api` mounted into `oven/bun:1.4-debian`, `bun install --frozen-lockfile --production && bun run src/index.ts`), and the stub on `:8081`. The env was the §9.3 env, with `DATABASE_URL=postgres://postgres:pw@pg:5432/sync`. `GET /health` answered `{"ok":true}`.
+- **Workers.** Two containers (`oven/bun:1.4-debian`) held the repo read-only and an empty `~/.claude-mem`. Each ran `cd /cm && bun plugin/scripts/worker-service.cjs start`. The built `plugin/scripts/worker-service.cjs` is in the repo, so no build step ran. Neither container held the owner's `~/.claude-mem` or any model credential.
+- **Settings.** `settings.json` held the five §9.3 keys (hub URL `http://hub:8080`, a random token, `USER_ID=yantra`, `WS=false`, `REDACT_ENABLED=true`), plus the worker host and port.
+- **Stub.** `/verify` accepts one token and `/project` echoes the epoch. It is the `startSidecar` logic with a fixed token:
+
+```ts
+Bun.serve({ hostname: "0.0.0.0", port: 8081, async fetch(req) {
+  const u = new URL(req.url);
+  if (u.pathname === "/verify") {
+    const t = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    return t === TOKEN ? Response.json({ userId: "yantra" }) : Response.json({ error: "denied" }, { status: 401 });
+  }
+  if (u.pathname === "/project") {
+    if (req.headers.get("Authorization") !== `Bearer ${SECRET}`) return Response.json({ error: "denied" }, { status: 401 });
+    const p: any = await req.json();
+    return Response.json({ protocol_version: 1, epoch: p.epoch, projected_through_seq: p.through_seq });
+  }
+  return Response.json({ error: "not found" }, { status: 404 });
+}});
+```
+
+- **Making an observation on A.** `POST /api/memory/save` on A with `{"text", "title", "project"}` and a unique marker. The route calls `cloudSync.notify()`, so A flushed within 10 s. `GET /api/sync/status` showed `pending` at 0 and `headSeq` 2. `select seq, kind from sync_ops` on the hub held two `observation` rows.
+- **Searching on B.** `GET /api/search?query=<marker>` on B returned the observation as `#2 Spike note ...`. B found the second marker too.
+- **Time to converge.** B found the first marker 145 s after A saved it, on B's idle poll. This fits the 5 min idle interval at the upper end. I did not test the 30 s in-session interval.
+- **The search needs no vector store.** Neither container had `uvx`, and the worker reported `vector_search_unavailable`. Keyword search still worked. Semantic search on the appliance would need `uvx`.
+
+Negative findings:
+
+- **`POST /api/import` does not flush.** It stored the row, and `sync/status` showed it `pending`, but it never called `notify()`. The row left only when the next `save` flushed. A bulk import to the hub would wait for the next write.
+- **`/api/import` needs the session row to carry `status`.** The first call was rejected with `NOT NULL constraint failed: sdk_sessions.status`. The error text names the column, but the import schema does not.
+- **The worker starts without Claude Code.** `/api/health` showed `degraded` (`claude_cli` setup required, `uvx` missing). Sync did not depend on either. Observations from real sessions still need a model, which this spike did not test.
+- **Not tested.** Redaction, the realtime-token 404 (`WS=false` skipped the probe), the 503 `projection_not_configured` path, a hub restart, and two workers writing at once.
+
+Commands, in order: `podman network create`, `podman volume create`, `podman run` for `postgres:17`, the stub and the hub, `podman run ... sleep infinity` twice for the workers, `podman exec -d` to start each worker, the `curl`-equivalent `fetch` calls named above. I removed the containers, the network, the volume and both images afterwards.
+
+The done condition holds: the self-hosted hub works with stock workers on v14.0.1. The §9.4 risk stands, because upstream can change the verify and projection contract in any release. I do not decide Y-531 here.
+
 ## Sources
 
 All accessed 2026-10-19.
@@ -183,6 +226,7 @@ All accessed 2026-10-19.
 - Cloud sync: https://docs.claude-mem.ai/cloud-sync.md
 - TeamBrain: https://docs.claude-mem.ai/usage/teambrain.md
 - Auto-redaction: https://docs.claude-mem.ai/usage/auto-redaction.md
+- Spike, 2026-10-19: clone of `thedotmack/claude-mem` at `v14.0.1` (`3fae1eb45`), and a run of its hub and two stock workers in throwaway podman containers (§9.6).
 - OpenAI-compatible provider: https://docs.claude-mem.ai/usage/openai-compatible-provider.md
 - Issue 233, multi-device sync: https://github.com/thedotmack/claude-mem/issues/233
 - Discussion 488, shared memory between machines: https://github.com/thedotmack/claude-mem/discussions/488
