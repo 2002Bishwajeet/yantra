@@ -213,3 +213,9 @@ drawn and tested without a fleet.
 > the place where they review an agent's work. The Chat gets a diff panel on `@pierre/diffs` and
 > `@pierre/trees` (Apache-2.0), loaded in a lazy chunk:
 > [ADR-0034](0034-the-coding-loop-writes-to-github.md) decision 6.
+
+> **2026-10-19 ([Y-446](../../tracker.md)): the chat's `claude -p` runs in a tmux session of its
+> own.** [ADR-0035](0035-a-chat-turn-outlives-its-ssh-pipe.md) puts each turn in a keeper session
+> named `yantra-keep-…`, so the turn outlives its ssh pipe. It is still never the TUI's pane, and
+> nothing types into a pane. The agent's three streams are files and a fifo, so I-22 holds for
+> the reason this decision gives. Decision 2 is unchanged: one `claude -p` for each turn.

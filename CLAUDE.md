@@ -142,7 +142,8 @@ Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`,
 never built (Y-044); see its 2026-08-02 amendment. It writes exactly one file, and that file is
 configuration rather than state —
 [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) and the 2026-08-22 amendment
-beside the first. The appliance may keep a conversation history that the daemon never touches —
+beside the first. **Since 2026-10-19 it also writes the owner's dashboard layout**, a preference
+with no fleet state and no secret ([ADR-0036](docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)). The appliance may keep a conversation history that the daemon never touches —
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
