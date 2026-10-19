@@ -18,6 +18,7 @@
 //! runtime is serving terminals on its workers (I-13).
 
 use std::fmt;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use crate::attention::{Attention, Forge, Item};
@@ -195,6 +196,99 @@ impl Release {
     }
 }
 
+/// `owner/repo#n`, the one way an issue is named to Yantra (Y-488).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueRef {
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+}
+
+impl FromStr for IssueRef {
+    type Err = Error;
+
+    fn from_str(input: &str) -> Result<Self, Error> {
+        let refused = || Error::NotAnIssue {
+            input: input.to_owned(),
+        };
+        let (owner, rest) = input.split_once('/').ok_or_else(refused)?;
+        let (repo, number) = rest.split_once('#').ok_or_else(refused)?;
+        let number = Some(number)
+            .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|n| n.parse::<u64>().ok())
+            .filter(|&n| n > 0)
+            .ok_or_else(refused)?;
+        if !named(owner) || !named(repo) {
+            return Err(refused());
+        }
+        Ok(Self {
+            owner: owner.to_owned(),
+            repo: repo.to_owned(),
+            number,
+        })
+    }
+}
+
+impl fmt::Display for IssueRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}#{}", self.owner, self.repo, self.number)
+    }
+}
+
+/// An owner or repository name as this module accepts one. Wider than GitHub's
+/// rule for an owner, and narrow enough to sit in a URL path unescaped.
+fn named(part: &str) -> bool {
+    !part.is_empty()
+        && part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// What a thread starts from. Neither field may reach a log or an error
+/// (ADR-0034 decision 4).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Issue {
+    pub title: String,
+    /// `""` for an issue with no description.
+    pub body: String,
+}
+
+impl fmt::Debug for Issue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<issue>")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullState {
+    Open,
+    Closed,
+    Merged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pull {
+    pub number: u64,
+    pub url: String,
+    pub state: PullState,
+}
+
+/// `(owner, repo)` of a github.com remote, in its https, `ssh://` or scp form.
+/// `None` for any other host, and for a URL carrying a user other than `git`.
+pub fn repo_of(remote: &str) -> Option<(String, String)> {
+    let path = [
+        "https://github.com/",
+        "ssh://git@github.com/",
+        "git@github.com:",
+    ]
+    .iter()
+    .find_map(|prefix| remote.strip_prefix(prefix))?;
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, repo) = path.split_once('/')?;
+    (named(owner) && named(repo)).then(|| (owner.to_owned(), repo.to_owned()))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no OAuth App client id — set {CLIENT_ID} to the id of the app the owner registered")]
@@ -225,6 +319,12 @@ pub enum Error {
 
     #[error("the newest release is tagged `{tag}`, which is not MAJOR.MINOR.PATCH")]
     NotAVersion { tag: String },
+
+    #[error("`{input}` is not an issue — name one as owner/repo#number")]
+    NotAnIssue { input: String },
+
+    #[error("{issue} is a pull request, not an issue")]
+    IsAPull { issue: String },
 
     #[error("could not read {what} from what GitHub sent")]
     Parse {
@@ -390,6 +490,64 @@ impl Github {
         .await
     }
 
+    /// The issue's title and body. A pull request answers this route too, and
+    /// is refused: a thread starts from an issue.
+    pub async fn issue(&self, token: &Token, issue: &IssueRef) -> Result<Issue, Error> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            self.api, issue.owner, issue.repo, issue.number
+        );
+        let token = token.clone();
+        let named = issue.to_string();
+        blocking(move || {
+            let mut response = get(&url, &token, &[]).map_err(unreachable)?;
+            ok(&response, "the issue")?;
+            let found: IssueAnswer = read_json(&mut response, "the issue")?;
+            if found.pull_request.is_some() {
+                return Err(Error::IsAPull { issue: named });
+            }
+            Ok(Issue {
+                title: found.title,
+                body: found.body.unwrap_or_default(),
+            })
+        })
+        .await
+    }
+
+    /// The newest PR whose head is `owner:branch`, in any state (ADR-0034
+    /// decision 3: Yantra derives the PR and stores no link).
+    pub async fn pull_for_head(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<Pull>, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls", self.api);
+        let head = format!("{owner}:{branch}");
+        let token = token.clone();
+        blocking(move || {
+            let mut response = get(
+                &url,
+                &token,
+                &[("head", &head), ("state", "all"), ("per_page", "1")],
+            )
+            .map_err(unreachable)?;
+            ok(&response, "the pull request list")?;
+            let found: Vec<PullAnswer> = read_json(&mut response, "the pull request list")?;
+            Ok(found.into_iter().next().map(|pull| Pull {
+                number: pull.number,
+                url: pull.html_url,
+                state: match (pull.merged_at, pull.state.as_str()) {
+                    (Some(_), _) => PullState::Merged,
+                    (None, "open") => PullState::Open,
+                    (None, _) => PullState::Closed,
+                },
+            }))
+        })
+        .await
+    }
+
     /// The work inbox over the REST API. Three independent reads, so they are
     /// three blocking threads rather than one that triples the worst case.
     pub async fn attention(&self, token: &Token) -> Result<Attention, Error> {
@@ -498,6 +656,23 @@ struct TokenAnswer {
     access_token: Option<String>,
     scope: Option<String>,
     error: Option<String>,
+}
+
+/// `user`, `labels` and the rest of the answer are not named, so they are
+/// never read.
+#[derive(serde::Deserialize)]
+struct IssueAnswer {
+    title: String,
+    body: Option<String>,
+    pull_request: Option<serde_json::Value>,
+}
+
+#[derive(serde::Deserialize)]
+struct PullAnswer {
+    number: u64,
+    html_url: String,
+    state: String,
+    merged_at: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1199,5 +1374,216 @@ mod tests {
         assert!(Release::parse("v0.3.3.1").is_none());
         assert!(Release::parse("v0.3.0-rc.1").is_none());
         assert!(Release::parse("").is_none());
+    }
+
+    #[test]
+    fn an_issue_is_named_owner_slash_repo_hash_number() {
+        let issue: IssueRef = "2002Bishwajeet/yantra.rs#488".parse().expect("good");
+        assert_eq!(
+            issue,
+            IssueRef {
+                owner: "2002Bishwajeet".to_owned(),
+                repo: "yantra.rs".to_owned(),
+                number: 488,
+            }
+        );
+        assert_eq!(issue.to_string(), "2002Bishwajeet/yantra.rs#488");
+        let dashed: IssueRef = "a-b/c_d#1".parse().expect("good");
+        assert_eq!(dashed.number, 1);
+
+        for bad in [
+            "",
+            "o/r",
+            "o/r#",
+            "o/r#0",
+            "o/r#-1",
+            "o/r#+1",
+            "o/r#1x",
+            "o/r#99999999999999999999",
+            "/r#1",
+            "o/#1",
+            "r#1",
+            "o/r/x#1",
+            "o r/x#1",
+            "o/r;id#1",
+            "o/r#1#2",
+        ] {
+            match bad.parse::<IssueRef>() {
+                Err(Error::NotAnIssue { input }) => assert_eq!(input, bad),
+                other => panic!("{bad}: {other:?}"),
+            }
+        }
+        let said = "x".parse::<IssueRef>().expect_err("bad").to_string();
+        assert!(
+            said.contains("`x`") && said.contains("owner/repo#number"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_github_remote_names_its_repository_in_every_form() {
+        let ours = Some(("o".to_owned(), "r".to_owned()));
+        for remote in [
+            "https://github.com/o/r",
+            "https://github.com/o/r.git",
+            "https://github.com/o/r/",
+            "ssh://git@github.com/o/r.git",
+            "git@github.com:o/r.git",
+            "git@github.com:o/r",
+        ] {
+            assert_eq!(repo_of(remote), ours, "{remote}");
+        }
+        for remote in [
+            "https://gitlab.com/o/r.git",
+            "https://user:token@github.com/o/r.git",
+            "git@gitlab.com:o/r.git",
+            "/srv/git/r.git",
+            "https://github.com/o",
+            "https://github.com/o/r/tree/main",
+            "https://github.com/o/r;id",
+            "",
+        ] {
+            assert_eq!(repo_of(remote), None, "{remote}");
+        }
+    }
+
+    fn issue_ref() -> IssueRef {
+        "o/r#7".parse().expect("good")
+    }
+
+    #[tokio::test]
+    async fn an_issue_is_read_for_its_title_and_body() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"{"number":7,"title":"Fix the thing","body":"Steps:\n1. run","user":{"login":"x"}}"#,
+            )],
+        );
+
+        let issue = at(address)
+            .issue(&token(), &issue_ref())
+            .await
+            .expect("an issue");
+
+        assert_eq!(issue.title, "Fix the thing");
+        assert_eq!(issue.body, "Steps:\n1. run");
+        assert!(!format!("{issue:?}").contains("Fix"), "{issue:?}");
+        let request = served.join().expect("the listener thread").remove(0);
+        assert!(
+            request.starts_with("GET /repos/o/r/issues/7 HTTP/1.1\r\n"),
+            "{request}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_issue_with_no_description_has_an_empty_body() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![reply("200 OK", r#"{"title":"t","body":null}"#)],
+        );
+        let issue = at(address)
+            .issue(&token(), &issue_ref())
+            .await
+            .expect("an issue");
+        assert_eq!(issue.body, "");
+    }
+
+    #[tokio::test]
+    async fn a_pull_request_number_is_not_an_issue() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"{"title":"secret title","body":"b","pull_request":{"url":"x"}}"#,
+            )],
+        );
+        let refused = at(address)
+            .issue(&token(), &issue_ref())
+            .await
+            .expect_err("a PR");
+        match &refused {
+            Error::IsAPull { issue } => assert_eq!(issue, "o/r#7"),
+            other => panic!("{other:?}"),
+        }
+        assert!(!refused.to_string().contains("secret"), "{refused}");
+    }
+
+    #[tokio::test]
+    async fn a_missing_issue_is_a_404_and_a_revoked_grant_is_refused() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("404 Not Found", r#"{"message":"Not Found"}"#),
+                reply("401 Unauthorized", r#"{"message":"Bad credentials"}"#),
+            ],
+        );
+        let missing = at(address)
+            .issue(&token(), &issue_ref())
+            .await
+            .expect_err("404");
+        assert!(
+            matches!(missing, Error::Status { status: 404, .. }),
+            "{missing}"
+        );
+        let refused = at(address)
+            .issue(&token(), &issue_ref())
+            .await
+            .expect_err("401");
+        assert!(matches!(refused, Error::Refused), "{refused}");
+    }
+
+    #[tokio::test]
+    async fn the_pull_for_a_head_is_open_merged_closed_or_absent() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply(
+                    "200 OK",
+                    r#"[{"number":12,"html_url":"https://github.com/o/r/pull/12","state":"open","merged_at":null}]"#,
+                ),
+                reply(
+                    "200 OK",
+                    r#"[{"number":13,"html_url":"https://github.com/o/r/pull/13","state":"closed","merged_at":"2026-10-19T10:00:00Z"}]"#,
+                ),
+                reply(
+                    "200 OK",
+                    r#"[{"number":14,"html_url":"https://github.com/o/r/pull/14","state":"closed","merged_at":null}]"#,
+                ),
+                reply("200 OK", "[]"),
+            ],
+        );
+        let github = at(address);
+        let mut states = Vec::new();
+        for _ in 0..4 {
+            states.push(
+                github
+                    .pull_for_head(&token(), "o", "r", "yantra/chat/web/1")
+                    .await
+                    .expect("a list")
+                    .map(|pull| (pull.number, pull.state)),
+            );
+        }
+        assert_eq!(
+            states,
+            [
+                Some((12, PullState::Open)),
+                Some((13, PullState::Merged)),
+                Some((14, PullState::Closed)),
+                None,
+            ]
+        );
+        let first = served.join().expect("the listener thread").remove(0);
+        assert!(
+            first.starts_with(
+                "GET /repos/o/r/pulls?head=o%3Ayantra%2Fchat%2Fweb%2F1&state=all&per_page=1 HTTP/1.1"
+            ),
+            "{first}"
+        );
     }
 }

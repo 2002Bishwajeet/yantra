@@ -11,7 +11,9 @@
 //!
 //! An ACP thread's harness and session id live in the repository's git config,
 //! under the thread's branch, so the daemon keeps nothing and `branch -D`
-//! forgets them. A thread with neither is a Claude thread.
+//! forgets them. A thread with neither is a Claude thread. A thread opened from
+//! an issue keeps the issue there too (Y-488), and its PR is read from its
+//! upstream branch rather than kept (ADR-0034 decision 3).
 
 use time::OffsetDateTime;
 
@@ -21,11 +23,12 @@ use crate::checkpoint;
 use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO, branch, said};
 pub use crate::delegate::{Error, Place, Summary};
+use crate::github::{self, Github, Issue, IssueRef, PullState, Token};
 use crate::logs::{self, Transcript};
-use crate::ssh::Exec;
+use crate::ssh::{self, Exec, Ssh};
 use crate::tmux::sq;
 use crate::tokens::{self, Spend};
-use crate::workspace::Workspace;
+use crate::workspace::{self, Workspace};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -73,7 +76,7 @@ pub async fn list<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Place>
         });
     };
     let top = String::from_utf8_lossy(&out.stdout[..newline]).into_owned();
-    let found = threads(&out.stdout[newline + 1..], &workspace.name);
+    let found = worktrees(&out.stdout[newline + 1..], &workspace.name);
     if found.is_empty() {
         return Ok(Vec::new());
     }
@@ -102,9 +105,267 @@ pub async fn list<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Place>
         .collect())
 }
 
+/// Opens a thread as [`open`] does and keeps the issue under its branch. A
+/// thread whose issue could not be kept is removed, so none is left unnamed.
+pub async fn open_for_issue<E: Exec>(
+    exec: &E,
+    workspace: &Workspace,
+    issue: &IssueRef,
+) -> Result<Place, Error> {
+    let place = open(exec, workspace).await?;
+    let kept = exec
+        .exec(&format!(
+            "git -C {} config {} {}",
+            sq(&place.repo),
+            key(&place, "yantraIssue"),
+            sq(&issue.to_string())
+        ))
+        .await;
+    let failed = match kept {
+        Ok(out) if out.success() => return Ok(place),
+        Ok(out) => Error::Worktree {
+            stderr: said(&out.stderr),
+        },
+        Err(error) => Error::Ssh(error),
+    };
+    // The write's own error is the one worth reporting.
+    let _ = remove(exec, &place).await;
+    Err(failed)
+}
+
+/// A thread with what git keeps about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub place: Place,
+    /// `owner/repo#n`, as [`open_for_issue`] kept it.
+    pub issue: Option<String>,
+    /// The remote's URL and the branch on it, from `branch.<b>.remote` and
+    /// `branch.<b>.merge`.
+    pub upstream: Option<(String, String)>,
+}
+
+/// [`list`], and each thread's issue and upstream. One more round trip, and
+/// none when the workspace has no thread.
+pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Listed>, Error> {
+    let places = list(exec, workspace).await?;
+    let Some(first) = places.first() else {
+        return Ok(Vec::new());
+    };
+    let out = exec
+        .exec(&format!(
+            "git -C {} config -z --get-regexp {}",
+            sq(&first.repo),
+            sq(&format!(
+                "^branch\\.yantra/chat/{}/.*\\.(yantraissue|remote|merge)$|^remote\\..*\\.url$",
+                workspace.name
+            ))
+        ))
+        .await?;
+    // `--get-regexp` exits 1 when no key matches.
+    if !out.success() && !(out.status == 1 && out.stderr.is_empty()) {
+        return Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        });
+    }
+    let config = Config::parse(&out.stdout);
+    Ok(places
+        .into_iter()
+        .map(|place| Listed {
+            issue: config.get(&place.branch, "yantraissue").map(str::to_owned),
+            upstream: config.upstream(&place.branch),
+            place,
+        })
+        .collect())
+}
+
+/// `git config -z` output: `key\nvalue` records, each ended by a NUL. git
+/// lowercases the section and the variable and keeps the subsection's case.
+struct Config(Vec<(String, String)>);
+
+impl Config {
+    fn parse(raw: &[u8]) -> Self {
+        Self(
+            raw.split(|&byte| byte == 0)
+                .filter(|record| !record.is_empty())
+                .map(|record| {
+                    let record = String::from_utf8_lossy(record);
+                    let (key, value) = record.split_once('\n').unwrap_or((&record, ""));
+                    (key.to_owned(), value.to_owned())
+                })
+                .collect(),
+        )
+    }
+
+    fn value(&self, key: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn get(&self, branch: &str, variable: &str) -> Option<&str> {
+        self.value(&format!("branch.{branch}.{variable}"))
+    }
+
+    fn upstream(&self, branch: &str) -> Option<(String, String)> {
+        let remote = self.get(branch, "remote")?;
+        let merge = self.get(branch, "merge")?;
+        let url = self.value(&format!("remote.{remote}.url"))?;
+        let merge = merge.strip_prefix("refs/heads/").unwrap_or(merge);
+        Some((url.to_owned(), merge.to_owned()))
+    }
+}
+
+/// The composer's first text for a thread opened from `issue`.
+pub fn draft(issue: &IssueRef, read: &Issue) -> String {
+    let first = format!("Work on {issue}: {}", read.title);
+    if read.body.trim().is_empty() {
+        first
+    } else {
+        format!("{first}\n\n{}", read.body)
+    }
+}
+
+/// A thread as `yantra chat ls` and `POST /api/workspaces/{name}/threads`
+/// show it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Thread {
+    /// [`name`]: the short id.
+    pub id: String,
+    pub branch: String,
+    pub worktree: String,
+    pub issue: Option<String>,
+    pub pr: Pr,
+}
+
+/// A thread's PR, read from its upstream each time it is asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pr {
+    /// No upstream, or no PR from it.
+    None,
+    Open {
+        number: u64,
+        url: String,
+    },
+    Closed {
+        number: u64,
+        url: String,
+    },
+    Merged {
+        number: u64,
+        url: String,
+    },
+    /// No grant, an upstream not on github.com, or a GitHub that failed.
+    Unknown {
+        said: String,
+    },
+}
+
+/// What [`start`] opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opened {
+    pub thread: String,
+    pub branch: String,
+    pub worktree: String,
+    pub issue: String,
+    pub draft: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Failed {
+    #[error(transparent)]
+    Workspace(#[from] workspace::Error),
+
+    #[error(transparent)]
+    Thread(#[from] Error),
+
+    #[error(transparent)]
+    Github(#[from] github::Error),
+
+    #[error("could not determine a directory for ssh control sockets")]
+    NoStateDir,
+}
+
+fn reach(workspace: &Workspace) -> Result<Ssh, Failed> {
+    let machine = ssh::machine_at(&workspace.machine).ok_or(Failed::NoStateDir)?;
+    Ok(Ssh::new(machine).map_err(Error::Ssh)?)
+}
+
+/// Every thread of workspace `name`, with its issue and PR. Without a grant
+/// a thread with an upstream says its PR is unknown.
+pub async fn threads(name: &str, github: Option<(&Github, &Token)>) -> Result<Vec<Thread>, Failed> {
+    let workspace = workspace::load(name)?;
+    let ssh = reach(&workspace)?;
+    let mut threads = Vec::new();
+    for found in listed(&ssh, &workspace).await? {
+        let pr = match &found.upstream {
+            None => Pr::None,
+            Some((url, branch)) => pr_of(github, url, branch).await,
+        };
+        threads.push(Thread {
+            id: self::name(&found.place).to_owned(),
+            branch: found.place.branch,
+            worktree: found.place.worktree,
+            issue: found.issue,
+            pr,
+        });
+    }
+    Ok(threads)
+}
+
+async fn pr_of(github: Option<(&Github, &Token)>, url: &str, branch: &str) -> Pr {
+    let Some((github, token)) = github else {
+        return Pr::Unknown {
+            said: github::Error::NoGrant.to_string(),
+        };
+    };
+    // The URL is not repeated: a remote can carry a credential in it.
+    let Some((owner, repo)) = github::repo_of(url) else {
+        return Pr::Unknown {
+            said: "the upstream is not a github.com repository".to_owned(),
+        };
+    };
+    match github.pull_for_head(token, &owner, &repo, branch).await {
+        Ok(None) => Pr::None,
+        Ok(Some(pull)) => {
+            let (number, url) = (pull.number, pull.url);
+            match pull.state {
+                PullState::Open => Pr::Open { number, url },
+                PullState::Closed => Pr::Closed { number, url },
+                PullState::Merged => Pr::Merged { number, url },
+            }
+        }
+        Err(error) => Pr::Unknown {
+            said: error.to_string(),
+        },
+    }
+}
+
+/// Opens a thread of workspace `name` from `issue`. The issue is read before
+/// any worktree is made, so an issue that cannot be read opens nothing.
+pub async fn start(
+    name: &str,
+    issue: &IssueRef,
+    github: &Github,
+    token: &Token,
+) -> Result<Opened, Failed> {
+    let workspace = workspace::load(name)?;
+    let read = github.issue(token, issue).await?;
+    let ssh = reach(&workspace)?;
+    let place = open_for_issue(&ssh, &workspace, issue).await?;
+    Ok(Opened {
+        thread: self::name(&place).to_owned(),
+        branch: place.branch,
+        worktree: place.worktree,
+        issue: issue.to_string(),
+        draft: draft(issue, &read),
+    })
+}
+
 /// The worktree path and id of each entry of `git worktree list --porcelain -z`
 /// whose branch is one of `name`'s threads.
-fn threads(porcelain: &[u8], name: &str) -> Vec<(String, String)> {
+fn worktrees(porcelain: &[u8], name: &str) -> Vec<(String, String)> {
     let prefix = format!("refs/heads/yantra/chat/{name}/");
     let mut found = Vec::new();
     let mut worktree = None;
@@ -226,7 +487,7 @@ pub async fn status<E: Exec>(exec: &E, place: &Place) -> Result<Status, Error> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::ssh;
@@ -616,5 +877,151 @@ mod tests {
             status(&gone, &place()).await,
             Err(Error::Worktree { .. })
         ));
+    }
+
+    fn issue() -> IssueRef {
+        "o/r#7".parse().expect("good")
+    }
+
+    #[tokio::test]
+    async fn a_thread_from_an_issue_keeps_the_issue_under_its_branch() {
+        let machine = Machine::answering(vec![
+            out(0, format!("{REPO}\n{WORKTREE}\n0123abcd\n").as_bytes(), ""),
+            out(0, b"", ""),
+        ]);
+        let place = open_for_issue(&machine, &workspace("web"), &issue())
+            .await
+            .expect("opened");
+        assert_eq!(
+            machine.asked()[1],
+            format!(
+                "git -C '{REPO}' config 'branch.{}.yantraIssue' 'o/r#7'",
+                place.branch
+            )
+        );
+        assert_eq!(machine.asked().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_thread_whose_issue_could_not_be_kept_is_removed() {
+        let machine = Machine::answering(vec![
+            out(0, format!("{REPO}\n{WORKTREE}\n0123abcd\n").as_bytes(), ""),
+            out(255, b"", "error: could not lock config file\n"),
+            out(0, b"", ""),
+        ]);
+        let failed = open_for_issue(&machine, &workspace("web"), &issue()).await;
+        assert!(
+            matches!(&failed, Err(Error::Worktree { stderr }) if stderr == "error: could not lock config file"),
+            "{failed:?}"
+        );
+        let asked = machine.asked();
+        assert_eq!(asked.len(), 3);
+        assert!(asked[2].contains("worktree remove --force"), "{}", asked[2]);
+        assert!(asked[2].contains("branch -D"), "{}", asked[2]);
+    }
+
+    const CONFIG: &[u8] = b"branch.yantra/chat/a/11111111.yantraissue\no/r#7\0\
+        branch.yantra/chat/a/11111111.remote\norigin\0\
+        branch.yantra/chat/a/11111111.merge\nrefs/heads/fix-7\0\
+        branch.yantra/chat/a/55555555.remote\nmy.fork\0\
+        remote.origin.url\nhttps://github.com/o/r.git\0\
+        remote.my.fork.url\ngit@github.com:me/r.git\0";
+
+    #[tokio::test]
+    async fn listed_reads_each_threads_issue_and_upstream_in_one_more_call() {
+        let machine = Machine::answering(vec![
+            out(0, PORCELAIN, ""),
+            out(0, b"aaaa\nbbbb\n", ""),
+            out(0, CONFIG, ""),
+        ]);
+        let found = listed(&machine, &workspace("a")).await.expect("listed");
+        assert_eq!(
+            machine.asked()[2],
+            format!(
+                "git -C '{REPO}' config -z --get-regexp \
+                 '^branch\\.yantra/chat/a/.*\\.(yantraissue|remote|merge)$|^remote\\..*\\.url$'"
+            )
+        );
+        let read: Vec<_> = found
+            .iter()
+            .map(|listed| (listed.issue.as_deref(), listed.upstream.clone()))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (
+                    Some("o/r#7"),
+                    Some(("https://github.com/o/r.git".to_owned(), "fix-7".to_owned()))
+                ),
+                // A remote with no `merge` is no upstream.
+                (None, None),
+            ]
+        );
+        assert_eq!(found[0].place.id, "chat/a/11111111");
+    }
+
+    #[tokio::test]
+    async fn listed_with_no_keys_set_or_no_threads_is_plain() {
+        let none = Machine::answering(vec![
+            out(0, PORCELAIN, ""),
+            out(0, b"aaaa\nbbbb\n", ""),
+            out(1, b"", ""),
+        ]);
+        let found = listed(&none, &workspace("a")).await.expect("listed");
+        assert!(
+            found
+                .iter()
+                .all(|l| l.issue.is_none() && l.upstream.is_none())
+        );
+
+        let empty = Machine::answering(vec![out(0, PORCELAIN, "")]);
+        assert_eq!(listed(&empty, &workspace("web")).await.expect("listed"), []);
+        assert_eq!(empty.asked().len(), 1);
+
+        let broken = Machine::answering(vec![
+            out(0, PORCELAIN, ""),
+            out(0, b"aaaa\nbbbb\n", ""),
+            out(3, b"", "error: invalid config file\n"),
+        ]);
+        assert!(matches!(
+            listed(&broken, &workspace("a")).await,
+            Err(Error::Worktree { stderr }) if stderr == "error: invalid config file"
+        ));
+    }
+
+    #[test]
+    fn the_draft_names_the_issue_then_its_title_and_body() {
+        let read = Issue {
+            title: "Fix it".to_owned(),
+            body: "Steps".to_owned(),
+        };
+        assert_eq!(draft(&issue(), &read), "Work on o/r#7: Fix it\n\nSteps");
+        let bare = Issue {
+            title: "Fix it".to_owned(),
+            body: String::new(),
+        };
+        assert_eq!(draft(&issue(), &bare), "Work on o/r#7: Fix it");
+    }
+
+    #[tokio::test]
+    async fn a_pr_without_a_grant_or_off_github_is_unknown_and_says_no_url() {
+        assert_eq!(
+            pr_of(None, "https://github.com/o/r", "b").await,
+            Pr::Unknown {
+                said: github::Error::NoGrant.to_string()
+            }
+        );
+        let token = Token::new("t".to_owned());
+        let github = Github::at("http://127.0.0.1:9", "http://127.0.0.1:9");
+        match pr_of(
+            Some((&github, &token)),
+            "https://user:secret@gitlab.com/o/r",
+            "b",
+        )
+        .await
+        {
+            Pr::Unknown { said } => assert!(!said.contains("secret"), "{said}"),
+            other => panic!("{other:?}"),
+        }
     }
 }

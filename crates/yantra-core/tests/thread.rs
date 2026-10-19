@@ -11,7 +11,7 @@ use yantra_core::acp::Harness;
 use yantra_core::ssh::{Exec, Machine, Os, Ssh};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::Workspace;
-use yantra_core::{logs, thread, tokens, up};
+use yantra_core::{github, logs, thread, tokens, up};
 
 const REPO: &str = "/home/yantra/repo";
 const NAME: &str = "chatws";
@@ -246,6 +246,82 @@ async fn a_thread_remembers_its_harness_and_acp_session() -> Result<()> {
         "git -C {repo} config --get-regexp '^branch\\.' || true"
     ))?;
     assert_eq!(left.trim(), "", "branch -D drops the section");
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Y-488: a thread opened from an issue keeps it in git config, `listed`
+/// reads it back with the upstream git keeps, and removing the thread forgets
+/// both.
+#[tokio::test]
+async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    let dir = state_dir("thi")?;
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(USER.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.clone(),
+    })?;
+    let repo = "/home/yantra/issues";
+    fixture.run(&format!(
+        "mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
+         && git add README && git -c user.name=t -c user.email=t@example.com \
+         commit -qm one"
+    ))?;
+    let workspace = Workspace {
+        name: "issues".to_owned(),
+        machine: "fixture".to_owned(),
+        repo: repo.into(),
+        startup: None,
+    };
+    let issue: github::IssueRef = "o/r#7".parse()?;
+
+    let from_issue = thread::open_for_issue(&ssh, &workspace, &issue).await?;
+    let plain = thread::open(&ssh, &workspace).await?;
+    let issue_of = |listed: &[thread::Listed], place: &thread::Place| {
+        listed
+            .iter()
+            .find(|l| &l.place == place)
+            .map(|l| (l.issue.clone(), l.upstream.clone()))
+    };
+    let listed = thread::listed(&ssh, &workspace).await?;
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert_eq!(
+        issue_of(&listed, &from_issue),
+        Some((Some("o/r#7".to_owned()), None))
+    );
+    assert_eq!(issue_of(&listed, &plain), Some((None, None)));
+
+    // What `git push -u origin HEAD:fix-7` would leave behind.
+    fixture.run(&format!(
+        "git -C {repo} remote add origin git@github.com:o/r.git \
+         && git -C {repo} config branch.{b}.remote origin \
+         && git -C {repo} config branch.{b}.merge refs/heads/fix-7",
+        b = plain.branch
+    ))?;
+    let listed = thread::listed(&ssh, &workspace).await?;
+    assert_eq!(
+        issue_of(&listed, &plain),
+        Some((
+            None,
+            Some(("git@github.com:o/r.git".to_owned(), "fix-7".to_owned()))
+        ))
+    );
+
+    thread::remove(&ssh, &from_issue).await?;
+    thread::remove(&ssh, &plain).await?;
+    let left = fixture.run(&format!(
+        "git -C {repo} config --get-regexp '^branch\\.' || true"
+    ))?;
+    assert_eq!(
+        left.trim(),
+        "",
+        "branch -D drops the issue and the upstream"
+    );
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }
