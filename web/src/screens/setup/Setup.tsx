@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Check, GitBranch, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
 import type { Event, Machine, Readiness } from '@/api'
@@ -65,6 +65,7 @@ const blockedBy = (stop: Event | null) => stop?.kind === 'install_stopped' && st
 /** What one line can do on a bulk press right now; null when it offers nothing. */
 type Presses = { check: (() => void) | null; install: (() => void) | null }
 type Register = (name: string, presses: Presses | null) => void
+type Running = (name: string, running: boolean) => void
 
 /** D7 §4.1's machine lines: what each state says and the one action it
  *  offers. An asleep machine offers none, since ssh cannot answer it. */
@@ -77,8 +78,9 @@ function MachineLine(props: {
   target: boolean
   join: ReactNode
   register: Register
+  running: Running
 }) {
-  const { machine, line: said, report, events, read, target, join, register } = props
+  const { machine, line: said, report, events, read, target, join, register, running } = props
   const name = machine.name
   const recheck = useRecheckReadiness()
   const install = useInstallOn(name, events)
@@ -90,11 +92,16 @@ function MachineLine(props: {
 
   useEffect(() => {
     register(name, {
-      check: said.kind === 'unchecked' ? () => recheck.mutate(name) : null,
+      check: said.kind === 'unchecked' && !recheck.isPending ? () => recheck.mutate(name) : null,
       install: said.kind === 'missing' && said.installable && view === 'missing' ? install.press : null,
     })
     return () => register(name, null)
   })
+
+  useEffect(() => {
+    running(name, install.running)
+    return () => running(name, false)
+  }, [name, install.running, running])
 
   const mark: Record<typeof view, MarkState> = {
     asleep: 'unknown',
@@ -204,13 +211,25 @@ export function Setup() {
     if (one) presses.current.set(name, one)
     else presses.current.delete(name)
   }, [])
+  const [installing, setInstalling] = useState<ReadonlySet<string>>(new Set())
+  const running = useCallback<Running>((name, on) => {
+    setInstalling((now) => {
+      if (now.has(name) === on) return now
+      const next = new Set(now)
+      if (on) next.add(name)
+      else next.delete(name)
+      return next
+    })
+  }, [])
   const press = (which: keyof Presses) => {
     for (const one of presses.current.values()) one[which]?.()
   }
   const unchecked = lines.some((one) => one.line.kind === 'unchecked')
-  const installable = lines.some(
-    (one) => one.line.kind === 'missing' && one.line.installable && !blockedBy(newest(events, one.machine.name)),
-  )
+  const installable =
+    installing.size === 0 &&
+    lines.some(
+      (one) => one.line.kind === 'missing' && one.line.installable && !blockedBy(newest(events, one.machine.name)),
+    )
 
   const others = all.filter((one) => one.ownership === 'yours' && !runsSessions(one))
   // Y-404: listed with the reason, never counted.
@@ -339,6 +358,7 @@ export function Setup() {
                       machine={one.machine}
                       read={notifications.data !== undefined}
                       register={register}
+                      running={running}
                       report={one.report}
                       target={next === 'install' && one.machine.name === target}
                     />

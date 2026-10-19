@@ -59,7 +59,7 @@ async function draw(routes: Routes) {
       const key = `${init?.method ?? 'GET'} ${path.split('?')[0]}`
       asked.push(key)
       const [status, body] = routes[key] ?? [404, 'no']
-      return Promise.resolve(answer(status, body))
+      return status === 0 ? new Promise<Response>(() => {}) : Promise.resolve(answer(status, body))
     }),
   )
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -190,7 +190,7 @@ describe('the setup gate', () => {
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
         const [status, body] = routes[`${init?.method ?? 'GET'} ${path.split('?')[0]}`] ?? [404, 'no']
-        return Promise.resolve(answer(status, body))
+        return status === 0 ? new Promise<Response>(() => {}) : Promise.resolve(answer(status, body))
       }),
     )
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -369,6 +369,33 @@ describe('the bulk buttons', () => {
     expect(asked).toContain('POST /api/machines/cachyos-g14/readiness')
     expect(asked).toContain('POST /api/machines/macbook/readiness')
     expect(filled().length).toBeLessThanOrEqual(1)
+  })
+
+  it('skips a machine whose check is already pending', async () => {
+    const asked = await draw({
+      ...base(both),
+      ...keyed,
+      'POST /api/machines/cachyos-g14/readiness': [0, undefined],
+      'POST /api/machines/macbook/readiness': [200, looked.ok(checks(tools, '', 'macbook'))],
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Check' })[0])
+    await screen.findByText('asking…')
+    fireEvent.click(screen.getByRole('button', { name: 'Check all' }))
+    await waitFor(() => expect(asked).toContain('POST /api/machines/macbook/readiness'))
+    expect(asked.filter((one) => one === 'POST /api/machines/cachyos-g14/readiness')).toHaveLength(1)
+  })
+
+  it('hides Install on all while an install it started is running', async () => {
+    await draw({
+      ...base(both),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([missing('cachyos-g14'), missing('macbook')])],
+      'POST /api/machines/cachyos-g14/install': [0, undefined],
+      'POST /api/machines/macbook/install': [202, undefined],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
+    expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Install on all' })).toBeNull()
   })
 
   it('installs on every machine that offers Install, and leaves the others alone', async () => {
