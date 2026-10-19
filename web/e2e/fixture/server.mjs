@@ -647,7 +647,9 @@ function oneOff(state, request, socket, head, machine, index, at) {
 
 /** chat.rs's socket (Y-356). A turn replays what yantrad really serialises,
  *  contract.gen.ts's `chatEvents`, as far as the permission request, and the
- *  rest once it is answered. The first turn's harness is the thread's (Y-434),
+ *  rest once it is answered. A completed turn is followed by its checkpoint
+ *  diff, and a full-access turn runs to its end with no request. One thread
+ *  runs one turn or revert at a time across all sockets, as chat.rs's `Running`. The first turn's harness is the thread's (Y-434),
  *  and Gemini has no login on the fixture's machine, so a turn for it is
  *  refused as yantrad refuses it. `?thread=` attaches to the one thread here,
  *  a Claude thread, and replays two turns of its transcript first. An image
@@ -692,10 +694,26 @@ function converse(state, request, socket, head, name, thread) {
       say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } })
       HISTORY.forEach(([kind, text], at) => say(delta(kind, text, `history:${at}`)))
     }
+    // chat.rs's `Running`: one set per thread, shared by every socket of the scenario.
+    const running = (state.running ??= new Set())
+    const elsewhere = 'another tab is running a turn or a revert in this thread; wait for it to end'
     let known = thread
     let waiting = null
     let sent = 0
     let images = 0
+    // chat.rs sends a completed turn's checkpoint diff right after `turn.completed`.
+    const play = (events) =>
+      events.forEach((one) => {
+        say(one)
+        if (one.type === 'turn.completed' && one.payload.state === 'completed') {
+          say({ ...contract.chatCheckpoints[0], payload: { ...contract.chatCheckpoints[0].payload, turn: sent } })
+        }
+      })
+    const release = () => {
+      if (waiting) running.delete(THREAD)
+      waiting = null
+    }
+    ws.on('close', release)
     ws.on('message', (data, binary) => {
       // An image (Y-424): yantrad's reply, under the name its counter gives.
       if (binary) {
@@ -708,6 +726,7 @@ function converse(state, request, socket, head, name, thread) {
       } catch {}
       if (frame?.type === 'turn' && typeof frame.text === 'string') {
         if (waiting) return fail('busy', 'a turn is running; stop it or wait for it to end')
+        if (running.has(THREAD)) return fail('busy', elsewhere)
         if (!known) {
           const harness = frame.harness ?? 'claude'
           if (LOGGED_OUT[harness]) {
@@ -723,22 +742,31 @@ function converse(state, request, socket, head, name, thread) {
         }
         sent += 1
         say(delta('user_text', frame.text, `user:${sent}`))
-        stream.slice(0, asked).forEach(say)
+        if (frame.mode === 'full-access') {
+          // chat.rs `full_access_mode_answers_every_request_without_a_card`: no card, and the turn ends at once.
+          play(stream.filter((one) => one.type !== 'request.opened'))
+          return
+        }
+        running.add(THREAD)
+        play(stream.slice(0, asked))
         waiting = stream.slice(asked)
       } else if (frame?.type === 'answer' && waiting) {
         const [resolved, ...rest] = waiting
         say({ ...resolved, payload: { ...resolved.payload, decision: frame.decision } })
-        rest.forEach(say)
-        waiting = null
+        play(rest)
+        release()
       } else if (frame?.type === 'cancel') {
         if (!waiting) return
         say({ threadId: THREAD, type: 'request.resolved', payload: { requestId: 'r1', requestType: 'exec_command_approval', decision: 'cancel' } })
         say({ threadId: THREAD, type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
-        waiting = null
+        release()
+      } else if (frame?.type === 'revert' && typeof frame.turn === 'number') {
+        if (running.has(THREAD)) return fail('busy', elsewhere)
+        say({ threadId: THREAD, type: 'thread.reverted', payload: { turn: frame.turn } })
       } else if (frame?.type === 'answer') {
         fail('badFrame', 'no turn is running, so nothing is waiting')
       } else {
-        fail('badFrame', 'a frame is a turn, an answer or a cancel')
+        fail('badFrame', 'a frame is a turn, an answer, a cancel or a revert')
       }
     })
   })
