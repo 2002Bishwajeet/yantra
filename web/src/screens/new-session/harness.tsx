@@ -78,6 +78,7 @@ const fleet: Answers = {
   'GET /api/repos': [200, contract.repos],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, listing(String(sent.path ?? HOME))],
   'POST /api/viewing': [204],
+  'POST /api/placement': [200, contract.placement],
 }
 
 /** `<App/>` at `/new`, one width, over the contract fixtures with `answers`

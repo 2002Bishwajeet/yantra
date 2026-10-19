@@ -7,7 +7,8 @@
  * Kept: a pure function over candidates, and freshness judged by receipt age, never by the
  * sender's clock. Changed: ADR-0013 collects no CPU count and no total RAM, so the score is
  * R5's RAM headroom (20), CPU idle (15) and power (10) over ADR-0013's fields, and there is
- * no CPU or RAM filter.
+ * no CPU or RAM filter. Y-517 adds R5's session affinity (20) and a repo term (30) that
+ * stands in the preference rank's place.
  */
 //! Ranks the machines whose heartbeat is fresh, and says why each one won or lost (Y-452).
 //!
@@ -25,6 +26,8 @@ pub const FRESH: Duration = Duration::from_secs(30);
 const RAM_WEIGHT: f64 = 20.0;
 const CPU_WEIGHT: f64 = 15.0;
 const POWER_WEIGHT: f64 = 10.0;
+const REPO_WEIGHT: f64 = 30.0;
+const AFFINITY_WEIGHT: f64 = 20.0;
 /// R5 divides headroom by 16 GB, so 16 GB free or more earns the whole RAM weight.
 const RAM_FULL_MB: u64 = 16_384;
 
@@ -35,6 +38,19 @@ pub struct Candidate {
     pub online: bool,
     /// `None` is "never heard from".
     pub beat: Option<Beat>,
+    /// Whether the repository or folder the session will open is on this machine.
+    pub repo: Here,
+    /// A workspace on this machine already names that repository or folder.
+    pub ran_here: bool,
+}
+
+/// `Unknown` is a machine that could not be asked. It scores 0 and never filters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Here {
+    /// The path where the machine holds it.
+    Yes(String),
+    No,
+    Unknown,
 }
 
 /// The fields of a heartbeat that the score reads, with the age of its *arrival*.
@@ -64,6 +80,14 @@ pub struct Terms {
     pub ram: f64,
     pub cpu: f64,
     pub power: f64,
+    pub repo: f64,
+    pub affinity: f64,
+}
+
+impl Terms {
+    fn sum(&self) -> f64 {
+        self.ram + self.cpu + self.power + self.repo + self.affinity
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +97,8 @@ pub struct Scored {
     pub terms: Terms,
     /// The raw readings, so a reader can see what each term was made from.
     pub beat: Beat,
+    /// Where the machine holds the repository, when [`Here::Yes`].
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,16 +134,23 @@ pub fn rank(candidates: Vec<Candidate>) -> Ranking {
         machine,
         online,
         beat,
+        repo,
+        ran_here,
     } in candidates
     {
         match (beat, online) {
             (Some(beat), _) if beat.age <= FRESH => {
-                let terms = terms(&beat);
+                let terms = terms(&beat, &repo, ran_here);
+                let path = match repo {
+                    Here::Yes(path) => Some(path),
+                    Here::No | Here::Unknown => None,
+                };
                 ranking.ranked.push(Scored {
                     machine,
-                    score: round1(terms.ram + terms.cpu + terms.power),
+                    score: round1(terms.sum()),
                     terms,
                     beat,
+                    path,
                 });
             }
             (Some(beat), true) => ranking.rejected.push(Rejected {
@@ -141,13 +174,37 @@ pub fn rank(candidates: Vec<Candidate>) -> Ranking {
     ranking
 }
 
-fn terms(beat: &Beat) -> Terms {
+fn terms(beat: &Beat, repo: &Here, ran_here: bool) -> Terms {
     let ram = (beat.free_ram_mb as f64 / RAM_FULL_MB as f64).clamp(0.0, 1.0);
     let cpu = 1.0 - f64::from(beat.cpu_busy_pct.min(100)) / 100.0;
+    let flag = |on: bool| if on { 1.0 } else { 0.0 };
     Terms {
         ram: round1(RAM_WEIGHT * ram),
         cpu: round1(CPU_WEIGHT * cpu),
         power: round1(POWER_WEIGHT * power(beat.power)),
+        repo: REPO_WEIGHT * flag(matches!(repo, Here::Yes(_))),
+        affinity: AFFINITY_WEIGHT * flag(ran_here),
+    }
+}
+
+/// A short phrase from the terms that fired, strongest first and at most two:
+/// "the repo is there and it is idle".
+pub fn reason(scored: &Scored) -> String {
+    let t = &scored.terms;
+    let said: Vec<&str> = [
+        (t.repo > 0.0, "the repo is there"),
+        (t.affinity > 0.0, "a workspace ran it there"),
+        (t.cpu >= 0.8 * CPU_WEIGHT, "it is idle"),
+        (t.ram >= 0.5 * RAM_WEIGHT, "it has RAM to spare"),
+        (t.power >= POWER_WEIGHT, "it is on AC power"),
+    ]
+    .into_iter()
+    .filter_map(|(fired, phrase)| fired.then_some(phrase))
+    .take(2)
+    .collect();
+    match said.as_slice() {
+        [] => "its beat is fresh".to_owned(),
+        phrases => phrases.join(" and "),
     }
 }
 
@@ -193,6 +250,8 @@ mod tests {
             machine: machine.to_owned(),
             online: true,
             beat: beat(5, free_ram_mb, cpu_busy_pct, power),
+            repo: Here::Unknown,
+            ran_here: false,
         }
     }
 
@@ -214,7 +273,9 @@ mod tests {
             Terms {
                 ram: 20.0,
                 cpu: 12.8,
-                power: 10.0
+                power: 10.0,
+                repo: 0.0,
+                affinity: 0.0,
             }
         );
         assert_eq!(zenith.score, 42.8);
@@ -250,6 +311,8 @@ mod tests {
             machine: format!("m{age}"),
             online: true,
             beat: beat(age, 8_192, 0, Power::Ac),
+            repo: Here::Unknown,
+            ran_here: false,
         };
         let ranking = rank(vec![at(30), at(31)]);
         assert_eq!(names(&ranking), ["m30"]);
@@ -294,21 +357,29 @@ mod tests {
                 machine: "stale-online".to_owned(),
                 online: true,
                 beat: beat(45, 8_192, 0, Power::Ac),
+                repo: Here::Unknown,
+                ran_here: false,
             },
             Candidate {
                 machine: "stale-offline".to_owned(),
                 online: false,
                 beat: beat(412, 8_192, 0, Power::Ac),
+                repo: Here::Unknown,
+                ran_here: false,
             },
             Candidate {
                 machine: "silent-offline".to_owned(),
                 online: false,
                 beat: None,
+                repo: Here::Unknown,
+                ran_here: false,
             },
             Candidate {
                 machine: "silent-online".to_owned(),
                 online: true,
                 beat: None,
+                repo: Here::Unknown,
+                ran_here: false,
             },
         ]);
         assert!(ranking.ranked.is_empty());
@@ -346,6 +417,8 @@ mod tests {
             machine: "m".to_owned(),
             online: false,
             beat: beat(1, 8_192, 0, Power::Ac),
+            repo: Here::Unknown,
+            ran_here: false,
         }]);
         assert_eq!(names(&ranking), ["m"]);
     }
@@ -376,15 +449,123 @@ mod tests {
                 &heartbeat(now - time::Duration::hours(1)),
                 Duration::from_secs(2),
             )),
+            repo: Here::Unknown,
+            ran_here: false,
         };
         let slow = Candidate {
             machine: "slow".to_owned(),
             online: true,
             beat: Some(Beat::of(&heartbeat(now), Duration::from_secs(60))),
+            repo: Here::Unknown,
+            ran_here: false,
         };
         let ranking = rank(vec![skewed, slow]);
         assert_eq!(names(&ranking), ["skewed"]);
         assert_eq!(ranking.rejected[0].machine, "slow");
+    }
+
+    #[test]
+    fn an_asleep_machine_is_rejected_and_never_ranks() {
+        let ranking = rank(vec![
+            Candidate {
+                machine: "asleep".to_owned(),
+                online: false,
+                beat: beat(300, 32_768, 0, Power::Ac),
+                repo: Here::Yes("/r".to_owned()),
+                ran_here: true,
+            },
+            fresh("awake", 0, 100, Power::Ac),
+        ]);
+        assert_eq!(names(&ranking), ["awake"]);
+        assert_eq!(
+            ranking.rejected[0].why,
+            Why::AsleepOrOff {
+                age: Some(Duration::from_secs(300))
+            }
+        );
+    }
+
+    #[test]
+    fn no_heartbeat_is_never_heard() {
+        let ranking = rank(vec![Candidate {
+            machine: "new".to_owned(),
+            online: true,
+            beat: None,
+            repo: Here::Unknown,
+            ran_here: false,
+        }]);
+        assert!(ranking.ranked.is_empty());
+        assert_eq!(ranking.rejected[0].why, Why::NeverHeard);
+    }
+
+    #[test]
+    fn the_repo_outranks_a_stronger_machine_without_it() {
+        let mut weak = fresh("weak", 4_096, 60, Power::Battery { percent: 50 });
+        weak.repo = Here::Yes("/home/b/Github/yantra".to_owned());
+        let mut strong = fresh("strong", 32_768, 20, Power::Ac);
+        strong.repo = Here::No;
+        let ranking = rank(vec![strong, weak]);
+        assert_eq!(names(&ranking), ["weak", "strong"]);
+        assert_eq!(ranking.ranked[0].terms.repo, 30.0);
+        assert_eq!(
+            ranking.ranked[0].path.as_deref(),
+            Some("/home/b/Github/yantra")
+        );
+        assert_eq!(ranking.ranked[1].terms.repo, 0.0);
+        assert_eq!(ranking.ranked[1].path, None);
+    }
+
+    #[test]
+    fn affinity_adds_twenty() {
+        let mut here = fresh("here", 8_192, 50, Power::Ac);
+        here.ran_here = true;
+        let ranking = rank(vec![fresh("there", 8_192, 50, Power::Ac), here]);
+        assert_eq!(names(&ranking), ["here", "there"]);
+        assert_eq!(ranking.ranked[0].terms.affinity, 20.0);
+        assert_eq!(ranking.ranked[0].score - ranking.ranked[1].score, 20.0);
+    }
+
+    #[test]
+    fn an_unknown_repo_adds_nothing_and_filters_nothing() {
+        let mut unknown = fresh("unknown", 8_192, 50, Power::Ac);
+        unknown.repo = Here::Unknown;
+        let mut absent = fresh("absent", 8_192, 50, Power::Ac);
+        absent.repo = Here::No;
+        let ranking = rank(vec![unknown, absent]);
+        assert_eq!(names(&ranking), ["absent", "unknown"]);
+        assert_eq!(ranking.ranked[0].score, ranking.ranked[1].score);
+        assert_eq!(ranking.ranked[1].terms.repo, 0.0);
+    }
+
+    #[test]
+    fn the_reason_names_the_strongest_terms_that_fired() {
+        let mut idle = fresh("idle", 0, 0, Power::Battery { percent: 10 });
+        idle.repo = Here::Yes("/r".to_owned());
+        let mut ran = fresh("ran", 32_768, 0, Power::Ac);
+        ran.ran_here = true;
+        let ranking = rank(vec![
+            idle,
+            ran,
+            fresh("busy", 0, 100, Power::Battery { percent: 10 }),
+            fresh("roomy", 32_768, 100, Power::Ac),
+        ]);
+        let said: Vec<(&str, String)> = ranking
+            .ranked
+            .iter()
+            .map(|s| (s.machine.as_str(), reason(s)))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                ("ran", "a workspace ran it there and it is idle".to_owned()),
+                ("idle", "the repo is there and it is idle".to_owned()),
+                (
+                    "roomy",
+                    "it has RAM to spare and it is on AC power".to_owned()
+                ),
+                ("busy", "its beat is fresh".to_owned()),
+            ]
+        );
     }
 
     /// I-10: the printed terms are the whole score.
@@ -402,18 +583,37 @@ mod tests {
                     Power::Battery { percent: 40 },
                     Power::Battery { percent: 3 },
                 ] {
-                    fleet.push(fresh(&format!("m{i}-{cpu}-{power:?}"), ram, cpu, power));
+                    for (j, repo) in [Here::Yes("/r".to_owned()), Here::No, Here::Unknown]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        for ran_here in [false, true] {
+                            let mut one = fresh(
+                                &format!("m{i}-{cpu}-{power:?}-{j}-{ran_here}"),
+                                ram,
+                                cpu,
+                                power,
+                            );
+                            one.repo = repo.clone();
+                            one.ran_here = ran_here;
+                            fleet.push(one);
+                        }
+                    }
                 }
             }
         }
         let ranking = rank(fleet);
         for scored in &ranking.ranked {
-            let Terms { ram, cpu, power } = scored.terms;
-            assert_eq!(scored.score, round1(ram + cpu + power), "{scored:?}");
-            assert!(
-                (scored.score - (ram + cpu + power)).abs() < 1e-9,
-                "{scored:?}"
-            );
+            let Terms {
+                ram,
+                cpu,
+                power,
+                repo,
+                affinity,
+            } = scored.terms;
+            let sum = ram + cpu + power + repo + affinity;
+            assert_eq!(scored.score, round1(sum), "{scored:?}");
+            assert!((scored.score - sum).abs() < 1e-9, "{scored:?}");
         }
         assert!(
             ranking

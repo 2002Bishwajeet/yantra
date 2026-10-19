@@ -26,7 +26,27 @@ test.describe('the four steps', () => {
     const chips = page.getByRole('group', { name: 'Machine' })
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeEnabled()
     await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    // Y-517: the daemon's top machine is preselected, with the reason.
+    await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('status').filter({ hasText: 'suggested' })).toHaveText(
+      'cachyos-g14 suggested: it is idle and it has RAM to spare',
+    )
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+
+  /** Y-517: a repository another machine holds is offered there, and the
+   *  switch keeps the repository at the path that machine has it. */
+  test('the source step offers the machine that holds the repo', async ({ page }) => {
+    await page.getByLabel('Name').fill('brisk-heron')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
+    await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
+
+    await expect(page.getByText('hetzner-1: the repo is there and it is on AC power')).toBeVisible()
+    await page.getByRole('button', { name: 'Use hetzner-1' }).click()
+    await expect(page.getByRole('button', { name: 'Use hetzner-1' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('open a tmux session on hetzner-1 in ~/Github/scratch', { exact: false })).toBeVisible()
   })
 
   test('passes axe on each step', async ({ page }) => {

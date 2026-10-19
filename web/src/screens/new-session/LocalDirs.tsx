@@ -93,7 +93,10 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   const machine = values.machine
   const client = useQueryClient()
   // `null` is the machine's own `$HOME`, which only the far side can name.
-  const [where, setWhere] = useState<string | null>(null)
+  // A source kept across a machine switch opens where it is (Y-517).
+  const [where, setWhere] = useState<string | null>(() =>
+    values.source?.kind === 'local' ? values.source.path : null,
+  )
   const [typed, setTyped] = useState('')
   const [probing, setProbing] = useState(false)
   // Off by default: a home's dotfiles outnumber its projects (Y-414).

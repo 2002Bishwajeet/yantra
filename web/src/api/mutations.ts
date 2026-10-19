@@ -8,6 +8,8 @@ import type {
   Listing,
   Looked,
   Opened,
+  Placement,
+  PlacementAsk,
   Readiness,
   Removed,
   Resumed,
@@ -277,3 +279,11 @@ export function useMakeDir() {
 }
 
 // ---- end Y-349 ----
+
+// Y-517: a read reached over a POST (ADR-0019), so a mutation: a person picked
+// the source, and nothing polls it. It writes nothing, so it invalidates nothing.
+export function usePlacement() {
+  return useMutation<Placement, ApiError, PlacementAsk>({
+    mutationFn: (ask) => fetchJson<Placement>('/api/placement', { method: 'POST', ...json(ask) }),
+  })
+}

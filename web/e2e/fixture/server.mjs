@@ -84,6 +84,39 @@ function defaults() {
     status: Object.fromEntries(
       contract.agents.map((one) => [one.data.workspace, one]),
     ),
+    // Y-517: what POST /api/placement answers, keyed on the repo or path asked
+    // about; '' is the ask with neither, and anything unlisted answers it too.
+    placement: {
+      '': {
+        ranked: [
+          {
+            machine: 'cachyos-g14',
+            score: 42.8,
+            terms: { ram: 20, cpu: 12.8, power: 10, repo: 0, affinity: 0 },
+            reason: 'it is idle and it has RAM to spare',
+          },
+        ],
+        rejected: [],
+      },
+      '2002Bishwajeet/scratch': {
+        ranked: [
+          {
+            machine: 'hetzner-1',
+            score: 65.4,
+            terms: { ram: 15.6, cpu: 5.4, power: 10, repo: 30, affinity: 0 },
+            reason: 'the repo is there and it is on AC power',
+            path: '/home/biswa/Github/scratch',
+          },
+          {
+            machine: 'cachyos-g14',
+            score: 42.8,
+            terms: { ram: 20, cpu: 12.8, power: 10, repo: 0, affinity: 0 },
+            reason: 'it is idle and it has RAM to spare',
+          },
+        ],
+        rejected: [],
+      },
+    },
   }
 }
 
@@ -516,6 +549,17 @@ const routes = [
   // never moves and About stays on its updating line.
   ['POST', /^\/api\/update$/, () => [202]],
   ['POST', /^\/api\/viewing$/, () => [204]],
+  [
+    'POST',
+    /^\/api\/placement$/,
+    (s, _, sent) => {
+      if (sent.repo && sent.path) return [400, 'ask about a repository or a folder, not both']
+      const answer = s.placement[sent.repo ?? sent.path ?? ''] ?? s.placement['']
+      // Only the machines this scenario lists, so another fleet is never told about cachyos-g14.
+      const names = new Set(s.machines.looked === 'ok' ? s.machines.data.map((one) => one.name) : [])
+      return [200, { ...answer, ranked: answer.ranked.filter((one) => names.has(one.machine)) }]
+    },
+  ],
   ['POST', /^\/api\/heartbeat$/, () => [204]],
 ]
 

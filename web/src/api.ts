@@ -556,3 +556,25 @@ export type Joined = {
 // Y-356, Y-424: the chat socket's shapes, whose home is `api/thread.ts`.
 // Re-exported so `contract.gen.ts` checks them with every other shape.
 export type { ChatAttached, ChatFailure, ChatFrame, ChatNotAttached, ThreadEvent } from './api/thread'
+
+// Y-517: `POST /api/placement`, which machine a new session should open on.
+
+/** Each term is its weight times its signal; the score is their sum (I-10). */
+export type PlacementTerms = { ram: number; cpu: number; power: number; repo: number; affinity: number }
+
+/** Best first. `reason` is a short phrase from the terms that fired; `path` is
+ *  where the machine holds the repository or folder, when it does. */
+export type Placed = { machine: string; score: number; terms: PlacementTerms; reason: string; path?: string }
+
+/** A machine with no fresh beat. `age_seconds` is absent when none ever arrived. */
+export type Unplaced = {
+  machine: string
+  why: 'never_heard' | 'not_reporting' | 'asleep_or_off'
+  age_seconds?: number
+}
+
+export type Placement = { ranked: Placed[]; rejected: Unplaced[] }
+
+/** Neither field ranks on the heartbeat alone. `folders` is the clone folder
+ *  this browser remembers per machine, and it wins over the one the daemon finds. */
+export type PlacementAsk = { repo?: string; path?: string; folders?: Record<string, string> }

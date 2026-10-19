@@ -3,14 +3,15 @@
 //!
 //! The beats live only in `yantrad`'s memory (Y-044), so this reads them from
 //! `GET /api/machines`. The scoring is [`placement::rank`]; this file fetches and
-//! renders, and prints every term that moves the rank (I-10).
+//! renders, and prints every term that moves the rank (I-10). The CLI asks no
+//! machine over ssh, so the repo term is always unknown here and prints 0.
 
 use std::fmt::Write as _;
 use std::time::Duration;
 
 use serde::Deserialize;
 use yantra_core::heartbeat::Power;
-use yantra_core::placement::{self, Candidate, Ranking, Scored, Why};
+use yantra_core::placement::{self, Candidate, Here, Ranking, Scored, Why};
 use yantra_core::workspace::{self, Workspace};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -44,7 +45,7 @@ pub struct Report {
 /// the daemon is asked anything.
 pub fn why(workspace: Result<Workspace, workspace::Error>, daemon: &str) -> Result<Report, Error> {
     let workspace = workspace?;
-    let ranking = placement::rank(fetch(daemon)?);
+    let ranking = placement::rank(fetch(daemon, &workspace.machine)?);
     Ok(Report {
         placed: !ranking.ranked.is_empty(),
         text: render(&ranking, &workspace.machine),
@@ -76,7 +77,8 @@ struct Beat {
     power: Power,
 }
 
-fn fetch(daemon: &str) -> Result<Vec<Candidate>, Error> {
+/// `home` is the workspace's own machine, which is where it ran.
+fn fetch(daemon: &str, home: &str) -> Result<Vec<Candidate>, Error> {
     let base = daemon.trim_end_matches('/');
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -112,6 +114,8 @@ fn fetch(daemon: &str) -> Result<Vec<Candidate>, Error> {
         Answer::Ok { data } => Ok(data
             .into_iter()
             .map(|machine| Candidate {
+                ran_here: machine.name.eq_ignore_ascii_case(home),
+                repo: Here::Unknown,
                 machine: machine.name,
                 online: machine.online,
                 beat: machine.heartbeat.map(|beat| placement::Beat {
@@ -157,14 +161,15 @@ pub fn render(ranking: &Ranking, home: &str) -> String {
     if !ranking.ranked.is_empty() {
         let _ = writeln!(
             out,
-            "\n{:<width$}  {:>5}  {:>5}  {:>5}  {:>5}",
-            "MACHINE", "SCORE", "RAM", "CPU", "POWER"
+            "\n{:<width$}  {:>5}  {:>5}  {:>5}  {:>5}  {:>5}  {:>5}",
+            "MACHINE", "SCORE", "RAM", "CPU", "POWER", "REPO", "AFFIN"
         );
         for s in &ranking.ranked {
+            let t = &s.terms;
             let _ = writeln!(
                 out,
-                "{:<width$}  {:>5.1}  {:>5.1}  {:>5.1}  {:>5.1}",
-                s.machine, s.score, s.terms.ram, s.terms.cpu, s.terms.power
+                "{:<width$}  {:>5.1}  {:>5.1}  {:>5.1}  {:>5.1}  {:>5.1}  {:>5.1}",
+                s.machine, s.score, t.ram, t.cpu, t.power, t.repo, t.affinity
             );
         }
     }
@@ -257,6 +262,14 @@ fn lost(loser: &Scored, winner: &Scored) -> String {
             winner.terms.power - loser.terms.power,
             format!("POWER: {} against {}", power(l.power), power(w.power)),
         ),
+        (
+            winner.terms.repo - loser.terms.repo,
+            format!("REPO: the repo is on {}", winner.machine),
+        ),
+        (
+            winner.terms.affinity - loser.terms.affinity,
+            format!("AFFIN: this workspace names {}", winner.machine),
+        ),
     ];
     let largest = gaps
         .iter()
@@ -288,6 +301,8 @@ mod tests {
         Candidate {
             machine: name.to_owned(),
             online,
+            repo: Here::Unknown,
+            ran_here: false,
             beat: beat.map(|(age, ram, cpu, power)| placement::Beat {
                 age: Duration::from_secs(age),
                 free_ram_mb: ram,
@@ -320,9 +335,9 @@ mod tests {
             "\
 2/6 machines have a beat within 30 s.
 
-MACHINE  SCORE    RAM    CPU  POWER
-zenith    42.8   20.0   12.8   10.0
-mba       13.6    2.6    9.0    2.0
+MACHINE  SCORE    RAM    CPU  POWER   REPO  AFFIN
+zenith    42.8   20.0   12.8   10.0    0.0    0.0
+mba       13.6    2.6    9.0    2.0    0.0    0.0
 
 zenith   won: highest score, 29.2 ahead of mba
 mba      lost: 29.2 behind zenith; the largest gap is RAM: free RAM 2.1 GB against 19.5 GB (this workspace's machine)
@@ -390,6 +405,27 @@ winbox   rejected: up, but not reporting (an agent or install problem); the last
         assert!(
             power.contains("the largest gap is POWER: battery at 10 % against AC"),
             "{power}"
+        );
+    }
+
+    #[test]
+    fn affinity_is_printed_and_named_as_the_gap() {
+        let mut home = candidate("home", true, Some((1, 0, 0, Power::Ac)));
+        home.ran_here = true;
+        let text = render(
+            &placement::rank(vec![
+                home,
+                candidate("away", true, Some((1, 0, 0, Power::Ac))),
+            ]),
+            "home",
+        );
+        assert!(
+            text.contains("home      45.0    0.0   15.0   10.0    0.0   20.0"),
+            "{text}"
+        );
+        assert!(
+            text.contains("the largest gap is AFFIN: this workspace names home"),
+            "{text}"
         );
     }
 
@@ -468,7 +504,7 @@ cold     rejected: asleep or off, and never heard from (this workspace's machine
         assert!(report.text.starts_with("2/3 machines"), "{}", report.text);
         assert!(
             report.text.contains(
-                "zenith   won: highest score, 29.2 ahead of mba (this workspace's machine)"
+                "zenith   won: highest score, 49.2 ahead of mba (this workspace's machine)"
             ),
             "{}",
             report.text

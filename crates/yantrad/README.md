@@ -35,6 +35,7 @@ API the CLI cannot reach.
 | `DELETE /api/machines/{machine}/sessions/{session}` | `yantra kill` |
 | `POST /api/machines/{machine}/probe` | `yantra probe` |
 | `POST /api/machines/{machine}/dirs` | `yantra ls dirs` |
+| `POST /api/placement` | `yantra why`, which scores the heartbeat terms only: the CLI asks no machine whether it holds the repo (Y-517) |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
 | `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
