@@ -1,6 +1,6 @@
-import { useId, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Check, GitBranch, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
+import { Check, GitBranch, KeyRound, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
 import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
@@ -29,14 +29,14 @@ import { REQUIRED, useChecklist } from './progress'
 import { marks, statusWord, type Line, type Step } from './steps'
 import './Setup.css'
 
-const tones = { done: 'primary', progress: 'tertiary', todo: 'high', failed: 'error' } as const
+const tones = { done: 'primary', progress: 'tertiary', todo: 'high', due: 'error', failed: 'error' } as const
 
 /** D7 B5: the lead is the state — a tick when done, the number when not yet,
  *  a ring in progress, a warning when it could not be read. */
 function lead(step: Step, fallback: ReactNode) {
   if (step.status === 'done') return <Check />
   if (step.status === 'progress') return <LoaderCircle />
-  if (step.status === 'failed') return <TriangleAlert />
+  if (step.status === 'failed' || step.status === 'due') return <TriangleAlert />
   return fallback
 }
 
@@ -60,6 +60,13 @@ const newest = (events: Event[], machine: string) =>
   events.find((one) => one.machine === machine && (one.kind === 'installed' || one.kind === 'install_stopped')) ??
   null
 
+const blockedBy = (stop: Event | null) => stop?.kind === 'install_stopped' && stop.commands.length > 0
+
+/** What one line can do on a bulk press right now; null when it offers nothing. */
+type Presses = { check: (() => void) | null; install: (() => void) | null }
+type Register = (name: string, presses: Presses | null) => void
+type Running = (name: string, running: boolean) => void
+
 /** D7 §4.1's machine lines: what each state says and the one action it
  *  offers. An asleep machine offers none, since ssh cannot answer it. */
 function MachineLine(props: {
@@ -70,16 +77,31 @@ function MachineLine(props: {
   read: boolean
   target: boolean
   join: ReactNode
+  register: Register
+  running: Running
 }) {
-  const { machine, line: said, report, events, read, target, join } = props
+  const { machine, line: said, report, events, read, target, join, register, running } = props
   const name = machine.name
   const recheck = useRecheckReadiness()
   const install = useInstallOn(name, events)
   const carried = useFab() !== null
   useAskOnArrival(name, events, read, recheck.mutate)
   const stop = newest(events, name)
-  const blocked = said.kind === 'missing' && stop?.kind === 'install_stopped' && stop.commands.length > 0
+  const blocked = said.kind === 'missing' && blockedBy(stop)
   const view = said.kind === 'missing' && install.running ? 'installing' : blocked ? 'blocked' : said.kind
+
+  useEffect(() => {
+    register(name, {
+      check: said.kind === 'unchecked' && !recheck.isPending ? () => recheck.mutate(name) : null,
+      install: said.kind === 'missing' && said.installable && view === 'missing' ? install.press : null,
+    })
+    return () => register(name, null)
+  })
+
+  useEffect(() => {
+    running(name, install.running)
+    return () => running(name, false)
+  }, [name, install.running, running])
 
   const mark: Record<typeof view, MarkState> = {
     asleep: 'unknown',
@@ -184,6 +206,30 @@ export function Setup() {
   const { about, identity, machines, sweep, notifications, events, all, lines, steps, later: optional, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
+  const presses = useRef(new Map<string, Presses>())
+  const register = useCallback<Register>((name, one) => {
+    if (one) presses.current.set(name, one)
+    else presses.current.delete(name)
+  }, [])
+  const [installing, setInstalling] = useState<ReadonlySet<string>>(new Set())
+  const running = useCallback<Running>((name, on) => {
+    setInstalling((now) => {
+      if (now.has(name) === on) return now
+      const next = new Set(now)
+      if (on) next.add(name)
+      else next.delete(name)
+      return next
+    })
+  }, [])
+  const press = (which: keyof Presses) => {
+    for (const one of presses.current.values()) one[which]?.()
+  }
+  const unchecked = lines.some((one) => one.line.kind === 'unchecked')
+  const installable =
+    installing.size === 0 &&
+    lines.some(
+      (one) => one.line.kind === 'missing' && one.line.installable && !blockedBy(newest(events, one.machine.name)),
+    )
 
   const others = all.filter((one) => one.ownership === 'yours' && !runsSessions(one))
   // Y-404: listed with the reason, never counted.
@@ -287,7 +333,22 @@ export function Setup() {
               {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
               ) : lines.length > 0 ? (
-                <ul className="setup__lines">
+                <>
+                  {unchecked || installable ? (
+                    <div className="setup__bulk">
+                      {unchecked ? (
+                        <Button onClick={() => press('check')} variant="tonal">
+                          Check all
+                        </Button>
+                      ) : null}
+                      {installable ? (
+                        <Button onClick={() => press('install')} variant="tonal">
+                          Install on all
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <ul className="setup__lines">
                   {lines.map((one) => (
                     <MachineLine
                       events={events}
@@ -296,11 +357,14 @@ export function Setup() {
                       line={one.line}
                       machine={one.machine}
                       read={notifications.data !== undefined}
+                      register={register}
+                      running={running}
                       report={one.report}
                       target={next === 'install' && one.machine.name === target}
                     />
                   ))}
-                </ul>
+                  </ul>
+                </>
               ) : null}
               {others.length > 0 ? (
                 <>
@@ -375,6 +439,18 @@ export function Setup() {
                   optional.push.status === 'done' ? undefined : (
                     <Button render={<Link params={{ category: 'notifications' }} to="/settings/$category" />} role="link" variant="tonal">
                       Set up
+                    </Button>
+                  )
+                }
+              />
+              <Item
+                fallback={<KeyRound />}
+                step={optional.key}
+                title="The appliance's Tailscale key"
+                trailing={
+                  optional.key.status === 'done' ? undefined : (
+                    <Button render={<a href="https://login.tailscale.com/admin/machines" rel="noreferrer" target="_blank" />} role="link" variant="tonal">
+                      Admin console
                     </Button>
                   )
                 }

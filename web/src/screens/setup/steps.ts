@@ -8,7 +8,7 @@ import type { MarkState } from '@/m3/mark/Mark'
  *  result than a step needs. */
 export type Asked<T> = { data: T | undefined; error: Error | null; isPending: boolean }
 
-export type Status = 'done' | 'progress' | 'todo' | 'failed'
+export type Status = 'done' | 'progress' | 'todo' | 'due' | 'failed'
 
 export type Step = { status: Status; words: string }
 
@@ -16,6 +16,7 @@ export const marks: Record<Status, MarkState> = {
   done: 'done',
   progress: 'running',
   todo: 'idle',
+  due: 'needs',
   failed: 'failed',
 }
 
@@ -23,6 +24,7 @@ export const statusWord: Record<Status, string> = {
   done: 'done',
   progress: 'in progress',
   todo: 'not yet',
+  due: 'soon',
   failed: 'could not be read',
 }
 
@@ -56,6 +58,27 @@ export function added(joined: string[], unkeyed: string[] = []): Step {
     }
   }
   return { status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' }
+}
+
+const DAY = 86_400_000
+const WARN_DAYS = 30
+const utcDate = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+
+/** The appliance's own node key. Tailscale expires it unless told not to, and
+ *  an expired one cuts the dashboard off from every machine. */
+export function keyExpiry(machines: Asked<Machine[]>, appliance: Machine | null, now: number): Step {
+  if (machines.error) return failed(machines.error)
+  if (machines.isPending || !machines.data) return reading()
+  if (!appliance) return { status: 'todo', words: 'the daemon has not found its own node' }
+  if (appliance.key_expires === null) return { status: 'done', words: 'key expiry is off' }
+  const expires = Date.parse(appliance.key_expires)
+  const date = utcDate(expires)
+  if (expires <= now) {
+    return { status: 'due', words: `expired on ${date} · log in to Tailscale on the appliance again` }
+  }
+  const days = Math.ceil((expires - now) / DAY)
+  if (days <= WARN_DAYS) return { status: 'due', words: `expires on ${date}, in ${days} day${days === 1 ? '' : 's'}` }
+  return { status: 'todo', words: `the key expires on ${date} · turn key expiry off in the admin console` }
 }
 
 /** The grant, read as narrowly as this step needs it: the api layer still

@@ -3012,6 +3012,7 @@ mod tests {
             online,
             last_seen: seen.map(str::to_string),
             expired,
+            key_expires: None,
             addresses: Vec::new(),
         }
     }

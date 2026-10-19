@@ -333,7 +333,7 @@ as an unprivileged account through `sudo`, against a release served from inside
 the container by `tests/fixture/release.sh` — `/etc/hosts` points github.com and
 api.github.com at a local HTTPS server the container trusts, which is how a *corrupted* archive gets
 served and refused. Both skip and label themselves the same way. `update.rs` uses the
-same container, and `release.yml` runs its last test against the x86_64 archive it built (Y-483). What no
+same container. One `installer.rs` test (Y-473) runs the script in a bare `debian:trixie`, which has no `curl`. `release.yml` runs its last test against the x86_64 archive it built (Y-483). What no
 container can show is the boot ordering against a real `tailscaled`.
 
 ## Cross-compiling for the appliance

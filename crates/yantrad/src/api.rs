@@ -529,6 +529,8 @@ struct Machine {
     /// I-39: an expired key is a third state. Such a machine can be powered on,
     /// listed, and still unreachable — which a green dot would erase.
     expired: bool,
+    /// When the node key lapses, RFC 3339; `null` is key expiry off.
+    key_expires: Option<String>,
     last_seen: Option<String>,
     /// **`null` is *never heard from*** — I-47 again, and the state a zeroed
     /// row would erase. `online` beside it is what tells the two explanations
@@ -557,6 +559,7 @@ impl Machine {
             os: machine.os.to_string(),
             online: machine.online,
             expired: machine.expired,
+            key_expires: machine.key_expires.clone(),
             last_seen: machine.last_seen.clone(),
             heartbeat: beats.get(&machine.id).map(Beat::of),
             ownership: match machine.ownership {
@@ -1036,6 +1039,7 @@ mod tests {
             online,
             last_seen: None,
             expired: false,
+            key_expires: None,
             addresses: Vec::new(),
         }
     }
@@ -1265,6 +1269,20 @@ mod tests {
         );
     }
 
+    /// Y-477: key expiry off is `null` on the wire, not a missing key.
+    #[tokio::test]
+    async fn key_expiry_off_is_null() {
+        let model = holding(Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(vec![machine(
+                "n-1", "mine", true,
+            )])))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(model, "/machines").await;
+        assert_eq!(body["data"][0]["key_expires"], serde_json::Value::Null);
+    }
+
     /// Y-404: whose node it is crosses the wire as one word, and the owner's
     /// number and the tag names never do.
     #[tokio::test]
@@ -1309,6 +1327,7 @@ mod tests {
                 online: false,
                 last_seen: Some("2026-07-07T09:00:00Z".into()),
                 expired: true,
+                key_expires: Some("2027-01-18T10:11:44Z".into()),
                 addresses: vec!["100.64.0.4".parse().expect("a v4 address")],
             }])))),
             ..Snapshot::default()
@@ -1318,6 +1337,7 @@ mod tests {
         let machine = &body["data"][0];
         assert_eq!(machine["online"], false);
         assert_eq!(machine["expired"], true);
+        assert_eq!(machine["key_expires"], "2027-01-18T10:11:44Z");
         assert_eq!(machine["os"], "linux");
         assert!(
             machine.get("id").is_none(),
