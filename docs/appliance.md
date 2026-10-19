@@ -167,12 +167,46 @@ by number, which is also the better answer when the network works.
 ### With no terminal
 
 A run with nothing at `/dev/tty` — a container, a CI job, an `ssh host 'curl … | bash'` without
-`-t` — asks nothing and starts nothing. It installs the release, writes both environment files if
+`-t` — without `--yes` asks nothing and starts nothing. It installs the release, writes both environment files if
 they are absent (`agent.env` with a placeholder rather than an address), enables no unit, and
 ends with a numbered list of what is left. When `yantrad.service` is already enabled — which is
 how `yantra-update.service` runs it — it says that instead, and restarts nothing itself. That is the path
 [`crates/yantrad/tests/installer.rs`](../crates/yantrad/tests/installer.rs) runs twice against a
 real systemd ([Y-158](../tracker.md#3-task-board)).
+
+### Unattended install
+
+**[Y-474](../tracker.md):** `--yes` answers every question yes, with or without a terminal.
+`YANTRA_YES=1` does the same:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_YES=1 bash
+```
+
+The run then does what a yes at a terminal does: it installs Tailscale, logs the box in, turns on
+HTTPS, starts the units and ends on the dashboard's URL. Without a key, `tailscale up` prints its
+login URL and waits for someone to open it. To log in with no one there, give it an auth key:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
+```
+
+- **The key is never written to disk.** The script pipes it to
+  `tailscale up --auth-key=file:/dev/stdin`, so it is in no command line, no file and no journal
+  line. `sudo` logs a command line to the journal, which is why the key does not go in one.
+- **A key made with a tag joins the box tagged**, which is what [Q17](../tracker.md#6-open-questions)
+  warned about: a tagged box may refuse every write from your phone, which
+  [Y-143](../tracker.md) has not measured, and it reads every peer as shared. Make the key without
+  a tag. The box's key still expires, so turn off key expiry as step 4
+  above says.
+- **With no terminal, `tailscale serve` gets 120 seconds.** On a tailnet that never had HTTPS it
+  waits on its link, and no one is there to press Ctrl-C. The install then ends on plain HTTP.
+- **`--uninstall` ignores `--yes`.** Its questions are default no, and `--yes` never deletes
+  `/etc/yantra` or the account.
+
+The updater runs `yantra-update` with no option, so a background update asks nothing and starts
+nothing new.
 
 ### What the tests prove, and what they cannot
 
@@ -184,7 +218,10 @@ a corrupted archive installs nothing. **At a terminal**, through a pty: a yes lo
 in, turns on `serve`, writes the address into an absent `agent.env`, enables both units and ends on
 the URL; a second run asks nothing and changes no file; a no installs Yantra and starts nothing. On
 a box that is already logged in, a no to HTTPS still starts both units. A `serve` that refuses, and
-a Ctrl-C while `serve` waits on its link, both end on the `http://` URL.
+a Ctrl-C while `serve` waits on its link, both end on the `http://` URL. **With `--yes` and no
+terminal**: the run asks nothing, hands `TS_AUTHKEY` to `tailscale up`, turns on `serve`, writes the
+address, enables both units and ends on the `https://` URL; the key is in no file and no journal
+line afterwards, and `YANTRA_YES=1` ends on the same URL. An unknown option installs nothing.
 
 **The terminal tests talk to a stub `tailscale`** that records its calls. A login, a tailnet address
 and a certificate are what no container can hold, so the tests prove which commands the script ran,

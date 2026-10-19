@@ -31,7 +31,8 @@
 //! answer are driven through a pty, and the `tailscale` they talk to is a stub
 //! that records its calls: a login, a tailnet address and a certificate are
 //! what no container can hold, so this proves which commands the script ran
-//! and never that Tailscale did what they ask.
+//! and never that Tailscale did what they ask. `--yes` (Y-474) answers with no
+//! terminal, and the same stub records the key it was handed.
 
 mod common;
 
@@ -117,7 +118,11 @@ status)
     [ -e $state/up ] || exit 1
     [ "$2" = --json ] && printf '{"Self": {"DNSName": "yantra-box.tail0000.ts.net."}, "Peer": {"p": {"DNSName": "peer.tail0000.ts.net."}}}\n'
     ;;
-up) touch $state/up ;;
+up)
+    # The real one reads a `file:` key with os.ReadFile; the log is the only copy.
+    case "$2" in --auth-key=file:*) echo "up authkey=$(cat "${2#--auth-key=file:}")" >> $state/calls ;; esac
+    touch $state/up
+    ;;
 ip)
     [ -e $state/up ] || exit 1
     echo 127.0.0.1
@@ -672,6 +677,23 @@ fn a_corrupted_archive_is_refused_and_nothing_is_installed() -> Result<()> {
     };
 
     fixture.publish(VERSION, "corrupt")?;
+
+    // Y-474: a flag the script does not know is refused before anything else.
+    let unknown = fixture.systemd.exec_as(
+        UNPRIVILEGED,
+        &["bash", "-c", "cat /fixture/install.sh | bash -s -- --yse"],
+    )?;
+    assert!(
+        !unknown.status.success(),
+        "an unknown flag installed anyway"
+    );
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("--yse"),
+        "the refusal must name the flag:\n{}",
+        String::from_utf8_lossy(&unknown.stderr)
+    );
+    fixture.nothing_is_installed("the flag was unknown")?;
+
     fixture.release(&["corrupt", &fixture.repo, VERSION])?;
 
     let out = fixture.install()?;
@@ -973,6 +995,85 @@ fn at_a_terminal_a_yes_starts_the_dashboard_and_a_second_run_asks_nothing() -> R
         last_line(&second),
         "install: open the dashboard at https://yantra-box.tail0000.ts.net:8443"
     );
+    Ok(())
+}
+
+/// Y-474's row: `--yes` with no terminal answers every question yes, logs the
+/// box in with `TS_AUTHKEY`, starts both units and ends on the dashboard's URL
+/// — and the key is in no file and no journal line afterwards.
+#[test]
+fn with_yes_and_no_terminal_the_install_ends_on_the_dashboard() -> Result<()> {
+    const KEY: &str = "tskey-auth-y474";
+    const HTTPS_URL: &str =
+        "install: open the dashboard at https://yantra-box.tail0000.ts.net:8443";
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+
+    fixture.publish(VERSION, "unattended")?;
+    let out = fixture.systemd.exec_as(
+        UNPRIVILEGED,
+        &[
+            "bash",
+            "-c",
+            &format!("cat /fixture/install.sh | TS_AUTHKEY={KEY} bash -s -- --yes"),
+        ],
+    )?;
+    let stdout = String::from_utf8(out.stdout)?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "install.sh --yes failed ({}):\n{stdout}\n{stderr}",
+        out.status
+    );
+    assert!(
+        !stdout.contains("[Y/n]") && !stderr.contains("[Y/n]"),
+        "--yes asked a question:\n{stdout}"
+    );
+
+    let calls = fixture.tailscale_calls()?;
+    assert!(
+        calls.iter().any(|c| c == &format!("up authkey={KEY}")),
+        "the key never reached tailscale up: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "serve --bg --https=8443 http://127.0.0.1:7717"),
+        "--yes did not turn on HTTPS: {calls:?}"
+    );
+    let env = fixture.sh("cat /etc/yantra/agent.env")?;
+    assert!(
+        env.lines().any(|l| l == "YANTRA_DAEMON=127.0.0.1:7717"),
+        "an absent agent.env is written with this box's address:\n{env}"
+    );
+    for unit in ENABLED {
+        assert_eq!(fixture.systemd.property(unit, "UnitFileState")?, "enabled");
+    }
+    assert_eq!(last_line(&stdout), HTTPS_URL);
+
+    // The stub's own log holds the key by design; nothing else may.
+    let on_disk = fixture.sh(&format!(
+        "grep -rlF --exclude-dir=tailscale-stub {KEY} /etc /home /root /usr/local /tmp /var 2>/dev/null || true"
+    ))?;
+    assert_eq!(on_disk.trim(), "", "the key was written to disk");
+    let journal = fixture.sh(&format!("journalctl --no-pager | grep -F {KEY} || true"))?;
+    assert_eq!(journal.trim(), "", "the key reached the journal");
+
+    // The env form, on the box the run above installed.
+    let again = fixture.systemd.exec_as(
+        UNPRIVILEGED,
+        &["bash", "-c", "cat /fixture/install.sh | YANTRA_YES=1 bash"],
+    )?;
+    let again_out = String::from_utf8(again.stdout)?;
+    assert!(
+        again.status.success(),
+        "YANTRA_YES=1 failed ({}):\n{again_out}\n{}",
+        again.status,
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(last_line(&again_out), HTTPS_URL);
     Ok(())
 }
 
