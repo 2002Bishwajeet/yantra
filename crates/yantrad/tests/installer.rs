@@ -36,7 +36,7 @@
 
 mod common;
 
-use std::process::Output;
+use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
 
@@ -1193,6 +1193,58 @@ fn uninstall_removes_units_and_binaries_and_keeps_the_rest_with_no_terminal() ->
     assert!(
         second.contains("removed:") && second.contains("kept:"),
         "a second run over nothing left must still succeed and say so:\n{second}"
+    );
+    Ok(())
+}
+
+/// A bare `debian:trixie` has no `curl` (Y-473). The script must install it
+/// with `apt-get` and go on, and only then stop on what that image lacks:
+/// `systemctl`. The image is plain rather than the systemd fixture, because
+/// the fixture's Fedora already carries `curl`.
+#[test]
+fn a_bare_debian_box_gets_curl_from_apt_get() -> Result<()> {
+    if !Command::new("podman")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        if std::env::var_os("YANTRA_REQUIRE_PODMAN").is_some() {
+            bail!("YANTRA_REQUIRE_PODMAN is set but `podman` is not available");
+        }
+        eprintln!("SKIPPED: `podman` is not available, so the bare Debian box cannot run.");
+        return Ok(());
+    }
+
+    let script = repo_root().join("install.sh");
+    let out = Command::new("podman")
+        .args(["run", "--rm", "--label", "yantra-fixture=1", "-v"])
+        .arg(format!("{}:/install.sh:ro,Z", script.display()))
+        .args([
+            "docker.io/library/debian:trixie",
+            "bash",
+            "-c",
+            "! command -v curl && echo 'precondition: no curl' ; \
+             bash /install.sh 2>&1; echo \"exit=$?\"; command -v curl",
+        ])
+        .output()
+        .context("spawning podman run")?;
+    let screen = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        screen.contains("precondition: no curl"),
+        "the image already had curl:\n{screen}"
+    );
+    assert!(
+        screen.contains("curl is missing, so apt-get installs it"),
+        "the script did not say it was installing curl:\n{screen}"
+    );
+    assert!(
+        screen.contains("systemctl is not installed"),
+        "the script did not get past curl to the next missing tool:\n{screen}"
+    );
+    assert!(
+        screen.trim_end().ends_with("/usr/bin/curl"),
+        "curl is not installed after the run:\n{screen}"
     );
     Ok(())
 }
