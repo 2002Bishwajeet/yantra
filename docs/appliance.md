@@ -450,5 +450,7 @@ The ntfy relay is written by `/settings` or by `sudo yantra relay <url> [--token
 ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The installer creates that
 file empty, `0600` and owned by `yantra`; **leave the owner alone** — the daemon rewrites the file
 in place, so one created by hand as root leaves `/settings` refusing with a 500. `yantrad` reads it
-when systemd starts the unit, so a relay set from the browser needs
+when systemd starts the unit, so a relay set from the browser needs a restart. The sheet offers
+"Restart now", which asks for the update trigger ([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md))
+and so also installs a newer release if one is published. Without the updater, run
 `sudo systemctl restart yantrad` ([`development.md`](development.md)).

@@ -11,6 +11,7 @@ import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { ConnectSheet } from './ConnectSheet'
 import { Group, Note } from './Group'
+import { RestartNow } from './RestartNow'
 import { onMachines, presentOn } from './readiness'
 import { Sheet } from './Sheet'
 
@@ -243,8 +244,7 @@ function ClientIdSheet(props: {
         <div aria-live="polite" className="settings__outcome">
           {saved === 'set' ? (
             <Text render={<p />} scale="body-medium" emphasized>
-              Saved. yantrad takes it at its next restart —{' '}
-              <Mono>sudo systemctl restart yantrad</Mono>.
+              Saved. yantrad takes it at its next restart.
             </Text>
           ) : null}
           {saved === 'cleared' ? (
@@ -252,6 +252,7 @@ function ClientIdSheet(props: {
               Cleared. yantrad falls back to its own app at its next restart.
             </Text>
           ) : null}
+          {saved ? <RestartNow /> : null}
           {error ? (
             <>
               <Text render={<p />} scale="body-medium" tone="error" emphasized>

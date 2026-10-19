@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
-import { mountSettings, sent, unmountSettings } from './harness'
+import { type Answer, type Answers, mountSettings, sent, unmountSettings } from './harness'
 
 /** GitHub's is the only row with an enabled Connect: GitLab and OpenAI are
  *  "Later", not a button. */
@@ -238,5 +238,68 @@ describe('Providers', () => {
       const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
       expect((sheet.getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(true)
     })
+  })
+})
+
+describe('restart now (Y-479)', () => {
+  const RESTART = { name: 'Restart now' }
+  const own = { 'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }] } as Answers
+
+  async function sheetOf(answers: Answers) {
+    const asked = mountSettings('desktop', '/settings/providers', answers)
+    await screen.findByRole('button', { name: 'Edit' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    return { asked, sheet: within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' })) }
+  }
+  const save = (sheet: ReturnType<typeof within>) => {
+    fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: 'Iv1.mine' } })
+    fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
+  }
+
+  it('offers no restart before a save, or after a refused one', async () => {
+    const { sheet } = await sheetOf({ 'POST /api/github/client-id': [400, 'bad id'] })
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+    save(sheet)
+    await sheet.findByText('bad id')
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+  })
+
+  it('asks for the restart after a save', async () => {
+    const { asked, sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': [202] })
+    save(sheet)
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    await waitFor(() => expect(asked).toContain('POST /api/update'))
+    expect(await sheet.findByText('yantrad is restarting. The page reconnects on its own.')).toBeTruthy()
+  })
+
+  it('asks for the restart after a clear', async () => {
+    const { asked, sheet } = await sheetOf({
+      ...own,
+      'DELETE /api/github/client-id': [204],
+      'POST /api/update': [202],
+    })
+    fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    await waitFor(() => expect(asked).toContain('POST /api/update'))
+    expect(await sheet.findByText(/yantrad is restarting/)).toBeTruthy()
+  })
+
+  const refusals: [string, Answer | (() => Answer), RegExp][] = [
+    ['a box with no updater', [409, 'no updater'], /cannot restart itself/],
+    [
+      'a daemon that does not answer',
+      () => {
+        throw new TypeError('Failed to fetch')
+      },
+      /did not answer, so it was not restarted/,
+    ],
+  ]
+
+  it.each(refusals)('draws %s, and names the manual command', async (_, answered, title) => {
+    const { sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': answered })
+    save(sheet)
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    expect(await sheet.findByText(title)).toBeTruthy()
+    expect(sheet.getByText('sudo systemctl restart yantrad')).toBeTruthy()
   })
 })

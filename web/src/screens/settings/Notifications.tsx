@@ -9,6 +9,7 @@ import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { Group, Note } from './Group'
+import { RestartNow } from './RestartNow'
 import { Sheet } from './Sheet'
 
 /** Where the daemon writes it, named here because the sheet is the only
@@ -196,9 +197,10 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
                 The test message arrived at the relay.
               </Text>
               <Text render={<p />} scale="body-small" tone="variant">
-                It is written in {FILE}. The daemon reads that file when systemd starts it, so run{' '}
-                <Mono>sudo systemctl restart yantrad</Mono> on the appliance before it notifies you from this relay.
+                It is written in {FILE}. The daemon reads that file when systemd starts it, so it notifies you from this
+                relay after a restart.
               </Text>
+              <RestartNow />
             </>
           ) : null}
           {relay.error ? (
@@ -209,6 +211,7 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
               {/* The daemon's own words: they name the file or what the relay
                   said, and never the topic or the token. */}
               <Mono className="settings__said">{relay.error.said}</Mono>
+              {relay.error.status === 502 ? <RestartNow /> : null}
             </>
           ) : null}
         </div>
