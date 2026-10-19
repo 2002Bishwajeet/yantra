@@ -1,13 +1,13 @@
 # ADR-0038 — Rooms, and guest devices
 
 - **Date:** 2026-10-20
-- **Status:** Proposed 2026-10-20 ([Y-533](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Accepted 2026-10-20 by the owner ([Y-533](../../tracker.md)).
 - **Evidence:** [the rooms-and-guests plan](../plans/rooms-and-guests.md), which holds the detail and
   the sources.
-- **Would amend, when accepted:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)
+- **Amends:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)
   decision 1 (reads are no longer open to every peer) and
   [ADR-0033](0033-other-harnesses-speak-acp-and-claude-delegates.md) decision 5 (the MCP tools gain
-  an HTTP transport in `yantrad`). Each gets a dated blockquote on acceptance.
+  an HTTP transport in `yantrad`). Each carries a dated blockquote.
 - **Reads against:** [ADR-0011](0011-claude-code-runs-as-a-tui-in-tmux.md) (no input into a pane),
   [ADR-0017](0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md),
   [ADR-0023](0023-the-github-grant-lives-beside-the-relay.md) (no third credential),

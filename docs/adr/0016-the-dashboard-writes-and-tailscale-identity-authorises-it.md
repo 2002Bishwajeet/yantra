@@ -159,3 +159,10 @@ here is that granting them later has to be deliberate.
 > layer rather than by anything changing here. Read that ADR before this one's §4: identity still
 > never comes from a name in a header, and the *address* is believed only because the connection
 > arrived from this machine.
+
+> **2026-10-20 ([Y-533](../../tracker.md)): reads are no longer open to every peer.**
+> [ADR-0038](0038-rooms-and-guest-devices.md) lets the owner share the appliance with a friend's
+> device. Decision 1 kept reads open to any tailnet peer, because every peer was the owner's. A shared
+> node breaks that premise: a guest would read the fleet and the private repo list. So every route now
+> checks the caller, and a non-owner reaches only what its grant names. The `whois` predicate for the
+> owner does not change.
