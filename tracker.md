@@ -382,6 +382,9 @@ deleted everywhere else.
 | Y-530 | claude-mem redaction against the Y-430 fixtures | ⬜ todo | claude | Y-527 | **Done** when R22 lists each Y-430 secret that claude-mem's patterns miss, and `CLAUDE_MEM_REDACT_CUSTOM_PATTERNS` catches each one. |
 | Y-531 | ADR: the appliance hosts the shared memory | ⬜ todo | owner, claude | Y-527, Y-530 | **Done** when the owner accepts an ADR that amends ADR-0032 with the hub, or drops it and opens the §9.5 fallback rows. |
 | Y-532 | Landing shows the wget install form | ⬜ todo | claude | Y-473 | **Parks:** needs the landing's visual baselines regenerated. **Done** when the landing's last beat shows the `wget` form beside the `curl` one and `landing-desktop-last.png` and `landing-mobile-last.png` are regenerated. |
+| Y-533 | Plan and ADR-0038: rooms and guest devices | ⬜ todo | owner, claude | — | **Owner, 2026-10-20:** live sessions talk to each other across machines, and a friend's device joins with limited rights. **Done** when a plan and a Proposed ADR-0038 cover rooms, delivery, the turn budget, guest onboarding and scopes, and the owner accepts both. |
+| Y-534 | Rooms inside the tailnet | ⬜ todo | claude | Y-533, Y-447 | **Done** when `room_send` and `room_read` in `yantra mcp` pass messages between sessions on two machines, a Chat thread wakes on a message, and a room pauses at its turn budget. A podman test covers it. |
+| Y-535 | A friend's device joins with a scoped grant | ⬜ todo | claude | Y-534 | **Done** when the owner adds a guest device from Settings, picks its scopes, and the guest reaches only those. Guest messages arrive labelled. Revoking the grant cuts the guest off at once. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
