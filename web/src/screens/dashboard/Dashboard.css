@@ -484,6 +484,12 @@
   padding: 4px 8px 4px 20px;
 }
 
+.dash__idle-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .dash__new {
   margin-left: auto;
 }

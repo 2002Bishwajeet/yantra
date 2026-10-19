@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, lazy, Suspense, useState } from 'react'
 import { Bell, BellRing, CircleSlash, Eye, EyeOff, MoonStar, SquareCheck } from 'lucide-react'
 import { useAbout } from '@/api/hooks'
 import { useSetRelay } from '@/api/mutations'
@@ -11,6 +11,9 @@ import { TextField } from '@/m3/text-field/TextField'
 import { Group, Note } from './Group'
 import { RestartNow } from './RestartNow'
 import { Sheet } from './Sheet'
+import { newTopic, publicTopic, topicUrl } from './topic'
+
+const Qr = lazy(() => import('qrcode.react').then((it) => ({ default: it.QRCodeSVG })))
 
 /** Where the daemon writes it, named here because the sheet is the only
  *  place a person learns the token is on disk in plain text (ADR-0021). */
@@ -134,6 +137,8 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
   const { open, onOpenChange, onSaved } = props
   const relay = useSetRelay()
   const [shown, setShown] = useState(false)
+  const [url, setUrl] = useState('')
+  const topic = publicTopic(url)
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -172,11 +177,32 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
           autoComplete="off"
           label="Topic URL"
           name="url"
+          onChange={(event) => setUrl(event.target.value)}
           placeholder="https://ntfy.sh/a-topic-nobody-guesses"
           required
           supporting="On the public server the topic is the only password there is, so make it one nobody guesses, or point this at your own ntfy."
+          trailing={
+            <Button onClick={() => setUrl(topicUrl(newTopic()))} variant="text">
+              Generate
+            </Button>
+          }
           type="url"
+          value={url}
         />
+        {topic ? (
+          <div className="settings__subscribe">
+            <Suspense fallback={<div className="settings__qr-wait" />}>
+              <Qr
+                aria-label={`A QR code for the ntfy topic ${topic}`}
+                marginSize={2}
+                role="img"
+                size={112}
+                value={topicUrl(topic)}
+              />
+            </Suspense>
+            <a href={topicUrl(topic)}>Open the topic</a>
+          </div>
+        ) : null}
         <TextField
           autoComplete="off"
           label="Token"
