@@ -626,7 +626,7 @@ function Idle(props: {
     return (
       <Card aria-labelledby="dash-idle" className="dash__idle" variant="outlined">
         <CardHead id="dash-idle" title="Idle" words={<State state="idle">{words}</State>} />
-        {workspaces.length === 0 ? <div className="dash__empty">{empty}</div> : list}
+        {workspaces.length === 0 ? <div className="dash__idle-empty">{empty}</div> : list}
       </Card>
     )
   }
