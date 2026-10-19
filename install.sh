@@ -432,9 +432,10 @@ if [ -n "$address" ]; then
     else
         echo "install: $AGENT_ENV names no daemon, so yantra-agent is not started. Add: YANTRA_DAEMON=$address"
     fi
-    # ADR-0027 §5 warns against an unattended restart; this one is asked for.
+    # ADR-0027 §5 warns against an unattended restart, so only a person at a
+    # terminal is asked; --yes with no terminal leaves the running units alone.
     if [ "$running" = yes ]; then
-        if ask "Restart yantrad and yantra-agent now?"; then
+        if [ "$interactive" = yes ] && ask "Restart yantrad and yantra-agent now?"; then
             as_root systemctl try-restart yantrad.service yantra-agent.service
         else
             echo "install: the units still run the version before v$VERSION. To run it: sudo systemctl try-restart yantrad.service yantra-agent.service"
@@ -462,7 +463,7 @@ if [ -n "$address" ]; then
     else
         url="http://$address"
     fi
-    if command -v qrencode >/dev/null; then
+    if [ "$interactive" = yes ] && command -v qrencode >/dev/null; then
         qrencode -t ansiutf8 "$url" </dev/null || true
     fi
     echo "install: open the dashboard at $url"
