@@ -565,59 +565,88 @@ JSON shape, so `contract.gen.ts` does not change.
 
 ## The route that holds a chat
 
-`GET /api/workspaces/{name}/chat?thread=<id>` ([`chat.rs`](src/chat.rs), Y-356,
+`GET /api/workspaces/{name}/chat?thread=<id>&after=<cursor>` ([`chat.rs`](src/chat.rs), Y-356,
 [ADR-0026](../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)) upgrades to a
 WebSocket after `allowed()`, as the terminal does. The turn that opens a thread names its harness
 (Y-434, [ADR-0033](../../docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md)), and the
 thread keeps it. A Claude turn is a [`claude::Turn`](../yantra-core/src/claude.rs) in the thread's
-worktree. Any other harness is one [`acp::Agent`](../yantra-core/src/acp.rs) for the socket's life,
-and `thread::remember` keeps its name and session id in the repository's git config. Without
+worktree. Any other harness is one [`acp::Agent`](../yantra-core/src/acp.rs), and
+`thread::remember` keeps its name and session id in the repository's git config. Without
 `?thread=` the first turn calls `thread::open` and says `thread.started{thread, harness}`; with it,
-the route finds the thread, says `thread.started` too, and replays it: Claude's transcript as deltas,
-or ACP's `session/load`. **There is no session-addressed form**: a thread
-is a worktree of a workspace's repository, and a bare session names none.
+the route finds the thread, says `thread.started` too, and replays it. **There is no
+session-addressed form**: a thread is a worktree of a workspace's repository, and a bare session
+names none.
+
+**A turn outlives its socket, its ssh pipe and this daemon**
+([ADR-0035](../../docs/adr/0035-a-chat-turn-outlives-its-ssh-pipe.md), Y-447). Each agent runs in
+a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux session
+`yantra-keep-<ws>-<thread>`, which journals the agent's stdin and stdout under
+`~/.yantra/keep/<ws>/<thread>`. The session is also the thread's lock.
+
+- **`chat::Registry` owns the turns, and a socket owns nothing.** It sits in `Fleet::chats`. Each
+  live keeper has one task that reads it, reconnects the reader when ssh drops, answers what the
+  turn's mode answers, and keeps the checkpoint at the turn's end. A socket subscribes to the
+  keeper, so **a socket that closes detaches** and the turn goes on. Only `cancel` and the
+  thread's removal stop a turn; a cancelled turn that has not ended in 10 s is killed.
+- **Each event carries a `cursor`**, `<run>:<line end>:<part>`, its place in the keeper's `out`
+  journal. `?after=` is the last cursor the browser drew. `thread.started` answers with the cursor
+  the socket continues from, or with none when it replays the whole run, and then the browser
+  starts its timeline again. No event reaches one socket twice.
+- **One turn at a time in a thread, across every tab and every restart.** A second `turn` while
+  one runs is `busy`, and the socket stays open. A keeper that already runs on the machine is
+  adopted, not started again.
+- **`refresh.rs` adopts what a restart left.** The sessions sweep lists `yantra-keep-` sessions,
+  and each one the registry does not hold is adopted. The session listing hides them, and
+  `validate_name` refuses the prefix to a workspace.
+- **A request nobody is attached to see sends one notification** (Y-451), titled with
+  `Phase::WaitingForApproval`'s headline. The body names the workspace and the thread, and nothing
+  of the request.
+- **A Claude keeper ends with its turn.** The task keeps the checkpoint and kills the session.
+  **An ACP keeper stays for the next turn** and stops after 15 minutes with no turn, or once `out`
+  passes half the journal cap. The next keeper calls `session/load`.
+
+The rules from before the keeper still hold:
 
 - **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel` and
   `revert`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn` and `checkpoint`. `notLoggedIn`
-  adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`.
+  adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
+  `chatQuery`.
 - **Each turn ends in a checkpoint** (Y-448, [`checkpoint`](../yantra-core/src/checkpoint.rs)).
   Before a turn starts, the route keeps checkpoint 0 if the thread has none, and a turn without it
-  does not start. When a turn ends, the route keeps the tree and sends
-  `turn.diff.updated{turn, unifiedDiff, truncated}`. A socket that closes mid-turn keeps it too, and
-  tells no one. `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
-  `thread.reverted{turn}`; it is `badFrame` with no thread. A turn or a revert is `busy` while
-  any tab of the daemon runs one in the thread, until that turn's checkpoint is kept. The
+  does not start. When a turn ends, the keeper's task keeps the tree and sends
+  `turn.diff.updated{turn, unifiedDiff, truncated}`, whether a socket is attached or not.
+  `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
+  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn runs. The
   conversation is not rewound. A git that refused, or did not answer in 60 s, is a `checkpoint`
   failure, except after a turn that failed: the turn's own error stays, and the log has the
   checkpoint's. No diff is logged.
 - **A binary frame is an image** (Y-424). The upgrade's limit is 16 MiB a message and a frame, so a
-  10 MB screenshot fits. The route sends the bytes to the machine through
-  [`image::Images`](../yantra-core/src/image.rs): one directory per socket under the machine's
-  `TMPDIR`, outside every repository and worktree, under a name the daemon generates. It writes
-  nothing on the appliance. Each frame is awaited inline for up to 60 s and gets exactly one reply,
-  in order: `{"type":"attached","path"}` or `{"type":"notAttached","kind","said"}`, whose kinds are
+  10 MB screenshot fits. The route sends the bytes through
+  [`image::Images`](../yantra-core/src/image.rs) to `images/` in the thread's keeper directory,
+  outside every repository and worktree, under a name the daemon generates. It writes nothing on
+  the appliance. Each frame is awaited inline for up to 60 s and gets exactly one reply, in order:
+  `{"type":"attached","path"}` or `{"type":"notAttached","kind","said"}`, whose kinds are
   `notAnImage` and `unreachable`. Every Claude turn after the first image gets `--add-dir` on the
-  directory, so Claude reads it without a prompt. The socket's close removes the directory, after the
-  turn is cancelled, within 10 s. The log says `image attached` and never a byte or a size.
+  directory. A new keeper keeps `images/`, and `thread::remove` deletes it with the thread. The log
+  says `image attached` and never a byte or a size.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
   `thread.started` is dropped. A browser's decision is answered with the option the agent offered.
 - **Login state is reactive.** The route sends `notLoggedIn` when an agent refuses with
   `acp::Error::is_auth()`, or a Claude turn fails "Not logged in". It probes no harness up front. An
   ACP thread whose agent never started is removed, so it is not read as a Claude thread later.
-- **One turn at a time.** A second `turn` while one runs is `busy`, and the socket stays open.
-- **A socket that closes mid-turn cancels the turn**, waits up to 10 s for it to end, then drops it.
-  The worktree stays, as `thread.rs` requires.
 - **Q5 binds it as hard as the terminal.** The lifecycle is logged; no prompt, reply or tool output.
 - **A turn has no CLI verb yet**, and [ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)
   asks for one. No ADR exempts the chat, so this is an open gap and not a decision. The gap is
   partly closed: `yantra chat new` and `chat ls` open and list threads (Y-488).
 - **It holds ssh after the upgrade has answered**, as the terminal does, so it is not a read handler
   that awaits ssh.
-- The calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket
-  logic against scripted turns and scripted ACP agents, and the real things run in
-  `yantra-core/tests/claude.rs`, `tests/acp.rs`, `tests/thread.rs` and `tests/image.rs`.
+- The calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket and
+  the registry against scripted keepers, and the real things run in `yantra-core/tests/keep.rs`,
+  `tests/claude.rs`, `tests/acp.rs`, `tests/thread.rs` and `tests/image.rs`.
+  [`tests/chat_keeper.rs`](tests/chat_keeper.rs) is ADR-0035's done test: a real `yantrad` against
+  the podman fixture, through a cut pipe, a closed socket and a killed daemon.
 
 ## The dashboard's types are checked against these routes, not trusted to match
 

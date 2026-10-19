@@ -30,7 +30,9 @@ chat edits there while the workspace's TUI keeps the repository. Ending a sessio
 `thread::remove` does. `claude::Turn` is one chat turn in that worktree: `claude -p` over
 stream-json, resumed from the newest transcript there, with permission requests answered on its
 stdin. A thread for any other harness runs an ACP agent there instead, and `thread::remember` keeps
-its harness and session id in git config under the thread's branch. `thread::start` opens a
+its harness and session id in git config under the thread's branch. `keep` holds either kind of agent on its machine, in a tmux session that journals
+its input and output, so a turn outlives its ssh pipe and the daemon
+([ADR-0035](../../docs/adr/0035-a-chat-turn-outlives-its-ssh-pipe.md)). `thread::start` opens a
 thread from a GitHub issue and keeps the issue there too; `thread::threads` lists each thread with
 its issue and the PR its upstream has (Y-488). `checkpoint` keeps the
 thread's tree after each turn under a hidden ref, diffs one turn, and reverts the files to a
