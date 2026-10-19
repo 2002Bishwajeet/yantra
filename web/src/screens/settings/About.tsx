@@ -3,7 +3,6 @@ import { ExternalLink, FileKey, Scale } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { Looked, Published } from '@/api'
 import { fromReading } from '@/api/client'
-import type { ApiError } from '@/api/errors'
 import { useApplyUpdate } from '@/api/mutations'
 import { aboutQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
@@ -14,6 +13,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Group, Note } from './Group'
 import { Sheet } from './Sheet'
+import { Reload, refused } from './update'
 
 /** While the daemon restarts after an update, About asks this often, so the
  *  new version is seen soon after it answers (ADR-0027 §5). */
@@ -137,16 +137,7 @@ function Update(props: {
   const update = useApplyUpdate()
 
   if (asked !== null && running !== asked) {
-    return (
-      <div className="settings__update" role="status">
-        <Text render={<p />} scale="body-medium">
-          yantrad <Mono>{running}</Mono> is running. This page is still the <Mono>{asked}</Mono> dashboard.
-        </Text>
-        <Button onClick={() => location.reload()} variant="tonal">
-          Reload
-        </Button>
-      </div>
-    )
+    return <Reload asked={asked} running={running} />
   }
   if (asked !== null) {
     return (
@@ -195,21 +186,6 @@ function Update(props: {
       </Sheet>
     </div>
   )
-}
-
-/** Each way the ask can fail is a different thing to fix. */
-function refused(error: ApiError): string {
-  if (error.kind === 'network') return 'The daemon did not answer, so no update was asked for'
-  switch (error.status) {
-    case 403:
-      return 'This device may not update the daemon'
-    case 409:
-      return 'This box cannot update itself'
-    case 503:
-      return 'The daemon could not tell who is asking'
-    default:
-      return 'The update was refused'
-  }
 }
 
 function Fact(props: { label: string; value: React.ReactNode }) {
