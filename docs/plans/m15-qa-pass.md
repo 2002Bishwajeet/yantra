@@ -1,3 +1,5 @@
+> **Since 2026-10-19 (Y-482), the [smoke pass](smoke-pass.md) gates a release. This full pass is the quarterly walk.**
+
 # M15 — the QA pass
 
 **Owner's ask, 2026-09-09: *"what works, what doesn't, how good is the UI/UX, onboarding, empty
