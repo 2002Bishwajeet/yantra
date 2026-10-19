@@ -417,3 +417,14 @@
 [data-shell="phone"] .settings__pane {
   gap: 16px;
 }
+
+.settings__subscribe {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings__qr-wait {
+  width: 112px;
+  height: 112px;
+}

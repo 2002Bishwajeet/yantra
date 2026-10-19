@@ -10,7 +10,7 @@
  * it — a port named here is one this machine may already be using.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { ATTEMPTS, PAUSE, type Target } from '@/api/socket'
 import { renderRouted } from '@/test/inRouter'
 import { browser, daemon, type Frame } from './harness'
@@ -33,9 +33,38 @@ const open = (target: Target = { machine: MACHINE, workspace: 'yantra' }) =>
 
 /** A real handshake against a real `ws` server, so the wait is I/O and not a
  *  render. One second is testing-library's default and it is not enough on a
- *  loaded machine: R-24 is this file failing about two runs in three while
+ *  loaded machine: R-25 is this file failing about two runs in three while
  *  twelve suites and a build ran beside it. */
-const settled = <T,>(check: () => T) => waitFor(check, { timeout: 10_000 })
+const realTimeout = setTimeout
+
+/** Polls on the timer captured at load. testing-library's `waitFor` drains its
+ *  queue through the global `setTimeout`, which `freeze` replaces and which then
+ *  never fires. */
+const settled = async <T,>(check: () => T): Promise<T> => {
+  const end = Date.now() + 10_000
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const acting = env.IS_REACT_ACT_ENVIRONMENT
+  env.IS_REACT_ACT_ENVIRONMENT = false
+  try {
+    for (;;) {
+      try {
+        return check()
+      } catch (failed) {
+        if (Date.now() > end) throw failed
+        await new Promise((done) => realTimeout(done, 20))
+      }
+    }
+  } finally {
+    env.IS_REACT_ACT_ENVIRONMENT = acting
+  }
+}
+
+/** Takes over the reopen timer once the first socket is up. `attachTerminal`
+ *  opens through `setTimeout(open, 0)`, so this runs after that fired on real
+ *  time. Only the timer is faked: `waitFor` polls on `setInterval`, and the
+ *  handshakes are I/O. A test then moves the retry window by hand, so no case
+ *  races a real PAUSE against a real handshake. */
+const freeze = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
 const screenText = () =>
   document.querySelector('.xterm-rows')?.textContent ?? ''
@@ -50,15 +79,29 @@ const first = (heard: Frame[]) =>
   'text' in heard[0] ? (JSON.parse(heard[0].text) as unknown) : heard[0]
 
 let daemonised: Awaited<ReturnType<typeof daemon>>
+// `open()` constructs synchronously, so this sees a reopen the server has not yet answered.
+let constructed = 0
 
 beforeEach(async () => {
   browser()
   daemonised = await daemon()
   vi.stubGlobal('location', new URL(`http://127.0.0.1:${daemonised.port}/`))
+  constructed = 0
+  const Real = WebSocket
+  vi.stubGlobal(
+    'WebSocket',
+    class extends Real {
+      constructor(...args: ConstructorParameters<typeof WebSocket>) {
+        super(...args)
+        constructed += 1
+      }
+    },
+  )
 })
 
 afterEach(async () => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   await daemonised.stop()
 })
@@ -131,11 +174,12 @@ describe('the terminal in the dashboard', () => {
     const { unmount } = await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
+    freeze()
     unmount()
     await settled(() => expect(daemonised.ended()).toBe(true))
 
-    await new Promise((done) => setTimeout(done, PAUSE * 3))
-    expect(daemonised.asked.length).toBe(1)
+    await vi.advanceTimersByTimeAsync(PAUSE * (ATTEMPTS + 2))
+    expect(constructed).toBe(1)
   })
 
   /** **Y-132.** Nothing here replays anything: the page opens another socket,
@@ -257,6 +301,7 @@ describe('the terminal in the dashboard', () => {
     await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
+    freeze()
     daemonised.keepHangingUp()
     daemonised.hangUp()
 
@@ -267,12 +312,11 @@ describe('the terminal in the dashboard', () => {
     )
     // The number moves, which is the whole point of printing it: two seconds of
     // silence and two seconds of counting are different things to sit through.
-    await waitFor(
-      () =>
-        expect(screen.getByRole('status').textContent).toContain(
-          `reconnecting · attempt 2 of ${ATTEMPTS}`,
-        ),
-      { timeout: PAUSE * 4 },
+    await vi.advanceTimersByTimeAsync(PAUSE)
+    await settled(() =>
+      expect(screen.getByRole('status').textContent).toContain(
+        `reconnecting · attempt 2 of ${ATTEMPTS}`,
+      ),
     )
   })
 
@@ -290,12 +334,14 @@ describe('the terminal in the dashboard', () => {
     expect(
       screen.getByRole('link', { name: MACHINE }).getAttribute('href'),
     ).toBe(`/m/${MACHINE}`)
+    freeze()
     daemonised.hangUp()
+    await settled(() => expect(screen.getByRole('status').textContent).toContain('refused'))
 
     // Proving a thing does not happen needs a window: this is the whole of the
     // retry budget with room to spare.
-    await new Promise((done) => setTimeout(done, PAUSE * (ATTEMPTS + 2)))
-    expect(daemonised.asked.length).toBe(1)
+    await vi.advanceTimersByTimeAsync(PAUSE * (ATTEMPTS + 2))
+    expect(constructed).toBe(1)
   })
 
   /** **The cap, and it is a cap on attempts rather than on anything kept.**
@@ -306,13 +352,21 @@ describe('the terminal in the dashboard', () => {
     await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
+    freeze()
     daemonised.keepHangingUp()
     daemonised.hangUp()
 
-    await waitFor(
-      () => expect(screen.getByText(/attempts to reopen/)).toBeTruthy(),
-      { timeout: PAUSE * (ATTEMPTS + 4) },
-    )
+    // Each retry is armed only after the last close landed, so the clock moves
+    // once the status shows the attempt that armed it.
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      await settled(() =>
+        expect(screen.getByRole('status').textContent).toContain(
+          `reconnecting · attempt ${attempt} of ${ATTEMPTS}`,
+        ),
+      )
+      await vi.advanceTimersByTimeAsync(PAUSE)
+    }
+    await settled(() => expect(screen.getByText(/attempts to reopen/)).toBeTruthy())
     expect(screen.queryByRole('alert')).toBeNull()
     // A spent budget is an end state rather than a pane that went quiet: it
     // counts what it tried, and it does not claim to know which side failed.
@@ -471,10 +525,11 @@ describe('a one-off terminal for an install step', () => {
     await renderRouted(<Terminal label="install step on cachyos-g14" target={step} />)
     await settled(() => expect(daemonised.heard.length).toBe(1))
 
+    freeze()
     daemonised.hangUp()
     await settled(() => expect(screen.getByText(/Nothing reopens it/)).toBeTruthy())
-    await new Promise((done) => setTimeout(done, PAUSE * 3))
-    expect(daemonised.asked).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(PAUSE * (ATTEMPTS + 2))
+    expect(constructed).toBe(1)
     expect(screen.queryByRole('button', { name: 'Open it again' })).toBeNull()
   })
 
