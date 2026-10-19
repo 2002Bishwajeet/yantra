@@ -9,7 +9,7 @@ How to get Yantra building and running on your machine. For *how to contribute*
 Arch / CachyOS:
 
 ```bash
-sudo pacman -S --needed rustup just zig mold podman
+sudo pacman -S --needed rustup just zig mold podman shellcheck
 rustup default stable
 rustup target add aarch64-unknown-linux-musl
 cargo install --locked cargo-zigbuild cargo-deny cargo-nextest
@@ -27,6 +27,7 @@ version itself is pinned by `rust-toolchain.toml` — don't override it.
 | `cargo-nextest` | Test runner with real per-test process isolation — needed because tests spawn actual `ssh` and `tmux`. |
 | `cargo-deny` | Licence and advisory checks. |
 | `podman` | Runs the sshd test fixture. Docker works too if you prefer. |
+| `shellcheck` | Lints `install.sh` and `join.sh`. `just ci` runs it; CI pins 0.11.0. |
 
 You do **not** need to run `sshd` on your own machine. Integration tests use a
 disposable container — see [Testing](#testing).
@@ -53,11 +54,12 @@ apply inside it and nowhere else: it **never prints and never exits**, and its
 ```bash
 just              # list every recipe
 just check        # the gate: fmt + clippy + tests + deny. Run before every push.
-just ci           # everything CI runs: check + the arm64 cross-build
+just ci           # everything CI runs: check + the arm64 cross-build + shellcheck
 just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
 just pinned       # every GitHub action names a commit, never a tag
+just shellcheck   # lint install.sh and join.sh (needs shellcheck 0.11.0, the version CI pins)
 just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
 just appliance    # cross-compile the appliance binaries (arm64 by default)
 just appliance-runtime  # idle RSS, idle CPU and CLI cold-start, on this machine
