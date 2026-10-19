@@ -26,10 +26,32 @@ test.describe('the four steps', () => {
     const chips = page.getByRole('group', { name: 'Machine' })
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeEnabled()
     await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    // Y-517: the daemon's top machine is preselected, with the reason.
+    await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('status').filter({ hasText: 'suggested' })).toHaveText(
+      'cachyos-g14 suggested: it is idle and it has RAM to spare',
+    )
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+
+  /** Y-517: a repository another machine holds is offered there, and the
+   *  switch keeps the repository at the path that machine has it. */
+  test('the source step offers the machine that holds the repo', async ({ page }) => {
+    await page.getByLabel('Name').fill('brisk-heron')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
+    await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
+
+    await expect(page.getByText('hetzner-1: the repo is there and it is on AC power')).toBeVisible()
+    await page.getByRole('button', { name: 'Use hetzner-1' }).click()
+    await expect(page.getByRole('button', { name: 'Use hetzner-1' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('open a tmux session on hetzner-1 in ~/Github/scratch', { exact: false })).toBeVisible()
   })
 
   test('passes axe on each step', async ({ page }) => {
+    // Y-517: the suggestion enables Continue after load; axe must not sample its colour transition.
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
     await axe(page)
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
@@ -123,11 +145,8 @@ test.describe('the four steps', () => {
 
   /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
   test('the clone folder survives a reload', async ({ page }) => {
-    const fillStep1 = async () => {
-      await page.getByLabel('Name').fill('quiet-otter')
-      await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    }
-    await fillStep1()
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
     const line = page.locator('.ns__clone', { hasText: 'Clone folder:' })
     await expect(line).toContainText('~/Github')
@@ -144,8 +163,7 @@ test.describe('the four steps', () => {
 
     await page.reload()
     await expect(heading(page, 'New session')).toBeVisible()
-    // The reload keeps ?step=2, so step 2 draws as soon as step 1 is complete.
-    await fillStep1()
+    // The reload keeps ?step=2, and the generated name with the suggested machine (Y-517) completes step 1.
     await expect(line).toContainText('~/notes')
   })
 })

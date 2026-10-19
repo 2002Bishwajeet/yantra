@@ -167,7 +167,7 @@ export function NewSession() {
           at label 4 (NewSession, NewSessionSource, NewSessionStart). */}
       <Stepper className="ns__stepper" current={step === 1 ? 0 : step} steps={STEPS} />
 
-      {step === 1 ? <StepName form={form} values={values} /> : null}
+      {step === 1 ? <StepName form={form} preset={preset} values={values} /> : null}
       {step === 2 ? <StepSource form={form} values={values} /> : null}
       {step === 3 ? <StepStart form={form} values={values} /> : null}
 

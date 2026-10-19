@@ -156,6 +156,7 @@ where
         });
 
     let tasks = crate::tasks::router(authoriser.clone(), fleet.closing.clone());
+    let placement = crate::placement::router(authoriser.clone(), fleet.clone());
 
     let installs: Router<S> = Router::new()
         .route("/machines/{machine}/install", post(put_basics::<I>))
@@ -165,7 +166,10 @@ where
             running: Running::default(),
         });
 
-    acts.merge(remembered).merge(installs).merge(tasks)
+    acts.merge(remembered)
+        .merge(installs)
+        .merge(tasks)
+        .merge(placement)
 }
 
 /// `GET /join`, the script a person pipes into `sh` on a new machine (Y-387).
