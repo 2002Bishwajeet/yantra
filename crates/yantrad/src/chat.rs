@@ -634,7 +634,7 @@ impl Machine for Fleet {
             &self.ssh,
             tmux,
             &keeper,
-            &harness.kept_command(),
+            &harness.kept_command(&place.worktree),
             &run,
             Limits::default(),
         )

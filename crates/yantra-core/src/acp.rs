@@ -26,6 +26,7 @@ use crate::chat::{self, Event, ThreadEvent};
 use crate::claude::Said;
 use crate::keep;
 use crate::ssh::{self, Ssh};
+use crate::tmux::sq;
 
 /// Enough of the end of stderr to hold "command not found".
 const STDERR_TAIL: usize = 2048;
@@ -56,15 +57,18 @@ impl Harness {
 
     /// The command a keeper runs ([`crate::keep`]): the binary searched for
     /// as I-34 requires, since a tmux pane's `PATH` is the server's, then its
-    /// arguments.
-    pub fn kept_command(self) -> String {
+    /// arguments. The `cd` matters: the keeper runs it in its journal
+    /// directory, where a relative write would land beside `in` and `out`.
+    pub fn kept_command(self, worktree: &str) -> String {
         let (binary, args) = self
             .command()
             .split_once(' ')
             .unwrap_or((self.command(), ""));
         format!(
-            "c=$({}) || {{ echo '{binary} was not found on PATH or in any of: {}' >&2; exit 127; }}\n\
+            "cd {} || exit 1\n\
+             c=$({}) || {{ echo '{binary} was not found on PATH or in any of: {}' >&2; exit 127; }}\n\
              exec \"$c\" {args}\n",
+            sq(worktree),
             agent::probe(binary),
             agent::CANDIDATES.join(", ")
         )
@@ -2273,11 +2277,18 @@ mod tests {
     const RUN: &str = "Y0123456789abcdef";
 
     #[test]
-    fn a_kept_agent_is_searched_for_and_given_its_arguments() {
-        let command = Harness::Opencode.kept_command();
-        assert!(command.starts_with("c=$("), "{command}");
+    fn a_kept_agent_starts_in_its_worktree_and_is_searched_for() {
+        let command = Harness::Opencode.kept_command("/w/it's");
+        assert!(
+            command.starts_with("cd '/w/it'\\''s' || exit 1\nc=$("),
+            "{command}"
+        );
         assert!(command.ends_with("exec \"$c\" acp\n"), "{command}");
-        assert!(Harness::Codex.kept_command().ends_with("exec \"$c\" \n"));
+        assert!(
+            Harness::Codex
+                .kept_command("/w")
+                .ends_with("exec \"$c\" \n")
+        );
     }
 
     /// A kept agent over pipes: the agent's stdout is `out`, and what the
