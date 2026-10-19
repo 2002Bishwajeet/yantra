@@ -23,7 +23,8 @@ export function Providers() {
   // The phone row is 390 px less a lead and a chevron, and `.m3-clip` cuts
   // rather than wraps, so the phone takes the boards' shorter strings.
   const phone = useFormFactor() === 'phone'
-  if (github.error) throw github.error
+  // The restart is a moment with no daemon; the facts already drawn stay.
+  if (github.error && !(appPending !== null && github.data)) throw github.error
   const connection = github.data
 
   return (
@@ -201,6 +202,7 @@ function ClientIdSheet(props: {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setSaved(null)
     const id = String(new FormData(event.currentTarget).get('id') ?? '').trim()
     set.mutate(
       { id },
@@ -268,14 +270,15 @@ function ClientIdSheet(props: {
           </Button>
           <Button
             disabled={pending || current === null}
-            onClick={() =>
+            onClick={() => {
+              setSaved(null)
               clear.mutate(undefined, {
                 onSuccess: () => {
                   setSaved('cleared')
                   onSaved({ kind: 'own' })
                 },
               })
-            }
+            }}
             tone="error"
             type="button"
             variant="tonal"

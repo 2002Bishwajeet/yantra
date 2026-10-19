@@ -74,7 +74,8 @@ export function Notifications() {
   const about = useAbout()
   const [savedAtUptime, setSavedAtUptime] = useState<number | null>(null)
   const [open, setOpen] = useState(false)
-  if (about.error) throw about.error
+  // The restart is a moment with no daemon; the facts already drawn stay.
+  if (about.error && !(savedAtUptime !== null && about.data)) throw about.error
 
   // uptime_seconds only grows while yantrad runs and resets on a restart, so
   // a read lower than the value at save time proves the restart happened —
@@ -138,10 +139,13 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
   const relay = useSetRelay()
   const [shown, setShown] = useState(false)
   const [url, setUrl] = useState('')
+  // A new save starts RestartNow over; its state belongs to the save before.
+  const [saves, setSaves] = useState(0)
   const topic = publicTopic(url)
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setSaves((n) => n + 1)
     const form = new FormData(event.currentTarget)
     const read = (name: string) => String(form.get(name) ?? '').trim()
     const url = read('url')
@@ -226,7 +230,7 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
                 It is written in {FILE}. The daemon reads that file when systemd starts it, so it notifies you from this
                 relay after a restart.
               </Text>
-              <RestartNow />
+              <RestartNow key={saves} />
             </>
           ) : null}
           {relay.error ? (
@@ -237,7 +241,7 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
               {/* The daemon's own words: they name the file or what the relay
                   said, and never the topic or the token. */}
               <Mono className="settings__said">{relay.error.said}</Mono>
-              {relay.error.status === 502 ? <RestartNow /> : null}
+              {relay.error.status === 502 ? <RestartNow key={saves} /> : null}
             </>
           ) : null}
         </div>
