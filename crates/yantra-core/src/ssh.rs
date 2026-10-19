@@ -405,7 +405,7 @@ fn payload(command: &str, nonce: &str) -> String {
 /// Still base64 (I-26, I-35), but not `payload`'s pipe into `/bin/sh`: that
 /// gives the command the pipe as its stdin, and here stdin must be ssh's. The
 /// expansion sits in single quotes, so a csh or fish login shell never parses it.
-fn stdio_payload(command: &str) -> String {
+pub(crate) fn stdio_payload(command: &str) -> String {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(command);
     format!("exec /bin/sh -c 'exec /bin/sh -c \"$(echo {encoded} | base64 -d)\"'")
