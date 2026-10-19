@@ -141,3 +141,8 @@ its environment either way, so the move is an installer change.
 > follows decision 3's other half rather than the token's: `client_id()` rereads the process
 > environment on every call, so a value this writes reaches a sign-in only once `yantrad` restarts,
 > exactly as the relay's own URL and token do.
+
+> **The grant writes, recorded 2026-10-19 (Y-487).** The `repo` scope already gives full read and
+> write access to the owner's repositories, so whoever reads `daemon.env` can also push to them and
+> merge in them. The scope does not widen. The owner ruled that the daemon uses that write access to
+> open, read and merge PRs: [ADR-0034](0034-the-coding-loop-writes-to-github.md).
