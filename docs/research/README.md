@@ -36,6 +36,7 @@ is a broken build rather than a reader's problem.
 | R19 | Driving every agent harness through ACP — support per harness, session lifetime over ssh, agent-calls-agent tools, and what T3 Code's chat needs | Y-427, Y-428 (no ADR yet) | [19-acp-for-every-harness.md](19-acp-for-every-harness.md) |
 | R20 | One chat turn with `claude -p` over stream-json — a permission answered on stdin, interrupt, resume from the newest transcript, and Bash refusing busybox `sh` | Y-356 | [20-claude-stream-json-turn.md](20-claude-stream-json-turn.md) |
 | R21 | T3 Code with T3 Connect, its phone apps and its background service, against Yantra feature by feature — where T3 Code is ahead and where Yantra can be better | Y-445 (no ADR yet) | [21-t3code-and-yantra.md](21-t3code-and-yantra.md) |
+| R22 | claude-mem as a shared memory across machines — it cannot be self-hosted as one shared worker today, and a Yantra-made handoff summary fits the owner's need | Y-518 (no ADR yet) | [22-claude-mem-shared-memory.md](22-claude-mem-shared-memory.md) |
 
 > **Note on R6.** It was written on day 0 to answer a language question that
 > [ADR-0004](../adr/0004-rust-for-the-daemon.md) settled the same day. What survives is the part that
