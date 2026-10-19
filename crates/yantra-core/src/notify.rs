@@ -879,6 +879,22 @@ mod tests {
         }
     }
 
+    /// Literal strings, so a changed headline cannot pass by changing both sides.
+    #[test]
+    fn the_three_titles_the_owner_sees() {
+        for (verdict, title) in [
+            (Verdict::AwaitingTrust, "Approval needed"),
+            (Verdict::Finished, "Agent finished"),
+            (Verdict::Crashed { status: 1 }, "Agent failed"),
+        ] {
+            assert_eq!(
+                told("api", verdict.clone()).message().title.as_deref(),
+                Some(title),
+                "{verdict:?}"
+            );
+        }
+    }
+
     /// Upstream's redaction: the exit code and the signal stay in the event
     /// log and never reach the relay.
     #[test]
