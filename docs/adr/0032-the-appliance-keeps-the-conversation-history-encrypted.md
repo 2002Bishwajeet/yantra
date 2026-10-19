@@ -82,3 +82,11 @@ the candidate there, and a build row must verify it.
 **Not yet measured.** Every figure on arm64 and on a Pi.
 Whether a redacted transcript still resumes under `claude --resume`. `ctx` over real Codex, Gemini
 and Grok history. The build rows carry these checks.
+
+> **Encryption at rest is dropped, and continuing elsewhere uses a summary, recorded 2026-10-19
+> (Y-429, Y-518).** The owner decided that the appliance is their own box, so decision 4 no longer
+> holds: the archive is a plain directory and Y-429 is closed. Decision 2 stands: each machine still
+> redacts before it sends. Decision 7 is replaced: continuing a session on another machine starts a
+> fresh session there from a short handoff summary and moves the work through git, because a full
+> transcript fills the new session's context. Y-518 plans it. The raw archive stays for search.
+

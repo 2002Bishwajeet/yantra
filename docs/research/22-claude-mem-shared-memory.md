@@ -114,10 +114,60 @@ If the owner wants the (b2) reader later, it is small and safe, but it should be
 
 - Whether hooks work against a remote worker with `CLAUDE_MEM_WORKER_AUTOSTART=false`. No test host.
 - Whether a 100.x address is rejected at runtime. I read the validator text only.
-- The code of `services/sync-api`, and whether it self-hosts.
+- ~~The code of `services/sync-api`, and whether it self-hosts.~~ Answered in §9.
 - Summary quality from a local model through the OpenAI-compatible provider.
 - `ctx` today. The R18 figures are from 2026-10-05, on version 2.2.7.
 - The date of issue #233's closing: I give the date as the fetched page stated it.
+
+## 9. Self-hosting the sync hub, 2026-10-19
+
+The owner asked for one common memory on every device (Y-527). This section answers the `services/sync-api` item in §8. I cloned `thedotmack/claude-mem` at commit `3fae1eb` (version 14.0.1) and read the hub and the client sync code. I ran the hub's test suite in throwaway podman containers (`postgres:17`, `oven/bun:1`): 52 pass, 0 fail. I did **not** run a stock worker against the hub, so §9.2 is from code.
+
+### 9.1 The hub self-hosts, with two stubs
+
+- **Runtime.** One Bun process, `bun run src/index.ts`, with one dependency, `postgres`. The `Dockerfile` uses `oven/bun:1.4-debian` on port 8080.
+- **Storage.** Postgres only. `src/schema.ts` creates `sync_users`, `sync_ops`, `sync_entity_heads`, `sync_devices` and `schema_migrations` at boot. Op bodies are plain text.
+- **Protocol.** HTTP and JSON, protocol v2, one append-only log per user id: `POST /v1/sync/ops` (500 ops, 8 MB), `GET /v1/sync/changes?since=N`, `GET /v1/sync/status`, `GET /v1/sync/ws` and `GET /health`. Content kinds are `observation`, `summary`, `prompt` and `work_state` (`src/canonical-content.ts`).
+- **Auth.** The client sends `Authorization: Bearer <token>`, `X-User-Id`, `X-Device-Id` and `X-Device-Name`. The hub does not check the token. It calls `TOKEN_VERIFY_URL` (default `https://cmem.ai/api/pro/sync/verify`) and wants a 2xx reply whose `userId` equals the header. This is the only paid-plan check (`src/auth.ts`).
+- **Projection.** After each push the hub posts the ops to `INTERNAL_PROJECTOR_URL`, cmem.ai's own store. If that URL or `CMEM_INTERNAL_PROJECTOR_SECRET` is empty, every push returns 503 `projection_not_configured` (`src/projection.ts`), and a client retries forever.
+- **Stubs.** `test/helpers.ts` (`startSidecar`) holds both: `/verify` returns `{"userId": <X-User-Id>}`, and `/project` checks the secret and returns `{protocol_version:1, epoch, projected_through_seq}`. The 52 tests pass with this sidecar.
+- **Licence.** Apache-2.0. No upstream guide covers self-hosting.
+
+### 9.2 A stock client needs no Pro licence for sync
+
+- `src/services/sync/CloudSync.ts` turns sync on when `CLAUDE_MEM_CLOUD_SYNC_TOKEN`, `CLAUDE_MEM_CLOUD_SYNC_USER_ID` and `CLAUDE_MEM_CLOUD_SYNC_HUB_URL` are all set. I found no plan check in the sync path. The `CLAUDE_MEM_PRO_*` keys control cmem.ai's observer gateway, not sync.
+- The client accepts `http://100.x.y.z:8080`. WireGuard encrypts the tailnet hop.
+- The client asks for Supabase Realtime at `POST /v1/sync/realtime-token`. The hub answers 404, so the client polls: 30 s in a session, 5 min idle. `CLAUDE_MEM_CLOUD_SYNC_WS=false` skips the probe.
+- `npx claude-mem install` signs in at cmem.ai. A self-hosted machine skips it and writes the keys into `~/.claude-mem/settings.json` by hand.
+
+### 9.3 The deployment on the appliance
+
+1. Postgres 16 or 17, in podman with a named volume.
+2. The hub, pinned to a commit, with `HOST=<tailnet ip>`, `PORT=8080`, `DATABASE_URL`, `TOKEN_VERIFY_URL=http://127.0.0.1:8081/verify`, `INTERNAL_PROJECTOR_URL=http://127.0.0.1:8081/project` and a random `CMEM_INTERNAL_PROJECTOR_SECRET`.
+3. The stub on `127.0.0.1:8081`. It accepts one random token from a `0600` file and answers `{"userId":"yantra"}`.
+
+A machine joins with these keys and a worker restart:
+
+```
+CLAUDE_MEM_CLOUD_SYNC_HUB_URL=http://<appliance-tailnet-ip>:8080
+CLAUDE_MEM_CLOUD_SYNC_TOKEN=<the stub token>
+CLAUDE_MEM_CLOUD_SYNC_USER_ID=yantra
+CLAUDE_MEM_CLOUD_SYNC_WS=false
+CLAUDE_MEM_REDACT_ENABLED=true
+```
+
+- **What flows.** Observations, session summaries, the full text of user prompts, and `work_state`. Each worker pulls the other machines' rows into its own SQLite and Chroma, so each machine holds the whole memory. Raw transcripts and `tool_uses` do not flow.
+- **Redaction.** `CLAUDE_MEM_REDACT_ENABLED` is off by default and must be on for every machine. `src/utils/tag-stripping.ts` redacts before text reaches the model, the local DB or the sync outbox. It uses claude-mem's own patterns, not the Y-430 gitleaks rules, and a model-written observation can still carry a secret that the patterns miss.
+
+### 9.4 Negative findings
+
+- **The hub is not standalone.** Without the stubs it calls cmem.ai, and pushes fail.
+- **Upstream does not support self-hosting.** The verify and projection contract can change in any release, and releases come about twice a week.
+- **No live channel.** Machines converge at the poll interval, up to a few minutes.
+
+### 9.5 Decision and fallback
+
+Spike the self-hosted hub first (Y-527). It gives the owner claude-mem on every device with nothing leaving the tailnet except the observer's model calls. If the spike fails, or upstream breaks the contract, use §7 option (c): redacted transcripts to the appliance by Syncthing (Y-430, Y-431) and a search server there. Do not merge SQLite files in Yantra (option b). `ctx` and other memory servers were not re-checked today.
 
 ## Sources
 
@@ -139,3 +189,4 @@ All accessed 2026-10-19.
 - Issue 4131, `--runtime server` install flow: https://github.com/thedotmack/claude-mem/issues/4131
 - DevContainer sharing with socat: https://dev.classmethod.jp/en/articles/share-claude-mem-across-devcontainers/
 - Yantra: `docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md`, `docs/research/18-one-conversation-history.md` §8, §11, `tracker.md` rows Y-426 to Y-432 and Y-518.
+- claude-mem at commit `3fae1eb`: `services/sync-api/src/{index,auth,env,projection,schema,canonical-content}.ts`, `Dockerfile`, `test/helpers.ts`; client `src/services/sync/CloudSync.ts`, `src/services/worker/DatabaseManager.ts`, `src/shared/SettingsDefaultsManager.ts`, `src/utils/tag-stripping.ts`; `docs/public/cloud-sync.mdx`. Local run: `bun test test` in podman, 52 pass.
