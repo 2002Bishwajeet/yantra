@@ -220,3 +220,7 @@ All accessed 2026-10-19.
   - `@atlaskit/pragmatic-drag-and-drop@4.0.0`, `@atlaskit/pragmatic-drag-and-drop-react-accessibility@3.2.4`, `react-resizable@4.0.2`
 - Package READMEs from the registry tarballs: `react-grid-layout@2.3.0` and `gridstack@14.0.0`. Neither documents keyboard move or resize.
 - Bundlephobia size API, <https://bundlephobia.com/api/size?package=…>, for min+gzip of `react-grid-layout@2.3.0`, `gridstack@14.0.0`, `@dnd-kit/react@0.5.1`, `@dnd-kit/core@6.3.1` and `@dnd-kit/sortable@10.0.0`.
+
+> **Sync, recorded 2026-10-19 (Y-515).** The owner chose to sync layouts across devices.
+> [ADR-0036](../adr/0036-the-dashboard-layout-syncs-through-the-daemon.md) keeps the layout in
+> `dashboard.json` on the daemon, so §5's layout link is dropped. Each browser keeps a local copy.

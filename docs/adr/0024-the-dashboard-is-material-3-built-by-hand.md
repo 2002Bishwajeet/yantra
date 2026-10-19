@@ -194,3 +194,7 @@ test, not a note.
 > colour engine still loads only for a seed that is not the default. One thing is new beside it:
 > machine state has its own `--yantra-state-*` tokens that no seed changes, because the owner named
 > a material for each state and a seed must not repaint what a state means.
+
+> **The layout syncs, recorded 2026-10-19 (Y-515).** §5 still keeps appearance in the browser. The
+> M17 widget layout moves to the daemon, which keeps it in `dashboard.json` and serves it to every
+> device: [ADR-0036](0036-the-dashboard-layout-syncs-through-the-daemon.md).
