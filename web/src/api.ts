@@ -43,6 +43,8 @@ export type Machine = {
   os: 'linux' | 'macOS' | 'iOS' | 'windows' | 'android' | (string & {})
   online: boolean
   expired: boolean
+  // RFC 3339; null is key expiry off.
+  key_expires: string | null
   // Present as null, and meaningless when `online` — I-39.
   last_seen: string | null
   // null is "never heard from" and is not a beat that reports zero (I-47).

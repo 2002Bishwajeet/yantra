@@ -26,6 +26,7 @@ export function aMachine(overrides: Partial<Machine> = {}): Machine {
     os: 'linux',
     online: true,
     expired: false,
+    key_expires: null,
     last_seen: '2026-07-07T09:00:00Z',
     heartbeat: aBeat(),
     ownership: 'yours',
