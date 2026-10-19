@@ -222,6 +222,9 @@ export function openChat(
   // The last cursor drawn, and the one the open socket was opened after.
   let cursor: string | undefined
   let asked: string | undefined
+  // Whether an earlier socket drew anything, and so whether a replay from the
+  // start would draw it again.
+  let drawn = false
   // An unknown thread is said, and then the daemon closes; that close is not
   // a second failure.
   let said = false
@@ -241,6 +244,7 @@ export function openChat(
   const open = () => {
     let live: WebSocket
     asked = wasOpen ? cursor : undefined
+    const redraws = drawn
     try {
       live = new WebSocket(address(asked))
     } catch (cause) {
@@ -293,9 +297,11 @@ export function openChat(
       }
       said = false
       // A reopen the daemon cannot continue says so by a `thread.started`
-      // that does not carry the cursor it was asked to continue from.
-      if (frame.type === 'thread.started' && asked !== undefined && frame.cursor !== asked) onRestart?.()
+      // that does not carry the cursor it was asked to continue from. Without
+      // a cursor to ask after, the daemon always replays from the start.
+      if (frame.type === 'thread.started' && redraws && (asked === undefined || frame.cursor !== asked)) onRestart?.()
       if (frame.cursor) cursor = frame.cursor
+      drawn = true
       onEvent(frame)
       if (frame.type === 'turn.completed' && frame.payload.state === 'failed') {
         onError(new ChatError('turnFailed', frame.payload.message ?? ''))

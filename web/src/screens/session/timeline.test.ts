@@ -48,6 +48,16 @@ describe('the timeline', () => {
     ])
   })
 
+  it('draws a prompt the daemon sends again after a reopen once', () => {
+    const prompt = event({
+      threadId: 't',
+      type: 'content.delta',
+      payload: { streamKind: 'user_text', delta: 'run the tests', itemId: 'user:r1:1' },
+    })
+    const timeline = fold([prompt, { type: 'event', event: { threadId: 't', type: 'turn.started' } }, prompt])
+    expect(timeline.entries).toEqual([{ kind: 'message', id: 'user:r1:1', who: 'you', text: 'run the tests' }])
+  })
+
   it('keeps an open request until it is resolved or the turn ends', () => {
     const opened = chatEvents.find((one) => one.type === 'request.opened')!
     const asking = fold([{ type: 'sent' }, event(opened)])

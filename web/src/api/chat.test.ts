@@ -104,6 +104,40 @@ describe('the chat socket', () => {
     expect(events.at(-1)).toEqual(chatEvents[0])
   })
 
+  it('starts over when a reopen has no cursor to ask after', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { events, opened, restarted } = connect(at, [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    // An idle thread's transcript carries no cursor.
+    const history = {
+      threadId: '1a2b3c4d',
+      type: 'content.delta',
+      payload: { streamKind: 'user_text', delta: 'hi', itemId: 'history:0' },
+    }
+    server.say(JSON.stringify(chatEvents[0]))
+    server.say(JSON.stringify(history))
+    await settled(() => expect(events).toHaveLength(2))
+    expect(restarted).not.toHaveBeenCalled()
+    server.hangUp()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    expect(server.asked[1]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d')
+
+    server.say(JSON.stringify(chatEvents[0]))
+    await settled(() => expect(restarted).toHaveBeenCalledTimes(1))
+    expect(events).toHaveLength(3)
+  })
+
+  it('does not start over on a reopen when nothing was drawn', async () => {
+    const { events, opened, restarted } = connect(chatAddress('yantra-web'), [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    server.hangUp()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    // The first turn on the reopened socket names the new thread.
+    server.say(JSON.stringify(chatEvents[0]))
+    await settled(() => expect(events).toHaveLength(1))
+    expect(restarted).not.toHaveBeenCalled()
+  })
+
   it('reports closed, and retryable, once every reopen in one outage failed', async () => {
     const { errors, opened, dropped } = connect(chatAddress('yantra-web'), [10, 10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
