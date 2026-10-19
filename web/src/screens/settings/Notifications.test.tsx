@@ -190,7 +190,7 @@ describe('restart now (Y-479)', () => {
     fireEvent.click(await sheet.findByRole('button', RESTART))
     await waitFor(() => expect(asked).toContain('POST /api/update'))
     expect(await sheet.findByText('yantrad is restarting. The page reconnects on its own.')).toBeTruthy()
-    expect(sheet.getByText(/newer release is published/)).toBeTruthy()
+    expect(sheet.getByText(/is installed too/)).toBeTruthy()
     expect(sheet.queryByRole('button', RESTART)).toBeNull()
   })
 

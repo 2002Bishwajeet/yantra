@@ -272,6 +272,24 @@ describe('restart now (Y-479)', () => {
     expect(await sheet.findByText('yantrad is restarting. The page reconnects on its own.')).toBeTruthy()
   })
 
+  it('says before the click that a newer release is installed, then offers a reload', async () => {
+    let updated = false
+    const out = { looked: 'ok', age_seconds: 5, data: { version: '0.4.0', newer: true } }
+    const { sheet } = await sheetOf({
+      'GET /api/about': () => [200, updated ? { ...contract.about, version: '0.4.0' } : { ...contract.about, published: out }],
+      'POST /api/github/client-id': [204],
+      'POST /api/update': () => {
+        updated = true
+        return [202]
+      },
+    })
+    save(sheet)
+    await sheet.findByRole('button', RESTART)
+    expect(await sheet.findByText(/installs v0\.4\.0 as it restarts/)).toBeTruthy()
+    fireEvent.click(sheet.getByRole('button', RESTART))
+    expect(await sheet.findByRole('button', { name: 'Reload' }, { timeout: 5_000 })).toBeTruthy()
+  })
+
   it('asks for the restart after a clear', async () => {
     const { asked, sheet } = await sheetOf({
       ...own,
