@@ -48,6 +48,9 @@ pub struct MachineInfo {
     /// The node key has expired. Such a machine can be powered on, listed, and
     /// still unreachable until someone re-authenticates it.
     pub expired: bool,
+    /// When the node key expires, RFC 3339. Tailscale omits the key when key
+    /// expiry is off, so `None` means "expiry is off", never "unknown".
+    pub key_expires: Option<String>,
     /// `TailscaleIPs`, parsed rather than kept as strings: ADR-0013 §5
     /// attributes a heartbeat by matching these against the address it arrived
     /// from, and one v6 address has more than one spelling. Empty is a peer
@@ -322,6 +325,8 @@ struct Node {
     /// Peers carry this; `Self` has no such key at all.
     #[serde(rename = "Expired", default)]
     expired: bool,
+    #[serde(rename = "KeyExpiry", default)]
+    key_expiry: Option<String>,
     /// `Option` because absent and `null` are both live possibilities in this
     /// format — the sibling `Addrs` is literally `null` on every peer here —
     /// and a `Vec` field would make the second one a whole-document error.
@@ -383,6 +388,7 @@ impl MachineInfo {
             online: node.online,
             last_seen: node.last_seen.filter(|t| t != ZERO_TIME),
             expired: node.expired,
+            key_expires: node.key_expiry.filter(|t| t != ZERO_TIME),
             dns_name: node.dns_name,
             addresses: node.tailscale_ips.unwrap_or_default(),
             ownership,
@@ -588,6 +594,24 @@ mod tests {
         let this_box = named("cachyos-g14");
         assert!(this_box.online);
         assert_eq!(this_box.last_seen, None);
+    }
+
+    #[test]
+    fn self_carries_its_key_expiry() {
+        let this_box = named("cachyos-g14");
+        assert_eq!(
+            this_box.key_expires.as_deref(),
+            Some("2027-01-18T10:11:44Z")
+        );
+    }
+
+    #[test]
+    fn a_node_without_key_expiry_has_none() {
+        let json = br#"{"Self": {
+            "ID": "n1", "DNSName": "solo.example.ts.net.", "OS": "linux",
+            "Online": true
+        }}"#;
+        assert_eq!(parse(json).expect("parses")[0].key_expires, None);
     }
 
     #[test]

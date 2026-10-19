@@ -184,6 +184,7 @@ mod tests {
             online,
             last_seen: None,
             expired: false,
+            key_expires: None,
             addresses: Vec::new(),
         }
     }

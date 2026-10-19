@@ -254,6 +254,7 @@ mod tests {
             online: true,
             last_seen: None,
             expired: false,
+            key_expires: None,
             addresses: addresses
                 .iter()
                 .map(|a| a.parse().expect("a fixture address"))

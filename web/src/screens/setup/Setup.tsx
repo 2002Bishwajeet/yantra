@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Check, GitBranch, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
+import { Check, GitBranch, KeyRound, LoaderCircle, Plus, Radio, TriangleAlert } from 'lucide-react'
 import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
@@ -29,14 +29,14 @@ import { REQUIRED, useChecklist } from './progress'
 import { marks, statusWord, type Line, type Step } from './steps'
 import './Setup.css'
 
-const tones = { done: 'primary', progress: 'tertiary', todo: 'high', failed: 'error' } as const
+const tones = { done: 'primary', progress: 'tertiary', todo: 'high', due: 'error', failed: 'error' } as const
 
 /** D7 B5: the lead is the state — a tick when done, the number when not yet,
  *  a ring in progress, a warning when it could not be read. */
 function lead(step: Step, fallback: ReactNode) {
   if (step.status === 'done') return <Check />
   if (step.status === 'progress') return <LoaderCircle />
-  if (step.status === 'failed') return <TriangleAlert />
+  if (step.status === 'failed' || step.status === 'due') return <TriangleAlert />
   return fallback
 }
 
@@ -375,6 +375,18 @@ export function Setup() {
                   optional.push.status === 'done' ? undefined : (
                     <Button render={<Link params={{ category: 'notifications' }} to="/settings/$category" />} role="link" variant="tonal">
                       Set up
+                    </Button>
+                  )
+                }
+              />
+              <Item
+                fallback={<KeyRound />}
+                step={optional.key}
+                title="The appliance's Tailscale key"
+                trailing={
+                  optional.key.status === 'done' ? undefined : (
+                    <Button render={<a href="https://login.tailscale.com/admin/machines" rel="noreferrer" target="_blank" />} role="link" variant="tonal">
+                      Admin console
                     </Button>
                   )
                 }
