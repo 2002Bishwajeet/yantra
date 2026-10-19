@@ -331,7 +331,8 @@ instead of giving up. `installer.rs` runs [`../install.sh`](../install.sh) twice
 as an unprivileged account through `sudo`, against a release served from inside
 the container by `tests/fixture/release.sh` — `/etc/hosts` points github.com and
 api.github.com at a local HTTPS server the container trusts, which is how a *corrupted* archive gets
-served and refused. Both skip and label themselves the same way. What no
+served and refused. Both skip and label themselves the same way. `update.rs` uses the
+same container, and `release.yml` runs its last test against the x86_64 archive it built (Y-483). What no
 container can show is the boot ordering against a real `tailscaled`.
 
 ## Cross-compiling for the appliance
