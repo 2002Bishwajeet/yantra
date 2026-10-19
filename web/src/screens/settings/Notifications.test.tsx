@@ -10,9 +10,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const relay = (status: number, said = ''): Answers => ({
-  'POST /api/relay': [status, said],
-})
+const relay = (status: number, said = ''): Answers => ({ 'POST /api/relay': [status, said] })
 
 async function open() {
   fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -20,13 +18,8 @@ async function open() {
 }
 
 function fill(sheet: ReturnType<typeof within>, url: string, token?: string) {
-  fireEvent.change(sheet.getByLabelText('Topic URL'), {
-    target: { value: url },
-  })
-  if (token !== undefined)
-    fireEvent.change(sheet.getByLabelText('Token'), {
-      target: { value: token },
-    })
+  fireEvent.change(sheet.getByLabelText('Topic URL'), { target: { value: url } })
+  if (token !== undefined) fireEvent.change(sheet.getByLabelText('Token'), { target: { value: token } })
   fireEvent.click(sheet.getByRole('button', { name: 'Save and send a test' }))
 }
 
@@ -44,9 +37,7 @@ describe('the relay row', () => {
   })
 
   it('draws the boundary when the daemon answers something else', async () => {
-    mountSettings('desktop', '/settings/notifications', {
-      'GET /api/about': [500, 'boom'],
-    })
+    mountSettings('desktop', '/settings/notifications', { 'GET /api/about': [500, 'boom'] })
     expect(await screen.findByText('Notifications could not be drawn')).toBeTruthy()
   })
 })
@@ -80,10 +71,7 @@ describe('the relay sheet', () => {
   it('sends the topic and the token to the one route that writes them', async () => {
     const asked = mountSettings('desktop', '/settings/notifications', {
       'POST /api/relay': (init) => {
-        expect(sent(init)).toEqual({
-          url: 'https://ntfy.sh/a-topic',
-          token: 'tk_notarealtoken',
-        })
+        expect(sent(init)).toEqual({ url: 'https://ntfy.sh/a-topic', token: 'tk_notarealtoken' })
         return [204]
       },
     })
@@ -118,10 +106,7 @@ describe('the relay sheet', () => {
     mountSettings(
       'desktop',
       '/settings/notifications',
-      relay(
-        502,
-        'the relay is written down in /etc/yantra/daemon.env, and the test message did not arrive: the relay answered 401',
-      ),
+      relay(502, 'the relay is written down in /etc/yantra/daemon.env, and the test message did not arrive: the relay answered 401'),
     )
     const sheet = await open()
     fill(sheet, 'https://ntfy.sh/a-topic', 'tk_wrong')
