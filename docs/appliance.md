@@ -148,7 +148,8 @@ with the one `/api/about` now reports, and offers a reload.
 
 [`crates/yantrad/tests/update.rs`](../crates/yantrad/tests/update.rs) proves this against a real
 systemd, a real sshd and a real tmux: the session's processes survive, the socket reopens within the
-browser's reconnect budget, and a corrupted archive restarts nothing.
+browser's reconnect budget, and a corrupted archive restarts nothing. [`release.yml`](../.github/workflows/release.yml)
+runs the same test against the x86_64 archive it built, and a failure there publishes nothing (Y-483).
 
 ### Roll back
 

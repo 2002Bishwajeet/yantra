@@ -10,12 +10,14 @@
 //! `release.sh`, and its `yantrad` is the real one this test run built. The
 //! other two binaries stay stand-ins: nothing here runs them. The far machine
 //! is the same container, reached over ssh as `deploy`, and `tailscale` is a
-//! stub answering the shapes in `yantra-core/tests/fixture`.
+//! stub answering the shapes in `yantra-core/tests/fixture`. The last test
+//! publishes the archive release.yml built instead, and only runs there (Y-483).
 //!
 //! [ADR-0027]: ../../../docs/adr/0027-the-appliance-pulls-its-own-update.md
 
 mod common;
 
+use std::path::PathBuf;
 use std::process::Output;
 
 use anyhow::{Context, Result, bail};
@@ -27,6 +29,10 @@ const OLD: &str = "0.2.0";
 const NEW: &str = "0.3.0";
 const OLD_MARK: &str = "y368-release-old";
 const NEW_MARK: &str = "y368-release-new";
+
+/// Where the archive from `YANTRA_RELEASE_ARCHIVE` lands in the container.
+const BUILT: &str = "/fixture/built.tar.gz";
+const SECOND_MARK: &str = "y483-second-build";
 
 const SESSION: &str = "survivor";
 /// What the pane prints once, so a reattached terminal can only show it if
@@ -127,22 +133,44 @@ impl Appliance {
         Ok(())
     }
 
+    /// The archive release.yml built, as `version`, with `marker` appended to
+    /// each binary when it is not empty.
+    fn publish_archive(&self, version: &str, marker: &str) -> Result<()> {
+        self.sh(&format!(
+            "bash /fixture/release.sh publish_archive {} {version} '{marker}' {BUILT}",
+            self.repo
+        ))?;
+        Ok(())
+    }
+
     /// The box as a person leaves it: v0.2.0 installed with no terminal, the
     /// daemon and the path unit enabled, one machine it reaches over ssh, and
     /// a tmux session there with something running in it.
     fn arrange(&self) -> Result<()> {
         self.publish(OLD, OLD_MARK)?;
+        self.install("/fixture/install.sh", OLD)?;
+        self.leave_running()
+    }
+
+    /// `script` piped to bash as `deploy`, with no terminal, which reaches root
+    /// through `sudo` as a person's install does.
+    fn install(&self, script: &str, version: &str) -> Result<()> {
         let installed = self.systemd.exec_as(
             UNPRIVILEGED,
-            &["bash", "-c", "cat /fixture/install.sh | bash"],
+            &["bash", "-c", &format!("cat {script} | bash")],
         )?;
         if !installed.status.success() {
             bail!(
-                "installing v{OLD} failed: {}",
+                "installing v{version} failed: {}",
                 String::from_utf8_lossy(&installed.stderr).trim()
             );
         }
+        Ok(())
+    }
 
+    /// Everything after the install: the machine over ssh, the tmux session,
+    /// and the daemon and the path unit enabled and answering.
+    fn leave_running(&self) -> Result<()> {
         self.sh(&format!(
             "install -d -m 700 -o yantra -g yantra /home/yantra/.ssh && \
              sudo -u yantra ssh-keygen -q -t ed25519 -N '' -f /home/yantra/.ssh/id_ed25519 && \
@@ -181,6 +209,10 @@ impl Appliance {
         }
 
         self.sh("systemctl enable --now yantrad.service yantra-update.path")?;
+        self.healthy()
+    }
+
+    fn healthy(&self) -> Result<()> {
         let ready = self.systemd.exec(&[
             "bash",
             "-c",
@@ -405,4 +437,106 @@ fn a_failed_update_restarts_nothing_and_the_socket_stays_up() -> Result<()> {
     );
     assert!(!appliance.exists(TRIGGER)?, "the trigger outlived the unit");
     Ok(())
+}
+
+/// The version `yantra --version` must print: the tag on a tag push, and the
+/// crate's own version on a dispatch, which has no tag.
+fn expected_version() -> String {
+    match std::env::var("YANTRA_RELEASE_TAG") {
+        Ok(tag) if !tag.is_empty() => tag.strip_prefix('v').unwrap_or(&tag).to_owned(),
+        _ => env!("CARGO_PKG_VERSION").to_owned(),
+    }
+}
+
+/// Y-483: the archive release.yml built installs with no terminal through its
+/// own install.sh, and then updates through the real unit while a tmux session
+/// survives. "The second build" is the same archive republished under
+/// v0.3.0 with a marker on each binary, so both builds hold the same code; what
+/// differs is the bytes, which is what makes the update replace files, keep
+/// `.prev` and restart the daemon. release.yml runs this; elsewhere it skips.
+#[test]
+fn the_built_archive_installs_updates_and_keeps_a_session() -> Result<()> {
+    let Some(archive) = std::env::var_os("YANTRA_RELEASE_ARCHIVE") else {
+        return Ok(());
+    };
+    let archive = PathBuf::from(archive);
+    if !archive.is_file() {
+        bail!(
+            "YANTRA_RELEASE_ARCHIVE names {}, which is not a file",
+            archive.display()
+        );
+    }
+    let Some(appliance) = Appliance::start()? else {
+        return Ok(());
+    };
+    appliance.systemd.copy_in(&archive, BUILT)?;
+    let expected = format!("yantra {}", expected_version());
+
+    appliance.publish_archive(OLD, "")?;
+    // The staged archive's own install.sh, not the repository's.
+    appliance.install(&format!("/srv/staging/yantra-{OLD}-*/install.sh"), OLD)?;
+    appliance.leave_running()?;
+
+    let version = || -> Result<String> {
+        Ok(appliance
+            .sh("/usr/local/bin/yantra --version")?
+            .trim()
+            .to_owned())
+    };
+    assert_eq!(version()?, expected, "the installed yantra is not the tag");
+
+    let (server, pane) = appliance.session_pids()?;
+    let before = appliance.daemon_pid()?;
+    appliance.publish_archive(NEW, SECOND_MARK)?;
+
+    let started = appliance
+        .systemd
+        .exec(&["systemctl", "start", "yantra-update.service"])?;
+    let story = format!(
+        "--- yantra-update ---\n{}\n--- yantrad ---\n{}",
+        appliance.systemd.journal("yantra-update.service"),
+        appliance.systemd.journal("yantrad.service"),
+    );
+    assert!(started.status.success(), "{story}");
+    assert_eq!(
+        appliance
+            .systemd
+            .property("yantra-update.service", "Result")?,
+        "success",
+        "{story}"
+    );
+    assert!(
+        appliance
+            .systemd
+            .journal("yantra-update.service")
+            .contains(&format!("install: yantra v{NEW},")),
+        "the unit did not install v{NEW}:\n{story}"
+    );
+
+    let after = appliance.daemon_pid()?;
+    assert_ne!(after, before, "yantrad was not restarted:\n{story}");
+    assert!(
+        appliance.runs(&after, SECOND_MARK)?,
+        "the running yantrad is not the second build"
+    );
+    assert!(
+        appliance.exists("/usr/local/bin/yantrad.prev")?,
+        "the update kept no yantrad.prev"
+    );
+    assert!(
+        !appliance.carries("/usr/local/bin/yantrad.prev", SECOND_MARK)?,
+        "yantrad.prev is the second build, not the first"
+    );
+    assert_eq!(version()?, expected, "the updated yantra is not the tag");
+
+    assert_eq!(
+        appliance.session_pids()?,
+        (server, pane.clone()),
+        "the tmux server or its pane is a new process"
+    );
+    assert_eq!(
+        appliance.sh(&format!("cat /proc/{pane}/comm"))?.trim(),
+        "sleep"
+    );
+    appliance.healthy()
 }

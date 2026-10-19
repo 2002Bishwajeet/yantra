@@ -2,7 +2,8 @@ name: release
 
 # Tag push cuts a real release. workflow_dispatch builds the whole matrix and
 # uploads the archives as workflow artifacts without publishing anything, which
-# is how you rehearse a release before committing to a tag.
+# is how you rehearse a release before committing to a tag. Either way the
+# `rehearse` job installs and updates the built x86_64 archive before `release`.
 on:
   push:
     tags:
@@ -301,9 +302,70 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The x86_64 archive this run built, installed with no terminal through its
+  # own install.sh and then updated under a real systemd, sshd and tmux in
+  # podman (Y-483, crates/yantrad/tests/update.rs). A failure here publishes
+  # nothing.
+  rehearse:
+    name: rehearse install and update
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Install mold
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
+
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest
+
+      # Copied from ci.yml's test job, which says why (Y-048).
+      - name: Verify podman is available
+        run: |
+          podman --version
+          crun --version | head -1 || true
+          runc --version | head -1 || true
+      - name: Pin the OCI runtime to runc
+        run: |
+          mkdir -p ~/.config/containers
+          printf '[engine]\nruntime = "runc"\n' > ~/.config/containers/containers.conf
+
+      - name: Download the x86_64 archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: yantra-x86_64-unknown-linux-musl
+          path: built
+
+      - name: Verify its checksum
+        working-directory: built
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: sha256sum -c "yantra-${VERSION}-x86_64-unknown-linux-musl.tar.gz.sha256"
+
+      # On a dispatch there is no tag, and the test expects the crate's version.
+      - name: Install and update the archive
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          YANTRA_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          YANTRA_REQUIRE_PODMAN=1 \
+          YANTRA_RELEASE_ARCHIVE="$PWD/built/yantra-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            cargo nextest run -p yantrad --test update --no-tests=fail -E 'test(the_built_archive)'
+
   release:
     name: publish release
-    needs: [meta, build]
+    needs: [meta, build, rehearse]
     # workflow_dispatch runs are rehearsals: they build and upload artifacts but
     # never publish. Only a tag push gets this far.
     if: github.ref_type == 'tag'
