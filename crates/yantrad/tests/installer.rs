@@ -31,8 +31,10 @@
 //! answer are driven through a pty, and the `tailscale` they talk to is a stub
 //! that records its calls: a login, a tailnet address and a certificate are
 //! what no container can hold, so this proves which commands the script ran
-//! and never that Tailscale did what they ask. `--yes` (Y-474) answers with no
-//! terminal, and the same stub records the key it was handed.
+//! and never that Tailscale did what they ask. A rerun asks to restart the
+//! running units, and a `qrencode` stub shows the URL went to a QR code
+//! (Y-475). `--yes` (Y-474) answers with no terminal, and the same stub records
+//! the key it was handed.
 
 mod common;
 
@@ -957,6 +959,9 @@ fn at_a_terminal_a_yes_starts_the_dashboard_and_a_second_run_asks_nothing() -> R
     let relay = fixture.sha("/etc/yantra/daemon.env")?;
     let before = calls.len();
 
+    // The fixture's `sleep` units may or may not still be up; with both stopped
+    // the restart question is never asked, so the next assertion is exact.
+    fixture.sh("systemctl stop yantrad.service yantra-agent.service")?;
     fixture.publish(NEXT_VERSION, "second")?;
     let second = fixture.install_at_terminal("")?;
     assert!(
@@ -995,6 +1000,149 @@ fn at_a_terminal_a_yes_starts_the_dashboard_and_a_second_run_asks_nothing() -> R
         last_line(&second),
         "install: open the dashboard at https://yantra-box.tail0000.ts.net:8443"
     );
+    Ok(())
+}
+
+const RESTART_QUESTION: &str = "Restart yantrad and yantra-agent now? [Y/n]";
+
+/// Echoes its arguments, so the screen shows what would have been drawn. The
+/// Fedora image has no real `qrencode`, so every other test runs without one.
+const QRENCODE_STUB: &str = r#"#!/bin/sh
+echo "QR $*"
+"#;
+
+/// Y-475's row: a run ends on a QR code of the URL, and a rerun asks to
+/// restart the units that run the old version — a no leaves them, a yes
+/// restarts both.
+#[test]
+fn at_a_terminal_a_rerun_asks_to_restart_and_a_qr_shows_the_url() -> Result<()> {
+    const HTTPS_URL: &str =
+        "install: open the dashboard at https://yantra-box.tail0000.ts.net:8443";
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+    fixture.sh(&format!(
+        "cat > /usr/bin/qrencode <<'STUB'\n{QRENCODE_STUB}STUB\nchmod 755 /usr/bin/qrencode"
+    ))?;
+    // The fixture's binaries are `sleep`, which exits at once with no argument.
+    // The drop-ins keep both units up; install.sh overwrites only the main files.
+    for unit in ["yantrad", "yantra-agent"] {
+        fixture.sh(&format!(
+            "mkdir -p /etc/systemd/system/{unit}.service.d && cat > /etc/systemd/system/{unit}.service.d/keep-running.conf <<'UNIT'\n[Service]\nExecStart=\nExecStart=/usr/local/bin/{unit} infinity\nUNIT"
+        ))?;
+    }
+    let pids = || -> Result<Vec<String>> {
+        ["yantrad.service", "yantra-agent.service"]
+            .iter()
+            .map(|unit| fixture.systemd.property(unit, "MainPID"))
+            .collect()
+    };
+
+    fixture.publish(VERSION, "first")?;
+    let first = fixture.install_at_terminal("y\n")?;
+    assert!(
+        first.contains("QR -t ansiutf8 https://yantra-box.tail0000.ts.net:8443"),
+        "the URL is drawn as a QR code when qrencode is there:\n{first}"
+    );
+    assert_eq!(last_line(&first), HTTPS_URL);
+    let started = pids()?;
+    assert!(
+        started.iter().all(|pid| pid != "0"),
+        "the drop-ins did not keep both units up: {started:?}"
+    );
+
+    fixture.publish(NEXT_VERSION, "second")?;
+    let declined = fixture.install_at_terminal("n\n")?;
+    assert!(declined.contains(RESTART_QUESTION), "{declined}");
+    assert!(
+        declined
+            .contains("To run it: sudo systemctl try-restart yantrad.service yantra-agent.service"),
+        "a no names the command:\n{declined}"
+    );
+    assert_eq!(pids()?, started, "a no restarted a unit");
+    assert_eq!(last_line(&declined), HTTPS_URL);
+
+    fixture.publish(NEXT_VERSION, "third")?;
+    let accepted = fixture.install_at_terminal("y\n")?;
+    assert!(accepted.contains(RESTART_QUESTION), "{accepted}");
+    let restarted = pids()?;
+    for (before, after) in started.iter().zip(&restarted) {
+        assert_ne!(before, after, "a yes left a unit running the old binary");
+    }
+    for unit in ["yantrad.service", "yantra-agent.service"] {
+        assert_eq!(fixture.systemd.property(unit, "ActiveState")?, "active");
+    }
+    assert_eq!(last_line(&accepted), HTTPS_URL);
+    Ok(())
+}
+
+/// Y-475's review: yantra-update.service and cloud-init run install.sh with no
+/// terminal, so a rerun there must not ask, restart a running unit (ADR-0027
+/// §5), draw a QR code or write to `/dev/tty`.
+#[test]
+fn with_no_terminal_a_rerun_restarts_nothing_and_leaves_stderr_clean() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+    fixture.sh(&format!(
+        "cat > /usr/bin/qrencode <<'STUB'\n{QRENCODE_STUB}STUB\nchmod 755 /usr/bin/qrencode"
+    ))?;
+    for unit in ["yantrad", "yantra-agent"] {
+        fixture.sh(&format!(
+            "mkdir -p /etc/systemd/system/{unit}.service.d && cat > /etc/systemd/system/{unit}.service.d/keep-running.conf <<'UNIT'\n[Service]\nExecStart=\nExecStart=/usr/local/bin/{unit} infinity\nUNIT"
+        ))?;
+    }
+    let pids = || -> Result<Vec<String>> {
+        ["yantrad.service", "yantra-agent.service"]
+            .iter()
+            .map(|unit| fixture.systemd.property(unit, "MainPID"))
+            .collect()
+    };
+    let run = |command: &str| -> Result<(String, String)> {
+        let out = fixture
+            .systemd
+            .exec_as(UNPRIVILEGED, &["bash", "-c", command])?;
+        let (stdout, stderr) = (
+            String::from_utf8(out.stdout)?,
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        );
+        assert!(
+            out.status.success(),
+            "{command} failed:\n{stdout}\n{stderr}"
+        );
+        Ok((stdout, stderr))
+    };
+
+    fixture.publish(VERSION, "first")?;
+    run("cat /fixture/install.sh | bash -s -- --yes")?;
+    let started = pids()?;
+    assert!(
+        started.iter().all(|pid| pid != "0"),
+        "the drop-ins did not keep both units up: {started:?}"
+    );
+
+    fixture.publish(NEXT_VERSION, "second")?;
+    for command in [
+        "cat /fixture/install.sh | bash",
+        "cat /fixture/install.sh | bash -s -- --yes",
+    ] {
+        let (stdout, stderr) = run(command)?;
+        assert!(
+            !stderr.contains("/dev/tty"),
+            "`{command}` wrote to the terminal it does not have:\n{stderr}"
+        );
+        assert!(
+            !stdout.contains("[Y/n]") && !stdout.contains("Restart yantrad"),
+            "`{command}` asked about a restart:\n{stdout}"
+        );
+        assert!(
+            !stdout.contains("QR "),
+            "`{command}` drew a QR code:\n{stdout}"
+        );
+        assert_eq!(pids()?, started, "`{command}` restarted a running unit");
+    }
     Ok(())
 }
 

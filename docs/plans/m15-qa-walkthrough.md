@@ -94,7 +94,8 @@ A person runs **at least five commands** before the dashboard is useful, and mus
 6. `systemctl enable --now` both units, and waits until `yantrad` answers.
 7. Ends with one line: the dashboard's URL.
 8. **A second run is the updater:** it asks nothing it already has an answer to, and it touches no
-   configuration (D2 §1).
+   configuration (D2 §1). At a terminal it asks one thing: whether to restart units that run the old
+   version. With no terminal it asks nothing and restarts nothing.
 
 ### 1.5 Decided
 
