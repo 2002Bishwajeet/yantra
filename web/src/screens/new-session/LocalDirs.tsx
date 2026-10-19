@@ -170,7 +170,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
       ) : null}
 
       <div className="ns__where">
-        {here !== null ? <PathBar here={here} home={root} onEdit={visit} onGo={go} /> : null}
+        <PathBar here={here} home={root} onEdit={visit} onGo={go} />
         <FilterChip onPressedChange={setHidden} pressed={hidden}>
           Show hidden
         </FilterChip>

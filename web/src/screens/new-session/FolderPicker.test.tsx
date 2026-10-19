@@ -252,6 +252,23 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
     expect(screen.getByText('ssh: No route to host')).toBeTruthy()
   })
 
+  it('chooses a typed path unchecked when the machine cannot list', async () => {
+    mountNew('desktop', '/new', {
+      'POST /api/machines/cachyos-g14/dirs': [503, 'ssh: No route to host'],
+      'POST /api/machines/cachyos-g14/probe': [503, 'ssh: No route to host'],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByRole('button', { name: /Local directory/ })
+    press(/Local directory/)
+    expect(await screen.findByText('cachyos-g14 could not be asked what is there')).toBeTruthy()
+    const field = screen.getByLabelText('Path')
+    fireEvent.change(field, { target: { value: '/srv/code' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(await screen.findByText(/could not be asked, so this path is unchecked/)).toBeTruthy()
+  })
+
   it('gives the crumbs back on Escape, without walking', async () => {
     await toLocal()
     press('Edit path')

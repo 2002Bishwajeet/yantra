@@ -8,7 +8,7 @@ import { typing } from './keys'
  *  Ctrl+L, and the Edit button, swap them for a field that holds the path:
  *  Enter hands it to `onEdit`, Escape gives the crumbs back. */
 export function PathBar(props: {
-  here: string
+  here: string | null
   home: string | null
   onGo: (path: string | null) => void
   onEdit?: (path: string) => Promise<void>
@@ -19,9 +19,10 @@ export function PathBar(props: {
   const field = useRef<HTMLDivElement>(null)
   const bar = useRef<HTMLDivElement>(null)
   const was = useRef(false)
-  const editing = text !== null
+  // With no folder to show (the listing is pending or failed) the field is the only way in (D4 §4.2).
+  const editing = text !== null || here === null
 
-  const open = useEffectEvent(() => setText(here))
+  const open = useEffectEvent(() => setText(here ?? ''))
   useEffect(() => {
     if (!onEdit) return
     const listen = (event: KeyboardEvent) => {
@@ -68,7 +69,7 @@ export function PathBar(props: {
           }}
           onValueChange={setText}
           supporting={busy ? 'checking…' : 'absolute, on this machine; checked before anything is written. Escape goes back'}
-          value={text}
+          value={text ?? ''}
         />
       </div>
     )
@@ -102,7 +103,7 @@ export function PathBar(props: {
         </ol>
       </nav>
       {onEdit ? (
-        <Button data-edit="" onClick={() => setText(here)} type="button" variant="text">
+        <Button data-edit="" onClick={() => setText(here ?? '')} type="button" variant="text">
           Edit path
         </Button>
       ) : null}
