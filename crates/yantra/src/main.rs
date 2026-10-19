@@ -23,6 +23,7 @@ use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::mic;
 use yantra_core::notify;
+use yantra_core::placement;
 use yantra_core::price;
 use yantra_core::probe;
 use yantra_core::remove;
@@ -262,8 +263,15 @@ enum Command {
     /// Rank the machines whose heartbeat is fresh, and say why each one won
     /// or lost. Exits 1 when none can be placed
     Why {
-        /// Workspace name, without the `.toml`
-        workspace: String,
+        /// Workspace name, without the `.toml`; its machine is marked
+        #[arg(required_unless_present_any = ["repo", "path"])]
+        workspace: Option<String>,
+        /// Ask each fresh machine over ssh whether it holds `owner/name`
+        #[arg(long, value_parser = placement::Wanted::repo, conflicts_with = "path")]
+        repo: Option<placement::Wanted>,
+        /// Ask each fresh machine over ssh whether it holds this folder
+        #[arg(long, value_parser = placement::Wanted::path)]
+        path: Option<placement::Wanted>,
         /// yantrad's address, such as http://appliance:7717
         #[arg(long)]
         daemon: String,
@@ -465,7 +473,12 @@ async fn main() -> ExitCode {
         }
         Some(Command::Update { check: false }) => update_apply().await,
         Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
-        Some(Command::Why { workspace, daemon }) => why(workspace, daemon).await,
+        Some(Command::Why {
+            workspace,
+            repo,
+            path,
+            daemon,
+        }) => why(workspace, repo.or(path), daemon).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -497,11 +510,11 @@ async fn serve_mcp(daemon: String) -> ExitCode {
     }
 }
 
-async fn why(name: String, daemon: String) -> ExitCode {
-    let answered =
-        tokio::task::spawn_blocking(move || why::why(workspace::load(&name), &daemon)).await;
-    match answered {
-        Ok(Ok(report)) => {
+async fn why(name: Option<String>, wanted: Option<placement::Wanted>, daemon: String) -> ExitCode {
+    let workspace = name.map(|name| workspace::load(&name));
+    let find = placement::find();
+    match why::why(workspace, wanted, workspace::list, daemon, &find).await {
+        Ok(report) => {
             print!("{}", report.text);
             if report.placed {
                 ExitCode::SUCCESS
@@ -509,12 +522,8 @@ async fn why(name: String, daemon: String) -> ExitCode {
                 ExitCode::FAILURE
             }
         }
-        Ok(Err(err)) => {
-            report_error(&err);
-            ExitCode::FAILURE
-        }
         Err(err) => {
-            eprintln!("yantra why: {err}");
+            report_error(&err);
             ExitCode::FAILURE
         }
     }
@@ -2526,15 +2535,32 @@ mod tests {
     }
 
     #[test]
-    fn why_needs_a_workspace_and_the_daemons_address() {
+    fn why_needs_a_workspace_or_a_target_and_the_daemons_address() {
         let parsed = Cli::try_parse_from(["yantra", "why", "demo", "--daemon", "http://x:7717"])
             .expect("`why <workspace> --daemon <url>` parses");
         assert!(matches!(
             parsed.command,
-            Some(Command::Why { workspace, daemon }) if workspace == "demo" && daemon == "http://x:7717"
+            Some(Command::Why { workspace: Some(workspace), repo: None, path: None, daemon })
+                if workspace == "demo" && daemon == "http://x:7717"
         ));
+        let parsed =
+            Cli::try_parse_from(["yantra", "why", "--repo", "o/n", "--daemon", "http://x"])
+                .expect("`why --repo owner/name --daemon <url>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Why { workspace: None, repo: Some(placement::Wanted::Repo(slug)), .. })
+                if slug == "o/n"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "why", "--path", "/srv", "--daemon", "x"]).is_ok());
         assert!(Cli::try_parse_from(["yantra", "why", "demo"]).is_err());
         assert!(Cli::try_parse_from(["yantra", "why", "--daemon", "http://x:7717"]).is_err());
+        assert!(Cli::try_parse_from(["yantra", "why", "--repo", "n", "--daemon", "x"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "yantra", "why", "--repo", "o/n", "--path", "/s", "--daemon", "x"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

@@ -2,9 +2,9 @@
 //! open on, and why (Y-517).
 //!
 //! **A read reached over a `POST`, on [ADR-0019]'s licence**: a person picked
-//! the repository or folder, and nothing polls it. It asks over ssh only the
-//! machines whose beat is fresh, each for at most [`ASK`]. A machine that does
-//! not answer in time is [`Here::Unknown`], which scores 0 and filters nothing.
+//! the repository or folder, and nothing polls it. [`placement::ask`] decides
+//! which machines are asked and how a match is made; `yantra why --repo` calls
+//! the same function, so this file only reads the snapshot and renders.
 //!
 //! The daemon persists nothing (Y-044), so "where it ran" is a workspace in the
 //! read model on that machine that names the same repository or folder.
@@ -12,44 +12,18 @@
 //! [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::net::SocketAddr;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
-use tokio::task::JoinSet;
-use yantra_core::dirs::{self, Kind, Listing};
 use yantra_core::inventory::{Inventory, Ownership};
-use yantra_core::placement::{self, Beat, Candidate, Here, Ranking, Scored, Why};
-use yantra_core::probe;
+use yantra_core::placement::{self, Beat, Candidate, Find, Here, Ranking, Scored, Wanted, Why};
 use yantra_core::workspace::Workspace;
 
 use crate::heartbeat::Fleet;
 use crate::write::{Authoriser, Refused, allowed, chain};
-
-/// How long one machine has to answer. A slow machine is `Unknown`, never a wait.
-const ASK: Duration = Duration::from_secs(5);
-
-/// What a session will open, as one machine is asked about it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Target {
-    /// `owner/name`, and the folder this browser remembers for the machine.
-    Repo {
-        slug: String,
-        folder: Option<String>,
-    },
-    Path(String),
-}
-
-/// Asks one machine whether it holds the target. A test fakes it.
-pub type Find =
-    Arc<dyn Fn(String, Target) -> Pin<Box<dyn Future<Output = Here> + Send>> + Send + Sync>;
 
 #[derive(Clone)]
 struct Placer<I> {
@@ -63,11 +37,7 @@ where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
-    routes(
-        authoriser,
-        fleet,
-        Arc::new(|machine, target| Box::pin(async move { look(&machine, &target).await })),
-    )
+    routes(authoriser, fleet, placement::find())
 }
 
 fn routes<I, S>(authoriser: Authoriser<I>, fleet: Fleet, find: Find) -> Router<S>
@@ -96,43 +66,18 @@ struct Asked {
     folders: BTreeMap<String, String>,
 }
 
-/// Neither field is a valid request, ranked on the heartbeat terms alone.
-enum Wanted {
-    Nothing,
-    Repo(String),
-    Path(String),
-}
-
 impl Asked {
-    fn wanted(&self) -> Result<Wanted, Refused> {
+    /// Neither field is a valid request, ranked on the heartbeat terms alone.
+    fn wanted(&self) -> Result<Option<Wanted>, Refused> {
         let bad = |said: &str| Refused::Verb {
             status: StatusCode::BAD_REQUEST,
             said: said.to_owned(),
         };
         match (&self.repo, &self.path) {
             (Some(_), Some(_)) => Err(bad("ask about a repository or a folder, not both")),
-            (Some(repo), None) => match repo.split_once('/') {
-                Some((owner, name))
-                    if !owner.is_empty() && !name.is_empty() && !name.contains('/') =>
-                {
-                    Ok(Wanted::Repo(repo.clone()))
-                }
-                _ => Err(bad("`repo` is `owner/name`")),
-            },
-            (None, Some(path)) if path.trim().is_empty() => Err(bad("`path` is empty")),
-            (None, Some(path)) => Ok(Wanted::Path(path.clone())),
-            (None, None) => Ok(Wanted::Nothing),
-        }
-    }
-
-    fn target(&self, wanted: &Wanted, machine: &str) -> Option<Target> {
-        match wanted {
-            Wanted::Nothing => None,
-            Wanted::Repo(slug) => Some(Target::Repo {
-                slug: slug.clone(),
-                folder: self.folders.get(machine).cloned(),
-            }),
-            Wanted::Path(path) => Some(Target::Path(path.clone())),
+            (Some(repo), None) => Wanted::repo(repo).map(Some).map_err(bad),
+            (None, Some(path)) => Wanted::path(path).map(Some).map_err(bad),
+            (None, None) => Ok(None),
         }
     }
 }
@@ -177,127 +122,22 @@ async fn place<I: Inventory + Clone + Send + Sync + 'static>(
                 .get(&machine.id)
                 .map(|reading| Beat::of(reading.value(), reading.age())),
             repo: Here::Unknown,
-            ran_here: ran_here(workspaces, &machine.name, &wanted),
+            ran_here: false,
         })
         .collect();
     drop(beats);
 
-    let mut asking = JoinSet::new();
-    for candidate in &candidates {
-        let fresh = candidate
-            .beat
-            .is_some_and(|beat| beat.age <= placement::FRESH);
-        if let (true, Some(target)) = (fresh, asked.target(&wanted, &candidate.machine)) {
-            let machine = candidate.machine.clone();
-            let find = (placer.find)(machine.clone(), target);
-            asking.spawn(async move {
-                let here = tokio::time::timeout(ASK, find)
-                    .await
-                    .unwrap_or(Here::Unknown);
-                (machine, here)
-            });
-        }
+    if let Some(wanted) = &wanted {
+        placement::ask(
+            &mut candidates,
+            wanted,
+            &asked.folders,
+            workspaces,
+            &placer.find,
+        )
+        .await;
     }
-    let mut found: BTreeMap<String, Here> = asking.join_all().await.into_iter().collect();
-    for candidate in &mut candidates {
-        if let Some(here) = found.remove(&candidate.machine) {
-            candidate.repo = here;
-        }
-    }
-
     Ok(Json(Placed::of(&placement::rank(candidates))))
-}
-
-/// A repository matches on the path's last segment, a folder on the whole path.
-fn ran_here(workspaces: &[Workspace], machine: &str, wanted: &Wanted) -> bool {
-    workspaces
-        .iter()
-        .filter(|one| one.machine.eq_ignore_ascii_case(machine))
-        .any(|one| match wanted {
-            Wanted::Nothing => false,
-            Wanted::Repo(slug) => {
-                let name = slug.rsplit('/').next().unwrap_or_default();
-                one.repo
-                    .file_name()
-                    .and_then(|last| last.to_str())
-                    .is_some_and(|last| last.eq_ignore_ascii_case(name))
-            }
-            Wanted::Path(path) => one.repo == Path::new(path.trim_end_matches('/')),
-        })
-}
-
-/// The real [`Find`]: a probe for a folder, and for a repository a listing of
-/// the clone folder, found as `web/src/screens/new-session/clonePath.ts` finds it.
-async fn look(machine: &str, target: &Target) -> Here {
-    match target {
-        Target::Path(path) => match probe::probe(machine, path).await {
-            Ok(found) if found.exists => Here::Yes(found.path),
-            Ok(_) => Here::No,
-            Err(_) => Here::Unknown,
-        },
-        Target::Repo { slug, folder } => {
-            let folder = match folder {
-                Some(folder) => Some(folder.clone()),
-                None => match clone_folder(machine).await {
-                    Ok(folder) => folder,
-                    Err(_) => return Here::Unknown,
-                },
-            };
-            let Some(folder) = folder else {
-                return Here::No;
-            };
-            match dirs::list(machine, Some(&folder)).await {
-                Ok(listing) => holding(&listing, slug).map_or(Here::No, Here::Yes),
-                Err(dirs::Error::NotADirectory { .. }) => Here::No,
-                Err(_) => Here::Unknown,
-            }
-        }
-    }
-}
-
-/// `~/Github` before `~/Documents/Github`, in any letter case.
-async fn clone_folder(machine: &str) -> Result<Option<String>, dirs::Error> {
-    let home = dirs::list(machine, None).await?;
-    if let Some(folder) = folder_named(&home, "github") {
-        return Ok(Some(folder));
-    }
-    let Some(documents) = folder_named(&home, "documents") else {
-        return Ok(None);
-    };
-    Ok(folder_named(
-        &dirs::list(machine, Some(&documents)).await?,
-        "github",
-    ))
-}
-
-fn folder_named(listing: &Listing, name: &str) -> Option<String> {
-    listing
-        .entries
-        .iter()
-        .find(|one| one.kind == Kind::Dir && one.access && one.name.eq_ignore_ascii_case(name))
-        .map(|one| one.path.clone())
-}
-
-/// The entry whose origin is `slug`, in any letter case.
-fn holding(listing: &Listing, slug: &str) -> Option<String> {
-    listing
-        .entries
-        .iter()
-        .find(|one| {
-            one.origin
-                .as_deref()
-                .is_some_and(|origin| slug_of(origin).eq_ignore_ascii_case(slug))
-        })
-        .map(|one| one.path.clone())
-}
-
-/// `git@github.com:o/n.git` and `https://github.com/o/n` are both `o/n`, as in
-/// `web/src/screens/new-session/form.ts`.
-fn slug_of(origin: &str) -> String {
-    let tail = origin.trim_end_matches('/');
-    let tail = tail.strip_suffix(".git").unwrap_or(tail);
-    let parts: Vec<&str> = tail.split(['/', ':']).collect();
-    parts[parts.len().saturating_sub(2)..].join("/")
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -380,6 +220,7 @@ impl Ranked {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
+    use std::time::Duration;
     use yantra_core::heartbeat::Power;
     let beat = |free_ram_mb, cpu_busy_pct| {
         Some(Beat {
@@ -438,10 +279,12 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, header};
     use std::net::IpAddr;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
     use tower::ServiceExt as _;
     use yantra_core::heartbeat::{Heartbeat, Power};
     use yantra_core::inventory::{Caller, Fake, MachineInfo, Os};
+    use yantra_core::placement::Target;
     use yantra_core::snapshot::{Reading, Snapshot};
     use yantra_core::workspace::Listing as Workspaces;
 
@@ -802,62 +645,5 @@ mod tests {
             said.as_str().expect("text").contains("has not looked"),
             "{said}"
         );
-    }
-
-    fn entry(path: &str, origin: Option<&str>) -> dirs::Entry {
-        dirs::Entry {
-            path: path.to_owned(),
-            name: path.rsplit('/').next().unwrap_or_default().to_owned(),
-            kind: Kind::Dir,
-            access: true,
-            repo: origin.is_some(),
-            origin: origin.map(str::to_owned),
-        }
-    }
-
-    fn listing(entries: Vec<dirs::Entry>) -> Listing {
-        Listing {
-            machine: "m".to_owned(),
-            path: "/home/b".to_owned(),
-            access: true,
-            entries,
-            truncated: false,
-        }
-    }
-
-    #[test]
-    fn the_clone_folder_and_the_repo_are_found_in_any_letter_case() {
-        let home = listing(vec![
-            entry("/home/b/Documents", None),
-            entry("/home/b/GitHub", None),
-        ]);
-        assert_eq!(
-            folder_named(&home, "github").as_deref(),
-            Some("/home/b/GitHub")
-        );
-        assert_eq!(folder_named(&home, "missing"), None);
-
-        let clones = listing(vec![
-            entry("/home/b/GitHub/notes", None),
-            entry("/home/b/GitHub/site", Some("https://github.com/o/site")),
-            entry("/home/b/GitHub/y", Some("git@github.com:O/Yantra.git")),
-        ]);
-        assert_eq!(
-            holding(&clones, "o/yantra").as_deref(),
-            Some("/home/b/GitHub/y")
-        );
-        assert_eq!(
-            holding(&clones, "o/site").as_deref(),
-            Some("/home/b/GitHub/site")
-        );
-        assert_eq!(holding(&clones, "o/notes"), None);
-    }
-
-    #[test]
-    fn an_origin_is_its_last_two_segments() {
-        assert_eq!(slug_of("https://github.com/o/n.git"), "o/n");
-        assert_eq!(slug_of("git@github.com:o/n"), "o/n");
-        assert_eq!(slug_of("https://github.com/o/n/"), "o/n");
-        assert_eq!(slug_of("n"), "n");
     }
 }

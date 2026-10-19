@@ -1,17 +1,21 @@
-//! `yantra why <workspace> --daemon <url>`: ranks the machines whose heartbeat is
-//! fresh, and says why each one won or lost (Y-452).
+//! `yantra why [<workspace>] [--repo owner/name | --path <folder>] --daemon <url>`:
+//! ranks the machines whose heartbeat is fresh, and says why each one won or lost
+//! (Y-452).
 //!
 //! The beats live only in `yantrad`'s memory (Y-044), so this reads them from
-//! `GET /api/machines`. The scoring is [`placement::rank`]; this file fetches and
-//! renders, and prints every term that moves the rank (I-10). The CLI asks no
-//! machine over ssh, so the repo term is always unknown here and prints 0.
+//! `GET /api/machines`. With `--repo` or `--path`, [`placement::ask`] asks each
+//! fresh machine over ssh whether it holds the target, as `POST /api/placement`
+//! does, so the REPO and AFFIN terms match the dashboard's (Y-517). The scoring
+//! is [`placement::rank`]; this file fetches and renders, and prints every term
+//! that moves the rank (I-10).
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Duration;
 
 use serde::Deserialize;
 use yantra_core::heartbeat::Power;
-use yantra_core::placement::{self, Candidate, Here, Ranking, Scored, Why};
+use yantra_core::placement::{self, Candidate, Find, Here, Ranking, Scored, Wanted, Why};
 use yantra_core::workspace::{self, Workspace};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -32,6 +36,8 @@ pub enum Error {
     NeverLooked,
     #[error("yantrad could not list the machines: {0}")]
     LookFailed(String),
+    #[error("the request to yantrad stopped: {0}")]
+    Stopped(String),
 }
 
 /// What to print, and whether any machine ranked. R5 fails fast when none does.
@@ -42,13 +48,38 @@ pub struct Report {
 }
 
 /// The workspace is loaded by the caller, so a missing one is reported before
-/// the daemon is asked anything.
-pub fn why(workspace: Result<Workspace, workspace::Error>, daemon: &str) -> Result<Report, Error> {
-    let workspace = workspace?;
-    let ranking = placement::rank(fetch(daemon, &workspace.machine)?);
+/// the daemon is asked anything. `workspaces` is read only when `wanted` is set.
+pub async fn why(
+    workspace: Option<Result<Workspace, workspace::Error>>,
+    wanted: Option<Wanted>,
+    workspaces: impl FnOnce() -> Result<workspace::Listing, workspace::Error>,
+    daemon: String,
+    find: &Find,
+) -> Result<Report, Error> {
+    let home = workspace
+        .transpose()?
+        .map(|workspace| workspace.machine)
+        .unwrap_or_default();
+    let fetched = {
+        let home = home.clone();
+        tokio::task::spawn_blocking(move || fetch(&daemon, &home)).await
+    };
+    let mut candidates = fetched.map_err(|error| Error::Stopped(error.to_string()))??;
+    if let Some(wanted) = &wanted {
+        let listing = workspaces()?;
+        placement::ask(
+            &mut candidates,
+            wanted,
+            &BTreeMap::new(),
+            &listing.workspaces,
+            find,
+        )
+        .await;
+    }
+    let ranking = placement::rank(candidates);
     Ok(Report {
         placed: !ranking.ranked.is_empty(),
-        text: render(&ranking, &workspace.machine),
+        text: render(&ranking, &home),
     })
 }
 
@@ -66,6 +97,7 @@ enum Answer {
 struct Machine {
     name: String,
     online: bool,
+    ownership: String,
     heartbeat: Option<Beat>,
 }
 
@@ -77,7 +109,8 @@ struct Beat {
     power: Power,
 }
 
-/// `home` is the workspace's own machine, which is where it ran.
+/// `home` is the workspace's own machine, which is where it ran. Only the
+/// owner's machines are candidates, as in `POST /api/placement`.
 fn fetch(daemon: &str, home: &str) -> Result<Vec<Candidate>, Error> {
     let base = daemon.trim_end_matches('/');
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -113,6 +146,7 @@ fn fetch(daemon: &str, home: &str) -> Result<Vec<Candidate>, Error> {
     match answer {
         Answer::Ok { data } => Ok(data
             .into_iter()
+            .filter(|machine| machine.ownership == "yours")
             .map(|machine| Candidate {
                 ran_here: machine.name.eq_ignore_ascii_case(home),
                 repo: Here::Unknown,
@@ -268,7 +302,7 @@ fn lost(loser: &Scored, winner: &Scored) -> String {
         ),
         (
             winner.terms.affinity - loser.terms.affinity,
-            format!("AFFIN: this workspace names {}", winner.machine),
+            format!("AFFIN: a workspace on {} names it", winner.machine),
         ),
     ];
     let largest = gaps
@@ -296,6 +330,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::get;
     use std::path::PathBuf;
+    use yantra_core::placement::Target;
 
     fn candidate(name: &str, online: bool, beat: Option<(u64, u64, u8, Power)>) -> Candidate {
         Candidate {
@@ -424,7 +459,7 @@ winbox   rejected: up, but not reporting (an agent or install problem); the last
             "{text}"
         );
         assert!(
-            text.contains("the largest gap is AFFIN: this workspace names home"),
+            text.contains("the largest gap is AFFIN: a workspace on home names it"),
             "{text}"
         );
     }
@@ -471,13 +506,23 @@ cold     rejected: asleep or off, and never heard from (this workspace's machine
         format!("http://{address}/")
     }
 
+    fn none() -> Result<workspace::Listing, workspace::Error> {
+        Ok(workspace::Listing {
+            workspaces: Vec::new(),
+            unusable: Vec::new(),
+        })
+    }
+
+    /// Never asked: no test without `wanted` may reach a machine over ssh.
+    fn nobody() -> Find {
+        std::sync::Arc::new(|_, _| Box::pin(async { Here::Unknown }))
+    }
+
     async fn ask(
         workspace: Result<Workspace, workspace::Error>,
         daemon: String,
     ) -> Result<Report, Error> {
-        tokio::task::spawn_blocking(move || why(workspace, &daemon))
-            .await
-            .expect("the blocking thread")
+        why(Some(workspace), None, none, daemon, &nobody()).await
     }
 
     /// The daemon's own shape (`api.rs`'s `Answer` and `Machine`), fields the
@@ -491,6 +536,10 @@ cold     rejected: asleep or off, and never heard from (this workspace's machine
          "online":true,"expired":false,"last_seen":null,"ownership":"yours",
          "heartbeat":{"age_seconds":8,"arch":"aarch64","labels":[],"free_ram_mb":2150,
                       "free_disk_mb":1,"cpu_busy_pct":40,"power":{"battery":{"percent":50}}}},
+        {"name":"theirs","dns_name":"theirs.ts.net.","address":null,"os":"linux",
+         "online":true,"expired":false,"last_seen":null,"ownership":"shared",
+         "heartbeat":{"age_seconds":1,"arch":"x86_64","labels":[],"free_ram_mb":65536,
+                      "free_disk_mb":1,"cpu_busy_pct":0,"power":"ac"}},
         {"name":"pi5","dns_name":"pi5.ts.net.","address":null,"os":"linux",
          "online":false,"expired":false,"last_seen":"2026-10-07T10:00:00Z","ownership":"yours",
          "heartbeat":null}]}"#;
@@ -513,6 +562,57 @@ cold     rejected: asleep or off, and never heard from (this workspace's machine
             report
                 .text
                 .contains("pi5      rejected: asleep or off, and never heard from"),
+            "{}",
+            report.text
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repo_asks_each_fresh_machine_and_scores_where_it_is_and_ran() {
+        let find: Find = std::sync::Arc::new(|machine, target| {
+            Box::pin(async move {
+                let wanted = Target::Repo {
+                    slug: "o/yantra".to_owned(),
+                    folder: None,
+                };
+                if machine == "mba" && target == wanted {
+                    Here::Yes("/Users/b/Github/yantra".to_owned())
+                } else {
+                    Here::No
+                }
+            })
+        });
+        let workspaces = || {
+            Ok(workspace::Listing {
+                workspaces: vec![Workspace {
+                    name: "y".to_owned(),
+                    machine: "mba".to_owned(),
+                    repo: PathBuf::from("/Users/b/Github/yantra"),
+                    startup: None,
+                }],
+                unusable: Vec::new(),
+            })
+        };
+        let report = why(
+            None,
+            Some(Wanted::Repo("o/yantra".to_owned())),
+            workspaces,
+            daemon(StatusCode::OK, MACHINES).await,
+            &find,
+        )
+        .await
+        .expect("an answer");
+        assert!(
+            report
+                .text
+                .contains("mba       63.6    2.6    9.0    2.0   30.0   20.0"),
+            "{}",
+            report.text
+        );
+        assert!(
+            report
+                .text
+                .contains("mba      won: highest score, 20.8 ahead of zenith\n"),
             "{}",
             report.text
         );

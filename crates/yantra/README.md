@@ -44,7 +44,8 @@ yantra about                     # version, target and build date of this binary
 yantra update --check            # running and published version, and whether a newer one exists
 sudo yantra update               # install the current release and restart what runs
 yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks
-yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost; REPO is 0 here, AFFIN marks the workspace's machine
+yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost
+yantra why --repo owner/name --daemon http://<appliance>:7717  # the same, scoring where the repo is, as new session does
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:
