@@ -42,6 +42,31 @@ describe('the relay row', () => {
   })
 })
 
+describe('the topic generator', () => {
+  it('shows no QR or link before Generate', async () => {
+    mountSettings('desktop', '/settings/notifications')
+    const sheet = await open()
+    expect(sheet.queryByRole('img', { name: /QR/ })).toBeNull()
+    expect(sheet.queryByRole('link', { name: 'Open the topic' })).toBeNull()
+  })
+
+  it('fills the field, shows the QR and link, and saves that same url', async () => {
+    const asked = mountSettings('desktop', '/settings/notifications', {
+      'POST /api/relay': [204],
+    })
+    const sheet = await open()
+    fireEvent.click(sheet.getByRole('button', { name: 'Generate' }))
+    const field = sheet.getByLabelText('Topic URL') as HTMLInputElement
+    expect(field.value).toMatch(/^https:\/\/ntfy\.sh\/yantra-[a-z2-7]{26}$/)
+    const topic = field.value.split('/').pop()
+    expect(await sheet.findByRole('img', { name: /QR/ })).toBeTruthy()
+    expect(sheet.getByRole('link', { name: 'Open the topic' }).getAttribute('href')).toBe(`https://ntfy.sh/${topic}`)
+    fireEvent.click(sheet.getByRole('button', { name: 'Save and send a test' }))
+    expect(await sheet.findByText('The test message arrived at the relay.')).toBeTruthy()
+    expect(asked.filter((one) => one === 'POST /api/relay')).toHaveLength(1)
+  })
+})
+
 describe('the relay sheet', () => {
   it('sends the topic and the token to the one route that writes them', async () => {
     const asked = mountSettings('desktop', '/settings/notifications', {

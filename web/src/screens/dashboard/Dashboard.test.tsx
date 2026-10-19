@@ -140,6 +140,7 @@ describe('the Dashboard in Compact', () => {
     expect(reads('Recent')).toContain('last 3 session events')
     expect(reads('Recent')).toContain('asked for trust · cachyos-g14')
     expect(region('Recent').queryByText(/relay test/)).toBeNull()
+    expect(idle.queryByRole('link', { name: 'New →' })).toBeNull()
   })
 })
 
@@ -190,6 +191,15 @@ describe('the Dashboard on an empty fleet', () => {
     )
     expect(screen.getByText('no workspaces yet')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
+  })
+
+  it('offers New in the compact Idle card on the phone', async () => {
+    writePrefs({ density: 'compact' })
+    mount('phone', '/', keyed(scenario('empty')))
+    await drawn()
+    const idle = region('Idle')
+    expect(idle.getByText('no workspaces yet')).toBeTruthy()
+    expect(idle.getByRole('link', { name: 'New →' }).getAttribute('href')).toBe('/new')
   })
 })
 

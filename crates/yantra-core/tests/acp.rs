@@ -127,7 +127,9 @@ async fn opencode_initializes_reloads_and_cancels_over_ssh() -> Result<()> {
     let (stopped, cancelled) = tokio::join!(within("a cancelled prompt", turn), cancel);
     // Y-470: opencode's free hosted model refuses CI's prompts; Y-471 replaces it with a local stub.
     if let Err(refused) = &stopped
-        && format!("{refused:#}").contains("Upstream request failed")
+        && ["Upstream request failed", "free models aren't available"]
+            .iter()
+            .any(|why| format!("{refused:#}").contains(why))
     {
         eprintln!(
             "SKIPPED: opencode's hosted model refused the prompt ({refused:#}), \

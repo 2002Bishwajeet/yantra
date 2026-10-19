@@ -103,6 +103,38 @@ publish() {
     pack "$repo" "$version"
 }
 
+# The archive release.yml built, served under a version of the fixture's
+# choosing (Y-483). Its install.sh, units and binaries are left as built; a
+# marker, when there is one, is appended to each binary so that two
+# publications of the same build are different files.
+publish_archive() {
+    local repo=$1 version=$2 marker=$3 archive=$4
+    local stage built binary
+    stage=$(staged "$version")
+
+    rm -rf "$STAGING" "$WWW/$repo" "$WWW/repos"
+    mkdir -p "$STAGING" "$(downloads "$repo" "$version")" "$WWW/repos/$repo/releases"
+    tar -C "$STAGING" -xzf "$archive"
+
+    built=("$STAGING"/yantra-*-"$target")
+    if [ "${#built[@]}" -ne 1 ] || [ ! -d "${built[0]}" ]; then
+        echo "release.sh: $archive holds no single yantra-*-$target directory" >&2
+        exit 1
+    fi
+    [ "${built[0]}" = "$STAGING/$stage" ] || mv "${built[0]}" "$STAGING/$stage"
+
+    if [ -n "$marker" ]; then
+        for binary in yantrad yantra yantra-agent; do
+            printf '\n%s\n' "$marker" >> "$STAGING/$stage/$binary"
+        done
+    fi
+
+    printf '{"tag_name":"v%s","name":"v%s","draft":false,"prerelease":false}\n' \
+        "$version" "$version" > "$WWW/repos/$repo/releases/latest"
+
+    pack "$repo" "$version"
+}
+
 pack() {
     local repo=$1 version=$2 stage
     stage=$(staged "$version")
