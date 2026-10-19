@@ -98,7 +98,8 @@ account. The script says so first, because the dashboard cannot exist before the
 8. It runs `systemctl enable --now` for both units and for `yantra-update.path`, and waits up to 30 s for `yantrad` to answer
    `/healthz`.
 9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
-   `http://<tailnet address>:7717` if HTTPS is not on.
+   `http://<tailnet address>:7717` if HTTPS is not on. If `qrencode` is installed, the URL also
+   prints above that line as a QR code, so a phone can open it.
 
 **What a no does depends on the question.** A no to installing Tailscale or to logging in installs
 Yantra and nothing else, and the run ends the way a run with no terminal does. On a box that is
@@ -111,16 +112,19 @@ not install `gh`, and `provision.sh` is gone: its fleet half belongs to the dash
 
 ### Run it again to update
 
-**A second run is the updater.** It asks nothing it already has an answer to and touches no
-configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon.env` stays as it
+**A second run is the updater.** It asks nothing it already has an answer to, except whether to
+restart. It touches no configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon.env` stays as it
 is, and it does not run `tailscale up` or `tailscale serve` again. It replaces the binaries and the
 units, and it ends on the same URL.
 
-**A run at a terminal does not restart what is running.** It says so and names the command:
+**A run at a terminal asks before it restarts what is running.** If either unit runs, it asks
+*"Restart yantrad and yantra-agent now? [Y/n]"*. A yes runs this command, and `--yes` answers yes:
 
 ```bash
 sudo systemctl try-restart yantrad.service yantra-agent.service
 ```
+
+A no or a `^D` restarts nothing, and the run prints that command for later.
 
 `YANTRA_VERSION=0.2.0 bash install.sh` installs a named release instead of the current one.
 
@@ -224,7 +228,9 @@ survive a second run, `daemon.env` is `600 yantra`, the binaries replace while o
 executing, each replaced binary is kept as `.prev`, the updater is the archive's own `install.sh`, and
 a corrupted archive installs nothing. **At a terminal**, through a pty: a yes logs
 in, turns on `serve`, writes the address into an absent `agent.env`, enables both units and ends on
-the URL; a second run asks nothing and changes no file; a no installs Yantra and starts nothing. On
+the URL; a second run asks nothing but the restart and changes no file; a rerun with both units
+running leaves them on a no and restarts both on a yes; with a `qrencode` stub installed, the URL
+also goes to a QR code; a no installs Yantra and starts nothing. On
 a box that is already logged in, a no to HTTPS still starts both units. A `serve` that refuses, and
 a Ctrl-C while `serve` waits on its link, both end on the `http://` URL. **With `--yes` and no
 terminal**: the run asks nothing, hands `TS_AUTHKEY` to `tailscale up`, turns on `serve`, writes the

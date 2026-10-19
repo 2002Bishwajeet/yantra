@@ -441,6 +441,15 @@ if [ -n "$address" ]; then
     else
         echo "install: $AGENT_ENV names no daemon, so yantra-agent is not started. Add: YANTRA_DAEMON=$address"
     fi
+    # ADR-0027 §5 warns against an unattended restart, so only a person at a
+    # terminal is asked; --yes with no terminal leaves the running units alone.
+    if [ "$running" = yes ]; then
+        if [ "$interactive" = yes ] && ask "Restart yantrad and yantra-agent now?"; then
+            as_root systemctl try-restart yantrad.service yantra-agent.service
+        else
+            echo "install: the units still run the version before v$VERSION. To run it: sudo systemctl try-restart yantrad.service yantra-agent.service"
+        fi
+    fi
 
     # The unit's RestartSec is 10 s, so this outlasts two refusals while
     # tailscaled is still learning its address.
@@ -456,19 +465,17 @@ if [ -n "$address" ]; then
     [ "$ready" = yes ] ||
         fail "yantrad did not answer on $address in 30 s. Read why: journalctl -u yantrad -n 20 --no-pager"
 
-    # A run at a terminal replaces the files and restarts nothing; `yantra
-    # update` is the path that restarts too (ADR-0027 §5).
-    if [ "$running" = yes ]; then
-        echo "install: the units still run the version before v$VERSION. To run it: sudo systemctl try-restart yantrad.service yantra-agent.service"
-    fi
-
     # Self comes before Peer in the status JSON, so the first DNSName is this box's.
     name=$(tailscale status --json | grep -o '"DNSName": *"[^"]*"' | head -n 1 | cut -d '"' -f 4) || true
     if [ -n "$name" ] && serving; then
-        echo "install: open the dashboard at https://${name%.}:$HTTPS_PORT"
+        url="https://${name%.}:$HTTPS_PORT"
     else
-        echo "install: open the dashboard at http://$address"
+        url="http://$address"
     fi
+    if [ "$interactive" = yes ] && command -v qrencode >/dev/null; then
+        qrencode -t ansiutf8 "$url" </dev/null || true
+    fi
+    echo "install: open the dashboard at $url"
     exit 0
 fi
 

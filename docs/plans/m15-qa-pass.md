@@ -59,7 +59,7 @@ The first release `install.sh` can install. It has been inert since #282 by desi
       → **these came out of the archive, not off the internet.** That is Y-365's whole point.
 - [ ] It asks before it installs Tailscale, logs the box in and turns on HTTPS (Y-384).
       → it ends on one line: the dashboard's URL.
-- [ ] Run it a second time. → it asks nothing and changes no configuration.
+- [ ] Run it a second time. → it asks only whether to restart and changes no configuration.
 - [ ] `YANTRA_VERSION=v0.1.0 … | bash` → it refuses by name: *"carries no units"*. Nothing installs.
 - [ ] `systemctl status yantrad` → active, running as `yantra`.
 - [ ] Open the dashboard. → the setup checklist is the home page until the key exists and one
