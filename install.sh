@@ -9,13 +9,18 @@
 # terminal it asks nothing, enables nothing and ends by naming what is left.
 # docs/appliance.md is the runbook around it.
 #
+# `--yes`, or YANTRA_YES=1, answers every question yes, with or without a
+# terminal (Y-474). TS_AUTHKEY logs the box in with that key, read from stdin:
+#
+#     curl -fsSL <url>/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
+#
 # `--uninstall` reverses it (Y-407):
 #
 #     curl -fsSL <url>/install.sh | bash -s -- --uninstall
 #
 # It always removes the services and the binaries. It asks, one at a time and
 # default no, before it removes /etc/yantra, the yantra account, or the
-# dashboard's Tailscale serve.
+# dashboard's Tailscale serve. `--yes` answers none of those: they stay no.
 
 # bash runs a piped script as it reads it, and a Ctrl-C also kills the `curl`
 # still writing it. The braces make bash read the whole file before it runs any.
@@ -64,8 +69,37 @@ else
     interactive=no
 fi
 
+yes=no
+if [ "${YANTRA_YES:-}" = 1 ]; then
+    yes=yes
+fi
+uninstalling=no
+for arg in "$@"; do
+    case "$arg" in
+    --yes) yes=yes ;;
+    --uninstall) uninstalling=yes ;;
+    *) fail "$arg is not an option. The options are --yes and --uninstall." ;;
+    esac
+done
+
+answering=no
+if [ "$interactive" = yes ] || [ "$yes" = yes ]; then
+    answering=yes
+fi
+
+# What a tailscale command reads: the terminal, or nothing when there is none.
+if [ "$interactive" = yes ]; then
+    tty=/dev/tty
+else
+    tty=/dev/null
+fi
+
 ask() {
     local reply
+    if [ "$yes" = yes ]; then
+        echo "install: $1 yes"
+        return 0
+    fi
     printf 'install: %s [Y/n] ' "$1" >/dev/tty
     # An empty line takes the default; ^D is not a yes.
     read -r reply </dev/tty || return 1
@@ -138,7 +172,7 @@ uninstall() {
     fi
 }
 
-if [ "${1:-}" = --uninstall ]; then
+if [ "$uninstalling" = yes ]; then
     uninstall
     exit 0
 fi
@@ -262,7 +296,7 @@ serving() { as_root tailscale serve status --json 2>/dev/null | grep -q "\"$HTTP
 
 # After the checksum, so a bad archive leaves the box as it was. An interactive
 # login joins the box untagged, which superseded Q17 (Y-384).
-if [ "$interactive" = yes ]; then
+if [ "$answering" = yes ]; then
     question=
     if ! command -v tailscale >/dev/null 2>&1; then
         question="Install Tailscale, log this box in and turn on HTTPS?"
@@ -279,9 +313,15 @@ if [ "$interactive" = yes ]; then
                     fail "Tailscale's installer failed — nothing of Yantra was installed"
             fi
             if ! up; then
-                echo "install: tailscale prints a URL. Open it and log in with the account your other devices use."
-                as_root tailscale up </dev/tty ||
-                    fail "tailscale up did not finish — nothing of Yantra was installed"
+                if [ -n "${TS_AUTHKEY:-}" ]; then
+                    # Through stdin, because sudo logs its command line to the journal.
+                    printf '%s' "$TS_AUTHKEY" | as_root tailscale up --auth-key=file:/dev/stdin ||
+                        fail "tailscale up did not finish — nothing of Yantra was installed"
+                else
+                    echo "install: tailscale prints a URL. Open it and log in with the account your other devices use."
+                    as_root tailscale up <"$tty" ||
+                        fail "tailscale up did not finish — nothing of Yantra was installed"
+                fi
                 echo "install: turn off key expiry for this box, or it leaves the tailnet when its key expires:"
                 echo "install: admin console → Machines → this box's menu → Disable key expiry."
             fi
@@ -290,8 +330,11 @@ if [ "$interactive" = yes ]; then
             trap 'echo' INT
             echo "install: on a tailnet that never had HTTPS, tailscale prints a link to turn it on. Ctrl-C skips HTTPS."
             ip=$(tailscale ip -4 2>/dev/null | head -n 1) || true
+            # With no terminal nobody is there to Ctrl-C a serve that waits on its link.
+            limit=()
+            [ "$interactive" = yes ] || limit=(timeout 120)
             if [ -z "$ip" ] ||
-                ! as_root tailscale serve --bg --https="$HTTPS_PORT" "http://$ip:$PORT" </dev/tty; then
+                ! as_root "${limit[@]}" tailscale serve --bg --https="$HTTPS_PORT" "http://$ip:$PORT" <"$tty"; then
                 echo "install: tailscale serve failed, so the dashboard is on plain HTTP."
             fi
             trap - INT
@@ -330,7 +373,7 @@ fi
 as_root systemctl daemon-reload
 
 address=
-if [ "$interactive" = yes ] && up; then
+if [ "$answering" = yes ] && up; then
     ip=$(tailscale ip -4 2>/dev/null | head -n 1) || true
     if [ -n "$ip" ]; then
         address="$ip:$PORT"
