@@ -20,9 +20,8 @@ export function newTopic(): string {
   return `yantra-${out}`
 }
 
+// ntfy:// links open only the Android app; https opens the topic on every phone.
 export const topicUrl = (topic: string) => `https://${HOST}/${topic}`
-
-export const subscribeLink = (topic: string) => `ntfy://${HOST}/${topic}`
 
 /** The topic when `url` is a topic on the public ntfy server, else null. */
 export function publicTopic(url: string): string | null {

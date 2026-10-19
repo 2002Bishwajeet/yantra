@@ -10,7 +10,7 @@ import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { Group, Note } from './Group'
 import { Sheet } from './Sheet'
-import { newTopic, publicTopic, subscribeLink, topicUrl } from './topic'
+import { newTopic, publicTopic, topicUrl } from './topic'
 
 const Qr = lazy(() => import('qrcode.react').then((it) => ({ default: it.QRCodeSVG })))
 
@@ -192,13 +192,14 @@ function RelaySheet(props: { open: boolean; onOpenChange: (open: boolean) => voi
           <div className="settings__subscribe">
             <Suspense fallback={<div className="settings__qr-wait" />}>
               <Qr
-                aria-label={`A QR code that subscribes the ntfy app to ${topic}`}
+                aria-label={`A QR code for the ntfy topic ${topic}`}
+                marginSize={2}
                 role="img"
                 size={112}
-                value={subscribeLink(topic)}
+                value={topicUrl(topic)}
               />
             </Suspense>
-            <a href={subscribeLink(topic)}>Open in the ntfy app</a>
+            <a href={topicUrl(topic)}>Open the topic</a>
           </div>
         ) : null}
         <TextField

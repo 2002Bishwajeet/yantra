@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { newTopic, publicTopic, subscribeLink, topicUrl } from './topic'
+import { newTopic, publicTopic, topicUrl } from './topic'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -27,9 +27,8 @@ describe('newTopic', () => {
 })
 
 describe('links', () => {
-  it('builds the topic URL and the deep link', () => {
+  it('builds the topic URL', () => {
     expect(topicUrl('yantra-abc')).toBe('https://ntfy.sh/yantra-abc')
-    expect(subscribeLink('yantra-abc')).toBe('ntfy://ntfy.sh/yantra-abc')
   })
 
   it('reads a topic only from the public server', () => {
