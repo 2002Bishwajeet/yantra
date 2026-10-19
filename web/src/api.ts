@@ -459,6 +459,34 @@ export type Cloning = {
 }
 
 // ---- end Y-343 / Y-344 ----
+
+/** A thread's PR, read from its upstream on each `POST
+ *  /api/workspaces/{name}/threads` (Y-488). `unknown` is no grant, an
+ *  upstream off github.com, or a GitHub that failed; `said` says which. */
+export type ThreadPr =
+  | { state: 'none' }
+  | { state: 'open' | 'closed' | 'merged'; number: number; url: string }
+  | { state: 'unknown'; said: string }
+
+/** One entry of `POST /api/workspaces/{name}/threads`. `issue` is
+ *  `owner/repo#n` for a thread opened from an issue. */
+export type Thread = {
+  id: string
+  branch: string
+  worktree: string
+  issue: string | null
+  pr: ThreadPr
+}
+
+/** `POST /api/workspaces/{name}/threads/new` with `{ issue }`. `draft` is the
+ *  composer's first text. */
+export type ThreadOpened = {
+  thread: string
+  branch: string
+  worktree: string
+  issue: string
+  draft: string
+}
 // ---------------------------------------------------------------------------
 // Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
 // edits above it is trivial.

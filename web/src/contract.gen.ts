@@ -32,7 +32,9 @@ import type {
   Stopped,
   TerminalExit,
   TerminalSize,
+  Thread,
   ThreadEvent,
+  ThreadOpened,
   Transcript,
   Workspace,
   WorkspaceStatus,
@@ -680,6 +682,69 @@ export const joinedKept = {
   "machine": "cachyos-g14",
   "user": "<user>"
 } satisfies Joined
+
+export const threads = [
+  {
+    "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
+    "id": "0a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "state": "none"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/1a1b2c3d4e5f6a7b",
+    "id": "1a1b2c3d4e5f6a7b",
+    "issue": "2002Bishwajeet/yantra#488",
+    "pr": {
+      "number": 512,
+      "state": "open",
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/512"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/1a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/2a1b2c3d4e5f6a7b",
+    "id": "2a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "number": 511,
+      "state": "closed",
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/511"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/2a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/3a1b2c3d4e5f6a7b",
+    "id": "3a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "number": 510,
+      "state": "merged",
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/510"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/3a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/4a1b2c3d4e5f6a7b",
+    "id": "4a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "said": "no GitHub grant — run `yantra github login`",
+      "state": "unknown"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/4a1b2c3d4e5f6a7b"
+  }
+] satisfies Thread[]
+
+export const threadOpened = {
+  "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
+  "draft": "Work on 2002Bishwajeet/yantra#488: A workspace lists its threads\n\nThe listing is a POST.",
+  "issue": "2002Bishwajeet/yantra#488",
+  "thread": "0a1b2c3d4e5f6a7b",
+  "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
+} satisfies ThreadOpened
 
 export const cloning = {
   "machine": "cachyos-g14",
