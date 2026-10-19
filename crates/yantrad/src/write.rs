@@ -4021,6 +4021,7 @@ mod tests {
                 online: true,
                 last_seen: None,
                 expired: false,
+                key_expires: None,
                 addresses: vec![address(7)],
             }],
             addresses: vec![address(1)],
@@ -4235,6 +4236,7 @@ mod tests {
                 online: false,
                 last_seen: None,
                 expired: false,
+                key_expires: None,
                 addresses: vec![address(7)],
             },
         );

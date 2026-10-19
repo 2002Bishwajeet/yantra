@@ -451,6 +451,7 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
         online,
         last_seen: last_seen.map(str::to_owned),
         expired: false,
+        key_expires: (id == "n-1").then(|| "2027-01-18T10:11:44Z".to_owned()),
         addresses: match id {
             "n-1" => vec![
                 "100.64.0.1".parse().expect("an address"),
