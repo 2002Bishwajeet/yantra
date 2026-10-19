@@ -11,6 +11,7 @@ import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { ConnectSheet } from './ConnectSheet'
 import { Group, Note } from './Group'
+import { RestartNow } from './RestartNow'
 import { onMachines, presentOn } from './readiness'
 import { Sheet } from './Sheet'
 
@@ -22,7 +23,8 @@ export function Providers() {
   // The phone row is 390 px less a lead and a chevron, and `.m3-clip` cuts
   // rather than wraps, so the phone takes the boards' shorter strings.
   const phone = useFormFactor() === 'phone'
-  if (github.error) throw github.error
+  // The restart is a moment with no daemon; the facts already drawn stay.
+  if (github.error && !(appPending !== null && github.data)) throw github.error
   const connection = github.data
 
   return (
@@ -200,6 +202,7 @@ function ClientIdSheet(props: {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setSaved(null)
     const id = String(new FormData(event.currentTarget).get('id') ?? '').trim()
     set.mutate(
       { id },
@@ -243,8 +246,7 @@ function ClientIdSheet(props: {
         <div aria-live="polite" className="settings__outcome">
           {saved === 'set' ? (
             <Text render={<p />} scale="body-medium" emphasized>
-              Saved. yantrad takes it at its next restart —{' '}
-              <Mono>sudo systemctl restart yantrad</Mono>.
+              Saved. yantrad takes it at its next restart.
             </Text>
           ) : null}
           {saved === 'cleared' ? (
@@ -252,6 +254,7 @@ function ClientIdSheet(props: {
               Cleared. yantrad falls back to its own app at its next restart.
             </Text>
           ) : null}
+          {saved ? <RestartNow /> : null}
           {error ? (
             <>
               <Text render={<p />} scale="body-medium" tone="error" emphasized>
@@ -267,14 +270,15 @@ function ClientIdSheet(props: {
           </Button>
           <Button
             disabled={pending || current === null}
-            onClick={() =>
+            onClick={() => {
+              setSaved(null)
               clear.mutate(undefined, {
                 onSuccess: () => {
                   setSaved('cleared')
                   onSaved({ kind: 'own' })
                 },
               })
-            }
+            }}
             tone="error"
             type="button"
             variant="tonal"

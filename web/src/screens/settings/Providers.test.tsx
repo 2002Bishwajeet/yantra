@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
-import { mountSettings, sent, unmountSettings } from './harness'
+import { type Answer, type Answers, mountSettings, sent, unmountSettings } from './harness'
 
 /** GitHub's is the only row with an enabled Connect: GitLab and OpenAI are
  *  "Later", not a button. */
@@ -238,5 +238,166 @@ describe('Providers', () => {
       const sheet = within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' }))
       expect((sheet.getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(true)
     })
+  })
+})
+
+describe('restart now (Y-479)', () => {
+  const RESTART = { name: 'Restart now' }
+  const own = { 'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.mine', client_id_custom: true }] } as Answers
+
+  async function sheetOf(answers: Answers) {
+    const asked = mountSettings('desktop', '/settings/providers', answers)
+    await screen.findByRole('button', { name: 'Edit' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    return { asked, sheet: within(await screen.findByRole('dialog', { name: 'Use your own GitHub app' })) }
+  }
+  const save = (sheet: ReturnType<typeof within>, id = 'Iv1.mine') => {
+    fireEvent.change(sheet.getByLabelText('Client ID'), { target: { value: id } })
+    fireEvent.click(sheet.getByRole('button', { name: 'Save' }))
+  }
+  /** The button opens the confirm; the second click asks. */
+  const restartNow = async (sheet: ReturnType<typeof within>) => {
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    fireEvent.click(sheet.getByRole('button', { name: 'Restart' }))
+  }
+
+  it('offers no restart before a save, or after a refused one', async () => {
+    const { sheet } = await sheetOf({ 'POST /api/github/client-id': [400, 'bad id'] })
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+    save(sheet)
+    await sheet.findByText('bad id')
+    expect(sheet.queryByRole('button', RESTART)).toBeNull()
+  })
+
+  it('warns about a chat turn and a newer release, and asks nothing until confirmed', async () => {
+    const { asked, sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': [202] })
+    save(sheet)
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    expect(sheet.getByText(/chat turn in flight dies with the restart/)).toBeTruthy()
+    expect(sheet.getByText(/installs .* as it restarts/)).toBeTruthy()
+    fireEvent.click(sheet.getByRole('button', { name: 'Cancel' }))
+    expect(sheet.getByRole('button', RESTART)).toBeTruthy()
+    expect(asked).not.toContain('POST /api/update')
+  })
+
+  it('asks for the restart after a save', async () => {
+    const { asked, sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': [202] })
+    save(sheet)
+    await restartNow(sheet)
+    await waitFor(() => expect(asked).toContain('POST /api/update'))
+    expect(await sheet.findByText('yantrad is restarting. The page reconnects on its own.')).toBeTruthy()
+  })
+
+  it('offers the restart again after a second save', async () => {
+    const { sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': [202] })
+    save(sheet, 'Iv1.a')
+    await restartNow(sheet)
+    await sheet.findByText(/yantrad is restarting/)
+    save(sheet, 'Iv1.b')
+    expect(await sheet.findByRole('button', RESTART)).toBeTruthy()
+    expect(sheet.queryByText(/yantrad is restarting/)).toBeNull()
+  })
+
+  it('offers the restart again after a clear that follows a restart', async () => {
+    const { sheet } = await sheetOf({
+      ...own,
+      'POST /api/github/client-id': [204],
+      'DELETE /api/github/client-id': [204],
+      'POST /api/update': [202],
+    })
+    save(sheet)
+    await restartNow(sheet)
+    await sheet.findByText(/yantrad is restarting/)
+    fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
+    expect(await sheet.findByRole('button', RESTART)).toBeTruthy()
+    expect(sheet.queryByText(/yantrad is restarting/)).toBeNull()
+  })
+
+  it('keeps the page when the polls fail during the restart, and sees the restart by uptime', async () => {
+    let down = false
+    let uptime = contract.about.uptime_seconds
+    const { asked, sheet } = await sheetOf({
+      'GET /api/github': () => (down ? [503, 'restarting'] : [200, contract.github]),
+      'GET /api/about': () => (down ? [503, 'restarting'] : [200, { ...contract.about, uptime_seconds: uptime }]),
+      'POST /api/github/client-id': [204],
+      'POST /api/update': () => {
+        down = true
+        return [202]
+      },
+    })
+    save(sheet)
+    await restartNow(sheet)
+    await sheet.findByText(/yantrad is restarting/)
+    const before = asked.filter((one) => one === 'GET /api/github').length
+    await waitFor(() => expect(asked.filter((one) => one === 'GET /api/github').length).toBeGreaterThan(before), {
+      timeout: 8_000,
+    })
+    expect(screen.queryByText('Providers could not be drawn')).toBeNull()
+    expect(sheet.getByText(/yantrad is restarting/)).toBeTruthy()
+    down = false
+    uptime = 3
+    expect(await sheet.findByText('yantrad restarted.', {}, { timeout: 8_000 })).toBeTruthy()
+  }, 25_000)
+
+  it('names the journal when nothing changes for a few minutes', async () => {
+    const { sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': [202] })
+    save(sheet)
+    fireEvent.click(await sheet.findByRole('button', RESTART))
+    // Faked from the click on, so the stall timer RestartNow sets after the 202 is the one advanced.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    fireEvent.click(sheet.getByRole('button', { name: 'Restart' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200_000)
+    })
+    vi.useRealTimers()
+    expect(await sheet.findByText(/journalctl -u yantra-update/)).toBeTruthy()
+  })
+
+  it('offers a reload once the running version moved', async () => {
+    let updated = false
+    const { sheet } = await sheetOf({
+      'GET /api/about': () => [200, updated ? { ...contract.about, version: '0.4.0' } : contract.about],
+      'POST /api/github/client-id': [204],
+      'POST /api/update': () => {
+        updated = true
+        return [202]
+      },
+    })
+    save(sheet)
+    await restartNow(sheet)
+    expect(await sheet.findByRole('button', { name: 'Reload' }, { timeout: 5_000 })).toBeTruthy()
+  })
+
+  it('asks for the restart after a clear', async () => {
+    const { asked, sheet } = await sheetOf({
+      ...own,
+      'DELETE /api/github/client-id': [204],
+      'POST /api/update': [202],
+    })
+    fireEvent.click(sheet.getByRole('button', { name: 'Clear' }))
+    await restartNow(sheet)
+    await waitFor(() => expect(asked).toContain('POST /api/update'))
+    expect(await sheet.findByText(/yantrad is restarting/)).toBeTruthy()
+  })
+
+  const refusals: [string, Answer | (() => Answer), RegExp][] = [
+    ['a box with no updater', [409, 'no updater'], /cannot update itself/],
+    ['a device that may not update', [403, 'not yours'], /may not update the daemon/],
+    ['a daemon that cannot tell who asks', [503, 'no whois'], /could not tell who is asking/],
+    [
+      'a daemon that does not answer',
+      () => {
+        throw new TypeError('Failed to fetch')
+      },
+      /did not answer, so it was not restarted/,
+    ],
+  ]
+
+  it.each(refusals)('draws %s, and names the manual command', async (_, answered, title) => {
+    const { sheet } = await sheetOf({ 'POST /api/github/client-id': [204], 'POST /api/update': answered })
+    save(sheet)
+    await restartNow(sheet)
+    expect(await sheet.findByText(title)).toBeTruthy()
+    expect(sheet.getByText('sudo systemctl restart yantrad')).toBeTruthy()
   })
 })

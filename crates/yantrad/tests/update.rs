@@ -394,6 +394,77 @@ fn an_update_restarts_the_daemon_and_the_session_and_its_socket_survive() -> Res
     Ok(())
 }
 
+/// Y-479: "Restart now" after a dashboard save is the Y-368 trigger and
+/// nothing else. The release is unchanged, so the restart reinstalls v0.2.0,
+/// and the new process reads the id the daemon wrote.
+#[test]
+fn restart_now_after_a_config_save_restarts_the_daemon() -> Result<()> {
+    const ID: &str = "Iv1.y479";
+    let Some(appliance) = Appliance::start()? else {
+        return Ok(());
+    };
+    appliance.arrange()?;
+
+    let post = |path: &str, body: &str| {
+        appliance.sh(&format!(
+            "curl -sS -o /dev/null -w '%{{http_code}}' -X POST -H 'Content-Type: application/json' \
+             -d '{body}' http://127.0.0.1:7717{path}"
+        ))
+    };
+    assert_eq!(
+        post("/api/github/client-id", &format!(r#"{{"id":"{ID}"}}"#))?,
+        "204"
+    );
+    let before = appliance.daemon_pid()?;
+    assert_eq!(post("/api/update", "")?, "202");
+
+    appliance.sh(&format!(
+        "for _ in $(seq 120); do
+           pid=$(systemctl show yantrad.service -p MainPID --value)
+           [ \"$pid\" != {before} ] && [ \"$pid\" != 0 ] && curl -fsS http://127.0.0.1:7717/healthz && exit 0
+           sleep 0.5
+         done; exit 1"
+    ))?;
+    let story = format!(
+        "--- yantra-update ---\n{}\n--- yantrad ---\n{}",
+        appliance.systemd.journal("yantra-update.service"),
+        appliance.systemd.journal("yantrad.service"),
+    );
+
+    let after = appliance.daemon_pid()?;
+    assert_ne!(after, before, "yantrad was not restarted:\n{story}");
+    // The trigger is removed when the unit starts, so wait for it to finish.
+    appliance.sh(
+        "for _ in $(seq 120); do systemctl is-active yantra-update.service | grep -qx activating || exit 0; sleep 0.5; done; exit 1",
+    )?;
+    assert_eq!(
+        appliance
+            .systemd
+            .property("yantra-update.service", "Result")?,
+        "success",
+        "{story}"
+    );
+    assert!(!appliance.exists(TRIGGER)?, "the trigger outlived the unit");
+    assert!(
+        appliance.carries("/etc/yantra/daemon.env", ID)?,
+        "the saved id is not in daemon.env"
+    );
+    let seen = appliance.systemd.exec_as(
+        "yantra",
+        &[
+            "grep",
+            "-qa",
+            &format!("YANTRA_GITHUB_CLIENT_ID={ID}"),
+            &format!("/proc/{after}/environ"),
+        ],
+    )?;
+    assert!(
+        seen.status.success(),
+        "the restarted yantrad does not hold the saved id"
+    );
+    Ok(())
+}
+
 /// A checksum that does not match installs nothing and restarts nothing:
 /// the restart is `ExecStartPost`, so a failed install never reaches it.
 #[test]
