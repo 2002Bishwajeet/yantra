@@ -54,6 +54,9 @@ export async function daemon() {
     keepHangingUp: () => {
       refusing = true
     },
+    takeConnections: () => {
+      refusing = false
+    },
     // `close` stops the listener and waits for the sockets on it, so the
     // clients have to be let go before it can finish.
     stop: () =>

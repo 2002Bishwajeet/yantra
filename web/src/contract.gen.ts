@@ -13,6 +13,7 @@ import type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatQuery,
   Cloning,
   Connection,
   Device,
@@ -816,6 +817,7 @@ export const chatEvents = [
     "type": "turn.started"
   },
   {
+    "cursor": "Y0123456789abcdef:812:0",
     "payload": {
       "delta": "Running the tests.",
       "itemId": "msg_1:1",
@@ -947,7 +949,7 @@ export const chatNotLoggedIn = {
 } satisfies ChatFailure
 
 export const chatAttached = {
-  "path": "/tmp/yantra-chat-Y0123456789abcdef/1.png",
+  "path": "/home/u/.yantra/keep/web/1a2b3c4d/images/Y0123456789abcdef-1.png",
   "type": "attached"
 } satisfies ChatAttached
 
@@ -982,3 +984,8 @@ export const chatFrames = [
     "type": "revert"
   }
 ] satisfies ChatFrame[]
+
+export const chatQuery = {
+  "after": "Y0123456789abcdef:812:0",
+  "thread": "1a2b3c4d"
+} satisfies ChatQuery

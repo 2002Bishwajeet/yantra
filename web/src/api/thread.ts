@@ -104,7 +104,11 @@ export type TurnCompleted = {
  *  diff cut at 256 KiB. */
 export type TurnDiff = { turn: number; unifiedDiff: string; truncated: boolean }
 
-export type ThreadEvent = { threadId: string } & (
+/** `cursor` is `<run>:<line end>:<part>` on an event read from the agent's
+ *  keeper, and absent on one the daemon made (ADR-0035). A reconnect sends the
+ *  last one back as `after`. On `thread.started` it is the cursor the replay
+ *  continues from; without one, the thread replays from the start. */
+export type ThreadEvent = { threadId: string; cursor?: string } & (
   | { type: 'thread.started'; payload: { thread: string; harness: Harness } }
   | { type: 'thread.metadata.updated'; payload: { name: string } }
   | { type: 'thread.token-usage.updated'; payload: { usedTokens: number; maxTokens: number } }
@@ -125,6 +129,9 @@ export type ThreadEvent = { threadId: string } & (
       payload: { requestId: string; requestType: RequestType; decision: Decision }
     }
 )
+
+/** The chat route's query: the thread to attach to, and the last cursor drawn. */
+export type ChatQuery = { thread?: string; after?: string }
 
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =

@@ -3,11 +3,11 @@
  * side is played from `contract.gen.ts`, which is what `yantrad` really
  * serialises, and every frame asserted below crossed a socket.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
-import { IMAGE_LIMIT } from '@/api/chat'
+import { IMAGE_LIMIT, PAUSES } from '@/api/chat'
 import { chatAttached, chatCheckpointFailed, chatCheckpoints, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
@@ -34,6 +34,16 @@ async function open(thread?: string) {
   await settled(() => expect(server.asked).toHaveLength(1))
   // The empty line appears once the socket is open.
   await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+}
+
+/** Two reopens 10 ms apart for this test, so a socket gives up at once. */
+function quickReopens() {
+  const pauses = PAUSES as number[]
+  const kept = [...pauses]
+  pauses.splice(0, pauses.length, 10, 10)
+  onTestFinished(() => {
+    pauses.splice(0, pauses.length, ...kept)
+  })
 }
 
 function type(text: string) {
@@ -360,18 +370,50 @@ describe('the chat', () => {
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 
-  it('draws a closed socket, and Try again reopens it on the same thread', async () => {
+  it('reopens a dropped socket after the last cursor, and the turn draws on', async () => {
     await open()
     say(started())
     await settled(() => expect(onThread).toHaveBeenCalled())
+    say({ ...of('content.delta'), cursor: 'r1:812:0' })
+    await settled(() => expect(screen.getByText('Running the tests.')).toBeTruthy())
+    server.hangUp()
+    await settled(() => expect(server.asked).toHaveLength(2))
+    expect(server.asked[1]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d&after=r1%3A812%3A0')
+    say({ ...started(), cursor: 'r1:812:0' })
+    say({ ...of('content.delta'), cursor: 'r1:900:0', payload: { ...of('content.delta').payload, delta: ' Done.' } })
+    await settled(() => expect(screen.getByText('Running the tests. Done.')).toBeTruthy())
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('draws the thread again when the daemon starts it over', async () => {
+    await open()
+    say(started())
+    say({ ...of('content.delta'), cursor: 'r1:812:0' })
+    await settled(() => expect(screen.getByText('Running the tests.')).toBeTruthy())
+    server.hangUp()
+    await settled(() => expect(server.asked).toHaveLength(2))
+    say(started())
+    say({ ...of('content.delta'), cursor: 'r2:812:0' })
+    await settled(() => expect(screen.getAllByText('Running the tests.')).toHaveLength(1))
+  })
+
+  it('draws a closed socket, and Try again reopens it on the same thread', async () => {
+    quickReopens()
+    await open()
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalled())
+    server.keepHangingUp()
     server.hangUp()
     const alert = await settled(() => screen.getByRole('alert'))
-    expect(alert.textContent).toContain('The chat socket closed')
+    expect(alert.textContent).toContain('The chat socket closed and did not reopen')
+    expect(alert.textContent).toContain('A running turn continues on the machine')
+    expect(server.asked).toHaveLength(3)
     expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').disabled).toBe(true)
 
+    server.takeConnections()
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
-    await settled(() => expect(server.asked).toHaveLength(2))
-    expect(server.asked[1]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d')
+    await settled(() => expect(server.asked).toHaveLength(4))
+    expect(server.asked[3]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d')
     await settled(() => expect(screen.queryByRole('alert')).toBeNull())
   })
 
@@ -490,10 +532,20 @@ describe('checkpoints', () => {
   })
 
   it('holds the revert when the socket closed', async () => {
+    quickReopens()
     const card = await aTurnChanged()
+    server.keepHangingUp()
     server.hangUp()
     await settled(() => screen.getByRole('alert'))
     expect(within(card).getByRole('button', { name: 'Revert to before this turn' })).toHaveProperty('disabled', true)
+  })
+
+  it('holds the revert while the socket reopens', async () => {
+    const card = await aTurnChanged()
+    server.hangUp()
+    await settled(() =>
+      expect(within(card).getByRole('button', { name: 'Revert to before this turn' })).toHaveProperty('disabled', true),
+    )
   })
 
   it("draws a checkpoint that failed in git's own words, and frees the composer", async () => {
@@ -683,7 +735,7 @@ describe('images in the composer', () => {
   })
 
   // The daemon removes a socket's images when it closes, so their paths name nothing.
-  it('fails an attached image when its socket closes, and Try again sends no path', async () => {
+  it('fails an attached image when its socket drops, and the reopened socket sends no path', async () => {
     await open()
     ways.button(png())
     await settled(() => expect(images()).toHaveLength(1))
@@ -695,7 +747,6 @@ describe('images in the composer', () => {
     )
     expect(screen.getByRole('listitem').getAttribute('data-state')).toBe('failed')
 
-    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }))
     await settled(() => expect(server.asked).toHaveLength(2))
     type('look')
     const send = screen.getByRole('button', { name: 'Send' })

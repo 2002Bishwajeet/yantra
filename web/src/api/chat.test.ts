@@ -14,23 +14,33 @@ import {
   chatNotLoggedIn,
 } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
-import { AttachError, ChatError, IMAGE_LIMIT, chatAddress, frameOf, openChat } from './chat'
+import { AttachError, ChatError, IMAGE_LIMIT, PAUSES, chatAddress, frameOf, openChat, type ChatSocket } from './chat'
 import type { ThreadEvent } from './thread'
 
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 5_000 })
 
 let server: Awaited<ReturnType<typeof daemon>>
 
-function connect(url = chatAddress('yantra-web')) {
+const sockets: ChatSocket[] = []
+
+/** A socket that reopens after each pause in `pauses`; none by default, so a
+ *  test that hangs up sees the end at once. */
+function connect(url: string | ((after?: string) => string) = chatAddress('yantra-web'), pauses: number[] = []) {
   const events: ThreadEvent[] = []
   const errors: ChatError[] = []
   const opened = vi.fn()
-  const socket = openChat(url, {
+  const dropped = vi.fn()
+  const restarted = vi.fn()
+  const socket = openChat(typeof url === 'string' ? () => url : url, {
     onEvent: (event) => events.push(event),
     onError: (error) => errors.push(error),
     onOpen: opened,
+    onDropped: dropped,
+    onRestart: restarted,
+    pauses,
   })
-  return { socket, events, errors, opened }
+  sockets.push(socket)
+  return { socket, events, errors, opened, dropped, restarted }
 }
 
 beforeEach(async () => {
@@ -40,16 +50,81 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  for (const socket of sockets.splice(0)) socket.close()
   vi.unstubAllGlobals()
   await server.stop()
 })
 
 describe('the chat socket', () => {
-  it('names the workspace, and the thread when there is one', () => {
+  it('names the workspace, the thread when there is one, and the cursor after it', () => {
     expect(chatAddress('a b')).toBe(`ws://127.0.0.1:${server.port}/api/workspaces/a%20b/chat`)
     expect(chatAddress('w', '1a2b3c4d')).toBe(
       `ws://127.0.0.1:${server.port}/api/workspaces/w/chat?thread=1a2b3c4d`,
     )
+    expect(chatAddress('w', '1a2b3c4d', 'Y0a:812:0')).toBe(
+      `ws://127.0.0.1:${server.port}/api/workspaces/w/chat?thread=1a2b3c4d&after=Y0a%3A812%3A0`,
+    )
+    expect(chatAddress('w', undefined, 'Y0a:812:0')).toBe(`ws://127.0.0.1:${server.port}/api/workspaces/w/chat`)
+  })
+
+  it('backs off as the daemon does: 1, 2, 4, then 8 seconds', () => {
+    expect(PAUSES).toEqual([1_000, 2_000, 4_000, 8_000, 8_000])
+  })
+
+  it('reopens a dropped socket after the last cursor it drew', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { events, errors, opened, dropped, restarted } = connect(at, [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    const drawn = { threadId: '1a2b3c4d', cursor: 'r1:812:0', type: 'turn.started' }
+    server.say(JSON.stringify(drawn))
+    // A frame the daemon made carries no cursor and does not move the last one.
+    server.say(JSON.stringify(chatCheckpoints[0]))
+    await settled(() => expect(events).toHaveLength(2))
+    server.hangUp()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    expect(dropped).toHaveBeenCalledTimes(1)
+    expect(server.asked[1]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d&after=r1%3A812%3A0')
+
+    server.say(JSON.stringify({ ...chatEvents[0], cursor: 'r1:812:0' }))
+    await settled(() => expect(events).toHaveLength(3))
+    expect(restarted).not.toHaveBeenCalled()
+    expect(errors).toEqual([])
+  })
+
+  it('starts over when the daemon cannot continue from the cursor', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { events, opened, restarted } = connect(at, [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    server.say(JSON.stringify({ threadId: '1a2b3c4d', cursor: 'r1:812:0', type: 'turn.started' }))
+    await settled(() => expect(events).toHaveLength(1))
+    server.hangUp()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    server.say(JSON.stringify(chatEvents[0]))
+    await settled(() => expect(restarted).toHaveBeenCalledTimes(1))
+    expect(events.at(-1)).toEqual(chatEvents[0])
+  })
+
+  it('reports closed, and retryable, once every reopen in one outage failed', async () => {
+    const { errors, opened, dropped } = connect(chatAddress('yantra-web'), [10, 10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    server.keepHangingUp()
+    server.hangUp()
+    await settled(() => expect(errors).toHaveLength(1))
+    expect(server.asked).toHaveLength(3)
+    expect(dropped).toHaveBeenCalledTimes(2)
+    expect(errors[0]?.kind).toBe('closed')
+    expect(errors[0]?.retryable).toBe(true)
+    expect(errors[0]?.describe()).toBe(
+      'The chat socket closed and did not reopen. A running turn continues on the machine. Try again to see it.',
+    )
+  })
+
+  it('does not reopen a socket the page closed', async () => {
+    const { socket, opened } = connect(chatAddress('yantra-web'), [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    socket.close()
+    await new Promise((done) => setTimeout(done, 100))
+    expect(server.asked).toHaveLength(1)
   })
 
   it('sends a turn, an answer and a stop as the frames the daemon reads', async () => {
@@ -149,8 +224,8 @@ describe('the chat socket', () => {
     expect(errors).toEqual([])
   })
 
-  it('says an unknown thread once, not again as a close', async () => {
-    const { errors, opened } = connect(chatAddress('yantra-web', 'ffffffff'))
+  it('says an unknown thread once, not again as a close, and does not reopen', async () => {
+    const { errors, opened } = connect(chatAddress('yantra-web', 'ffffffff'), [10])
     await settled(() => expect(opened).toHaveBeenCalled())
     expect(server.asked).toEqual(['/api/workspaces/yantra-web/chat?thread=ffffffff'])
     server.say(JSON.stringify({ type: 'error', kind: 'unknownThread', said: 'web has no chat thread ffffffff' }))
@@ -158,6 +233,7 @@ describe('the chat socket', () => {
     await settled(() => expect(errors).toHaveLength(1))
     await new Promise((done) => setTimeout(done, 100))
     expect(errors.map((error) => error.kind)).toEqual(['unknownThread'])
+    expect(server.asked).toHaveLength(1)
   })
 
   it('reports a frame it cannot read as badFrame with a sentence of its own', async () => {
@@ -172,7 +248,7 @@ describe('the chat socket', () => {
     expect(errors[0]?.said).toBe('not json')
   })
 
-  it('reports a socket that closed after it opened as closed, and retryable', async () => {
+  it('reports a socket that dropped with no reopen left as closed, and retryable', async () => {
     const { errors, opened } = connect()
     await settled(() => expect(opened).toHaveBeenCalled())
     server.hangUp()
