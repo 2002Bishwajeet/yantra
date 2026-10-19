@@ -21,6 +21,7 @@ M14 closes first. The release is the milestone's proof, not a way around it.
 | The review nits are closed or refused | Y-360 | three sweeps in flight |
 | e2e, axe and the budget green at three sizes | Y-352 | two of three |
 | The whole-system documents say what shipped | Y-369 | not started |
+| The smoke pass is walked on the installed release | Y-482 | see [smoke-pass.md](smoke-pass.md) |
 
 Nothing else blocks a tag. `release.yml` last ran on v0.1.0's tag and has not been exercised since,
 which is the reason §2 rehearses before it publishes.
