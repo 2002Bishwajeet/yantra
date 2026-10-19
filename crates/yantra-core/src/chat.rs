@@ -19,6 +19,11 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct ThreadEvent {
     pub thread_id: String,
+    /// Not T3 Code's: where in a keeper's `out` the event was read, as
+    /// `<run>:<line end>:<part>` (ADR-0035 decision 8). An event the daemon
+    /// makes itself has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
     #[serde(flatten)]
     pub event: Event,
 }
@@ -290,6 +295,7 @@ mod tests {
     fn wire(event: Event) -> serde_json::Value {
         serde_json::to_value(ThreadEvent {
             thread_id: "ses_1".to_owned(),
+            cursor: None,
             event,
         })
         .expect("an event serialises")

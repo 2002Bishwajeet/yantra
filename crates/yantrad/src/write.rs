@@ -295,9 +295,9 @@ async fn make<I: Inventory + Clone + Send + Sync + 'static>(
 fn from_create(error: &workspace::Error) -> StatusCode {
     match error {
         workspace::Error::Exists { .. } => StatusCode::CONFLICT,
-        workspace::Error::InvalidName { .. } | workspace::Error::Empty { .. } => {
-            StatusCode::BAD_REQUEST
-        }
+        workspace::Error::InvalidName { .. }
+        | workspace::Error::Reserved { .. }
+        | workspace::Error::Empty { .. } => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1617,7 +1617,9 @@ fn asked(uri: &Uri, flag: &str) -> bool {
 fn from_workspace(error: &workspace::Error) -> StatusCode {
     match error {
         workspace::Error::NotFound { .. } => StatusCode::NOT_FOUND,
-        workspace::Error::InvalidName { .. } => StatusCode::BAD_REQUEST,
+        workspace::Error::InvalidName { .. } | workspace::Error::Reserved { .. } => {
+            StatusCode::BAD_REQUEST
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -2841,6 +2843,13 @@ mod tests {
             from_create(&workspace::Error::InvalidName {
                 name: "../etc/passwd".to_string(),
                 path: "/srv/workspaces/../etc/passwd.toml".into(),
+            }),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            from_create(&workspace::Error::Reserved {
+                name: "yantra-keep-web".to_string(),
+                path: "/srv/workspaces/yantra-keep-web.toml".into(),
             }),
             StatusCode::BAD_REQUEST
         );

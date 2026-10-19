@@ -3,15 +3,17 @@
 //!
 //! `ssh.rs`'s fourth call shape, [`Ssh::stdio`]: the bytes go on `ssh`'s stdin
 //! over the multiplexed socket (I-20), and the command is still base64 (I-26,
-//! I-35). An image lands in one directory per chat socket under the machine's
-//! `TMPDIR`, outside every repository and worktree, under a name generated here
-//! (I-24). **No image byte or size is ever logged or formatted** (Q5).
+//! I-35). An image lands in its thread's keeper directory, `images/` under
+//! `~/.yantra/keep/<workspace>/<thread>` (ADR-0035 decision 4), outside every
+//! repository and worktree, under a name generated here (I-24). **No image
+//! byte or size is ever logged or formatted** (Q5).
 
 use std::future::Future;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::acp;
+use crate::keep::Keeper;
 use crate::ssh::{self, Exec, Ssh};
 
 #[derive(Debug, thiserror::Error)]
@@ -62,11 +64,14 @@ pub fn kind(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// The images one chat socket attached: one directory on the machine, and a
-/// counter that names each file in it.
-#[derive(Debug, Default)]
+/// The images one chat socket attached to a thread: its directory on the
+/// machine, and a prefix and a counter that name each file in it. Two sockets
+/// on one thread share the directory, so the prefix keeps their names apart.
+#[derive(Debug)]
 pub struct Images {
-    /// Made on the first image, so a socket that sends none has no directory.
+    /// The directory as a word the far shell expands.
+    word: String,
+    /// Made on the first image, so a socket that sends none writes nothing.
     id: Option<String>,
     count: u32,
     /// The absolute directory, as the machine expanded it.
@@ -74,8 +79,14 @@ pub struct Images {
 }
 
 impl Images {
-    pub fn new() -> Self {
-        Self::default()
+    /// The images of the thread `keeper` holds.
+    pub fn of(keeper: &Keeper) -> Self {
+        Self {
+            word: keeper.images(),
+            id: None,
+            count: 0,
+            dir: None,
+        }
     }
 
     /// Where the images are, once one has landed.
@@ -107,21 +118,21 @@ impl Images {
             None => self.id.insert(ssh::nonce()?).clone(),
         };
         self.count += 1;
-        let path = write(command(&id, self.count, ext)).await?;
+        let path = write(command(&self.word, &id, self.count, ext)).await?;
         if let Some((dir, _)) = path.rsplit_once('/') {
             self.dir = Some(dir.to_owned());
         }
         Ok(path)
     }
 
-    /// Removes the directory, and succeeds when there was none.
+    /// Removes the directory, and succeeds when there was none. Only for a
+    /// socket whose thread never opened; a thread's own go with
+    /// [`crate::thread::remove`].
     pub async fn remove<E: Exec>(&self, exec: &E) -> Result<(), Error> {
-        let Some(id) = &self.id else {
+        if self.id.is_none() {
             return Ok(());
-        };
-        let out = exec
-            .exec(&format!("{}; rm -rf \"$d\"", directory(id)))
-            .await?;
+        }
+        let out = exec.exec(&format!("rm -rf {}", self.word)).await?;
         if !out.success() {
             return Err(Error::Remove {
                 status: out.status,
@@ -132,16 +143,11 @@ impl Images {
     }
 }
 
-/// `${d%/}` because macOS's `TMPDIR` ends in a slash.
-fn directory(id: &str) -> String {
-    format!("d=\"${{TMPDIR:-/tmp}}\"; d=\"${{d%/}}/yantra-chat-{id}\"")
-}
-
-/// `umask` before `mkdir`, so the directory is 0700 and each image 0600.
-fn command(id: &str, n: u32, ext: &str) -> String {
+/// `umask` before `mkdir`, so the directories are 0700 and each image 0600.
+fn command(word: &str, id: &str, n: u32, ext: &str) -> String {
     format!(
-        "umask 077; {}; mkdir -p \"$d\" && cat > \"$d/{n}.{ext}\" && printf %s \"$d/{n}.{ext}\"",
-        directory(id)
+        "umask 077; d={word}; mkdir -p \"$d\" && cat > \"$d/{id}-{n}.{ext}\" \
+         && printf %s \"$d/{id}-{n}.{ext}\""
     )
 }
 
@@ -206,19 +212,24 @@ mod tests {
         assert_eq!(kind(b"RIFF\x24\0"), None);
     }
 
+    fn images() -> Images {
+        Images::of(&Keeper::new("web", "1a2b3c4d5e6f7a8b"))
+    }
+
     /// I-24: the only name in the command is the one generated here.
     #[test]
     fn the_command_names_only_the_generated_file() {
         assert_eq!(
-            command("Y0123456789abcdef", 2, "png"),
-            "umask 077; d=\"${TMPDIR:-/tmp}\"; d=\"${d%/}/yantra-chat-Y0123456789abcdef\"; \
-             mkdir -p \"$d\" && cat > \"$d/2.png\" && printf %s \"$d/2.png\""
+            command(&images().word, "Y0123456789abcdef", 2, "png"),
+            "umask 077; d=\"$HOME\"/.yantra/keep/'web'/'1a2b3c4d5e6f7a8b'/images; \
+             mkdir -p \"$d\" && cat > \"$d/Y0123456789abcdef-2.png\" \
+             && printf %s \"$d/Y0123456789abcdef-2.png\""
         );
     }
 
     #[tokio::test]
     async fn each_image_is_named_by_a_counter_in_one_directory() {
-        let mut images = Images::new();
+        let mut images = images();
         assert!(!images.used());
         let mut sent = Vec::new();
         for _ in 0..2 {
@@ -226,28 +237,28 @@ mod tests {
                 .put_with(PNG, |command| {
                     let n = sent.len() + 1;
                     sent.push(command);
-                    async move { Ok(format!("/tmp/yantra-chat-x/{n}.png")) }
+                    async move { Ok(format!("/home/u/.yantra/keep/web/x/images/{n}.png")) }
                 })
                 .await
                 .expect("it lands");
         }
-        assert!(sent[0].contains("\"$d/1.png\""), "{}", sent[0]);
-        assert!(sent[1].contains("\"$d/2.png\""), "{}", sent[1]);
+        assert!(sent[0].contains("-1.png\""), "{}", sent[0]);
+        assert!(sent[1].contains("-2.png\""), "{}", sent[1]);
         let id = |command: &str| {
             command
-                .split("yantra-chat-")
+                .split("\"$d/")
                 .nth(1)
-                .and_then(|rest| rest.split('"').next())
+                .and_then(|rest| rest.split('-').next())
                 .map(str::to_owned)
         };
-        assert_eq!(id(&sent[0]), id(&sent[1]), "one directory per socket");
-        assert_eq!(images.dir(), Some("/tmp/yantra-chat-x"));
+        assert_eq!(id(&sent[0]), id(&sent[1]), "one prefix per socket");
+        assert_eq!(images.dir(), Some("/home/u/.yantra/keep/web/x/images"));
         assert!(images.used());
     }
 
     #[tokio::test]
     async fn a_non_image_writes_nothing() {
-        let mut images = Images::new();
+        let mut images = images();
         let refused = images
             .put_with(b"#!/bin/sh\nrm -rf ~", |_| async {
                 panic!("nothing is sent for a non-image")
@@ -260,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_write_leaves_no_directory_to_name() {
-        let mut images = Images::new();
+        let mut images = images();
         let failed = images
             .put_with(PNG, |_| async {
                 Err(Error::Put {

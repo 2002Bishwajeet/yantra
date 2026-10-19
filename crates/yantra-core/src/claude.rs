@@ -13,12 +13,14 @@
 //! `result`. No prompt, output or file content is ever logged.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -26,7 +28,7 @@ use crate::chat::{self, Event, ThreadEvent};
 use crate::delegate::Place;
 use crate::ssh::{self, Ssh};
 use crate::tmux::sq;
-use crate::{acp, agent, logs, thread};
+use crate::{acp, agent, keep, logs, thread};
 
 /// How long a closed stdout waits for stderr's last words.
 const STDERR_GRACE: Duration = Duration::from_secs(5);
@@ -47,6 +49,9 @@ pub enum Error {
 
 /// Every event of the turn, in order, ending with `turn.completed`.
 pub type Events = mpsc::UnboundedReceiver<ThreadEvent>;
+
+/// What the agent said on stderr, read once its stdout has ended.
+pub type Said = Pin<Box<dyn Future<Output = String> + Send>>;
 
 /// One running `claude -p`. Dropping it kills the local `ssh` and leaves the
 /// remote `claude` to end when its stdin closes (I-27); [`Turn::cancel`] is
@@ -86,15 +91,57 @@ impl Turn {
             log,
         } = ssh.stdio(&command(&place.worktree, images, mode))?;
         let diagnosis = acp::diagnosis(stderr, log);
+        let said: Said = Box::pin(async move { diagnosis.await.unwrap_or_default() });
         let (turn, events) = Self::wire(
             stdout,
             stdin,
-            thread::name(place),
-            Some(diagnosis),
+            Parse::new(thread::name(place), None, State::default()),
+            Some(said),
             Some(child),
         );
         turn.shared.send(&prompt(text))?;
         Ok((turn, events))
+    }
+
+    /// A turn held by a keeper ([`keep`]): `reader` follows its `out` from
+    /// byte 0 and `writer` appends to its `in`. Each event read carries a
+    /// cursor in `run`, and `said` is what the keeper's `err` holds.
+    pub fn kept<R, W>(
+        reader: R,
+        writer: W,
+        thread: &str,
+        run: &str,
+        text: &str,
+        said: Said,
+    ) -> (Self, Events)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let parse = Parse::new(thread, Some((run, 0)), State::default());
+        let (turn, events) = Self::wire(reader, writer, parse, Some(said), None);
+        // The writer is fresh, so the line is queued.
+        let _ = turn.shared.send(&prompt(text));
+        (turn, events)
+    }
+
+    /// A kept turn this daemon did not start, continued where [`replay`]
+    /// stopped: `reader` follows `out` from [`Replayed::offset`]. The events
+    /// already replayed are not sent again.
+    pub fn resume<R, W>(reader: R, writer: W, replayed: Replayed, said: Said) -> (Self, Events)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let Replayed {
+            thread,
+            run,
+            offset,
+            state,
+            ..
+        } = replayed;
+        let parse = Parse::new(&thread, Some((&run, offset)), state);
+        Self::wire(reader, writer, parse, Some(said), None)
     }
 
     /// The generic half: a turn on any pair of streams.
@@ -103,7 +150,8 @@ impl Turn {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        let (turn, events) = Self::wire(reader, writer, thread, None, None);
+        let parse = Parse::new(thread, None, State::default());
+        let (turn, events) = Self::wire(reader, writer, parse, None, None);
         // The writer is fresh, so the line is queued.
         let _ = turn.shared.send(&prompt(text));
         (turn, events)
@@ -112,8 +160,8 @@ impl Turn {
     fn wire<R, W>(
         reader: R,
         writer: W,
-        thread: &str,
-        stderr: Option<JoinHandle<String>>,
+        parse: Parse,
+        stderr: Option<Said>,
         child: Option<tokio::process::Child>,
     ) -> (Self, Events)
     where
@@ -122,14 +170,16 @@ impl Turn {
     {
         let (out, lines) = mpsc::unbounded_channel();
         let (events, received) = mpsc::unbounded_channel();
+        let from = parse.from;
         let shared = Arc::new(Shared {
-            thread: thread.to_owned(),
+            thread: parse.thread,
+            run: parse.run,
             out: Mutex::new(Some(out)),
             events,
-            state: Mutex::default(),
+            state: Mutex::new(parse.state),
         });
         let tasks = [
-            tokio::spawn(read(reader, stderr, Arc::clone(&shared))),
+            tokio::spawn(read(reader, from, stderr, Arc::clone(&shared))),
             tokio::spawn(write(writer, lines)),
         ];
         (
@@ -182,7 +232,7 @@ impl Turn {
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
 /// cannot turn approval off.
-fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
+pub fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
     format!(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
@@ -236,6 +286,11 @@ struct State {
     used: Option<u64>,
     cancelled: bool,
     completed: bool,
+    /// What a keeper's `in` already answered, so a replay or an adopted turn
+    /// never answers it again (ADR-0035 decision 9).
+    answered: HashMap<String, chat::Decision>,
+    /// The end of the line being read and the number of events made from it.
+    line: Option<(u64, u32)>,
 }
 
 /// A `can_use_tool` request Claude is waiting on.
@@ -246,9 +301,31 @@ struct Pending {
     request_type: chat::RequestType,
 }
 
+/// How a turn's events are made: for which thread, from which offset of a
+/// keeper's `out` in which run, and from what state.
+struct Parse {
+    thread: String,
+    run: Option<String>,
+    from: Option<u64>,
+    state: State,
+}
+
+impl Parse {
+    fn new(thread: &str, journal: Option<(&str, u64)>, state: State) -> Self {
+        Self {
+            thread: thread.to_owned(),
+            run: journal.map(|(run, _)| run.to_owned()),
+            from: journal.map(|(_, from)| from),
+            state,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Shared {
     thread: String,
+    /// The keeper's run, when the turn is read from one.
+    run: Option<String>,
     /// `None` once stdin is closed.
     out: Mutex<Option<mpsc::UnboundedSender<String>>>,
     events: mpsc::UnboundedSender<ThreadEvent>,
@@ -260,10 +337,33 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// An event read from the line being read, with its cursor when the turn
+    /// is kept.
     fn emit(&self, event: Event) {
+        let cursor = self.run.as_ref().and_then(|run| {
+            let mut state = self.lock();
+            let (end, part) = state.line.as_mut()?;
+            let cursor = keep::Cursor {
+                run: run.clone(),
+                end: *end,
+                part: *part,
+            };
+            *part += 1;
+            Some(cursor.to_string())
+        });
+        self.send_event(cursor, event);
+    }
+
+    /// An event the daemon made itself, which carries no cursor.
+    fn emit_made(&self, event: Event) {
+        self.send_event(None, event);
+    }
+
+    fn send_event(&self, cursor: Option<String>, event: Event) {
         // Nobody listening is not this turn's failure.
         let _ = self.events.send(ThreadEvent {
             thread_id: self.thread.clone(),
+            cursor,
             event,
         });
     }
@@ -306,7 +406,7 @@ impl Shared {
             "type": "control_response",
             "response": {"subtype": "success", "request_id": request, "response": response},
         }))?;
-        self.emit(Event::RequestResolved(chat::RequestResolved {
+        self.emit_made(Event::RequestResolved(chat::RequestResolved {
             request_id: request.to_owned(),
             request_type: pending.request_type,
             decision,
@@ -314,7 +414,14 @@ impl Shared {
         Ok(())
     }
 
-    fn dispatch(&self, line: &[u8]) {
+    /// One line of stdout. `end` is where it ends in a keeper's `out`.
+    fn dispatch(&self, line: &[u8], end: Option<u64>) {
+        self.lock().line = end.map(|end| (end, 0));
+        self.dispatch_line(line);
+        self.lock().line = None;
+    }
+
+    fn dispatch_line(&self, line: &[u8]) {
         // A line that is not stream-json is noise, such as a login script's echo.
         let Ok(line) = serde_json::from_slice::<Line>(line) else {
             return;
@@ -411,16 +518,23 @@ impl Shared {
         let tool = request.tool_name.unwrap_or_default();
         let request_type = request_type(&tool);
         let title = logs::target_in(&request.input);
-        self.lock().pending.insert(
-            request_id.clone(),
-            Pending {
-                input: request.input,
-                suggestions: request.permission_suggestions,
-                request_type,
-            },
-        );
+        let answered = {
+            let mut state = self.lock();
+            let answered = state.answered.remove(&request_id);
+            if answered.is_none() {
+                state.pending.insert(
+                    request_id.clone(),
+                    Pending {
+                        input: request.input,
+                        suggestions: request.permission_suggestions,
+                        request_type,
+                    },
+                );
+            }
+            answered
+        };
         self.emit(Event::RequestOpened(chat::RequestOpened {
-            request_id,
+            request_id: request_id.clone(),
             request_type,
             item_id: request.tool_use_id,
             title,
@@ -432,6 +546,13 @@ impl Shared {
                 chat::Scope::Other
             },
         }));
+        if let Some(decision) = answered {
+            self.emit_made(Event::RequestResolved(chat::RequestResolved {
+                request_id,
+                request_type,
+                decision,
+            }));
+        }
     }
 
     fn finish(&self, outcome: Outcome) {
@@ -490,7 +611,7 @@ impl Shared {
         if completed {
             return;
         }
-        self.emit(Event::TurnCompleted(if cancelled {
+        self.emit_made(Event::TurnCompleted(if cancelled {
             cancelled_turn()
         } else {
             chat::TurnCompleted {
@@ -584,27 +705,95 @@ fn output(content: &Value) -> String {
 
 async fn read<R: AsyncRead + Unpin>(
     reader: R,
-    stderr: Option<JoinHandle<String>>,
+    from: Option<u64>,
+    stderr: Option<Said>,
     shared: Arc<Shared>,
 ) {
-    let mut reader = BufReader::new(reader);
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        match reader.read_until(b'\n', &mut line).await {
-            Ok(0) | Err(_) => break,
-            Ok(_) => shared.dispatch(&line),
-        }
-    }
+    keep::read_lines(reader, from, |line, end| shared.dispatch(line, end)).await;
     let said = match stderr {
-        Some(task) => tokio::time::timeout(STDERR_GRACE, task)
+        Some(said) => tokio::time::timeout(STDERR_GRACE, said)
             .await
-            .ok()
-            .and_then(Result::ok)
             .unwrap_or_default(),
         None => String::new(),
     };
     shared.ended(said);
+}
+
+/// A kept turn's events so far, parsed again from its journals: `out` from
+/// byte 0, and `input`, the `in` the daemon wrote, for what was answered.
+/// The same bytes always give the same events with the same cursors.
+#[derive(Debug)]
+pub struct Replayed {
+    thread: String,
+    run: String,
+    /// Every event `out`'s whole lines make, in order.
+    pub events: Vec<ThreadEvent>,
+    /// The offset after the last whole line, where a reader carries on.
+    pub offset: u64,
+    /// The prompt the turn was started with.
+    pub prompt: Option<String>,
+    state: State,
+}
+
+impl Replayed {
+    /// Whether `out` holds the turn's `result`.
+    pub fn completed(&self) -> bool {
+        self.state.completed
+    }
+}
+
+pub fn replay(thread: &str, run: &str, out: &[u8], input: &[u8]) -> Replayed {
+    let (sent, _) = keep::lines(input);
+    let mut state = State::default();
+    let mut prompt = None;
+    for (line, _) in sent {
+        match serde_json::from_slice::<Sent>(line) {
+            Ok(Sent::User { message }) => {
+                if prompt.is_none() {
+                    prompt = message.content.text();
+                }
+            }
+            Ok(Sent::ControlRequest { request }) if request.subtype == "interrupt" => {
+                state.cancelled = true;
+            }
+            Ok(Sent::ControlResponse { response }) => {
+                if let Some(answer) = response.response {
+                    state
+                        .answered
+                        .insert(response.request_id, answer.decision());
+                }
+            }
+            _ => {}
+        }
+    }
+    let (out_tx, _) = mpsc::unbounded_channel();
+    let (events, mut received) = mpsc::unbounded_channel();
+    let shared = Shared {
+        thread: thread.to_owned(),
+        run: Some(run.to_owned()),
+        out: Mutex::new(Some(out_tx)),
+        events,
+        state: Mutex::new(state),
+    };
+    // A replay answers nothing: what it would send was sent when it was read.
+    shared.close();
+    let (found, offset) = keep::lines(out);
+    for (line, end) in found {
+        shared.dispatch(line, Some(end));
+    }
+    let mut replayed = Vec::new();
+    while let Ok(event) = received.try_recv() {
+        replayed.push(event);
+    }
+    let state = std::mem::take(&mut *shared.lock());
+    Replayed {
+        thread: thread.to_owned(),
+        run: run.to_owned(),
+        events: replayed,
+        offset,
+        prompt,
+        state,
+    }
 }
 
 /// Ends when every sender is gone, which drops stdin and is Claude's EOF.
@@ -688,7 +877,7 @@ struct Message {
 enum Content {
     Blocks(Vec<Block>),
     // A typed prompt is a bare string, and it carries no tool.
-    Text(#[allow(dead_code)] String),
+    Text(String),
 }
 
 impl Default for Content {
@@ -704,11 +893,25 @@ impl Content {
             Self::Text(_) => Vec::new(),
         }
     }
+
+    /// A prompt's text, as [`prompt`] writes it.
+    fn text(self) -> Option<String> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Blocks(blocks) => blocks.into_iter().find_map(|block| match block {
+                Block::Text { text } => Some(text),
+                _ => None,
+            }),
+        }
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Block {
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -777,6 +980,51 @@ struct ModelUsage {
     context_window: Option<u64>,
 }
 
+/// The lines a daemon writes to `in`, read back on a replay.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Sent {
+    User {
+        message: Message,
+    },
+    ControlRequest {
+        request: Interrupt,
+    },
+    ControlResponse {
+        response: Responded,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+struct Interrupt {
+    subtype: String,
+}
+
+#[derive(Deserialize)]
+struct Responded {
+    request_id: String,
+    response: Option<Behaviour>,
+}
+
+#[derive(Deserialize)]
+struct Behaviour {
+    behavior: String,
+    #[serde(rename = "updatedPermissions")]
+    updated_permissions: Option<Value>,
+}
+
+impl Behaviour {
+    fn decision(&self) -> chat::Decision {
+        match (self.behavior.as_str(), &self.updated_permissions) {
+            ("allow", Some(_)) => chat::Decision::AcceptAlways,
+            ("allow", None) => chat::Decision::Accept,
+            _ => chat::Decision::Decline,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
@@ -786,7 +1034,7 @@ mod tests {
         RequestResolved, RequestType, Scope, StopReason, StreamKind, TokenUsage, TurnCompleted,
         TurnState,
     };
-    use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
+    use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
     const ACCEPT: &str = include_str!("../tests/recordings/claude-2.1.291-accept.jsonl");
     const DECLINE: &str = include_str!("../tests/recordings/claude-2.1.291-decline.jsonl");
@@ -823,11 +1071,12 @@ mod tests {
         }
     }
 
-    fn pair(stderr: Option<JoinHandle<String>>) -> (Turn, Events, Fake) {
+    fn pair(stderr: Option<Said>) -> (Turn, Events, Fake) {
         let (ours, theirs) = tokio::io::duplex(1 << 20);
         let (our_read, our_write) = tokio::io::split(ours);
         let (their_read, their_write) = tokio::io::split(theirs);
-        let (turn, events) = Turn::wire(our_read, our_write, THREAD, stderr, None);
+        let parse = Parse::new(THREAD, None, State::default());
+        let (turn, events) = Turn::wire(our_read, our_write, parse, stderr, None);
         let _ = turn.shared.send(&prompt("Run touch made.txt"));
         let fake = Fake {
             from_turn: BufReader::new(their_read),
@@ -1133,7 +1382,7 @@ mod tests {
     /// and `claude` said on the way out.
     #[tokio::test]
     async fn an_exit_without_a_result_fails_with_the_stderr_tail() {
-        let stderr = tokio::spawn(async { "sh: claude: not found".to_owned() });
+        let stderr: Said = Box::pin(async { "sh: claude: not found".to_owned() });
         let (_turn, mut events, mut fake) = pair(Some(stderr));
         fake.receive().await;
         fake.play("Welcome to the machine!\n{\"type\":\"system\",\"subtype\":\"init\"}\n")
@@ -1285,5 +1534,213 @@ mod tests {
         );
         assert_eq!(answers(PermissionMode::FullAccess, Scope::Question), None);
         assert_eq!(answers(PermissionMode::Supervised, Scope::Other), None);
+    }
+
+    const RUN: &str = "Y0123456789abcdef";
+
+    /// What a daemon writes to `in` for the accept recording: the prompt,
+    /// then, when `answered`, the answer.
+    fn sent(answered: bool) -> String {
+        let mut lines = format!("{}\n", prompt("Run touch made.txt"));
+        if answered {
+            lines.push_str(&format!(
+                "{}\n",
+                json!({"type": "control_response", "response": {"subtype": "success",
+                    "request_id": REQUEST, "response": {"behavior": "allow",
+                    "updatedInput": {"command": "touch made.txt"}}}})
+            ));
+        }
+        lines
+    }
+
+    /// A kept turn over pipes: Claude's stdout is `out` and the line the turn
+    /// writes is what `in` would get.
+    fn kept() -> (Turn, Events, Fake) {
+        let (ours, theirs) = tokio::io::duplex(1 << 20);
+        let (our_read, our_write) = tokio::io::split(ours);
+        let (their_read, their_write) = tokio::io::split(theirs);
+        let said: Said = Box::pin(async { String::new() });
+        let (turn, events) =
+            Turn::kept(our_read, our_write, THREAD, RUN, "Run touch made.txt", said);
+        let fake = Fake {
+            from_turn: BufReader::new(their_read),
+            to_turn: their_write,
+        };
+        (turn, events, fake)
+    }
+
+    /// Every event up to and including the first that `last` picks.
+    async fn through(events: &mut Events, last: impl Fn(&Event) -> bool) -> Vec<ThreadEvent> {
+        let mut seen = Vec::new();
+        loop {
+            let next = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("an event within 5 s")
+                .expect("the channel is open");
+            let done = last(&next.event);
+            seen.push(next);
+            if done {
+                return seen;
+            }
+        }
+    }
+
+    fn is_completed(event: &Event) -> bool {
+        matches!(event, Event::TurnCompleted(_))
+    }
+
+    /// ADR-0035 decision 8: each event read from `out` carries
+    /// `<run>:<line end>:<part>`, and a replay of the same bytes gives the
+    /// same events with the same cursors.
+    #[tokio::test]
+    async fn a_kept_turn_cursors_each_event_and_a_replay_gives_the_same() {
+        let (turn, mut events, mut fake) = kept();
+        assert!(fake.receive().await.is_some(), "the prompt");
+        fake.play(&up_to_the_request(ACCEPT)).await;
+        let mut live = through(&mut events, |event| {
+            matches!(event, Event::RequestOpened(_))
+        })
+        .await;
+        turn.answer(REQUEST, Decision::Accept).expect("answered");
+        let rest: String = ACCEPT
+            .lines()
+            .skip_while(|line| !line.contains("\"type\":\"control_request\""))
+            .skip(1)
+            .map(|line| format!("{line}\n"))
+            .collect();
+        fake.play(&rest).await;
+        live.extend(through(&mut events, is_completed).await);
+
+        let replayed = replay(THREAD, RUN, ACCEPT.as_bytes(), sent(true).as_bytes());
+        assert_eq!(replayed.offset, ACCEPT.len() as u64);
+        assert!(replayed.completed());
+        assert_eq!(replayed.prompt.as_deref(), Some("Run touch made.txt"));
+        let cursored = |events: &[ThreadEvent]| -> Vec<ThreadEvent> {
+            events
+                .iter()
+                .filter(|event| event.cursor.is_some())
+                .cloned()
+                .collect()
+        };
+        assert_eq!(cursored(&replayed.events), cursored(&live));
+        assert_eq!(
+            live[0].cursor.as_deref(),
+            Some(format!("{RUN}:{}:0", ACCEPT.lines().next().map_or(0, str::len) + 1).as_str()),
+            "turn.started comes from the first line"
+        );
+        let result = live
+            .iter()
+            .filter(|event| event.cursor.is_some())
+            .map(|event| event.cursor.clone().unwrap_or_default())
+            .collect::<Vec<_>>();
+        let end = ACCEPT.len();
+        assert_eq!(
+            result[result.len() - 2..],
+            [format!("{RUN}:{end}:0"), format!("{RUN}:{end}:1")],
+            "one `result` line gives two events"
+        );
+        // The answer the daemon made carries no cursor, live and replayed.
+        let resolved = |events: &[ThreadEvent]| {
+            events
+                .iter()
+                .filter(|event| matches!(event.event, Event::RequestResolved(_)))
+                .map(|event| event.cursor.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(resolved(&live), [None]);
+        assert_eq!(resolved(&replayed.events), [None]);
+    }
+
+    /// ADR-0035 decision 9: a request still open is one `out` holds and `in`
+    /// has not answered, and an adopted turn answers it once.
+    #[tokio::test]
+    async fn an_adopted_turn_waits_on_an_open_request_and_answers_it_once() {
+        let head = up_to_the_request(ACCEPT);
+        let replayed = replay(THREAD, RUN, head.as_bytes(), sent(false).as_bytes());
+        assert!(!replayed.completed());
+        assert!(matches!(
+            replayed.events.last().map(|event| &event.event),
+            Some(Event::RequestOpened(_))
+        ));
+        let offset = replayed.offset;
+        assert_eq!(offset, head.len() as u64);
+
+        let (ours, theirs) = tokio::io::duplex(1 << 20);
+        let (our_read, our_write) = tokio::io::split(ours);
+        let (their_read, mut their_write) = tokio::io::split(theirs);
+        let said: Said = Box::pin(async { String::new() });
+        let (turn, mut events) = Turn::resume(our_read, our_write, replayed, said);
+        turn.answer(REQUEST, Decision::Accept)
+            .expect("the open request is still open");
+        assert!(matches!(
+            turn.answer(REQUEST, Decision::Accept),
+            Err(Error::NotPending(_))
+        ));
+        let mut from_turn = BufReader::new(their_read);
+        let mut line = String::new();
+        from_turn.read_line(&mut line).await.expect("a line");
+        assert!(line.contains("\"control_response\""), "{line}");
+
+        let after = &ACCEPT[head.len()..];
+        let rest: String = ACCEPT
+            .lines()
+            .skip_while(|line| !line.contains("\"type\":\"control_request\""))
+            .skip(1)
+            .map(|line| format!("{line}\n"))
+            .collect();
+        assert_eq!(after, rest, "the recording ends with the request's line");
+        their_write
+            .write_all(rest.as_bytes())
+            .await
+            .expect("written");
+        let seen = through(&mut events, is_completed).await;
+        assert!(matches!(seen[0].event, Event::RequestResolved(_)));
+        let first = seen
+            .iter()
+            .find_map(|event| event.cursor.as_deref().and_then(keep::Cursor::parse))
+            .expect("a cursored event");
+        assert!(
+            first.end > offset,
+            "nothing before the offset is sent again"
+        );
+        assert!(seen.iter().any(|event| matches!(&event.event,
+            Event::TurnCompleted(done) if done.state == TurnState::Completed)));
+    }
+
+    /// A request `in` already answered is opened and resolved on a replay, and
+    /// an adopting daemon has nothing left to answer.
+    #[test]
+    fn a_replay_resolves_a_request_in_already_answered() {
+        let head = up_to_the_request(ACCEPT);
+        let replayed = replay(THREAD, RUN, head.as_bytes(), sent(true).as_bytes());
+        let n = replayed.events.len();
+        assert!(matches!(
+            &replayed.events[n - 2].event,
+            Event::RequestOpened(_)
+        ));
+        assert_eq!(
+            replayed.events[n - 1],
+            ThreadEvent {
+                thread_id: THREAD.to_owned(),
+                cursor: None,
+                event: Event::RequestResolved(RequestResolved {
+                    request_id: REQUEST.to_owned(),
+                    request_type: RequestType::ExecCommandApproval,
+                    decision: Decision::Accept,
+                }),
+            }
+        );
+        assert!(replayed.state.pending.is_empty());
+    }
+
+    /// A line cut off mid-way is not read, so the reader that carries on
+    /// starts at that line and no event is made twice.
+    #[test]
+    fn a_replay_stops_at_the_last_whole_line() {
+        let cut = &ACCEPT[..ACCEPT.len() - 10];
+        let replayed = replay(THREAD, RUN, cut.as_bytes(), sent(true).as_bytes());
+        let last_line = ACCEPT.lines().last().map_or(0, str::len) + 1;
+        assert_eq!(replayed.offset, (ACCEPT.len() - last_line) as u64);
+        assert!(!replayed.completed());
     }
 }

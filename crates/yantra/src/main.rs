@@ -3226,6 +3226,7 @@ mod tests {
             MachineSessions {
                 machine: "cachyos-g14".to_owned(),
                 sessions: Ok(vec![summary("demo", 2, 1)]),
+                keepers: Vec::new(),
             },
             MachineSessions {
                 machine: "pi".to_owned(),
@@ -3233,6 +3234,7 @@ mod tests {
                     machine: "pi".to_owned(),
                     reason: "timed out".to_owned(),
                 }),
+                keepers: Vec::new(),
             },
         ];
 
@@ -3252,6 +3254,7 @@ mod tests {
         let listed = vec![MachineSessions {
             machine: "mac".to_owned(),
             sessions: Ok(Vec::new()),
+            keepers: Vec::new(),
         }];
         let rendered = render_sessions(&listed);
         assert!(

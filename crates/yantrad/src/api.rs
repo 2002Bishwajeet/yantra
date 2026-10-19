@@ -1174,6 +1174,7 @@ mod tests {
                         created: "Thu Jul 30 13:02:31 2026".into(),
                         created_at: 1_785_502_951,
                     }]),
+                    keepers: Vec::new(),
                 },
                 MachineSessions {
                     machine: "pi".into(),
@@ -1181,6 +1182,7 @@ mod tests {
                         machine: "pi".into(),
                         reason: "connection timed out".into(),
                     }),
+                    keepers: Vec::new(),
                 },
             ])))),
             ..Snapshot::default()

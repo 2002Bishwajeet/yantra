@@ -409,6 +409,23 @@ pub async fn read<E: Exec>(
     Ok(out.stdout)
 }
 
+/// How many bytes `file` holds; a file that is not there holds none.
+pub async fn size<E: Exec>(exec: &E, keeper: &Keeper, file: File) -> Result<u64, Error> {
+    let name = file.name();
+    let out = exec
+        .exec(&format!(
+            "cd {} 2>/dev/null || {{ echo 0; exit 0; }}; [ -f {name} ] || {{ echo 0; exit 0; }}; \
+             wc -c <{name}",
+            keeper.dir()
+        ))
+        .await?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    match said.lines().last().map(str::trim).map(str::parse) {
+        Some(Ok(size)) if out.success() => Ok(size),
+        _ => Err(failed("read", &out)),
+    }
+}
+
 /// Writes the turn's permission mode, which an adopting daemon reads back.
 pub async fn write_mode<E: Exec>(exec: &E, keeper: &Keeper, mode: &str) -> Result<(), Error> {
     let out = exec

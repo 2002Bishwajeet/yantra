@@ -10,18 +10,21 @@
 //! six calls. The client offers no `fs` and no `terminal`, so the agent uses
 //! its own tools on its own machine, and a request for either is refused.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::agent;
 use crate::chat::{self, Event, ThreadEvent};
+use crate::claude::Said;
+use crate::keep;
 use crate::ssh::{self, Ssh};
 
 /// Enough of the end of stderr to hold "command not found".
@@ -49,6 +52,22 @@ impl Harness {
             Self::Grok => "grok agent stdio",
             Self::Opencode => "opencode acp",
         }
+    }
+
+    /// The command a keeper runs ([`crate::keep`]): the binary searched for
+    /// as I-34 requires, since a tmux pane's `PATH` is the server's, then its
+    /// arguments.
+    pub fn kept_command(self) -> String {
+        let (binary, args) = self
+            .command()
+            .split_once(' ')
+            .unwrap_or((self.command(), ""));
+        format!(
+            "c=$({}) || {{ echo '{binary} was not found on PATH or in any of: {}' >&2; exit 127; }}\n\
+             exec \"$c\" {args}\n",
+            agent::probe(binary),
+            agent::CANDIDATES.join(", ")
+        )
     }
 
     /// The name a caller sends and a thread's git config keeps.
@@ -185,11 +204,14 @@ impl Agent {
             stderr,
             log,
         } = ssh.stdio(harness.command())?;
+        let diagnosis = diagnosis(stderr, log);
+        let said: Said = Box::pin(async move { diagnosis.await.unwrap_or_default() });
         Ok(Self::wire(
             harness,
             stdout,
             stdin,
-            Some(diagnosis(stderr, log)),
+            (None, None, State::default()),
+            Some(said),
             Some(child),
         ))
     }
@@ -200,14 +222,58 @@ impl Agent {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        Self::wire(harness, reader, writer, None, None)
+        Self::wire(
+            harness,
+            reader,
+            writer,
+            (None, None, State::default()),
+            None,
+            None,
+        )
+    }
+
+    /// An agent held by a keeper ([`keep`]): `reader` follows its `out` from
+    /// byte 0 and `writer` appends to its `in`. Each event read carries a
+    /// cursor in `run`, and `said` is what the keeper's `err` holds.
+    pub fn kept<R, W>(
+        harness: Harness,
+        reader: R,
+        writer: W,
+        run: &str,
+        said: Said,
+    ) -> (Self, Events)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let parse = (Some(run.to_owned()), Some(0), State::default());
+        Self::wire(harness, reader, writer, parse, Some(said), None)
+    }
+
+    /// A kept agent this daemon did not start, continued where [`replay`]
+    /// stopped. A call the last daemon made and the agent has not answered
+    /// still ends its turn when the answer comes.
+    pub fn resume<R, W>(
+        harness: Harness,
+        reader: R,
+        writer: W,
+        replayed: Replayed,
+        said: Said,
+    ) -> (Self, Events)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let parse = (Some(replayed.run), Some(replayed.offset), replayed.state);
+        Self::wire(harness, reader, writer, parse, Some(said), None)
     }
 
     fn wire<R, W>(
         harness: Harness,
         reader: R,
         writer: W,
-        stderr: Option<JoinHandle<String>>,
+        (run, from, state): (Option<String>, Option<u64>, State),
+        stderr: Option<Said>,
         child: Option<tokio::process::Child>,
     ) -> (Self, Events)
     where
@@ -217,12 +283,13 @@ impl Agent {
         let (out, lines) = mpsc::unbounded_channel();
         let (events, received) = mpsc::unbounded_channel();
         let shared = Arc::new(Shared {
-            state: Mutex::default(),
+            run,
+            state: Mutex::new(state),
             out,
             events: Mutex::new(Some(events)),
         });
         let tasks = [
-            tokio::spawn(read(reader, stderr, Arc::clone(&shared))),
+            tokio::spawn(read(reader, from, stderr, Arc::clone(&shared))),
             tokio::spawn(write(writer, lines)),
         ];
         (
@@ -295,11 +362,7 @@ impl Agent {
 
         let params = json!({"cwd": cwd, "mcpServers": []});
         let created: Created = self.call("session/new", params).await?;
-        self.shared
-            .lock()
-            .worktrees
-            .insert(created.session_id.clone(), cwd.to_owned());
-        self.shared.emit(
+        self.shared.emit_made(
             &created.session_id,
             Event::ThreadStarted {
                 thread: created.session_id.clone(),
@@ -329,34 +392,28 @@ impl Agent {
             stop_reason: StopReason,
         }
 
-        // Its own sender, so the turn's end still arrives after `close`.
+        // Its own sender, so a turn that could not be sent still ends.
         let events = self.shared.sender();
-        let emit = |event| emit(events.as_ref(), session, event);
+        let emit = |event| emit(events.as_ref(), session, None, event);
         emit(Event::TurnStarted);
         let params = json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]});
-        let result = self
-            .call::<Prompted>("session/prompt", params)
-            .await
-            .map(|prompted| prompted.stop_reason.into());
-        let completed = match &result {
-            Ok(chat::StopReason::Cancelled) => chat::TurnCompleted {
-                state: chat::TurnState::Cancelled,
-                stop_reason: Some(chat::StopReason::Cancelled),
-                message: None,
-            },
-            Ok(reason) => chat::TurnCompleted {
-                state: chat::TurnState::Completed,
-                stop_reason: Some(*reason),
-                message: None,
-            },
-            Err(error) => chat::TurnCompleted {
-                state: chat::TurnState::Failed,
-                stop_reason: None,
-                message: Some(error.to_string()),
-            },
+        // Once the call is sent, the answer or the agent's end makes
+        // `turn.completed`, so a turn another daemon sent ends the same way.
+        let answered = match self.shared.register("session/prompt", params) {
+            Ok(answered) => answered,
+            Err(error) => {
+                emit(Event::TurnCompleted(failed(&error)));
+                return Err(error);
+            }
         };
-        emit(Event::TurnCompleted(completed));
-        result
+        let result = answered
+            .await
+            .unwrap_or_else(|_| Err(self.shared.closed()))?;
+        serde_json::from_value::<Prompted>(result)
+            .map(|prompted| prompted.stop_reason.into())
+            .map_err(|_| Error::Malformed {
+                method: "session/prompt",
+            })
     }
 
     /// Asks the agent to stop the turn, and withdraws every permission request
@@ -425,26 +482,7 @@ impl Agent {
         method: &'static str,
         params: Value,
     ) -> Result<T, Error> {
-        let (reply, answered) = oneshot::channel();
-        let id = {
-            let mut state = self.shared.lock();
-            if let Some(stderr) = &state.closed {
-                return Err(Error::Closed {
-                    stderr: stderr.clone(),
-                });
-            }
-            state.next_id += 1;
-            let id = state.next_id;
-            state.pending.insert(id, reply);
-            id
-        };
-        let sent = self
-            .shared
-            .send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
-        if let Err(error) = sent {
-            self.shared.lock().pending.remove(&id);
-            return Err(error);
-        }
+        let answered = self.shared.register(method, params)?;
         let result = answered
             .await
             .unwrap_or_else(|_| Err(self.shared.closed()))?;
@@ -452,16 +490,103 @@ impl Agent {
     }
 }
 
+/// This daemon's JSON-RPC ids start with a random prefix, so they never meet
+/// the ids an earlier daemon wrote to a keeper's `in` (ADR-0035 decision 9).
+fn prefix() -> &'static str {
+    static PREFIX: OnceLock<String> = OnceLock::new();
+    PREFIX.get_or_init(|| ssh::nonce().unwrap_or_else(|_| "Y0".to_owned()))
+}
+
+/// A JSON-RPC id as a key: this daemon's are strings, and an agent's may be
+/// numbers.
+fn key(id: &Value) -> String {
+    match id {
+        Value::String(id) => id.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn failed(error: &Error) -> chat::TurnCompleted {
+    chat::TurnCompleted {
+        state: chat::TurnState::Failed,
+        stop_reason: None,
+        message: Some(error.to_string()),
+    }
+}
+
+/// How the answer to a `session/prompt` ends its turn.
+fn completed(answer: &Result<Value, Error>) -> chat::TurnCompleted {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Prompted {
+        stop_reason: StopReason,
+    }
+    let reason = match answer {
+        Ok(result) => serde_json::from_value::<Prompted>(result.clone())
+            .map(|prompted| chat::StopReason::from(prompted.stop_reason))
+            .map_err(|_| Error::Malformed {
+                method: "session/prompt",
+            }),
+        Err(Error::Rpc { code, message }) => Err(Error::Rpc {
+            code: *code,
+            message: message.clone(),
+        }),
+        Err(error) => Err(Error::Closed {
+            stderr: error.to_string(),
+        }),
+    };
+    match reason {
+        Ok(chat::StopReason::Cancelled) => chat::TurnCompleted {
+            state: chat::TurnState::Cancelled,
+            stop_reason: Some(chat::StopReason::Cancelled),
+            message: None,
+        },
+        Ok(reason) => chat::TurnCompleted {
+            state: chat::TurnState::Completed,
+            stop_reason: Some(reason),
+            message: None,
+        },
+        Err(error) => failed(&error),
+    }
+}
+
 #[derive(Debug, Default)]
 struct State {
     next_id: u64,
-    pending: HashMap<u64, oneshot::Sender<Result<Value, Error>>>,
+    /// The calls this client made and the agent has not answered.
+    calls: HashMap<String, Call>,
     next_request: u64,
     permissions: HashMap<String, Permission>,
     /// Each session's `cwd`, the thread's worktree.
     worktrees: HashMap<String, String>,
     /// Set once stdout ends, to what the agent said on the way out.
     closed: Option<String>,
+    /// What a keeper's `in` already answered, by the agent's id.
+    answered: HashMap<String, Value>,
+    /// The end of the line being read and the number of events made from it.
+    line: Option<(u64, u32)>,
+}
+
+/// A call this client made. `reply` is `None` for a call an earlier daemon
+/// made, found in a keeper's `in`.
+#[derive(Debug)]
+struct Call {
+    method: String,
+    session: Option<String>,
+    cwd: Option<String>,
+    reply: Option<oneshot::Sender<Result<Value, Error>>>,
+}
+
+impl Call {
+    fn of(method: &str, params: &Value) -> Self {
+        let text = |name: &str| params.get(name).and_then(Value::as_str).map(str::to_owned);
+        Self {
+            method: method.to_owned(),
+            session: text("sessionId"),
+            cwd: text("cwd"),
+            reply: None,
+        }
+    }
 }
 
 /// A `session/request_permission` the agent is waiting on.
@@ -475,17 +600,25 @@ struct Permission {
 
 #[derive(Debug)]
 struct Shared {
+    /// The keeper's run, when the agent is read from one.
+    run: Option<String>,
     state: Mutex<State>,
     out: mpsc::UnboundedSender<String>,
     /// Taken by `close`, so [`Events`] ends once the last turn has.
     events: Mutex<Option<mpsc::UnboundedSender<ThreadEvent>>>,
 }
 
-fn emit(events: Option<&mpsc::UnboundedSender<ThreadEvent>>, session: &str, event: Event) {
+fn emit(
+    events: Option<&mpsc::UnboundedSender<ThreadEvent>>,
+    session: &str,
+    cursor: Option<String>,
+    event: Event,
+) {
     // Nobody listening is not this client's failure.
     if let Some(events) = events {
         let _ = events.send(ThreadEvent {
             thread_id: session.to_owned(),
+            cursor,
             event,
         });
     }
@@ -503,8 +636,56 @@ impl Shared {
             .clone()
     }
 
+    /// An event read from the line being read, with its cursor when the
+    /// agent is kept.
     fn emit(&self, session: &str, event: Event) {
-        emit(self.sender().as_ref(), session, event);
+        let cursor = self.run.as_ref().and_then(|run| {
+            let mut state = self.lock();
+            let (end, part) = state.line.as_mut()?;
+            let cursor = keep::Cursor {
+                run: run.clone(),
+                end: *end,
+                part: *part,
+            };
+            *part += 1;
+            Some(cursor.to_string())
+        });
+        emit(self.sender().as_ref(), session, cursor, event);
+    }
+
+    /// An event the daemon made itself, which carries no cursor.
+    fn emit_made(&self, session: &str, event: Event) {
+        emit(self.sender().as_ref(), session, None, event);
+    }
+
+    /// Sends a call and returns where its answer arrives.
+    fn register(
+        &self,
+        method: &'static str,
+        params: Value,
+    ) -> Result<oneshot::Receiver<Result<Value, Error>>, Error> {
+        let (reply, answered) = oneshot::channel();
+        let id = {
+            let mut state = self.lock();
+            if let Some(stderr) = &state.closed {
+                return Err(Error::Closed {
+                    stderr: stderr.clone(),
+                });
+            }
+            state.next_id += 1;
+            let id = format!("{}-{}", prefix(), state.next_id);
+            let mut call = Call::of(method, &params);
+            call.reply = Some(reply);
+            state.calls.insert(id.clone(), call);
+            id
+        };
+        let sent =
+            self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        if let Err(error) = sent {
+            self.lock().calls.remove(&id);
+            return Err(error);
+        }
+        Ok(answered)
     }
 
     fn send(&self, message: Value) -> Result<(), Error> {
@@ -543,7 +724,7 @@ impl Shared {
     }
 
     fn emit_resolved(&self, request: &str, permission: &Permission, decision: chat::Decision) {
-        self.emit(
+        self.emit_made(
             &permission.session,
             Event::RequestResolved(chat::RequestResolved {
                 request_id: request.to_owned(),
@@ -553,7 +734,14 @@ impl Shared {
         );
     }
 
-    fn dispatch(&self, line: &[u8]) {
+    /// One line of stdout. `end` is where it ends in a keeper's `out`.
+    fn dispatch(&self, line: &[u8], end: Option<u64>) {
+        self.lock().line = end.map(|end| (end, 0));
+        self.dispatch_line(line);
+        self.lock().line = None;
+    }
+
+    fn dispatch_line(&self, line: &[u8]) {
         #[derive(Deserialize)]
         struct Incoming {
             id: Option<Value>,
@@ -575,16 +763,32 @@ impl Shared {
         };
         match (message.id, message.method) {
             (Some(id), None) => {
-                let Some(reply) = id.as_u64().and_then(|id| self.lock().pending.remove(&id)) else {
+                let Some(call) = self.lock().calls.remove(&key(&id)) else {
                     return;
                 };
-                let _ = reply.send(match message.error {
+                let answer = match message.error {
                     Some(error) => Err(Error::Rpc {
                         code: error.code,
                         message: error.message,
                     }),
                     None => Ok(message.result.unwrap_or(Value::Null)),
-                });
+                };
+                match (call.method.as_str(), &call.session, &call.cwd, &answer) {
+                    ("session/new", _, Some(cwd), Ok(result)) => {
+                        if let Some(session) = result.get("sessionId").and_then(Value::as_str) {
+                            self.lock()
+                                .worktrees
+                                .insert(session.to_owned(), cwd.clone());
+                        }
+                    }
+                    ("session/prompt", Some(session), _, answer) => {
+                        self.emit(session, Event::TurnCompleted(completed(answer)));
+                    }
+                    _ => {}
+                }
+                if let Some(reply) = call.reply {
+                    let _ = reply.send(answer);
+                }
             }
             (Some(id), Some(method)) if method == "session/request_permission" => {
                 match serde_json::from_value(message.params) {
@@ -632,7 +836,7 @@ impl Shared {
             }
             _ => chat::RequestType::DynamicToolCall,
         };
-        let (request_id, scope) = {
+        let (request_id, scope, answered) = {
             let mut state = self.lock();
             let worktree = state.worktrees.get(&asked.session_id);
             let paths = (asked.tool_call.locations.iter().flatten())
@@ -647,21 +851,31 @@ impl Shared {
             };
             state.next_request += 1;
             let request_id = state.next_request.to_string();
-            state.permissions.insert(
-                request_id.clone(),
-                Permission {
-                    rpc_id,
-                    session: asked.session_id.clone(),
-                    request_type,
-                    options: options.clone(),
-                },
-            );
-            (request_id, scope)
+            let answered = state.answered.remove(&key(&rpc_id));
+            if answered.is_none() {
+                state.permissions.insert(
+                    request_id.clone(),
+                    Permission {
+                        rpc_id,
+                        session: asked.session_id.clone(),
+                        request_type,
+                        options: options.clone(),
+                    },
+                );
+            }
+            (request_id, scope, answered)
         };
+        let decision = answered.map(|answer| {
+            let picked = answer["outcome"]["optionId"].as_str();
+            options
+                .iter()
+                .find(|option| Some(option.option_id.as_str()) == picked)
+                .map_or(chat::Decision::Cancel, |option| option.decision)
+        });
         self.emit(
             &asked.session_id,
             Event::RequestOpened(chat::RequestOpened {
-                request_id,
+                request_id: request_id.clone(),
                 request_type,
                 item_id: Some(asked.tool_call.tool_call_id),
                 title: None,
@@ -670,58 +884,204 @@ impl Shared {
                 scope,
             }),
         );
+        if let Some(decision) = decision {
+            self.emit_made(
+                &asked.session_id,
+                Event::RequestResolved(chat::RequestResolved {
+                    request_id,
+                    request_type,
+                    decision,
+                }),
+            );
+        }
     }
 
     /// Cancels every waiting request, ends [`Events`] and fails every call
     /// still waiting, now and later, with `stderr`.
     fn close(&self, stderr: String) {
-        let (pending, permissions) = {
+        let (calls, permissions) = {
             let mut state = self.lock();
             state.closed = Some(stderr.clone());
             (
-                std::mem::take(&mut state.pending),
+                std::mem::take(&mut state.calls),
                 std::mem::take(&mut state.permissions),
             )
         };
-        // Before the replies, so a turn's failure follows its requests.
+        // A turn's failure follows its requests, and ends the events.
         for (request, permission) in permissions {
             self.emit_resolved(&request, &permission, chat::Decision::Cancel);
+        }
+        let closed = Error::Closed {
+            stderr: stderr.clone(),
+        };
+        for call in calls.values() {
+            if let ("session/prompt", Some(session)) = (call.method.as_str(), &call.session) {
+                self.emit_made(session, Event::TurnCompleted(failed(&closed)));
+            }
         }
         self.events
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        for (_, reply) in pending {
-            let _ = reply.send(Err(Error::Closed {
-                stderr: stderr.clone(),
-            }));
+        for call in calls.into_values() {
+            if let Some(reply) = call.reply {
+                let _ = reply.send(Err(Error::Closed {
+                    stderr: stderr.clone(),
+                }));
+            }
         }
     }
 }
 
 async fn read<R: AsyncRead + Unpin>(
     reader: R,
-    stderr: Option<JoinHandle<String>>,
+    from: Option<u64>,
+    stderr: Option<Said>,
     shared: Arc<Shared>,
 ) {
-    let mut reader = BufReader::new(reader);
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        match reader.read_until(b'\n', &mut line).await {
-            Ok(0) | Err(_) => break,
-            Ok(_) => shared.dispatch(&line),
-        }
-    }
+    keep::read_lines(reader, from, |line, end| shared.dispatch(line, end)).await;
     let said = match stderr {
-        Some(task) => tokio::time::timeout(STDERR_GRACE, task)
+        Some(said) => tokio::time::timeout(STDERR_GRACE, said)
             .await
-            .ok()
-            .and_then(Result::ok)
             .unwrap_or_default(),
         None => String::new(),
     };
     shared.close(said);
+}
+
+/// A kept agent's events so far, parsed again from its journals: `out` from
+/// byte 0, and `input`, the `in` the daemons wrote, for the calls they made
+/// and the requests they answered. The same bytes always give the same
+/// events with the same cursors.
+#[derive(Debug)]
+pub struct Replayed {
+    run: String,
+    /// Every event `out`'s whole lines make, in order. A prompt's text and
+    /// `turn.started` carry no cursor and stand before the first line that
+    /// followed the prompt.
+    pub events: Vec<ThreadEvent>,
+    /// The offset after the last whole line, where a reader carries on.
+    pub offset: u64,
+    /// How many prompts `in` holds.
+    pub prompts: usize,
+    state: State,
+}
+
+impl Replayed {
+    /// Whether a prompt is still waiting for the agent's answer.
+    pub fn prompting(&self) -> bool {
+        self.state
+            .calls
+            .values()
+            .any(|call| call.method == "session/prompt")
+    }
+}
+
+pub fn replay(run: &str, out: &[u8], input: &[u8]) -> Replayed {
+    #[derive(Deserialize)]
+    struct Sent {
+        id: Option<Value>,
+        method: Option<String>,
+        #[serde(default)]
+        params: Value,
+        result: Option<Value>,
+    }
+
+    let mut state = State::default();
+    let mut prompts = VecDeque::new();
+    let (sent, _) = keep::lines(input);
+    for (line, _) in sent {
+        let Ok(sent) = serde_json::from_slice::<Sent>(line) else {
+            continue;
+        };
+        match (sent.id, sent.method) {
+            (Some(id), Some(method)) => {
+                let call = Call::of(&method, &sent.params);
+                if let ("session/load", Some(session), Some(cwd)) =
+                    (method.as_str(), &call.session, &call.cwd)
+                {
+                    state.worktrees.insert(session.clone(), cwd.clone());
+                }
+                if method == "session/prompt" {
+                    let text = sent.params["prompt"][0]["text"]
+                        .as_str()
+                        .unwrap_or_default();
+                    prompts.push_back((key(&id), call.session.clone(), text.to_owned()));
+                }
+                state.calls.insert(key(&id), call);
+            }
+            (Some(id), None) => {
+                state
+                    .answered
+                    .insert(key(&id), sent.result.unwrap_or(Value::Null));
+            }
+            _ => {}
+        }
+    }
+    let total = prompts.len();
+
+    let (out_tx, _) = mpsc::unbounded_channel();
+    let (events, mut received) = mpsc::unbounded_channel();
+    let shared = Shared {
+        run: Some(run.to_owned()),
+        state: Mutex::new(state),
+        out: out_tx,
+        events: Mutex::new(Some(events)),
+    };
+    let mut set_up = false;
+    let mut turn: Option<String> = None;
+    let mut n = 0;
+    let mut begin = |shared: &Shared, turn: &mut Option<String>| {
+        if let Some((id, session, text)) = prompts.pop_front() {
+            n += 1;
+            let session = session.unwrap_or_default();
+            shared.emit_made(
+                &session,
+                Event::ContentDelta(chat::ContentDelta {
+                    stream_kind: chat::StreamKind::UserText,
+                    delta: text,
+                    item_id: Some(format!("user:{run}:{n}")),
+                }),
+            );
+            shared.emit_made(&session, Event::TurnStarted);
+            *turn = Some(id);
+        }
+    };
+    let (found, offset) = keep::lines(out);
+    for (line, end) in found {
+        if set_up && turn.is_none() {
+            begin(&shared, &mut turn);
+        }
+        let answers = serde_json::from_slice::<Sent>(line)
+            .ok()
+            .filter(|sent| sent.method.is_none())
+            .and_then(|sent| sent.id)
+            .map(|id| key(&id));
+        let method = answers
+            .as_ref()
+            .and_then(|id| shared.lock().calls.get(id).map(|call| call.method.clone()));
+        shared.dispatch(line, Some(end));
+        match method.as_deref() {
+            Some("session/new" | "session/load") => set_up = true,
+            Some("session/prompt") if turn == answers => turn = None,
+            _ => {}
+        }
+    }
+    if set_up && turn.is_none() {
+        begin(&shared, &mut turn);
+    }
+    let mut replayed = Vec::new();
+    while let Ok(event) = received.try_recv() {
+        replayed.push(event);
+    }
+    let state = std::mem::take(&mut *shared.lock());
+    Replayed {
+        run: run.to_owned(),
+        events: replayed,
+        offset,
+        prompts: total,
+        state,
+    }
 }
 
 async fn write<W: AsyncWrite + Unpin>(mut writer: W, mut lines: mpsc::UnboundedReceiver<String>) {
@@ -1080,7 +1440,7 @@ mod tests {
         RequestOpened, RequestOption, RequestResolved, RequestType, Scope, StopReason, StreamKind,
         TokenUsage, TurnCompleted, TurnState,
     };
-    use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
+    use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
     const SESSION: &str = "ses_eeed4274bffeTYit4oOoDcmsRY";
 
@@ -1124,12 +1484,19 @@ mod tests {
         pair_with_stderr(None)
     }
 
-    fn pair_with_stderr(stderr: Option<JoinHandle<String>>) -> (Agent, Events, Fake) {
+    fn pair_with_stderr(stderr: Option<Said>) -> (Agent, Events, Fake) {
         let (client, agent) = tokio::io::duplex(1 << 16);
         let (client_read, client_write) = tokio::io::split(client);
         let (agent_read, agent_write) = tokio::io::split(agent);
-        let (client, events) =
-            Agent::wire(Harness::Opencode, client_read, client_write, stderr, None);
+        let parse = (None, None, State::default());
+        let (client, events) = Agent::wire(
+            Harness::Opencode,
+            client_read,
+            client_write,
+            parse,
+            stderr,
+            None,
+        );
         let fake = Fake {
             from_client: BufReader::new(agent_read),
             to_client: agent_write,
@@ -1292,7 +1659,7 @@ mod tests {
     /// A harness that is not installed exits at once, and stderr says why.
     #[tokio::test]
     async fn closed_carries_what_the_agent_said_on_stderr() {
-        let stderr = tokio::spawn(async { "sh: opencode: not found".to_owned() });
+        let stderr: Said = Box::pin(async { "sh: opencode: not found".to_owned() });
         let (agent, _events, fake) = pair_with_stderr(Some(stderr));
         drop(fake);
         let answer = agent.initialize().await;
@@ -1355,6 +1722,7 @@ mod tests {
             next(&mut events).await,
             ThreadEvent {
                 thread_id: SESSION.to_owned(),
+                cursor: None,
                 event: Event::TokenUsageUpdated(TokenUsage {
                     used_tokens: 1,
                     max_tokens: 2
@@ -1692,6 +2060,7 @@ mod tests {
             next(&mut events).await,
             ThreadEvent {
                 thread_id: SESSION.to_owned(),
+                cursor: None,
                 event: Event::ThreadStarted {
                     thread: SESSION.to_owned(),
                     harness: "opencode".to_owned(),
@@ -1899,5 +2268,240 @@ mod tests {
         ] {
             assert_eq!(parse(update), None);
         }
+    }
+
+    const RUN: &str = "Y0123456789abcdef";
+
+    #[test]
+    fn a_kept_agent_is_searched_for_and_given_its_arguments() {
+        let command = Harness::Opencode.kept_command();
+        assert!(command.starts_with("c=$("), "{command}");
+        assert!(command.ends_with("exec \"$c\" acp\n"), "{command}");
+        assert!(Harness::Codex.kept_command().ends_with("exec \"$c\" \n"));
+    }
+
+    /// A kept agent over pipes: the agent's stdout is `out`, and what the
+    /// client writes is what `in` would get.
+    fn kept() -> (Agent, Events, Fake) {
+        let (client, agent) = tokio::io::duplex(1 << 16);
+        let (client_read, client_write) = tokio::io::split(client);
+        let (agent_read, agent_write) = tokio::io::split(agent);
+        let said: Said = Box::pin(async { String::new() });
+        let (client, events) = Agent::kept(Harness::Opencode, client_read, client_write, RUN, said);
+        let fake = Fake {
+            from_client: BufReader::new(agent_read),
+            to_client: agent_write,
+        };
+        (client, events, fake)
+    }
+
+    fn line(message: &Value) -> String {
+        format!("{message}\n")
+    }
+
+    /// ADR-0035 decision 9: this daemon's ids carry a prefix of its own, so
+    /// they never meet an earlier daemon's in `in`.
+    #[tokio::test]
+    async fn a_call_id_carries_this_daemons_prefix() {
+        let (agent, _events, mut fake) = pair();
+        let (_, request) = tokio::join!(agent.new_session("/w"), async {
+            let request = fake.receive().await;
+            fake.reply(&request, json!({"sessionId": SESSION})).await;
+            request
+        });
+        assert_eq!(request["id"], json!(format!("{}-1", prefix())));
+        assert!(prefix().starts_with('Y'), "{}", prefix());
+    }
+
+    /// The answer to `session/prompt` ends the turn with a cursor, and a
+    /// replay of the same journals gives the same events, with the prompt's
+    /// text and `turn.started` before the turn's first line.
+    #[tokio::test]
+    async fn a_kept_prompt_ends_on_its_answer_and_replays_the_same() {
+        let (agent, mut events, mut fake) = kept();
+        let mut input = String::new();
+        let mut out = String::new();
+        let (session, ()) = tokio::join!(agent.new_session("/w"), async {
+            let request = fake.receive().await;
+            input.push_str(&line(&request));
+            let answer = json!({"jsonrpc": "2.0", "id": request["id"],
+                                "result": {"sessionId": SESSION}});
+            out.push_str(&line(&answer));
+            fake.send(answer).await;
+        });
+        let session = session.expect("a session");
+        let (stopped, ()) = tokio::join!(agent.prompt(&session, "hello"), async {
+            let request = fake.receive().await;
+            input.push_str(&line(&request));
+            for message in [
+                json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "sessionId": SESSION, "update": {"sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "hi"}, "messageId": "m1"}}}),
+                json!({"jsonrpc": "2.0", "id": request["id"],
+                       "result": {"stopReason": "end_turn"}}),
+            ] {
+                out.push_str(&line(&message));
+                fake.send(message).await;
+            }
+        });
+        assert_eq!(stopped.expect("the turn ends"), StopReason::EndTurn);
+        let mut live = Vec::new();
+        loop {
+            let event = next(&mut events).await;
+            let done = matches!(event.event, Event::TurnCompleted(_));
+            live.push(event);
+            if done {
+                break;
+            }
+        }
+        let completed = live.last().expect("turn.completed");
+        assert_eq!(
+            completed.cursor.as_deref(),
+            Some(format!("{RUN}:{}:0", out.len()).as_str())
+        );
+
+        let replayed = replay(RUN, out.as_bytes(), input.as_bytes());
+        assert_eq!(replayed.offset, out.len() as u64);
+        assert_eq!(replayed.prompts, 1);
+        assert!(!replayed.prompting());
+        let cursored = |events: &[ThreadEvent]| -> Vec<ThreadEvent> {
+            events
+                .iter()
+                .filter(|event| event.cursor.is_some())
+                .cloned()
+                .collect()
+        };
+        assert_eq!(cursored(&replayed.events), cursored(&live));
+        let kinds: Vec<&Event> = replayed.events.iter().map(|event| &event.event).collect();
+        assert_eq!(
+            kinds[..2],
+            [
+                &Event::ContentDelta(ContentDelta {
+                    stream_kind: StreamKind::UserText,
+                    delta: "hello".to_owned(),
+                    item_id: Some(format!("user:{RUN}:1")),
+                }),
+                &Event::TurnStarted,
+            ]
+        );
+        assert!(
+            replayed.events[..2]
+                .iter()
+                .all(|event| event.cursor.is_none())
+        );
+    }
+
+    /// ADR-0035 decision 9: a prompt an earlier daemon sent, with no answer
+    /// in `out`, is still running, and its answer ends the turn here.
+    #[tokio::test]
+    async fn an_adopted_agent_ends_the_turn_an_earlier_daemon_sent() {
+        let input = [
+            line(
+                &json!({"jsonrpc": "2.0", "id": "Yold-1", "method": "session/new",
+                         "params": {"cwd": "/w", "mcpServers": []}}),
+            ),
+            line(
+                &json!({"jsonrpc": "2.0", "id": "Yold-2", "method": "session/prompt",
+                         "params": {"sessionId": SESSION,
+                                    "prompt": [{"type": "text", "text": "hello"}]}}),
+            ),
+        ]
+        .concat();
+        let out = line(&json!({"jsonrpc": "2.0", "id": "Yold-1",
+                               "result": {"sessionId": SESSION}}));
+        let replayed = replay(RUN, out.as_bytes(), input.as_bytes());
+        assert!(replayed.prompting());
+        assert!(matches!(
+            replayed.events.last().map(|event| &event.event),
+            Some(Event::TurnStarted)
+        ));
+
+        let (client, agent) = tokio::io::duplex(1 << 16);
+        let (client_read, client_write) = tokio::io::split(client);
+        let (_agent_read, mut agent_write) = tokio::io::split(agent);
+        let said: Said = Box::pin(async { String::new() });
+        let (_agent, mut events) =
+            Agent::resume(Harness::Opencode, client_read, client_write, replayed, said);
+        let answer = line(&json!({"jsonrpc": "2.0", "id": "Yold-2",
+                                  "result": {"stopReason": "end_turn"}}));
+        agent_write
+            .write_all(answer.as_bytes())
+            .await
+            .expect("written");
+        let ended = next(&mut events).await;
+        assert_eq!(
+            ended,
+            ThreadEvent {
+                thread_id: SESSION.to_owned(),
+                cursor: Some(format!("{RUN}:{}:0", out.len() + answer.len())),
+                event: Event::TurnCompleted(TurnCompleted {
+                    state: TurnState::Completed,
+                    stop_reason: Some(StopReason::EndTurn),
+                    message: None,
+                }),
+            }
+        );
+    }
+
+    /// A permission `in` already answered is opened and resolved on a replay,
+    /// and an adopting daemon cannot answer it again.
+    #[tokio::test]
+    async fn a_replayed_permission_already_answered_is_not_answered_again() {
+        let out = line(&asked(7));
+        let input = line(&json!({"jsonrpc": "2.0", "id": 7,
+            "result": {"outcome": {"outcome": "selected", "optionId": "allow-once"}}}));
+        let replayed = replay(RUN, out.as_bytes(), input.as_bytes());
+        let kinds: Vec<(&Option<String>, &Event)> = replayed
+            .events
+            .iter()
+            .map(|event| (&event.cursor, &event.event))
+            .collect();
+        assert!(matches!(kinds[0], (Some(_), Event::RequestOpened(_))));
+        assert_eq!(
+            kinds[1],
+            (
+                &None,
+                &Event::RequestResolved(RequestResolved {
+                    request_id: "1".to_owned(),
+                    request_type: RequestType::FileChangeApproval,
+                    decision: Decision::Accept,
+                })
+            )
+        );
+
+        let (client, _agent) = tokio::io::duplex(1 << 16);
+        let (client_read, client_write) = tokio::io::split(client);
+        let said: Said = Box::pin(async { String::new() });
+        let (agent, _events) =
+            Agent::resume(Harness::Opencode, client_read, client_write, replayed, said);
+        assert!(matches!(
+            agent.answer("1", Answer::Selected("allow-once".to_owned())),
+            Err(Error::NotPending(_))
+        ));
+    }
+
+    /// An open permission is still open after a replay, and the request id
+    /// the browser saw still names it.
+    #[tokio::test]
+    async fn a_replayed_permission_with_no_answer_is_still_open() {
+        let out = line(&asked(7));
+        let replayed = replay(RUN, out.as_bytes(), b"");
+        let (client, agent_end) = tokio::io::duplex(1 << 16);
+        let (client_read, client_write) = tokio::io::split(client);
+        let (agent_read, _agent_write) = tokio::io::split(agent_end);
+        let said: Said = Box::pin(async { String::new() });
+        let (agent, _events) =
+            Agent::resume(Harness::Opencode, client_read, client_write, replayed, said);
+        agent
+            .answer("1", Answer::Selected("allow-once".to_owned()))
+            .expect("still open");
+        let mut sent = String::new();
+        BufReader::new(agent_read)
+            .read_line(&mut sent)
+            .await
+            .expect("a line");
+        let sent: Value = serde_json::from_str(&sent).expect("JSON");
+        assert_eq!(sent["id"], json!(7));
+        assert_eq!(sent["result"]["outcome"]["optionId"], json!("allow-once"));
     }
 }

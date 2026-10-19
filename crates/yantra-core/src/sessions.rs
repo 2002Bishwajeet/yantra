@@ -17,6 +17,7 @@
 //! paid for repeatedly.
 
 use crate::inventory::{Inventory, MachineInfo, Os, Tailscale};
+use crate::keep;
 use crate::ssh::{self, Ssh};
 use crate::tmux::{self, Summary, Tmux};
 use crate::workspace;
@@ -26,7 +27,22 @@ use crate::workspace;
 #[derive(Debug)]
 pub struct MachineSessions {
     pub machine: String,
+    /// Every session but the Chat keepers, which no person started.
     pub sessions: Result<Vec<Summary>, Error>,
+    /// The keepers' session names (ADR-0035 decision 1), which the daemon
+    /// adopts and the session list hides.
+    pub keepers: Vec<String>,
+}
+
+/// Takes the Chat keepers out of a tmux listing.
+pub fn split(listed: Vec<Summary>) -> (Vec<Summary>, Vec<String>) {
+    let (keepers, sessions): (Vec<Summary>, Vec<Summary>) = listed
+        .into_iter()
+        .partition(|summary| keep::is_keeper(&summary.name));
+    (
+        sessions,
+        keepers.into_iter().map(|summary| summary.name).collect(),
+    )
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -89,14 +105,25 @@ pub async fn list_from<I: Inventory>(inventory: &I) -> Result<Vec<MachineSession
 
     let mut answers = Vec::with_capacity(queries.len());
     for (machine, query) in queries {
-        let sessions = match query.await {
-            Ok(sessions) => sessions,
-            Err(joined) => Err(Error::Interrupted {
-                machine: machine.clone(),
-                reason: joined.to_string(),
-            }),
+        let (sessions, keepers) = match query.await {
+            Ok(Ok(listed)) => {
+                let (sessions, keepers) = split(listed);
+                (Ok(sessions), keepers)
+            }
+            Ok(Err(error)) => (Err(error), Vec::new()),
+            Err(joined) => (
+                Err(Error::Interrupted {
+                    machine: machine.clone(),
+                    reason: joined.to_string(),
+                }),
+                Vec::new(),
+            ),
         };
-        answers.push(MachineSessions { machine, sessions });
+        answers.push(MachineSessions {
+            machine,
+            sessions,
+            keepers,
+        });
     }
     Ok(answers)
 }
@@ -191,6 +218,27 @@ mod tests {
 
     /// A phone runs no sshd and no tmux, so asking it can only fail — and it
     /// would fail slowly, once every 30 s, for as long as the daemon runs.
+    #[test]
+    fn a_keeper_is_taken_out_of_the_listing_and_named_apart() {
+        let summary = |name: &str| Summary {
+            name: name.to_owned(),
+            windows: 1,
+            attached: 0,
+            created: String::new(),
+            created_at: 0,
+        };
+        let (sessions, keepers) = split(vec![
+            summary("web"),
+            summary("yantra-keep-web-1a2b3c4d5e6f7a8b"),
+            summary("scratch"),
+        ]);
+        assert_eq!(
+            sessions.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["web", "scratch"]
+        );
+        assert_eq!(keepers, ["yantra-keep-web-1a2b3c4d5e6f7a8b"]);
+    }
+
     #[test]
     fn a_phone_is_never_asked() {
         assert!(!worth_asking(&peer("iphone", Os::Ios, true)));
