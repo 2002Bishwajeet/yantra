@@ -84,6 +84,10 @@ appliance target=appliance_target:
     cargo zigbuild --release --target {{target}} \
         -p yantrad -p yantra -p yantra-agent
 
+# Lint the shell scripts users pipe into sh; no --severity, so any finding fails.
+shellcheck:
+    shellcheck install.sh crates/yantra-core/src/join.sh
+
 # R-24's assertion, and it is a negative one: no recipe the Rust gate runs may
 # turn `embed-dashboard` on, pass `--all-features`, or reach npm. A green build
 # says nothing about which jobs needed npm to succeed, so this reads the recipes
@@ -91,10 +95,6 @@ appliance target=appliance_target:
 # Every `uses:` names a 40-hex commit. A tag is mutable — a major tag is
 # repointed at every release, and any tag can be force-pushed — and an action
 # runs arbitrary code with the job's token, which for `release.yml` can publish.
-# Lint the shell scripts users pipe into sh; no --severity, so any finding fails.
-shellcheck:
-    shellcheck install.sh crates/yantra-core/src/join.sh
-
 pinned:
     #!/usr/bin/env bash
     set -euo pipefail
