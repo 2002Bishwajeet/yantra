@@ -539,7 +539,10 @@ fn appending(keeper: &Keeper, run: &str, at: u64, len: u64) -> String {
 /// holds `at` bytes now. A line that cannot be written is tried again for as
 /// long as the keeper's pane lives, as the reader is. An `in` that another
 /// writer changed ends the keeper and says why in `err`, so the turn fails
-/// where it can be seen. A keeper of another run ends only the writer.
+/// where it can be seen. A keeper of another run ends only the writer, and so
+/// does a [`Feed`] dropped while a line waits for a machine that does not
+/// answer: no turn waits for that line, and a late one would put a new
+/// writer of the same run `Behind`.
 pub fn feed(ssh: Ssh, tmux: Tmux, keeper: Keeper, run: &str, at: u64) -> Feed {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
     let (close, closed) = oneshot::channel();
@@ -591,6 +594,7 @@ async fn pump_in(
 ) {
     let mut lines = BufReader::new(from);
     let mut line = Vec::new();
+    let mut shut = false;
     loop {
         line.clear();
         match lines.read_until(b'\n', &mut line).await {
@@ -618,6 +622,11 @@ async fn pump_in(
                     return;
                 }
                 _ => {
+                    match closed.try_recv() {
+                        Ok(()) => shut = true,
+                        Err(oneshot::error::TryRecvError::Closed) if !shut => return,
+                        Err(_) => {}
+                    }
                     // A pane that is gone or dead reads no more lines.
                     if let Ok(found) = pane(&ssh, &tmux, &keeper).await
                         && found.is_none_or(|found| found.dead)
@@ -631,7 +640,7 @@ async fn pump_in(
         }
         at += line.len() as u64;
     }
-    if closed.try_recv().is_ok() {
+    if shut || closed.try_recv().is_ok() {
         let _ = close_stdin(&ssh, &keeper, &run).await;
     }
 }
@@ -639,7 +648,9 @@ async fn pump_in(
 /// A reader of `out` from byte `from` on, which outlives its `ssh`: when one
 /// drops while the pane lives, another carries on from the next byte, after 1,
 /// 2, 4 and then every 8 seconds (ADR-0035 decision 6). Once the pane is dead
-/// it reads the rest of `out` and ends.
+/// it reads the rest of `out` and ends. While the machine does not answer,
+/// nothing can say whether the pane lives, so it asks again until the machine
+/// answers or nobody reads the stream.
 pub fn follow(ssh: Ssh, tmux: Tmux, keeper: Keeper, pane: String, from: u64) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
     tokio::spawn(pump_out(ssh, tmux, keeper, pane, from, ours));
@@ -673,7 +684,11 @@ async fn pump_out(
                 drain(&ssh, &keeper, at, &mut to).await;
                 return;
             }
-            Read::Dropped => {}
+            Read::Dropped => {
+                if unread(&mut to).await {
+                    return;
+                }
+            }
         }
         if at > before {
             wait = Duration::from_secs(1);
@@ -751,7 +766,8 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
 
 /// The rest of `out` once the pane is dead, which the far `tail` may not have
 /// sent before it was killed. `out` stays until the thread's next turn, so it
-/// is asked for on the reader's schedule until the machine answers.
+/// is asked for on the reader's schedule until the machine answers or nobody
+/// reads `to`.
 async fn drain<E: Exec>(exec: &E, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
     let mut wait = Duration::from_secs(1);
     loop {
@@ -768,9 +784,23 @@ async fn drain<E: Exec>(exec: &E, keeper: &Keeper, at: u64, to: &mut DuplexStrea
             let _ = to.write_all(&out.stdout).await;
             return;
         }
+        if unread(to).await {
+            return;
+        }
         tokio::time::sleep(wait).await;
         wait = (wait * 2).min(BACKOFF);
     }
+}
+
+/// Whether the stream's reader was dropped. An empty write fails only then.
+async fn unread(to: &mut DuplexStream) -> bool {
+    std::future::poll_fn(|cx| {
+        Poll::Ready(matches!(
+            Pin::new(&mut *to).poll_write(cx, &[]),
+            Poll::Ready(Err(_))
+        ))
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -1196,6 +1226,104 @@ mod tests {
         assert!(
             *machine.asked.lock().expect("a lock") > 6,
             "more than the old six tries"
+        );
+    }
+
+    /// An `ssh` that fails before it connects, as a machine that does not
+    /// answer.
+    fn nowhere() -> Ssh {
+        Ssh::new(ssh::Machine {
+            host: "nowhere.invalid".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: "/nonexistent".into(),
+        })
+        .expect("a short control path")
+    }
+
+    async fn some_tmux() -> Tmux {
+        Tmux::resolve(&Found("/usr/bin/tmux".to_owned()))
+            .await
+            .expect("a tmux")
+    }
+
+    /// Y-542: a reader whose machine does not answer ends once nobody reads
+    /// it, and does not ask that machine every 8 seconds forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_reader_nobody_reads_ends_while_its_machine_is_away() {
+        let (ours, theirs) = tokio::io::duplex(1 << 10);
+        let pump = tokio::spawn(pump_out(
+            nowhere(),
+            some_tmux().await,
+            Keeper::new("w", "t"),
+            "%1".to_owned(),
+            0,
+            ours,
+        ));
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert!(!pump.is_finished(), "a reader that is read waits on");
+        drop(theirs);
+        tokio::time::timeout(Duration::from_secs(60), pump)
+            .await
+            .expect("the reader ends")
+            .expect("it does not panic");
+    }
+
+    /// Y-542: the last read of a dead keeper's `out` ends once nobody reads
+    /// it, though the machine never answers.
+    #[tokio::test(start_paused = true)]
+    async fn a_drain_nobody_reads_ends_while_its_machine_is_away() {
+        let machine = Late {
+            from: tokio::time::Instant::now() + Duration::from_secs(1 << 30),
+            out: b"",
+            asked: std::sync::Mutex::new(0),
+        };
+        let (mut ours, theirs) = tokio::io::duplex(1 << 10);
+        drop(theirs);
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            drain(&machine, &Keeper::new("w", "t"), 0, &mut ours),
+        )
+        .await
+        .expect("the drain ends");
+    }
+
+    /// Y-542: a line that waits for a machine that does not answer is given
+    /// up once its writer is dropped. A writer that is shut down still waits
+    /// to deliver it.
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_writer_gives_up_its_line_while_its_machine_is_away() {
+        let pump = |shut: bool| async move {
+            let (ours, theirs) = tokio::io::duplex(1 << 10);
+            let (close, closed) = oneshot::channel();
+            let mut feed = Feed {
+                inner: theirs,
+                close: Some(close),
+            };
+            let pump = tokio::spawn(pump_in(
+                nowhere(),
+                some_tmux().await,
+                Keeper::new("w", "t"),
+                "r1".to_owned(),
+                0,
+                ours,
+                closed,
+            ));
+            feed.write_all(b"{}\n").await.expect("written");
+            if shut {
+                feed.shutdown().await.expect("shut");
+            }
+            drop(feed);
+            tokio::time::timeout(Duration::from_secs(60), pump).await
+        };
+        pump(false)
+            .await
+            .expect("a dropped writer ends")
+            .expect("it does not panic");
+        assert!(
+            pump(true).await.is_err(),
+            "a writer shut down still waits for the machine"
         );
     }
 }

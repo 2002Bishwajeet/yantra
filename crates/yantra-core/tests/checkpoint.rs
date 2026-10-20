@@ -176,7 +176,7 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
         Err(Error::Git { stderr }) if !stderr.is_empty()
     ));
 
-    thread::remove(&ssh, &Tmux::resolve(&ssh).await?, &place).await?;
+    thread::remove(&ssh, Some(&Tmux::resolve(&ssh).await?), &place).await?;
     assert_eq!(
         fixture.run(&refs)?.trim(),
         "",
@@ -364,7 +364,7 @@ async fn a_branch_diff_is_the_whole_tree_against_the_merge_base() -> Result<()> 
         Err(Error::Git { stderr }) if !stderr.is_empty()
     ));
 
-    thread::remove(&ssh, &Tmux::resolve(&ssh).await?, &place).await?;
+    thread::remove(&ssh, Some(&Tmux::resolve(&ssh).await?), &place).await?;
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }

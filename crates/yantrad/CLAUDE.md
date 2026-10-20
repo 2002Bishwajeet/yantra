@@ -621,14 +621,16 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   replaced by the next start, and an adoption kills it: its pane never got the script, or its
   agent waits on an empty `in` (`keep::stale`, Y-541).
 - **`refresh.rs` adopts what a restart left.** The sessions sweep lists `yantra-keep-` sessions,
-  and each one the registry does not hold is adopted. The session listing hides them, and
-  `validate_name` refuses the prefix to a workspace.
+  and each one the registry does not hold is adopted. A keeper whose workspace or thread is gone
+  is tried once, warned about once, and skipped until the daemon restarts (Y-542). The session
+  listing hides them, and `validate_name` refuses the prefix to a workspace.
 - **A request nobody is attached to see sends one notification** (Y-451), titled with
   `Phase::WaitingForApproval`'s headline. The body names the workspace and the thread, and nothing
   of the request.
 - **A Claude keeper ends with its turn.** The task keeps the checkpoint and kills the session.
   **An ACP keeper stays for the next turn** and stops after 15 minutes with no turn, or once `out`
-  passes half the journal cap. The next keeper calls `session/load`.
+  passes half the journal cap. While its agent ends, it takes no turn, and the next turn waits
+  for a new keeper, which calls `session/load` (Y-542).
 
 The rules from before the keeper still hold:
 
@@ -642,10 +644,10 @@ The rules from before the keeper still hold:
   does not start. When a turn ends, the keeper's task keeps the tree and sends
   `turn.diff.updated{turn, unifiedDiff, truncated}`, whether a socket is attached or not.
   `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
-  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn runs. The
-  conversation is not rewound. A git that refused, or did not answer in 60 s, is a `checkpoint`
-  failure, except after a turn that failed: the turn's own error stays, and the log has the
-  checkpoint's. No diff is logged.
+  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn runs or its
+  checkpoint is kept (Y-542). The conversation is not rewound. A git that refused, or did not
+  answer in 60 s, is a `checkpoint` failure, except after a turn that failed: the turn's own
+  error stays, and the log has the checkpoint's. No diff is logged.
 - **`diff` asks for the thread's whole-branch diff** (Y-490,
   [`checkpoint::branch`](../yantra-core/src/checkpoint.rs)). It answers one
   `{"type":"branchDiff","threadId","base","files","filesTruncated","unifiedDiff","truncated"}`, a

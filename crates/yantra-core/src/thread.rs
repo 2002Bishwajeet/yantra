@@ -457,9 +457,10 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
 /// a thread.
 /// Removes the thread: its keeper's session first, so no agent writes to the
 /// journals while they go (I-30), then the worktree, the branch, the
-/// checkpoints and the journals.
-pub async fn remove<E: Exec>(exec: &E, tmux: &Tmux, place: &Place) -> Result<(), Error> {
-    if let Some(keeper) = Keeper::of(place) {
+/// checkpoints and the journals. `None` is a machine where tmux was not
+/// found, so no keeper runs there.
+pub async fn remove<E: Exec>(exec: &E, tmux: Option<&Tmux>, place: &Place) -> Result<(), Error> {
+    if let (Some(tmux), Some(keeper)) = (tmux, Keeper::of(place)) {
         keep::kill(exec, tmux, &keeper).await?;
     }
     removal(exec, place).await
@@ -749,7 +750,9 @@ mod tests {
     async fn remove_kills_the_keeper_then_runs_the_removal_and_names_a_refusal() {
         let tmux = tmux().await;
         let machine = Machine::answering(vec![out(0, b"", ""), out(0, b"", "")]);
-        remove(&machine, &tmux, &place()).await.expect("removed");
+        remove(&machine, Some(&tmux), &place())
+            .await
+            .expect("removed");
         assert_eq!(
             machine.asked(),
             [
@@ -774,17 +777,23 @@ mod tests {
             out(128, b"", "fatal: not a working tree\n"),
         ]);
         assert!(matches!(
-            remove(&refused, &tmux, &place()).await,
+            remove(&refused, Some(&tmux), &place()).await,
             Err(Error::Worktree { stderr }) if stderr == "fatal: not a working tree"
         ));
 
         // A keeper that stays keeps its journals too.
         let kept = Machine::answering(vec![out(1, b"", "permission denied\n")]);
         assert!(matches!(
-            remove(&kept, &tmux, &place()).await,
+            remove(&kept, Some(&tmux), &place()).await,
             Err(Error::Keeper(_))
         ));
         assert_eq!(kept.asked().len(), 1, "nothing is removed");
+
+        // A machine with no tmux has no keeper to kill (Y-542).
+        let bare = Machine::answering(vec![out(0, b"", "")]);
+        remove(&bare, None, &place()).await.expect("removed");
+        assert_eq!(bare.asked().len(), 1, "the removal alone");
+        assert!(bare.asked()[0].contains("worktree remove --force"));
     }
 
     #[tokio::test]

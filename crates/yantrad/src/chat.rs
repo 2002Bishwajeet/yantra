@@ -644,7 +644,8 @@ impl Machine for Fleet {
     }
 
     async fn remove(&self, place: &Place) -> Result<(), String> {
-        thread::remove(&self.ssh, self.tmux().await?, place)
+        // No tmux means no keeper, and the worktree still goes.
+        thread::remove(&self.ssh, self.tmux().await.ok(), place)
             .await
             .map_err(|error| chain(&error))
     }
