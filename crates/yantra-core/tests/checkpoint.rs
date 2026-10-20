@@ -82,6 +82,7 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
     bases.sort_unstable();
     assert_eq!(bases, [None, Some(0)]);
     assert_eq!(checkpoint::base(&ssh, &place).await?, None, "one baseline");
+    assert_eq!(checkpoint::latest(&ssh, &place).await?, None, "no turn yet");
 
     fixture.run(&format!(
         "cd {wt} && printf 'two\\n' >> kept.txt && rm gone.txt \
@@ -96,6 +97,7 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
     let mut turns = [one?, two?];
     turns.sort_unstable();
     assert_eq!(turns, [1, 2]);
+    assert_eq!(checkpoint::latest(&ssh, &place).await?, Some(2));
     assert_eq!(checkpoint::diff(&ssh, &place, 2).await?.unified, "");
 
     // A user's config must not change the format the browser reads.
@@ -144,6 +146,7 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
         format!("refs/yantra/checkpoints/{}/0", place.id),
         "checkpoint 1 is deleted"
     );
+    assert_eq!(checkpoint::latest(&ssh, &place).await?, None);
     assert!(matches!(
         checkpoint::revert(&ssh, &place, 1).await,
         Err(Error::NoCheckpoint { turn: 1 })
@@ -156,6 +159,7 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
     // The next turn is 1 again, and diffs against the restored tree.
     fixture.run(&format!("cd {wt} && printf 'again\\n' > again.txt"))?;
     assert_eq!(checkpoint::capture(&ssh, &place).await?, 1);
+    assert_eq!(checkpoint::latest(&ssh, &place).await?, Some(1));
     let again = checkpoint::diff(&ssh, &place, 1).await?;
     assert!(again.unified.contains("a/again.txt"), "{}", again.unified);
     assert!(!again.unified.contains("made.txt"), "{}", again.unified);

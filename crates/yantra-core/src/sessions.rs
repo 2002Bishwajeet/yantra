@@ -216,8 +216,6 @@ mod tests {
         }
     }
 
-    /// A phone runs no sshd and no tmux, so asking it can only fail — and it
-    /// would fail slowly, once every 30 s, for as long as the daemon runs.
     #[test]
     fn a_keeper_is_taken_out_of_the_listing_and_named_apart() {
         let summary = |name: &str| Summary {
@@ -239,6 +237,8 @@ mod tests {
         assert_eq!(keepers, ["yantra-keep-web-1a2b3c4d5e6f7a8b"]);
     }
 
+    /// A phone runs no sshd and no tmux, so asking it can only fail — and it
+    /// would fail slowly, once every 30 s, for as long as the daemon runs.
     #[test]
     fn a_phone_is_never_asked() {
         assert!(!worth_asking(&peer("iphone", Os::Ios, true)));

@@ -126,6 +126,20 @@ describe('the timeline', () => {
     expect(again.turn).toBe('idle')
   })
 
+  it("draws a turn's diff once when a reopen sends it again", () => {
+    const turn = (n: number, text: string) =>
+      event({ threadId: 't', type: 'turn.diff.updated', payload: { turn: n, unifiedDiff: text, truncated: false } })
+    const once = fold([turn(1, '+1\n'), turn(1, '+1\n')])
+    expect(once.entries).toEqual([
+      { kind: 'diff', id: 'diff:0', turn: 1, unified: '+1\n', truncated: false, reverted: false },
+    ])
+    const back = fold([event({ threadId: 't', type: 'thread.reverted', payload: { turn: 0 } }), turn(1, '+new\n')], once)
+    expect(back.entries.map((one) => (one.kind === 'diff' ? [one.unified, one.reverted] : null))).toEqual([
+      ['+1\n', true],
+      ['+new\n', false],
+    ])
+  })
+
   it('draws nothing for a plan or a title', () => {
     const plan = event({ threadId: 't', type: 'turn.plan.updated', payload: { plan: [] } })
     const named = event({ threadId: 't', type: 'thread.metadata.updated', payload: { name: 'x' } })
