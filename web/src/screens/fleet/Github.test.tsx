@@ -100,14 +100,17 @@ describe('Start session', () => {
     expect(within(dialog).getAllByRole('listitem').length).toBeGreaterThan(0)
   })
 
+  const grant = 'no GitHub grant — run `yantra github login`'
   const kinds: [number, string, string][] = [
-    [400, 'not an issue', 'That is not an issue a session can start from.'],
-    [404, 'no workspace named `site`', 'The daemon does not know that workspace.'],
-    [409, 'no GitHub grant', 'The daemon holds no GitHub sign-in, so it cannot read the issue.'],
+    [400, 'o/r#1 is a pull request, not an issue', 'The daemon refused the request.'],
+    [404, 'workspace `site` not found', 'The daemon does not know that workspace.'],
+    [404, 'GitHub answered 404 to the issue', 'GitHub has no such issue, or the sign-in cannot see it.'],
+    [409, grant, 'The daemon holds no GitHub sign-in, so it cannot read the issue.'],
+    [409, 'git worktree add failed: branch already exists', 'The workspace already has a worktree or branch for this issue.'],
     [502, 'GitHub returned 500', 'GitHub did not answer.'],
     [503, 'ssh timed out', 'The workspace machine did not answer.'],
   ]
-  it.each(kinds)('draws a %i inside the picker with the daemon words', async (status, said, sentence) => {
+  it.each(kinds)('draws a %i inside the picker with the daemon words (%s)', async (status, said, sentence) => {
     daemon({ 'POST /api/workspaces/*/threads/new': [status, said] })
     const dialog = await open()
     const list = await within(dialog).findByRole('list', { name: 'Workspaces that hold this repository' })
@@ -117,8 +120,15 @@ describe('Start session', () => {
     expect(alert.textContent).toContain(sentence)
     expect(alert.textContent).toContain(said)
     const sign = within(alert).queryByRole('link', { name: 'Sign in' })
-    if (status === 409) expect(sign?.getAttribute('href')).toBe('/settings/providers')
+    if (said === grant) expect(sign?.getAttribute('href')).toBe('/settings/providers')
     else expect(sign).toBeNull()
+  })
+
+  it('says the match is by folder name when the path does not end in owner/repo', async () => {
+    daemon()
+    const dialog = await open()
+    const list = await within(dialog).findByRole('list', { name: 'Workspaces that hold this repository' })
+    expect(within(list).getAllByText(/Matched by folder name only/)).toHaveLength(2)
   })
 
   it('asks the daemon to open the issue on the workspace picked', async () => {

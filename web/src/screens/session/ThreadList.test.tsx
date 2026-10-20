@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { useEffect, useState } from 'react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { answer } from '@/test/daemon'
 import { renderInApp } from '@/test/inApp'
@@ -87,6 +88,37 @@ describe('the thread list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh threads' }))
     await waitFor(() => expect(screen.getAllByRole('link')).toHaveLength(5))
     expect(asked).toEqual(['POST /api/workspaces/site/threads', 'POST /api/workspaces/site/threads'])
+  })
+
+  it('keeps the list on screen while Refresh reads again', async () => {
+    const asked = daemon([200, contract.threads])
+    await show()
+    await screen.findAllByRole('link')
+    const fetching = vi.fn(() => new Promise(() => {}))
+    vi.stubGlobal('fetch', fetching)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh threads' }))
+    await waitFor(() => expect(fetching).toHaveBeenCalled())
+    expect(screen.getAllByRole('link')).toHaveLength(5)
+    expect(document.querySelector('[aria-busy="true"]')).toBeNull()
+    expect(asked).toHaveLength(1)
+  })
+
+  it('reads again once when the chat names a thread the list does not hold', async () => {
+    const asked = daemon([200, contract.threads])
+    const control: { pick: (thread: string) => void } = { pick: () => {} }
+    function Switch() {
+      const [thread, setThread] = useState('1a1b2c3d4e5f6a7b')
+      useEffect(() => {
+        control.pick = setThread
+      }, [setThread])
+      return <ThreadList name="site" thread={thread} view="chat" />
+    }
+    await renderInApp(<Switch />)
+    await screen.findAllByRole('link')
+    act(() => control.pick('ffffffffffffffff'))
+    await waitFor(() => expect(asked).toHaveLength(2))
+    await screen.findAllByRole('link')
+    expect(asked).toHaveLength(2)
   })
 
   it('draws a pending state while the read is out', async () => {

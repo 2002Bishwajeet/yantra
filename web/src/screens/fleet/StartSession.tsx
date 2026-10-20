@@ -11,20 +11,35 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Empty } from './Empty'
 import { pickWorkspaces, type Choice } from './issuePick'
 
-/** What each refusal of `threads/new` means here; the status table says it for any write. */
-const SAYS: Record<number, string> = {
-  400: 'That is not an issue a session can start from.',
-  404: 'The daemon does not know that workspace.',
-  409: 'The daemon holds no GitHub sign-in, so it cannot read the issue.',
-  502: 'GitHub did not answer.',
-  503: 'The workspace machine did not answer.',
+/** What a refusal of `threads/new` means here. A status alone is ambiguous: 409 is
+ *  no sign-in or a worktree clash, 404 is a missing issue or a missing workspace. */
+export function sentenceFor(error: ApiError): string | undefined {
+  const said = error.said.toLowerCase()
+  switch (error.status) {
+    case 400:
+      return 'The daemon refused the request.'
+    case 404:
+      return said.includes('github answered')
+        ? 'GitHub has no such issue, or the sign-in cannot see it.'
+        : 'The daemon does not know that workspace.'
+    case 409:
+      return said.includes('no github grant')
+        ? 'The daemon holds no GitHub sign-in, so it cannot read the issue.'
+        : 'The workspace already has a worktree or branch for this issue.'
+    case 502:
+      return 'GitHub did not answer.'
+    case 503:
+      return 'The workspace machine did not answer.'
+  }
 }
+
+const noSignIn = (error: ApiError) => error.status === 409 && error.said.toLowerCase().includes('no github grant')
 
 const explain = (error: ApiError) => ({
   kind: error.kind,
   said: error.said,
   retryable: error.retryable,
-  describe: () => (error.status !== undefined ? SAYS[error.status] : undefined) ?? error.describe(),
+  describe: () => sentenceFor(error) ?? error.describe(),
 })
 
 /** Y-489: Start session on an inbox issue. The picker lists the workspaces
@@ -118,11 +133,16 @@ function Pick(props: { choice: Choice; issue: string }) {
         {workspace.name}
       </Button>
       <Mono className="start__machine">{workspace.machine}</Mono>
+      {choice.owned ? null : (
+        <Text scale="body-small" tone="variant">
+          Matched by folder name only. Check the repository before you start.
+        </Text>
+      )}
       {choice.reason ? <Text scale="body-small" tone="variant">{choice.reason}</Text> : null}
       {open.error ? (
         <ErrorSurface.Inline
           action={
-            open.error.status === 409 ? (
+            noSignIn(open.error) ? (
               <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="text">
                 Sign in
               </Button>

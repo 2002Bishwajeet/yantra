@@ -57,4 +57,29 @@ describe('pickWorkspaces', () => {
     expect(picks.ranked).toBe(false)
     expect(picks.choices[0]?.reason).toBeNull()
   })
+
+  it('finds the placement of a machine whatever its case', () => {
+    const picks = pickWorkspaces([ws('on-b', 'Cachyos-G14')], 'o/yantra', {
+      ranked: [placed('cachyos-g14', 70)],
+      rejected: [],
+    })
+    expect(picks.choices[0]?.reason).toBe('cachyos-g14 reason')
+    const slept = pickWorkspaces([ws('on-b', 'PI')], 'o/yantra', {
+      ranked: [],
+      rejected: [{ machine: 'pi', why: 'asleep_or_off', age_seconds: 900 }],
+    })
+    expect(slept.choices[0]?.asleep).toBe(true)
+  })
+
+  it('marks a workspace owned only when its path ends in owner/repo', () => {
+    const picks = pickWorkspaces(
+      [ws('exact', 'a', '/home/me/Github/Me/Yantra'), ws('guess', 'a', '/home/me/Github/yantra')],
+      'me/yantra',
+      null,
+    )
+    expect(picks.choices.map((one) => [one.workspace.name, one.owned])).toEqual([
+      ['exact', true],
+      ['guess', false],
+    ])
+  })
 })

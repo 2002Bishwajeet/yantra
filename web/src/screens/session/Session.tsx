@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRouteApi, Link, useLocation } from '@tanstack/react-router'
+import { getRouteApi, Link, useLocation, useNavigate } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
 import { useSessions, useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
 import { MISSING, statusQuery } from '@/api/queries'
@@ -135,6 +135,14 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const { name } = workspace
   // Y-489: the issue draft rides in location state, so its text stays out of the URL (ADR-0034).
   const draft = useLocation({ select: (here) => (here.state as { draft?: string } | undefined)?.draft })
+  const navigate = useNavigate()
+  // The draft is read once, then dropped from history.state so a reload or a Back does not bring it again.
+  const [carried, setCarried] = useState(draft)
+  if (draft !== undefined && draft !== carried) setCarried(draft)
+  useEffect(() => {
+    if (draft === undefined) return
+    void navigate({ to: '.', params: true, search: true, replace: true, state: {} as never })
+  }, [draft, navigate])
   const sessions = useSessions()
   const factor = useFormFactor()
   const now = useTick(true)
@@ -148,18 +156,19 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const chatOpened = chatFor === name
   // A chat reads its thread only when its socket opens, so a thread picked from the list
   // remounts it. A thread the chat itself named is already attached and does not.
-  const named = useRef(thread)
+  const [named, setNamed] = useState(thread)
   const [seen, setSeen] = useState(thread)
   const [epoch, setEpoch] = useState(0)
   if (thread !== seen) {
     setSeen(thread)
-    if (thread !== named.current) {
-      named.current = thread
+    if (thread !== named) {
+      setNamed(thread)
+      setCarried(undefined)
       setEpoch(epoch + 1)
     }
   }
   const chatNamed = (id: string) => {
-    named.current = id
+    setNamed(id)
     onThread(id)
   }
 
@@ -211,12 +220,12 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       {/* Only the open tab is mounted, except the chat: mounting the terminal
           opens an ssh, and tmux redraws the pane for whoever attaches next (D5 §3.5). */}
       <ErrorBoundary eyebrow="Session / Threads" layout="inline" resetKeys={[name]} title="The thread list broke">
-        <ThreadList name={name} thread={thread} view={view} />
+        <ThreadList key={name} name={name} thread={thread} view={view} />
       </ErrorBoundary>
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div hidden={view !== 'chat'}>
-            <Chat initialDraft={draft} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
+            <Chat initialDraft={draft ?? carried} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
           </div>
         ) : null}
         {view === 'terminal' ? (

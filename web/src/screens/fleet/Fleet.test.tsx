@@ -11,6 +11,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   unmount()
 })
 
@@ -89,6 +90,41 @@ describe('/fleet Start session', () => {
     // The composer is single-line in jsdom, which drops the newlines.
     expect((composer as HTMLTextAreaElement).value).toBe(contract.threadOpened.draft.replaceAll('\n', ''))
     expect(asked).toContain('POST /api/workspaces/yantra-web/threads')
+  })
+
+  it('drops the draft from history.state once Chat has it, and does not bring it back', async () => {
+    vi.stubGlobal('WebSocket', class { close() {} addEventListener() {} removeEventListener() {} })
+    mount('desktop', '/fleet')
+    await screen.findByText(/^looked /, {}, { timeout: 2000 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Start session on 2002Bishwajeet/yantra#118' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'yantra-web' }, { timeout: 2000 }))
+    const composer = (await screen.findByRole('textbox', { name: /Message/ }, { timeout: 5000 })) as HTMLTextAreaElement
+    await waitFor(() => expect((history.state as { draft?: string } | null)?.draft).toBeUndefined())
+    expect(composer.value).not.toBe('')
+    expect(location.search).toContain(`thread=${contract.threadOpened.thread}`)
+  })
+
+  it('reattaches the chat to the thread whose row is clicked', async () => {
+    const urls: string[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        constructor(url: string) {
+          urls.push(url)
+        }
+        close() {}
+        send() {}
+        addEventListener() {}
+        removeEventListener() {}
+      },
+    )
+    const [first, second] = contract.threads
+    mount('desktop', `/w/yantra-web?view=chat&thread=${first!.id}`)
+    await waitFor(() => expect(urls.some((one) => one.includes(`thread=${first!.id}`))).toBe(true), { timeout: 5000 })
+    const rows = await screen.findAllByRole('link', { name: new RegExp(second!.branch.split('/').pop()!) })
+    fireEvent.click(rows[0]!)
+    await waitFor(() => expect(urls.some((one) => one.includes(`thread=${second!.id}`))).toBe(true), { timeout: 5000 })
   })
 })
 
