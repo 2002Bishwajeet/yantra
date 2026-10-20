@@ -280,7 +280,16 @@ pub async fn start<E: Exec>(
     }
     let session = match tmux.ensure(exec, &keeper.session(), &dir, None).await? {
         Opened::Created(session) => session,
-        Opened::Attached(_) => return Ok(Started::Busy),
+        Opened::Attached(_) => {
+            if !stale(exec, tmux, keeper).await? {
+                return Ok(Started::Busy);
+            }
+            kill(exec, tmux, keeper).await?;
+            match tmux.ensure(exec, &keeper.session(), &dir, None).await? {
+                Opened::Created(session) => session,
+                Opened::Attached(_) => return Ok(Started::Busy),
+            }
+        }
     };
     let started = async {
         let prepared = exec.exec(&prepare(&dir, run)).await?;
@@ -300,6 +309,20 @@ pub async fn start<E: Exec>(
     Ok(Started::Running {
         pane: session.pane_id,
     })
+}
+
+/// Whether the keeper's session is one a failed start left behind, which no
+/// daemon will ever feed: its pane never got the script, or its agent is alive
+/// and `in` is still empty. Only a start under the thread's claim writes the
+/// first line, so a session nobody holds that has none is never fed (Y-541).
+pub async fn stale<E: Exec>(exec: &E, tmux: &Tmux, keeper: &Keeper) -> Result<bool, Error> {
+    let Some(found) = pane(exec, tmux, keeper).await? else {
+        return Ok(false);
+    };
+    if found.start_command.is_none() {
+        return Ok(true);
+    }
+    Ok(!found.dead && size(exec, keeper, File::In).await? == 0)
 }
 
 /// Empties the journals apart from `images/`, so they hold one keeper's life.
@@ -681,6 +704,8 @@ async fn read_once(
     }
 }
 
+/// The far loop ends the `tail` only on a dead pane or one tmux cannot find;
+/// any other answer, such as a tmux that failed to fork, is asked again.
 fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
     format!(
         "cd {dir} || {{ echo {ENDED} >&2; exit 1; }}\n\
@@ -688,9 +713,8 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
          t=$!\n\
          while sleep 2; do\n\
          \x20 kill -0 \"$t\" 2>/dev/null || exit 1\n\
-         \x20 case \"$({tmux} display-message -p -t {pane} '#{{pane_dead}}' 2>/dev/null)\" in\n\
-         \x20 0) ;;\n\
-         \x20 *) break ;;\n\
+         \x20 case \"$({tmux} display-message -p -t {pane} '#{{pane_dead}}' 2>&1)\" in\n\
+         \x20 1|*\"can't find\"*|*\"no server running\"*|*\"error connecting to\"*\"No such file\"*) break ;;\n\
          \x20 esac\n\
          done\n\
          kill \"$t\" 2>/dev/null\n\
@@ -958,6 +982,60 @@ mod tests {
             .arg(scratch.read("feed.pid").trim())
             .status();
         assert_eq!(ended(&mut keeper).code(), Some(0));
+    }
+
+    /// Answers every command with a path, as `Tmux::resolve`'s probe would.
+    struct Found(String);
+
+    impl Exec for Found {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            Ok(ssh::Output {
+                status: 0,
+                stdout: format!("{}\n", self.0).into_bytes(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    /// The far reader under the host's `/bin/sh`, against a tmux that first
+    /// answers nonsense, then `0`, then that it cannot find the pane. Only the
+    /// last ends the `tail`.
+    #[tokio::test]
+    async fn the_far_reader_ends_only_on_a_dead_or_missing_pane() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let scratch = Scratch::new("reader");
+        std::fs::write(scratch.path("out"), b"").expect("out");
+        let fake = scratch.path("tmux");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho x >>{calls}\ncase $(wc -l <{calls}) in\n\
+                 *1) echo 'server exited unexpectedly' >&2 ;;\n*2) echo 0 ;;\n\
+                 *) echo \"can't find pane: %9\" >&2; exit 1 ;;\nesac\n",
+                calls = sq(&scratch.path("calls").to_string_lossy())
+            ),
+        )
+        .expect("a fake tmux");
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
+            .expect("the fake runs");
+        let tmux = Tmux::resolve(&Found(fake.to_string_lossy().into_owned()))
+            .await
+            .expect("the fake resolves");
+        let script = reading(&tmux, &Keeper::new("w", "t"), "%9", 0).replacen(
+            "cd \"$HOME\"/.yantra/keep/'w'/'t'",
+            &format!("cd {}", sq(&scratch.0.to_string_lossy())),
+            1,
+        );
+        let out = Command::new("/bin/sh")
+            .args(["-c", &script])
+            .output()
+            .expect("sh runs");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(ENDED));
+        assert_eq!(
+            scratch.read("calls").lines().count(),
+            3,
+            "asked three times"
+        );
     }
 
     #[test]

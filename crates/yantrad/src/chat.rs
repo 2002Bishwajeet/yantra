@@ -484,6 +484,8 @@ trait Machine: Send + Sync + 'static {
     fn base(&self, place: &Place) -> impl Future<Output = Result<Option<u32>, String>> + Send;
     fn capture(&self, place: &Place) -> impl Future<Output = Result<u32, String>> + Send;
     fn diff(&self, place: &Place, turn: u32) -> impl Future<Output = Result<Diff, String>> + Send;
+    /// The newest checkpoint that has a diff, which is the last turn's.
+    fn latest(&self, place: &Place) -> impl Future<Output = Result<Option<u32>, String>> + Send;
     fn revert(&self, place: &Place, turn: u32) -> impl Future<Output = Result<(), String>> + Send;
 }
 
@@ -603,9 +605,12 @@ impl Machine for Fleet {
         let keep::Started::Running { pane } = started else {
             return Ok(Started::Busy);
         };
-        keep::write_mode(&self.ssh, &keeper, &mode_name(mode))
-            .await
-            .map_err(|error| chain(&error))?;
+        if let Err(error) = keep::write_mode(&self.ssh, &keeper, &mode_name(mode)).await {
+            // The lock goes with the start that failed; `keep::stale` catches a
+            // kill that fails too.
+            let _ = keep::kill(&self.ssh, tmux, &keeper).await;
+            return Err(chain(&error));
+        }
         let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
         let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), 0);
         let said = self.said(&keeper);
@@ -677,6 +682,16 @@ impl Machine for Fleet {
         else {
             return Ok(None);
         };
+        if keep::stale(&self.ssh, tmux, &keeper)
+            .await
+            .map_err(|error| chain(&error))?
+        {
+            // A failed start left it, and nothing will ever feed it.
+            keep::kill(&self.ssh, tmux, &keeper)
+                .await
+                .map_err(|error| chain(&error))?;
+            return Ok(None);
+        }
         let read = |file| keep::read(&self.ssh, &keeper, file, None);
         let run = String::from_utf8_lossy(&read(File::Run).await.map_err(|e| chain(&e))?)
             .trim()
@@ -823,6 +838,12 @@ impl Machine for Fleet {
 
     async fn diff(&self, place: &Place, turn: u32) -> Result<Diff, String> {
         checkpoint::diff(&self.ssh, place, turn)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn latest(&self, place: &Place) -> Result<Option<u32>, String> {
+        checkpoint::latest(&self.ssh, place)
             .await
             .map_err(|error| chain(&error))
     }
@@ -1069,6 +1090,9 @@ struct Published {
     /// The `turn.completed` the daemon made for the last turn, which no
     /// replay of `out` makes again, until the next turn starts.
     ended: Option<ThreadEvent>,
+    /// The last turn's `turn.diff.updated`, until the next turn starts or a
+    /// revert puts its files back (ADR-0035 decision 8).
+    diff: Option<ThreadEvent>,
 }
 
 impl Live {
@@ -1090,6 +1114,7 @@ impl Live {
                 sender: Some(sender),
                 prompts: 0,
                 ended: None,
+                diff: None,
             }),
         });
         (live, received)
@@ -1140,24 +1165,26 @@ impl Live {
             Event::TurnCompleted(_) if event.cursor.is_none() => {
                 self.lock().ended = Some(event.clone());
             }
-            Event::TurnStarted | Event::TurnCompleted(_) => self.lock().ended = None,
+            Event::TurnStarted => {
+                let mut state = self.lock();
+                state.ended = None;
+                state.diff = None;
+            }
+            Event::TurnCompleted(_) => self.lock().ended = None,
+            Event::TurnDiffUpdated(_) => self.lock().diff = Some(event.clone()),
             _ => {}
         }
         self.publish(event, event.cursor.as_deref());
     }
 
-    /// A subscription, the last cursor sent before it, and the last turn's
-    /// end when the daemon made it.
-    fn subscribe(
-        &self,
-    ) -> Option<(
-        Option<Cursor>,
-        Option<ThreadEvent>,
-        broadcast::Receiver<Sent>,
-    )> {
+    /// A subscription, the last cursor sent before it, and what the daemon
+    /// made for the last turn that no replay of `out` makes again: its end,
+    /// then its diff.
+    fn subscribe(&self) -> Option<(Option<Cursor>, Vec<ThreadEvent>, broadcast::Receiver<Sent>)> {
         let state = self.lock();
         let receiver = state.sender.as_ref()?.subscribe();
-        Some((state.last.clone(), state.ended.clone(), receiver))
+        let remade = state.ended.iter().chain(&state.diff).cloned().collect();
+        Some((state.last.clone(), remade, receiver))
     }
 
     /// Ends every subscription.
@@ -1420,7 +1447,8 @@ async fn heard_frame<M: Machine, P: Peer>(
                 if !machine.registry().lock().reverting.insert(place.id.clone()) {
                     return peer.say(&elsewhere()).await;
                 }
-                let said = revert(machine.as_ref(), name, &place, turn, peer).await;
+                let said =
+                    revert(machine.as_ref(), name, &place, turn, live.as_deref(), peer).await;
                 machine.registry().lock().reverting.remove(&place.id);
                 said
             }
@@ -1501,18 +1529,7 @@ async fn checkpointed<M: Machine>(
     match kept {
         Ok((turn, Diff { unified, truncated })) => {
             tracing::info!("chat {name}: checkpoint {turn} kept");
-            live.publish(
-                &ThreadEvent {
-                    thread_id: thread::name(place).to_owned(),
-                    cursor: None,
-                    event: Event::TurnDiffUpdated(TurnDiff {
-                        turn,
-                        unified_diff: unified,
-                        truncated,
-                    }),
-                },
-                None,
-            );
+            live.event(&diffed(place, turn, unified, truncated));
         }
         Err(said) => {
             tracing::warn!("chat {name}: no checkpoint: {said}");
@@ -1521,6 +1538,25 @@ async fn checkpointed<M: Machine>(
             }
         }
     }
+}
+
+fn diffed(place: &Place, turn: u32, unified_diff: String, truncated: bool) -> ThreadEvent {
+    ThreadEvent {
+        thread_id: thread::name(place).to_owned(),
+        cursor: None,
+        event: Event::TurnDiffUpdated(TurnDiff {
+            turn,
+            unified_diff,
+            truncated,
+        }),
+    }
+}
+
+/// The last turn's diff, for a tab back after its keeper has gone.
+async fn last_diff<M: Machine>(machine: &M, place: &Place) -> Option<ThreadEvent> {
+    let turn = within(machine.latest(place)).await.ok()??;
+    let Diff { unified, truncated } = within(machine.diff(place, turn)).await.ok()?;
+    Some(diffed(place, turn, unified, truncated))
 }
 
 async fn within<T>(call: impl Future<Output = Result<T, String>>) -> Result<T, String> {
@@ -1548,11 +1584,16 @@ async fn revert<M: Machine, P: Peer>(
     name: &str,
     place: &Place,
     turn: u32,
+    live: Option<&Live>,
     peer: &mut P,
 ) -> bool {
     match within(machine.revert(place, turn)).await {
         Ok(()) => {
             tracing::info!("chat {name}: reverted to checkpoint {turn}");
+            // A tab back later must not draw the reverted turn's diff again.
+            if let Some(live) = live {
+                live.lock().diff = None;
+            }
             peer.say(&ThreadEvent {
                 thread_id: thread::name(place).to_owned(),
                 cursor: None,
@@ -1733,6 +1774,7 @@ async fn attach<M: Machine, P: Peer>(
                     let ended = replayed.end(journals.said);
                     let mut events = missed(replayed.events, &after);
                     events.extend(ended);
+                    events.extend(last_diff(machine.as_ref(), &here.place).await);
                     say_all(peer, &events).await
                 }
                 _ => replay(machine.as_ref(), &here.place, None, peer).await,
@@ -1777,7 +1819,7 @@ async fn replay_live<M: Machine, P: Peer>(
     after: Option<Cursor>,
     peer: &mut P,
 ) -> Option<Sub> {
-    let (last, ended, receiver) = live.subscribe()?;
+    let (last, remade, receiver) = live.subscribe()?;
     let upto = last.as_ref().map_or(0, |last| last.end);
     let journals = match machine.journals(&here.place, Some(upto)).await {
         Ok(journals) => journals,
@@ -1824,9 +1866,7 @@ async fn replay_live<M: Machine, P: Peer>(
     if !say_all(peer, &events).await {
         return None;
     }
-    if let Some(ended) = ended
-        && !peer.say(&ended).await
-    {
+    if !say_all(peer, &remade).await {
         return None;
     }
     Some(Sub {
@@ -3534,6 +3574,12 @@ mod tests {
             })
         }
 
+        async fn latest(&self, _: &Place) -> Result<Option<u32>, String> {
+            Ok(lock(&self.checkpoints)
+                .checked_sub(1)
+                .filter(|&turn| turn > 0))
+        }
+
         async fn revert(&self, _: &Place, turn: u32) -> Result<(), String> {
             if self.revert_fails {
                 return Err("the thread has no checkpoint 4".to_owned());
@@ -4740,6 +4786,41 @@ mod tests {
         assert_eq!(diff["payload"]["turn"], 1);
     }
 
+    /// ADR-0035 decision 8 on a live keeper: a tab back after the turn ended
+    /// gets that turn's diff once, and none after a revert put its files back.
+    #[tokio::test]
+    async fn a_tab_back_after_an_acp_turn_ended_gets_its_diff_until_a_revert() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            ..Script::default()
+        });
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        let ended = through(&mut tab, "turn.diff.updated").await;
+        let cursor = ended
+            .iter()
+            .rev()
+            .find_map(|frame| frame["cursor"].as_str())
+            .expect("a cursor")
+            .to_owned();
+        tab.close();
+
+        let (mut back, _b) = connect_after(Arc::clone(&script), Some(THREAD), Some(&cursor));
+        assert_eq!(back.next().await["type"], "thread.started");
+        assert_eq!(Some(&back.next().await), ended.last(), "the diff");
+        assert!(back.quiet().await, "once");
+        back.send(json!({"type": "revert", "turn": 0}));
+        assert_eq!(back.next().await["type"], "thread.reverted");
+        back.close();
+
+        let (mut again, _c) = connect_after(Arc::clone(&script), Some(THREAD), Some(&cursor));
+        assert_eq!(again.next().await["type"], "thread.started");
+        assert!(again.quiet().await, "a reverted turn's diff is not sent");
+    }
+
     #[tokio::test]
     async fn checkpoint_a_capture_that_fails_says_so_in_gits_words() {
         let script = Arc::new(Script {
@@ -5239,7 +5320,7 @@ mod tests {
     }
 
     /// A turn that ended while the tab was away: its journals stay, so the
-    /// tab gets the end and not the transcript again.
+    /// tab gets the end and the turn's diff, and not the transcript again.
     #[tokio::test]
     async fn a_tab_back_after_its_turn_ended_gets_the_end() {
         let script = Arc::new(Script {
@@ -5291,11 +5372,13 @@ mod tests {
                 .cloned()
                 .collect()
         };
-        let mut caught = Vec::new();
-        for _ in 0..ended.len() - 1 {
-            caught.push(back.next().await);
-        }
+        let caught = through(&mut back, "turn.diff.updated").await;
         assert_eq!(cursored(&caught), cursored(&ended), "the end, once");
+        assert_eq!(
+            caught.last(),
+            ended.last(),
+            "and the turn's diff (ADR-0035 decision 8)"
+        );
         assert!(back.quiet().await, "and no transcript");
     }
 

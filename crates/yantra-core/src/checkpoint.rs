@@ -77,6 +77,21 @@ pub async fn capture<E: Exec>(exec: &E, place: &Place) -> Result<u32, Error> {
     number(&run(exec, &keep(place, false)).await?)
 }
 
+/// The newest checkpoint that has a diff, which is the last turn's, or `None`
+/// when the thread holds no checkpoint above 0. The numbers are contiguous.
+pub async fn latest<E: Exec>(exec: &E, place: &Place) -> Result<Option<u32>, Error> {
+    let count = run(
+        exec,
+        &format!(
+            "cd {} || exit\ngit for-each-ref --format=x {} | wc -l",
+            sq(&place.worktree),
+            sq(&refs(place))
+        ),
+    )
+    .await?;
+    Ok(number(&count)?.checked_sub(1).filter(|&turn| turn > 0))
+}
+
 fn number(stdout: &str) -> Result<u32, Error> {
     stdout.trim().parse().map_err(|_| Error::Git {
         stderr: format!("git printed `{}` for a checkpoint number", stdout.trim()),

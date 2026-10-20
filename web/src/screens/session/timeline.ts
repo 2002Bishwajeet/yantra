@@ -112,6 +112,11 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
       return { ...timeline, requests: [...timeline.requests, event.payload] }
     case 'turn.diff.updated': {
       const { turn, unifiedDiff, truncated } = event.payload
+      // A reopen sends the last turn's diff again (ADR-0035 decision 8). Only a
+      // revert frees a turn's number for a new card.
+      if (timeline.entries.some((one) => one.kind === 'diff' && one.turn === turn && !one.reverted)) {
+        return timeline
+      }
       // A turn's number comes back after a revert, so the id cannot be it.
       const diff: TurnDiff = {
         kind: 'diff',

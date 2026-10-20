@@ -221,6 +221,8 @@ async fn a_second_start_is_busy_and_leaves_the_journals() -> Result<()> {
     let keeper = Keeper::new("web", "2b3c4d5e6f7a8b9c");
     lab.start_keeper(&keeper, COUNTER, Limits::default())
         .await?;
+    // A running turn has its first line in `in`; one without is stale.
+    keep::append(&lab.ssh, &keeper, 0, b"{\"prompt\":1}\n").await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
     let before = lab.out_size(&keeper)?;
     let again = keep::start(
@@ -235,6 +237,69 @@ async fn a_second_start_is_busy_and_leaves_the_journals() -> Result<()> {
     ensure!(again == Started::Busy, "{again:?}");
     ensure!(lab.out_size(&keeper)? >= before, "out was not emptied");
     keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
+    Ok(())
+}
+
+/// Y-541: a start that failed after its session existed, and whose kill went
+/// over the same dead link, leaves a keeper nothing will feed. The next start
+/// replaces it, whether the script never reached the pane or the agent waits
+/// on an `in` that is still empty.
+#[tokio::test]
+async fn a_start_replaces_a_keeper_a_failed_start_left() -> Result<()> {
+    let Some(lab) = Lab::start("stale").await? else {
+        return Ok(());
+    };
+    let shell = Keeper::new("web", "9c0d1e2f3a4b5c6d");
+    // A plain shell, as `new-session` leaves it before the respawn, beside the
+    // journals of an earlier turn that `prepare` never emptied.
+    lab.fixture.run(&format!(
+        "d=~/.yantra/keep/web/{t} && mkdir -p $d && cd $d && echo old >run && echo '{{}}' >in \
+         && {tmux} new-session -d -s {s} -c $d",
+        t = shell.thread(),
+        s = shell.session(),
+        tmux = lab.tmux.path()
+    ))?;
+    ensure!(
+        keep::stale(&lab.ssh, &lab.tmux, &shell).await?,
+        "a shell is stale"
+    );
+    lab.start_keeper(&shell, "exec cat", Limits::default())
+        .await?;
+    let pane = keep::pane(&lab.ssh, &lab.tmux, &shell)
+        .await?
+        .expect("the new keeper");
+    ensure!(pane.start_command.is_some(), "the script is in the pane");
+    let run = keep::read(&lab.ssh, &shell, File::Run, None).await?;
+    ensure!(run != b"old\n", "the journals are emptied");
+
+    let unfed = Keeper::new("web", "0d1e2f3a4b5c6d7e");
+    let first = lab
+        .start_keeper(&unfed, "exec sleep 600", Limits::default())
+        .await?;
+    ensure!(
+        keep::stale(&lab.ssh, &lab.tmux, &unfed).await?,
+        "no line was fed"
+    );
+    let second = lab
+        .start_keeper(&unfed, "exec sleep 601", Limits::default())
+        .await?;
+    ensure!(second != first, "a new pane: {first} then {second}");
+    ensure!(
+        lab.fixture
+            .run("pgrep -f 'sleep 60[0]' || true")?
+            .trim()
+            .is_empty(),
+        "the unfed agent went with its session"
+    );
+    keep::append(&lab.ssh, &unfed, 0, b"{\"prompt\":1}\n").await?;
+    ensure!(
+        !keep::stale(&lab.ssh, &lab.tmux, &unfed).await?,
+        "a fed keeper is live"
+    );
+
+    for keeper in [&shell, &unfed] {
+        keep::kill(&lab.ssh, &lab.tmux, keeper).await?;
+    }
     Ok(())
 }
 
