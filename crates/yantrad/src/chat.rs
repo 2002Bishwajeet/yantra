@@ -40,7 +40,8 @@
 //!
 //! **`diff` gets one [`BranchDiffReply`]** (Y-490): everything the thread
 //! changed since its branch left the repository's `HEAD`, read through a
-//! private index, so it is answered while a turn runs.
+//! private index. It runs beside the socket's loop, so a turn's events and a
+//! `cancel` still flow, and a revert in the thread refuses it as busy.
 //!
 //! **A binary frame is an image** (Y-424). It goes to the thread's keeper
 //! directory through [`Images`] and gets exactly one [`Attachment`] in reply,
@@ -360,9 +361,10 @@ enum Kind {
     Unreachable,
     /// The harness has no login on the machine (ADR-0033 decision 6).
     NotLoggedIn,
-    /// git could not keep, diff or restore a checkpoint, or diff the
-    /// thread's branch.
+    /// git could not keep, diff or restore a checkpoint.
     Checkpoint,
+    /// git could not diff the thread's branch.
+    Diff,
 }
 
 fn failure(kind: Kind, said: impl Into<String>) -> Failure {
@@ -1384,6 +1386,8 @@ async fn converse<M: Machine, P: Peer>(
     // already lands in the thread's own directory.
     let mut early: Option<String> = None;
     let mut images: Option<Images> = None;
+    // A branch diff runs beside the loop and sends its frame back here.
+    let (diffs, mut diffed) = mpsc::unbounded_channel::<String>();
     loop {
         let open = tokio::select! {
             heard = peer.hear() => match heard {
@@ -1393,9 +1397,10 @@ async fn converse<M: Machine, P: Peer>(
                     peer.say(&reply).await
                 }
                 Some(Heard::Text(text)) => {
-                    heard_frame(&machine, name, &text, &mut here, &mut sub, &mut early, images.as_ref(), peer).await
+                    heard_frame(&machine, name, &text, &mut here, &mut sub, &mut early, images.as_ref(), &diffs, peer).await
                 }
             },
+            Some(text) = diffed.recv() => peer.say_text(text).await,
             sent = next_sent(&mut sub) => match sent {
                 News::Frame(text) => peer.say_text(text.to_string()).await,
                 News::Ended => {
@@ -1434,6 +1439,7 @@ async fn heard_frame<M: Machine, P: Peer>(
     sub: &mut Option<Sub>,
     early: &mut Option<String>,
     images: Option<&Images>,
+    diffs: &mpsc::UnboundedSender<String>,
     peer: &mut P,
 ) -> bool {
     let live = here
@@ -1518,13 +1524,25 @@ async fn heard_frame<M: Machine, P: Peer>(
                 said
             }
         },
-        // Read-only through a private index, so a running turn does not refuse it.
+        // A running turn does not refuse it: it reads through a private index.
         Ok(Frame::Diff) => match here.as_ref() {
             None => {
                 let said = "no thread is open, so there is nothing to diff";
                 peer.say(&failure(Kind::BadFrame, said)).await
             }
-            Some(here) => branch_diff(machine.as_ref(), name, &here.place, peer).await,
+            // A revert half done is no tree to diff.
+            Some(here) if machine.registry().lock().reverting.contains(&here.place.id) => {
+                peer.say(&elsewhere()).await
+            }
+            Some(here) => {
+                let (machine, name, place) =
+                    (Arc::clone(machine), name.to_owned(), here.place.clone());
+                let diffs = diffs.clone();
+                tokio::spawn(async move {
+                    let _ = diffs.send(branch_diff(machine.as_ref(), &name, &place).await);
+                });
+                true
+            }
         },
         Err(error) => {
             let said =
@@ -1682,24 +1700,20 @@ async fn revert<M: Machine, P: Peer>(
     }
 }
 
-/// Sends the thread's whole-branch diff. git's words are not logged either,
+/// The frame that answers a `diff`. git's words are not logged either,
 /// because they may name a path (Q5).
-async fn branch_diff<M: Machine, P: Peer>(
-    machine: &M,
-    name: &str,
-    place: &Place,
-    peer: &mut P,
-) -> bool {
-    match within(machine.branch_diff(place)).await {
+async fn branch_diff<M: Machine>(machine: &M, name: &str, place: &Place) -> String {
+    let reply = match within(machine.branch_diff(place)).await {
         Ok(diff) => {
             tracing::info!("chat {name}: branch diff sent");
-            peer.say(&BranchDiffReply::of(place, diff)).await
+            serde_json::to_string(&BranchDiffReply::of(place, diff))
         }
         Err(said) => {
             tracing::warn!("chat {name}: no branch diff");
-            peer.say(&failure(Kind::Checkpoint, said)).await
+            serde_json::to_string(&failure(Kind::Diff, said))
         }
-    }
+    };
+    reply.unwrap_or_default()
 }
 
 /// What an agent's refusal tells the browser: the login to make, or the
@@ -3028,6 +3042,15 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             .expect("a failure serialises"),
         ),
         (
+            "chatDiffFailed",
+            "ChatFailure",
+            serde_json::to_value(failure(
+                Kind::Diff,
+                "git could not keep or restore a checkpoint: fatal: bad object HEAD",
+            ))
+            .expect("a failure serialises"),
+        ),
+        (
             "chatNotLoggedIn",
             "ChatFailure",
             serde_json::to_value(not_logged_in(
@@ -3390,6 +3413,8 @@ mod tests {
         capture_hangs: bool,
         /// Holds a Claude start after its keeper exists, until notified.
         start_gate: Option<Arc<tokio::sync::Notify>>,
+        /// Holds a branch diff until notified, as a slow git would.
+        branch_gate: Option<Arc<tokio::sync::Notify>>,
         /// How many keepers were read back.
         adopted: Mutex<usize>,
         /// Shared by every tab connected to this script.
@@ -3715,6 +3740,9 @@ mod tests {
         }
 
         async fn branch_diff(&self, _: &Place) -> Result<BranchDiff, String> {
+            if let Some(gate) = &self.branch_gate {
+                gate.notified().await;
+            }
             if self.branch_fails {
                 return Err("git: fatal: the branch has no merge-base with HEAD".to_owned());
             }
@@ -5198,7 +5226,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn branch_diff_that_fails_is_a_checkpoint_failure_in_gits_words() {
+    async fn branch_diff_that_fails_is_a_diff_failure_in_gits_words() {
         let script = Arc::new(Script {
             threads: vec![place()],
             branch_fails: true,
@@ -5208,9 +5236,62 @@ mod tests {
         tab.next().await;
         assert_eq!(
             tab.next_after(json!({"type": "diff"})).await,
-            json!({"type": "error", "kind": "checkpoint",
+            json!({"type": "error", "kind": "diff",
                    "said": "git: fatal: the branch has no merge-base with HEAD"})
         );
+    }
+
+    #[tokio::test]
+    async fn branch_diff_while_a_revert_runs_is_busy() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        tab.next().await;
+        script.registry.lock().reverting.insert(place().id);
+        let said = tab.next_after(json!({"type": "diff"})).await;
+        assert_eq!(said["kind"], "busy", "{said}");
+        script.registry.lock().reverting.remove(&place().id);
+        let said = tab.next_after(json!({"type": "diff"})).await;
+        assert_eq!(said["type"], "branchDiff", "{said}");
+    }
+
+    /// A slow git holds neither the turn's events nor a cancel.
+    #[tokio::test]
+    async fn a_slow_branch_diff_runs_beside_the_turn() {
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let script = Arc::new(Script {
+            branch_gate: Some(Arc::clone(&gate)),
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "diff"}));
+        claude
+            .say(
+                json!({"type": "control_request", "request_id": "r1", "request": {
+                "subtype": "can_use_tool", "tool_name": "Bash",
+                "input": {"command": "touch a"}, "tool_use_id": "t1"}}),
+            )
+            .await;
+        assert_eq!(tab.next().await["type"], "request.opened");
+        tab.send(json!({"type": "cancel"}));
+        // The cancel first refuses the waiting request, then interrupts.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while claude.heard().await.expect("a line")["request"]["subtype"] != "interrupt" {}
+        })
+        .await
+        .expect("the cancel is read while the diff runs");
+        gate.notify_one();
+        let mut said = tab.next().await;
+        while said["type"] != "branchDiff" {
+            said = tab.next().await;
+        }
     }
 
     #[tokio::test]

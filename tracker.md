@@ -392,6 +392,7 @@ deleted everywhere else.
 | Y-540 | Act on the history redaction review findings (#410) | ⬜ todo | claude | — | **Done** when each finding in #410 is fixed with a test or answered as not needed, and the PR closes #410. |
 | Y-541 | Fix the two blocking findings of the Y-447 post-merge review | 🔵 review | claude | Y-447 | **Done** when a start that fails after the keeper session exists leaves no keeper, a tab back after its turn ended gets that turn's diff once, and each has a test that fails on 909c0cc. |
 | Y-542 | Act on the minor findings of the Y-447 post-merge review | ⬜ todo | claude | Y-541 | **Done** when each minor finding listed in PR #481 is fixed with a test or answered as not needed. |
+| Y-543 | Fix the open review findings of Y-490 | 🔵 review | claude | Y-490 | **Done** when a `diff` during a turn does not stall the socket, a diff waits for or refuses a running revert, a diff failure has its own error kind, the branch diff is one remote command, and each has a test that fails on bbdf6b1. **Merged 2026-10-20.** |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
