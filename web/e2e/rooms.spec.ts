@@ -34,12 +34,12 @@ test.describe('rooms', () => {
     await expect(log).toContainText('Two links are broken in the notes.')
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
 
-    await page.getByLabel('Message').fill('Fix the links, then ship.')
+    await page.getByRole('textbox', { name: 'Message' }).fill('Fix the links, then ship.')
     await page.getByRole('button', { name: 'Post' }).click()
     await expect(log.getByRole('listitem')).toHaveCount(3)
     await expect(log.getByRole('listitem').last()).toContainText('owner on pixel')
     await expect(log.getByRole('listitem').last()).toContainText('Fix the links, then ship.')
-    await expect(page.getByLabel('Message')).toHaveValue('')
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('')
     // A person's post sets the count to 0, so the pause is gone with it.
     await expect(page.getByRole('button', { name: 'Resume' })).toBeHidden()
     await expect(page.getByText('0/20 · 2 members · 3 messages')).toBeVisible()
