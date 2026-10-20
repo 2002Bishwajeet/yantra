@@ -24,10 +24,10 @@ use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO, branch, said};
 pub use crate::delegate::{Error, Place, Summary};
 use crate::github::{self, Github, Issue, IssueRef, PullState, Token};
-use crate::keep::Keeper;
+use crate::keep::{self, Keeper};
 use crate::logs::{self, Transcript};
 use crate::ssh::{self, Exec, Ssh};
-use crate::tmux::sq;
+use crate::tmux::{self, Tmux, sq};
 use crate::tokens::{self, Spend};
 use crate::workspace::{self, Workspace};
 
@@ -140,8 +140,8 @@ pub async fn open_for_issue<E: Exec>(
         },
         Err(error) => Error::Ssh(error),
     };
-    // The write's own error is the one worth reporting.
-    let _ = remove(exec, &place).await;
+    // The write's own error is the one worth reporting. No keeper runs yet.
+    let _ = removal(exec, &place).await;
     Err(failed)
 }
 
@@ -452,10 +452,21 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
     }
 }
 
-/// Removes the worktree, the branch, the checkpoints and the keeper's
-/// journals and images, uncommitted work included. The only path that deletes
-/// a thread.
+/// Kills the keeper, then removes the worktree, branch, checkpoints, journals and images: the
+/// only path that deletes a thread. A keeper that will not go keeps all of it.
 pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
+    if let Some(keeper) = Keeper::of(place) {
+        match Tmux::resolve(exec).await {
+            Ok(tmux) => keep::kill(exec, &tmux, &keeper).await?,
+            // A machine with no tmux runs no keeper.
+            Err(tmux::Error::NotFound { .. }) => {}
+            Err(error) => return Err(keep::Error::from(error).into()),
+        }
+    }
+    removal(exec, place).await
+}
+
+async fn removal<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
     let journals =
         Keeper::of(place).map_or_else(String::new, |keeper| format!(" && {}", keeper.removal()));
     let out = exec
@@ -727,14 +738,38 @@ mod tests {
         ));
     }
 
+    const KILL: &str = "'/usr/bin/tmux' kill-session -t '=yantra-keep-web-11111111'";
+
+    fn found() -> ssh::Output {
+        out(0, b"/usr/bin/tmux\n", "")
+    }
+
+    /// A machine whose every command fails before it reaches the shell.
+    struct Away(Mutex<usize>);
+
+    impl Exec for Away {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            *self.0.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            Err(ssh::Error::Transport {
+                host: "m".to_owned(),
+                diagnosis: "Connection timed out".to_owned(),
+            })
+        }
+    }
+
     #[tokio::test]
-    async fn remove_runs_the_removal_and_names_a_refusal() {
-        let machine = Machine::answering(vec![out(0, b"", "")]);
+    async fn remove_kills_the_keeper_then_runs_the_removal_and_names_a_refusal() {
+        let machine = Machine::answering(vec![found(), out(0, b"", ""), out(0, b"", "")]);
         remove(&machine, &place()).await.expect("removed");
+        let asked = machine.asked();
+        assert_eq!(asked.len(), 3, "{asked:?}");
+        assert!(asked[0].contains("command -v tmux"));
         assert_eq!(
-            machine.asked(),
-            [format!(
-                "{{ [ ! -e '{WORKTREE}' ] \
+            asked[1..],
+            [
+                KILL.to_owned(),
+                format!(
+                    "{{ [ ! -e '{WORKTREE}' ] \
                  || git -C '{REPO}' worktree remove --force '{WORKTREE}'; }} \
                  && git -C '{REPO}' worktree prune \
                  && {{ ! git -C '{REPO}' rev-parse -q --verify \
@@ -744,14 +779,49 @@ mod tests {
                  'refs/yantra/checkpoints/chat/web/11111111' \
                  | git -C '{REPO}' update-ref --stdin \
                  && rm -rf \"$HOME\"/.yantra/keep/'web'/'11111111'"
-            )]
+                )
+            ]
         );
 
-        let refused = Machine::answering(vec![out(128, b"", "fatal: not a working tree\n")]);
+        let refused = Machine::answering(vec![
+            found(),
+            out(0, b"", ""),
+            out(128, b"", "fatal: not a working tree\n"),
+        ]);
         assert!(matches!(
             remove(&refused, &place()).await,
             Err(Error::Worktree { stderr }) if stderr == "fatal: not a working tree"
         ));
+
+        // A keeper that stays keeps its journals too.
+        let kept = Machine::answering(vec![found(), out(1, b"", "permission denied\n")]);
+        assert!(matches!(
+            remove(&kept, &place()).await,
+            Err(Error::Keeper(_))
+        ));
+        assert_eq!(kept.asked().len(), 2, "nothing is removed");
+
+        // A machine with no tmux has no keeper to kill.
+        let bare = Machine::answering(vec![out(1, b"", ""), out(0, b"", "")]);
+        remove(&bare, &place()).await.expect("removed");
+        assert_eq!(bare.asked().len(), 2, "the probe, then the removal");
+        assert!(bare.asked()[1].contains("worktree remove --force"));
+    }
+
+    /// Y-542: a machine that cannot say whether tmux runs a keeper keeps
+    /// the thread, so no journal goes from under a running agent.
+    #[tokio::test]
+    async fn remove_on_a_machine_that_does_not_answer_removes_nothing() {
+        let away = Away(Mutex::new(0));
+        assert!(matches!(
+            remove(&away, &place()).await,
+            Err(Error::Keeper(_))
+        ));
+        assert_eq!(
+            *away.0.lock().unwrap_or_else(PoisonError::into_inner),
+            1,
+            "only the tmux probe"
+        );
     }
 
     #[tokio::test]

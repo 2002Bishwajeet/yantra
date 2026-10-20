@@ -214,7 +214,9 @@ pub(crate) fn from_delegate(error: &delegate::Error) -> StatusCode {
             StatusCode::BAD_REQUEST
         }
         delegate::Error::Worktree { .. } | delegate::Error::Ended => StatusCode::CONFLICT,
-        delegate::Error::Ssh(_) | delegate::Error::Acp(_) => StatusCode::SERVICE_UNAVAILABLE,
+        delegate::Error::Ssh(_) | delegate::Error::Acp(_) | delegate::Error::Keeper(_) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
         delegate::Error::Random(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

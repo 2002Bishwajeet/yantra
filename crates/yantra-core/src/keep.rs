@@ -229,6 +229,11 @@ pub enum Error {
     /// of order.
     #[error("the keeper's `in` holds {found} bytes where {expected} were written")]
     Behind { found: String, expected: u64 },
+
+    /// The keeper's `run` is another one's, so a new keeper holds the thread
+    /// and this writer's turn is over.
+    #[error("a new keeper replaced the one this writer fed")]
+    Replaced,
 }
 
 fn colon(said: &str) -> String {
@@ -370,19 +375,24 @@ pub async fn kill<E: Exec>(exec: &E, tmux: &Tmux, keeper: &Keeper) -> Result<(),
     Ok(tmux.kill(exec, &keeper.session()).await?)
 }
 
-/// Closes the agent's stdin by killing the `tail` that feeds it. A stdin that
-/// is already closed is success.
-pub async fn close_stdin<E: Exec>(exec: &E, keeper: &Keeper) -> Result<(), Error> {
-    let out = exec
-        .exec(&format!(
-            "cd {} 2>/dev/null || exit 0; [ ! -f feed.pid ] || kill \"$(cat feed.pid)\" 2>/dev/null; exit 0",
-            keeper.dir()
-        ))
-        .await?;
+/// Closes the agent's stdin by killing the `tail` that feeds it, when the
+/// keeper is still `run`'s. A stdin that is already closed is success.
+pub async fn close_stdin<E: Exec>(exec: &E, keeper: &Keeper, run: &str) -> Result<(), Error> {
+    let out = exec.exec(&closing(keeper, run)).await?;
     if !out.success() {
         return Err(failed("closed", &out));
     }
     Ok(())
+}
+
+/// A new keeper's `feed.pid` is its own tail, which an old run must not kill.
+fn closing(keeper: &Keeper, run: &str) -> String {
+    format!(
+        "cd {} 2>/dev/null || exit 0; [ \"$(cat run 2>/dev/null)\" = {} ] || exit 0; \
+         [ ! -f feed.pid ] || kill \"$(cat feed.pid)\" 2>/dev/null; exit 0",
+        keeper.dir(),
+        sq(run)
+    )
 }
 
 /// One of a keeper's files.
@@ -464,10 +474,15 @@ pub async fn write_mode<E: Exec>(exec: &E, keeper: &Keeper, mode: &str) -> Resul
     Ok(())
 }
 
-/// Appends `line` to `in`, which holds `at` bytes before it. The line rides
-/// stdin, so its size is not bound by a command line. A retry after a lost
-/// answer finds the line already there and succeeds, so no line lands twice.
-pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<(), Error> {
+/// Appends `line` on stdin to `in`, which holds `at` bytes, while the keeper is `run`'s. A retry
+/// after a lost answer finds the line already there, so no line lands twice.
+pub async fn append(
+    ssh: &Ssh,
+    keeper: &Keeper,
+    run: &str,
+    at: u64,
+    line: &[u8],
+) -> Result<(), Error> {
     let len = line.len() as u64;
     let ssh::Piped {
         mut child,
@@ -475,7 +490,7 @@ pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<
         stdout,
         stderr,
         log,
-    } = ssh.stdio(&appending(keeper, at, len))?;
+    } = ssh.stdio(&appending(keeper, run, at, len))?;
     drop(stdout);
     let said = crate::acp::diagnosis(stderr, log);
     let fed = async move {
@@ -492,6 +507,7 @@ pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<
             found: said,
             expected: at,
         }),
+        5 => Err(Error::Replaced),
         _ => Err(Error::Journal {
             what: "written",
             status,
@@ -500,10 +516,11 @@ pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<
     }
 }
 
-fn appending(keeper: &Keeper, at: u64, len: u64) -> String {
+fn appending(keeper: &Keeper, run: &str, at: u64, len: u64) -> String {
     let end = at + len;
     format!(
         "cd {} || exit 1\n\
+         if [ \"$(cat run 2>/dev/null)\" != {} ]; then cat >/dev/null; exit 5; fi\n\
          n=$(($(wc -c <in))) || exit 1\n\
          if [ \"$n\" -eq {end} ]; then cat >/dev/null; exit 0; fi\n\
          if [ \"$n\" -ne {at} ]; then cat >/dev/null; echo \"$n\" >&2; exit 3; fi\n\
@@ -513,18 +530,26 @@ fn appending(keeper: &Keeper, at: u64, len: u64) -> String {
          s=$?\n\
          rm -f in.part\n\
          exit \"$s\"\n",
-        keeper.dir()
+        keeper.dir(),
+        sq(run)
     )
 }
 
-/// A writer whose every line is appended to `in`, which holds `at` bytes now.
-/// A line that cannot be written is tried again for as long as the keeper's
-/// pane lives, as the reader is. An `in` that another writer changed ends the
-/// keeper and says why in `err`, so the turn fails where it can be seen.
-pub fn feed(ssh: Ssh, tmux: Tmux, keeper: Keeper, at: u64) -> Feed {
+/// A writer for keeper `run` that appends each line to `in` from byte `at`, retrying while the
+/// pane lives. It gives up on a new run, a dropped [`Feed`], or a machine silent too long.
+pub fn feed(ssh: Ssh, tmux: Tmux, keeper: Keeper, run: &str, at: u64) -> Feed {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
     let (close, closed) = oneshot::channel();
-    tokio::spawn(pump_in(ssh, tmux, keeper, at, ours, closed));
+    tokio::spawn(pump_in(
+        ssh,
+        tmux,
+        keeper,
+        run.to_owned(),
+        at,
+        ours,
+        closed,
+        patience(),
+    ));
     Feed {
         inner: theirs,
         close: Some(close),
@@ -561,16 +586,32 @@ impl AsyncWrite for Feed {
     }
 }
 
+/// How long a reader or a writer waits for a machine that does not answer.
+/// By then the keeper's idle limit has ended the agent.
+fn patience() -> Duration {
+    Duration::from_secs(Limits::default().idle)
+}
+
+/// Whether the machine has not answered for `patience`, counted from the
+/// first failure in `away`.
+fn gave_up(away: &mut Option<tokio::time::Instant>, patience: Duration) -> bool {
+    away.get_or_insert_with(tokio::time::Instant::now).elapsed() >= patience
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn pump_in(
     ssh: Ssh,
     tmux: Tmux,
     keeper: Keeper,
+    run: String,
     mut at: u64,
     from: DuplexStream,
     mut closed: oneshot::Receiver<()>,
+    patience: Duration,
 ) {
     let mut lines = BufReader::new(from);
     let mut line = Vec::new();
+    let mut shut = false;
     loop {
         line.clear();
         match lines.read_until(b'\n', &mut line).await {
@@ -579,27 +620,32 @@ async fn pump_in(
             _ => return,
         }
         let mut wait = Duration::from_secs(1);
+        let mut away = None;
         loop {
-            let tried = tokio::time::timeout(APPEND_WITHIN, append(&ssh, &keeper, at, &line)).await;
+            let tried =
+                tokio::time::timeout(APPEND_WITHIN, append(&ssh, &keeper, &run, at, &line)).await;
             match tried {
                 Ok(Ok(())) => break,
+                // The new keeper's turn is not this writer's to end.
+                Ok(Err(Error::Replaced)) => return,
                 Ok(Err(behind @ Error::Behind { .. })) => {
                     let _ = ssh
-                        .exec(&format!(
-                            "cd {} && printf '%s\\n' {} >>err",
-                            keeper.dir(),
-                            sq(&format!("yantra: {behind}"))
-                        ))
+                        .exec(&ending(&tmux, &keeper, &run, &format!("yantra: {behind}")))
                         .await;
-                    let _ = kill(&ssh, &tmux, &keeper).await;
                     return;
                 }
                 _ => {
-                    // A pane that is gone or dead reads no more lines.
-                    if let Ok(found) = pane(&ssh, &tmux, &keeper).await
-                        && found.is_none_or(|found| found.dead)
-                    {
-                        return;
+                    match closed.try_recv() {
+                        Ok(()) => shut = true,
+                        Err(oneshot::error::TryRecvError::Closed) if !shut => return,
+                        Err(_) => {}
+                    }
+                    match pane(&ssh, &tmux, &keeper).await {
+                        // A pane that is gone or dead reads no more lines.
+                        Ok(found) if found.as_ref().is_none_or(|found| found.dead) => return,
+                        Ok(_) => away = None,
+                        Err(_) if gave_up(&mut away, patience) => return,
+                        Err(_) => {}
                     }
                     tokio::time::sleep(wait).await;
                     wait = (wait * 2).min(BACKOFF);
@@ -608,18 +654,32 @@ async fn pump_in(
         }
         at += line.len() as u64;
     }
-    if closed.try_recv().is_ok() {
-        let _ = close_stdin(&ssh, &keeper).await;
+    if shut || closed.try_recv().is_ok() {
+        let _ = close_stdin(&ssh, &keeper, &run).await;
     }
 }
 
-/// A reader of `out` from byte `from` on, which outlives its `ssh`: when one
-/// drops while the pane lives, another carries on from the next byte, after 1,
-/// 2, 4 and then every 8 seconds (ADR-0035 decision 6). Once the pane is dead
-/// it reads the rest of `out` and ends.
+/// Says `said` in `err` and kills the keeper, only while it is `run`'s.
+fn ending(tmux: &Tmux, keeper: &Keeper, run: &str, said: &str) -> String {
+    format!(
+        "cd {} 2>/dev/null || exit 0\n\
+         [ \"$(cat run 2>/dev/null)\" = {} ] || exit 0\n\
+         printf '%s\\n' {} >>err\n\
+         {} kill-session -t {} 2>/dev/null\n\
+         exit 0\n",
+        keeper.dir(),
+        sq(run),
+        sq(said),
+        sq(tmux.path()),
+        sq(&format!("={}", keeper.session()))
+    )
+}
+
+/// A reader of `out` from byte `from` on that reconnects while the pane lives (ADR-0035 decision
+/// 6). It ends once the dead pane is drained, nobody reads it, or the machine is silent too long.
 pub fn follow(ssh: Ssh, tmux: Tmux, keeper: Keeper, pane: String, from: u64) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
-    tokio::spawn(pump_out(ssh, tmux, keeper, pane, from, ours));
+    tokio::spawn(pump_out(ssh, tmux, keeper, pane, from, ours, patience()));
     theirs
 }
 
@@ -640,8 +700,10 @@ async fn pump_out(
     pane: String,
     mut at: u64,
     mut to: DuplexStream,
+    patience: Duration,
 ) {
     let mut wait = Duration::from_secs(1);
+    let mut away = None;
     loop {
         let before = at;
         match read_once(&ssh, &tmux, &keeper, &pane, &mut at, &mut to).await {
@@ -650,7 +712,21 @@ async fn pump_out(
                 drain(&ssh, &keeper, at, &mut to).await;
                 return;
             }
-            Read::Dropped => {}
+            Read::Dropped => {
+                if unread(&mut to).await {
+                    return;
+                }
+                match self::pane(&ssh, &tmux, &keeper).await {
+                    Ok(found) if found.as_ref().is_none_or(|found| found.dead) => {
+                        drain(&ssh, &keeper, at, &mut to).await;
+                        return;
+                    }
+                    Ok(_) => away = None,
+                    Err(_) if at > before => away = None,
+                    Err(_) if gave_up(&mut away, patience) => return,
+                    Err(_) => {}
+                }
+            }
         }
         if at > before {
             wait = Duration::from_secs(1);
@@ -727,11 +803,11 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
 }
 
 /// The rest of `out` once the pane is dead, which the far `tail` may not have
-/// sent before it was killed.
-async fn drain(ssh: &Ssh, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
+/// sent before it was killed. It stops once nobody reads `to`.
+async fn drain<E: Exec>(exec: &E, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
     let mut wait = Duration::from_secs(1);
     for _ in 0..DRAIN_TRIES {
-        let read = ssh
+        let read = exec
             .exec(&format!(
                 "cd {} 2>/dev/null || exit 0; tail -c +{} out",
                 keeper.dir(),
@@ -744,9 +820,23 @@ async fn drain(ssh: &Ssh, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
             let _ = to.write_all(&out.stdout).await;
             return;
         }
+        if unread(to).await {
+            return;
+        }
         tokio::time::sleep(wait).await;
         wait = (wait * 2).min(BACKOFF);
     }
+}
+
+/// Whether the stream's reader was dropped. An empty write fails only then.
+async fn unread(to: &mut DuplexStream) -> bool {
+    std::future::poll_fn(|cx| {
+        Poll::Ready(matches!(
+            Pin::new(&mut *to).poll_write(cx, &[]),
+            Poll::Ready(Err(_))
+        ))
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -1040,27 +1130,31 @@ mod tests {
 
     #[test]
     fn the_append_command_writes_only_at_the_offset_it_names() {
-        let script = appending(&Keeper::new("w", "t"), 10, 4);
+        let script = appending(&Keeper::new("w", "t"), "r1", 10, 4);
         assert!(script.starts_with("cd \"$HOME\"/.yantra/keep/'w'/'t' || exit 1\n"));
+        assert!(script.contains(
+            "if [ \"$(cat run 2>/dev/null)\" != 'r1' ]; then cat >/dev/null; exit 5; fi"
+        ));
         assert!(script.contains("if [ \"$n\" -eq 14 ]; then cat >/dev/null; exit 0; fi"));
         assert!(script.contains("if [ \"$n\" -ne 10 ]; then"));
         assert!(script.contains("-ne 4 ]; then rm -f in.part; exit 4; fi"));
     }
 
-    /// The append's three cases under the host's `/bin/sh`: a line lands at
-    /// its offset, a retry of it lands nothing, and an offset that is wrong
-    /// lands nothing and says so.
+    /// The append's four cases under the host's `/bin/sh`: a line lands at its offset once,
+    /// and a wrong offset or another run's writer lands nothing.
     #[test]
     fn an_append_lands_once_and_never_out_of_order() {
         let scratch = Scratch::new("append");
         std::fs::write(scratch.path("in"), b"0123456789").expect("in");
-        let run = |at: u64, line: &str| {
+        std::fs::write(scratch.path("run"), b"r1\n").expect("run");
+        let run_as = |keeper_run: &str, at: u64, line: &str| {
             use std::io::Write as _;
-            let script = appending(&Keeper::new("w", "t"), at, line.len() as u64).replacen(
-                "cd \"$HOME\"/.yantra/keep/'w'/'t'",
-                &format!("cd {}", sq(&scratch.0.to_string_lossy())),
-                1,
-            );
+            let script = appending(&Keeper::new("w", "t"), keeper_run, at, line.len() as u64)
+                .replacen(
+                    "cd \"$HOME\"/.yantra/keep/'w'/'t'",
+                    &format!("cd {}", sq(&scratch.0.to_string_lossy())),
+                    1,
+                );
             let mut child = Command::new("/bin/sh")
                 .args(["-c", &script])
                 .stdin(std::process::Stdio::piped())
@@ -1075,12 +1169,305 @@ mod tests {
                 .expect("written");
             child.wait().expect("it ends").code()
         };
+        let run = |at: u64, line: &str| run_as("r1", at, line);
         assert_eq!(run(10, "abc\n"), Some(0));
         assert_eq!(scratch.read("in"), "0123456789abc\n");
         assert_eq!(run(10, "abc\n"), Some(0), "a retry finds it there");
         assert_eq!(scratch.read("in"), "0123456789abc\n");
         assert_eq!(run(3, "zzz\n"), Some(3));
         assert_eq!(scratch.read("in"), "0123456789abc\n");
+        // A stale writer at the right offset still lands nothing (Y-542).
+        assert_eq!(run_as("r0", 14, "old\n"), Some(5));
+        assert_eq!(scratch.read("in"), "0123456789abc\n");
         assert!(!scratch.path("in.part").exists());
+    }
+
+    /// `close_stdin` kills the tail only for the run that names the keeper,
+    /// so a stale writer cannot end a new keeper's agent.
+    #[test]
+    fn a_close_of_another_run_leaves_the_tail() {
+        let scratch = Scratch::new("close");
+        std::fs::write(scratch.path("run"), b"r1\n").expect("run");
+        let mut tail = Command::new("sleep").arg("60").spawn().expect("sleep runs");
+        std::fs::write(scratch.path("feed.pid"), format!("{}\n", tail.id())).expect("feed.pid");
+        let close = |run: &str| {
+            let script = closing(&Keeper::new("w", "t"), run).replacen(
+                "cd \"$HOME\"/.yantra/keep/'w'/'t'",
+                &format!("cd {}", sq(&scratch.0.to_string_lossy())),
+                1,
+            );
+            Command::new("/bin/sh")
+                .args(["-c", &script])
+                .status()
+                .expect("sh runs")
+                .code()
+        };
+        assert_eq!(close("r0"), Some(0));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            tail.try_wait().expect("waitable").is_none(),
+            "another run's close leaves the tail"
+        );
+        assert_eq!(close("r1"), Some(0));
+        let mut status = None;
+        until("the tail ends", || {
+            status = tail.try_wait().expect("waitable");
+            status.is_some()
+        });
+    }
+
+    /// Fails every command until `from` has passed, then answers with `out`.
+    struct Late {
+        from: tokio::time::Instant,
+        out: &'static [u8],
+        asked: std::sync::Mutex<u32>,
+    }
+
+    impl Exec for Late {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            *self
+                .asked
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+            if tokio::time::Instant::now() < self.from {
+                return Err(ssh::Error::Transport {
+                    host: "m".to_owned(),
+                    diagnosis: "Connection timed out".to_owned(),
+                });
+            }
+            Ok(ssh::Output {
+                status: 0,
+                stdout: self.out.to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    /// Y-542: the last read of a dead keeper's `out` is tried six times over
+    /// about 31 s, so a machine that never comes back frees the thread.
+    #[tokio::test(start_paused = true)]
+    async fn the_drain_gives_up_on_a_machine_that_does_not_come_back() {
+        let machine = Late {
+            from: tokio::time::Instant::now() + Duration::from_secs(1 << 30),
+            out: b"",
+            asked: std::sync::Mutex::new(0),
+        };
+        let (mut ours, _theirs) = tokio::io::duplex(1 << 10);
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            drain(&machine, &Keeper::new("w", "t"), 0, &mut ours),
+        )
+        .await
+        .expect("the drain gives up");
+        assert_eq!(*machine.asked.lock().expect("a lock"), DRAIN_TRIES);
+
+        let back = Late {
+            from: tokio::time::Instant::now() + Duration::from_secs(5),
+            out: b"{\"type\":\"result\"}\n",
+            asked: std::sync::Mutex::new(0),
+        };
+        let (mut ours, mut theirs) = tokio::io::duplex(1 << 10);
+        drain(&back, &Keeper::new("w", "t"), 0, &mut ours).await;
+        drop(ours);
+        let mut read = Vec::new();
+        theirs.read_to_end(&mut read).await.expect("the bytes");
+        assert_eq!(read, b"{\"type\":\"result\"}\n", "a machine back in time");
+    }
+
+    /// An `ssh` that fails before it connects, as a machine that does not
+    /// answer.
+    fn nowhere() -> Ssh {
+        Ssh::new(ssh::Machine {
+            host: "nowhere.invalid".to_owned(),
+            user: None,
+            port: None,
+            identity: None,
+            state_dir: "/nonexistent".into(),
+        })
+        .expect("a short control path")
+    }
+
+    async fn some_tmux() -> Tmux {
+        Tmux::resolve(&Found("/usr/bin/tmux".to_owned()))
+            .await
+            .expect("a tmux")
+    }
+
+    /// Y-542: a reader whose machine does not answer ends once nobody reads
+    /// it, and does not ask that machine every 8 seconds forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_reader_nobody_reads_ends_while_its_machine_is_away() {
+        let (ours, theirs) = tokio::io::duplex(1 << 10);
+        let pump = tokio::spawn(pump_out(
+            nowhere(),
+            some_tmux().await,
+            Keeper::new("w", "t"),
+            "%1".to_owned(),
+            0,
+            ours,
+            patience(),
+        ));
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert!(!pump.is_finished(), "a reader that is read waits on");
+        drop(theirs);
+        tokio::time::timeout(Duration::from_secs(60), pump)
+            .await
+            .expect("the reader ends")
+            .expect("it does not panic");
+    }
+
+    /// Y-542: the last read of a dead keeper's `out` ends once nobody reads
+    /// it, though the machine never answers.
+    #[tokio::test(start_paused = true)]
+    async fn a_drain_nobody_reads_ends_while_its_machine_is_away() {
+        let machine = Late {
+            from: tokio::time::Instant::now() + Duration::from_secs(1 << 30),
+            out: b"",
+            asked: std::sync::Mutex::new(0),
+        };
+        let (mut ours, theirs) = tokio::io::duplex(1 << 10);
+        drop(theirs);
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            drain(&machine, &Keeper::new("w", "t"), 0, &mut ours),
+        )
+        .await
+        .expect("the drain ends");
+    }
+
+    /// Y-542: a line that waits for a silent machine is given up once its
+    /// writer is dropped; a writer that is shut down still waits to send it.
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_writer_gives_up_its_line_while_its_machine_is_away() {
+        let pump = |shut: bool| async move {
+            let (ours, theirs) = tokio::io::duplex(1 << 10);
+            let (close, closed) = oneshot::channel();
+            let mut feed = Feed {
+                inner: theirs,
+                close: Some(close),
+            };
+            let pump = tokio::spawn(pump_in(
+                nowhere(),
+                some_tmux().await,
+                Keeper::new("w", "t"),
+                "r1".to_owned(),
+                0,
+                ours,
+                closed,
+                patience(),
+            ));
+            feed.write_all(b"{}\n").await.expect("written");
+            if shut {
+                feed.shutdown().await.expect("shut");
+            }
+            drop(feed);
+            tokio::time::timeout(Duration::from_secs(60), pump).await
+        };
+        pump(false)
+            .await
+            .expect("a dropped writer ends")
+            .expect("it does not panic");
+        assert!(
+            pump(true).await.is_err(),
+            "a writer shut down still waits for the machine"
+        );
+    }
+
+    /// Y-542: a reader and a writer that are still held give up on a machine
+    /// that has not answered for their patience, so neither waits forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_reader_and_a_writer_give_up_on_a_machine_away_past_their_patience() {
+        let patience = Duration::from_secs(120);
+        let (ours, _theirs) = tokio::io::duplex(1 << 10);
+        let reader = tokio::spawn(pump_out(
+            nowhere(),
+            some_tmux().await,
+            Keeper::new("w", "t"),
+            "%1".to_owned(),
+            0,
+            ours,
+            patience,
+        ));
+        let (ours, theirs) = tokio::io::duplex(1 << 10);
+        let (close, closed) = oneshot::channel();
+        let mut feed = Feed {
+            inner: theirs,
+            close: Some(close),
+        };
+        let writer = tokio::spawn(pump_in(
+            nowhere(),
+            some_tmux().await,
+            Keeper::new("w", "t"),
+            "r1".to_owned(),
+            0,
+            ours,
+            closed,
+            patience,
+        ));
+        feed.write_all(b"{}\n").await.expect("written");
+        feed.shutdown().await.expect("shut");
+        tokio::time::sleep(patience / 2).await;
+        assert!(
+            !reader.is_finished(),
+            "the reader waits within its patience"
+        );
+        assert!(
+            !writer.is_finished(),
+            "the writer waits within its patience"
+        );
+        tokio::time::timeout(patience * 2, reader)
+            .await
+            .expect("the reader gives up")
+            .expect("it does not panic");
+        tokio::time::timeout(patience * 2, writer)
+            .await
+            .expect("the writer gives up")
+            .expect("it does not panic");
+        drop(feed);
+    }
+
+    /// Y-542: a writer that finds `in` out of order ends its keeper only
+    /// while `run` names it, so a stale writer cannot end a new keeper.
+    #[tokio::test]
+    async fn a_writer_behind_ends_only_its_own_keeper() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let scratch = Scratch::new("ending");
+        std::fs::write(scratch.path("run"), b"r1\n").expect("run");
+        let fake = scratch.path("tmux");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho \"$*\" >>{calls}\n",
+                calls = sq(&scratch.path("calls").to_string_lossy())
+            ),
+        )
+        .expect("a fake tmux");
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
+            .expect("the fake runs");
+        let tmux = Tmux::resolve(&Found(fake.to_string_lossy().into_owned()))
+            .await
+            .expect("the fake resolves");
+        let end = |run: &str| {
+            let script = ending(&tmux, &Keeper::new("w", "t"), run, "yantra: behind").replacen(
+                "cd \"$HOME\"/.yantra/keep/'w'/'t'",
+                &format!("cd {}", sq(&scratch.0.to_string_lossy())),
+                1,
+            );
+            Command::new("/bin/sh")
+                .args(["-c", &script])
+                .status()
+                .expect("sh runs")
+                .code()
+        };
+        assert_eq!(end("r0"), Some(0));
+        assert_eq!(
+            scratch.read("calls"),
+            "",
+            "another run's writer kills nothing"
+        );
+        assert_eq!(scratch.read("err"), "");
+        assert_eq!(end("r1"), Some(0));
+        assert_eq!(scratch.read("calls"), "kill-session -t =yantra-keep-w-t\n");
+        assert_eq!(scratch.read("err"), "yantra: behind\n");
     }
 }

@@ -202,6 +202,37 @@ describe('the chat socket', () => {
     expect(errors[0]?.describe()).toBe('The agent could not finish the turn.')
   })
 
+  it('reports a failed turn once, though each reopen sends its end again', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { events, errors, opened } = connect(at, [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    const failed = JSON.stringify(chatEvents[chatEvents.length - 1])
+    server.say(failed)
+    await settled(() => expect(errors).toHaveLength(1))
+    server.hangUp()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    server.say(failed)
+    await settled(() => expect(events).toHaveLength(2))
+    await new Promise((done) => setTimeout(done, 100))
+    expect(errors.map((error) => error.kind)).toEqual(['turnFailed'])
+
+    server.say(JSON.stringify({ threadId: '1a2b3c4d', cursor: 'r1:900:0', type: 'turn.started' }))
+    server.say(failed)
+    await settled(() => expect(errors).toHaveLength(2))
+    expect(errors.map((error) => error.kind)).toEqual(['turnFailed', 'turnFailed'])
+  })
+
+  it('reports a second failed turn sent from this tab, though it never started', async () => {
+    const { socket, errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const failed = JSON.stringify(chatEvents[chatEvents.length - 1])
+    server.say(failed)
+    await settled(() => expect(errors).toHaveLength(1))
+    expect(socket.send('again')).toBe(true)
+    server.say(failed)
+    await settled(() => expect(errors).toHaveLength(2))
+  })
+
   it.each([
     ['busy', false],
     ['badFrame', false],
@@ -284,6 +315,57 @@ describe('the chat socket', () => {
     await settled(() => expect(opened).toHaveBeenCalledTimes(2))
     expect(dropped).toHaveBeenCalledTimes(1)
     expect(errors.map((error) => error.kind)).toEqual(['unreachable'])
+  })
+
+  it('reopens after an unreachable error and a clean close, and ends closed when the budget is spent', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { errors, opened, dropped } = connect(at, [10, 10])
+    for (const n of [1, 2, 3]) {
+      await settled(() => expect(opened).toHaveBeenCalledTimes(n))
+      server.say(JSON.stringify({ type: 'error', kind: 'unreachable', said: 'ssh: connection refused' }))
+      await settled(() => expect(errors).toHaveLength(n))
+      server.hangUp()
+    }
+    await settled(() => expect(errors).toHaveLength(4))
+    expect(errors.map((error) => error.kind)).toEqual(['unreachable', 'unreachable', 'unreachable', 'closed'])
+    expect(dropped).toHaveBeenCalledTimes(2)
+    expect(server.asked).toHaveLength(3)
+  })
+
+  it('ends the reopens when each one says thread.started and then unreachable', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { errors, opened, dropped } = connect(at, [10, 10])
+    for (const n of [1, 2, 3]) {
+      await settled(() => expect(opened).toHaveBeenCalledTimes(n))
+      server.say(JSON.stringify({ threadId: '1a2b3c4d', type: 'thread.started', payload: { thread: '1a2b3c4d', harness: 'opencode' } }))
+      server.say(JSON.stringify({ type: 'error', kind: 'unreachable', said: 'the agent did not open a session' }))
+      await settled(() => expect(errors).toHaveLength(n))
+      server.hangUp()
+    }
+    await settled(() => expect(errors).toHaveLength(4))
+    expect(errors.map((error) => error.kind)).toEqual(['unreachable', 'unreachable', 'unreachable', 'closed'])
+    expect(dropped).toHaveBeenCalledTimes(2)
+    expect(server.asked).toHaveLength(3)
+  })
+
+  it('reports a failed turn once, though a reopen replays its start and a send went nowhere', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { socket, errors, opened, dropped } = connect(at, [200])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    const started = JSON.stringify({ threadId: '1a2b3c4d', cursor: 'r1:812:0', type: 'turn.started' })
+    const failed = JSON.stringify(chatEvents[chatEvents.length - 1])
+    server.say(started)
+    server.say(failed)
+    await settled(() => expect(errors).toHaveLength(1))
+    server.hangUp()
+    await settled(() => expect(dropped).toHaveBeenCalledTimes(1))
+    expect(socket.send('while closed')).toBe(false)
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    server.say(failed)
+    server.say(started)
+    server.say(failed)
+    await new Promise((done) => setTimeout(done, 100))
+    expect(errors.map((error) => error.kind)).toEqual(['turnFailed'])
   })
 
   it('reports a frame it cannot read as badFrame with a sentence of its own', async () => {
