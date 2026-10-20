@@ -187,57 +187,65 @@ pub async fn diff<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<Diff, E
 /// merge-base of its branch and the repository's `HEAD`. The base is asked
 /// fresh, because `HEAD` moves after the thread opens.
 pub async fn branch<E: Exec>(exec: &E, place: &Place) -> Result<BranchDiff, Error> {
-    let worktree = sq(&place.worktree);
+    let changes = |flags: &str| {
+        capped(&format!(
+            "git -c core.quotePath=false diff {flags} {DIFF_FLAGS} \"$b\" \"$tree\""
+        ))
+    };
     let out = exec
         .exec(&format!(
             "cd {worktree} || exit\n\
              b=$(git -C {repo} merge-base {branch} HEAD) \
              || {{ echo 'fatal: the branch has no merge-base with HEAD' >&2; exit 1; }}\n\
              {SNAPSHOT} || exit\n\
-             echo \"$b $tree\"\n\
-             {numstat}",
+             echo \"$b\"\n\
+             {numstat}\n\
+             printf '\\0'\n\
+             {unified}",
+            worktree = sq(&place.worktree),
             repo = sq(&place.repo),
             branch = sq(&place.branch),
-            numstat = capped(&format!(
-                "git -c core.quotePath=false diff --numstat -z -M {DIFF_FLAGS} \"$b\" \"$tree\""
-            )),
+            numstat = changes("--numstat -z -M"),
+            unified = changes("-M"),
         ))
         .await?;
     if !out.success() {
         return Err(failed(&out));
     }
-    let mut lines = out.stdout.splitn(2, |&b| b == b'\n');
-    let named = String::from_utf8_lossy(lines.next().unwrap_or_default());
-    // Both go into the next command unquoted, so each must be an object name.
-    let object = |word: &str| !word.is_empty() && word.bytes().all(|b| b.is_ascii_hexdigit());
-    let Some((base, tree)) = named
-        .split_once(' ')
-        .filter(|&(b, t)| object(b) && object(t))
-    else {
-        return Err(Error::Git {
-            stderr: "git did not name the merge-base and the tree".to_owned(),
-        });
+    let unreadable = || Error::Git {
+        stderr: "git did not name the merge-base or print the diff".to_owned(),
     };
-    let (files, files_truncated) = stats(lines.next().unwrap_or_default())?;
-
-    let out = exec
-        .exec(&format!(
-            "cd {worktree} || exit\n\
-             {}",
-            capped(&format!(
-                "git -c core.quotePath=false diff -M {DIFF_FLAGS} {base} {tree}"
-            )),
-        ))
-        .await?;
-    if !out.success() {
-        return Err(failed(&out));
-    }
+    let line = out
+        .stdout
+        .iter()
+        .position(|&b| b == b'\n')
+        .ok_or_else(unreadable)?;
+    let (base, rest) = (&out.stdout[..line], &out.stdout[line + 1..]);
+    let (numstat, unified) = numstat_end(rest)
+        .map(|end| (&rest[..end], &rest[end + 1..]))
+        .ok_or_else(unreadable)?;
+    let (files, files_truncated) = stats(numstat)?;
     Ok(BranchDiff {
-        base: base.to_owned(),
+        base: String::from_utf8_lossy(base).into_owned(),
         files,
         files_truncated,
-        diff: cut(&out.stdout),
+        diff: cut(unified),
     })
+}
+
+/// Where the numstat ends in `numstat NUL unified`. A whole `--numstat -z` is
+/// empty or ends in a NUL and never holds two NULs together; a cut one is
+/// [`LIMIT`] + 1 bytes long.
+fn numstat_end(rest: &[u8]) -> Option<usize> {
+    let end = match rest.first() {
+        Some(0) => 0,
+        _ => rest
+            .windows(2)
+            .position(|pair| pair == [0, 0])
+            .map_or(LIMIT + 1, |at| at + 1)
+            .min(LIMIT + 1),
+    };
+    (end < rest.len()).then_some(end)
 }
 
 /// Reads `git diff --numstat -z`: `added\tdeleted\tpath\0`, or
@@ -602,7 +610,6 @@ mod tests {
     }
 
     const BASE: &str = "0123abcd0123abcd0123abcd0123abcd0123abcd";
-    const TREE: &str = "4567ef014567ef014567ef014567ef014567ef01";
 
     fn stat(path: &str, from: Option<&str>, counts: Option<(u32, u32)>) -> FileStat {
         FileStat {
@@ -617,12 +624,10 @@ mod tests {
     async fn branch_snapshots_the_tree_against_a_fresh_merge_base_and_diffs_it() {
         let numstat =
             b"2\t1\tkeep.txt\x000\t0\t\x00old-name.txt\x00new-name.txt\x00-\t-\tblob.bin\x00";
-        let mut first = format!("{BASE} {TREE}\n").into_bytes();
-        first.extend_from_slice(numstat);
-        let machine = Machine::answering(vec![
-            out(0, &first, ""),
-            out(0, b"diff --git a/keep.txt b/keep.txt\n", ""),
-        ]);
+        let mut reply = format!("{BASE}\n").into_bytes();
+        reply.extend_from_slice(numstat);
+        reply.extend_from_slice(b"\0diff --git a/keep.txt b/keep.txt\n");
+        let machine = Machine::answering(vec![out(0, &reply, "")]);
         assert_eq!(
             branch(&machine, &place()).await.expect("diffed"),
             BranchDiff {
@@ -643,9 +648,8 @@ mod tests {
                      --src-prefix=a/ --dst-prefix=b/";
         assert_eq!(
             machine.asked(),
-            [
-                format!(
-                    "cd '{WORKTREE}' || exit\n\
+            [format!(
+                "cd '{WORKTREE}' || exit\n\
                      b=$(git -C '/home/u/repo' merge-base 'yantra/chat/web/11111111' HEAD) \
                      || {{ echo 'fatal: the branch has no merge-base with HEAD' >&2; exit 1; }}\n\
                      tmp=$(mktemp) || exit\n\
@@ -654,20 +658,17 @@ mod tests {
                      || rm -f \"$tmp\"\n\
                      GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
                      && tree=$(GIT_INDEX_FILE=$tmp git write-tree) || exit\n\
-                     echo \"$b $tree\"\n\
+                     echo \"$b\"\n\
                      exec 3>&1\n\
                      s=$({{ {{ git -c core.quotePath=false diff --numstat -z -M {flags} \
                      \"$b\" \"$tree\"; echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
-                     [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\""
-                ),
-                format!(
-                    "cd '{WORKTREE}' || exit\n\
+                     [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\"\n\
+                     printf '\\0'\n\
                      exec 3>&1\n\
-                     s=$({{ {{ git -c core.quotePath=false diff -M {flags} {BASE} {TREE}; \
-                     echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
+                     s=$({{ {{ git -c core.quotePath=false diff -M {flags} \
+                     \"$b\" \"$tree\"; echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
                      [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\""
-                ),
-            ]
+            ),]
         );
     }
 
@@ -719,6 +720,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_numstat_ends_at_the_separator_or_at_the_cap() {
+        assert_eq!(numstat_end(b"\0"), Some(0), "no change");
+        assert_eq!(numstat_end(b"\0diff"), Some(0));
+        assert_eq!(numstat_end(b"1\t1\tf\0\0diff"), Some(6));
+        assert_eq!(numstat_end(b"0\t0\t\0a\0b\0\0"), Some(9), "a rename");
+        let mut cut = b"1\t1\t".to_vec();
+        cut.resize(LIMIT + 1, b'f');
+        let whole = cut.len();
+        cut.extend_from_slice(b"\0\0\0diff");
+        assert_eq!(numstat_end(&cut), Some(whole), "cut mid-path");
+        cut[whole - 1] = 0;
+        assert_eq!(numstat_end(&cut), Some(whole), "cut after a NUL");
+        assert_eq!(numstat_end(&cut[..whole]), None, "no separator");
+        assert_eq!(numstat_end(b"1\t1\tf\0"), None);
+    }
+
     #[tokio::test]
     async fn a_branch_diff_git_refused_is_named_in_gits_words() {
         let gone = Machine::answering(vec![out(2, b"", "sh: cd: can't cd to /x\n")]);
@@ -735,16 +753,17 @@ mod tests {
             branch(&unrelated, &place()).await,
             Err(Error::Git { stderr }) if stderr == "fatal: the branch has no merge-base with HEAD"
         ));
-        let odd = Machine::answering(vec![out(0, b"$(reboot) x\n", "")]);
-        assert!(
-            matches!(branch(&odd, &place()).await, Err(Error::Git { .. })),
-            "a base that is no object name never reaches a command"
-        );
-        assert_eq!(odd.asked().len(), 1);
-        let corrupt = Machine::answering(vec![
-            out(0, format!("{BASE} {TREE}\n").as_bytes(), ""),
-            out(128, b"", "fatal: unable to read 89ab\n"),
-        ]);
+        for odd in [&b""[..], b"no newline", format!("{BASE}\n").as_bytes()] {
+            assert!(
+                matches!(
+                    branch(&Machine::answering(vec![out(0, odd, "")]), &place()).await,
+                    Err(Error::Git { .. })
+                ),
+                "{}",
+                String::from_utf8_lossy(odd)
+            );
+        }
+        let corrupt = Machine::answering(vec![out(128, b"", "fatal: unable to read 89ab\n")]);
         assert!(matches!(
             branch(&corrupt, &place()).await,
             Err(Error::Git { stderr }) if stderr == "fatal: unable to read 89ab"
