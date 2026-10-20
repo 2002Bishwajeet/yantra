@@ -237,6 +237,11 @@ enum Command {
         /// The thread's id, as `yantra chat ls` prints it
         thread: String,
     },
+    /// A chat thread's pull request, opened with the GitHub grant
+    Pr {
+        #[command(subcommand)]
+        action: PrAction,
+    },
     /// This machine's conversation history, as the appliance receives it
     History {
         #[command(subcommand)]
@@ -346,6 +351,24 @@ enum ChatAction {
     Ls {
         /// Workspace name, without the `.toml`
         workspace: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PrAction {
+    /// Open a PR from the thread's pushed branch to the default branch. An
+    /// issue thread's PR says `Closes #n`. A PR already open is printed
+    Open {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
+        /// The PR's title; the tip commit's subject when absent
+        #[arg(long)]
+        title: Option<String>,
+        /// The PR's body; the tip commit's body when absent
+        #[arg(long)]
+        body: Option<String>,
     },
 }
 
@@ -503,6 +526,15 @@ async fn main() -> ExitCode {
             draft,
         }) => commit_thread(&workspace, &thread, message.as_deref(), draft).await,
         Some(Command::Push { workspace, thread }) => push_thread(&workspace, &thread).await,
+        Some(Command::Pr {
+            action:
+                PrAction::Open {
+                    workspace,
+                    thread,
+                    title,
+                    body,
+                },
+        }) => pr_open(&workspace, &thread, title.as_deref(), body.as_deref()).await,
         Some(Command::History {
             action: HistoryAction::Stage,
         }) => history_stage(),
@@ -2049,6 +2081,35 @@ async fn push_thread(workspace: &str, thread: &str) -> ExitCode {
 
 fn render_pushed(pushed: &commit::Pushed) -> String {
     format!("pushed to {} {}\n", pushed.remote, pushed.branch)
+}
+
+async fn pr_open(
+    workspace: &str,
+    thread: &str,
+    title: Option<&str>,
+    body: Option<&str>,
+) -> ExitCode {
+    let Some(token) = grant() else {
+        return ExitCode::FAILURE;
+    };
+    match commit::open_pr_for(workspace, thread, &Github::default(), &token, title, body).await {
+        Ok(opened) => {
+            print!("{}", render_pr(&opened));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_pr(opened: &commit::Opened) -> String {
+    if opened.created {
+        format!("opened {}\n", opened.url)
+    } else {
+        format!("already open {}\n", opened.url)
+    }
 }
 
 fn grant_note() -> String {
@@ -4445,5 +4506,36 @@ mod tests {
             branch: "yantra/7-0a1b".to_owned(),
         };
         assert_eq!(render_pushed(&pushed), "pushed to origin yantra/7-0a1b\n");
+    }
+
+    #[test]
+    fn pr_open_takes_a_workspace_a_thread_and_optional_text() {
+        let parsed =
+            Cli::try_parse_from(["yantra", "pr", "open", "site", "0a1b", "--title", "Fix it"])
+                .expect("parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Pr { action: PrAction::Open { workspace, thread, title: Some(title), body: None } })
+                if workspace == "site" && thread == "0a1b" && title == "Fix it"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "pr", "open", "site"]).is_err());
+    }
+
+    #[test]
+    fn pr_open_prints_opened_or_already_open() {
+        let mut opened = commit::Opened {
+            number: 21,
+            url: "https://github.com/o/r/pull/21".to_owned(),
+            created: true,
+        };
+        assert_eq!(
+            render_pr(&opened),
+            "opened https://github.com/o/r/pull/21\n"
+        );
+        opened.created = false;
+        assert_eq!(
+            render_pr(&opened),
+            "already open https://github.com/o/r/pull/21\n"
+        );
     }
 }

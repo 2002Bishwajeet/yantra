@@ -26,7 +26,16 @@ export default defineConfig({
     tailwindcss(),
   ],
   resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      // Both keep the diff panel from putting hundreds of Shiki files in dist.
+      { find: /^shiki$/, replacement: fileURLToPath(new URL('./src/screens/session/diff/shiki.ts', import.meta.url)) },
+      { find: /^shiki\/wasm$/, replacement: fileURLToPath(new URL('./src/screens/session/diff/noWasm.ts', import.meta.url)) },
+      {
+        find: /^@pierre\/theming\/themes$/,
+        replacement: fileURLToPath(new URL('./src/screens/session/diff/themes.ts', import.meta.url)),
+      },
+    ],
   },
   // yantrad binds this machine's Tailscale addresses and refuses loopback
   // (R-22), so `npm run dev` supplies the real target.

@@ -167,6 +167,30 @@ function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
     : null
 }
 
+const isCount = (n: unknown) => n === undefined || (typeof n === 'number' && Number.isInteger(n) && n >= 0)
+
+/** A reply whose files the tree cannot read is a badFrame, not a crash in the panel. */
+function branchDiffOf(said: object): ChatBranchDiff | null {
+  const d = said as Partial<Record<keyof ChatBranchDiff, unknown>>
+  if (
+    typeof d.threadId !== 'string' ||
+    typeof d.base !== 'string' ||
+    typeof d.unifiedDiff !== 'string' ||
+    typeof d.filesTruncated !== 'boolean' ||
+    typeof d.truncated !== 'boolean' ||
+    !Array.isArray(d.files)
+  ) {
+    return null
+  }
+  for (const file of d.files as Record<string, unknown>[]) {
+    if (typeof file !== 'object' || file === null) return null
+    if (typeof file.path !== 'string' || file.path === '') return null
+    if (file.from !== undefined && typeof file.from !== 'string') return null
+    if (!isCount(file.added) || !isCount(file.deleted)) return null
+  }
+  return said as ChatBranchDiff
+}
+
 /** A daemon frame, or `null` for one this dashboard cannot read. */
 export function frameOf(
   text: string,
@@ -187,15 +211,7 @@ export function frameOf(
       ? (said as ChatNotAttached)
       : null
   }
-  if (said.type === 'branchDiff') {
-    const reply = said as Partial<ChatBranchDiff>
-    return typeof reply.threadId === 'string' &&
-      typeof reply.base === 'string' &&
-      Array.isArray(reply.files) &&
-      typeof reply.unifiedDiff === 'string'
-      ? (said as ChatBranchDiff)
-      : null
-  }
+  if (said.type === 'branchDiff') return branchDiffOf(said)
   if (said.type === 'error') {
     const failure = said as Partial<ChatFailure> & Partial<Record<keyof Login, unknown>>
     if (typeof failure.kind !== 'string' || !KINDS.has(failure.kind) || typeof failure.said !== 'string') return null

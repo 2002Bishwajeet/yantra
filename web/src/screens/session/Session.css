@@ -768,6 +768,23 @@
   line-height: 44px;
 }
 
+.chat__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat__added {
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-medium);
+}
+
+.chat__branch {
+  flex: 1;
+  min-width: 0;
+}
+
 /* Y-489: the thread list above the views. */
 
 .threads {
@@ -840,4 +857,10 @@
 
 .threads__pr {
   margin-left: auto;
+}
+
+.chat__asks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }

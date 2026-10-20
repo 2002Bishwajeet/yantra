@@ -43,6 +43,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
 | `POST /api/workspaces/{name}/threads/{thread}/commit` | `yantra commit [-m MSG]` |
 | `POST /api/workspaces/{name}/threads/{thread}/push` | `yantra push` |
+| `POST /api/workspaces/{name}/threads/{thread}/pr` | `yantra pr open`; an optional `{"title", "body"}` body is `--title` and `--body`. Answers `{number, url, created}`; `409` for no grant, an unpushed or diverged branch, a remote off github.com, a repository the grant cannot see, or a GitHub `422` |
 | `POST /api/workspaces/{name}/tokens` | `yantra tokens`; an optional `{"since": <RFC 3339>}` body is the dashboard's window and has no CLI flag (Y-354) |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |

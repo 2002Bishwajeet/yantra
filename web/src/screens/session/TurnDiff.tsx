@@ -1,42 +1,25 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Undo2 } from 'lucide-react'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dialog'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import type { Workspace } from '@/api'
+import type { DiffState } from './diff/data'
+import { DiffSheet } from './diff/DiffSheet'
+import type { Editors } from './diff/useEditors'
 import type { TurnDiff as Diff } from './timeline'
 
-type Tone = 'meta' | 'hunk' | 'add' | 'del' | 'same'
-type Line = { text: string; tone: Tone }
-
-/** The paths a unified diff names, and each line with what it is. A file's
- *  header runs from `diff --git` to its first hunk, so a removed line that
- *  starts `---` is still a removal. */
-function read(unified: string): { files: string[]; lines: Line[] } {
+/** The paths a unified diff names. */
+function filesOf(unified: string): string[] {
   const files: string[] = []
-  const lines: Line[] = []
-  let header = false
   for (const text of unified.split('\n')) {
     if (text.startsWith('diff --git ')) {
-      header = true
       files.push(/ b\/(.+)$/.exec(text)?.[1] ?? text.slice('diff --git '.length))
-    } else if (text.startsWith('@@')) {
-      header = false
     }
-    const tone: Tone = header
-      ? 'meta'
-      : text.startsWith('@@')
-        ? 'hunk'
-        : text.startsWith('+')
-          ? 'add'
-          : text.startsWith('-')
-            ? 'del'
-            : 'same'
-    lines.push({ text, tone })
   }
-  if (lines.at(-1)?.text === '') lines.pop()
-  return { files, lines }
+  return files
 }
 
 /** Asks before the files go back. The conversation is not rewound. */
@@ -80,9 +63,20 @@ function Revert(props: { turn: number; disabled: boolean; onRevert: (turn: numbe
 
 /** What one turn changed (Y-448): the files, the unified diff on request,
  *  and a revert to the tree before it. A diff with no files draws nothing. */
-export function TurnDiff(props: { diff: Diff; disabled: boolean; onRevert: (turn: number) => boolean }) {
-  const { diff, disabled, onRevert } = props
-  const { files, lines } = read(diff.unified)
+export function TurnDiff(props: {
+  diff: Diff
+  disabled: boolean
+  onRevert: (turn: number) => boolean
+  workspace: Workspace
+  editors: Editors
+  onComment: (block: string) => void
+}) {
+  const { diff, disabled, onRevert, workspace, editors, onComment } = props
+  const state = useMemo<DiffState>(
+    () => ({ state: 'ready', data: { unified: diff.unified, truncated: false, filesTruncated: false } }),
+    [diff.unified],
+  )
+  const files = filesOf(diff.unified)
   if (files.length === 0) return null
   return (
     <Card
@@ -113,16 +107,14 @@ export function TurnDiff(props: { diff: Diff; disabled: boolean; onRevert: (turn
             Cut at 256 KiB
           </Text>
         ) : null}
-        <pre className="chat__diff-text">
-          <code>
-            {lines.map((line, at) => (
-              // Each line is a block, so an empty one still takes its height.
-              <span data-tone={line.tone} key={at}>
-                {line.text || ' '}
-              </span>
-            ))}
-          </code>
-        </pre>
+        {/* The note above is this turn's cut, so the viewer is told nothing was. */}
+        <DiffSheet
+          editors={editors}
+          onComment={onComment}
+          quiet
+          state={state}
+          workspace={workspace}
+        />
       </Disclosure>
       {diff.reverted ? null : <Revert disabled={disabled} onRevert={onRevert} turn={diff.turn} />}
     </Card>

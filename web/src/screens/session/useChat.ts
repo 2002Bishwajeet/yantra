@@ -1,9 +1,17 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
 import { AttachError, ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
-import type { Decision, Harness, PermissionMode } from '@/api/thread'
+import type { ChatBranchDiff, Decision, Harness, PermissionMode } from '@/api/thread'
+import { DiffError } from './diff/errors'
 import { empty, reduce, type Timeline } from './timeline'
 
 export type Link = 'connecting' | 'open' | 'closed'
+
+/** The branch diff (Y-491): asked for on request, answered by one frame. */
+export type Branch =
+  | { state: 'idle' }
+  | { state: 'loading' }
+  | { state: 'ready'; diff: ChatBranchDiff }
+  | { state: 'failed'; error: DiffError }
 
 /** One chat socket for the workspace, and the timeline it folds into.
  *
@@ -17,13 +25,23 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
   const [error, setError] = useState<ChatError | null>(null)
   const [link, setLink] = useState<Link>('connecting')
   const [opened, reopen] = useState(0)
+  const [branch, setBranch] = useState<Branch>({ state: 'idle' })
+  const asking = useRef(false)
   const socket = useRef<ChatSocket | null>(null)
   const attach = useRef(thread)
   const named = useEffectEvent((id: string) => onThread(id))
+  const settle = useEffectEvent((error: DiffError) => {
+    asking.current = false
+    setBranch({ state: 'failed', error })
+  })
 
   useEffect(() => {
     const live = openChat((after) => chatAddress(workspace, attach.current, after), {
-      onOpen: () => setLink('open'),
+      onOpen: () => {
+        setLink('open')
+        // A diff asked on a dropped socket got no reply (ADR-0035), so it is asked again.
+        if (asking.current && !live.diff()) settle(new DiffError('notOpen'))
+      },
       onDropped: () => setLink('connecting'),
       // The daemon replays the whole thread, so it is drawn again.
       onRestart: () => dispatch({ type: 'reset' }),
@@ -34,7 +52,25 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         }
         dispatch({ type: 'event', event })
       },
+      onBranchDiff: (diff) => {
+        asking.current = false
+        setBranch({ state: 'ready', diff })
+      },
       onError: (failure) => {
+        // Error frames carry no request id: only `diff`, and `busy` during a revert, are the diff's.
+        if (asking.current && (failure.kind === 'diff' || failure.kind === 'busy')) {
+          settle(new DiffError(failure.kind === 'busy' ? 'busy' : 'failed', failure.kind === 'busy' ? '' : failure.said))
+          return
+        }
+        if (
+          asking.current &&
+          (failure.kind === 'closed' ||
+            failure.kind === 'refused' ||
+            failure.kind === 'unknownThread' ||
+            failure.kind === 'notLoggedIn')
+        ) {
+          settle(new DiffError('notOpen'))
+        }
         setError(failure)
         // Busy and badFrame never end or prevent a turn: a second tap on an
         // answer the daemon already took is a badFrame while the agent still runs.
@@ -84,11 +120,28 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       setError(null)
       return true
     },
+    branch,
+    /** Asks for the thread's whole-branch diff; the answer lands in `branch`. */
+    requestDiff: () => {
+      if (timeline.thread === null) {
+        setBranch({ state: 'failed', error: new DiffError('noThread') })
+        return
+      }
+      if (!socket.current?.diff()) {
+        setBranch({ state: 'failed', error: new DiffError('notOpen') })
+        return
+      }
+      asking.current = true
+      setBranch({ state: 'loading' })
+    },
     /** Opens the socket again; an attach replays the transcript, so the
      *  timeline starts over. */
     retry: () => {
       setError(null)
       setLink('connecting')
+      // A diff panel left open shows this and waits for Refresh, not a skeleton nobody fills.
+      asking.current = false
+      setBranch({ state: 'failed', error: new DiffError('notOpen') })
       dispatch({ type: 'reset' })
       reopen((n) => n + 1)
     },

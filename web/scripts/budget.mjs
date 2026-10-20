@@ -11,16 +11,21 @@
 // xterm in the entry by 33 KiB and every screen eager by 47 KiB, which is what
 // the route split exists for.
 //
+// The diff panel (Y-491) is a lazy chunk `/` never loads, so it has its own ceiling.
+// It counts the viewer, Pierre's diffs and tree, and the shared chunks only it needs.
+//
 //   npm run budget            builds, then measures
 //   npm run budget -- --no-build   measures the dist that is there
 import { execSync } from 'node:child_process'
-import { readFileSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 
 const KIB = 1024
+const DIFF_CEILING_KIB = 270
 const FIRST_LOAD_CEILING = 200 * KIB
 const FONTS_CEILING = 80 * KIB
+const DIFF_CEILING = DIFF_CEILING_KIB * KIB
 
 const web = resolve(import.meta.dirname, '..')
 const dist = join(web, 'dist')
@@ -60,6 +65,26 @@ for (const { url } of chunks.filter((c) => c.url.endsWith('.css'))) {
   }
 }
 
+// Vite names the lazy diff chunk after its file, `DiffViewer-<hash>.js`. Its static imports
+// that the first load did not fetch count too.
+const diffEntry = readdirSync(join(dist, 'assets')).find((name) => /^DiffViewer-[\w-]+\.js$/.test(name))
+if (!diffEntry) {
+  console.error('\nno DiffViewer chunk in dist/assets: the diff panel is no longer lazy-loaded')
+  process.exit(1)
+}
+const inFirstLoad = new Set(named.map((url) => url.replace(/^\//, '')))
+const diffChunks = []
+const pending = [`assets/${diffEntry}`]
+while (pending.length > 0) {
+  const url = pending.pop()
+  if (diffChunks.some((c) => c.url === url) || inFirstLoad.has(url)) continue
+  const bytes = readFileSync(join(dist, url))
+  diffChunks.push({ url, raw: bytes.length, gzip: gz(bytes) })
+  const code = bytes.toString('utf8')
+  for (const [, dep] of code.matchAll(/(?:from|import)\s*"\.\/([^"]+\.js)"/g)) pending.push(`assets/${dep}`)
+}
+const diffBytes = diffChunks.reduce((sum, c) => sum + c.gzip, 0)
+
 const firstLoad = chunks.reduce((sum, c) => sum + c.gzip, 0)
 const fontBytes = [...fonts.values()].reduce((sum, n) => sum + n, 0)
 
@@ -76,6 +101,13 @@ for (const [file, size] of fonts) {
 console.log(`  ${'total'.padEnd(44)} ${String(fontBytes).padStart(8)} B  (${kib(fontBytes)} KiB, ceiling ${kib(FONTS_CEILING)} KiB = ${FONTS_CEILING} B)`)
 console.log(headroomLine(FONTS_CEILING, fontBytes))
 
+console.log('diff panel, lazy (gzip -9; the chunk, and the chunks only it needs)')
+for (const c of diffChunks) {
+  console.log(`  ${c.url.padEnd(44)} ${String(c.gzip).padStart(8)} B  (${kib(c.gzip)} KiB)`)
+}
+console.log(`  ${'total'.padEnd(44)} ${String(diffBytes).padStart(8)} B  (${kib(diffBytes)} KiB, ceiling ${kib(DIFF_CEILING)} KiB = ${DIFF_CEILING} B)`)
+console.log(headroomLine(DIFF_CEILING, diffBytes))
+
 let failed = false
 if (firstLoad > FIRST_LOAD_CEILING) {
   console.error(`\nfirst load is ${firstLoad - FIRST_LOAD_CEILING} B over the ${kib(FIRST_LOAD_CEILING)} KiB ceiling`)
@@ -83,6 +115,10 @@ if (firstLoad > FIRST_LOAD_CEILING) {
 }
 if (fontBytes > FONTS_CEILING) {
   console.error(`\nfonts are ${fontBytes - FONTS_CEILING} B over the ${kib(FONTS_CEILING)} KiB ceiling`)
+  failed = true
+}
+if (diffBytes > DIFF_CEILING) {
+  console.error(`\nthe diff panel is ${diffBytes - DIFF_CEILING} B over the ${kib(DIFF_CEILING)} KiB ceiling`)
   failed = true
 }
 process.exit(failed ? 1 : 0)

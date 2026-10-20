@@ -11,7 +11,15 @@ describe('Y-441 budget figures', () => {
     expect(src).toContain('headroomLine(FIRST_LOAD_CEILING, firstLoad)')
     expect(src).toContain('headroomLine(FONTS_CEILING, fontBytes)')
     const code = src.split('\n').filter((l) => !l.startsWith('//')).join('\n')
-    expect(code).not.toMatch(/(200|80) KiB/)
+    expect(code).not.toMatch(/(200|80|270) KiB/)
+  })
+
+  it('the script measures the lazy diff chunk by its module name and fails above its ceiling (Y-491)', () => {
+    const src = read('scripts/budget.mjs')
+    expect(src).toContain('headroomLine(DIFF_CEILING, diffBytes)')
+    expect(src).toContain('DiffViewer-')
+    expect(src).toContain('if (diffBytes > DIFF_CEILING)')
+    expect(src).toContain('process.exit(1)')
   })
 
   it('the README section "What it weighs" quotes no dated byte figure', () => {

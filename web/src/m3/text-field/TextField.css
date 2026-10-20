@@ -143,3 +143,27 @@
 .m3-text-field:has(.m3-text-field__input:disabled) {
   opacity: 0.38;
 }
+
+textarea.m3-text-field__input {
+  resize: none;
+  font-family: inherit;
+}
+
+/* Where the field can size itself to its text, the box grows with it; elsewhere the text scrolls in 56px. */
+@supports (field-sizing: content) {
+  .m3-text-field__box:has(textarea.m3-text-field__input) {
+    height: auto;
+    min-height: 56px;
+  }
+
+  textarea.m3-text-field__input {
+    field-sizing: content;
+    height: auto;
+    max-height: 40vh;
+    padding-block: 8px;
+  }
+
+  .m3-text-field[data-variant="filled"] textarea.m3-text-field__input {
+    padding-block: 24px 8px;
+  }
+}
