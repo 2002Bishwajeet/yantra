@@ -1040,4 +1040,40 @@ mod tests {
             other => panic!("{other:?}"),
         }
     }
+
+    /// The threads list finds a PR by the upstream's branch, so a PR that
+    /// `commit::open_pr` made shows there with nothing kept (Y-449).
+    #[tokio::test]
+    async fn a_pr_open_on_the_upstream_shows_in_the_threads_list() {
+        use crate::github::tests::{at, listen, reply, serve, token};
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"[{"number":21,"html_url":"https://github.com/o/r/pull/21","state":"open","merged_at":null}]"#,
+            )],
+        );
+
+        let pr = pr_of(
+            Some((&at(address), &token())),
+            "git@github.com:o/r.git",
+            "yantra/42-11111111",
+        )
+        .await;
+
+        assert_eq!(
+            pr,
+            Pr::Open {
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+            }
+        );
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[0].starts_with("GET /repos/o/r/pulls?head=o%3Ayantra%2F42-11111111"),
+            "{}",
+            seen[0]
+        );
+    }
 }

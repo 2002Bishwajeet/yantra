@@ -89,6 +89,7 @@ import type {
   ThreadEvent,
   ThreadMessage,
   ThreadOpened,
+  ThreadPrOpened,
   ThreadPushed,
   Transcript,
   Workspace,

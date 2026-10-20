@@ -39,7 +39,8 @@ thread's tree after each turn under a hidden ref, diffs one turn, diffs the whol
 the newest commit it shares with its start or `HEAD`, and reverts the files to a checkpoint; no
 branch moves. `commit`
 commits a thread's work with the machine's own git identity, with a message `claude -p` writes
-there, and pushes its branch and sets the upstream (Y-492).
+there, and pushes its branch and sets the upstream (Y-492). It also opens a PR from the pushed
+branch to the default branch with the daemon's GitHub grant, or answers the one already open (Y-449).
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.

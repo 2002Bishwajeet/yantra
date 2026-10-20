@@ -507,6 +507,15 @@ export type ThreadPushed = {
   remote: string
   branch: string
 }
+
+/** `POST /api/workspaces/{name}/threads/{thread}/pr` with `{ title?, body? }`.
+ *  Absent fields take the tip commit's. `created` is false when the PR was
+ *  already open. */
+export type ThreadPrOpened = {
+  number: number
+  url: string
+  created: boolean
+}
 // ---------------------------------------------------------------------------
 // Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
 // edits above it is trivial.
