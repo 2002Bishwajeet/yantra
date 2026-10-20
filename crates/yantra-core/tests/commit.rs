@@ -14,6 +14,7 @@ use yantra_core::commit::{self, Error};
 use yantra_core::github::IssueRef;
 use yantra_core::ssh::{Exec as _, Machine, Ssh};
 use yantra_core::thread::{self, Place};
+use yantra_core::tmux::Tmux;
 use yantra_core::workspace::Workspace;
 
 /// Where Claude Code's installer puts the binary, as in `tests/agent.rs`.
@@ -126,7 +127,7 @@ async fn a_thread_commits_with_the_machines_identity_and_claudes_message() -> Re
     fixture.run(&format!(
         "git -C {REPO} config user.name Owner && git -C {REPO} config user.email owner@example.com"
     ))?;
-    let message = commit::draft(&ssh, &place).await?;
+    let message = commit::draft(&ssh, &place, None).await?;
     assert_eq!(message, format!("{SUBJECT}\n\n- tracked and untracked"));
     let seen = fixture.run(&format!("cat {SEEN_STDIN}"))?;
     assert!(seen.starts_with("You write concise git commit messages."));
@@ -173,10 +174,56 @@ async fn a_thread_commits_with_the_machines_identity_and_claudes_message() -> Re
         Err(Error::NothingToCommit)
     ));
     assert!(matches!(
-        commit::draft(&ssh, &place).await,
+        commit::draft(&ssh, &place, None).await,
         Err(Error::NothingToCommit)
     ));
     assert_eq!(head(&fixture, &place)?, committed.commit);
+
+    // (d) A pre-commit hook that fails: HEAD and the index stay as they were.
+    fixture.run(&format!(
+        "cd {wt} && printf 'staged\\n' > staged.txt && git add staged.txt \
+         && printf 'loose\\n' > loose.txt \
+         && printf '#!/bin/sh\\necho lint failed >&2\\nexit 1\\n' > {REPO}/.git/hooks/pre-commit \
+         && chmod 755 {REPO}/.git/hooks/pre-commit"
+    ))?;
+    let index = format!("git -C {wt} status --porcelain");
+    assert_eq!(fixture.run(&index)?, "A  staged.txt\n?? loose.txt\n");
+    assert!(matches!(
+        commit::commit(&ssh, &place, "Add both").await,
+        Err(Error::Git { stderr }) if stderr.contains("lint failed")
+    ));
+    assert_eq!(head(&fixture, &place)?, committed.commit);
+    assert_eq!(
+        fixture.run(&index)?,
+        "A  staged.txt\n?? loose.txt\n",
+        "a failed commit leaves the index as it was"
+    );
+
+    // (e) Inside a tmux server, as on a Mac (I-44): the reply and a refusal
+    // both come back through `run-shell`.
+    fixture.run("tmux new-session -d -s login")?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    let inside = commit::draft(&ssh, &place, Some(tmux.path())).await?;
+    assert_eq!(inside, message);
+
+    // (f) A patch over 256 KiB reaches claude cut, with a line that says so.
+    fixture.run(&format!(
+        "head -c 300000 /dev/zero | tr '\\0' a | fold -w 100 > {wt}/big.txt"
+    ))?;
+    commit::draft(&ssh, &place, None).await?;
+    let seen = fixture.run(&format!("cat {SEEN_STDIN}"))?;
+    assert!(seen.contains("diff --git a/big.txt b/big.txt"));
+    assert!(
+        seen.trim_end()
+            .ends_with("[The patch is cut at 256 KiB. The file list above is complete.]"),
+        "{}",
+        &seen[seen.len().saturating_sub(200)..]
+    );
+    fixture.run(&format!("mv {INSTALLED_AT} {INSTALLED_AT}.off"))?;
+    assert!(matches!(
+        commit::draft(&ssh, &place, Some(tmux.path())).await,
+        Err(Error::Claude { said }) if said.starts_with("claude was not found")
+    ));
     Ok(())
 }
 
@@ -195,7 +242,7 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
     let place = thread::open(&ssh, &workspace).await?;
     let wt = place.worktree.clone();
     assert!(matches!(
-        commit::push(&ssh, &place, None).await,
+        commit::push(&ssh, &place, None, None).await,
         Err(Error::NoRemote)
     ));
     fixture.run(&format!(
@@ -215,14 +262,20 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
 
     // (e) A hook that declines: refused, and no upstream is set.
     assert!(matches!(
-        commit::push(&ssh, &place, Some(&issue)).await,
+        commit::push(&ssh, &place, Some(&issue), None).await,
         Err(Error::Refused { reason }) if reason.contains("pre-receive hook declined")
     ));
     assert_eq!(fixture.run(&merge)?, "", "no upstream after a refusal");
 
-    // (d) The push sets the upstream to the generated name.
-    fixture.run(&format!("rm {ORIGIN}/hooks/pre-receive"))?;
-    let pushed = commit::push(&ssh, &place, Some(&issue)).await?;
+    // (d) The push sets the upstream to the generated name. An upstream whose
+    // remote is a URL, which can hold a credential, is not followed or echoed.
+    fixture.run(&format!(
+        "rm {ORIGIN}/hooks/pre-receive \
+         && git -C {REPO} config branch.{b}.remote https://me:ghp_secret@example.invalid/r.git \
+         && git -C {REPO} config branch.{b}.merge refs/heads/yantra/elsewhere",
+        b = place.branch,
+    ))?;
+    let pushed = commit::push(&ssh, &place, Some(&issue), None).await?;
     assert_eq!(pushed.remote, "origin");
     assert_eq!(pushed.branch, named);
     assert_eq!(fixture.run(&merge)?, format!("refs/heads/{named}\n"));
@@ -234,7 +287,7 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
     // A second commit goes to the same upstream, whatever issue is passed.
     fixture.run(&format!("cd {wt} && printf 'b\\n' > b.txt"))?;
     commit::commit(&ssh, &place, "Add b").await?;
-    let again = commit::push(&ssh, &place, None).await?;
+    let again = commit::push(&ssh, &place, None, None).await?;
     assert_eq!(again.branch, named);
     assert_eq!(
         fixture.run(&format!("git -C {ORIGIN} rev-parse refs/heads/{named}"))?,
@@ -258,7 +311,7 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
     ))?;
     commit::commit(&ssh, &other, "Add mine").await?;
     assert!(matches!(
-        commit::push(&ssh, &other, None).await,
+        commit::push(&ssh, &other, None, None).await,
         Err(Error::Refused { reason }) if reason.contains("non-fast-forward")
     ));
     assert_eq!(
@@ -289,7 +342,7 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
         wt = inherited.worktree,
     ))?;
     commit::commit(&ssh, &inherited, "Add c").await?;
-    let pushed = commit::push(&ssh, &inherited, None).await?;
+    let pushed = commit::push(&ssh, &inherited, None, None).await?;
     assert_eq!(pushed.branch, inherited_named);
     assert_eq!(
         fixture.run(&format!("git -C {ORIGIN} rev-parse refs/heads/main"))?,

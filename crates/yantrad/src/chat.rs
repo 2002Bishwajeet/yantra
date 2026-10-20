@@ -1004,6 +1004,20 @@ impl Registry {
         })
     }
 
+    /// Whether a turn runs, starts or reverts in thread `id`, so a commit or a
+    /// push there must wait (Y-544).
+    pub fn occupied(&self, id: &str) -> bool {
+        let held = self.lock();
+        held.reverting.contains(id)
+            || held.claimed.contains(id)
+            || held.lives.get(id).is_some_and(|live| live.busy())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_reverting(&self, id: &str) {
+        self.lock().reverting.insert(id.to_owned());
+    }
+
     /// Adds `live` unless the thread already has one.
     fn insert(&self, live: &Arc<Live>) -> bool {
         let mut held = self.lock();
