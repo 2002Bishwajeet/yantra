@@ -281,11 +281,11 @@ directory to walk.
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
-`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push}`, `POST /api/relay`,
+`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id` and `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
+`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
 `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
@@ -466,6 +466,16 @@ are `503`; five minutes on the machine is `504`; any other git failure is `500`.
 no wildcard (Y-135). The log names the workspace, the thread and the caller, and never the message
 or the diff (Q5). A refusal is `Refused::Unlogged`, logged by its status alone, because its text can
 hold hook output.
+
+**`pr` is `yantra pr open`, and it reads the grant** (Y-449,
+[ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md) decisions 1 and 3). It sits in
+the same router, and a turn or a revert in the thread is `409` as for its siblings. It takes
+`{title?, body?}`; an absent one takes the tip commit's. It answers `{number, url, created}`, and
+`created` is `false` when a PR from the branch is already open. No grant is `409` naming
+`yantra github login`, before any machine is asked. No upstream, a tip that is not the upstream's
+and a remote off github.com are `409`, and so is GitHub's `422`: a PR already open, or no commits
+between the branches. Every other GitHub failure goes through `from_github`. The log says
+`pr open {name} {id} for {node}` and never the title or the body (Q5).
 
 **`repair` is the one that writes bytes this daemon did not compose**, and
 [ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
