@@ -65,6 +65,12 @@ impl Lab {
         }
     }
 
+    /// The run the keeper's start wrote, which its writers carry.
+    async fn run(&self, keeper: &Keeper) -> Result<String> {
+        let run = keep::read(&self.ssh, keeper, File::Run, None).await?;
+        Ok(String::from_utf8(run)?.trim().to_owned())
+    }
+
     /// Kills every local `ssh` of this lab: the reader's and the ControlMaster.
     fn kill_local_ssh(&self) {
         let _ = Command::new("pkill")
@@ -222,7 +228,8 @@ async fn a_second_start_is_busy_and_leaves_the_journals() -> Result<()> {
     lab.start_keeper(&keeper, COUNTER, Limits::default())
         .await?;
     // A running turn has its first line in `in`; one without is stale.
-    keep::append(&lab.ssh, &keeper, 0, b"{\"prompt\":1}\n").await?;
+    let run = lab.run(&keeper).await?;
+    keep::append(&lab.ssh, &keeper, &run, 0, b"{\"prompt\":1}\n").await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
     let before = lab.out_size(&keeper)?;
     let again = keep::start(
@@ -291,7 +298,8 @@ async fn a_start_replaces_a_keeper_a_failed_start_left() -> Result<()> {
             .is_empty(),
         "the unfed agent went with its session"
     );
-    keep::append(&lab.ssh, &unfed, 0, b"{\"prompt\":1}\n").await?;
+    let run = lab.run(&unfed).await?;
+    keep::append(&lab.ssh, &unfed, &run, 0, b"{\"prompt\":1}\n").await?;
     ensure!(
         !keep::stale(&lab.ssh, &lab.tmux, &unfed).await?,
         "a fed keeper is live"
@@ -313,7 +321,8 @@ async fn lines_reach_the_agent_and_a_shut_writer_ends_it() -> Result<()> {
     let keeper = Keeper::new("web", "3c4d5e6f7a8b9c0d");
     lab.start_keeper(&keeper, "exec cat", Limits::default())
         .await?;
-    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), 0);
+    let run = lab.run(&keeper).await?;
+    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), &run, 0);
     writer.write_all(b"{\"one\":1}\n{\"two\":2}\n").await?;
     writer.flush().await?;
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -321,7 +330,7 @@ async fn lines_reach_the_agent_and_a_shut_writer_ends_it() -> Result<()> {
         ensure!(Instant::now() < deadline, "the writer appended both lines");
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    keep::append(&lab.ssh, &keeper, 20, b"{\"three\":3}\n").await?;
+    keep::append(&lab.ssh, &keeper, &run, 20, b"{\"three\":3}\n").await?;
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let out = keep::read(&lab.ssh, &keeper, File::Out, None).await?;
@@ -332,8 +341,8 @@ async fn lines_reach_the_agent_and_a_shut_writer_ends_it() -> Result<()> {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     // The same line at the same offset is already there.
-    keep::append(&lab.ssh, &keeper, 20, b"{\"three\":3}\n").await?;
-    let behind = keep::append(&lab.ssh, &keeper, 3, b"{\"no\":0}\n").await;
+    keep::append(&lab.ssh, &keeper, &run, 20, b"{\"three\":3}\n").await?;
+    let behind = keep::append(&lab.ssh, &keeper, &run, 3, b"{\"no\":0}\n").await;
     ensure!(
         matches!(behind, Err(keep::Error::Behind { .. })),
         "{behind:?}"
@@ -457,7 +466,8 @@ async fn a_writer_keeps_trying_while_the_pane_lives() -> Result<()> {
         keeper.thread()
     );
     lab.fixture.run(&format!("chmod 000 {journal}"))?;
-    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), 0);
+    let run = lab.run(&keeper).await?;
+    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), &run, 0);
     writer.write_all(b"{\"late\":1}\n").await?;
     writer.flush().await?;
     // Six tries take about 25 s: 1 + 2 + 4 + 8 + 8 seconds apart.
@@ -486,8 +496,9 @@ async fn a_writer_behind_in_ends_the_keeper_and_says_why() -> Result<()> {
     let keeper = Keeper::new("web", "8b9c0d1e2f3a4b5c");
     lab.start_keeper(&keeper, "exec cat", Limits::default())
         .await?;
-    keep::append(&lab.ssh, &keeper, 0, b"{\"other\":1}\n").await?;
-    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), 0);
+    let run = lab.run(&keeper).await?;
+    keep::append(&lab.ssh, &keeper, &run, 0, b"{\"other\":1}\n").await?;
+    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), &run, 0);
     writer.write_all(b"{\"mine\":1}\n").await?;
     writer.flush().await?;
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -497,5 +508,42 @@ async fn a_writer_behind_in_ends_the_keeper_and_says_why() -> Result<()> {
     }
     let said = String::from_utf8(keep::read(&lab.ssh, &keeper, File::Err, None).await?)?;
     ensure!(said.contains("yantra: the keeper's `in` holds"), "{said}");
+    Ok(())
+}
+
+/// Y-542: a writer whose keeper was replaced lands nothing in the new
+/// keeper's `in` and leaves its session alone, though its offset is wrong
+/// there.
+#[tokio::test]
+async fn a_writer_of_a_replaced_keeper_leaves_the_new_one() -> Result<()> {
+    let Some(lab) = Lab::start("replaced").await? else {
+        return Ok(());
+    };
+    let keeper = Keeper::new("web", "1e2f3a4b5c6d7e8f");
+    lab.start_keeper(&keeper, "exec cat", Limits::default())
+        .await?;
+    let old = lab.run(&keeper).await?;
+    let mut stale = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), &old, 0);
+    keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
+
+    let pane = lab
+        .start_keeper(&keeper, "exec cat", Limits::default())
+        .await?;
+    let new = lab.run(&keeper).await?;
+    ensure!(new != old, "a new run: {old} then {new}");
+    keep::append(&lab.ssh, &keeper, &new, 0, b"{\"prompt\":1}\n").await?;
+    stale.write_all(b"{\"stale\":1}\n").await?;
+    stale.flush().await?;
+    stale.shutdown().await?;
+    // One append and its answer take well under a second over the socket.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let found = keep::pane(&lab.ssh, &lab.tmux, &keeper)
+        .await?
+        .expect("the new keeper stays");
+    ensure!(found.id == pane && !found.dead, "{found:?}");
+    let input = keep::read(&lab.ssh, &keeper, File::In, None).await?;
+    ensure!(input == b"{\"prompt\":1}\n", "in holds {input:?}");
+    keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
     Ok(())
 }

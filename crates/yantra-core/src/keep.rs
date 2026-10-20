@@ -36,8 +36,6 @@ const ENDED: &str = "yantra-keeper-ended";
 
 /// How long one write to `in` may take before it counts as failed.
 const APPEND_WITHIN: Duration = Duration::from_secs(30);
-/// How many times the last read of a dead keeper's `out` is tried.
-const DRAIN_TRIES: u32 = 6;
 /// The longest wait between two tries of a reader or a writer.
 const BACKOFF: Duration = Duration::from_secs(8);
 
@@ -229,6 +227,11 @@ pub enum Error {
     /// of order.
     #[error("the keeper's `in` holds {found} bytes where {expected} were written")]
     Behind { found: String, expected: u64 },
+
+    /// The keeper's `run` is another one's, so a new keeper holds the thread
+    /// and this writer's turn is over.
+    #[error("a new keeper replaced the one this writer fed")]
+    Replaced,
 }
 
 fn colon(said: &str) -> String {
@@ -370,19 +373,24 @@ pub async fn kill<E: Exec>(exec: &E, tmux: &Tmux, keeper: &Keeper) -> Result<(),
     Ok(tmux.kill(exec, &keeper.session()).await?)
 }
 
-/// Closes the agent's stdin by killing the `tail` that feeds it. A stdin that
-/// is already closed is success.
-pub async fn close_stdin<E: Exec>(exec: &E, keeper: &Keeper) -> Result<(), Error> {
-    let out = exec
-        .exec(&format!(
-            "cd {} 2>/dev/null || exit 0; [ ! -f feed.pid ] || kill \"$(cat feed.pid)\" 2>/dev/null; exit 0",
-            keeper.dir()
-        ))
-        .await?;
+/// Closes the agent's stdin by killing the `tail` that feeds it, when the
+/// keeper is still `run`'s. A stdin that is already closed is success.
+pub async fn close_stdin<E: Exec>(exec: &E, keeper: &Keeper, run: &str) -> Result<(), Error> {
+    let out = exec.exec(&closing(keeper, run)).await?;
     if !out.success() {
         return Err(failed("closed", &out));
     }
     Ok(())
+}
+
+/// A new keeper's `feed.pid` is its own tail, which an old run must not kill.
+fn closing(keeper: &Keeper, run: &str) -> String {
+    format!(
+        "cd {} 2>/dev/null || exit 0; [ \"$(cat run 2>/dev/null)\" = {} ] || exit 0; \
+         [ ! -f feed.pid ] || kill \"$(cat feed.pid)\" 2>/dev/null; exit 0",
+        keeper.dir(),
+        sq(run)
+    )
 }
 
 /// One of a keeper's files.
@@ -464,10 +472,17 @@ pub async fn write_mode<E: Exec>(exec: &E, keeper: &Keeper, mode: &str) -> Resul
     Ok(())
 }
 
-/// Appends `line` to `in`, which holds `at` bytes before it. The line rides
-/// stdin, so its size is not bound by a command line. A retry after a lost
-/// answer finds the line already there and succeeds, so no line lands twice.
-pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<(), Error> {
+/// Appends `line` to `in`, which holds `at` bytes before it, while the keeper
+/// is still `run`'s. The line rides stdin, so its size is not bound by a
+/// command line. A retry after a lost answer finds the line already there and
+/// succeeds, so no line lands twice.
+pub async fn append(
+    ssh: &Ssh,
+    keeper: &Keeper,
+    run: &str,
+    at: u64,
+    line: &[u8],
+) -> Result<(), Error> {
     let len = line.len() as u64;
     let ssh::Piped {
         mut child,
@@ -475,7 +490,7 @@ pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<
         stdout,
         stderr,
         log,
-    } = ssh.stdio(&appending(keeper, at, len))?;
+    } = ssh.stdio(&appending(keeper, run, at, len))?;
     drop(stdout);
     let said = crate::acp::diagnosis(stderr, log);
     let fed = async move {
@@ -492,6 +507,7 @@ pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<
             found: said,
             expected: at,
         }),
+        5 => Err(Error::Replaced),
         _ => Err(Error::Journal {
             what: "written",
             status,
@@ -500,10 +516,11 @@ pub async fn append(ssh: &Ssh, keeper: &Keeper, at: u64, line: &[u8]) -> Result<
     }
 }
 
-fn appending(keeper: &Keeper, at: u64, len: u64) -> String {
+fn appending(keeper: &Keeper, run: &str, at: u64, len: u64) -> String {
     let end = at + len;
     format!(
         "cd {} || exit 1\n\
+         if [ \"$(cat run 2>/dev/null)\" != {} ]; then cat >/dev/null; exit 5; fi\n\
          n=$(($(wc -c <in))) || exit 1\n\
          if [ \"$n\" -eq {end} ]; then cat >/dev/null; exit 0; fi\n\
          if [ \"$n\" -ne {at} ]; then cat >/dev/null; echo \"$n\" >&2; exit 3; fi\n\
@@ -513,18 +530,20 @@ fn appending(keeper: &Keeper, at: u64, len: u64) -> String {
          s=$?\n\
          rm -f in.part\n\
          exit \"$s\"\n",
-        keeper.dir()
+        keeper.dir(),
+        sq(run)
     )
 }
 
-/// A writer whose every line is appended to `in`, which holds `at` bytes now.
-/// A line that cannot be written is tried again for as long as the keeper's
-/// pane lives, as the reader is. An `in` that another writer changed ends the
-/// keeper and says why in `err`, so the turn fails where it can be seen.
-pub fn feed(ssh: Ssh, tmux: Tmux, keeper: Keeper, at: u64) -> Feed {
+/// A writer for keeper `run`, whose every line is appended to `in`, which
+/// holds `at` bytes now. A line that cannot be written is tried again for as
+/// long as the keeper's pane lives, as the reader is. An `in` that another
+/// writer changed ends the keeper and says why in `err`, so the turn fails
+/// where it can be seen. A keeper of another run ends only the writer.
+pub fn feed(ssh: Ssh, tmux: Tmux, keeper: Keeper, run: &str, at: u64) -> Feed {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
     let (close, closed) = oneshot::channel();
-    tokio::spawn(pump_in(ssh, tmux, keeper, at, ours, closed));
+    tokio::spawn(pump_in(ssh, tmux, keeper, run.to_owned(), at, ours, closed));
     Feed {
         inner: theirs,
         close: Some(close),
@@ -565,6 +584,7 @@ async fn pump_in(
     ssh: Ssh,
     tmux: Tmux,
     keeper: Keeper,
+    run: String,
     mut at: u64,
     from: DuplexStream,
     mut closed: oneshot::Receiver<()>,
@@ -580,9 +600,12 @@ async fn pump_in(
         }
         let mut wait = Duration::from_secs(1);
         loop {
-            let tried = tokio::time::timeout(APPEND_WITHIN, append(&ssh, &keeper, at, &line)).await;
+            let tried =
+                tokio::time::timeout(APPEND_WITHIN, append(&ssh, &keeper, &run, at, &line)).await;
             match tried {
                 Ok(Ok(())) => break,
+                // The new keeper's turn is not this writer's to end.
+                Ok(Err(Error::Replaced)) => return,
                 Ok(Err(behind @ Error::Behind { .. })) => {
                     let _ = ssh
                         .exec(&format!(
@@ -609,7 +632,7 @@ async fn pump_in(
         at += line.len() as u64;
     }
     if closed.try_recv().is_ok() {
-        let _ = close_stdin(&ssh, &keeper).await;
+        let _ = close_stdin(&ssh, &keeper, &run).await;
     }
 }
 
@@ -727,11 +750,12 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
 }
 
 /// The rest of `out` once the pane is dead, which the far `tail` may not have
-/// sent before it was killed.
-async fn drain(ssh: &Ssh, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
+/// sent before it was killed. `out` stays until the thread's next turn, so it
+/// is asked for on the reader's schedule until the machine answers.
+async fn drain<E: Exec>(exec: &E, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
     let mut wait = Duration::from_secs(1);
-    for _ in 0..DRAIN_TRIES {
-        let read = ssh
+    loop {
+        let read = exec
             .exec(&format!(
                 "cd {} 2>/dev/null || exit 0; tail -c +{} out",
                 keeper.dir(),
@@ -1040,27 +1064,32 @@ mod tests {
 
     #[test]
     fn the_append_command_writes_only_at_the_offset_it_names() {
-        let script = appending(&Keeper::new("w", "t"), 10, 4);
+        let script = appending(&Keeper::new("w", "t"), "r1", 10, 4);
         assert!(script.starts_with("cd \"$HOME\"/.yantra/keep/'w'/'t' || exit 1\n"));
+        assert!(script.contains(
+            "if [ \"$(cat run 2>/dev/null)\" != 'r1' ]; then cat >/dev/null; exit 5; fi"
+        ));
         assert!(script.contains("if [ \"$n\" -eq 14 ]; then cat >/dev/null; exit 0; fi"));
         assert!(script.contains("if [ \"$n\" -ne 10 ]; then"));
         assert!(script.contains("-ne 4 ]; then rm -f in.part; exit 4; fi"));
     }
 
-    /// The append's three cases under the host's `/bin/sh`: a line lands at
-    /// its offset, a retry of it lands nothing, and an offset that is wrong
-    /// lands nothing and says so.
+    /// The append's four cases under the host's `/bin/sh`: a line lands at
+    /// its offset, a retry of it lands nothing, an offset that is wrong lands
+    /// nothing and says so, and a writer of another run lands nothing.
     #[test]
     fn an_append_lands_once_and_never_out_of_order() {
         let scratch = Scratch::new("append");
         std::fs::write(scratch.path("in"), b"0123456789").expect("in");
-        let run = |at: u64, line: &str| {
+        std::fs::write(scratch.path("run"), b"r1\n").expect("run");
+        let run_as = |keeper_run: &str, at: u64, line: &str| {
             use std::io::Write as _;
-            let script = appending(&Keeper::new("w", "t"), at, line.len() as u64).replacen(
-                "cd \"$HOME\"/.yantra/keep/'w'/'t'",
-                &format!("cd {}", sq(&scratch.0.to_string_lossy())),
-                1,
-            );
+            let script = appending(&Keeper::new("w", "t"), keeper_run, at, line.len() as u64)
+                .replacen(
+                    "cd \"$HOME\"/.yantra/keep/'w'/'t'",
+                    &format!("cd {}", sq(&scratch.0.to_string_lossy())),
+                    1,
+                );
             let mut child = Command::new("/bin/sh")
                 .args(["-c", &script])
                 .stdin(std::process::Stdio::piped())
@@ -1075,12 +1104,98 @@ mod tests {
                 .expect("written");
             child.wait().expect("it ends").code()
         };
+        let run = |at: u64, line: &str| run_as("r1", at, line);
         assert_eq!(run(10, "abc\n"), Some(0));
         assert_eq!(scratch.read("in"), "0123456789abc\n");
         assert_eq!(run(10, "abc\n"), Some(0), "a retry finds it there");
         assert_eq!(scratch.read("in"), "0123456789abc\n");
         assert_eq!(run(3, "zzz\n"), Some(3));
         assert_eq!(scratch.read("in"), "0123456789abc\n");
+        // A stale writer at the right offset still lands nothing (Y-542).
+        assert_eq!(run_as("r0", 14, "old\n"), Some(5));
+        assert_eq!(scratch.read("in"), "0123456789abc\n");
         assert!(!scratch.path("in.part").exists());
+    }
+
+    /// `close_stdin` kills the tail only for the run that names the keeper,
+    /// so a stale writer cannot end a new keeper's agent.
+    #[test]
+    fn a_close_of_another_run_leaves_the_tail() {
+        let scratch = Scratch::new("close");
+        std::fs::write(scratch.path("run"), b"r1\n").expect("run");
+        let mut tail = Command::new("sleep").arg("60").spawn().expect("sleep runs");
+        std::fs::write(scratch.path("feed.pid"), format!("{}\n", tail.id())).expect("feed.pid");
+        let close = |run: &str| {
+            let script = closing(&Keeper::new("w", "t"), run).replacen(
+                "cd \"$HOME\"/.yantra/keep/'w'/'t'",
+                &format!("cd {}", sq(&scratch.0.to_string_lossy())),
+                1,
+            );
+            Command::new("/bin/sh")
+                .args(["-c", &script])
+                .status()
+                .expect("sh runs")
+                .code()
+        };
+        assert_eq!(close("r0"), Some(0));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            tail.try_wait().expect("waitable").is_none(),
+            "another run's close leaves the tail"
+        );
+        assert_eq!(close("r1"), Some(0));
+        let mut status = None;
+        until("the tail ends", || {
+            status = tail.try_wait().expect("waitable");
+            status.is_some()
+        });
+    }
+
+    /// Fails every command until `from` has passed, then answers with `out`.
+    struct Late {
+        from: tokio::time::Instant,
+        out: &'static [u8],
+        asked: std::sync::Mutex<u32>,
+    }
+
+    impl Exec for Late {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            *self
+                .asked
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+            if tokio::time::Instant::now() < self.from {
+                return Err(ssh::Error::Transport {
+                    host: "m".to_owned(),
+                    diagnosis: "Connection timed out".to_owned(),
+                });
+            }
+            Ok(ssh::Output {
+                status: 0,
+                stdout: self.out.to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    /// A machine away for longer than the old six tries still gets its
+    /// result line read, because `out` stays until the next turn.
+    #[tokio::test(start_paused = true)]
+    async fn the_drain_asks_until_the_machine_answers() {
+        let machine = Late {
+            from: tokio::time::Instant::now() + Duration::from_secs(40),
+            out: b"{\"type\":\"result\"}\n",
+            asked: std::sync::Mutex::new(0),
+        };
+        let (mut ours, mut theirs) = tokio::io::duplex(1 << 10);
+        drain(&machine, &Keeper::new("w", "t"), 0, &mut ours).await;
+        drop(ours);
+        let mut read = Vec::new();
+        theirs.read_to_end(&mut read).await.expect("the bytes");
+        assert_eq!(read, b"{\"type\":\"result\"}\n");
+        assert!(
+            *machine.asked.lock().expect("a lock") > 6,
+            "more than the old six tries"
+        );
     }
 }

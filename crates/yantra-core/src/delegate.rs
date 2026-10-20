@@ -50,6 +50,10 @@ pub enum Error {
     #[error(transparent)]
     Acp(#[from] acp::Error),
 
+    /// A thread's keeper session would not go, so its journals stay.
+    #[error(transparent)]
+    Keeper(#[from] crate::keep::Error),
+
     #[error("the task has ended or is stopping, so it takes no more prompts")]
     Ended,
 }

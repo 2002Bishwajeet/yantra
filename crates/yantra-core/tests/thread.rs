@@ -8,6 +8,7 @@ mod common;
 use anyhow::Result;
 use common::{SshFixture, USER};
 use yantra_core::acp::Harness;
+use yantra_core::keep::{self, Keeper, Limits, Started};
 use yantra_core::ssh::{Exec, Machine, Os, Ssh};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::Workspace;
@@ -180,7 +181,7 @@ async fn a_thread_edits_its_own_worktree_while_the_tui_keeps_the_repo() -> Resul
         branch = ended.branch
     ))?;
 
-    thread::remove(&ssh, &ended).await?;
+    thread::remove(&ssh, &tmux, &ended).await?;
     assert_eq!(
         fixture
             .run(&format!("test -e {} && echo there || true", ended.worktree))?
@@ -196,7 +197,7 @@ async fn a_thread_edits_its_own_worktree_while_the_tui_keeps_the_repo() -> Resul
         std::slice::from_ref(&two)
     );
 
-    thread::remove(&ssh, &two).await?;
+    thread::remove(&ssh, &tmux, &two).await?;
     tmux.kill(&ssh, NAME).await?;
     std::fs::remove_dir_all(&dir)?;
     Ok(())
@@ -241,7 +242,7 @@ async fn a_thread_remembers_its_harness_and_acp_session() -> Result<()> {
         Some((Harness::Opencode, session.to_owned()))
     );
 
-    thread::remove(&ssh, &place).await?;
+    thread::remove(&ssh, &Tmux::resolve(&ssh).await?, &place).await?;
     let left = fixture.run(&format!(
         "git -C {repo} config --get-regexp '^branch\\.' || true"
     ))?;
@@ -312,8 +313,9 @@ async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()>
         ))
     );
 
-    thread::remove(&ssh, &from_issue).await?;
-    thread::remove(&ssh, &plain).await?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    thread::remove(&ssh, &tmux, &from_issue).await?;
+    thread::remove(&ssh, &tmux, &plain).await?;
     let left = fixture.run(&format!(
         "git -C {repo} config --get-regexp '^branch\\.' || true"
     ))?;
@@ -321,6 +323,73 @@ async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()>
         left.trim(),
         "",
         "branch -D drops the issue and the upstream"
+    );
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Y-542: removing a thread kills its keeper's session first, so no agent
+/// writes the journals while they go, and neither is left after.
+#[tokio::test]
+async fn removing_a_thread_ends_its_keeper_and_its_journals() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    let dir = state_dir("thr-rm")?;
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(USER.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.clone(),
+    })?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    let repo = "/home/yantra/removes";
+    fixture.run(&format!(
+        "mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
+         && git add README && git -c user.name=t -c user.email=t@example.com \
+         commit -qm one"
+    ))?;
+    let workspace = Workspace {
+        name: "removes".to_owned(),
+        machine: "fixture".to_owned(),
+        repo: repo.into(),
+        startup: None,
+    };
+    let place = thread::open(&ssh, &workspace).await?;
+    let keeper = Keeper::of(&place).expect("a chat thread has a keeper");
+    let started = keep::start(
+        &ssh,
+        &tmux,
+        &keeper,
+        "exec sleep 600",
+        &keep::run_id()?,
+        Limits::default(),
+    )
+    .await?;
+    assert!(matches!(started, Started::Running { .. }), "{started:?}");
+
+    thread::remove(&ssh, &tmux, &place).await?;
+    assert!(
+        keep::pane(&ssh, &tmux, &keeper).await?.is_none(),
+        "the keeper's session is gone"
+    );
+    assert_eq!(
+        fixture
+            .run(&format!(
+                "test -e ~/.yantra/keep/removes/{} && echo there || true",
+                keeper.thread()
+            ))?
+            .trim(),
+        "",
+        "the journals are gone"
+    );
+    assert!(
+        fixture
+            .run("pgrep -f 'sleep 60[0]' || true")?
+            .trim()
+            .is_empty(),
+        "no agent outlives its thread"
     );
     std::fs::remove_dir_all(&dir)?;
     Ok(())

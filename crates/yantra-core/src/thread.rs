@@ -24,10 +24,10 @@ use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO, branch, said};
 pub use crate::delegate::{Error, Place, Summary};
 use crate::github::{self, Github, Issue, IssueRef, PullState, Token};
-use crate::keep::Keeper;
+use crate::keep::{self, Keeper};
 use crate::logs::{self, Transcript};
 use crate::ssh::{self, Exec, Ssh};
-use crate::tmux::sq;
+use crate::tmux::{Tmux, sq};
 use crate::tokens::{self, Spend};
 use crate::workspace::{self, Workspace};
 
@@ -140,8 +140,8 @@ pub async fn open_for_issue<E: Exec>(
         },
         Err(error) => Error::Ssh(error),
     };
-    // The write's own error is the one worth reporting.
-    let _ = remove(exec, &place).await;
+    // The write's own error is the one worth reporting. No keeper runs yet.
+    let _ = removal(exec, &place).await;
     Err(failed)
 }
 
@@ -455,7 +455,17 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
 /// Removes the worktree, the branch, the checkpoints and the keeper's
 /// journals and images, uncommitted work included. The only path that deletes
 /// a thread.
-pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
+/// Removes the thread: its keeper's session first, so no agent writes to the
+/// journals while they go (I-30), then the worktree, the branch, the
+/// checkpoints and the journals.
+pub async fn remove<E: Exec>(exec: &E, tmux: &Tmux, place: &Place) -> Result<(), Error> {
+    if let Some(keeper) = Keeper::of(place) {
+        keep::kill(exec, tmux, &keeper).await?;
+    }
+    removal(exec, place).await
+}
+
+async fn removal<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
     let journals =
         Keeper::of(place).map_or_else(String::new, |keeper| format!(" && {}", keeper.removal()));
     let out = exec
@@ -727,14 +737,25 @@ mod tests {
         ));
     }
 
+    async fn tmux() -> Tmux {
+        Tmux::resolve(&Machine::answering(vec![out(0, b"/usr/bin/tmux\n", "")]))
+            .await
+            .expect("a tmux")
+    }
+
+    const KILL: &str = "'/usr/bin/tmux' kill-session -t '=yantra-keep-web-11111111'";
+
     #[tokio::test]
-    async fn remove_runs_the_removal_and_names_a_refusal() {
-        let machine = Machine::answering(vec![out(0, b"", "")]);
-        remove(&machine, &place()).await.expect("removed");
+    async fn remove_kills_the_keeper_then_runs_the_removal_and_names_a_refusal() {
+        let tmux = tmux().await;
+        let machine = Machine::answering(vec![out(0, b"", ""), out(0, b"", "")]);
+        remove(&machine, &tmux, &place()).await.expect("removed");
         assert_eq!(
             machine.asked(),
-            [format!(
-                "{{ [ ! -e '{WORKTREE}' ] \
+            [
+                KILL.to_owned(),
+                format!(
+                    "{{ [ ! -e '{WORKTREE}' ] \
                  || git -C '{REPO}' worktree remove --force '{WORKTREE}'; }} \
                  && git -C '{REPO}' worktree prune \
                  && {{ ! git -C '{REPO}' rev-parse -q --verify \
@@ -744,14 +765,26 @@ mod tests {
                  'refs/yantra/checkpoints/chat/web/11111111' \
                  | git -C '{REPO}' update-ref --stdin \
                  && rm -rf \"$HOME\"/.yantra/keep/'web'/'11111111'"
-            )]
+                )
+            ]
         );
 
-        let refused = Machine::answering(vec![out(128, b"", "fatal: not a working tree\n")]);
+        let refused = Machine::answering(vec![
+            out(0, b"", ""),
+            out(128, b"", "fatal: not a working tree\n"),
+        ]);
         assert!(matches!(
-            remove(&refused, &place()).await,
+            remove(&refused, &tmux, &place()).await,
             Err(Error::Worktree { stderr }) if stderr == "fatal: not a working tree"
         ));
+
+        // A keeper that stays keeps its journals too.
+        let kept = Machine::answering(vec![out(1, b"", "permission denied\n")]);
+        assert!(matches!(
+            remove(&kept, &tmux, &place()).await,
+            Err(Error::Keeper(_))
+        ));
+        assert_eq!(kept.asked().len(), 1, "nothing is removed");
     }
 
     #[tokio::test]
