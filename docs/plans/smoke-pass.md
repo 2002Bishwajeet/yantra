@@ -1,6 +1,6 @@
 # The smoke pass
 
-Four releases shipped while the 61-box pass ([v0.7.2-qa-pass.md](v0.7.2-qa-pass.md), 60 boxes) went unwalked. A pass that long does not get walked at each release. The owner confirmed on 2026-10-19 (Y-482) that a 15-check smoke pass is the release gate.
+Four releases shipped while the 61-box pass ([v0.8.0-qa-pass.md](v0.8.0-qa-pass.md), 60 boxes) went unwalked. A pass that long does not get walked at each release. The owner confirmed on 2026-10-19 (Y-482) that a 15-check smoke pass is the release gate.
 
 ## The rule
 
@@ -32,4 +32,4 @@ Some twins cover only part of a check. For example, no test draws a permission c
 
 ## The full pass is quarterly
 
-The owner walks [m15-qa-pass.md](m15-qa-pass.md) and the newest full release pass, [v0.7.2-qa-pass.md](v0.7.2-qa-pass.md), once a quarter. They are not walked at each release.
+The owner walks [m15-qa-pass.md](m15-qa-pass.md) and the newest full release pass, [v0.8.0-qa-pass.md](v0.8.0-qa-pass.md), once a quarter. They are not walked at each release.
