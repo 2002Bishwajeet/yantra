@@ -29,14 +29,14 @@ const NO_CHECKPOINT: i32 = 3;
 const IDENTITY: &str = "GIT_AUTHOR_NAME=Yantra GIT_AUTHOR_EMAIL=yantra@localhost \
                         GIT_COMMITTER_NAME=Yantra GIT_COMMITTER_EMAIL=yantra@localhost";
 /// The browser reads `a/` and `b/`, so no user config may change the format.
-const DIFF_FLAGS: &str =
+pub(crate) const DIFF_FLAGS: &str =
     "--no-color --no-ext-diff --no-textconv --no-relative --src-prefix=a/ --dst-prefix=b/";
 /// `git diff` dies of SIGPIPE when `head` has read enough, which is no failure.
 const SIGPIPE: i32 = 128 + 13;
 /// Writes the whole worktree, untracked files too, as `$tree` through a
 /// private index, so the real one is untouched. `cp -p` keeps the index's
 /// time, so git's racy check still sees a file changed in its second.
-const SNAPSHOT: &str = "tmp=$(mktemp) || exit\n\
+pub(crate) const SNAPSHOT: &str = "tmp=$(mktemp) || exit\n\
      trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
      cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n\
      GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
@@ -296,7 +296,7 @@ fn stats(numstat: &[u8]) -> Result<(Vec<FileStat>, bool), Error> {
 
 /// Runs `command` and passes on one byte more than [`LIMIT`], so a caller can
 /// tell that it was cut.
-fn capped(command: &str) -> String {
+pub(crate) fn capped(command: &str) -> String {
     format!(
         "exec 3>&1\n\
          s=$({{ {{ {command}; echo $? >&4; }} | head -c {over} >&3; }} 4>&1)\n\

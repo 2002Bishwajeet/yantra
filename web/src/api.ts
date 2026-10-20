@@ -487,6 +487,26 @@ export type ThreadOpened = {
   issue: string
   draft: string
 }
+
+/** `POST /api/workspaces/{name}/threads/{thread}/message`: the commit message
+ *  `claude -p` wrote on the machine (Y-492). */
+export type ThreadMessage = {
+  message: string
+}
+
+/** `POST /api/workspaces/{name}/threads/{thread}/commit` with `{ message? }`.
+ *  No message drafts one first. */
+export type ThreadCommitted = {
+  commit: string
+  subject: string
+}
+
+/** `POST /api/workspaces/{name}/threads/{thread}/push`. `remote` is the
+ *  remote's name, never its URL. */
+export type ThreadPushed = {
+  remote: string
+  branch: string
+}
 // ---------------------------------------------------------------------------
 // Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
 // edits above it is trivial.

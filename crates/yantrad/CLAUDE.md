@@ -280,11 +280,12 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`, `POST /api/relay`,
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
+`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id` and `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair`, `chat ls`, `chat new` (Y-488), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
+`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
 `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
@@ -450,6 +451,17 @@ A bad issue is `400`, an issue GitHub does not have is `404`, no grant is `409` 
 `yantra github login`, GitHub's own failure is `502`, and a machine that could not be asked is
 `503`, as in `from_logs`. The issue's title and body are never logged (ADR-0034 decision 4); the log
 says `threads {name} for {node}` and `thread new {name} for {node}`.
+
+**`message`, `commit` and `push` are `yantra commit --draft`, `commit` and `push`** (Y-492,
+[ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md) decisions 2 and 5). They sit in
+the `acts` router, because none reads the grant: git on the machine commits and pushes with the
+machine's own identity and credential. `message` answers `{message}`, which `claude -p` wrote there.
+`commit` takes `{message?}` and answers `{commit, subject}`; with no message it drafts one first.
+`push` answers `{remote, branch}`, the remote's name and never its URL. A thread the workspace
+does not have is `404`; no git identity, nothing to commit, no `origin` and a refused push are
+`409`; a `claude` that could not answer is `502`; ssh is `503`; any other git failure is `500`.
+`from_commit` has no wildcard (Y-135). The log names the workspace, the thread and the caller,
+and never the message or the diff (Q5).
 
 **`repair` is the one that writes bytes this daemon did not compose**, and
 [ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
