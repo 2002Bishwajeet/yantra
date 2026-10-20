@@ -11,7 +11,7 @@ use anyhow::Result;
 use base64::Engine as _;
 use common::{SshFixture, USER};
 use yantra_core::commit::{self, Error};
-use yantra_core::github::IssueRef;
+use yantra_core::github::{Github, IssueRef, Token};
 use yantra_core::ssh::{Exec as _, Machine, Ssh};
 use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
@@ -353,5 +353,125 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
         fixture.run(&inherited_merge)?,
         format!("refs/heads/{inherited_named}\n")
     );
+    Ok(())
+}
+
+/// A loopback GitHub that answers each request in turn and returns what it
+/// was sent. The GitHub calls stay faked; the tip read is what goes over ssh.
+fn github_answering(
+    replies: Vec<(&'static str, &'static str)>,
+) -> (Github, std::thread::JoinHandle<Vec<String>>) {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let base = format!("http://{}", listener.local_addr().expect("its address"));
+    let served = std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        for (status, body) in replies {
+            let (mut stream, _) = listener.accept().expect("a connection");
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            loop {
+                let text = String::from_utf8_lossy(&request).into_owned();
+                if let Some((head, sent)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")?
+                                .trim()
+                                .parse::<usize>()
+                                .ok()
+                        })
+                        .unwrap_or(0);
+                    if sent.len() >= length {
+                        break;
+                    }
+                }
+                match stream.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => request.push(byte[0]),
+                }
+            }
+            seen.push(String::from_utf8_lossy(&request).into_owned());
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .expect("the answer is written");
+        }
+        seen
+    });
+    (Github::at(&base, &base), served)
+}
+
+/// Y-449 per §B3: `open_pr` reads the pushed tip over the real ssh exec, so
+/// a pushed thread opens a PR with its tip's text and a commit after the push
+/// is refused.
+#[tokio::test]
+async fn a_pr_opens_from_the_pushed_tip_read_over_ssh() -> Result<()> {
+    const REPO: &str = "/home/yantra/prs";
+    const ORIGIN: &str = "/home/yantra/prs-origin.git";
+    const NONE_OPEN: &str = "[]";
+    let Some((fixture, ssh, workspace)) = lab("yt-pr", REPO).await? else {
+        return Ok(());
+    };
+    fixture.run(&format!(
+        "git -C {REPO} config user.name Owner && git -C {REPO} config user.email owner@example.com \
+         && git init -q --bare {ORIGIN} && git -C {REPO} remote add origin {ORIGIN}"
+    ))?;
+    let place = thread::open(&ssh, &workspace).await?;
+    fixture.run(&format!("cd {} && printf 'a\\n' > a.txt", place.worktree))?;
+    commit::commit(&ssh, &place, "Fix the thing\n\nwhy").await?;
+    let issue: IssueRef = "o/r#7".parse()?;
+    let pushed = commit::push(&ssh, &place, Some(&issue), None).await?;
+    // The remote-tracking ref stays; only the URL now names github.com.
+    fixture.run(&format!(
+        "git -C {REPO} remote set-url origin https://github.com/o/r.git"
+    ))?;
+    let found = |listed: Vec<thread::Listed>| {
+        listed
+            .into_iter()
+            .find(|found| found.place.branch == place.branch)
+            .expect("the thread")
+    };
+    let mut thread = found(thread::listed(&ssh, &workspace).await?);
+    thread.issue = Some(issue.to_string());
+    let token = Token::new("gho_notarealtoken".to_owned());
+
+    let (github, served) = github_answering(vec![
+        ("200 OK", NONE_OPEN),
+        ("200 OK", r#"{"default_branch":"main"}"#),
+        (
+            "201 Created",
+            r#"{"number":3,"html_url":"https://github.com/o/r/pull/3","state":"open","merged_at":null}"#,
+        ),
+    ]);
+    let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None).await?;
+    assert!(opened.created);
+    assert_eq!(opened.number, 3);
+    let seen = served.join().expect("the stub thread");
+    let sent: serde_json::Value =
+        serde_json::from_str(seen[2].rsplit("\r\n\r\n").next().unwrap_or_default())?;
+    assert_eq!(
+        sent,
+        serde_json::json!({
+            "head": format!("o:{}", pushed.branch),
+            "base": "main",
+            "title": "Fix the thing",
+            "body": "why\n\nCloses #7",
+        })
+    );
+
+    fixture.run(&format!("cd {} && printf 'b\\n' > b.txt", place.worktree))?;
+    commit::commit(&ssh, &place, "Add b").await?;
+    let (github, _served) = github_answering(vec![("200 OK", NONE_OPEN)]);
+    assert!(matches!(
+        commit::open_pr(&ssh, &thread, &github, &token, None, None).await,
+        Err(commit::Failed::Ahead)
+    ));
     Ok(())
 }

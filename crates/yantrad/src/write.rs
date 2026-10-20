@@ -150,6 +150,11 @@ where
         // Here for the grant: a thread's PR and its issue are read with it.
         .route("/workspaces/{name}/threads", post(threads::<I>))
         .route("/workspaces/{name}/threads/new", post(thread_new::<I>))
+        // Opening a PR reads refs and writes GitHub, so a running turn does not refuse it.
+        .route(
+            "/workspaces/{name}/threads/{thread}/pr",
+            post(opening_pr::<I>),
+        )
         // Here for the chat registry: a running turn or revert refuses them.
         .route(
             "/workspaces/{name}/threads/{thread}/message",
@@ -162,10 +167,6 @@ where
         .route(
             "/workspaces/{name}/threads/{thread}/push",
             post(pushing::<I>),
-        )
-        .route(
-            "/workspaces/{name}/threads/{thread}/pr",
-            post(opening_pr::<I>),
         )
         .with_state(Remembered {
             authoriser: authoriser.clone(),
@@ -1514,7 +1515,7 @@ fn from_github(error: &github::Error) -> StatusCode {
     match error {
         github::Error::NotAnIssue { .. } | github::Error::IsAPull { .. } => StatusCode::BAD_REQUEST,
         github::Error::Status { status: 404, .. } => StatusCode::NOT_FOUND,
-        // A PR already open, or no commits between the branches.
+        // No commits between the branches; a lost race is answered before here.
         github::Error::NoGrant | github::Error::Unprocessable { .. } => StatusCode::CONFLICT,
         github::Error::Refused
         | github::Error::Status { .. }
@@ -1614,7 +1615,6 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
     body: Option<Json<PrBody>>,
 ) -> Result<Json<ThreadPrOpened>, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
-    idle(&state.fleet.chats, &name, &id)?;
     let Json(PrBody { title, body }) = body.unwrap_or_default();
     let token = state
         .fleet
@@ -1664,9 +1664,13 @@ fn from_commit(error: &commit::Failed) -> StatusCode {
     match error {
         commit::Failed::Workspace(workspace) => from_workspace(workspace),
         commit::Failed::NoThread { .. } => StatusCode::NOT_FOUND,
-        commit::Failed::NotPushed | commit::Failed::Ahead | commit::Failed::NotGithub => {
-            StatusCode::CONFLICT
-        }
+        commit::Failed::NotPushed
+        | commit::Failed::Ahead
+        | commit::Failed::Behind
+        | commit::Failed::Diverged
+        | commit::Failed::NotGithub
+        | commit::Failed::NoTitle
+        | commit::Failed::Unseen { .. } => StatusCode::CONFLICT,
         commit::Failed::Github(github) => from_github(github),
         commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
         commit::Failed::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
@@ -3749,7 +3753,7 @@ mod tests {
                     .status()
             }
         };
-        for path in ["message", "commit", "push", "pr"] {
+        for path in ["message", "commit", "push"] {
             let request =
                 Request::post(format!("/workspaces/site/threads/0a1b/{path}")).body(Body::empty());
             assert_eq!(send(request).await, StatusCode::CONFLICT, "{path}");
@@ -3854,15 +3858,28 @@ mod tests {
             from_commit(&commit::Failed::NotPushed),
             StatusCode::CONFLICT
         );
-        assert_eq!(from_commit(&commit::Failed::Ahead), StatusCode::CONFLICT);
-        assert_eq!(
-            from_commit(&commit::Failed::NotGithub),
-            StatusCode::CONFLICT
+        for refused in [
+            commit::Failed::Ahead,
+            commit::Failed::Behind,
+            commit::Failed::Diverged,
+            commit::Failed::NotGithub,
+            commit::Failed::NoTitle,
+        ] {
+            assert_eq!(from_commit(&refused), StatusCode::CONFLICT, "{refused}");
+        }
+        // A repository the grant cannot see is not a thread that is missing.
+        let unseen = commit::Failed::Unseen {
+            repo: "o/r".to_owned(),
+        };
+        assert_eq!(from_commit(&unseen), StatusCode::CONFLICT);
+        assert_ne!(
+            from_commit(&unseen),
+            from_commit(&commit::Failed::NoThread { id: "x".to_owned() })
         );
         let of = |error: github::Error| from_commit(&commit::Failed::Github(error));
         assert_eq!(
             of(github::Error::Unprocessable {
-                said: "Validation Failed: A pull request already exists".to_owned()
+                said: "Validation Failed: No commits between main and b".to_owned()
             }),
             StatusCode::CONFLICT
         );
@@ -3872,17 +3889,17 @@ mod tests {
         assert!(serde_json::from_str::<PrBody>(r#"{"draft":true}"#).is_err());
     }
 
-    /// No grant is a 409 before any workspace or machine is asked.
+    /// No grant is a 409 before any workspace or machine is asked. A busy
+    /// thread does not refuse it: opening a PR touches no worktree.
     #[tokio::test]
-    async fn pr_open_without_a_grant_is_a_conflict() {
+    async fn pr_open_without_a_grant_is_a_conflict_even_on_a_busy_thread() {
         use axum::body::Body;
         use axum::http::Request;
         use tower::ServiceExt as _;
 
-        let app = router::<Fake, ()>(
-            direct(tailnet(vec![(address(9), caller(ME, &[]))])),
-            Fleet::default(),
-        );
+        let fleet = Fleet::default();
+        fleet.chats.mark_reverting("chat/site/0a1b");
+        let app = router::<Fake, ()>(direct(tailnet(vec![(address(9), caller(ME, &[]))])), fleet);
         let mut request = Request::post("/workspaces/site/threads/0a1b/pr")
             .body(Body::empty())
             .expect("a request");

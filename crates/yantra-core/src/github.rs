@@ -759,15 +759,23 @@ struct Refusal {
     errors: Vec<Reason>,
 }
 
+/// GitHub sends an error as an object, or as a plain string.
 #[derive(serde::Deserialize)]
-struct Reason {
-    #[serde(default)]
-    message: Option<String>,
+#[serde(untagged)]
+enum Reason {
+    Text(String),
+    Object {
+        #[serde(default)]
+        message: Option<String>,
+    },
 }
 
 impl Refusal {
     fn said(self) -> String {
-        let first = self.errors.into_iter().find_map(|error| error.message);
+        let first = self.errors.into_iter().find_map(|error| match error {
+            Reason::Text(text) => Some(text),
+            Reason::Object { message } => message,
+        });
         match (self.message.trim(), first) {
             ("", None) => "422 with no reason".to_owned(),
             (message, None) => message.to_owned(),
@@ -843,13 +851,7 @@ fn request(
     token: Option<&Token>,
     query: &[(&str, &str)],
 ) -> Result<Response, ureq::Error> {
-    let mut request = agent()
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28");
-    if let Some(token) = token {
-        request = request.header("Authorization", &format!("Bearer {}", token.reveal()));
-    }
+    let mut request = headed(agent().get(url), token);
     for (key, value) in query {
         request = request.query(key, value);
     }
@@ -857,13 +859,19 @@ fn request(
 }
 
 fn post(url: &str, token: &Token, body: &serde_json::Value) -> Result<Response, ureq::Error> {
-    agent()
-        .post(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("Authorization", &format!("Bearer {}", token.reveal()))
+    headed(agent().post(url), Some(token))
         .header("Content-Type", "application/json")
         .send(body.to_string())
+}
+
+fn headed<B>(request: ureq::RequestBuilder<B>, token: Option<&Token>) -> ureq::RequestBuilder<B> {
+    let request = request
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28");
+    match token {
+        Some(token) => request.header("Authorization", &format!("Bearer {}", token.reveal())),
+        None => request,
+    }
 }
 
 fn ok(response: &Response, what: &'static str) -> Result<(), Error> {
@@ -1822,6 +1830,31 @@ pub(crate) mod tests {
         for refused in [exists, bare] {
             let text = refused.to_string();
             assert!(!text.contains("secret"), "{text}");
+        }
+    }
+
+    /// GitHub sends `errors` as plain strings for some refusals.
+    #[tokio::test]
+    async fn pr_open_reads_a_422_whose_errors_are_strings() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![reply(
+                "422 Unprocessable Entity",
+                r#"{"message":"Validation Failed","errors":["No commits between main and b"]}"#,
+            )],
+        );
+
+        let refused = at(address)
+            .create_pull(&token(), "o", "r", "o:b", "main", "t", "")
+            .await
+            .expect_err("422");
+
+        match refused {
+            Error::Unprocessable { said } => {
+                assert_eq!(said, "Validation Failed: No commits between main and b");
+            }
+            other => panic!("{other:?}"),
         }
     }
 }

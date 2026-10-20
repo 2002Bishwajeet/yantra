@@ -469,13 +469,17 @@ hold hook output.
 
 **`pr` is `yantra pr open`, and it reads the grant** (Y-449,
 [ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md) decisions 1 and 3). It sits in
-the same router, and a turn or a revert in the thread is `409` as for its siblings. It takes
-`{title?, body?}`; an absent one takes the tip commit's. It answers `{number, url, created}`, and
-`created` is `false` when a PR from the branch is already open. No grant is `409` naming
-`yantra github login`, before any machine is asked. No upstream, a tip that is not the upstream's
-and a remote off github.com are `409`, and so is GitHub's `422`: a PR already open, or no commits
-between the branches. Every other GitHub failure goes through `from_github`. The log says
-`pr open {name} {id} for {node}` and never the title or the body (Q5).
+the same router for the grant. A turn or a revert in the thread does not refuse it, because it
+reads refs and writes GitHub and touches no worktree. It takes `{title?, body?}`; an absent or blank
+one takes the tip commit's, and no title anywhere is `409`. It answers `{number, url, created}`.
+`created` is `false` when a PR from the branch is already open, and that is checked before the tip,
+so a commit made after the PR does not hide it. A `422` "already exists" from a lost race is
+answered the same way (§B4). No grant is `409` naming `yantra github login`, before any machine is
+asked. These are `409` too: no upstream (`NotPushed`), a remote off github.com (`NotGithub`), a
+branch ahead of, behind or diverged from its upstream (`Ahead`, `Behind`, `Diverged`), a repository
+the grant cannot see (`Unseen`, GitHub's `404`, never the `404` of a missing thread), and any other
+`422`, such as no commits between the branches. Every other GitHub failure goes through
+`from_github`. The log says `pr open {name} {id} for {node}` and never the title or the body (Q5).
 
 **`repair` is the one that writes bytes this daemon did not compose**, and
 [ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
