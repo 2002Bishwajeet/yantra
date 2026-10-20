@@ -393,6 +393,7 @@ deleted everywhere else.
 | Y-541 | Fix the two blocking findings of the Y-447 post-merge review | 🔵 review | claude | Y-447 | **Done** when a start that fails after the keeper session exists leaves no keeper, a tab back after its turn ended gets that turn's diff once, and each has a test that fails on 909c0cc. |
 | Y-542 | Act on the minor findings of the Y-447 post-merge review | ⬜ todo | claude | Y-541 | **Done** when each minor finding listed in PR #481 is fixed with a test or answered as not needed. |
 | Y-544 | Fix the open review findings of Y-492 | 🔵 review | claude | Y-492 | **Done** when drafting and pushing work on a Mac, a failed commit leaves the index as it was, commit and push refuse a running turn or revert, and each fix has a test that fails on 2ba20af. **Merged 2026-10-20.** The owner still checks a draft and an `osxkeychain` push on the real Mac. |
+| Y-545 | The build loop's reviewer sorts every finding | 🔵 review | claude | — | **Done** when the review step returns every finding as blocking or minor, with a written test for blocking, so a finding the reviewer says should hold the merge cannot pass the gate. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
