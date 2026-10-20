@@ -395,6 +395,7 @@ deleted everywhere else.
 | Y-543 | Fix the open review findings of Y-490 | 🔵 review | claude | Y-490 | **Done** when a `diff` during a turn does not stall the socket, a diff waits for or refuses a running revert, a diff failure has its own error kind, the branch diff is one remote command, and each has a test that fails on bbdf6b1. **Merged 2026-10-20.** |
 | Y-544 | Fix the open review findings of Y-492 | 🔵 review | claude | Y-492 | **Done** when drafting and pushing work on a Mac, a failed commit leaves the index as it was, commit and push refuse a running turn or revert, and each fix has a test that fails on 2ba20af. **Merged 2026-10-20.** The owner still checks a draft and an `osxkeychain` push on the real Mac. |
 | Y-545 | The build loop's reviewer sorts every finding | 🔵 review | claude | — | **Done** when the review step returns every finding as blocking or minor, with a written test for blocking, so a finding the reviewer says should hold the merge cannot pass the gate. |
+| Y-547 | The composer's draft overlaps its label | ⬜ todo | claude | Y-489 | Found by the Y-546 capture: after an issue starts a session, the "Work on …" draft sits over the "Message Claude" label. **Done** when a prefilled draft floats the label, with a test and a Playwright baseline at three sizes. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
