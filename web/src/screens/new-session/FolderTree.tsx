@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, File, Folder, FolderGit2, FolderLock } from 'lucide-react'
 import type { Entry } from '@/api'
@@ -10,6 +10,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
 import { noAccess } from './dirs'
 import { slug } from './form'
+import { arrange } from './picker'
 
 const badge = (entry: Entry): string =>
   entry.origin ? `git · ${slug(entry.origin)}` : entry.repo ? 'git · no origin' : 'not a repository'
@@ -20,13 +21,24 @@ const note = (text: string) => (
   </Text>
 )
 
-type Walk = { machine: string; hidden: boolean; onWalk: (entry: Entry) => void }
+/** `tab` is the roving tabindex: 0 for the one row Tab reaches, -1 for the
+ *  rest. Without it every row is a tab stop, as in the clone folder picker. */
+type Walk = {
+  machine: string
+  hidden: boolean
+  onWalk: (entry: Entry) => void
+  tab?: (path: string) => 0 | -1
+  /** A folder's subfolders stopped being drawn. */
+  onDrop?: (path: string) => void
+}
 
 /** The folders under one folder, fetched when it opens: one level per
  *  request, as everywhere else (D4 §2). Files are not drawn here. */
 function Children(props: Walk & { entry: Entry }) {
   const { entry, ...walk } = props
   const listing = useQuery({ ...dirsQuery(walk.machine, entry.path), enabled: true })
+  const { onDrop } = walk
+  useEffect(() => () => onDrop?.(entry.path), [onDrop, entry.path])
   if (listing.isPending) {
     return (
       <div aria-busy="true" className="ns__sub">
@@ -39,7 +51,10 @@ function Children(props: Walk & { entry: Entry }) {
     return <div className="ns__sub">{note(said)}</div>
   }
   if (!listing.data.access) return <div className="ns__sub">{note(noAccess(walk.machine))}</div>
-  const shown = listing.data.entries.filter((one) => one.kind === 'dir' && (walk.hidden || !one.name.startsWith('.')))
+  const shown = arrange(
+    listing.data.entries.filter((one) => one.kind === 'dir'),
+    { hidden: walk.hidden, filter: '' },
+  )
   return (
     <ul aria-label={`Folders in ${entry.name}`} className="ns__list ns__sub">
       {shown.length === 0 ? <li>{note('no folders here')}</li> : null}
@@ -88,11 +103,18 @@ function Node(props: Walk & { entry: Entry }) {
           aria-label={`Show folders in ${entry.name}`}
           className="ns__toggle m3-interactive"
           onClick={() => setOpen(!open)}
+          tabIndex={walk.tab ? -1 : undefined}
           type="button"
         >
           <ChevronRight aria-hidden="true" />
         </button>
-        <Row onClick={() => walk.onWalk(entry)} render={<button type="button" />}>
+        <Row
+          data-path={entry.path}
+          data-row=""
+          onClick={() => walk.onWalk(entry)}
+          render={<button type="button" />}
+          tabIndex={walk.tab?.(entry.path)}
+        >
           <Lead tone={entry.repo ? 'primary' : undefined}>{entry.repo ? <FolderGit2 /> : <Folder />}</Lead>
           <RowText headline={entry.name} supporting={badge(entry)} />
         </Row>

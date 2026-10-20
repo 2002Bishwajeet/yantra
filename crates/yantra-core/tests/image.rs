@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use anyhow::{Result, ensure};
 use common::{SshFixture, USER};
 use yantra_core::image::{Error, Images};
+use yantra_core::keep::Keeper;
 use yantra_core::ssh::{Machine, Ssh};
 
 /// Short on purpose: `%C` adds 40 characters and the socket path budget is 90.
@@ -56,19 +57,16 @@ async fn an_image_lands_at_the_path_it_names_and_goes_with_the_session() -> Resu
     std::fs::write(&local, &blob)?;
     fixture.copy_in(&local, "/tmp/expected.png")?;
 
-    let mut images = Images::new();
+    let mut images = Images::of(&Keeper::new("web", "1a2b3c4d5e6f7a8b"));
     let first = images.put(&ssh, &blob).await?;
     fixture.run(&format!("cmp /tmp/expected.png '{first}'"))?;
 
-    let tmp = fixture.run("printf %s \"${TMPDIR:-/tmp}\"")?;
+    // ADR-0035 decision 4: beside the thread's journals, outside every worktree.
+    let home = fixture.run("printf %s \"$HOME\"")?;
     ensure!(first.starts_with('/'), "{first} is not absolute");
     ensure!(
-        first.starts_with(&format!("{}/", tmp.trim_end_matches('/'))),
-        "{first} is not under {tmp}"
-    );
-    ensure!(
-        !first.starts_with(&format!("/home/{USER}")),
-        "{first} is in the home directory"
+        first.starts_with(&format!("{home}/.yantra/keep/web/1a2b3c4d5e6f7a8b/images/")),
+        "{first} is not in the thread's keeper directory"
     );
     let dir = images
         .dir()
@@ -78,8 +76,11 @@ async fn an_image_lands_at_the_path_it_names_and_goes_with_the_session() -> Resu
         first.starts_with(&format!("{dir}/")),
         "{first} is not in {dir}"
     );
+    // Busybox's adduser makes the home 2755, and `mkdir` inherits the setgid
+    // bit; only the access bits say who can read the images.
     let mode = fixture.run(&format!("stat -c %a '{dir}'"))?;
-    ensure!(mode.trim() == "700", "the directory is {mode}");
+    let mode = u32::from_str_radix(mode.trim(), 8)?;
+    ensure!(mode & 0o777 == 0o700, "the directory is {mode:o}");
 
     let second = images.put(&ssh, &blob[..4096]).await?;
     ensure!(

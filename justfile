@@ -86,7 +86,7 @@ appliance target=appliance_target:
 
 # Lint the shell scripts users pipe into sh; no --severity, so any finding fails.
 shellcheck:
-    shellcheck install.sh crates/yantra-core/src/join.sh
+    shellcheck install.sh crates/yantra-core/src/join.sh crates/yantra-core/src/keep.sh
 
 # R-24's assertion, and it is a negative one: no recipe the Rust gate runs may
 # turn `embed-dashboard` on, pass `--all-features`, or reach npm. A green build

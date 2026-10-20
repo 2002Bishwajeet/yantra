@@ -318,9 +318,17 @@ is removed in `Drop`. The file never enters git, CI or another machine. Without 
 prints `SKIPPED:` and passes, and CI skips it even with `YANTRA_REQUIRE_PODMAN=1`, because CI has no
 login. Each run spends a little of the owner's Claude plan. **`YANTRA_REQUIRE_CLAUDE=1` turns that
 skip into a failure**, the way `YANTRA_REQUIRE_PODMAN` does for podman, so a run that must prove the
-chat cannot pass by skipping it. `tests/claude.rs` is the one such test today
-([R20](research/20-claude-stream-json-turn.md)). It sets the container's model to `haiku`, and the
+chat cannot pass by skipping it. `tests/claude.rs` is one such test
+([R20](research/20-claude-stream-json-turn.md)), and `crates/yantrad/tests/chat_keeper.rs` is the
+other. It sets the container's model to `haiku`, and the
 image carries `bash` because claude's Bash tool refuses busybox `sh`.
+
+**`crates/yantrad/tests/chat_keeper.rs` runs a real `yantrad` on your host** (Y-447,
+[ADR-0035](adr/0035-a-chat-turn-outlives-its-ssh-pipe.md)). It gives the daemon a scratch `HOME`
+and `XDG_RUNTIME_DIR` under `/tmp/ykc-<pid>`, and puts two shims first on its `PATH`: a `tailscale`
+that names this host at 127.0.0.1, and an `ssh` that adds `-F` with a config naming the fixture.
+The daemon binds `127.0.0.1:7717`, so its three cases take a file lock and run one at a time. A
+daemon of your own on the tailnet address does not collide with it.
 
 **There is a second container, and it runs a real `systemd`.** Its fixture is
 `crates/yantrad/tests/common/mod.rs`, built from

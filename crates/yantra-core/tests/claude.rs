@@ -18,6 +18,7 @@ use common::{SshFixture, USER};
 use yantra_core::chat::{Decision, Event, PermissionMode, StreamKind, TurnCompleted, TurnState};
 use yantra_core::claude::{Events, Turn};
 use yantra_core::image::Images;
+use yantra_core::keep::Keeper;
 use yantra_core::ssh::{Machine, Ssh};
 use yantra_core::thread::{self, Place};
 use yantra_core::workspace::Workspace;
@@ -298,7 +299,7 @@ async fn a_real_claude_reads_a_pasted_image() -> Result<()> {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixture/red.png"
     ))?;
-    let mut images = Images::new();
+    let mut images = Images::of(&Keeper::of(&place).expect("a chat thread"));
     let path = images.put(&ssh, &red).await?;
 
     let seen = run(

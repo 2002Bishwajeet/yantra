@@ -93,6 +93,11 @@ describe('what each step needs before it can be left', () => {
 })
 
 describe('the plan the starting screen runs', () => {
+  it('marks only a local source, the one that remembers its folder', () => {
+    expect(plan(cloned('yes'))?.local).toBeUndefined()
+    expect(plan(cloned('no'))?.local).toBeUndefined()
+  })
+
   it('clones only a repository the machine does not have', () => {
     expect(plan(cloned('no'))?.clone).toEqual({
       url: repo.clone_url,

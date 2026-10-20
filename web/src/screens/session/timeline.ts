@@ -112,6 +112,11 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
       return { ...timeline, requests: [...timeline.requests, event.payload] }
     case 'turn.diff.updated': {
       const { turn, unifiedDiff, truncated } = event.payload
+      // A reopen sends the last turn's diff again (ADR-0035 decision 8). Only a
+      // revert frees a turn's number for a new card.
+      if (timeline.entries.some((one) => one.kind === 'diff' && one.turn === turn && !one.reverted)) {
+        return timeline
+      }
       // A turn's number comes back after a revert, so the id cannot be it.
       const diff: TurnDiff = {
         kind: 'diff',
@@ -156,6 +161,9 @@ function said(entries: Entry[], who: Message['who'], delta: string, itemId?: str
   if (at === -1) {
     return [...entries, { kind: 'message', id: itemId ?? `said:${entries.length}`, who, text: delta }]
   }
+  // The daemon makes a prompt (`user:<run>…`) whole and without a cursor, so
+  // a reopen may send it again (ADR-0035 decision 8); a second copy repeats it.
+  if (itemId?.startsWith('user:')) return entries
   const found = entries[at] as Message
   return entries.with(at, { ...found, text: found.text + delta })
 }

@@ -85,6 +85,15 @@ pub enum Error {
     )]
     InvalidName { name: String, path: PathBuf },
 
+    /// The prefix names a Chat keeper's tmux session (ADR-0035 decision 1).
+    #[error(
+        "`{name}` is not a usable workspace name: names that start with `{}` are Yantra's own \
+         (looked at {})",
+        crate::keep::PREFIX,
+        path.display()
+    )]
+    Reserved { name: String, path: PathBuf },
+
     #[error("no workspace named `{name}` (looked for {})", path.display())]
     NotFound { name: String, path: PathBuf },
 
@@ -558,14 +567,20 @@ fn validate_name(dir: &Path, name: &str) -> Result<(), Error> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
 
-    if usable {
-        Ok(())
-    } else {
-        Err(Error::InvalidName {
+    let path = || dir.join(format!("{name}.toml"));
+    if !usable {
+        return Err(Error::InvalidName {
             name: name.to_owned(),
-            path: dir.join(format!("{name}.toml")),
-        })
+            path: path(),
+        });
     }
+    if crate::keep::is_keeper(name) {
+        return Err(Error::Reserved {
+            name: name.to_owned(),
+            path: path(),
+        });
+    }
+    Ok(())
 }
 
 fn parse(name: &str, path: &Path, text: &str) -> Result<Workspace, Error> {
@@ -1261,6 +1276,15 @@ mod tests {
             create_in(&dir, "not a name", "m", Path::new("/r"), None),
             Err(Error::InvalidName { .. })
         ));
+        let reserved = create_in(&dir, "yantra-keep-web", "m", Path::new("/r"), None);
+        assert!(
+            matches!(reserved, Err(Error::Reserved { .. })),
+            "{reserved:?}"
+        );
+        assert!(
+            validate_name(&dir, "yantra-kept").is_ok(),
+            "only the whole prefix is Yantra's"
+        );
         assert!(matches!(
             create_in(&dir, "fine", "  ", Path::new("/r"), None),
             Err(Error::Empty { field: "machine" })

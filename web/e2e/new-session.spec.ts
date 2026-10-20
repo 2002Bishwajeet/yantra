@@ -143,6 +143,79 @@ test.describe('the four steps', () => {
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
+  /** Y-516: a path bar, a filter, arrow keys, repositories first, and a start
+   *  at the last folder used, kept in `yantra.prefs` general.lastFolders. */
+  test('the local picker browses like a file browser', async ({ page }) => {
+    const toLocal = async (name: string) => {
+      await page.getByLabel('Name').fill(name)
+      await page.getByRole('button', { name: 'cachyos-g14' }).click()
+      await page.getByRole('button', { name: 'Continue' }).click()
+      await page.getByRole('button', { name: /Local directory/ }).click()
+    }
+    const crumb = page.getByRole('navigation', { name: 'Where you are' }).locator('[aria-current="location"]')
+    const folders = page.getByRole('list', { name: 'Folders' })
+    const names = folders.locator('[data-row] .m3-row__headline')
+    await toLocal('quiet-otter')
+    await expect(crumb).toHaveText('~')
+
+    await page.getByRole('button', { name: 'Edit path' }).click()
+    await page.getByLabel('Path').fill('/home/biswa/Github')
+    await page.getByLabel('Path').press('Enter')
+    await expect(crumb).toHaveText('Github')
+    await expect(page.getByRole('button', { name: 'Edit path' })).toBeFocused()
+    await expect(names).toHaveText(['landing', 'yantra', 'notes'])
+    await axe(page)
+    await keyboardWalk(page, 12)
+
+    const filter = page.getByLabel('Filter this folder')
+    await filter.fill('LAN')
+    await expect(names).toHaveText(['landing'])
+    await filter.fill('zzz')
+    await expect(page.getByText('nothing in ~/Github matches zzz')).toBeVisible()
+    await filter.fill('')
+    await expect(names).toHaveText(['landing', 'yantra', 'notes'])
+
+    await filter.press('ArrowDown')
+    await expect(folders.getByRole('button', { name: /^landing/ })).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(folders.getByRole('button', { name: /^yantra/ })).toBeFocused()
+    await page.keyboard.press('End')
+    await expect(folders.getByRole('button', { name: /^notes/ })).toBeFocused()
+    await page.keyboard.press('Home')
+    await expect(folders.getByRole('button', { name: /^landing/ })).toBeFocused()
+
+    await page.getByRole('button', { name: 'Show hidden' }).click()
+    await filter.fill('git')
+    await expect(names).toHaveText(['.github'])
+    await filter.fill('')
+    await page.getByRole('button', { name: 'Show hidden' }).click()
+
+    await filter.press('ArrowDown')
+    await page.keyboard.press('Backspace')
+    await expect(crumb).toHaveText('~')
+    await expect(folders.getByRole('button', { name: /^Github/ })).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('button', { name: 'Show folders in Github' })).toHaveAttribute('aria-expanded', 'true')
+    await page.keyboard.press('ArrowLeft')
+    await expect(page.getByRole('button', { name: 'Show folders in Github' })).toHaveAttribute('aria-expanded', 'false')
+
+    await page.keyboard.press('Enter')
+    await expect(crumb).toHaveText('Github')
+    await expect(folders.getByRole('button', { name: /^landing/ })).toBeFocused()
+    await folders.getByRole('button', { name: /^yantra/ }).click()
+    await expect(crumb).toHaveText('yantra')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Create and open' }).click()
+    await expect(page).toHaveURL('/w/quiet-otter?view=chat')
+
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+    await toLocal('brisk-heron')
+    await expect(crumb).toHaveText('yantra')
+    const recent = page.getByRole('region', { name: 'Recent on cachyos-g14' })
+    await expect(recent.getByRole('button', { name: '~/Github/yantra' })).toBeVisible()
+  })
+
   /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
   test('the clone folder survives a reload', async ({ page }) => {
     await page.getByLabel('Name').fill('quiet-otter')

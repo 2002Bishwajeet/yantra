@@ -13,6 +13,7 @@ use yantra_core::agent;
 use yantra_core::attach;
 use yantra_core::attention::{self, Attention, Forge as _};
 use yantra_core::clone;
+use yantra_core::commit;
 use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
 use yantra_core::github::{self, Github};
@@ -213,6 +214,28 @@ enum Command {
     Chat {
         #[command(subcommand)]
         action: ChatAction,
+    },
+    /// Commit a chat thread's work with the machine's git identity. With no
+    /// `-m`, `claude -p` on the machine writes the message
+    Commit {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
+        /// The commit message, such as one `--draft` printed and you edited
+        #[arg(short, long, conflicts_with = "draft")]
+        message: Option<String>,
+        /// Print the message claude writes and commit nothing
+        #[arg(long)]
+        draft: bool,
+    },
+    /// Push a chat thread's branch with the machine's credential, and set
+    /// its upstream
+    Push {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
     },
     /// This machine's conversation history, as the appliance receives it
     History {
@@ -456,6 +479,13 @@ async fn main() -> ExitCode {
         Some(Command::Chat {
             action: ChatAction::Ls { workspace },
         }) => chat_ls(&workspace).await,
+        Some(Command::Commit {
+            workspace,
+            thread,
+            message,
+            draft,
+        }) => commit_thread(&workspace, &thread, message.as_deref(), draft).await,
+        Some(Command::Push { workspace, thread }) => push_thread(&workspace, &thread).await,
         Some(Command::History {
             action: HistoryAction::Stage,
         }) => history_stage(),
@@ -1928,6 +1958,57 @@ fn render_threads(threads: &[thread::Thread]) -> String {
     table(&["THREAD", "BRANCH", "ISSUE", "PR"], &rows)
 }
 
+/// `--draft` prints the message alone, so it can be edited and passed back
+/// with `-m`.
+async fn commit_thread(
+    workspace: &str,
+    thread: &str,
+    message: Option<&str>,
+    draft: bool,
+) -> ExitCode {
+    let done = if draft {
+        commit::draft_for(workspace, thread)
+            .await
+            .map(|message| format!("{message}\n"))
+    } else {
+        commit::commit_for(workspace, thread, message)
+            .await
+            .map(|committed| render_committed(&committed))
+    };
+    match done {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_committed(committed: &commit::Committed) -> String {
+    let short = committed.commit.get(..12).unwrap_or(&committed.commit);
+    format!("committed {short} {}\n", committed.subject)
+}
+
+async fn push_thread(workspace: &str, thread: &str) -> ExitCode {
+    match commit::push_for(workspace, thread).await {
+        Ok(pushed) => {
+            print!("{}", render_pushed(&pushed));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_pushed(pushed: &commit::Pushed) -> String {
+    format!("pushed to {} {}\n", pushed.remote, pushed.branch)
+}
+
 fn grant_note() -> String {
     format!(
         "\x20 note: `yantra github login` writes the grant to {} for yantrad;\n\
@@ -3252,6 +3333,7 @@ mod tests {
             MachineSessions {
                 machine: "cachyos-g14".to_owned(),
                 sessions: Ok(vec![summary("demo", 2, 1)]),
+                keepers: Vec::new(),
             },
             MachineSessions {
                 machine: "pi".to_owned(),
@@ -3259,6 +3341,7 @@ mod tests {
                     machine: "pi".to_owned(),
                     reason: "timed out".to_owned(),
                 }),
+                keepers: Vec::new(),
             },
         ];
 
@@ -3278,6 +3361,7 @@ mod tests {
         let listed = vec![MachineSessions {
             machine: "mac".to_owned(),
             sessions: Ok(Vec::new()),
+            keepers: Vec::new(),
         }];
         let rendered = render_sessions(&listed);
         assert!(
@@ -4234,5 +4318,70 @@ mod tests {
              e       yantra/chat/site/e  -      unknown: no GitHub grant\n"
         );
         assert_eq!(render_threads(&[]), "no threads\n");
+    }
+
+    #[test]
+    fn commit_takes_a_message_or_a_draft_but_not_both() {
+        let parsed = Cli::try_parse_from(["yantra", "commit", "site", "0a1b", "-m", "Add x"])
+            .expect("parses");
+        assert!(
+            matches!(
+                &parsed.command,
+                Some(Command::Commit { workspace, thread, message: Some(message), draft: false })
+                    if workspace == "site" && thread == "0a1b" && message == "Add x"
+            ),
+            "{parsed:?}"
+        );
+        let drafted =
+            Cli::try_parse_from(["yantra", "commit", "site", "0a1b", "--draft"]).expect("parses");
+        assert!(matches!(
+            drafted.command,
+            Some(Command::Commit {
+                message: None,
+                draft: true,
+                ..
+            })
+        ));
+        let bare = Cli::try_parse_from(["yantra", "commit", "site", "0a1b"]).expect("parses");
+        assert!(matches!(
+            bare.command,
+            Some(Command::Commit {
+                message: None,
+                draft: false,
+                ..
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "commit", "site", "0a1b", "-m", "x", "--draft"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["yantra", "commit", "site"]).is_err());
+    }
+
+    #[test]
+    fn push_takes_a_workspace_and_a_thread() {
+        let parsed = Cli::try_parse_from(["yantra", "push", "site", "0a1b"]).expect("parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Push { workspace, thread }) if workspace == "site" && thread == "0a1b"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "push", "site"]).is_err());
+    }
+
+    #[test]
+    fn a_commit_and_a_push_each_print_one_line() {
+        let committed = commit::Committed {
+            commit: "89abcdef0123456789abcdef0123456789abcdef".to_owned(),
+            subject: "Add x".to_owned(),
+        };
+        assert_eq!(
+            render_committed(&committed),
+            "committed 89abcdef0123 Add x\n"
+        );
+        let pushed = commit::Pushed {
+            remote: "origin".to_owned(),
+            branch: "yantra/7-0a1b".to_owned(),
+        };
+        assert_eq!(render_pushed(&pushed), "pushed to origin yantra/7-0a1b\n");
     }
 }

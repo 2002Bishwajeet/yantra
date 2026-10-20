@@ -24,6 +24,7 @@ use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO, branch, said};
 pub use crate::delegate::{Error, Place, Summary};
 use crate::github::{self, Github, Issue, IssueRef, PullState, Token};
+use crate::keep::Keeper;
 use crate::logs::{self, Transcript};
 use crate::ssh::{self, Exec, Ssh};
 use crate::tmux::sq;
@@ -40,7 +41,18 @@ pub struct Status {
 /// Makes a new worktree of the workspace's repository, at its `HEAD`. A live
 /// session in the repository does not stop it.
 pub async fn open<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Place, Error> {
-    let id = format!("chat/{}/{}", workspace.name, delegate::id()?);
+    open_as(exec, workspace, &new_id()?).await
+}
+
+/// A fresh thread id. A chat socket takes one before its thread opens, so an
+/// image sent first already lands in the thread's directory.
+pub fn new_id() -> Result<String, Error> {
+    delegate::id()
+}
+
+/// [`open`] with the id `new_id` gave.
+pub async fn open_as<E: Exec>(exec: &E, workspace: &Workspace, id: &str) -> Result<Place, Error> {
+    let id = format!("chat/{}/{id}", workspace.name);
     delegate::prepare(exec, &workspace.repo.to_string_lossy(), &id).await
 }
 
@@ -440,12 +452,15 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
     }
 }
 
-/// Removes the worktree, the branch and the checkpoints, uncommitted work
-/// included. The only path that deletes a thread.
+/// Removes the worktree, the branch, the checkpoints and the keeper's
+/// journals and images, uncommitted work included. The only path that deletes
+/// a thread.
 pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
+    let journals =
+        Keeper::of(place).map_or_else(String::new, |keeper| format!(" && {}", keeper.removal()));
     let out = exec
         .exec(&format!(
-            "{} && {}",
+            "{} && {}{journals}",
             delegate::removal(place),
             checkpoint::forget(place)
         ))
@@ -581,7 +596,7 @@ mod tests {
                 "top=$(git -C '{REPO}' rev-parse --show-toplevel 2>/dev/null) || exit 3\n\
                  wt=\"$HOME\"/.yantra/worktrees/'chat/web/{id}'\n\
                  mkdir -p \"$HOME/.yantra/worktrees\" \
-                 && git -C \"$top\" worktree add -q -b 'yantra/chat/web/{id}' \"$wt\" HEAD >&2 \
+                 && git -C \"$top\" worktree add -q --no-track -b 'yantra/chat/web/{id}' \"$wt\" HEAD >&2 \
                  && printf '%s\\n%s\\n' \"$top\" \"$wt\" && git -C \"$wt\" rev-parse HEAD"
             )
         );
@@ -727,7 +742,8 @@ mod tests {
                  || git -C '{REPO}' branch -D 'yantra/chat/web/11111111' >/dev/null; }} \
                  && git -C '{REPO}' for-each-ref --format='delete %(refname)' \
                  'refs/yantra/checkpoints/chat/web/11111111' \
-                 | git -C '{REPO}' update-ref --stdin"
+                 | git -C '{REPO}' update-ref --stdin \
+                 && rm -rf \"$HOME\"/.yantra/keep/'web'/'11111111'"
             )]
         );
 

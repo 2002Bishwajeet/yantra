@@ -104,7 +104,11 @@ export type TurnCompleted = {
  *  diff cut at 256 KiB. */
 export type TurnDiff = { turn: number; unifiedDiff: string; truncated: boolean }
 
-export type ThreadEvent = { threadId: string } & (
+/** `cursor` is `<run>:<line end>:<part>` on an event read from the agent's
+ *  keeper, and absent on one the daemon made (ADR-0035). A reconnect sends the
+ *  last one back as `after`. On `thread.started` it is the cursor the replay
+ *  continues from; without one, the thread replays from the start. */
+export type ThreadEvent = { threadId: string; cursor?: string } & (
   | { type: 'thread.started'; payload: { thread: string; harness: Harness } }
   | { type: 'thread.metadata.updated'; payload: { name: string } }
   | { type: 'thread.token-usage.updated'; payload: { usedTokens: number; maxTokens: number } }
@@ -126,6 +130,9 @@ export type ThreadEvent = { threadId: string } & (
     }
 )
 
+/** The chat route's query: the thread to attach to, and the last cursor drawn. */
+export type ChatQuery = { thread?: string; after?: string }
+
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =
   /** `harness` is read only on the turn that opens a thread. `mode` holds for
@@ -135,6 +142,8 @@ export type ChatFrame =
   | { type: 'cancel' }
   /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */
   | { type: 'revert'; turn: number }
+  /** Asks for the thread's whole-branch diff; answered while a turn runs. */
+  | { type: 'diff' }
 
 /** The one daemon frame that is not an event. `notLoggedIn` names the
  *  command to run on the machine, because the login stays there (ADR-0033 §6). */
@@ -147,3 +156,20 @@ export type ChatFailure =
 export type ChatAttached = { type: 'attached'; path: string }
 
 export type ChatNotAttached = { type: 'notAttached'; kind: 'notAnImage' | 'unreachable'; said: string }
+
+/** One file of a branch diff. No counts is a binary file; `from` is a rename's
+ *  old path. */
+export type ChangedFile = { path: string; from?: string; added?: number; deleted?: number }
+
+/** The reply to a `diff` frame (Y-490): the thread's committed and uncommitted
+ *  work against the merge-base of its branch and `HEAD`. `filesTruncated` and
+ *  `truncated` are a list or a diff cut at 256 KiB. A failure is `checkpoint`. */
+export type ChatBranchDiff = {
+  type: 'branchDiff'
+  threadId: string
+  base: string
+  files: ChangedFile[]
+  filesTruncated: boolean
+  unifiedDiff: string
+  truncated: boolean
+}

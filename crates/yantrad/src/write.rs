@@ -33,8 +33,8 @@ use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
-    agent, clone, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
-    terminfo, thread, tmux, tokens, up, workspace,
+    agent, clone, commit, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions,
+    status, terminfo, thread, tmux, tokens, up, workspace,
 };
 use yantra_core::{identity, join, update};
 
@@ -150,6 +150,19 @@ where
         // Here for the grant: a thread's PR and its issue are read with it.
         .route("/workspaces/{name}/threads", post(threads::<I>))
         .route("/workspaces/{name}/threads/new", post(thread_new::<I>))
+        // Here for the chat registry: a running turn or revert refuses them.
+        .route(
+            "/workspaces/{name}/threads/{thread}/message",
+            post(drafting::<I>),
+        )
+        .route(
+            "/workspaces/{name}/threads/{thread}/commit",
+            post(committing::<I>),
+        )
+        .route(
+            "/workspaces/{name}/threads/{thread}/push",
+            post(pushing::<I>),
+        )
         .with_state(Remembered {
             authoriser: authoriser.clone(),
             fleet: fleet.clone(),
@@ -299,9 +312,9 @@ async fn make<I: Inventory + Clone + Send + Sync + 'static>(
 fn from_create(error: &workspace::Error) -> StatusCode {
     match error {
         workspace::Error::Exists { .. } => StatusCode::CONFLICT,
-        workspace::Error::InvalidName { .. } | workspace::Error::Empty { .. } => {
-            StatusCode::BAD_REQUEST
-        }
+        workspace::Error::InvalidName { .. }
+        | workspace::Error::Reserved { .. }
+        | workspace::Error::Empty { .. } => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1511,6 +1524,111 @@ fn from_github(error: &github::Error) -> StatusCode {
     }
 }
 
+/// `yantra commit <workspace> <thread> --draft` on the wire (Y-492): the message
+/// `claude -p` writes on the machine. Neither it nor the diff is logged (Q5).
+async fn drafting<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+) -> Result<Json<ThreadMessage>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    idle(&state.fleet.chats, &name, &id)?;
+    tracing::info!("commit draft {name} {id} for {}", caller.node);
+    let message = commit::draft_for(&name, &id).await.map_err(refuse_commit)?;
+    Ok(Json(ThreadMessage { message }))
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommitBody {
+    /// Absent drafts one first, as `yantra commit` with no `-m` does.
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// `yantra commit <workspace> <thread> [-m MSG]` on the wire (Y-492), with the
+/// machine's own git identity (ADR-0034 decision 2).
+async fn committing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+    body: Option<Json<CommitBody>>,
+) -> Result<Json<ThreadCommitted>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    idle(&state.fleet.chats, &name, &id)?;
+    let Json(CommitBody { message }) = body.unwrap_or_default();
+    tracing::info!("commit {name} {id} for {}", caller.node);
+    let committed = commit::commit_for(&name, &id, message.as_deref())
+        .await
+        .map_err(refuse_commit)?;
+    Ok(Json(ThreadCommitted {
+        commit: committed.commit,
+        subject: committed.subject,
+    }))
+}
+
+/// `yantra push <workspace> <thread>` on the wire (Y-492), with the machine's
+/// own credential. The answer names the remote, never its URL.
+async fn pushing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+) -> Result<Json<ThreadPushed>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    idle(&state.fleet.chats, &name, &id)?;
+    tracing::info!("push {name} {id} for {}", caller.node);
+    let pushed = commit::push_for(&name, &id).await.map_err(refuse_commit)?;
+    Ok(Json(ThreadPushed {
+        remote: pushed.remote,
+        branch: pushed.branch,
+    }))
+}
+
+/// A turn or a revert would race the commit for the worktree and its index.
+fn idle(chats: &crate::chat::Registry, name: &str, id: &str) -> Result<(), Refused> {
+    if chats.occupied(&format!("chat/{name}/{id}")) {
+        return Err(Refused::Verb {
+            status: StatusCode::CONFLICT,
+            said: "a turn or a revert is running in this thread; wait for it to end".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn refuse_commit(error: commit::Failed) -> Refused {
+    Refused::Unlogged {
+        status: from_commit(&error),
+        said: chain(&error),
+    }
+}
+
+/// No wildcard, per Y-135. What the owner can fix on the machine is `409`; a
+/// `claude` that could not answer is `502`, as a GitHub that could not is.
+fn from_commit(error: &commit::Failed) -> StatusCode {
+    match error {
+        commit::Failed::Workspace(workspace) => from_workspace(workspace),
+        commit::Failed::NoThread { .. } => StatusCode::NOT_FOUND,
+        commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
+        commit::Failed::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+        commit::Failed::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
+        commit::Failed::Commit(error) => match error {
+            commit::Error::EmptyMessage => StatusCode::BAD_REQUEST,
+            commit::Error::NoIdentity
+            | commit::Error::NothingToCommit
+            | commit::Error::NoRemote
+            | commit::Error::NoLoginServer
+            | commit::Error::Refused { .. } => StatusCode::CONFLICT,
+            commit::Error::Claude { .. } => StatusCode::BAD_GATEWAY,
+            commit::Error::TimedOut { .. } => StatusCode::GATEWAY_TIMEOUT,
+            commit::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+            commit::Error::Git { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        },
+    }
+}
+
 /// Stops a session by machine and name — the sessions `ls sessions` finds that
 /// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
 ///
@@ -1621,7 +1739,9 @@ fn asked(uri: &Uri, flag: &str) -> bool {
 fn from_workspace(error: &workspace::Error) -> StatusCode {
     match error {
         workspace::Error::NotFound { .. } => StatusCode::NOT_FOUND,
-        workspace::Error::InvalidName { .. } => StatusCode::BAD_REQUEST,
+        workspace::Error::InvalidName { .. } | workspace::Error::Reserved { .. } => {
+            StatusCode::BAD_REQUEST
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1906,6 +2026,25 @@ impl ThreadOpened {
             draft: opened.draft,
         }
     }
+}
+
+/// The message is never logged (Q5).
+#[derive(Debug, serde::Serialize)]
+struct ThreadMessage {
+    message: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ThreadCommitted {
+    commit: String,
+    subject: String,
+}
+
+/// The remote's name, never its URL, which can carry a credential.
+#[derive(Debug, serde::Serialize)]
+struct ThreadPushed {
+    remote: String,
+    branch: String,
 }
 
 /// What a `202` carries: where to watch. The session is
@@ -2394,6 +2533,30 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             }),
         ),
         (
+            "threadMessage",
+            "ThreadMessage",
+            of(&ThreadMessage {
+                message: "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
+                    .to_owned(),
+            }),
+        ),
+        (
+            "threadCommitted",
+            "ThreadCommitted",
+            of(&ThreadCommitted {
+                commit: "89abcdef0123456789abcdef0123456789abcdef".to_owned(),
+                subject: "Add the commit and push verbs".to_owned(),
+            }),
+        ),
+        (
+            "threadPushed",
+            "ThreadPushed",
+            of(&ThreadPushed {
+                remote: "origin".to_owned(),
+                branch: "yantra/492-0a1b2c3d4e5f6a7b".to_owned(),
+            }),
+        ),
+        (
             "cloning",
             "Cloning",
             of(&Cloning {
@@ -2525,10 +2688,20 @@ pub(crate) enum Refused {
         status: StatusCode,
         said: String,
     },
+    /// A commit verb's refusal. Its text can hold hook output, which can
+    /// hold code, so the log names the status alone (Q5).
+    Unlogged {
+        status: StatusCode,
+        said: String,
+    },
 }
 
 impl IntoResponse for Refused {
     fn into_response(self) -> Response {
+        if let Self::Unlogged { status, said } = self {
+            tracing::warn!("refused: a commit verb failed with {status}");
+            return (status, said).into_response();
+        }
         let (status, said) = match self {
             // Named rather than logged only, because the operator reading this
             // is the same person who can fix it.
@@ -2559,7 +2732,7 @@ impl IntoResponse for Refused {
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("could not establish who is calling: {said}"),
             ),
-            Self::Verb { status, said } => (status, said),
+            Self::Verb { status, said } | Self::Unlogged { status, said } => (status, said),
         };
         tracing::warn!("refused: {said}");
         (status, said).into_response()
@@ -2845,6 +3018,13 @@ mod tests {
             from_create(&workspace::Error::InvalidName {
                 name: "../etc/passwd".to_string(),
                 path: "/srv/workspaces/../etc/passwd.toml".into(),
+            }),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            from_create(&workspace::Error::Reserved {
+                name: "yantra-keep-web".to_string(),
+                path: "/srv/workspaces/yantra-keep-web.toml".into(),
             }),
             StatusCode::BAD_REQUEST
         );
@@ -3439,6 +3619,158 @@ mod tests {
                 .expect("the router is infallible");
             assert_eq!(answered.status(), StatusCode::FORBIDDEN);
         }
+    }
+
+    /// Y-492: drafting, committing and pushing refuse a stranger before any
+    /// workspace or machine is asked.
+    #[tokio::test]
+    async fn a_thread_is_committed_and_pushed_only_for_the_owner() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let app = router::<Fake, ()>(direct(tailnet(vec![])), Fleet::default());
+        for request in [
+            Request::post("/workspaces/site/threads/0a1b/message").body(Body::empty()),
+            Request::post("/workspaces/site/threads/0a1b/commit")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"message":"Add x"}"#)),
+            Request::post("/workspaces/site/threads/0a1b/push").body(Body::empty()),
+        ] {
+            let mut request = request.expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            let answered = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    /// Y-544: a turn or a revert in the thread refuses all three with 409, and
+    /// an empty message is a 400 before any workspace or machine is asked.
+    #[tokio::test]
+    async fn a_busy_thread_and_an_empty_message_are_refused_first() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        fleet.chats.mark_reverting("chat/site/0a1b");
+        let app = router::<Fake, ()>(direct(tailnet(vec![(address(9), caller(ME, &[]))])), fleet);
+        let send = |request: Result<Request<Body>, axum::http::Error>| {
+            let app = app.clone();
+            async move {
+                let mut request = request.expect("a request");
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                app.oneshot(request)
+                    .await
+                    .expect("the router is infallible")
+                    .status()
+            }
+        };
+        for path in ["message", "commit", "push"] {
+            let request =
+                Request::post(format!("/workspaces/site/threads/0a1b/{path}")).body(Body::empty());
+            assert_eq!(send(request).await, StatusCode::CONFLICT, "{path}");
+        }
+        for empty in [r#"{"message":""}"#, r#"{"message":"  \n"}"#] {
+            let request = Request::post("/workspaces/site/threads/other/commit")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(empty));
+            assert_eq!(send(request).await, StatusCode::BAD_REQUEST, "{empty}");
+        }
+    }
+
+    /// Q5: hook output can hold code, so a commit verb's refusal is answered
+    /// whole and logged by its status alone.
+    #[test]
+    fn a_commit_refusal_is_logged_without_its_text() {
+        use crate::terminal::tests::Capture;
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let refused = refuse_commit(commit::Failed::Commit(commit::Error::Git {
+            stderr: "pre-commit: +let secret = 1;".to_owned(),
+        }));
+        let answered = refused.into_response();
+        assert_eq!(answered.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let logged = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        assert!(logged.contains("a commit verb failed with 500"), "{logged}");
+        assert!(!logged.contains("secret"), "{logged}");
+    }
+
+    #[test]
+    fn a_commit_body_names_a_message_or_nothing() {
+        let asked: CommitBody = serde_json::from_str(r#"{"message":"Add x"}"#).expect("a message");
+        assert_eq!(asked.message.as_deref(), Some("Add x"));
+        let empty: CommitBody = serde_json::from_str("{}").expect("no message");
+        assert_eq!(empty.message, None);
+        assert!(serde_json::from_str::<CommitBody>(r#"{"message":"x","amend":true}"#).is_err());
+    }
+
+    #[test]
+    fn what_the_owner_can_fix_on_the_machine_is_a_conflict() {
+        use yantra_core::ssh;
+        let of = |error: commit::Error| from_commit(&commit::Failed::Commit(error));
+        assert_eq!(of(commit::Error::NoIdentity), StatusCode::CONFLICT);
+        assert_eq!(of(commit::Error::NothingToCommit), StatusCode::CONFLICT);
+        assert_eq!(of(commit::Error::NoRemote), StatusCode::CONFLICT);
+        assert_eq!(of(commit::Error::NoLoginServer), StatusCode::CONFLICT);
+        assert_eq!(of(commit::Error::EmptyMessage), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            of(commit::Error::TimedOut { minutes: 5 }),
+            StatusCode::GATEWAY_TIMEOUT
+        );
+        assert_eq!(
+            of(commit::Error::Refused {
+                reason: "rejected (non-fast-forward)".to_owned()
+            }),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            of(commit::Error::Claude {
+                said: "Not logged in".to_owned()
+            }),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            of(commit::Error::Ssh(ssh::Error::Spawn(
+                std::io::Error::other("no ssh")
+            ))),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            of(commit::Error::Git {
+                stderr: "fatal".to_owned()
+            }),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_commit(&commit::Failed::NoThread {
+                id: "0a1b".to_owned()
+            }),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            from_commit(&commit::Failed::Workspace(workspace::Error::NoConfigDir)),
+            from_workspace(&workspace::Error::NoConfigDir)
+        );
+        assert_eq!(
+            from_commit(&commit::Failed::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[test]

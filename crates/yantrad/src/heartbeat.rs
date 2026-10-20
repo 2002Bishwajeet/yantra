@@ -83,6 +83,9 @@ pub struct Fleet {
     /// True once the daemon has begun to shut down, so a long wait ends
     /// rather than holding the graceful shutdown open.
     pub closing: tokio::sync::watch::Sender<bool>,
+    /// The live Chat keepers (ADR-0035 decision 4), which the refresh pass
+    /// adopts after a restart.
+    pub chats: crate::chat::Registry,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -123,6 +126,7 @@ impl Default for Fleet {
             env: Arc::default(),
             left: Arc::default(),
             closing: tokio::sync::watch::Sender::new(false),
+            chats: crate::chat::Registry::default(),
         }
     }
 }

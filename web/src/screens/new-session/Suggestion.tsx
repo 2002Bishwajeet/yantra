@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useRef } from 'react'
 import type { Machine, PlacementAsk } from '@/api'
 import type { ApiError } from '@/api/errors'
+import { useMachines } from '@/api/hooks'
 import { usePlacement } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -33,10 +34,12 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
   const { mutate } = placement
   useEffect(() => mutate({}), [mutate])
 
-  const top = placement.data?.ranked[0]
+  const ranked = placement.data?.ranked ?? []
+  // The first machine whose chip can be pressed; a preset that cannot be used decides nothing.
+  const top = ranked.find((one) => pickMachine(one.machine, machines) !== '') ?? ranked[0]
   const chosen = useRef(false)
   const choose = useEffectEvent((machine: string) => {
-    if (chosen.current || preset !== '' || values.machine !== '') return
+    if (chosen.current || pickMachine(preset, machines) !== '' || values.machine !== '') return
     chosen.current = true
     const usable = pickMachine(machine, machines)
     if (usable !== '') form.setFieldValue('machine', usable)
@@ -67,6 +70,8 @@ const askFor = (source: Source): PlacementAsk =>
 export function SuggestSwitch(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
   const prefs = usePrefs()
+  const reading = useMachines()
+  const machines = reading.looked === 'ok' ? reading.data : []
   const placement = usePlacement()
   const { mutate } = placement
   const { source, machine } = values
@@ -83,12 +88,18 @@ export function SuggestSwitch(props: { form: SessionForm; values: Values }) {
   // An answer to an earlier source is not an answer to this one.
   const asked = placement.variables
   const current = wanted !== null && asked !== undefined && asked.repo === wanted.repo && asked.path === wanted.path
-  const top = current ? placement.data?.ranked[0] : undefined
-  const better = top && top.machine !== machine && top.path !== undefined ? { ...top, path: top.path } : null
+  const ranked = current ? (placement.data?.ranked ?? []) : []
+  const top = ranked.find((one) => one.path !== undefined && pickMachine(one.machine, machines) !== '')
+  // A local folder is a fact about one machine, and a machine that holds the repo needs no switch.
+  const holds = ranked.some((one) => one.machine === machine && one.path !== undefined)
+  const better =
+    source?.kind === 'github' && top?.path !== undefined && top.machine !== machine && !holds
+      ? { ...top, path: top.path }
+      : null
 
   return (
     <div aria-live="polite" className="ns__suggest">
-      {better && source ? (
+      {better && source?.kind === 'github' ? (
         <>
           <Text render={<p />} className="ns__note" scale="body-medium">
             {`${better.machine}: ${better.reason}`}
@@ -96,12 +107,7 @@ export function SuggestSwitch(props: { form: SessionForm; values: Values }) {
           <Button
             onClick={() => {
               form.setFieldValue('machine', better.machine)
-              form.setFieldValue(
-                'source',
-                source.kind === 'github'
-                  ? { kind: 'github', repo: source.repo, path: better.path, here: 'yes' }
-                  : { ...source, path: better.path, checked: 'yes', because: undefined },
-              )
+              form.setFieldValue('source', { kind: 'github', repo: source.repo, path: better.path, here: 'yes' })
             }}
             type="button"
             variant="tonal"

@@ -10,9 +10,11 @@ import type {
   Attention,
   Broken,
   ChatAttached,
+  ChatBranchDiff,
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatQuery,
   Cloning,
   Connection,
   Device,
@@ -34,8 +36,11 @@ import type {
   TerminalExit,
   TerminalSize,
   Thread,
+  ThreadCommitted,
   ThreadEvent,
+  ThreadMessage,
   ThreadOpened,
+  ThreadPushed,
   Transcript,
   Workspace,
   WorkspaceStatus,
@@ -747,6 +752,20 @@ export const threadOpened = {
   "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
 } satisfies ThreadOpened
 
+export const threadMessage = {
+  "message": "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
+} satisfies ThreadMessage
+
+export const threadCommitted = {
+  "commit": "89abcdef0123456789abcdef0123456789abcdef",
+  "subject": "Add the commit and push verbs"
+} satisfies ThreadCommitted
+
+export const threadPushed = {
+  "branch": "yantra/492-0a1b2c3d4e5f6a7b",
+  "remote": "origin"
+} satisfies ThreadPushed
+
 export const cloning = {
   "machine": "cachyos-g14",
   "session": "clone-yantra"
@@ -858,6 +877,7 @@ export const chatEvents = [
     "type": "turn.started"
   },
   {
+    "cursor": "Y0123456789abcdef:812:0",
     "payload": {
       "delta": "Running the tests.",
       "itemId": "msg_1:1",
@@ -989,9 +1009,29 @@ export const chatNotLoggedIn = {
 } satisfies ChatFailure
 
 export const chatAttached = {
-  "path": "/tmp/yantra-chat-Y0123456789abcdef/1.png",
+  "path": "/home/u/.yantra/keep/web/1a2b3c4d/images/Y0123456789abcdef-1.png",
   "type": "attached"
 } satisfies ChatAttached
+
+export const chatBranchDiff = {
+  "base": "0123abcd0123abcd0123abcd0123abcd0123abcd",
+  "files": [
+    {
+      "added": 3,
+      "deleted": 1,
+      "from": "src/old.rs",
+      "path": "src/new.rs"
+    },
+    {
+      "path": "logo.png"
+    }
+  ],
+  "filesTruncated": false,
+  "threadId": "1a2b3c4d",
+  "truncated": false,
+  "type": "branchDiff",
+  "unifiedDiff": "diff --git a/src/old.rs b/src/new.rs\n"
+} satisfies ChatBranchDiff
 
 export const chatNotAttached = {
   "kind": "notAnImage",
@@ -1022,5 +1062,13 @@ export const chatFrames = [
   {
     "turn": 0,
     "type": "revert"
+  },
+  {
+    "type": "diff"
   }
 ] satisfies ChatFrame[]
+
+export const chatQuery = {
+  "after": "Y0123456789abcdef:812:0",
+  "thread": "1a2b3c4d"
+} satisfies ChatQuery
