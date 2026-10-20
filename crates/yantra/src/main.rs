@@ -382,6 +382,17 @@ enum RoomAction {
         #[arg(long)]
         daemon: String,
     },
+    /// Write to a room as the owner. Its count goes back to 0 and every agent
+    /// thread in it wakes
+    Post {
+        /// The room's name
+        room: String,
+        /// The message, at most 16 KiB
+        text: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -555,6 +566,9 @@ async fn main() -> ExitCode {
         Some(Command::Room {
             action: RoomAction::Resume { room, daemon },
         }) => room_resume(room, daemon).await,
+        Some(Command::Room {
+            action: RoomAction::Post { room, text, daemon },
+        }) => room_post(room, text, daemon).await,
         Some(Command::Why {
             workspace,
             repo,
@@ -609,6 +623,34 @@ async fn room_resume(name: String, daemon: String) -> ExitCode {
         }
         Err(error) => {
             eprintln!("yantra room resume: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn room_post(name: String, text: String, daemon: String) -> ExitCode {
+    if !yantra_core::room::valid_name(&name) {
+        eprintln!("yantra: {}", yantra_core::room::Error::BadName(name));
+        return ExitCode::FAILURE;
+    }
+    let room = name.clone();
+    match tokio::task::spawn_blocking(move || mcp::post_message(&daemon, &room, &text)).await {
+        Ok(Ok(said)) => {
+            let delivered = serde_json::from_str::<serde_json::Value>(&said)
+                .ok()
+                .and_then(|answer| answer["delivered"].as_u64());
+            match delivered {
+                Some(delivered) => println!("posted to room {name}: {delivered} members see it"),
+                None => println!("posted to room {name}"),
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(Err(said)) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra room post: {error}");
             ExitCode::FAILURE
         }
     }
@@ -2736,6 +2778,38 @@ mod tests {
         ));
         assert!(Cli::try_parse_from(["yantra", "room", "resume", "r2"]).is_err());
         assert!(Cli::try_parse_from(["yantra", "room", "resume", "--daemon", "x"]).is_err());
+    }
+
+    #[test]
+    fn room_post_needs_a_room_a_text_and_the_daemons_address() {
+        let parsed = Cli::try_parse_from([
+            "yantra",
+            "room",
+            "post",
+            "r2",
+            "carry on",
+            "--daemon",
+            "http://x:7717",
+        ])
+        .expect("`room post <room> <text> --daemon <url>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Room { action: RoomAction::Post { room, text, daemon } })
+                if room == "r2" && text == "carry on" && daemon == "http://x:7717"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "room", "post", "r2", "--daemon", "x"]).is_err());
+        assert!(Cli::try_parse_from(["yantra", "room", "post", "r2", "hi"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn room_post_refuses_a_bad_name_before_asking_the_daemon() {
+        let code = room_post(
+            "Bad Name".to_owned(),
+            "hi".to_owned(),
+            "http://127.0.0.1:9".to_owned(),
+        )
+        .await;
+        assert_eq!(code, ExitCode::FAILURE);
     }
 
     #[test]
