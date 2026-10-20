@@ -454,14 +454,18 @@ says `threads {name} for {node}` and `thread new {name} for {node}`.
 
 **`message`, `commit` and `push` are `yantra commit --draft`, `commit` and `push`** (Y-492,
 [ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md) decisions 2 and 5). They sit in
-the `acts` router, because none reads the grant: git on the machine commits and pushes with the
-machine's own identity and credential. `message` answers `{message}`, which `claude -p` wrote there.
-`commit` takes `{message?}` and answers `{commit, subject}`; with no message it drafts one first.
+the `remembered` router for the chat registry: a turn or a revert in the thread is `409` (Y-544).
+None reads the grant: git on the machine commits and pushes with the machine's own identity and
+credential. `message` answers `{message}`, which `claude -p` wrote there.
+`commit` takes `{message?}` and answers `{commit, subject}`; with no message it drafts one first,
+and an empty one is `400`.
 `push` answers `{remote, branch}`, the remote's name and never its URL. A thread the workspace
 does not have is `404`; no git identity, nothing to commit, no `origin` and a refused push are
-`409`; a `claude` that could not answer is `502`; ssh is `503`; any other git failure is `500`.
-`from_commit` has no wildcard (Y-135). The log names the workspace, the thread and the caller,
-and never the message or the diff (Q5).
+`409`, and so is a Mac with no tmux server; a `claude` that could not answer is `502`; ssh and tmux
+are `503`; five minutes on the machine is `504`; any other git failure is `500`. `from_commit` has
+no wildcard (Y-135). The log names the workspace, the thread and the caller, and never the message
+or the diff (Q5). A refusal is `Refused::Unlogged`, logged by its status alone, because its text can
+hold hook output.
 
 **`repair` is the one that writes bytes this daemon did not compose**, and
 [ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
