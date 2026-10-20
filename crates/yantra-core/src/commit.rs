@@ -19,6 +19,7 @@
 
 use crate::agent;
 use crate::checkpoint::{DIFF_FLAGS, SNAPSHOT, capped};
+use crate::delegate::said;
 use crate::github::IssueRef;
 use crate::ssh::{self, Exec, Ssh};
 use crate::thread::{self, Place};
@@ -285,10 +286,6 @@ fn failed(out: &ssh::Output) -> Error {
     Error::Git {
         stderr: redact(&said(&out.stderr)),
     }
-}
-
-fn said(stderr: &[u8]) -> String {
-    String::from_utf8_lossy(stderr).trim().to_owned()
 }
 
 /// Drops `user:secret@` from every URL in `text`: a remote's URL can carry a
