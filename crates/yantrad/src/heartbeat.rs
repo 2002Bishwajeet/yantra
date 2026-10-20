@@ -86,6 +86,8 @@ pub struct Fleet {
     /// The live Chat keepers (ADR-0035 decision 4), which the refresh pass
     /// adopts after a restart.
     pub chats: crate::chat::Registry,
+    /// The rooms (ADR-0038), in memory only.
+    pub rooms: crate::room::Rooms,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -108,6 +110,7 @@ pub struct Facts {
 
 impl Default for Fleet {
     fn default() -> Self {
+        let chats = crate::chat::Registry::default();
         Self {
             model: Model::default(),
             beats: Beats::default(),
@@ -126,7 +129,8 @@ impl Default for Fleet {
             env: Arc::default(),
             left: Arc::default(),
             closing: tokio::sync::watch::Sender::new(false),
-            chats: crate::chat::Registry::default(),
+            rooms: crate::room::Rooms::new(chats.clone(), None),
+            chats,
         }
     }
 }

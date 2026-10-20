@@ -31,10 +31,12 @@ mod contract;
 mod events;
 mod github;
 mod heartbeat;
+mod mcp;
 mod mic;
 mod notify;
 mod placement;
 mod refresh;
+mod room;
 mod tasks;
 mod terminal;
 mod web;
@@ -148,6 +150,11 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
                 .with_state(fleet.clone())
                 .merge(write::router(authoriser.clone(), fleet.clone()))
                 .merge(chat::router(authoriser.clone(), fleet.chats.clone()))
+                .merge(mcp::router(
+                    authoriser.clone(),
+                    fleet.rooms.clone(),
+                    fleet.closing.clone(),
+                ))
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
                 .merge(mic::router(authoriser)),
         )
@@ -167,6 +174,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         PathBuf::new()
     });
     let relay = yantra_core::notify::from_env();
+    let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
+    let chats = chats(yantra_core::join::daemon_address(&ips).ok());
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
             started: std::time::Instant::now(),
@@ -177,7 +186,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             updater: PathBuf::from(yantra_core::update::UPDATER),
         }),
         github: github::Grant::from_env(),
-        chats: chats(),
+        rooms: rooms(chats.clone()),
+        chats,
         ..heartbeat::Fleet::default()
     };
 
@@ -249,16 +259,33 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
         .collect())
 }
 
-/// The chat registry, whose waits go to the relay when there is one. The
-/// relay is read again because a `Relay` is not `Clone`, by design.
-fn chats() -> chat::Registry {
-    match yantra_core::notify::from_env() {
+/// The chat registry, whose waits go to the relay when there is one, and
+/// whose Claude turns reach the room tools at `daemon`. The relay is read
+/// again because a `Relay` is not `Clone`, by design.
+fn chats(daemon: Option<SocketAddr>) -> chat::Registry {
+    let registry = match yantra_core::notify::from_env() {
         Some(relay) => {
             let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(chat::tell(relay, heard));
             chat::Registry::telling(waits)
         }
         None => chat::Registry::default(),
+    };
+    match daemon {
+        Some(daemon) => registry.reaching(daemon),
+        None => registry,
+    }
+}
+
+/// The rooms, whose pauses go to the relay when there is one.
+fn rooms(chats: chat::Registry) -> room::Rooms {
+    match yantra_core::notify::from_env() {
+        Some(relay) => {
+            let (pauses, heard) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(room::tell(relay, heard));
+            room::Rooms::new(chats, Some(pauses))
+        }
+        None => room::Rooms::new(chats, None),
     }
 }
 

@@ -43,6 +43,7 @@ pub mod probe;
 pub mod pty;
 pub mod remove;
 pub mod resume;
+pub mod room;
 pub mod sessions;
 pub mod snapshot;
 pub mod ssh;

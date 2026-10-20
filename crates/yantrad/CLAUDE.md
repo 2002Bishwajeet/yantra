@@ -283,10 +283,11 @@ directory to walk.
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
-`DELETE /api/github`, `POST`/`DELETE /api/github/client-id` and `POST /api/update` — **the CLI's own
+`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms/{room}/resume` and
+`POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
-`update` (Y-368). The daemon may do
+`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
+`room resume` (Y-534) and `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
 
@@ -684,6 +685,59 @@ The rules from before the keeper still hold:
   [`tests/chat_keeper.rs`](tests/chat_keeper.rs) is ADR-0035's done test: a real `yantrad` against
   the podman fixture, through a cut pipe, a closed socket and a killed daemon.
 
+## The route that holds rooms
+
+`POST /api/mcp` ([`mcp.rs`](src/mcp.rs), Y-534,
+[ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)) serves `room_send` and `room_read`
+to live agents, and [`room.rs`](src/room.rs) holds the rooms in `Fleet::rooms`.
+[`yantra_core::room`](../yantra-core/src/room.rs) decides every rule; this crate holds the store,
+the wait and the wakes.
+
+- **A small MCP subset.** POST takes one JSON-RPC message and answers JSON: `initialize`, `ping`,
+  `tools/list` and `tools/call`. A notification or a response is `202` with no body. A batch is
+  `400`, because 2025-06-18 removed batches. `GET` is `405`, which the spec allows for the event
+  stream. `initialize` issues an `Mcp-Session-Id`, and a call with no thread is that session's
+  member, so two TUIs on one machine, or two `yantra mcp` processes, each read every message. A
+  thread ignores the id, because a Chat turn's session ends with the turn.
+- **`allowed()` comes first, so only the owner reaches a room in this row.** A guest is Y-535's.
+  A non-owner is `403`, and a `tailscale` that cannot answer is `503`. After that check, a tool's
+  failure is a `tools/call` result with `isError`, so the agent reads it.
+- **The label comes from identity.** The machine is `whois` joined to the tailnet list on the
+  stable id, as `/api/join` does. `X-Yantra-Thread: <workspace>/<thread>` adds ` · chat <thread>`
+  only when that workspace's machine is the caller's machine; any other header is ignored. The
+  workspace's `machine` is an ssh destination (ADR-0009), so it matches when its host, without
+  `user@`, is the node's name, its DNS name or a name whose first label is the node's, or one of its
+  addresses, and else when the host `ssh -G` resolves it to matches. A field in the body never sets
+  the label.
+- **A Chat turn gets the server by `--mcp-config`.** `chat::Registry` holds
+  `join::daemon_address` of the bound set, which is the address `agent.env` already reaches, and
+  each Claude turn names its own thread in the header. The server is `yantra-room`, apart from a
+  `yantra` stdio server a person may have added. `--allowedTools` lets a woken turn use both tools
+  without a prompt.
+- **`room_read` waits in memory, never on ssh**, up to 50 s on a `watch` that every message bumps.
+  It answers an `isError` result when the daemon begins to shut down.
+- **`room_send` never awaits ssh.** It takes each member thread's unseen messages under the
+  store's lock and queues them for that thread. **One task per thread** sends its queue to
+  `chat::wake`, one wake at a time, so a thread gets its messages in seq order. The wake finds the
+  thread and starts a Claude turn at `room::cap` of the person's last mode, or `Supervised` when
+  this daemon has not seen one. A thread with a live keeper queues the prompt, and the keeper's
+  task sends the queue as one prompt when its turn ends; the queue leaves the registry under the
+  same lock as the keeper. A wake resolves only when a turn starts or cannot. A delivered message
+  moves that thread's cursor, so a message reaches a thread once. A wake that starts no turn, a
+  queued one included, gives the messages back, and the thread's next read or wake has them first.
+  A revert in the thread fails the wake before it takes a checkpoint. An ACP thread or a thread
+  that is gone is never woken again, and its messages wait for a read.
+- **The budget is 20 agent messages.** The 20th pauses the room and wakes nothing. Later sends are
+  refused, and the owner gets one ntfy notification that names the room and no text. `POST
+  /api/rooms/{room}/resume`, behind `allowed()`, sets the count to 0; an unknown room is `404`.
+- **A restart loses every room**, with its members, cursors, count, pause and queued wakes. The
+  threads and keepers stay on their machines.
+- **Q5.** The log names a room, a seq, a node and counts. It never names a message's text, and the
+  pause notification carries none.
+- [`tests/rooms.rs`](tests/rooms.rs) is the done test: two fixture machines, a wake in
+  `acceptEdits`, a waiting read, the pause and the resume. No real `claude` calls the route there,
+  because a fixture cannot reach the host's loopback.
+
 ## The dashboard's types are checked against these routes, not trusted to match
 
 `contract.rs` (Y-124) drives the real `api::router()` over a fake snapshot and commits every answer
@@ -804,6 +858,10 @@ and on Refresh, and nothing polls it.
 repository or folder a person picked, for at most 5 s each. The new-session page asks once when it
 opens and once when a source is picked, and nothing polls it. A machine that does not answer in time
 scores 0 on that term and is never filtered out.
+
+**`room_read` waits beside the tasks licence, and holds no ssh at all** (Y-534). Its wait is in
+memory, it ends at 50 s or when the daemon shuts down, and a `room_send` spawns its wakes as tasks
+rather than awaiting them.
 
 None of the eleven licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
