@@ -5,7 +5,7 @@
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/m3/button/Button'
 import { isSubmit } from './comment'
 
@@ -21,6 +21,18 @@ export function DiffComment(props: DiffCommentProps) {
   const { label, onCancel, onSubmit } = props
   const [text, setText] = useState('')
   const hint = useId()
+  const box = useRef<HTMLTextAreaElement>(null)
+  // A box inside Pierre's shadow DOM is not focusable until its slot is drawn, so autoFocus at mount misses.
+  useEffect(() => {
+    let frame = 0
+    let tries = 0
+    const take = () => {
+      box.current?.focus()
+      if (box.current && !box.current.matches(':focus') && tries++ < 30) frame = requestAnimationFrame(take)
+    }
+    take()
+    return () => cancelAnimationFrame(frame)
+  }, [])
   const empty = text.trim() === ''
   return (
     <form
@@ -34,7 +46,6 @@ export function DiffComment(props: DiffCommentProps) {
       <textarea
         aria-describedby={hint}
         aria-label={`Comment on ${label}`}
-        autoFocus
         className="diff-comment__text"
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
@@ -48,6 +59,7 @@ export function DiffComment(props: DiffCommentProps) {
           }
         }}
         placeholder="Add a comment…"
+        ref={box}
         rows={3}
         value={text}
       />

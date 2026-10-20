@@ -26,6 +26,15 @@
   overflow: hidden;
   border-radius: 12px;
   background: var(--md-sys-color-surface-container-low);
+  /* Pierre's own status colours miss 4.5:1 on this surface; the M3 roles do not. */
+  --trees-bg-override: var(--md-sys-color-surface-container-low);
+  --trees-fg-override: var(--md-sys-color-on-surface);
+  --trees-fg-muted-override: var(--md-sys-color-on-surface-variant);
+  --trees-status-added-override: var(--md-sys-color-primary);
+  --trees-status-untracked-override: var(--md-sys-color-primary);
+  --trees-status-modified-override: var(--md-sys-color-secondary);
+  --trees-status-renamed-override: var(--md-sys-color-tertiary);
+  --trees-status-deleted-override: var(--md-sys-color-error);
 }
 
 .diff__files {
