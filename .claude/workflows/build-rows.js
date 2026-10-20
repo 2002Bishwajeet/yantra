@@ -119,10 +119,11 @@ const REVIEW_SCHEMA = {
         required: ['file', 'issue'],
       },
     },
+    minor: { type: 'array', items: { type: 'string' }, description: 'every other finding, one line each' },
     doneMet: { type: 'boolean', description: "the row's done condition is met and proved by a test" },
     diffLines: { type: 'integer', description: 'added plus removed lines against origin/main' },
   },
-  required: ['blocking', 'doneMet', 'diffLines'],
+  required: ['blocking', 'minor', 'doneMet', 'diffLines'],
 }
 
 const SETUP_SCHEMA = {
@@ -254,7 +255,7 @@ Write the tests that prove the done condition first, then the code. Run the fast
     const r = await agent(
       `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
 Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
-List only defects that must be fixed before merge as blocking. Do not change any file.`,
+Put every finding of the review in blocking or minor; none may be dropped. A finding is blocking when it makes the feature fail on a platform the row or the crate targets, stalls or drops the user's work, leaves state wrong after a failure, leaks a secret or private text, or breaks a crate invariant or a CLAUDE.md rule. Anything you would call "should hold the merge" is blocking. Only style, cost, cleanup and unlikely edge cases are minor. Do not change any file.`,
       { label: `review:${row.id}:${round}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
     )
     if (!r) return park('the reviewer died')
