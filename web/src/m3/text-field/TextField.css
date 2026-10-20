@@ -143,3 +143,12 @@
 .m3-text-field:has(.m3-text-field__input:disabled) {
   opacity: 0.38;
 }
+
+/* A multi-line field starts one line tall and grows with its text. */
+textarea.m3-text-field__input {
+  height: auto;
+  max-height: 40vh;
+  resize: none;
+  field-sizing: content;
+  font-family: inherit;
+}

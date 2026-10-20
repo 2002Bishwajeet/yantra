@@ -1,9 +1,17 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
 import { AttachError, ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
-import type { Decision, Harness, PermissionMode } from '@/api/thread'
+import type { ChatBranchDiff, Decision, Harness, PermissionMode } from '@/api/thread'
+import { DiffError } from './diff/errors'
 import { empty, reduce, type Timeline } from './timeline'
 
 export type Link = 'connecting' | 'open' | 'closed'
+
+/** The branch diff (Y-491): asked for on request, answered by one frame. */
+export type Branch =
+  | { state: 'idle' }
+  | { state: 'loading' }
+  | { state: 'ready'; diff: ChatBranchDiff }
+  | { state: 'failed'; error: DiffError }
 
 /** One chat socket for the workspace, and the timeline it folds into.
  *
@@ -17,6 +25,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
   const [error, setError] = useState<ChatError | null>(null)
   const [link, setLink] = useState<Link>('connecting')
   const [opened, reopen] = useState(0)
+  const [branch, setBranch] = useState<Branch>({ state: 'idle' })
+  const asking = useRef(false)
   const socket = useRef<ChatSocket | null>(null)
   const attach = useRef(thread)
   const named = useEffectEvent((id: string) => onThread(id))
@@ -34,7 +44,22 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         }
         dispatch({ type: 'event', event })
       },
+      onBranchDiff: (diff) => {
+        asking.current = false
+        setBranch({ state: 'ready', diff })
+      },
       onError: (failure) => {
+        // The daemon answers a diff it cannot read with a `checkpoint` error,
+        // which belongs to the panel that asked and not to the conversation.
+        if (asking.current && failure.kind === 'checkpoint') {
+          asking.current = false
+          setBranch({ state: 'failed', error: new DiffError('failed', failure.said) })
+          return
+        }
+        if (asking.current && (failure.kind === 'closed' || failure.kind === 'refused')) {
+          asking.current = false
+          setBranch({ state: 'failed', error: new DiffError('notOpen') })
+        }
         setError(failure)
         // Busy and badFrame never end or prevent a turn: a second tap on an
         // answer the daemon already took is a badFrame while the agent still runs.
@@ -84,11 +109,27 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       setError(null)
       return true
     },
+    branch,
+    /** Asks for the thread's whole-branch diff; the answer lands in `branch`. */
+    requestDiff: () => {
+      if (timeline.thread === null) {
+        setBranch({ state: 'failed', error: new DiffError('noThread') })
+        return
+      }
+      if (!socket.current?.diff()) {
+        setBranch({ state: 'failed', error: new DiffError('notOpen') })
+        return
+      }
+      asking.current = true
+      setBranch({ state: 'loading' })
+    },
     /** Opens the socket again; an attach replays the transcript, so the
      *  timeline starts over. */
     retry: () => {
       setError(null)
       setLink('connecting')
+      asking.current = false
+      setBranch({ state: 'idle' })
       dispatch({ type: 'reset' })
       reopen((n) => n + 1)
     },

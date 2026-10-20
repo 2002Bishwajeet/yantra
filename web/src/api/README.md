@@ -5,7 +5,7 @@
 the two terminal sockets. `mic.ts` is push-to-talk ([ADR-0031](../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md)
 §4–6): `openMic` opens the microphone, an AudioWorklet (`mic.worklet.ts`) and the socket on a press,
 `toPcm16` resamples to 16 kHz mono s16le in 640-byte frames, and `close` is the release. `client.ts` holds `fetchJson`, the `Looked` envelope, and the
-`QueryClient` defaults. `fixtures.ts` is for tests only.
+`QueryClient` defaults. `chat.ts` is the chat socket, and its `diff()` asks for a thread's branch diff (Y-491); `threadsQuery` reads the thread list that the editor links need. `fixtures.ts` is for tests only.
 
 ## Errors
 

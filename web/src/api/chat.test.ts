@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import {
   chatAttached,
+  chatBranchDiff,
   chatCheckpoints,
   chatEvents,
   chatFailure,
@@ -15,7 +16,7 @@ import {
 } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
 import { AttachError, ChatError, IMAGE_LIMIT, PAUSES, chatAddress, frameOf, openChat, type ChatSocket } from './chat'
-import type { ThreadEvent } from './thread'
+import type { ChatBranchDiff, ThreadEvent } from './thread'
 
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 5_000 })
 
@@ -31,16 +32,18 @@ function connect(url: string | ((after?: string) => string) = chatAddress('yantr
   const opened = vi.fn()
   const dropped = vi.fn()
   const restarted = vi.fn()
+  const diffs: ChatBranchDiff[] = []
   const socket = openChat(typeof url === 'string' ? () => url : url, {
     onEvent: (event) => events.push(event),
     onError: (error) => errors.push(error),
     onOpen: opened,
     onDropped: dropped,
     onRestart: restarted,
+    onBranchDiff: (diff) => diffs.push(diff),
     pauses,
   })
   sockets.push(socket)
-  return { socket, events, errors, opened, dropped, restarted }
+  return { socket, events, errors, opened, dropped, restarted, diffs }
 }
 
 beforeEach(async () => {
@@ -458,5 +461,51 @@ describe('a reply to an image', () => {
     expect(frameOf('{"type":"attached","path":""}')).toBeNull()
     expect(frameOf('{"type":"notAttached","kind":"tooBig","said":"x"}')).toBeNull()
     expect(frameOf('{"type":"notAttached","kind":"unreachable"}')).toBeNull()
+  })
+})
+
+describe('the branch diff', () => {
+  it('sends a diff frame, and says false when the socket is not open', async () => {
+    const { socket, opened } = connect()
+    expect(socket.diff()).toBe(false)
+    await settled(() => expect(opened).toHaveBeenCalled())
+    expect(socket.diff()).toBe(true)
+    await settled(() => expect(server.heard).toHaveLength(1))
+    expect(JSON.parse((server.heard[0] as { text: string }).text)).toEqual({ type: 'diff' })
+    expect(chatFrames).toContainEqual({ type: 'diff' })
+  })
+
+  it('hands a valid reply over, and draws no event from it', async () => {
+    const { diffs, events, errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    server.say(JSON.stringify(chatBranchDiff))
+    await settled(() => expect(diffs).toEqual([chatBranchDiff]))
+    expect(events).toEqual([])
+    expect(errors).toEqual([])
+  })
+
+  it('refuses a malformed reply as badFrame', async () => {
+    const { diffs, errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    server.say(JSON.stringify({ ...chatBranchDiff, files: 'src/new.rs' }))
+    await settled(() => expect(errors).toHaveLength(1))
+    expect(errors[0]?.kind).toBe('badFrame')
+    expect(diffs).toEqual([])
+  })
+
+  it('reads a reply field by field', () => {
+    const bad = (change: object) => frameOf(JSON.stringify({ ...chatBranchDiff, ...change }))
+    expect(frameOf(JSON.stringify(chatBranchDiff))).toEqual(chatBranchDiff)
+    expect(bad({ threadId: 7 })).toBeNull()
+    expect(bad({ base: undefined })).toBeNull()
+    expect(bad({ unifiedDiff: null })).toBeNull()
+    expect(bad({ truncated: 'no' })).toBeNull()
+    expect(bad({ filesTruncated: undefined })).toBeNull()
+    expect(bad({ files: [null] })).toBeNull()
+    expect(bad({ files: [{ path: '' }] })).toBeNull()
+    expect(bad({ files: [{ path: 'a', from: 3 }] })).toBeNull()
+    expect(bad({ files: [{ path: 'a', added: -1 }] })).toBeNull()
+    expect(bad({ files: [{ path: 'a', deleted: '2' }] })).toBeNull()
+    expect(bad({ files: [] })).not.toBeNull()
   })
 })

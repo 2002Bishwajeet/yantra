@@ -1,6 +1,7 @@
 import {
   HARNESSES,
   type ChatAttached,
+  type ChatBranchDiff,
   type ChatFailure,
   type ChatFrame,
   type ChatNotAttached,
@@ -140,6 +141,8 @@ export type ChatSocket = {
   stop: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
   revert: (turn: number) => boolean
+  /** Asks for the branch diff (Y-491); it comes back through `onBranchDiff`. */
+  diff: () => boolean
   /** Sends an image and resolves to its path on the machine, or rejects with
    *  an `AttachError`. The daemon replies to images in the order they went. */
   attach: (file: Blob) => Promise<string>
@@ -161,8 +164,34 @@ function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
     : null
 }
 
+const isCount = (n: unknown) => n === undefined || (typeof n === 'number' && Number.isInteger(n) && n >= 0)
+
+/** `chatBranchDiff` in the contract is what the daemon sends. */
+function branchDiffOf(said: object): ChatBranchDiff | null {
+  const d = said as Partial<Record<keyof ChatBranchDiff, unknown>>
+  if (
+    typeof d.threadId !== 'string' ||
+    typeof d.base !== 'string' ||
+    typeof d.unifiedDiff !== 'string' ||
+    typeof d.filesTruncated !== 'boolean' ||
+    typeof d.truncated !== 'boolean' ||
+    !Array.isArray(d.files)
+  ) {
+    return null
+  }
+  for (const file of d.files as Record<string, unknown>[]) {
+    if (typeof file !== 'object' || file === null) return null
+    if (typeof file.path !== 'string' || file.path === '') return null
+    if (file.from !== undefined && typeof file.from !== 'string') return null
+    if (!isCount(file.added) || !isCount(file.deleted)) return null
+  }
+  return said as ChatBranchDiff
+}
+
 /** A daemon frame, or `null` for one this dashboard cannot read. */
-export function frameOf(text: string): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | null {
+export function frameOf(
+  text: string,
+): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | null {
   let said: unknown
   try {
     said = JSON.parse(text)
@@ -173,6 +202,7 @@ export function frameOf(text: string): ThreadEvent | ChatFailure | ChatAttached 
   if (said.type === 'attached') {
     return 'path' in said && typeof said.path === 'string' && said.path !== '' ? (said as ChatAttached) : null
   }
+  if (said.type === 'branchDiff') return branchDiffOf(said)
   if (said.type === 'notAttached') {
     const refused = said as Partial<ChatNotAttached>
     return (refused.kind === 'notAnImage' || refused.kind === 'unreachable') && typeof refused.said === 'string'
@@ -203,6 +233,7 @@ export function openChat(
     onOpen,
     onDropped,
     onRestart,
+    onBranchDiff,
     pauses = PAUSES,
   }: {
     onEvent: (event: ThreadEvent) => void
@@ -211,6 +242,7 @@ export function openChat(
     /** The socket dropped and a reopen is waiting. */
     onDropped?: () => void
     onRestart?: () => void
+    onBranchDiff?: (diff: ChatBranchDiff) => void
     pauses?: readonly number[]
   },
 ): ChatSocket {
@@ -271,6 +303,10 @@ export function openChat(
         return
       }
       attempts = 0
+      if (frame.type === 'branchDiff') {
+        onBranchDiff?.(frame)
+        return
+      }
       if (frame.type === 'attached' || frame.type === 'notAttached') {
         const waiting = pending.shift()
         if (!waiting) {
@@ -342,6 +378,7 @@ export function openChat(
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
     revert: (turn) => send({ type: 'revert', turn }),
+    diff: () => send({ type: 'diff' }),
     attach: (file) => {
       if (file.size > IMAGE_LIMIT) return Promise.reject(new AttachError('tooLarge'))
       if (!IMAGE_TYPES.includes(file.type)) return Promise.reject(new AttachError('notAnImage'))

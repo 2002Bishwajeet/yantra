@@ -767,3 +767,20 @@
   font-size: 36px;
   line-height: 44px;
 }
+
+.chat__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat__added {
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-medium);
+}
+
+.chat__branch {
+  flex: 1;
+  min-width: 0;
+}
