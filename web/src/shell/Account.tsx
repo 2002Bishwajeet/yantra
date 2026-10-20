@@ -9,14 +9,16 @@ export function AccountMenu(props: PopupProps) {
   const ready = useReady()
   return (
     <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
+      {/* A LinkItem stays open by default, and the open menu's inert layer then covers the page. */}
       <MenuPopup anchor={props.anchor} finalFocus={props.anchor}>
-        <MenuLinkItem icon={<MessagesSquare />} render={<Link to="/rooms" />}>
+        <MenuLinkItem closeOnClick icon={<MessagesSquare />} render={<Link to="/rooms" />}>
           Rooms
         </MenuLinkItem>
-        <MenuLinkItem icon={<SettingsIcon />} render={<Link to="/settings" />}>
+        <MenuLinkItem closeOnClick icon={<SettingsIcon />} render={<Link to="/settings" />}>
           Settings
         </MenuLinkItem>
         <MenuLinkItem
+          closeOnClick
           icon={<Info />}
           render={<Link params={{ category: 'about' }} to="/settings/$category" />}
         >
