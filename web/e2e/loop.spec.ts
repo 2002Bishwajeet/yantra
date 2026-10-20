@@ -28,7 +28,7 @@ test('an inbox issue starts a session with its draft and lists the threads', asy
 
   const threads = page.getByRole('region', { name: 'Threads' })
   await expect(threads.getByRole('link')).toHaveCount(5)
-  await expect(threads.locator('a[aria-current="true"]')).toHaveCount(1)
+  await expect(threads.locator('a[aria-current]')).toHaveCount(1)
   for (const mark of ['no PR', 'PR #512 open', 'PR #511 closed', 'PR #510 merged', 'PR unknown']) {
     await expect(threads.getByText(mark)).toBeVisible()
   }

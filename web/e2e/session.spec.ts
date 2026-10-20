@@ -280,7 +280,7 @@ test.describe('the session screen, the other three views', () => {
 
     await expect(page.getByText('read from the transcript on')).toBeVisible()
     await expect(page.getByText('the last 50 of 1,944 records')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Take control' })).toHaveAttribute(
       'href',
       `${PATH}?view=terminal`,
