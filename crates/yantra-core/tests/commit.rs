@@ -266,5 +266,39 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
         "",
         "no upstream after a refusal"
     );
+
+    // (f) main tracks origin/main and autoSetupMerge=inherit: the thread
+    // branch tracks nothing, and an upstream it inherited before --no-track
+    // does not push to main.
+    fixture.run(&format!(
+        "git -C {REPO} push -q -u origin main && git -C {REPO} config branch.autoSetupMerge inherit"
+    ))?;
+    let main_before = fixture.run(&format!("git -C {ORIGIN} rev-parse refs/heads/main"))?;
+    let inherited = thread::open(&ssh, &workspace).await?;
+    let inherited_named = format!("yantra/{}", thread::name(&inherited));
+    let inherited_merge = format!(
+        "git -C {REPO} config --get branch.{}.merge || true",
+        inherited.branch
+    );
+    assert_eq!(fixture.run(&inherited_merge)?, "", "no inherited upstream");
+    fixture.run(&format!(
+        "git -C {REPO} config branch.{b}.remote origin \
+         && git -C {REPO} config branch.{b}.merge refs/heads/main \
+         && cd {wt} && printf 'c\\n' > c.txt",
+        b = inherited.branch,
+        wt = inherited.worktree,
+    ))?;
+    commit::commit(&ssh, &inherited, "Add c").await?;
+    let pushed = commit::push(&ssh, &inherited, None).await?;
+    assert_eq!(pushed.branch, inherited_named);
+    assert_eq!(
+        fixture.run(&format!("git -C {ORIGIN} rev-parse refs/heads/main"))?,
+        main_before,
+        "main on origin is untouched"
+    );
+    assert_eq!(
+        fixture.run(&inherited_merge)?,
+        format!("refs/heads/{inherited_named}\n")
+    );
     Ok(())
 }

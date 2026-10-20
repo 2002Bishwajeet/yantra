@@ -240,12 +240,14 @@ pub async fn push<E: Exec>(
 }
 
 /// An explicit refspec, because `push.default=simple` refuses a branch whose
-/// remote name differs from its local one.
+/// remote name differs from its local one. An upstream counts only if Yantra
+/// could have set it: a thread opened before `--no-track` may track `main`.
 fn push_command(place: &Place, issue: Option<&IssueRef>) -> String {
     let key = |name: &str| sq(&format!("branch.{}.{name}", place.branch));
     format!(
         "cd {worktree} || exit\n\
          r=$(git config --get {remote}) && m=$(git config --get {merge}) \
+         && [ \"$r\" != . ] && [ \"${{m#refs/heads/yantra/}}\" != \"$m\" ] \
          || {{ r=origin; m={named}; git remote get-url origin >/dev/null 2>&1 || exit {NO_REMOTE}; }}\n\
          printf '%s\\n%s\\n' \"$r\" \"${{m#refs/heads/}}\"\n\
          GIT_TERMINAL_PROMPT=0 git push --porcelain -u \"$r\" {local}:\"$m\"",
@@ -611,6 +613,7 @@ mod tests {
                 "cd '{WORKTREE}' || exit\n\
                  r=$(git config --get 'branch.yantra/chat/web/11111111.remote') \
                  && m=$(git config --get 'branch.yantra/chat/web/11111111.merge') \
+                 && [ \"$r\" != . ] && [ \"${{m#refs/heads/yantra/}}\" != \"$m\" ] \
                  || {{ r=origin; m='refs/heads/yantra/42-11111111'; \
                  git remote get-url origin >/dev/null 2>&1 || exit 5; }}\n\
                  printf '%s\\n%s\\n' \"$r\" \"${{m#refs/heads/}}\"\n\
