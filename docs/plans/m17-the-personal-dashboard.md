@@ -210,7 +210,7 @@ All accessed 2026-10-19.
 - Yantra on `main` at `dc84722`:
   - `CLAUDE.md` §6, §B0, §B1; `tracker.md` (Y-449, Y-487…Y-502, M16).
   - `docs/adr/0019-*.md`, `0021-*.md`, `0024-*.md` (with the Y-370 and Y-383 notes).
-  - `docs/design/03-dashboard-surface.md` §1, §4, §7, §9.1, §10; `docs/plans/m14-the-material-dashboard.md`; `docs/plans/m16-the-coding-loop.md`; `docs/plans/v0.7.2-qa-pass.md` §6.
+  - `docs/design/03-dashboard-surface.md` §1, §4, §7, §9.1, §10; `docs/plans/m14-the-material-dashboard.md`; `docs/plans/m16-the-coding-loop.md`; `docs/plans/v0.8.0-qa-pass.md` §6.
   - `web/package.json`, `web/scripts/budget.mjs` (run with `--no-build` on the `dist/` of 2026-09-30), `web/playwright.config.ts`, `web/e2e/dashboard.spec.ts`, `web/e2e/fixture/scenarios/`.
   - `web/src/router.ts`, `web/src/screens/dashboard/{Dashboard,Home,bands}.ts*`, `web/src/shell/{prefs,formFactor}.ts`, `web/src/api.ts`, `web/src/api/{errors,queries,hooks}.ts`, `web/src/lib/spend.ts`, `web/src/screens/usage/span.ts`, `web/src/m3/` (listing).
   - `crates/yantrad/src/{api,write,tasks,contract}.rs` (route tables), `crates/yantra-core/src/thread.rs`, `crates/yantra-core/tests/fixture/tailscale-status.json`.
