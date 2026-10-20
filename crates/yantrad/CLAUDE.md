@@ -591,10 +591,14 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 - **Each event carries a `cursor`**, `<run>:<line end>:<part>`, its place in the keeper's `out`
   journal. `?after=` is the last cursor the browser drew. `thread.started` answers with the cursor
   the socket continues from, or with none when it replays the whole run, and then the browser
-  starts its timeline again. No event reaches one socket twice.
+  starts its timeline again. No event with a cursor reaches one socket twice. The daemon makes
+  the `turn.completed` of a turn whose `out` ended with no `result`, so an attach makes it again.
 - **One turn at a time in a thread, across every tab and every restart.** A second `turn` while
   one runs is `busy`, and the socket stays open. A keeper that already runs on the machine is
   adopted, not started again.
+- **One task reads a keeper.** A task claims the thread before it starts or adopts a keeper. The
+  claim goes however the task ends, and a keeper started under a claim that no task took is
+  killed. A tab that attaches during a start waits for it.
 - **`refresh.rs` adopts what a restart left.** The sessions sweep lists `yantra-keep-` sessions,
   and each one the registry does not hold is adopted. The session listing hides them, and
   `validate_name` refuses the prefix to a workspace.

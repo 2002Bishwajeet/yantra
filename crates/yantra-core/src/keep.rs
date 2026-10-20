@@ -36,8 +36,8 @@ const ENDED: &str = "yantra-keeper-ended";
 
 /// How long one write to `in` may take before it counts as failed.
 const APPEND_WITHIN: Duration = Duration::from_secs(30);
-/// How many times a write to `in` is tried before the writer gives up.
-const APPEND_TRIES: u32 = 6;
+/// How many times the last read of a dead keeper's `out` is tried.
+const DRAIN_TRIES: u32 = 6;
 /// The longest wait between two tries of a reader or a writer.
 const BACKOFF: Duration = Duration::from_secs(8);
 
@@ -495,12 +495,13 @@ fn appending(keeper: &Keeper, at: u64, len: u64) -> String {
 }
 
 /// A writer whose every line is appended to `in`, which holds `at` bytes now.
-/// A line that cannot be written after a few tries ends the writer, so the
-/// next write fails and nothing lands out of order.
-pub fn feed(ssh: Ssh, keeper: Keeper, at: u64) -> Feed {
+/// A line that cannot be written is tried again for as long as the keeper's
+/// pane lives, as the reader is. An `in` that another writer changed ends the
+/// keeper and says why in `err`, so the turn fails where it can be seen.
+pub fn feed(ssh: Ssh, tmux: Tmux, keeper: Keeper, at: u64) -> Feed {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
     let (close, closed) = oneshot::channel();
-    tokio::spawn(pump_in(ssh, keeper, at, ours, closed));
+    tokio::spawn(pump_in(ssh, tmux, keeper, at, ours, closed));
     Feed {
         inner: theirs,
         close: Some(close),
@@ -539,6 +540,7 @@ impl AsyncWrite for Feed {
 
 async fn pump_in(
     ssh: Ssh,
+    tmux: Tmux,
     keeper: Keeper,
     mut at: u64,
     from: DuplexStream,
@@ -554,15 +556,28 @@ async fn pump_in(
             _ => return,
         }
         let mut wait = Duration::from_secs(1);
-        let mut tries = 0;
         loop {
             let tried = tokio::time::timeout(APPEND_WITHIN, append(&ssh, &keeper, at, &line)).await;
             match tried {
                 Ok(Ok(())) => break,
-                Ok(Err(Error::Behind { .. })) => return,
-                _ if tries + 1 >= APPEND_TRIES => return,
+                Ok(Err(behind @ Error::Behind { .. })) => {
+                    let _ = ssh
+                        .exec(&format!(
+                            "cd {} && printf '%s\\n' {} >>err",
+                            keeper.dir(),
+                            sq(&format!("yantra: {behind}"))
+                        ))
+                        .await;
+                    let _ = kill(&ssh, &tmux, &keeper).await;
+                    return;
+                }
                 _ => {
-                    tries += 1;
+                    // A pane that is gone or dead reads no more lines.
+                    if let Ok(found) = pane(&ssh, &tmux, &keeper).await
+                        && found.is_none_or(|found| found.dead)
+                    {
+                        return;
+                    }
                     tokio::time::sleep(wait).await;
                     wait = (wait * 2).min(BACKOFF);
                 }
@@ -672,6 +687,7 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
          tail -c +{from} -f out &\n\
          t=$!\n\
          while sleep 2; do\n\
+         \x20 kill -0 \"$t\" 2>/dev/null || exit 1\n\
          \x20 case \"$({tmux} display-message -p -t {pane} '#{{pane_dead}}' 2>/dev/null)\" in\n\
          \x20 0) ;;\n\
          \x20 *) break ;;\n\
@@ -690,7 +706,7 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
 /// sent before it was killed.
 async fn drain(ssh: &Ssh, keeper: &Keeper, at: u64, to: &mut DuplexStream) {
     let mut wait = Duration::from_secs(1);
-    for _ in 0..APPEND_TRIES {
+    for _ in 0..DRAIN_TRIES {
         let read = ssh
             .exec(&format!(
                 "cd {} 2>/dev/null || exit 0; tail -c +{} out",

@@ -248,8 +248,6 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
         .collect())
 }
 
-/// M7 runs this under a supervisor, and I-27 is a standing reminder about
-/// processes nobody reaps.
 /// The chat registry, whose waits go to the relay when there is one. The
 /// relay is read again because a `Relay` is not `Clone`, by design.
 fn chats() -> chat::Registry {
@@ -263,6 +261,8 @@ fn chats() -> chat::Registry {
     }
 }
 
+/// M7 runs this under a supervisor, and I-27 is a standing reminder about
+/// processes nobody reaps.
 async fn shutdown() {
     let interrupt = async {
         let _ = tokio::signal::ctrl_c().await;

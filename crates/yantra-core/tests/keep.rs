@@ -248,7 +248,7 @@ async fn lines_reach_the_agent_and_a_shut_writer_ends_it() -> Result<()> {
     let keeper = Keeper::new("web", "3c4d5e6f7a8b9c0d");
     lab.start_keeper(&keeper, "exec cat", Limits::default())
         .await?;
-    let mut writer = keep::feed(lab.ssh.clone(), keeper.clone(), 0);
+    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), 0);
     writer.write_all(b"{\"one\":1}\n{\"two\":2}\n").await?;
     writer.flush().await?;
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -334,5 +334,103 @@ async fn both_limits_stop_the_agent_and_say_why() -> Result<()> {
             .is_empty(),
         "no agent outlives its keeper"
     );
+    Ok(())
+}
+
+/// A far `tail` that dies while its pane lives ends its `ssh`, so the reader
+/// reconnects and carries on, and no far poller is left waiting for the pane.
+#[tokio::test]
+async fn a_far_tail_that_dies_ends_its_reader_and_the_reader_carries_on() -> Result<()> {
+    let Some(lab) = Lab::start("tail").await? else {
+        return Ok(());
+    };
+    let keeper = Keeper::new("web", "6f7a8b9c0d1e2f3a");
+    let pane = lab
+        .start_keeper(&keeper, COUNTER, Limits::default())
+        .await?;
+    let reader = keep::follow(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), pane, 0);
+    let mut lines = BufReader::new(reader).lines();
+    let mut last = 0;
+    for _ in 0..3 {
+        let line = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
+            .await??
+            .expect("a line");
+        last = counted(&line)?;
+    }
+    // `^` matches the tail alone, and not the far shell whose script names it.
+    lab.fixture.run("pkill -f '^tail -[c] '; true")?;
+    for _ in 0..10 {
+        let line = tokio::time::timeout(Duration::from_secs(20), lines.next_line())
+            .await??
+            .expect("a line");
+        let n = counted(&line)?;
+        ensure!(n == last + 1, "{n} follows {last} after the far tail died");
+        last = n;
+    }
+    lab.fixture.run("pkill -f yantra-test-agen[t]; true")?;
+    lab.until_dead(&keeper).await?;
+    keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
+    Ok(())
+}
+
+/// A line that cannot be appended for longer than six tries still lands once
+/// `in` can be written again, because the writer tries while the pane lives.
+#[tokio::test]
+async fn a_writer_keeps_trying_while_the_pane_lives() -> Result<()> {
+    let Some(lab) = Lab::start("retry").await? else {
+        return Ok(());
+    };
+    let keeper = Keeper::new("web", "7a8b9c0d1e2f3a4b");
+    let quiet = Limits {
+        tick: 3600,
+        ..Limits::default()
+    };
+    lab.start_keeper(&keeper, "exec cat", quiet).await?;
+    let journal = format!(
+        "~/.yantra/keep/{}/{}/in",
+        keeper.workspace(),
+        keeper.thread()
+    );
+    lab.fixture.run(&format!("chmod 000 {journal}"))?;
+    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), 0);
+    writer.write_all(b"{\"late\":1}\n").await?;
+    writer.flush().await?;
+    // Six tries take about 25 s: 1 + 2 + 4 + 8 + 8 seconds apart.
+    tokio::time::sleep(Duration::from_secs(40)).await;
+    lab.fixture.run(&format!("chmod 600 {journal}"))?;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let out = keep::read(&lab.ssh, &keeper, File::Out, None).await?;
+        if out == b"{\"late\":1}\n" {
+            break;
+        }
+        ensure!(Instant::now() < deadline, "out holds {out:?}");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
+    Ok(())
+}
+
+/// An `in` that another writer changed ends the keeper and says why, so the
+/// turn fails where it can be seen and no line is dropped unseen.
+#[tokio::test]
+async fn a_writer_behind_in_ends_the_keeper_and_says_why() -> Result<()> {
+    let Some(lab) = Lab::start("behind").await? else {
+        return Ok(());
+    };
+    let keeper = Keeper::new("web", "8b9c0d1e2f3a4b5c");
+    lab.start_keeper(&keeper, "exec cat", Limits::default())
+        .await?;
+    keep::append(&lab.ssh, &keeper, 0, b"{\"other\":1}\n").await?;
+    let mut writer = keep::feed(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), 0);
+    writer.write_all(b"{\"mine\":1}\n").await?;
+    writer.flush().await?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while keep::pane(&lab.ssh, &lab.tmux, &keeper).await?.is_some() {
+        ensure!(Instant::now() < deadline, "the keeper ended within 20 s");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let said = String::from_utf8(keep::read(&lab.ssh, &keeper, File::Err, None).await?)?;
+    ensure!(said.contains("yantra: the keeper's `in` holds"), "{said}");
     Ok(())
 }

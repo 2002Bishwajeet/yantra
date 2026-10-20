@@ -611,19 +611,23 @@ impl Shared {
         if completed {
             return;
         }
-        self.emit_made(Event::TurnCompleted(if cancelled {
-            cancelled_turn()
+        self.emit_made(Event::TurnCompleted(unfinished(cancelled, said)));
+    }
+}
+
+/// How a turn whose stdout ended with no `result` ended.
+fn unfinished(cancelled: bool, said: String) -> chat::TurnCompleted {
+    if cancelled {
+        return cancelled_turn();
+    }
+    chat::TurnCompleted {
+        state: chat::TurnState::Failed,
+        stop_reason: None,
+        message: Some(if said.is_empty() {
+            "claude ended without a result".to_owned()
         } else {
-            chat::TurnCompleted {
-                state: chat::TurnState::Failed,
-                stop_reason: None,
-                message: Some(if said.is_empty() {
-                    "claude ended without a result".to_owned()
-                } else {
-                    said
-                }),
-            }
-        }));
+            said
+        }),
     }
 }
 
@@ -739,6 +743,17 @@ impl Replayed {
     /// Whether `out` holds the turn's `result`.
     pub fn completed(&self) -> bool {
         self.state.completed
+    }
+
+    /// The `turn.completed` the daemon made when this ended keeper's `out`
+    /// stopped with no `result`, made again for a replay (ADR-0035 decision
+    /// 8). `said` is what the keeper's `err` says.
+    pub fn end(&self, said: String) -> Option<ThreadEvent> {
+        (!self.state.completed).then(|| ThreadEvent {
+            thread_id: self.thread.clone(),
+            cursor: None,
+            event: Event::TurnCompleted(unfinished(self.state.cancelled, said)),
+        })
     }
 }
 

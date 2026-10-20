@@ -307,7 +307,7 @@ export function openChat(
         onError(new ChatError('turnFailed', frame.payload.message ?? ''))
       }
     }
-    live.onclose = () => {
+    live.onclose = (closed: CloseEvent) => {
       abandon()
       if (finished) return
       if (!wasOpen) {
@@ -316,7 +316,8 @@ export function openChat(
         return
       }
       // The daemon said why it ended the socket, and a reopen would say it again.
-      if (said) {
+      // It ends a socket with a close frame; a network that drops sends none.
+      if (said && closed.wasClean) {
         finished = true
         return
       }

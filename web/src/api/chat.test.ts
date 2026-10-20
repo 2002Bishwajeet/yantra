@@ -270,6 +270,18 @@ describe('the chat socket', () => {
     expect(server.asked).toHaveLength(1)
   })
 
+  it('reopens after an error on a socket that stayed open and then dropped', async () => {
+    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const { errors, opened, dropped } = connect(at, [10])
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    server.say(JSON.stringify({ type: 'error', kind: 'unreachable', said: 'ssh: connection reset' }))
+    await settled(() => expect(errors).toHaveLength(1))
+    server.drop()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(2))
+    expect(dropped).toHaveBeenCalledTimes(1)
+    expect(errors.map((error) => error.kind)).toEqual(['unreachable'])
+  })
+
   it('reports a frame it cannot read as badFrame with a sentence of its own', async () => {
     const { errors, opened } = connect()
     await settled(() => expect(opened).toHaveBeenCalled())

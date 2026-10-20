@@ -48,6 +48,8 @@ export async function daemon() {
     print: (bytes: string) => live?.send(Buffer.from(bytes), { binary: true }),
     say: (text: string) => live?.send(text, { binary: false }),
     hangUp: () => live?.close(),
+    /** The connection goes with no close frame, as a network that dropped. */
+    drop: () => live?.terminate(),
     /** A daemon that takes the connection and drops it having said nothing —
      *  which is the one shape the page cannot tell from a network that went
      *  away, and so the one it must stop retrying by counting. */
