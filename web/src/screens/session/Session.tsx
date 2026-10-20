@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRouteApi, Link } from '@tanstack/react-router'
+import { getRouteApi, Link, useLocation } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
 import { useSessions, useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
 import { MISSING, statusQuery } from '@/api/queries'
@@ -21,6 +21,7 @@ import { KeyRow } from './Keys'
 import { NotFound } from './NotFound'
 import { Spend } from './Spend'
 import { Terminal } from './Terminal'
+import { ThreadList } from './ThreadList'
 import { Transcript } from './Transcript'
 import './Session.css'
 
@@ -132,6 +133,8 @@ export function Workspace(props: {
 function Loaded(props: { workspace: Workspace; view: View; thread?: string; onThread: (thread: string) => void }) {
   const { workspace, view, thread, onThread } = props
   const { name } = workspace
+  // Y-489: the issue draft rides in location state, so its text stays out of the URL (ADR-0034).
+  const draft = useLocation({ select: (here) => (here.state as { draft?: string } | undefined)?.draft })
   const sessions = useSessions()
   const factor = useFormFactor()
   const now = useTick(true)
@@ -191,10 +194,13 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       </div>
       {/* Only the open tab is mounted, except the chat: mounting the terminal
           opens an ssh, and tmux redraws the pane for whoever attaches next (D5 §3.5). */}
+      <ErrorBoundary eyebrow="Session / Threads" layout="inline" resetKeys={[name]} title="The thread list broke">
+        <ThreadList name={name} thread={thread} view={view} />
+      </ErrorBoundary>
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div hidden={view !== 'chat'}>
-            <Chat key={name} onThread={onThread} thread={thread} workspace={workspace} />
+            <Chat initialDraft={draft} key={name} onThread={onThread} thread={thread} workspace={workspace} />
           </div>
         ) : null}
         {view === 'terminal' ? (

@@ -1,4 +1,5 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import * as contract from '@/contract.gen'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { mount, scenario, unmount } from './harness'
 
@@ -66,6 +67,28 @@ describe('/fleet on the busy fleet', () => {
     expect(github.getByRole('heading', { name: 'Reviews' })).toBeTruthy()
     expect(github.getByRole('heading', { name: 'Issues' })).toBeTruthy()
     expect(github.getByRole('link', { name: /7notifications on GitHub/ })).toBeTruthy()
+  })
+})
+
+describe('/fleet Start session', () => {
+  it('opens a thread on the workspace picked and lands in Chat with the draft in state, not the URL', async () => {
+    vi.stubGlobal('WebSocket', class { close() {} addEventListener() {} removeEventListener() {} })
+    const asked = mount('desktop', '/fleet')
+    await screen.findByText(/^looked /, {}, { timeout: 2000 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Start session on 2002Bishwajeet/yantra#118' }))
+    const dialog = await screen.findByRole('dialog')
+    const pick = await within(dialog).findByRole('button', { name: 'yantra-web' }, { timeout: 2000 })
+    expect(asked).toContain('POST /api/placement')
+    fireEvent.click(pick)
+    await waitFor(() => expect(location.pathname).toBe('/w/yantra-web'), { timeout: 2000 })
+    expect(asked).toContain('POST /api/workspaces/yantra-web/threads/new')
+    expect(location.search).toContain(`thread=${contract.threadOpened.thread}`)
+    expect(location.search).not.toContain('Work')
+    expect((history.state as { draft?: string }).draft).toBe(contract.threadOpened.draft)
+    const composer = await screen.findByRole('textbox', { name: /Message/ }, { timeout: 5000 })
+    // The composer is single-line in jsdom, which drops the newlines.
+    expect((composer as HTMLTextAreaElement).value).toBe(contract.threadOpened.draft.replaceAll('\n', ''))
+    expect(asked).toContain('POST /api/workspaces/yantra-web/threads')
   })
 })
 

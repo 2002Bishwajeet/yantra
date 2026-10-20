@@ -53,6 +53,22 @@ afterEach(async () => {
   await server.stop()
 })
 
+describe('the initial draft', () => {
+  it('seeds the composer with the issue text and leaves it editable', async () => {
+    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+    const composer = screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement
+    expect(composer.value).toBe('Work on o/r#1: a title')
+    type('changed')
+    expect(composer.value).toBe('changed')
+  })
+
+  it('starts empty without one', async () => {
+    await open()
+    expect((screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement).value).toBe('')
+  })
+})
+
 describe('the harness picker', () => {
   it('offers every harness with Claude first, and sends the one picked with the first turn', async () => {
     await open()
