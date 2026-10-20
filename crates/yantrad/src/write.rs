@@ -155,6 +155,11 @@ where
         // Here for the grant: a thread's PR and its issue are read with it.
         .route("/workspaces/{name}/threads", post(threads::<I>))
         .route("/workspaces/{name}/threads/new", post(thread_new::<I>))
+        // Opening a PR reads refs and writes GitHub, so a running turn does not refuse it.
+        .route(
+            "/workspaces/{name}/threads/{thread}/pr",
+            post(opening_pr::<I>),
+        )
         // Here for the chat registry: a running turn or revert refuses them.
         .route(
             "/workspaces/{name}/threads/{thread}/message",
@@ -1515,7 +1520,8 @@ fn from_github(error: &github::Error) -> StatusCode {
     match error {
         github::Error::NotAnIssue { .. } | github::Error::IsAPull { .. } => StatusCode::BAD_REQUEST,
         github::Error::Status { status: 404, .. } => StatusCode::NOT_FOUND,
-        github::Error::NoGrant => StatusCode::CONFLICT,
+        // No commits between the branches; a lost race is answered before here.
+        github::Error::NoGrant | github::Error::Unprocessable { .. } => StatusCode::CONFLICT,
         github::Error::Refused
         | github::Error::Status { .. }
         | github::Error::Unreachable { .. }
@@ -1592,6 +1598,53 @@ async fn pushing<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrBody {
+    /// Absent takes the tip commit's subject.
+    #[serde(default)]
+    title: Option<String>,
+    /// Absent takes the tip commit's body.
+    #[serde(default)]
+    body: Option<String>,
+}
+
+/// `yantra pr open <workspace> <thread>` on the wire (Y-449), with the
+/// daemon's grant (ADR-0034 decision 1). Neither the title nor the body is
+/// logged (Q5).
+async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+    body: Option<Json<PrBody>>,
+) -> Result<Json<ThreadPrOpened>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let Json(PrBody { title, body }) = body.unwrap_or_default();
+    let token = state
+        .fleet
+        .github
+        .token()
+        .await
+        .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
+    tracing::info!("pr open {name} {id} for {}", caller.node);
+    let opened = commit::open_pr_for(
+        &name,
+        &id,
+        &github::Github::default(),
+        &token,
+        title.as_deref(),
+        body.as_deref(),
+    )
+    .await
+    .map_err(refuse_commit)?;
+    Ok(Json(ThreadPrOpened {
+        number: opened.number,
+        url: opened.url,
+        created: opened.created,
+    }))
+}
+
 /// A turn or a revert would race the commit for the worktree and its index.
 fn idle(chats: &crate::chat::Registry, name: &str, id: &str) -> Result<(), Refused> {
     if chats.occupied(&format!("chat/{name}/{id}")) {
@@ -1616,6 +1669,14 @@ fn from_commit(error: &commit::Failed) -> StatusCode {
     match error {
         commit::Failed::Workspace(workspace) => from_workspace(workspace),
         commit::Failed::NoThread { .. } => StatusCode::NOT_FOUND,
+        commit::Failed::NotPushed
+        | commit::Failed::Ahead
+        | commit::Failed::Behind
+        | commit::Failed::Diverged
+        | commit::Failed::NotGithub
+        | commit::Failed::NoTitle
+        | commit::Failed::Unseen { .. } => StatusCode::CONFLICT,
+        commit::Failed::Github(github) => from_github(github),
         commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
         commit::Failed::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
         commit::Failed::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -2050,6 +2111,14 @@ struct ThreadCommitted {
 struct ThreadPushed {
     remote: String,
     branch: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ThreadPrOpened {
+    number: u64,
+    url: String,
+    /// `false` when the PR was already open.
+    created: bool,
 }
 
 /// What a `202` carries: where to watch. The session is
@@ -2559,6 +2628,15 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             of(&ThreadPushed {
                 remote: "origin".to_owned(),
                 branch: "yantra/492-0a1b2c3d4e5f6a7b".to_owned(),
+            }),
+        ),
+        (
+            "threadPrOpened",
+            "ThreadPrOpened",
+            of(&ThreadPrOpened {
+                number: 497,
+                url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
+                created: true,
             }),
         ),
         (
@@ -3641,6 +3719,7 @@ mod tests {
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"message":"Add x"}"#)),
             Request::post("/workspaces/site/threads/0a1b/push").body(Body::empty()),
+            Request::post("/workspaces/site/threads/0a1b/pr").body(Body::empty()),
         ] {
             let mut request = request.expect("a request");
             request
@@ -3776,6 +3855,71 @@ mod tests {
             from_commit(&commit::Failed::NoStateDir),
             StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    #[test]
+    fn pr_open_refusals_map_to_their_status() {
+        assert_eq!(
+            from_commit(&commit::Failed::NotPushed),
+            StatusCode::CONFLICT
+        );
+        for refused in [
+            commit::Failed::Ahead,
+            commit::Failed::Behind,
+            commit::Failed::Diverged,
+            commit::Failed::NotGithub,
+            commit::Failed::NoTitle,
+        ] {
+            assert_eq!(from_commit(&refused), StatusCode::CONFLICT, "{refused}");
+        }
+        // A repository the grant cannot see is not a thread that is missing.
+        let unseen = commit::Failed::Unseen {
+            repo: "o/r".to_owned(),
+        };
+        assert_eq!(from_commit(&unseen), StatusCode::CONFLICT);
+        assert_ne!(
+            from_commit(&unseen),
+            from_commit(&commit::Failed::NoThread { id: "x".to_owned() })
+        );
+        let of = |error: github::Error| from_commit(&commit::Failed::Github(error));
+        assert_eq!(
+            of(github::Error::Unprocessable {
+                said: "Validation Failed: No commits between main and b".to_owned()
+            }),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(of(github::Error::NoGrant), StatusCode::CONFLICT);
+        assert_eq!(of(github::Error::Refused), StatusCode::BAD_GATEWAY);
+        assert!(serde_json::from_str::<PrBody>(r#"{"title":"t","body":"b"}"#).is_ok());
+        assert!(serde_json::from_str::<PrBody>(r#"{"draft":true}"#).is_err());
+    }
+
+    /// No grant is a 409 before any workspace or machine is asked. A busy
+    /// thread does not refuse it: opening a PR touches no worktree.
+    #[tokio::test]
+    async fn pr_open_without_a_grant_is_a_conflict_even_on_a_busy_thread() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        fleet.chats.mark_reverting("chat/site/0a1b");
+        let app = router::<Fake, ()>(direct(tailnet(vec![(address(9), caller(ME, &[]))])), fleet);
+        let mut request = Request::post("/workspaces/site/threads/0a1b/pr")
+            .body(Body::empty())
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+        let answered = app
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::CONFLICT);
+        let said = axum::body::to_bytes(answered.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        assert!(String::from_utf8_lossy(&said).contains("yantra github login"));
     }
 
     #[test]
