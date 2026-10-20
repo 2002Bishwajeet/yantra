@@ -74,6 +74,7 @@ import type {
   Machine,
   MachineSessions,
   Opened,
+  Placement,
   Readiness,
   Repo,
   Resumed,
@@ -175,6 +176,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
     ];
     out.extend(crate::api::answers());
     out.extend(crate::write::answers());
+    out.extend(crate::placement::answers());
     out.extend(crate::terminal::answers());
     out.extend(crate::chat::answers());
     out

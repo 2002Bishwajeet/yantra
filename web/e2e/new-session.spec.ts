@@ -26,10 +26,32 @@ test.describe('the four steps', () => {
     const chips = page.getByRole('group', { name: 'Machine' })
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeEnabled()
     await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    // Y-517: the daemon's top machine is preselected, with the reason.
+    await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('status').filter({ hasText: 'suggested' })).toHaveText(
+      'cachyos-g14 suggested: it is idle and it has RAM to spare',
+    )
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+
+  /** Y-517: a repository another machine holds is offered there, and the
+   *  switch keeps the repository at the path that machine has it. */
+  test('the source step offers the machine that holds the repo', async ({ page }) => {
+    await page.getByLabel('Name').fill('brisk-heron')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
+    await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
+
+    await expect(page.getByText('hetzner-1: the repo is there and it is on AC power')).toBeVisible()
+    await page.getByRole('button', { name: 'Use hetzner-1' }).click()
+    await expect(page.getByRole('button', { name: 'Use hetzner-1' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('open a tmux session on hetzner-1 in ~/Github/scratch', { exact: false })).toBeVisible()
   })
 
   test('passes axe on each step', async ({ page }) => {
+    // Y-517: the suggestion enables Continue after load; axe must not sample its colour transition.
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
     await axe(page)
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
@@ -121,13 +143,83 @@ test.describe('the four steps', () => {
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
+  /** Y-516: a path bar, a filter, arrow keys, repositories first, and a start
+   *  at the last folder used, kept in `yantra.prefs` general.lastFolders. */
+  test('the local picker browses like a file browser', async ({ page }) => {
+    const toLocal = async (name: string) => {
+      await page.getByLabel('Name').fill(name)
+      await page.getByRole('button', { name: 'cachyos-g14' }).click()
+      await page.getByRole('button', { name: 'Continue' }).click()
+      await page.getByRole('button', { name: /Local directory/ }).click()
+    }
+    const crumb = page.getByRole('navigation', { name: 'Where you are' }).locator('[aria-current="location"]')
+    const folders = page.getByRole('list', { name: 'Folders' })
+    const names = folders.locator('[data-row] .m3-row__headline')
+    await toLocal('quiet-otter')
+    await expect(crumb).toHaveText('~')
+
+    await page.getByRole('button', { name: 'Edit path' }).click()
+    await page.getByLabel('Path').fill('/home/biswa/Github')
+    await page.getByLabel('Path').press('Enter')
+    await expect(crumb).toHaveText('Github')
+    await expect(page.getByRole('button', { name: 'Edit path' })).toBeFocused()
+    await expect(names).toHaveText(['landing', 'yantra', 'notes'])
+    await axe(page)
+    await keyboardWalk(page, 12)
+
+    const filter = page.getByLabel('Filter this folder')
+    await filter.fill('LAN')
+    await expect(names).toHaveText(['landing'])
+    await filter.fill('zzz')
+    await expect(page.getByText('nothing in ~/Github matches zzz')).toBeVisible()
+    await filter.fill('')
+    await expect(names).toHaveText(['landing', 'yantra', 'notes'])
+
+    await filter.press('ArrowDown')
+    await expect(folders.getByRole('button', { name: /^landing/ })).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(folders.getByRole('button', { name: /^yantra/ })).toBeFocused()
+    await page.keyboard.press('End')
+    await expect(folders.getByRole('button', { name: /^notes/ })).toBeFocused()
+    await page.keyboard.press('Home')
+    await expect(folders.getByRole('button', { name: /^landing/ })).toBeFocused()
+
+    await page.getByRole('button', { name: 'Show hidden' }).click()
+    await filter.fill('git')
+    await expect(names).toHaveText(['.github'])
+    await filter.fill('')
+    await page.getByRole('button', { name: 'Show hidden' }).click()
+
+    await filter.press('ArrowDown')
+    await page.keyboard.press('Backspace')
+    await expect(crumb).toHaveText('~')
+    await expect(folders.getByRole('button', { name: /^Github/ })).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('button', { name: 'Show folders in Github' })).toHaveAttribute('aria-expanded', 'true')
+    await page.keyboard.press('ArrowLeft')
+    await expect(page.getByRole('button', { name: 'Show folders in Github' })).toHaveAttribute('aria-expanded', 'false')
+
+    await page.keyboard.press('Enter')
+    await expect(crumb).toHaveText('Github')
+    await expect(folders.getByRole('button', { name: /^landing/ })).toBeFocused()
+    await folders.getByRole('button', { name: /^yantra/ }).click()
+    await expect(crumb).toHaveText('yantra')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Create and open' }).click()
+    await expect(page).toHaveURL('/w/quiet-otter?view=chat')
+
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+    await toLocal('brisk-heron')
+    await expect(crumb).toHaveText('yantra')
+    const recent = page.getByRole('region', { name: 'Recent on cachyos-g14' })
+    await expect(recent.getByRole('button', { name: '~/Github/yantra' })).toBeVisible()
+  })
+
   /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
   test('the clone folder survives a reload', async ({ page }) => {
-    const fillStep1 = async () => {
-      await page.getByLabel('Name').fill('quiet-otter')
-      await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    }
-    await fillStep1()
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
     const line = page.locator('.ns__clone', { hasText: 'Clone folder:' })
     await expect(line).toContainText('~/Github')
@@ -144,8 +236,7 @@ test.describe('the four steps', () => {
 
     await page.reload()
     await expect(heading(page, 'New session')).toBeVisible()
-    // The reload keeps ?step=2, so step 2 draws as soon as step 1 is complete.
-    await fillStep1()
+    // The reload keeps ?step=2, and the generated name with the suggested machine (Y-517) completes step 1.
     await expect(line).toContainText('~/notes')
   })
 })

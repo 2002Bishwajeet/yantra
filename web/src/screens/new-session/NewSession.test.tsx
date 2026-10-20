@@ -67,7 +67,7 @@ describe('step 1, the name and the machine', () => {
   })
 
   it('takes one machine, and never one that is not there', async () => {
-    mountNew('desktop', '/new')
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await screen.findByRole('dialog', { name: 'New session' })
     const chips = within(screen.getByRole('group', { name: 'Machine' }))
     expect(chips.getByRole('button', { name: 'bishwajeets-macbook-pro · unreachable' })).toHaveProperty(
@@ -243,7 +243,7 @@ describe('step 2, the local browser', () => {
             ? [200, listing('/')]
             : [200, { ...listing(HOME), truncated: true }],
     })
-    expect(await folders.findByText(/sent the first 4 entries and stopped/)).toBeTruthy()
+    expect(await folders.findByText(/sent the first 4 entries and stopped.*Edit path, or press \//)).toBeTruthy()
 
     const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
     fireEvent.click(where.getByRole('button', { name: '/' }))
@@ -426,20 +426,20 @@ describe('the default machine', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
   })
 
-  it('selects no machine when there is no default', async () => {
-    mountNew('desktop', '/new')
+  it('selects no machine when there is no default and nothing is suggested', async () => {
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await stays()
   })
 
   it('does not select a default that is offline', async () => {
     writePrefs({ general: { defaultMachine: 'bishwajeets-macbook-pro' } })
-    mountNew('desktop', '/new')
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await stays()
   })
 
   it('does not select a default the list does not hold', async () => {
     writePrefs({ general: { defaultMachine: 'gone' } })
-    mountNew('desktop', '/new')
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await stays()
   })
 
@@ -451,7 +451,7 @@ describe('the default machine', () => {
   })
 
   it('does not press a ?machine= that is unreachable', async () => {
-    mountNew('desktop', '/new?machine=bishwajeets-macbook-pro')
+    mountNew('desktop', '/new?machine=bishwajeets-macbook-pro', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await stays()
   })
 
@@ -475,9 +475,159 @@ describe('the default machine', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
-  it('chooses no machine when the general pref is corrupt', async () => {
+  it('chooses no machine when the general pref is corrupt and nothing is suggested', async () => {
     writePrefs({ general: { defaultMachine: 42 } })
-    mountNew('desktop', '/new')
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await stays()
+  })
+})
+
+describe('the suggested machine (Y-517)', () => {
+  const pressed = () =>
+    within(screen.getByRole('group', { name: 'Machine' }))
+      .getAllByRole('button')
+      .filter((chip) => chip.getAttribute('aria-pressed') === 'true')
+      .map((chip) => chip.textContent)
+  const terms = { ram: 20, cpu: 15, power: 10, repo: 0, affinity: 0 }
+  const placed = (machine: string, score: number, reason: string, path?: string) => ({
+    machine,
+    score,
+    terms,
+    reason,
+    ...(path ? { path } : {}),
+  })
+  const ranked = (...machines: ReturnType<typeof placed>[]): Answers => ({
+    'POST /api/placement': [200, { ranked: machines, rejected: [] }],
+  })
+
+  it('preselects the top machine and says why, and Continue enables with a name', async () => {
+    mountNew('desktop', '/new', ranked(placed('pi', 45, 'it is idle and it has RAM to spare'), placed('cachyos-g14', 20, 'x')))
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+    expect(screen.getByRole('status').textContent).toBe('pi suggested: it is idle and it has RAM to spare')
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+  })
+
+  it('takes the first of a tie, which the daemon sorts by name', async () => {
+    mountNew('desktop', '/new', ranked(placed('cachyos-g14', 30, 'it is idle'), placed('pi', 30, 'it is idle')))
+    await waitFor(() => expect(pressed()).toEqual(['cachyos-g14']))
+  })
+
+  it('does not preselect a machine whose chip cannot be pressed', async () => {
+    mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 45, 'it is idle')))
+    expect(await screen.findByText('bishwajeets-macbook-pro suggested: it is idle')).toBeTruthy()
+    expect(pressed()).toEqual([])
+  })
+
+  it('preselects nothing when no machine reports a heartbeat', async () => {
+    mountNew('desktop', '/new', {
+      'POST /api/placement': [
+        200,
+        { ranked: [], rejected: [{ machine: 'bishwajeets-macbook-pro', why: 'asleep_or_off' }] },
+      ],
+    })
+    expect(await screen.findByText('no machine reports a heartbeat, so none is suggested')).toBeTruthy()
+    expect(pressed()).toEqual([])
+  })
+
+  it('yields to ?machine= and to a default machine', async () => {
+    mountNew('desktop', '/new?machine=pi', ranked(placed('cachyos-g14', 45, 'it is idle')))
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+    expect(await screen.findByText('cachyos-g14 suggested: it is idle')).toBeTruthy()
+    expect(pressed()).toEqual(['pi'])
+    cleanup()
+    unmountNew()
+
+    writePrefs({ general: { defaultMachine: 'pi' } })
+    mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
+    await screen.findByText('cachyos-g14 suggested: it is idle')
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+  })
+
+  it('fills in for a default machine that cannot be used', async () => {
+    writePrefs({ general: { defaultMachine: 'bishwajeets-macbook-pro' } })
+    mountNew('desktop', '/new', ranked(placed('pi', 45, 'it is idle')))
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+  })
+
+  it('skips a top machine whose chip cannot be pressed, and names the one it picks', async () => {
+    mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 60, 'it is idle'), placed('pi', 45, 'it has RAM to spare')))
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+    expect(screen.getByRole('status').textContent).toBe('pi suggested: it has RAM to spare')
+  })
+
+  it('never overwrites a pick made by hand', async () => {
+    mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
+    await screen.findByRole('group', { name: 'Machine' })
+    press('pi')
+    await screen.findByText('cachyos-g14 suggested: it is idle')
+    expect(pressed()).toEqual(['pi'])
+  })
+
+  it('a failed ask says so, can be asked again, and the chips still work', async () => {
+    let calls = 0
+    const asked = mountNew('desktop', '/new', {
+      'POST /api/placement': () => {
+        calls += 1
+        return calls === 1 ? [503, 'yantrad has not looked at the tailnet yet'] : [200, { ranked: [], rejected: [] }]
+      },
+    })
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('No machine could be suggested')
+    expect(alert.textContent).toContain('yantrad has not looked at the tailnet yet')
+    press('cachyos-g14')
+    expect(pressed()).toEqual(['cachyos-g14'])
+    fireEvent.click(within(alert).getByRole('button', { name: 'Ask again' }))
+    expect(await screen.findByText('no machine reports a heartbeat, so none is suggested')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(asked.filter((one) => one === 'POST /api/placement')).toHaveLength(2)
+  })
+
+  it('step 2 offers the machine that holds the repo, and switching keeps the repo', async () => {
+    const sent: Record<string, unknown>[] = []
+    mountNew('desktop', '/new', {
+      'POST /api/machines/pi/dirs': (body) => [200, listing(String(body.path ?? HOME))],
+      'POST /api/placement': (body) => {
+        sent.push(body)
+        return body.repo === undefined
+          ? [200, { ranked: [placed('cachyos-g14', 45, 'it is idle')], rejected: [] }]
+          : [200, { ranked: [placed('pi', 75, 'the repo is there and it is idle', '/srv/yantra'), placed('cachyos-g14', 45, 'it is idle')], rejected: [] }]
+      },
+    })
+    await waitFor(() => expect(pressed()).toEqual(['cachyos-g14']))
+    type('Name', 'quiet-otter')
+    press('Continue')
+    await screen.findByText(/already on cachyos-g14/)
+    press(/2002Bishwajeet\/yantra/)
+    expect(await screen.findByText('pi: the repo is there and it is idle')).toBeTruthy()
+    expect(sent.at(-1)).toMatchObject({ repo: '2002Bishwajeet/yantra' })
+
+    press('Use pi')
+    const dialog = await screen.findByRole('dialog', { name: 'quiet-otter' })
+    await waitFor(() => expect(within(dialog).getByText('on pi')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Use pi' })).toBeNull()
+    press('Continue')
+    expect(await screen.findByText('on pi · 2002Bishwajeet/yantra')).toBeTruthy()
+  })
+  it.each([
+    ['an unreachable machine', [placed('bishwajeets-macbook-pro', 80, 'the repo is there', '/srv/y'), placed('cachyos-g14', 45, 'it is idle')]],
+    ['a machine when the chosen one holds the repo', [placed('pi', 80, 'the repo is there', '/srv/y'), placed('cachyos-g14', 75, 'the repo is there', '/home/b/y')]],
+  ])('step 2 does not offer %s', async (_, step2) => {
+    let answered = false
+    mountNew('desktop', '/new', {
+      'POST /api/placement': (body) => {
+        if (body.repo === undefined) return [200, { ranked: [placed('cachyos-g14', 45, 'it is idle')], rejected: [] }]
+        answered = true
+        return [200, { ranked: step2, rejected: [] }]
+      },
+    })
+    await waitFor(() => expect(pressed()).toEqual(['cachyos-g14']))
+    type('Name', 'quiet-otter')
+    press('Continue')
+    await screen.findByText(/already on cachyos-g14/)
+    press(/2002Bishwajeet\/yantra/)
+    await waitFor(() => expect(answered).toBe(true))
+    await new Promise((done) => setTimeout(done, 50))
+    expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
   })
 })

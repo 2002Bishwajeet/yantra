@@ -5,6 +5,7 @@ import { Card } from '@/m3/card/Card'
 import type { Provider, Values } from './form'
 import { GithubRepos } from './GithubRepos'
 import { LocalDirs } from './LocalDirs'
+import { SuggestSwitch } from './Suggestion'
 import type { SessionForm } from './useSessionForm'
 
 function Choice(props: {
@@ -75,7 +76,8 @@ export function StepSource(props: { form: SessionForm; values: Values }) {
         />
       </div>
       {values.provider === 'github' ? <GithubRepos form={form} values={values} /> : null}
-      {values.provider === 'local' ? <LocalDirs form={form} values={values} /> : null}
+      {values.provider === 'local' ? <LocalDirs form={form} key={values.machine} values={values} /> : null}
+      <SuggestSwitch form={form} values={values} />
       <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         {values.provider === 'local'
           ? `the session's working directory is this folder on ${values.machine}. Nothing is cloned and nothing is written into it.`

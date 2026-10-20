@@ -25,6 +25,7 @@ import type {
   Machine,
   MachineSessions,
   Opened,
+  Placement,
   Readiness,
   Repo,
   Resumed,
@@ -792,6 +793,47 @@ export const listing = {
   "path": "/home/<user>/Github",
   "truncated": false
 } satisfies Listing
+
+export const placement = {
+  "ranked": [
+    {
+      "machine": "cachyos-g14",
+      "path": "/home/<user>/Github/yantra",
+      "reason": "the repo is there and a workspace ran it there",
+      "score": 92.8,
+      "terms": {
+        "affinity": 20.0,
+        "cpu": 12.8,
+        "power": 10.0,
+        "ram": 20.0,
+        "repo": 30.0
+      }
+    },
+    {
+      "machine": "pi",
+      "reason": "it is on AC power",
+      "score": 18.5,
+      "terms": {
+        "affinity": 0.0,
+        "cpu": 6.0,
+        "power": 10.0,
+        "ram": 2.5,
+        "repo": 0.0
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "machine": "bishwajeets-macbook-pro",
+      "why": "asleep_or_off"
+    },
+    {
+      "age_seconds": 45,
+      "machine": "winbox",
+      "why": "not_reporting"
+    }
+  ]
+} satisfies Placement
 
 export const terminalSize = {
   "cols": 120,

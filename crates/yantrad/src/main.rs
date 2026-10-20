@@ -33,6 +33,7 @@ mod github;
 mod heartbeat;
 mod mic;
 mod notify;
+mod placement;
 mod refresh;
 mod tasks;
 mod terminal;

@@ -222,6 +222,10 @@ down, resume, kill, and the settings writes. Each one invalidates what it change
 **and returns that refetch**, so `isPending` holds until the page can draw the
 answer rather than the row it replaced.
 
+`usePlacement` is the one mutation that writes nothing (Y-517). `POST /api/placement` asks
+machines over ssh, so it is a `POST` and the page asks it when a person acts: once when New session
+opens, and once when a source is picked. It invalidates nothing.
+
 - **There is no machine argument on a verb, and adding one would be a bug.** The
   target is `workspace.machine`, chosen when the workspace was written. A
   transient override would place a session where `down`, `resume`, `status` and

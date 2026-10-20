@@ -14,6 +14,7 @@ import { Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { useTick } from '@/useTick'
 import type { Plan } from './form'
+import { rememberFolder } from './picker'
 import { run } from './run'
 import { advance, begin, type Stage } from './stages'
 
@@ -81,7 +82,11 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
           })
         },
         probe: (path) => client.fetchQuery(probeQuery(plan.machine, path)),
-        create: create.mutateAsync,
+        create: async (body) => {
+          const made = await create.mutateAsync(body)
+          if (plan.local) rememberFolder(plan.machine, plan.path)
+          return made
+        },
         up: up.mutateAsync,
         open: (name) => void navigate({ to: '/w/$name', params: { name }, search: { view: 'chat' } }),
         sleep,

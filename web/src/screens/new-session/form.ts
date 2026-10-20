@@ -102,6 +102,8 @@ export type Plan = {
   /** A repository not on the machine; `null` is a path that is there, or one
    *  the machine could not be asked about and `up` will try. */
   clone: { url: string; full_name: string } | null
+  /** Only the Local picker remembers its folder; a clone destination is not one. */
+  local?: true
 }
 
 export function plan(values: Values): Plan | null {
@@ -113,6 +115,7 @@ export function plan(values: Values): Plan | null {
     machine: values.machine,
     path: source.path,
     ...(values.opens === 'command' ? { startup: command } : {}),
+    ...(source.kind === 'local' ? { local: true as const } : {}),
     clone:
       source.kind === 'github' && source.here === 'no'
         ? { url: source.repo.clone_url, full_name: source.repo.full_name }

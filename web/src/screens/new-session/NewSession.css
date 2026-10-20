@@ -295,6 +295,38 @@ span.ns__crumb {
   cursor: default;
 }
 
+.ns__pathbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ns__pathfield {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.ns__recents {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ns__recents h3 {
+  margin: 0;
+}
+
+.ns__recents ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .ns__make {
   display: flex;
   align-items: flex-start;
@@ -493,4 +525,15 @@ span.ns__crumb {
 .ns-dialog__tile {
   --m3-tile-size: 44px;
   --m3-tile-radius: var(--md-sys-shape-corner-medium);
+}
+
+.ns__suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.ns__suggest:empty {
+  display: none;
 }

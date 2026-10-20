@@ -721,7 +721,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Ten things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Eleven things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -767,7 +767,13 @@ is held, and only after the upgrade has answered.
 lists worktrees over ssh and asks GitHub for each upstream's PR. The page reads it when it opens
 and on Refresh, and nothing polls it.
 
-None of the ten licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-517 is the eleventh, and it is a read on the probe licence.** `POST /api/placement`
+([`placement.rs`](src/placement.rs)) asks each machine with a fresh beat whether it holds the
+repository or folder a person picked, for at most 5 s each. The new-session page asks once when it
+opens and once when a source is picked, and nothing polls it. A machine that does not answer in time
+scores 0 on that term and is never filtered out.
+
+None of the eleven licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

@@ -12,11 +12,12 @@ import { Eyebrow, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { Tile } from '@/m3/tile/Tile'
 import { nameError, type Values } from './form'
+import { SuggestMachine } from './Suggestion'
 import type { SessionForm } from './useSessionForm'
 import { generateName } from './words'
 
-function Machines(props: { form: SessionForm; values: Values }) {
-  const { form, values } = props
+function Machines(props: { form: SessionForm; values: Values; preset: string }) {
+  const { form, values, preset } = props
   const machines = useMachines()
   const client = useQueryClient()
   if (machines.looked === 'pending') {
@@ -45,33 +46,36 @@ function Machines(props: { form: SessionForm; values: Values }) {
     )
   }
   return (
-    <div aria-label="Machine" className="ns__chips" role="group">
-      {/* Y-404: a node another owner holds is not a place to run sessions. */}
-      {machines.data.filter((one) => one.ownership === 'yours').map((one) => {
-        const reachable = one.online && !one.expired
-        return (
-          <FilterChip
-            disabled={!reachable}
-            key={one.name}
-            onPressedChange={(pressed) => {
-              if (!pressed) return
-              form.setFieldValue('machine', one.name)
-              // A path is a fact about one machine.
-              form.setFieldValue('source', null)
-            }}
-            pressed={values.machine === one.name}
-          >
-            {reachable ? one.name : `${one.name} · unreachable`}
-          </FilterChip>
-        )
-      })}
-    </div>
+    <>
+      <div aria-label="Machine" className="ns__chips" role="group">
+        {/* Y-404: a node another owner holds is not a place to run sessions. */}
+        {machines.data.filter((one) => one.ownership === 'yours').map((one) => {
+          const reachable = one.online && !one.expired
+          return (
+            <FilterChip
+              disabled={!reachable}
+              key={one.name}
+              onPressedChange={(pressed) => {
+                if (!pressed) return
+                form.setFieldValue('machine', one.name)
+                // A path is a fact about one machine.
+                form.setFieldValue('source', null)
+              }}
+              pressed={values.machine === one.name}
+            >
+              {reachable ? one.name : `${one.name} · unreachable`}
+            </FilterChip>
+          )
+        })}
+      </div>
+      <SuggestMachine form={form} machines={machines.data} preset={preset} values={values} />
+    </>
   )
 }
 
 /** Step 1: the name, its tile, and the machine (NewSession, PhoneNewSessionName). */
-export function StepName(props: { form: SessionForm; values: Values }) {
-  const { form, values } = props
+export function StepName(props: { form: SessionForm; values: Values; preset: string }) {
+  const { form, values, preset } = props
   return (
     <Card className="ns__card">
       <Eyebrow render={<h2 />}>Name</Eyebrow>
@@ -116,7 +120,7 @@ export function StepName(props: { form: SessionForm; values: Values }) {
       </div>
 
       <Eyebrow render={<h2 />}>Machine</Eyebrow>
-      <Machines form={form} values={values} />
+      <Machines form={form} preset={preset} values={values} />
       <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         the session runs here; the repository is looked for on this machine in the next step.
       </Text>

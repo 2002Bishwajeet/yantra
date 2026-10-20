@@ -91,3 +91,8 @@ figure on arm64. Grok takes no images.
 > daemon restart no longer cancel a Chat turn. `session/load` still restores the history when a
 > keeper starts. Delegated tasks (decision 5) still end with their connection until a row moves
 > them into the keeper.
+
+> **2026-10-20 ([Y-533](../../tracker.md)): the MCP tools also speak HTTP from `yantrad`.**
+> [ADR-0038](0038-rooms-and-guest-devices.md) adds `room_send` and `room_read`. A session on a fleet
+> machine or a guest's machine has no `yantra` binary, so `yantrad` serves the tools at `/api/mcp`
+> as well. Decision 5's stdio server in `yantra mcp` stays for the main agent on the appliance.
