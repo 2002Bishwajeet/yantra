@@ -732,10 +732,18 @@ async fn outlives(agent: Agent) -> Result<()> {
     let (asks, answers) = agent.request();
     let before = machine.size(&thread)?;
     host.cut_the_pipe(&a)?;
+    // What the first socket reads past the cut, which only a reader that
+    // reconnected can send. Step 6 joins without it, so no cursor counts twice.
+    let mut after_cut = Vec::new();
     if agent != Agent::RealClaude {
         machine
             .until(Duration::from_secs(10), "out growing", |machine| {
                 Ok(machine.size(&thread)? > before)
+            })
+            .await?;
+        after_cut = first
+            .through(agent.patience(), |frame| {
+                cursor(frame).is_some_and(|(_, (end, _))| end > before)
             })
             .await?;
     }
@@ -815,8 +823,15 @@ async fn outlives(agent: Agent) -> Result<()> {
     machine.sh(&format!(
         "test -f ~/.yantra/worktrees/chat/{WORKSPACE}/{thread}/made.txt"
     ))?;
+    let later = placed(&caught);
+    for event in placed(&after_cut) {
+        assert!(
+            later.contains(&event),
+            "what the reconnected reader sent is the turn's: {event:?}"
+        );
+    }
     let mut joined = placed(&drawn);
-    joined.extend(placed(&caught));
+    joined.extend(later);
     let places: Vec<_> = joined.iter().map(|(at, _)| *at).collect();
     let unique: BTreeSet<_> = places.iter().collect();
     assert_eq!(unique.len(), places.len(), "no cursor twice: {places:?}");
