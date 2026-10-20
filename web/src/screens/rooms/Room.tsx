@@ -1,0 +1,173 @@
+import { useId, useState, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useParams } from '@tanstack/react-router'
+import type { Room as RoomData, RoomMessage } from '@/api'
+import { asApiError } from '@/api/errors'
+import { usePostToRoom, useResumeRoom } from '@/api/mutations'
+import { roomQuery } from '@/api/queries'
+import { ago } from '@/lib/time'
+import { Button } from '@/m3/button/Button'
+import { Card } from '@/m3/card/Card'
+import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
+import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { announce } from '@/m3/live/live'
+import { State } from '@/m3/mark/Mark'
+import { Skeleton } from '@/m3/skeleton/Skeleton'
+import { TextField } from '@/m3/text-field/TextField'
+import { Mono, Text } from '@/m3/text/Text'
+import { useTick } from '@/useTick'
+import { facts } from './facts'
+import './Rooms.css'
+
+function Message({ message, now }: { message: RoomMessage; now: number }) {
+  const when = ago(now / 1000 - message.at, now)
+  return (
+    <li className="room__message">
+      <div className="room__meta">
+        <span className="room__from">{message.from}</span>
+        <time className="room__time" dateTime={when.iso} title={when.title}>
+          {when.text}
+        </time>
+      </div>
+      {/* Plain text: an agent wrote it, so it is never markup. */}
+      <p className="room__text">{message.text}</p>
+    </li>
+  )
+}
+
+function Paused({ name, budget }: { name: string; budget: number }) {
+  const resume = useResumeRoom()
+  return (
+    <Card className="room__paused" surface="high">
+      <State state="needs">paused</State>
+      <Text render={<p />} scale="body-medium">
+        The agents sent {budget} messages, so the room waits for you. Resume it, or post a message.
+      </Text>
+      <Button
+        aria-busy={resume.isPending || undefined}
+        className="room__resume"
+        onClick={() =>
+          resume.mutate(name, { onSuccess: () => announce(`Room ${name} resumed.`) })
+        }
+      >
+        {resume.isPending ? 'Resuming…' : 'Resume'}
+      </Button>
+      {resume.error ? (
+        <ErrorSurface.Inline error={resume.error} title="The room was not resumed" />
+      ) : null}
+    </Card>
+  )
+}
+
+function Compose({ name }: { name: string }) {
+  const [text, setText] = useState('')
+  const post = usePostToRoom()
+  const id = useId()
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (post.isPending || text.trim() === '') return
+    post.mutate(
+      { name, text },
+      {
+        onSuccess: (sent) => {
+          setText('')
+          announce(`Posted to ${name}. ${sent.delivered} ${sent.delivered === 1 ? 'member sees' : 'members see'} it.`)
+        },
+      },
+    )
+  }
+  return (
+    <form aria-labelledby={`${id}-title`} className="room__compose" onSubmit={submit}>
+      <h2 className="m3-sr-only" id={`${id}-title`}>
+        Post to {name}
+      </h2>
+      <TextField
+        autoComplete="off"
+        className="room__field"
+        label="Message"
+        onChange={(event) => setText(event.target.value)}
+        supporting="Every agent in the room reads it. Posting sets the count back to 0."
+        value={text}
+      />
+      <Button aria-busy={post.isPending || undefined} className="room__post" type="submit">
+        {post.isPending ? 'Posting…' : 'Post'}
+      </Button>
+      {post.error ? (
+        <ErrorSurface.Inline className="room__refused" error={post.error} title="The message was not posted" />
+      ) : null}
+    </form>
+  )
+}
+
+function Body({ room }: { room: RoomData }) {
+  const now = useTick(true)
+  return (
+    <>
+      <Mono className="room__facts">{facts(room)}</Mono>
+      {room.paused ? <Paused budget={room.budget} name={room.name} /> : null}
+      {room.log.length === 0 ? (
+        <Text render={<p />} scale="body-medium" tone="variant">
+          No messages yet.
+        </Text>
+      ) : (
+        <ol aria-label="Messages" className="room__log">
+          {room.log.map((message) => (
+            <Message key={message.seq} message={message} now={now} />
+          ))}
+        </ol>
+      )}
+      <Compose name={room.name} />
+    </>
+  )
+}
+
+function Unread({ name, error, reset }: { name: string; error: unknown; reset: () => void }) {
+  const said = asApiError(error)
+  if (said.kind === 'missing') {
+    return (
+      <ErrorSurface.Page
+        action={
+          <Button role="link" render={<Link to="/rooms" />} variant="tonal">
+            All rooms
+          </Button>
+        }
+        error={{
+          kind: said.kind,
+          said: said.said,
+          retryable: false,
+          describe: () => 'yantrad holds rooms in memory, so a restart clears them.',
+        }}
+        eyebrow="Rooms"
+        title={`No room is called ${name}`}
+      />
+    )
+  }
+  return <ErrorSurface.Page eyebrow="Rooms" error={said} reset={reset} title="The room could not be read" />
+}
+
+/** `/rooms/$room` (ADR-0038 decision 5): what the agents said, and the two
+ *  acts that set the count to 0, a post and a resume. */
+export function Room() {
+  const { room: name } = useParams({ from: '/rooms/$room' })
+  const room = useQuery(roomQuery(name))
+  return (
+    <div className="rooms">
+      <Text render={<h1 />} emphasized scale="display-small">
+        {name}
+      </Text>
+      {/* A 404 on a later poll is a room the daemon lost, so it wins over what was drawn. */}
+      {room.error && (!room.data || asApiError(room.error).kind === 'missing') ? (
+        <Unread error={room.error} name={name} reset={() => void room.refetch()} />
+      ) : room.data ? (
+        <ErrorBoundary layout="card" title="The room could not be drawn">
+          <Body room={room.data} />
+        </ErrorBoundary>
+      ) : (
+        <div aria-busy="true" className="rooms__list" data-slot="reading">
+          <Skeleton style={{ height: 80 }} />
+          <Skeleton style={{ height: 80 }} />
+        </div>
+      )}
+    </div>
+  )
+}

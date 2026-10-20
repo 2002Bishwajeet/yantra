@@ -37,4 +37,7 @@ export const keys = {
     ['dirs', machine, path] as const,
   probe: (machine: string, path: string) =>
     ['probe', machine, path] as const,
+  /** The list, and one room under it, so a post or a resume invalidates both. */
+  rooms: () => ['rooms'] as const,
+  room: (name: string) => ['rooms', name] as const,
 }

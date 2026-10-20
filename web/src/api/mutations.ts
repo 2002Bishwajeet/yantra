@@ -13,6 +13,7 @@ import type {
   Readiness,
   Removed,
   Resumed,
+  RoomPosted,
   Stopped,
   Thread,
   ThreadOpened,
@@ -307,5 +308,28 @@ export function useOpenThread(name: string) {
   return useMutation<ThreadOpened, ApiError, string>({
     mutationFn: (issue) =>
       fetchJson<ThreadOpened>(workspace(name, '/threads/new'), { method: 'POST', ...json({ issue }) }),
+  })
+}
+
+const room = (name: string, tail: string) => `/api/rooms/${encodeURIComponent(name)}/${tail}`
+
+/** Y-536, `yantra room post`. The daemon labels it from this browser's node,
+ *  sets the room's count to 0 and wakes every agent thread in it. 400 is an
+ *  empty or too long text, 404 a room the daemon does not hold. */
+export function usePostToRoom() {
+  const client = useQueryClient()
+  return useMutation<RoomPosted, ApiError, { name: string; text: string }>({
+    mutationFn: ({ name, text }) =>
+      fetchJson<RoomPosted>(room(name, 'messages'), { method: 'POST', ...json({ text }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.rooms() }),
+  })
+}
+
+/** Y-536, `yantra room resume`: the count goes back to 0 and the pause lifts. */
+export function useResumeRoom() {
+  const client = useQueryClient()
+  return useMutation<void, ApiError, string>({
+    mutationFn: (name) => fetchJson<void>(room(name, 'resume'), { method: 'POST' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.rooms() }),
   })
 }

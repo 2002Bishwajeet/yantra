@@ -30,6 +30,9 @@ import type {
   Readiness,
   Repo,
   Resumed,
+  Room,
+  RoomPosted,
+  RoomSummary,
   Spend,
   SshIdentity,
   Stopped,
@@ -1085,3 +1088,55 @@ export const chatQuery = {
   "after": "Y0123456789abcdef:812:0",
   "thread": "1a2b3c4d"
 } satisfies ChatQuery
+
+export const rooms = [
+  {
+    "budget": 20,
+    "last_at": 1800000000,
+    "members": 2,
+    "messages": 2,
+    "name": "design-review",
+    "paused": false,
+    "spent": 3
+  },
+  {
+    "budget": 20,
+    "last_at": null,
+    "members": 0,
+    "messages": 0,
+    "name": "quiet",
+    "paused": false,
+    "spent": 0
+  }
+] satisfies RoomSummary[]
+
+export const room = {
+  "budget": 20,
+  "last_at": 1800000060,
+  "log": [
+    {
+      "at": 1800000000,
+      "budget": 19,
+      "from": "cachyos-g14 · chat 1a2b3c4d",
+      "seq": 19,
+      "text": "The API is ready for review."
+    },
+    {
+      "at": 1800000060,
+      "budget": 0,
+      "from": "owner on pixel",
+      "seq": 20,
+      "text": "Go ahead."
+    }
+  ],
+  "members": 2,
+  "messages": 2,
+  "name": "design-review",
+  "paused": true,
+  "spent": 20
+} satisfies Room
+
+export const roomPosted = {
+  "delivered": 2,
+  "seq": 21
+} satisfies RoomPosted

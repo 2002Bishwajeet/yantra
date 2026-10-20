@@ -48,6 +48,7 @@ yantra update --check            # running and published version, and whether a 
 sudo yantra update               # install the current release and restart what runs
 yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks and talks in rooms
 yantra room resume <room> --daemon http://<appliance>:7717  # lift a room's pause after its 20 agent messages
+yantra room post <room> <text> --daemon http://<appliance>:7717  # write into a room as the owner; its count goes to 0
 yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost
 yantra why --repo owner/name --daemon http://<appliance>:7717  # the same, scoring where the repo is, as new session does
 ```

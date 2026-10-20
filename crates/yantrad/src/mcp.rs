@@ -1,6 +1,8 @@
 //! `/api/mcp`: the room tools over MCP's Streamable HTTP transport
 //! ([ADR-0038](../../../docs/adr/0038-rooms-and-guest-devices.md) decision 2),
-//! and `POST /api/rooms/{room}/resume` (decision 4).
+//! and the owner's room routes (decisions 4 and 5): `GET /api/rooms`,
+//! `GET /api/rooms/{room}`, `POST /api/rooms/{room}/messages` and
+//! `POST /api/rooms/{room}/resume`.
 //!
 //! **A small subset, on purpose**: POST with one JSON-RPC message and a JSON
 //! answer. A notification or a response gets `202` and no body, a batch is
@@ -24,16 +26,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tokio::sync::watch;
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory, MachineInfo};
-use yantra_core::room::{self, Call, Reader, Thread};
+use yantra_core::room::{self, Call, Message, Reader, Summary, Thread};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
@@ -93,6 +96,9 @@ where
 {
     Router::new()
         .route("/mcp", post(mcp::<I>).get(stream::<I>))
+        .route("/rooms", get(list::<I>))
+        .route("/rooms/{room}", get(view::<I>))
+        .route("/rooms/{room}/messages", post(post_message::<I>))
         .route("/rooms/{room}/resume", post(resume::<I>))
         .with_state(Served {
             authoriser,
@@ -341,6 +347,213 @@ async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
     })?;
     tracing::info!("room {name}: resumed for {}", caller.node);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A room as `GET /api/rooms` lists it.
+#[derive(Debug, serde::Serialize)]
+struct RoomSummary {
+    name: String,
+    spent: u32,
+    budget: u32,
+    paused: bool,
+    members: usize,
+    messages: usize,
+    last_at: Option<u64>,
+}
+
+impl From<Summary> for RoomSummary {
+    fn from(summary: Summary) -> Self {
+        Self {
+            name: summary.name,
+            spent: summary.spent,
+            budget: room::BUDGET,
+            paused: summary.paused,
+            members: summary.members,
+            messages: summary.messages,
+            last_at: summary.last_at,
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RoomMessage {
+    seq: u64,
+    at: u64,
+    from: String,
+    text: String,
+    budget: u32,
+}
+
+impl From<Message> for RoomMessage {
+    fn from(message: Message) -> Self {
+        Self {
+            seq: message.seq,
+            at: message.at,
+            from: message.from,
+            text: message.text,
+            budget: message.budget,
+        }
+    }
+}
+
+/// `GET /api/rooms/{room}`.
+#[derive(Debug, serde::Serialize)]
+struct RoomView {
+    #[serde(flatten)]
+    summary: RoomSummary,
+    log: Vec<RoomMessage>,
+}
+
+/// `POST /api/rooms/{room}/messages`.
+#[derive(Debug, serde::Serialize)]
+struct RoomPosted {
+    seq: u64,
+    delivered: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct Post {
+    text: String,
+}
+
+async fn list<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<RoomSummary>>, Refused> {
+    allowed(&state.authoriser, from.ip(), &headers).await?;
+    Ok(Json(
+        state
+            .rooms
+            .list()
+            .into_iter()
+            .map(RoomSummary::from)
+            .collect(),
+    ))
+}
+
+async fn view<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<RoomView>, Refused> {
+    allowed(&state.authoriser, from.ip(), &headers).await?;
+    let (summary, messages) = state.rooms.view(&name).map_err(missing)?;
+    Ok(Json(RoomView {
+        summary: summary.into(),
+        log: messages.into_iter().map(RoomMessage::from).collect(),
+    }))
+}
+
+/// A person's message. The label is the caller's machine, never the body.
+async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    post: Result<Json<Post>, JsonRejection>,
+) -> Result<Json<RoomPosted>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    // Only application/json is taken: a text/plain cross-site form post needs no preflight.
+    let Json(post) = post.map_err(|error| Refused::Verb {
+        status: match error {
+            JsonRejection::MissingJsonContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            _ => StatusCode::BAD_REQUEST,
+        },
+        said: format!("the body is not {{\"text\": \"...\"}} as application/json: {error}"),
+    })?;
+    let machine = machine_of(&state.authoriser, &caller.node)
+        .await
+        .map_err(|said| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said,
+        })?;
+    let label = format!("owner on {}", machine.name);
+    let sent = state
+        .rooms
+        .post(&name, &label, &post.text)
+        .map_err(|error| match error {
+            room::Error::Empty | room::Error::TooLong(_) => Refused::Verb {
+                status: StatusCode::BAD_REQUEST,
+                said: error.to_string(),
+            },
+            other => missing(other),
+        })?;
+    Ok(Json(RoomPosted {
+        seq: sent.seq,
+        delivered: sent.delivered,
+    }))
+}
+
+fn missing(error: room::Error) -> Refused {
+    Refused::Verb {
+        status: StatusCode::NOT_FOUND,
+        said: error.to_string(),
+    }
+}
+
+/// What the owner's room routes put on the wire, for [`crate::contract`].
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
+    fn of<T: serde::Serialize>(value: &T) -> Value {
+        serde_json::to_value(value).expect("a DTO of owned strings and numbers")
+    }
+    let summary = |name: &str, spent, paused, last_at| RoomSummary {
+        name: name.to_owned(),
+        spent,
+        budget: room::BUDGET,
+        paused,
+        members: 2,
+        messages: 2,
+        last_at,
+    };
+    vec![
+        (
+            "rooms",
+            "RoomSummary[]",
+            Value::Array(vec![
+                of(&summary("design-review", 3, false, Some(1_800_000_000))),
+                of(&RoomSummary {
+                    members: 0,
+                    messages: 0,
+                    ..summary("quiet", 0, false, None)
+                }),
+            ]),
+        ),
+        (
+            "room",
+            "Room",
+            of(&RoomView {
+                summary: summary("design-review", room::BUDGET, true, Some(1_800_000_060)),
+                log: vec![
+                    RoomMessage {
+                        seq: 19,
+                        at: 1_800_000_000,
+                        from: "cachyos-g14 · chat 1a2b3c4d".to_owned(),
+                        text: "The API is ready for review.".to_owned(),
+                        budget: 19,
+                    },
+                    RoomMessage {
+                        seq: 20,
+                        at: 1_800_000_060,
+                        from: "owner on pixel".to_owned(),
+                        text: "Go ahead.".to_owned(),
+                        budget: 0,
+                    },
+                ],
+            }),
+        ),
+        (
+            "roomPosted",
+            "RoomPosted",
+            of(&RoomPosted {
+                seq: 21,
+                delivered: 2,
+            }),
+        ),
+    ]
 }
 
 fn result(id: &Value, result: Value) -> Value {
@@ -605,6 +818,9 @@ mod tests {
             (Method::POST, "/mcp"),
             (Method::GET, "/mcp"),
             (Method::POST, "/rooms/r1/resume"),
+            (Method::GET, "/rooms"),
+            (Method::GET, "/rooms/r1"),
+            (Method::POST, "/rooms/r1/messages"),
         ] {
             let (status, said) = send(
                 &app,
@@ -806,6 +1022,141 @@ mod tests {
         )
         .await;
         assert_eq!(sent["isError"], false, "{sent}");
+    }
+
+    #[tokio::test]
+    async fn the_owner_lists_posts_into_and_resumes_a_room() {
+        let app = app();
+        let (status, said) = send(&app, Method::GET, "/rooms", None, ALPHA, None).await;
+        assert_eq!((status, said.as_str()), (StatusCode::OK, "[]"));
+
+        tool(
+            &app,
+            BETA,
+            Some("wb/B2"),
+            "room_read",
+            json!({"room": "r4"}),
+        )
+        .await;
+        for n in 1..=room::BUDGET {
+            tool(
+                &app,
+                ALPHA,
+                None,
+                "room_send",
+                json!({"room": "r4", "text": format!("m{n}")}),
+            )
+            .await;
+        }
+        let before = woken(&app.woke).await.len();
+
+        let (status, said) = send(&app, Method::GET, "/rooms", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let listed: Value = serde_json::from_str(&said).expect("JSON");
+        assert_eq!(
+            listed[0],
+            json!({"name": "r4", "spent": 20, "budget": 20, "paused": true, "members": 2,
+                   "messages": 20, "last_at": listed[0]["last_at"]})
+        );
+        assert!(listed[0]["last_at"].is_u64(), "{listed}");
+
+        let (status, said) = send(&app, Method::GET, "/rooms/r4", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let viewed: Value = serde_json::from_str(&said).expect("JSON");
+        assert_eq!(viewed["paused"], true);
+        assert_eq!(viewed["log"][0]["text"], "m1");
+        assert_eq!(viewed["log"][0]["from"], "alpha");
+        let (status, _) = send(&app, Method::GET, "/rooms/nope", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, said) = send(
+            &app,
+            Method::POST,
+            "/rooms/r4/messages",
+            Some(json!({"text": "carry on", "from": "someone else"})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&said).expect("JSON"),
+            json!({"seq": 21, "delivered": 2})
+        );
+        let woke = woken(&app.woke).await;
+        assert_eq!(woke.len(), before + 1, "{woke:?}");
+        assert_eq!(woke[before].0.thread, "B2");
+        assert!(
+            woke[before].1.contains(
+                "<room name=\"r4\" from=\"owner on alpha\" seq=\"21\" budget=\"0/20\">\ncarry on\n</room>"
+            ),
+            "{}",
+            woke[before].1
+        );
+        let (_, said) = send(&app, Method::GET, "/rooms/r4", None, ALPHA, None).await;
+        let viewed: Value = serde_json::from_str(&said).expect("JSON");
+        assert_eq!(
+            (viewed["paused"].clone(), viewed["spent"].clone()),
+            (json!(false), json!(0))
+        );
+        let sent = tool(
+            &app,
+            ALPHA,
+            None,
+            "room_send",
+            json!({"room": "r4", "text": "ok"}),
+        )
+        .await;
+        assert_eq!(sent["isError"], false, "the post lifted the pause: {sent}");
+
+        for (path, body, status) in [
+            (
+                "/rooms/nope/messages",
+                json!({"text": "hi"}),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                "/rooms/r4/messages",
+                json!({"text": " "}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/rooms/r4/messages",
+                json!({"text": "x".repeat(room::TEXT_LIMIT + 1)}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/rooms/r4/messages",
+                json!({"words": "hi"}),
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            let (got, said) = send(&app, Method::POST, path, Some(body), ALPHA, None).await;
+            assert_eq!(got, status, "{path}: {said}");
+        }
+
+        let mut forged = Request::builder()
+            .method(Method::POST)
+            .uri("/rooms/r4/messages")
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::from(r#"{"text":"forged"}"#))
+            .expect("a request");
+        forged
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+        let refused = app
+            .router
+            .clone()
+            .oneshot(forged)
+            .await
+            .expect("infallible");
+        assert_eq!(refused.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        let (status, said) = send(&app, Method::POST, "/rooms/r4/resume", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{said}");
+        let (_, said) = send(&app, Method::GET, "/rooms/r4", None, ALPHA, None).await;
+        let viewed: Value = serde_json::from_str(&said).expect("JSON");
+        assert_eq!(viewed["spent"], 0);
     }
 
     /// A call as an MCP client makes it: with the session id `initialize` issued.

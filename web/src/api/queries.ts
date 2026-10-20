@@ -11,6 +11,8 @@ import type {
   Probed,
   Readiness,
   Repo,
+  Room,
+  RoomSummary,
   Spend,
   Transcript,
   WorkspaceStatus,
@@ -26,6 +28,7 @@ import {
   NOT_REACHED,
   POLL_MS,
   SWEEP_MS,
+  type Shape,
 } from '@/api/client'
 import { isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
@@ -272,4 +275,32 @@ export const sshIdentityQuery = () =>
     },
     staleTime: Infinity,
     refetchInterval: (query) => (query.state.data === null ? POLL_MS : false),
+  })
+
+/** Y-536. Rooms are daemon memory, not a sweep, so no envelope. Polled fast
+ *  enough to read a conversation as agents write it. */
+export const ROOM_POLL_MS = 3_000
+
+const list: Shape = (body) => (Array.isArray(body) ? null : 'rooms')
+
+export const roomsQuery = () =>
+  queryOptions({
+    queryKey: keys.rooms(),
+    queryFn: ({ signal }) => fetchJson<RoomSummary[]>('/api/rooms', { signal }, list),
+    staleTime: 0,
+    refetchInterval: ROOM_POLL_MS,
+  })
+
+/** A 404 is a room the daemon lost to a restart, or one never made. */
+export const roomQuery = (name: string) =>
+  queryOptions({
+    queryKey: keys.room(name),
+    queryFn: ({ signal }) =>
+      fetchJson<Room>(
+        `/api/rooms/${encodeURIComponent(name)}`,
+        { signal },
+        fields('name', 'spent', 'budget', 'paused', 'log'),
+      ),
+    staleTime: 0,
+    refetchInterval: ROOM_POLL_MS,
   })

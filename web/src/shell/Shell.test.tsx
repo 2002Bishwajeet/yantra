@@ -94,6 +94,14 @@ describe('the desktop shell', () => {
     expect(within(menu).getByRole('menuitem', { name: 'About' }).getAttribute('href')).toBe('/settings/about')
   })
 
+  it('closes the avatar menu when one of its links is followed', async () => {
+    mount('desktop')
+    fireEvent.click(await screen.findByRole('button', { name: 'Account' }))
+    const menu = await screen.findByRole('menu')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Rooms' }))
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+  })
+
   it('says nothing is at a path nothing routes', async () => {
     mount('desktop', '/nope')
     expect(await screen.findByText(/Nothing is at/)).toBeTruthy()

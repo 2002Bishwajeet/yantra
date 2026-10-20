@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use tokio::sync::{mpsc, watch};
 use yantra_core::notify::{self, Relay};
-use yantra_core::room::{self, BUDGET, Message, Reader, Sent, Thread};
+use yantra_core::room::{self, BUDGET, Message, Reader, Sent, Summary, Thread};
 
 use crate::chat::{self, Woke};
 
@@ -121,36 +121,7 @@ impl Rooms {
                         tracing::info!("room {name}: a message was refused, because it is paused");
                     }
                 })?;
-            // Queued under the same lock as the send, so each thread gets a
-            // message once and in seq order.
-            let mut waking = self.jobs();
-            let (mut woken, mut workers) = (0, Vec::new());
-            for member in &sent.wake {
-                let Some(thread) = member.thread.clone() else {
-                    continue;
-                };
-                if waking.unreachable.contains(&thread) {
-                    continue;
-                }
-                let messages = store.deliver(name, member, sent.seq);
-                if messages.is_empty() {
-                    continue;
-                }
-                let job = Job {
-                    room: name.to_owned(),
-                    member: member.clone(),
-                    seqs: messages.iter().map(|message| message.seq).collect(),
-                    prompt: prompt(name, &messages),
-                };
-                woken += 1;
-                match waking.queued.entry(thread) {
-                    Entry::Occupied(mut queued) => queued.get_mut().push(job),
-                    Entry::Vacant(free) => {
-                        workers.push(free.key().clone());
-                        free.insert(vec![job]);
-                    }
-                }
-            }
+            let (woken, workers) = self.queue(&mut store, name, &sent);
             (sent, made, woken, workers)
         };
         if made {
@@ -163,10 +134,7 @@ impl Rooms {
             sent.delivered,
             woken
         );
-        self.said.send_modify(|count| *count += 1);
-        for thread in workers {
-            tokio::spawn(self.clone().work(thread));
-        }
+        self.start(workers);
         if sent.paused {
             tracing::info!("room {name}: paused after {BUDGET} agent messages");
             if let Some(pauses) = &self.pauses {
@@ -174,6 +142,78 @@ impl Rooms {
             }
         }
         Ok(sent)
+    }
+
+    /// A person's message from the dashboard: the count goes back to 0, the
+    /// pause lifts, and every member thread wakes as it would for a send.
+    pub fn post(&self, name: &str, from: &str, text: &str) -> Result<Sent, room::Error> {
+        let (sent, woken, workers) = {
+            let mut store = self.lock();
+            let sent = store.post(name, from, text, SystemTime::now())?;
+            let (woken, workers) = self.queue(&mut store, name, &sent);
+            (sent, woken, workers)
+        };
+        tracing::info!(
+            "room {name}: message {} from the owner, {} delivered, {} woken",
+            sent.seq,
+            sent.delivered,
+            woken
+        );
+        self.start(workers);
+        Ok(sent)
+    }
+
+    /// Every room, for the dashboard.
+    pub fn list(&self) -> Vec<Summary> {
+        self.lock().list(SystemTime::now())
+    }
+
+    /// One room and the messages it keeps, for the dashboard.
+    pub fn view(&self, name: &str) -> Result<(Summary, Vec<Message>), room::Error> {
+        self.lock().view(name, SystemTime::now())
+    }
+
+    /// Queues each thread `sent` wakes with what it has not seen, and says how
+    /// many were queued and which threads need a worker. It runs under the
+    /// store's lock, so each thread gets a message once and in seq order.
+    fn queue(&self, store: &mut room::Rooms, name: &str, sent: &Sent) -> (usize, Vec<Thread>) {
+        let mut waking = self.jobs();
+        let (mut woken, mut workers) = (0, Vec::new());
+        for member in &sent.wake {
+            let Some(thread) = member.thread.clone() else {
+                continue;
+            };
+            if waking.unreachable.contains(&thread) {
+                continue;
+            }
+            let messages = store.deliver(name, member, sent.seq);
+            if messages.is_empty() {
+                continue;
+            }
+            let job = Job {
+                room: name.to_owned(),
+                member: member.clone(),
+                seqs: messages.iter().map(|message| message.seq).collect(),
+                prompt: prompt(name, &messages),
+            };
+            woken += 1;
+            match waking.queued.entry(thread) {
+                Entry::Occupied(mut queued) => queued.get_mut().push(job),
+                Entry::Vacant(free) => {
+                    workers.push(free.key().clone());
+                    free.insert(vec![job]);
+                }
+            }
+        }
+        (woken, workers)
+    }
+
+    /// Tells waiting reads to look again, and starts a worker per new thread.
+    fn start(&self, workers: Vec<Thread>) {
+        self.said.send_modify(|count| *count += 1);
+        for thread in workers {
+            tokio::spawn(self.clone().work(thread));
+        }
     }
 
     /// What `reader` has not seen, waiting up to `wait` for something new.
@@ -534,6 +574,47 @@ pub(crate) mod tests {
             rooms.resume("nope"),
             Err(room::Error::Unknown("nope".to_owned()))
         );
+    }
+
+    #[tokio::test]
+    async fn a_persons_post_lifts_the_pause_and_wakes_every_member_thread() {
+        let (rooms, woke, _) = rooms();
+        let (a, b) = (reader("alpha", Some("A")), reader("beta", Some("B")));
+        let closing = watch::Sender::new(false);
+        rooms
+            .read(&b, "r3", Duration::ZERO, &closing)
+            .await
+            .expect("joins");
+        for _ in 0..BUDGET {
+            rooms.send(&a, "alpha", "r3", "m").expect("sent");
+        }
+        let before = woken(&woke).await.len();
+        let sent = rooms.post("r3", "owner on phone", "go on").expect("posted");
+        assert_eq!((sent.delivered, sent.paused), (2, false));
+        let woke = woken(&woke).await;
+        let mut threads: Vec<&str> = woke[before..]
+            .iter()
+            .map(|(thread, _)| thread.thread.as_str())
+            .collect();
+        threads.sort_unstable();
+        assert_eq!(threads, ["A", "B"], "the sender of the 20th wakes too");
+        assert!(
+            woke.last()
+                .is_some_and(|(_, prompt)| prompt.contains("from=\"owner on phone\"")
+                    && prompt.contains("budget=\"0/20\"")),
+            "{woke:?}"
+        );
+        rooms
+            .send(&a, "alpha", "r3", "again")
+            .expect("the pause lifted");
+        assert_eq!(
+            rooms.post("nope", "owner", "hi"),
+            Err(room::Error::Unknown("nope".to_owned()))
+        );
+        assert_eq!(rooms.list().len(), 1);
+        let (summary, messages) = rooms.view("r3").expect("known");
+        assert_eq!((summary.spent, summary.members), (1, 2));
+        assert_eq!(messages.len(), usize::try_from(BUDGET).expect("small") + 2);
     }
 
     #[tokio::test]

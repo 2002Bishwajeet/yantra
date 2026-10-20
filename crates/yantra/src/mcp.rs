@@ -231,6 +231,15 @@ pub fn resume(daemon: &str, name: &str) -> Result<(), String> {
         .map(drop)
 }
 
+/// `yantra room post`: the owner writes into a room (ADR-0038 decision 5).
+/// The daemon's `{seq, delivered}` answer comes back as it was sent.
+pub fn post_message(daemon: &str, name: &str, text: &str) -> Result<String, String> {
+    Daemon::new(daemon).send(
+        Method::Post(Some(json!({"text": text}))),
+        &format!("/api/rooms/{name}/messages"),
+    )
+}
+
 enum Method {
     Get,
     /// A `GET` that may last as long as the daemon's longest wait.
@@ -409,6 +418,18 @@ mod tests {
                         (StatusCode::NOT_FOUND, format!("no room {room}"))
                     }
                 }),
+            )
+            .route(
+                "/api/rooms/{room}/messages",
+                post(
+                    |Path(room): Path<String>, axum::Json(body): axum::Json<Value>| async move {
+                        if room == "r2" {
+                            (StatusCode::OK, json!({"seq": 1, "heard": body}).to_string())
+                        } else {
+                            (StatusCode::NOT_FOUND, format!("no room {room}"))
+                        }
+                    },
+                ),
             )
             .route(
                 "/api/tasks/{id}/wait",
@@ -803,5 +824,23 @@ mod tests {
             resumed.1,
             Err("yantrad answered 404: no room r9".to_owned())
         );
+    }
+
+    #[tokio::test]
+    async fn post_sends_the_text_to_the_route_and_names_a_refusal() {
+        let daemon = fake_daemon().await;
+        let posted = tokio::task::spawn_blocking(move || {
+            (
+                post_message(&daemon, "r2", "carry on"),
+                post_message(&daemon, "r9", "hi"),
+            )
+        })
+        .await
+        .expect("the thread");
+        assert_eq!(
+            serde_json::from_str::<Value>(&posted.0.expect("posted")).expect("JSON"),
+            json!({"seq": 1, "heard": {"text": "carry on"}})
+        );
+        assert_eq!(posted.1, Err("yantrad answered 404: no room r9".to_owned()));
     }
 }
