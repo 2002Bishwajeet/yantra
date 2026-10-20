@@ -28,7 +28,7 @@ export type ChatErrorKind =
   | 'checkpoint'
   // The agent's turn ended failed: ssh refused, the harness not found.
   | 'turnFailed'
-  // The socket closed after it opened.
+  // The socket closed after it opened, and every reopen failed.
   | 'closed'
 
 const sentences: Record<ChatErrorKind, string> = {
@@ -40,7 +40,7 @@ const sentences: Record<ChatErrorKind, string> = {
   badFrame: 'The daemon could not read what the dashboard sent.',
   checkpoint: "git on the workspace's machine could not keep or restore this chat's files.",
   turnFailed: 'The agent could not finish the turn.',
-  closed: 'The chat socket closed. A turn that was running was stopped.',
+  closed: 'The chat socket closed and did not reopen. A running turn continues on the machine. Try again to see it.',
 }
 
 /** Whose login is missing, where, and what to run there. */
@@ -117,11 +117,20 @@ export class AttachError extends Error {
   }
 }
 
-export function chatAddress(workspace: string, thread?: string): string {
+/** `after` is the last cursor drawn, so the daemon sends only what follows
+ *  it (ADR-0035 decision 8). It is read only with a thread. */
+export function chatAddress(workspace: string, thread?: string, after?: string): string {
   const daemon = location.origin.replace(/^http/, 'ws')
   const base = `${daemon}/api/workspaces/${encodeURIComponent(workspace)}/chat`
-  return thread ? `${base}?thread=${encodeURIComponent(thread)}` : base
+  if (!thread) return base
+  const query = `${base}?thread=${encodeURIComponent(thread)}`
+  return after ? `${query}&after=${encodeURIComponent(after)}` : query
 }
+
+/** How long apart a socket that dropped is reopened, one pause per attempt:
+ *  the daemon's own reader backs off the same way. A message refills it, so
+ *  the budget is per outage. Exported so the tests assert this list. */
+export const PAUSES: readonly number[] = [1_000, 2_000, 4_000, 8_000, 8_000]
 
 export type ChatSocket = {
   /** `false` when the socket is not open, so nothing was sent. */
@@ -181,24 +190,41 @@ export function frameOf(text: string): ThreadEvent | ChatFailure | ChatAttached 
 
 /** The browser's half of the chat socket, and nothing that renders.
  *
- *  It does not reopen a socket that closed: the daemon cancels a turn whose
- *  socket closed, so a silent reconnect would hide a stopped turn. `closed` is
- *  retryable instead, and the person reopens it. */
+ *  A turn outlives its socket (ADR-0035), so a socket that drops is reopened
+ *  with the last cursor drawn, and the daemon sends only what followed it.
+ *  `address` builds each URL from that cursor. `onRestart` says the daemon
+ *  could not continue from it and replays the thread from the start, so the
+ *  caller draws it again. `closed` is reported once every reopen failed. */
 export function openChat(
-  url: string,
+  address: (after?: string) => string,
   {
     onEvent,
     onError,
     onOpen,
+    onDropped,
+    onRestart,
+    pauses = PAUSES,
   }: {
     onEvent: (event: ThreadEvent) => void
     onError: (error: ChatError) => void
     onOpen?: () => void
+    /** The socket dropped and a reopen is waiting. */
+    onDropped?: () => void
+    onRestart?: () => void
+    pauses?: readonly number[]
   },
 ): ChatSocket {
   let socket: WebSocket | undefined
   let finished = false
   let wasOpen = false
+  let waiting: ReturnType<typeof setTimeout> | undefined
+  let attempts = 0
+  // The last cursor drawn, and the one the open socket was opened after.
+  let cursor: string | undefined
+  let asked: string | undefined
+  // Whether an earlier socket drew anything, and so whether a replay from the
+  // start would draw it again.
+  let drawn = false
   // An unknown thread is said, and then the daemon closes; that close is not
   // a second failure.
   let said = false
@@ -217,8 +243,10 @@ export function openChat(
 
   const open = () => {
     let live: WebSocket
+    asked = wasOpen ? cursor : undefined
+    const redraws = drawn
     try {
-      live = new WebSocket(url)
+      live = new WebSocket(address(asked))
     } catch (cause) {
       finished = true
       onError(new ChatError('refused', String(cause)))
@@ -242,6 +270,7 @@ export function openChat(
         )
         return
       }
+      attempts = 0
       if (frame.type === 'attached' || frame.type === 'notAttached') {
         const waiting = pending.shift()
         if (!waiting) {
@@ -267,23 +296,46 @@ export function openChat(
         return
       }
       said = false
+      // A reopen the daemon cannot continue says so by a `thread.started`
+      // that does not carry the cursor it was asked to continue from. Without
+      // a cursor to ask after, the daemon always replays from the start.
+      if (frame.type === 'thread.started' && redraws && (asked === undefined || frame.cursor !== asked)) onRestart?.()
+      if (frame.cursor) cursor = frame.cursor
+      drawn = true
       onEvent(frame)
       if (frame.type === 'turn.completed' && frame.payload.state === 'failed') {
         onError(new ChatError('turnFailed', frame.payload.message ?? ''))
       }
     }
-    live.onclose = () => {
+    live.onclose = (closed: CloseEvent) => {
       abandon()
       if (finished) return
-      finished = true
-      if (!wasOpen) onError(new ChatError('refused', 'the daemon refused the chat'))
-      else if (!said) onError(new ChatError('closed', ''))
+      if (!wasOpen) {
+        finished = true
+        onError(new ChatError('refused', 'the daemon refused the chat'))
+        return
+      }
+      // The daemon said why it ended the socket, and a reopen would say it again.
+      // It ends a socket with a close frame; a network that drops sends none.
+      if (said && closed.wasClean) {
+        finished = true
+        return
+      }
+      const pause = pauses[attempts]
+      if (pause === undefined) {
+        finished = true
+        onError(new ChatError('closed', ''))
+        return
+      }
+      attempts += 1
+      onDropped?.()
+      waiting = setTimeout(open, pause)
     }
   }
 
   // StrictMode runs an effect twice in dev; a close before this tick opens no
   // socket rather than closing a CONNECTING one.
-  const waiting = setTimeout(open, 0)
+  waiting = setTimeout(open, 0)
 
   return {
     send: (text, harness, mode) => send({ type: 'turn', text, ...(harness ? { harness } : {}), ...(mode ? { mode } : {}) }),

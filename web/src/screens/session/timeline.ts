@@ -156,6 +156,9 @@ function said(entries: Entry[], who: Message['who'], delta: string, itemId?: str
   if (at === -1) {
     return [...entries, { kind: 'message', id: itemId ?? `said:${entries.length}`, who, text: delta }]
   }
+  // The daemon makes a prompt (`user:<run>…`) whole and without a cursor, so
+  // a reopen may send it again (ADR-0035 decision 8); a second copy repeats it.
+  if (itemId?.startsWith('user:')) return entries
   const found = entries[at] as Message
   return entries.with(at, { ...found, text: found.text + delta })
 }

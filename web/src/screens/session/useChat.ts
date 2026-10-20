@@ -9,7 +9,9 @@ export type Link = 'connecting' | 'open' | 'closed'
  *
  *  `thread` is read when the socket opens. The daemon names a new thread on the
  *  first turn, `onThread` puts it in the URL, and a reopened socket attaches to
- *  it — so the URL changing under a live socket never opens a second one. */
+ *  it — so the URL changing under a live socket never opens a second one. A
+ *  socket that drops reopens by itself after the last cursor drawn, and the
+ *  turn runs on meanwhile (ADR-0035). */
 export function useChat(workspace: string, thread: string | undefined, onThread: (id: string) => void) {
   const [timeline, dispatch] = useReducer(reduce, thread, (id): Timeline => ({ ...empty, thread: id ?? null }))
   const [error, setError] = useState<ChatError | null>(null)
@@ -20,8 +22,11 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
   const named = useEffectEvent((id: string) => onThread(id))
 
   useEffect(() => {
-    const live = openChat(chatAddress(workspace, attach.current), {
+    const live = openChat((after) => chatAddress(workspace, attach.current, after), {
       onOpen: () => setLink('open'),
+      onDropped: () => setLink('connecting'),
+      // The daemon replays the whole thread, so it is drawn again.
+      onRestart: () => dispatch({ type: 'reset' }),
       onEvent: (event) => {
         if (event.type === 'thread.started') {
           attach.current = event.payload.thread

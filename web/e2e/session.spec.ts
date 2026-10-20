@@ -160,7 +160,7 @@ test.describe('the session screen, chat first', () => {
     await page.getByRole('button', { name: 'Send' }).click()
     const you = page.locator('.turn[data-who="you"]')
     await expect(you).toContainText('what is in it?')
-    await expect(you).toContainText('/tmp/yantra-chat-Y0123456789abcdef/2.png')
+    await expect(you).toContainText('/home/u/.yantra/keep/web/1a2b3c4d/images/Y0123456789abcdef-2.png')
     await expect(page.getByRole('list', { name: 'Images' })).toHaveCount(0)
   })
 

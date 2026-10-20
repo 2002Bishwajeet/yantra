@@ -32,6 +32,7 @@ pub mod image;
 pub mod install;
 pub mod inventory;
 pub mod join;
+pub mod keep;
 pub mod logs;
 pub mod mic;
 pub mod notify;
