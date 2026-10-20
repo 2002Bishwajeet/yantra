@@ -696,7 +696,9 @@ the wait and the wakes.
 - **A small MCP subset.** POST takes one JSON-RPC message and answers JSON: `initialize`, `ping`,
   `tools/list` and `tools/call`. A notification or a response is `202` with no body. A batch is
   `400`, because 2025-06-18 removed batches. `GET` is `405`, which the spec allows for the event
-  stream. No session id is issued.
+  stream. `initialize` issues an `Mcp-Session-Id`, and a call with no thread is that session's
+  member, so two TUIs on one machine, or two `yantra mcp` processes, each read every message. A
+  thread ignores the id, because a Chat turn's session ends with the turn.
 - **`allowed()` comes first, so only the owner reaches a room in this row.** A guest is Y-535's.
   A non-owner is `403`, and a `tailscale` that cannot answer is `503`.
 - **The label comes from identity.** The machine is `whois` joined to the tailnet list on the
@@ -715,7 +717,8 @@ the wait and the wakes.
   at `room::cap` of the person's last mode, or `Supervised` when this daemon has not seen one. A
   thread with a live keeper queues the prompt, and the keeper's task sends the queue as one prompt
   when its turn ends. A delivered message moves that thread's cursor, so a message reaches a thread
-  once. An ACP thread is not woken in this row.
+  once. A wake that neither starts a turn nor queues the prompt gives the messages back, and the
+  thread's next read or wake has them first. An ACP thread is not woken in this row.
 - **The budget is 20 agent messages.** The 20th pauses the room and wakes nothing. Later sends are
   refused, and the owner gets one ntfy notification that names the room and no text. `POST
   /api/rooms/{room}/resume`, behind `allowed()`, sets the count to 0; an unknown room is `404`.

@@ -2834,33 +2834,34 @@ fn answer(acp: &AcpAgent, request: &str, decision: Decision) -> Result<(), Strin
 }
 
 /// Starts a turn in thread `thread` of `workspace` with a room's `prompt`,
-/// or queues it while a turn runs there (ADR-0038 decision 3).
-pub async fn wake(registry: Registry, workspace: String, thread: String, prompt: String) {
+/// or queues it while a turn runs there (ADR-0038 decision 3). `false` is a
+/// prompt that went nowhere, so the room gives its messages back.
+pub async fn wake(registry: Registry, workspace: String, thread: String, prompt: String) -> bool {
     let woke = async {
         let fleet = Arc::new(Fleet::of(&workspace, registry)?);
         let place = fleet
             .find(&thread)
             .await?
             .ok_or_else(|| format!("{workspace} has no chat thread {thread}"))?;
-        wake_on(fleet, workspace.clone(), place, prompt).await;
-        Ok::<(), String>(())
+        Ok::<bool, String>(wake_on(fleet, workspace.clone(), place, prompt).await)
     }
     .await;
-    if let Err(said) = woke {
+    woke.unwrap_or_else(|said| {
         tracing::warn!("chat {workspace}: thread {thread} was not woken: {said}");
-    }
+        false
+    })
 }
 
 /// The turn runs at [`room::cap`] of the person's last mode, and as
 /// `Supervised` when this daemon has not seen one. An ACP thread is not woken:
-/// `--mcp-config` is Claude's. Boxed, because a turn's end may wake its thread
-/// again.
+/// `--mcp-config` is Claude's. `true` is a turn started or a prompt queued.
+/// Boxed, because a turn's end may wake its thread again.
 fn wake_on<M: Machine>(
     machine: Arc<M>,
     name: String,
     place: Place,
     prompt: String,
-) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+) -> Pin<Box<dyn Future<Output = bool> + Send>> {
     Box::pin(async move {
         let thread = thread::name(&place).to_owned();
         match machine.recall(&place).await {
@@ -2870,26 +2871,26 @@ fn wake_on<M: Machine>(
                     "chat {name}: thread {thread} is {}'s, so a room message does not wake it",
                     harness.name()
                 );
-                return;
+                return false;
             }
             Err(said) => {
                 tracing::warn!("chat {name}: thread {thread} was not woken: {said}");
-                return;
+                return false;
             }
         }
         if machine.registry().queue(&place.id, &prompt) {
             tracing::info!("chat {name}: a room message waits for thread {thread}'s turn");
-            return;
+            return true;
         }
         if let Err(said) = within(machine.base(&place)).await {
             tracing::warn!("chat {name}: no checkpoint, so thread {thread} was not woken: {said}");
-            return;
+            return false;
         }
         let deadline = tokio::time::Instant::now() + CONNECT_WITHIN;
         loop {
             if machine.registry().queue(&place.id, &prompt) {
                 tracing::info!("chat {name}: a room message waits for thread {thread}'s turn");
-                return;
+                return true;
             }
             if !machine.registry().lock().reverting.contains(&place.id) {
                 let mode = room::cap(machine.registry().mode(&place.id).unwrap_or_default());
@@ -2901,23 +2902,23 @@ fn wake_on<M: Machine>(
                 match claude_turn(&machine, &name, &place, turn).await {
                     Ok(_) => {
                         tracing::info!("chat {name}: a room message woke thread {thread}");
-                        return;
+                        return true;
                     }
                     Err(refusal) if refusal.kind != Kind::Busy => {
                         tracing::warn!(
                             "chat {name}: thread {thread} was not woken: {}",
                             refusal.said
                         );
-                        return;
+                        return false;
                     }
                     Err(_) => {}
                 }
             }
             if tokio::time::Instant::now() >= deadline {
                 tracing::warn!(
-                    "chat {name}: thread {thread} stayed busy, so a room message was dropped"
+                    "chat {name}: thread {thread} stayed busy, so a room message was given back"
                 );
-                return;
+                return false;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -6206,13 +6207,16 @@ mod tests {
             if let Some(mode) = last {
                 script.registry.remember_mode(&place().id, mode);
             }
-            wake_on(
-                Arc::clone(&script),
-                "web".to_owned(),
-                place(),
-                ROOM_PROMPT.to_owned(),
-            )
-            .await;
+            assert!(
+                wake_on(
+                    Arc::clone(&script),
+                    "web".to_owned(),
+                    place(),
+                    ROOM_PROMPT.to_owned(),
+                )
+                .await,
+                "a turn started"
+            );
             let mut claude = script.claude().await;
             assert_eq!(
                 prompt_of(&claude.heard().await.expect("a line")),
@@ -6233,7 +6237,7 @@ mod tests {
         let mut first = script.claude().await;
         first.heard().await;
         for prompt in ["one", "two"] {
-            tokio::time::timeout(
+            let queued = tokio::time::timeout(
                 Duration::from_secs(5),
                 wake_on(
                     Arc::clone(&script),
@@ -6244,6 +6248,7 @@ mod tests {
             )
             .await
             .expect("a busy thread queues at once");
+            assert!(queued, "a queued prompt is a wake that took");
         }
         assert_eq!(
             lock(&script.modes).len(),
@@ -6281,13 +6286,14 @@ mod tests {
             kept: Some((Harness::Opencode, SESSION.to_owned())),
             ..Script::default()
         });
-        wake_on(
+        let woke = wake_on(
             Arc::clone(&script),
             "web".to_owned(),
             place(),
             ROOM_PROMPT.to_owned(),
         )
         .await;
+        assert!(!woke, "so the room gives the message back");
         assert!(lock(&script.turns).is_empty());
         assert!(lock(&script.modes).is_empty());
     }

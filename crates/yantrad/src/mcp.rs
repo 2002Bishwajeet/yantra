@@ -5,7 +5,9 @@
 //! **A small subset, on purpose**: POST with one JSON-RPC message and a JSON
 //! answer. A notification or a response gets `202` and no body, a batch is
 //! refused because 2025-06-18 removed it, and `GET`, the optional event stream,
-//! is `405`. No session id is issued.
+//! is `405`. `initialize` issues an `Mcp-Session-Id`, and the id a call
+//! carries keeps two sessions with no thread on one node apart; the daemon
+//! keeps no list of the ids.
 //!
 //! **Every request passes [`allowed`] first**, so only the owner's own untagged
 //! nodes reach a room in this row. The label comes from identity and never
@@ -33,6 +35,7 @@ use crate::room::Rooms;
 use crate::write::{Authoriser, Refused, allowed};
 
 const THREAD: &str = "x-yantra-thread";
+const SESSION: &str = "mcp-session-id";
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
@@ -130,6 +133,7 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
         return Ok(StatusCode::ACCEPTED.into_response());
     };
     let params = message.get("params").unwrap_or(&Value::Null);
+    let mut issued = None;
     let answer = match method {
         "initialize" => {
             let version = params
@@ -141,6 +145,7 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
                         .find(|known| *known == asked)
                 })
                 .unwrap_or(room::PROTOCOL_VERSIONS[0]);
+            issued = room::session_id();
             result(
                 id,
                 json!({"protocolVersion": version,
@@ -162,9 +167,11 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
                         Some(thread) => format!("{machine} · chat {}", thread.thread),
                         None => machine,
                     };
+                    let session = thread.is_none().then(|| session_of(&headers)).flatten();
                     let reader = Reader {
                         node: caller.node,
                         thread,
+                        session,
                     };
                     result(id, tool(&state, &reader, &label, call).await?)
                 }
@@ -172,7 +179,10 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
         }
         _ => error(id, METHOD_NOT_FOUND, "Method not found"),
     };
-    Ok(Json(answer).into_response())
+    Ok(match issued {
+        Some(session) => ([(SESSION, session)], Json(answer)).into_response(),
+        None => Json(answer).into_response(),
+    })
 }
 
 async fn tool<I>(
@@ -249,6 +259,13 @@ fn thread_of(headers: &HeaderMap, machine: &str, locate: &Locate) -> Option<Thre
         workspace: workspace.to_owned(),
         thread: thread.to_owned(),
     })
+}
+
+/// The spec's session id is visible ASCII; any other value is ignored.
+fn session_of(headers: &HeaderMap) -> Option<String> {
+    let session = headers.get(SESSION)?.to_str().ok()?;
+    ((1..=128).contains(&session.len()) && session.bytes().all(|b| b.is_ascii_graphic()))
+        .then(|| session.to_owned())
 }
 
 async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
@@ -714,5 +731,140 @@ mod tests {
         )
         .await;
         assert_eq!(sent["isError"], false, "{sent}");
+    }
+
+    /// A call as an MCP client makes it: with the session id `initialize` issued.
+    async fn in_session(
+        app: &App,
+        from: [u8; 4],
+        headers: &[(&str, &str)],
+        body: Value,
+    ) -> (Option<String>, Value) {
+        let mut request = Request::builder().method(Method::POST).uri("/mcp");
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let mut request = request
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+        let response = app
+            .router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        let issued = response
+            .headers()
+            .get(SESSION)
+            .map(|id| id.to_str().expect("ASCII").to_owned());
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("the body is in memory");
+        (
+            issued,
+            serde_json::from_slice(&body).expect("a JSON answer"),
+        )
+    }
+
+    /// Two TUI sessions on one machine are two members: each sees the
+    /// other's message, and a message from elsewhere reaches both.
+    #[tokio::test]
+    async fn two_sessions_on_one_machine_see_each_other_and_both_get_a_message() {
+        let app = app();
+        let initialize = json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+                                "params": {"protocolVersion": "2025-06-18"}});
+        let (one, _) = in_session(&app, ALPHA, &[], initialize.clone()).await;
+        let (two, _) = in_session(&app, ALPHA, &[], initialize).await;
+        let (one, two) = (one.expect("an id"), two.expect("an id"));
+        assert_ne!(one, two);
+        let call = |name: &str, arguments: Value| {
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": name, "arguments": arguments}})
+        };
+        let read = call("room_read", json!({"room": "r1"}));
+        for session in [&one, &two] {
+            in_session(&app, ALPHA, &[(SESSION, session)], read.clone()).await;
+        }
+
+        let (none, sent) = in_session(
+            &app,
+            ALPHA,
+            &[(SESSION, &one)],
+            call("room_send", json!({"room": "r1", "text": "from one"})),
+        )
+        .await;
+        assert_eq!(none, None, "only initialize issues an id");
+        assert_eq!(
+            serde_json::from_str::<Value>(text(&sent["result"])).expect("JSON"),
+            json!({"seq": 1, "delivered": 1})
+        );
+        tool(
+            &app,
+            BETA,
+            None,
+            "room_send",
+            json!({"room": "r1", "text": "from beta"}),
+        )
+        .await;
+
+        let (_, got) = in_session(&app, ALPHA, &[(SESSION, &two)], read.clone()).await;
+        let got = text(&got["result"]);
+        assert!(
+            got.contains("from one") && got.contains("from beta"),
+            "{got}"
+        );
+        let (_, got) = in_session(&app, ALPHA, &[(SESSION, &one)], read).await;
+        let got = text(&got["result"]);
+        assert!(
+            got.contains("from beta") && !got.contains("from one"),
+            "its own cursor: {got}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_thread_ignores_the_session_and_a_bad_session_id_is_ignored() {
+        let mut bad = HeaderMap::new();
+        for value in ["", "a b", &"x".repeat(129)] {
+            bad.insert(SESSION, value.parse().expect("a header value"));
+            assert_eq!(session_of(&bad), None, "{value:?}");
+        }
+        bad.insert(SESSION, "0f-A~".parse().expect("a header value"));
+        assert_eq!(session_of(&bad).as_deref(), Some("0f-A~"));
+
+        // A Chat turn's session is new each turn, so it must not move the thread's cursor.
+        let app = app();
+        tool(
+            &app,
+            BETA,
+            Some("wb/B2"),
+            "room_read",
+            json!({"room": "r1"}),
+        )
+        .await;
+        tool(
+            &app,
+            ALPHA,
+            None,
+            "room_send",
+            json!({"room": "r1", "text": "hi"}),
+        )
+        .await;
+        let (_, answer) = in_session(
+            &app,
+            BETA,
+            &[(THREAD, "wb/B2"), (SESSION, "a-new-turn")],
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": "room_read", "arguments": {"room": "r1"}}}),
+        )
+        .await;
+        assert_eq!(
+            text(&answer["result"]),
+            "No new messages in room r1.",
+            "the wake delivered it to the thread already"
+        );
     }
 }

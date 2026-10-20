@@ -7,7 +7,7 @@
 //! same [`call`], so both transports agree. No I/O happens here, and the clock
 //! is an argument, so a test can move it.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -62,6 +62,9 @@ pub struct Thread {
 pub struct Reader {
     pub node: String,
     pub thread: Option<Thread>,
+    /// The MCP session, so two sessions with no thread on one node are two
+    /// members. `None` when a thread names the reader, which outlives a session.
+    pub session: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +113,8 @@ struct Member {
     seen: SystemTime,
     /// The last seq this member was given.
     cursor: u64,
+    /// Seqs at or below the cursor whose wake failed, so they are given again.
+    back: BTreeSet<u64>,
 }
 
 impl Rooms {
@@ -134,6 +139,7 @@ impl Rooms {
             .or_insert(Member {
                 seen: now,
                 cursor: last,
+                back: BTreeSet::new(),
             })
             .seen = now;
         Ok(made)
@@ -203,8 +209,9 @@ impl Rooms {
         Ok(self.deliver(name, reader, u64::MAX))
     }
 
-    /// [`Self::read`] up to `upto`, for a wake. It is not a call by the
-    /// member, so it does not keep the member alive.
+    /// [`Self::read`] up to `upto`, for a wake, with what [`Self::give_back`]
+    /// returned first. It is not a call by the member, so it does not keep the
+    /// member alive.
     pub fn deliver(&mut self, name: &str, reader: &Reader, upto: u64) -> Vec<Message> {
         let Some(room) = self.rooms.get_mut(name) else {
             return Vec::new();
@@ -216,12 +223,26 @@ impl Rooms {
         let taken: Vec<Message> = room
             .messages
             .iter()
-            .filter(|message| message.seq > after && message.seq <= upto)
+            .filter(|message| {
+                (message.seq > after && message.seq <= upto) || member.back.contains(&message.seq)
+            })
             .filter(|message| message.sender != *reader)
             .cloned()
             .collect();
         member.cursor = upto.min(room.last).max(after);
+        member.back.clear();
         taken
+    }
+
+    /// A wake of `reader` failed: its next read or wake gives `seqs` again.
+    pub fn give_back(&mut self, name: &str, reader: &Reader, seqs: &[u64]) {
+        if let Some(member) = self
+            .rooms
+            .get_mut(name)
+            .and_then(|room| room.members.get_mut(reader))
+        {
+            member.back.extend(seqs);
+        }
     }
 
     /// Sets the budget back to 0 and lifts the pause.
@@ -245,6 +266,15 @@ fn age(then: SystemTime, now: SystemTime) -> Duration {
 
 fn size(message: &Message) -> usize {
     message.text.len() + message.from.len()
+}
+
+/// A new MCP session id: 128 random bits in hex. `None` only when the OS has
+/// no entropy, and then the caller goes without one.
+#[must_use]
+pub fn session_id() -> Option<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 #[must_use]
@@ -407,6 +437,14 @@ mod tests {
         Reader {
             node: name.to_owned(),
             thread: None,
+            session: None,
+        }
+    }
+
+    fn session(name: &str, id: &str) -> Reader {
+        Reader {
+            session: Some(id.to_owned()),
+            ..node(name)
         }
     }
 
@@ -417,6 +455,7 @@ mod tests {
                 workspace: "w".to_owned(),
                 thread: id.to_owned(),
             }),
+            session: None,
         }
     }
 
@@ -588,6 +627,55 @@ mod tests {
         assert!(rooms.deliver("r", &b, 2).is_empty(), "at most once");
         assert_eq!(texts(&rooms.read("r", &b, at(2)).expect("read")), ["three"]);
         assert!(rooms.deliver("r", &node("stranger"), 9).is_empty());
+    }
+
+    #[test]
+    fn a_given_back_message_comes_first_in_the_next_read_and_only_once() {
+        let mut rooms = Rooms::default();
+        let (a, b) = (node("a"), thread("b", "B"));
+        rooms.join("r", &b, at(0)).expect("joins");
+        rooms.send("r", &a, "a", "one", at(1)).expect("sent");
+        rooms.send("r", &a, "a", "two", at(1)).expect("sent");
+        assert_eq!(texts(&rooms.deliver("r", &b, 2)), ["one", "two"]);
+        rooms.send("r", &a, "a", "three", at(1)).expect("sent");
+        rooms.give_back("r", &b, &[1, 2]);
+        assert_eq!(
+            texts(&rooms.read("r", &b, at(2)).expect("read")),
+            ["one", "two", "three"]
+        );
+        assert!(rooms.read("r", &b, at(3)).expect("read").is_empty());
+        rooms.give_back("nope", &b, &[1]);
+        rooms.give_back("r", &node("stranger"), &[1]);
+    }
+
+    #[test]
+    fn two_sessions_on_one_node_are_two_members() {
+        let mut rooms = Rooms::default();
+        let (one, two, far) = (session("n", "s1"), session("n", "s2"), node("far"));
+        rooms.join("r", &one, at(0)).expect("joins");
+        rooms.join("r", &two, at(0)).expect("joins");
+        let sent = rooms.send("r", &one, "n", "from one", at(1)).expect("sent");
+        assert_eq!(sent.delivered, 1, "the other session on the node");
+        rooms
+            .send("r", &far, "far", "from far", at(1))
+            .expect("sent");
+        assert_eq!(
+            texts(&rooms.read("r", &two, at(2)).expect("read")),
+            ["from one", "from far"]
+        );
+        assert_eq!(
+            texts(&rooms.read("r", &one, at(2)).expect("read")),
+            ["from far"],
+            "each session has its own cursor"
+        );
+    }
+
+    #[test]
+    fn a_session_id_is_32_hex_digits_and_new_each_time() {
+        let id = session_id().expect("the OS has entropy");
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()), "{id}");
+        assert_ne!(session_id(), Some(id));
     }
 
     #[test]

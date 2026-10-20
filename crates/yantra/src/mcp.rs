@@ -13,7 +13,8 @@
 //! `yantra mcp`: a stdio MCP server whose tools call `yantrad`'s `/api/tasks`,
 //! so the main agent can delegate work (ADR-0033 decision 5). The room tools
 //! are `yantra_core::room`'s, forwarded to `/api/mcp`, where the reader is
-//! the daemon's own node with no thread (ADR-0038 decision 2).
+//! the caller's node with no thread, and this process's own session id, so
+//! two main agents on one machine are two members (ADR-0038 decision 2).
 //!
 //! JSON-RPC 2.0, one message per line. **Stdout carries protocol and nothing
 //! else**, because the client reads every byte there as a message.
@@ -235,12 +236,15 @@ enum Method {
     /// A `GET` that may last as long as the daemon's longest wait.
     Wait,
     Post(Option<Value>),
+    /// A `POST` to `/api/mcp`, carrying this process's session id.
+    Mcp(Value),
     Delete,
 }
 
 struct Daemon {
     base: String,
     agent: ureq::Agent,
+    session: String,
 }
 
 impl Daemon {
@@ -253,13 +257,14 @@ impl Daemon {
         Self {
             base: base.trim_end_matches('/').to_owned(),
             agent,
+            session: room::session_id().unwrap_or_default(),
         }
     }
 
     /// A room tool's result from the daemon's own MCP route.
     fn forward(&self, params: &Value) -> Result<Value, String> {
         let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params});
-        let said = self.send(Method::Post(Some(body)), "/api/mcp")?;
+        let said = self.send(Method::Mcp(body), "/api/mcp")?;
         let answer: Value = serde_json::from_str(&said).map_err(|error| {
             format!(
                 "yantrad at {} sent an unreadable answer: {error}",
@@ -291,6 +296,12 @@ impl Daemon {
                 .agent
                 .post(&url)
                 .header("content-type", "application/json")
+                .send(body.to_string()),
+            Method::Mcp(body) => self
+                .agent
+                .post(&url)
+                .header("content-type", "application/json")
+                .header("mcp-session-id", &self.session)
                 .send(body.to_string()),
         };
         let mut response =
@@ -382,8 +393,9 @@ mod tests {
             )
             .route(
                 "/api/mcp",
-                post(|axum::Json(body): axum::Json<Value>| async move {
-                    let said = json!({"heard": body}).to_string();
+                post(|headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| async move {
+                    let session = headers.get("mcp-session-id").and_then(|id| id.to_str().ok());
+                    let said = json!({"heard": body, "session": session}).to_string();
                     axum::Json(json!({"jsonrpc": "2.0", "id": body["id"], "result":
                         {"content": [{"type": "text", "text": said}], "isError": false}}))
                 }),
@@ -738,23 +750,37 @@ mod tests {
     }
 
     /// ADR-0038 decision 2: the checks are yantra-core's, and a good call
-    /// reaches the daemon's own MCP route unchanged.
+    /// reaches the daemon's own MCP route unchanged, with one session id for
+    /// the life of this process.
     #[tokio::test]
     async fn a_room_call_is_checked_here_and_forwarded_to_the_daemon() {
         let daemon = fake_daemon().await;
-        let sent = one_call(
+        let send = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": "room_send", "arguments": {"room": "r1", "text": "hello"}}});
+        let answers = exchange(daemon.clone(), vec![send.clone(), send]).await;
+        let heard: Vec<Value> = answers
+            .iter()
+            .map(|answer| {
+                assert_eq!(answer["result"]["isError"], false, "{answer}");
+                serde_json::from_str(text(&answer["result"])).expect("JSON")
+            })
+            .collect();
+        assert_eq!(heard[0]["heard"]["method"], "tools/call");
+        assert_eq!(
+            heard[0]["heard"]["params"],
+            json!({"name": "room_send", "arguments": {"room": "r1", "text": "hello"}})
+        );
+        let session = heard[0]["session"].as_str().expect("a session id");
+        assert_eq!(session.len(), 32, "{session}");
+        assert_eq!(heard[1]["session"], session, "one process, one session");
+        let other = one_call(
             daemon.clone(),
             "room_send",
             json!({"room": "r1", "text": "hello"}),
         )
         .await;
-        assert_eq!(sent["isError"], false, "{sent}");
-        let heard: Value = serde_json::from_str(text(&sent)).expect("JSON");
-        assert_eq!(heard["heard"]["method"], "tools/call");
-        assert_eq!(
-            heard["heard"]["params"],
-            json!({"name": "room_send", "arguments": {"room": "r1", "text": "hello"}})
-        );
+        let other: Value = serde_json::from_str(text(&other)).expect("JSON");
+        assert_ne!(other["session"], session, "another process, another member");
 
         let answers = exchange(
             daemon,

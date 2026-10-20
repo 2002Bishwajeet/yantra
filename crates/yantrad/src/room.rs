@@ -7,6 +7,8 @@
 //! cursor, count and pause. The log names a room, a seq and counts, and never a
 //! message's text (Q5).
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
@@ -16,8 +18,9 @@ use yantra_core::room::{self, BUDGET, Message, Reader, Sent, Thread};
 
 use crate::chat;
 
-/// Starts or queues a turn in a member thread. A test captures it.
-type Wake = Arc<dyn Fn(Thread, String) + Send + Sync>;
+/// Starts or queues a turn in a member thread, and says whether it did. A
+/// test captures it.
+type Wake = Arc<dyn Fn(Thread, String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Rooms {
@@ -42,12 +45,12 @@ impl Rooms {
         pauses: Option<mpsc::UnboundedSender<notify::Message>>,
     ) -> Self {
         let wake: Wake = Arc::new(move |thread: Thread, prompt: String| {
-            tokio::spawn(chat::wake(
+            Box::pin(chat::wake(
                 chats.clone(),
                 thread.workspace,
                 thread.thread,
                 prompt,
-            ));
+            ))
         });
         Self::waking(wake, pauses)
     }
@@ -66,7 +69,8 @@ impl Rooms {
     }
 
     /// Takes `text` from `reader`, labelled `from`, and wakes each member
-    /// thread with what it has not seen. Never awaits: each wake is a task.
+    /// thread with what it has not seen. Never awaits: each wake is a task,
+    /// and a wake that fails gives its messages back to that thread.
     pub fn send(
         &self,
         reader: &Reader,
@@ -87,13 +91,13 @@ impl Rooms {
                 })?;
             // Taken under the same lock as the send, so each thread gets a
             // message once and in order.
-            let prompts: Vec<(Thread, String)> = sent
+            let prompts: Vec<(Reader, Vec<u64>, String)> = sent
                 .wake
                 .iter()
                 .filter_map(|member| {
-                    let thread = member.thread.clone()?;
                     let messages = store.deliver(name, member, sent.seq);
-                    (!messages.is_empty()).then(|| (thread, prompt(name, &messages)))
+                    let seqs = messages.iter().map(|message| message.seq).collect();
+                    (!messages.is_empty()).then(|| (member.clone(), seqs, prompt(name, &messages)))
                 })
                 .collect();
             (sent, made, prompts)
@@ -109,8 +113,20 @@ impl Rooms {
             prompts.len()
         );
         self.said.send_modify(|count| *count += 1);
-        for (thread, prompt) in prompts {
-            (self.wake)(thread, prompt);
+        for (member, seqs, prompt) in prompts {
+            let Some(thread) = member.thread.clone() else {
+                continue;
+            };
+            let woke = (self.wake)(thread, prompt);
+            let rooms = self.clone();
+            let name = name.to_owned();
+            tokio::spawn(async move {
+                if !woke.await {
+                    rooms.lock().give_back(&name, &member, &seqs);
+                    rooms.said.send_modify(|count| *count += 1);
+                    tracing::info!("room {name}: {} given back to a thread", seqs.len());
+                }
+            });
         }
         if sent.paused {
             tracing::info!("room {name}: paused after {BUDGET} agent messages");
@@ -193,20 +209,36 @@ pub async fn tell(relay: Relay, mut pauses: mpsc::UnboundedReceiver<notify::Mess
 #[allow(clippy::expect_used)]
 pub(crate) mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     pub(crate) type Woken = Arc<Mutex<Vec<(Thread, String)>>>;
 
     /// Rooms whose wakes land in a list, and whose pauses land in a channel.
     pub(crate) fn rooms() -> (Rooms, Woken, mpsc::UnboundedReceiver<notify::Message>) {
+        let (rooms, woken, heard, _) = failing();
+        (rooms, woken, heard)
+    }
+
+    /// [`rooms`], with a switch that makes each later wake fail.
+    fn failing() -> (
+        Rooms,
+        Woken,
+        mpsc::UnboundedReceiver<notify::Message>,
+        Arc<AtomicBool>,
+    ) {
         let woken = Woken::default();
         let into = Arc::clone(&woken);
+        let fails = Arc::new(AtomicBool::new(false));
+        let failed = Arc::clone(&fails);
         let (pauses, heard) = mpsc::unbounded_channel();
         let wake: Wake = Arc::new(move |thread, prompt| {
             into.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push((thread, prompt));
+            let woke = !failed.load(Ordering::SeqCst);
+            Box::pin(async move { woke })
         });
-        (Rooms::waking(wake, Some(pauses)), woken, heard)
+        (Rooms::waking(wake, Some(pauses)), woken, heard, fails)
     }
 
     pub(crate) fn woken(woken: &Woken) -> Vec<(Thread, String)> {
@@ -220,6 +252,7 @@ pub(crate) mod tests {
                 workspace: "wb".to_owned(),
                 thread: thread.to_owned(),
             }),
+            session: None,
         }
     }
 
@@ -257,6 +290,40 @@ pub(crate) mod tests {
             .expect("read")
             .expect("not closing");
         assert!(read.is_empty(), "the wake moved b's cursor");
+    }
+
+    #[tokio::test]
+    async fn a_failed_wake_gives_the_message_back_to_the_threads_next_read() {
+        let (rooms, woke, _, fails) = failing();
+        let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
+        let closing = watch::Sender::new(false);
+        rooms
+            .read(&b, "r1", Duration::ZERO, &closing)
+            .await
+            .expect("joins");
+        fails.store(true, Ordering::SeqCst);
+        rooms.send(&a, "alpha", "r1", "lost?").expect("sent");
+        assert_eq!(woken(&woke).len(), 1, "a wake was tried");
+        let read = tokio::time::timeout(
+            Duration::from_secs(5),
+            rooms.read(&b, "r1", Duration::from_secs(50), &closing),
+        )
+        .await
+        .expect("the give-back ends the wait")
+        .expect("read")
+        .expect("not closing");
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].text, "lost?");
+
+        fails.store(false, Ordering::SeqCst);
+        rooms.send(&a, "alpha", "r1", "next").expect("sent");
+        tokio::task::yield_now().await;
+        let read = rooms
+            .read(&b, "r1", Duration::ZERO, &closing)
+            .await
+            .expect("read")
+            .expect("not closing");
+        assert!(read.is_empty(), "a wake that took keeps the cursor moved");
     }
 
     #[tokio::test]
