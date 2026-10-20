@@ -700,25 +700,33 @@ the wait and the wakes.
   member, so two TUIs on one machine, or two `yantra mcp` processes, each read every message. A
   thread ignores the id, because a Chat turn's session ends with the turn.
 - **`allowed()` comes first, so only the owner reaches a room in this row.** A guest is Y-535's.
-  A non-owner is `403`, and a `tailscale` that cannot answer is `503`.
+  A non-owner is `403`, and a `tailscale` that cannot answer is `503`. After that check, a tool's
+  failure is a `tools/call` result with `isError`, so the agent reads it.
 - **The label comes from identity.** The machine is `whois` joined to the tailnet list on the
   stable id, as `/api/join` does. `X-Yantra-Thread: <workspace>/<thread>` adds ` · chat <thread>`
-  only when that workspace's machine is the caller's machine; any other header is ignored. A
-  field in the body never sets the label.
+  only when that workspace's machine is the caller's machine; any other header is ignored. The
+  workspace's `machine` is an ssh destination (ADR-0009), so it matches when its host, without
+  `user@`, is the node's name, its DNS name or a name whose first label is the node's, or one of its
+  addresses, and else when the host `ssh -G` resolves it to matches. A field in the body never sets
+  the label.
 - **A Chat turn gets the server by `--mcp-config`.** `chat::Registry` holds
   `join::daemon_address` of the bound set, which is the address `agent.env` already reaches, and
   each Claude turn names its own thread in the header. The server is `yantra-room`, apart from a
   `yantra` stdio server a person may have added. `--allowedTools` lets a woken turn use both tools
   without a prompt.
 - **`room_read` waits in memory, never on ssh**, up to 50 s on a `watch` that every message bumps.
-  It answers `503` when the daemon begins to shut down, as `/api/tasks/{id}/wait` does.
+  It answers an `isError` result when the daemon begins to shut down.
 - **`room_send` never awaits ssh.** It takes each member thread's unseen messages under the
-  store's lock and spawns `chat::wake` for each. The wake finds the thread and starts a Claude turn
-  at `room::cap` of the person's last mode, or `Supervised` when this daemon has not seen one. A
-  thread with a live keeper queues the prompt, and the keeper's task sends the queue as one prompt
-  when its turn ends. A delivered message moves that thread's cursor, so a message reaches a thread
-  once. A wake that neither starts a turn nor queues the prompt gives the messages back, and the
-  thread's next read or wake has them first. An ACP thread is not woken in this row.
+  store's lock and queues them for that thread. **One task per thread** sends its queue to
+  `chat::wake`, one wake at a time, so a thread gets its messages in seq order. The wake finds the
+  thread and starts a Claude turn at `room::cap` of the person's last mode, or `Supervised` when
+  this daemon has not seen one. A thread with a live keeper queues the prompt, and the keeper's
+  task sends the queue as one prompt when its turn ends; the queue leaves the registry under the
+  same lock as the keeper. A wake resolves only when a turn starts or cannot. A delivered message
+  moves that thread's cursor, so a message reaches a thread once. A wake that starts no turn, a
+  queued one included, gives the messages back, and the thread's next read or wake has them first.
+  A revert in the thread fails the wake before it takes a checkpoint. An ACP thread or a thread
+  that is gone is never woken again, and its messages wait for a read.
 - **The budget is 20 agent messages.** The 20th pauses the room and wakes nothing. Later sends are
   refused, and the owner gets one ntfy notification that names the room and no text. `POST
   /api/rooms/{room}/resume`, behind `allowed()`, sets the count to 0; an unknown room is `404`.

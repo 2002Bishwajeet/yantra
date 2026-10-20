@@ -14,6 +14,9 @@
 //! fixture cannot reach the host's loopback. The arguments prove that a turn
 //! gets the server; the owner's walk in Y-535 proves the real client.
 //!
+//! `wa` names alpha the way an ssh config often does, as a user at a DNS
+//! name, and not by its Tailscale name, so the header must still route.
+//!
 //! The daemon binds the fixed port 7717, so this takes `chat_keeper.rs`'s lock.
 
 #![allow(clippy::expect_used)]
@@ -40,6 +43,8 @@ const PATIENCE: Duration = Duration::from_secs(60);
 const ALPHA: &str = "127.0.0.2";
 const BETA: &str = "127.0.0.3";
 const STRANGER: &str = "127.0.0.4";
+/// What `wa` and the ssh config call alpha: not its Tailscale name.
+const ALPHA_SSH: &str = "alpha.example.ts.net";
 
 const RECORDING: &str =
     include_str!("../../yantra-core/tests/recordings/claude-2.1.291-accept.jsonl");
@@ -172,7 +177,7 @@ impl Host {
             )
         };
         let config = host.root.join("ssh_config");
-        fs::write(&config, block("alpha", alpha) + &block("beta", beta))?;
+        fs::write(&config, block(ALPHA_SSH, alpha) + &block("beta", beta))?;
         host.script(
             "ssh",
             &format!(
@@ -186,7 +191,8 @@ impl Host {
 
         let workspaces = host.root.join("home/.config/yantra/workspaces");
         fs::create_dir_all(&workspaces)?;
-        for (name, machine) in [("wa", "alpha"), ("wb", "beta")] {
+        let alpha_at = format!("{USER}@{ALPHA_SSH}");
+        for (name, machine) in [("wa", alpha_at.as_str()), ("wb", "beta")] {
             fs::write(
                 workspaces.join(format!("{name}.toml")),
                 format!("machine = \"{machine}\"\nrepo = \"{REPO}\"\n"),
@@ -558,7 +564,8 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     assert!(prompt.contains("hello from A"), "{prompt}");
     assert!(args.contains("--permission-mode acceptEdits"), "{args}");
 
-    // 5. A reader on alpha waits, and gets B's reply and not alpha's own.
+    // 5. A reader on alpha waits and gets B's reply, and B's reply wakes
+    //    thread A without A's own message, which is after A's cursor too.
     let waiting = tokio::spawn(tool(
         ALPHA,
         None,
@@ -580,7 +587,10 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
         text(&read).contains(&format!("from=\"beta · chat {b}\"")),
         "{read}"
     );
-    assert!(!text(&read).contains("hello from A"), "{read}");
+    let calls = alpha.until_calls(2).await?;
+    let (_, prompt) = &calls[1];
+    assert!(prompt.contains("reply from B"), "{prompt}");
+    assert!(!prompt.contains("hello from A"), "not its own: {prompt}");
 
     // 6. r2 pauses at its budget, and the owner resumes it.
     for n in 1..=20 {

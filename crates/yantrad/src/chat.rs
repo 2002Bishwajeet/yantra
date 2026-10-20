@@ -981,8 +981,23 @@ struct Held {
     claimed: HashSet<String>,
     /// The mode of each thread's last Claude turn a person sent.
     modes: HashMap<String, PermissionMode>,
-    /// Room prompts that wait for a thread's turn to end.
-    queued: HashMap<String, Vec<String>>,
+    /// Room prompts that wait for a thread's turn to end, each with the
+    /// sender that tells its wake what came of it.
+    queued: HashMap<String, Vec<Queued>>,
+}
+
+/// A room prompt held for a thread's next turn.
+type Queued = (String, oneshot::Sender<Woke>);
+
+/// What a room's wake of a thread came to (ADR-0038 decision 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Woke {
+    /// A turn started with the prompt.
+    Started,
+    /// No turn started, and a later wake may start one.
+    Failed,
+    /// No wake reaches this thread: it is an ACP thread, or it is gone.
+    Never,
 }
 
 impl std::fmt::Debug for Registry {
@@ -1069,24 +1084,24 @@ impl Registry {
     }
 
     /// Queues `prompt` while a keeper holds thread `id`; its task's end
-    /// sends it. `false` is a thread with no keeper.
-    fn queue(&self, id: &str, prompt: &str) -> bool {
+    /// sends it, and the receiver says whether that turn started. `None` is a
+    /// thread with no keeper.
+    fn queue(&self, id: &str, prompt: &str) -> Option<oneshot::Receiver<Woke>> {
         let mut held = self.lock();
         if !held.lives.contains_key(id) {
-            return false;
+            return None;
         }
+        let (woke, heard) = oneshot::channel();
         held.queued
             .entry(id.to_owned())
             .or_default()
-            .push(prompt.to_owned());
-        true
+            .push((prompt.to_owned(), woke));
+        Some(heard)
     }
 
-    fn take_queued(&self, id: &str) -> Vec<String> {
-        self.lock().queued.remove(id).unwrap_or_default()
-    }
-
-    fn forget(&self, live: &Live) {
+    /// Lets `live`'s thread go, and returns the prompts queued for it. Both
+    /// happen under one lock, so no prompt queues behind a keeper that is gone.
+    fn forget(&self, live: &Live) -> Vec<Queued> {
         let mut held = self.lock();
         if held
             .lives
@@ -1094,7 +1109,9 @@ impl Registry {
             .is_some_and(|held| std::ptr::eq(held.as_ref(), live))
         {
             held.lives.remove(&live.id);
+            return held.queued.remove(&live.id).unwrap_or_default();
         }
+        Vec::new()
     }
 
     fn wait(&self, workspace: &str, thread: &str) {
@@ -2568,11 +2585,16 @@ async fn keep_claude<M: Machine>(
         &live,
     )
     .await;
-    finish(machine.as_ref(), &name, &place, &live).await;
+    let queued = finish(machine.as_ref(), &name, &place, &live).await;
     drop(turn);
-    let queued = machine.registry().take_queued(&place.id);
     if !queued.is_empty() {
-        tokio::spawn(wake_on(machine, name, place, queued.join("\n\n")));
+        tokio::spawn(async move {
+            let (prompts, told): (Vec<String>, Vec<_>) = queued.into_iter().unzip();
+            let woke = wake_on(machine, name, place, prompts.join("\n\n")).await;
+            for tell in told {
+                let _ = tell.send(woke);
+            }
+        });
     }
 }
 
@@ -2583,16 +2605,18 @@ async fn until(at: Option<tokio::time::Instant>) {
     }
 }
 
-/// Removes an ended keeper's session (I-30) and lets its thread go.
-async fn finish<M: Machine>(machine: &M, name: &str, place: &Place, live: &Live) {
+/// Removes an ended keeper's session (I-30) and lets its thread go. It returns
+/// the room prompts queued for the thread; one dropped tells its wake it failed.
+async fn finish<M: Machine>(machine: &M, name: &str, place: &Place, live: &Live) -> Vec<Queued> {
     live.lock().closing = true;
     match machine.finish(place, STOP_GRACE).await {
         Ok(Some(ended)) => tracing::info!("chat {name}: the keeper ended {ended}"),
         Ok(None) => {}
         Err(said) => tracing::warn!("chat {name}: the keeper's session stays: {said}"),
     }
-    machine.registry().forget(live);
+    let queued = machine.registry().forget(live);
     live.close();
+    queued
 }
 
 type Prompt = Pin<Box<dyn Future<Output = Result<StopReason, acp::Error>> + Send>>;
@@ -2834,34 +2858,36 @@ fn answer(acp: &AcpAgent, request: &str, decision: Decision) -> Result<(), Strin
 }
 
 /// Starts a turn in thread `thread` of `workspace` with a room's `prompt`,
-/// or queues it while a turn runs there (ADR-0038 decision 3). `false` is a
-/// prompt that went nowhere, so the room gives its messages back.
-pub async fn wake(registry: Registry, workspace: String, thread: String, prompt: String) -> bool {
+/// or queues it while a turn runs there (ADR-0038 decision 3). It resolves
+/// once a turn starts with the prompt or cannot, so the room gives back what
+/// did not arrive.
+pub async fn wake(registry: Registry, workspace: String, thread: String, prompt: String) -> Woke {
     let woke = async {
         let fleet = Arc::new(Fleet::of(&workspace, registry)?);
-        let place = fleet
-            .find(&thread)
-            .await?
-            .ok_or_else(|| format!("{workspace} has no chat thread {thread}"))?;
-        Ok::<bool, String>(wake_on(fleet, workspace.clone(), place, prompt).await)
+        let Some(place) = fleet.find(&thread).await? else {
+            tracing::info!("chat {workspace}: thread {thread} is gone, so it is not woken");
+            return Ok(Woke::Never);
+        };
+        Ok::<Woke, String>(wake_on(fleet, workspace.clone(), place, prompt).await)
     }
     .await;
     woke.unwrap_or_else(|said| {
         tracing::warn!("chat {workspace}: thread {thread} was not woken: {said}");
-        false
+        Woke::Failed
     })
 }
 
 /// The turn runs at [`room::cap`] of the person's last mode, and as
-/// `Supervised` when this daemon has not seen one. An ACP thread is not woken:
-/// `--mcp-config` is Claude's. `true` is a turn started or a prompt queued.
-/// Boxed, because a turn's end may wake its thread again.
+/// `Supervised` when this daemon has not seen one. An ACP thread is never
+/// woken: `--mcp-config` is Claude's. A queued prompt resolves when the turn
+/// it waits for ends and the next one starts or cannot. Boxed, because a
+/// turn's end may wake its thread again.
 fn wake_on<M: Machine>(
     machine: Arc<M>,
     name: String,
     place: Place,
     prompt: String,
-) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+) -> Pin<Box<dyn Future<Output = Woke> + Send>> {
     Box::pin(async move {
         let thread = thread::name(&place).to_owned();
         match machine.recall(&place).await {
@@ -2871,54 +2897,61 @@ fn wake_on<M: Machine>(
                     "chat {name}: thread {thread} is {}'s, so a room message does not wake it",
                     harness.name()
                 );
-                return false;
+                return Woke::Never;
             }
             Err(said) => {
                 tracing::warn!("chat {name}: thread {thread} was not woken: {said}");
-                return false;
+                return Woke::Failed;
             }
         }
-        if machine.registry().queue(&place.id, &prompt) {
-            tracing::info!("chat {name}: a room message waits for thread {thread}'s turn");
-            return true;
-        }
-        if let Err(said) = within(machine.base(&place)).await {
-            tracing::warn!("chat {name}: no checkpoint, so thread {thread} was not woken: {said}");
-            return false;
-        }
+        let reverting = || machine.registry().lock().reverting.contains(&place.id);
+        let mut checkpointed = false;
         let deadline = tokio::time::Instant::now() + CONNECT_WITHIN;
         loop {
-            if machine.registry().queue(&place.id, &prompt) {
+            if let Some(heard) = machine.registry().queue(&place.id, &prompt) {
                 tracing::info!("chat {name}: a room message waits for thread {thread}'s turn");
-                return true;
+                return heard.await.unwrap_or(Woke::Failed);
             }
-            if !machine.registry().lock().reverting.contains(&place.id) {
-                let mode = room::cap(machine.registry().mode(&place.id).unwrap_or_default());
-                let turn = Typed {
-                    text: prompt.clone(),
-                    images: None,
-                    mode,
-                };
-                match claude_turn(&machine, &name, &place, turn).await {
-                    Ok(_) => {
-                        tracing::info!("chat {name}: a room message woke thread {thread}");
-                        return true;
-                    }
-                    Err(refusal) if refusal.kind != Kind::Busy => {
-                        tracing::warn!(
-                            "chat {name}: thread {thread} was not woken: {}",
-                            refusal.said
-                        );
-                        return false;
-                    }
-                    Err(_) => {}
+            // As in `begin`: a revert first, then a checkpoint, then the turn.
+            if reverting() {
+                tracing::info!("chat {name}: thread {thread} is reverting, so it was not woken");
+                return Woke::Failed;
+            }
+            if !checkpointed {
+                if let Err(said) = within(machine.base(&place)).await {
+                    tracing::warn!(
+                        "chat {name}: no checkpoint, so thread {thread} was not woken: {said}"
+                    );
+                    return Woke::Failed;
                 }
+                checkpointed = true;
+                continue;
+            }
+            let mode = room::cap(machine.registry().mode(&place.id).unwrap_or_default());
+            let turn = Typed {
+                text: prompt.clone(),
+                images: None,
+                mode,
+            };
+            match claude_turn(&machine, &name, &place, turn).await {
+                Ok(_) => {
+                    tracing::info!("chat {name}: a room message woke thread {thread}");
+                    return Woke::Started;
+                }
+                Err(refusal) if refusal.kind != Kind::Busy => {
+                    tracing::warn!(
+                        "chat {name}: thread {thread} was not woken: {}",
+                        refusal.said
+                    );
+                    return Woke::Failed;
+                }
+                Err(_) => {}
             }
             if tokio::time::Instant::now() >= deadline {
                 tracing::warn!(
                     "chat {name}: thread {thread} stayed busy, so a room message was given back"
                 );
-                return false;
+                return Woke::Failed;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -6207,7 +6240,7 @@ mod tests {
             if let Some(mode) = last {
                 script.registry.remember_mode(&place().id, mode);
             }
-            assert!(
+            assert_eq!(
                 wake_on(
                     Arc::clone(&script),
                     "web".to_owned(),
@@ -6215,7 +6248,7 @@ mod tests {
                     ROOM_PROMPT.to_owned(),
                 )
                 .await,
-                "a turn started"
+                Woke::Started
             );
             let mut claude = script.claude().await;
             assert_eq!(
@@ -6227,6 +6260,15 @@ mod tests {
         }
     }
 
+    fn queued(script: &Script) -> usize {
+        script
+            .registry
+            .lock()
+            .queued
+            .get(&place().id)
+            .map_or(0, Vec::len)
+    }
+
     #[tokio::test]
     async fn wake_queues_on_a_busy_thread_and_sends_one_prompt_when_its_turn_ends() {
         let script = Arc::new(Script::default());
@@ -6236,20 +6278,20 @@ mod tests {
         tab.next().await;
         let mut first = script.claude().await;
         first.heard().await;
-        for prompt in ["one", "two"] {
-            let queued = tokio::time::timeout(
-                Duration::from_secs(5),
-                wake_on(
-                    Arc::clone(&script),
-                    "web".to_owned(),
-                    place(),
-                    prompt.to_owned(),
-                ),
-            )
-            .await
-            .expect("a busy thread queues at once");
-            assert!(queued, "a queued prompt is a wake that took");
+        let mut waking = Vec::new();
+        for (n, prompt) in ["one", "two"].into_iter().enumerate() {
+            waking.push(tokio::spawn(wake_on(
+                Arc::clone(&script),
+                "web".to_owned(),
+                place(),
+                prompt.to_owned(),
+            )));
+            until_script(&script, |script| queued(script) == n + 1).await;
         }
+        assert!(
+            waking.iter().all(|wake| !wake.is_finished()),
+            "a queued wake waits for the turn it waits behind"
+        );
         assert_eq!(
             lock(&script.modes).len(),
             1,
@@ -6264,6 +6306,9 @@ mod tests {
             prompt_of(&second.heard().await.expect("a line")),
             "one\n\ntwo"
         );
+        for wake in waking {
+            assert_eq!(wake.await.expect("no panic"), Woke::Started);
+        }
         assert_eq!(
             *lock(&script.modes),
             [PermissionMode::FullAccess, PermissionMode::AutoAcceptEdits]
@@ -6280,6 +6325,78 @@ mod tests {
         );
     }
 
+    /// The review's finding: a queued prompt whose turn never started was
+    /// counted as delivered, so the room never gave its messages back.
+    #[tokio::test]
+    async fn a_queued_room_message_whose_turn_cannot_start_reaches_the_threads_next_read() {
+        let script = Arc::new(Script::default());
+        let waker = Arc::clone(&script);
+        let wake: crate::room::Wake = Arc::new(move |_, prompt| {
+            wake_on(Arc::clone(&waker), "web".to_owned(), place(), prompt)
+        });
+        let rooms = crate::room::Rooms::waking(wake, None);
+        let me = room::Reader {
+            node: "beta".to_owned(),
+            thread: Some(room::Thread {
+                workspace: "web".to_owned(),
+                thread: thread::name(&place()).to_owned(),
+            }),
+            session: None,
+        };
+        let other = room::Reader {
+            node: "alpha".to_owned(),
+            thread: None,
+            session: None,
+        };
+        let closing = watch::Sender::new(false);
+        rooms
+            .read(&me, "r1", Duration::ZERO, &closing)
+            .await
+            .expect("joins");
+
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "work"}));
+        tab.next().await;
+        tab.next().await;
+        let mut first = script.claude().await;
+        first.heard().await;
+        rooms.send(&other, "alpha", "r1", "queued").expect("sent");
+        until_script(&script, |script| queued(script) == 1).await;
+
+        // A revert begins before the turn ends, so the queued turn cannot start.
+        script.registry.lock().reverting.insert(place().id);
+        first
+            .say(json!({"type": "result", "subtype": "success", "is_error": false}))
+            .await;
+        let read = tokio::time::timeout(
+            Duration::from_secs(5),
+            rooms.read(&me, "r1", Duration::from_secs(50), &closing),
+        )
+        .await
+        .expect("the give-back ends the wait")
+        .expect("read")
+        .expect("not closing");
+        assert_eq!(read.len(), 1, "{read:?}");
+        assert_eq!(read[0].text, "queued");
+        assert_eq!(lock(&script.modes).len(), 1, "no second turn");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wake_takes_no_checkpoint_of_a_thread_that_reverts() {
+        let script = Arc::new(Script::default());
+        script.registry.lock().reverting.insert(place().id);
+        let woke = wake_on(
+            Arc::clone(&script),
+            "web".to_owned(),
+            place(),
+            ROOM_PROMPT.to_owned(),
+        )
+        .await;
+        assert_eq!(woke, Woke::Failed);
+        assert_eq!(*lock(&script.checkpoints), 0, "no checkpoint was taken");
+        assert!(lock(&script.modes).is_empty());
+    }
+
     #[tokio::test]
     async fn wake_leaves_an_acp_thread_alone() {
         let script = Arc::new(Script {
@@ -6293,7 +6410,7 @@ mod tests {
             ROOM_PROMPT.to_owned(),
         )
         .await;
-        assert!(!woke, "so the room gives the message back");
+        assert_eq!(woke, Woke::Never, "so the room stops waking it");
         assert!(lock(&script.turns).is_empty());
         assert!(lock(&script.modes).is_empty());
     }

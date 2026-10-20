@@ -277,10 +277,20 @@ pub fn unnamed_in(dir: &Path, machine: &str) -> Option<String> {
     logs_in_as_in(dir, machine)
 }
 
+/// The host ssh connects to for `machine`, which an alias's `HostName`
+/// decides (Y-534). `None` when ssh cannot say. A blocking spawn (I-13).
+pub fn host_of(machine: &str) -> Option<String> {
+    asked_in(&dir().ok()?, machine, "hostname")
+}
+
+fn logs_in_as_in(dir: &Path, machine: &str) -> Option<String> {
+    asked_in(dir, machine, "user")
+}
+
 /// `ssh -G`, so the answer is ssh's own reading of every block that matches.
 /// `-F` drops `/etc/ssh/ssh_config`, which a real connection reads, so it is
 /// passed only for a directory that is not this account's own `~/.ssh`.
-fn logs_in_as_in(dir: &Path, machine: &str) -> Option<String> {
+fn asked_in(dir: &Path, machine: &str, key: &str) -> Option<String> {
     let mut ssh = Command::new("ssh");
     ssh.arg("-G");
     if crate::identity::dir().ok().as_deref() != Some(dir) {
@@ -294,9 +304,10 @@ fn logs_in_as_in(dir: &Path, machine: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
+    let key = format!("{key} ");
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .find_map(|line| line.strip_prefix("user "))
+        .find_map(|line| line.strip_prefix(&key))
         .map(str::to_owned)
 }
 
@@ -582,6 +593,23 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&joined.config).expect("readable"),
             owners
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Y-534: an alias's `HostName` is the host, as ssh itself reads it.
+    #[test]
+    fn the_host_is_what_hostname_says_for_an_alias() {
+        let dir = scratch("hostname");
+        fs::create_dir_all(&dir).expect("scratch");
+        fs::write(dir.join("config"), "Host box\n    HostName 100.64.0.9\n").expect("a config");
+        assert_eq!(
+            asked_in(&dir, "box", "hostname").as_deref(),
+            Some("100.64.0.9")
+        );
+        assert_eq!(
+            asked_in(&dir, "other", "hostname").as_deref(),
+            Some("other")
         );
         let _ = fs::remove_dir_all(&dir);
     }

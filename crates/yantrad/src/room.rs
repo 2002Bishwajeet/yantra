@@ -7,6 +7,8 @@
 //! cursor, count and pause. The log names a room, a seq and counts, and never a
 //! message's text (Q5).
 
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -16,11 +18,12 @@ use tokio::sync::{mpsc, watch};
 use yantra_core::notify::{self, Relay};
 use yantra_core::room::{self, BUDGET, Message, Reader, Sent, Thread};
 
-use crate::chat;
+use crate::chat::{self, Woke};
 
-/// Starts or queues a turn in a member thread, and says whether it did. A
-/// test captures it.
-type Wake = Arc<dyn Fn(Thread, String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+/// Starts a turn in a member thread, or waits for one to start, and says
+/// what came of it. A test captures it.
+pub(crate) type Wake =
+    Arc<dyn Fn(Thread, String) -> Pin<Box<dyn Future<Output = Woke> + Send>> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Rooms {
@@ -28,7 +31,27 @@ pub struct Rooms {
     /// Bumped on every message, so a waiting read looks again.
     said: watch::Sender<u64>,
     wake: Wake,
+    waking: Arc<Mutex<Waking>>,
     pauses: Option<mpsc::UnboundedSender<notify::Message>>,
+}
+
+/// One delivery to a member thread, kept until its wake resolves so a wake
+/// that fails gives its messages back.
+struct Job {
+    room: String,
+    member: Reader,
+    seqs: Vec<u64>,
+    prompt: String,
+}
+
+#[derive(Default)]
+struct Waking {
+    /// The jobs each thread has yet to be woken with. A thread is a key while
+    /// its one worker runs, so its wakes go one at a time, in seq order.
+    queued: HashMap<Thread, Vec<Job>>,
+    /// Threads no wake reaches: ACP threads and threads that are gone. Their
+    /// messages wait for a read.
+    unreachable: HashSet<Thread>,
 }
 
 impl std::fmt::Debug for Rooms {
@@ -55,11 +78,15 @@ impl Rooms {
         Self::waking(wake, pauses)
     }
 
-    fn waking(wake: Wake, pauses: Option<mpsc::UnboundedSender<notify::Message>>) -> Self {
+    pub(crate) fn waking(
+        wake: Wake,
+        pauses: Option<mpsc::UnboundedSender<notify::Message>>,
+    ) -> Self {
         Self {
             store: Arc::default(),
             said: watch::Sender::new(0),
             wake,
+            waking: Arc::default(),
             pauses,
         }
     }
@@ -68,9 +95,14 @@ impl Rooms {
         self.store.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn jobs(&self) -> MutexGuard<'_, Waking> {
+        self.waking.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Takes `text` from `reader`, labelled `from`, and wakes each member
-    /// thread with what it has not seen. Never awaits: each wake is a task,
-    /// and a wake that fails gives its messages back to that thread.
+    /// thread with what it has not seen. Never awaits: each thread's wakes run
+    /// in one task, one after another, and a wake that does not start a turn
+    /// gives its messages back to that thread.
     pub fn send(
         &self,
         reader: &Reader,
@@ -79,7 +111,7 @@ impl Rooms {
         text: &str,
     ) -> Result<Sent, room::Error> {
         let now = SystemTime::now();
-        let (sent, made, prompts) = {
+        let (sent, made, woken, workers) = {
             let mut store = self.lock();
             let made = !store.contains(name);
             let sent = store
@@ -89,18 +121,37 @@ impl Rooms {
                         tracing::info!("room {name}: a message was refused, because it is paused");
                     }
                 })?;
-            // Taken under the same lock as the send, so each thread gets a
-            // message once and in order.
-            let prompts: Vec<(Reader, Vec<u64>, String)> = sent
-                .wake
-                .iter()
-                .filter_map(|member| {
-                    let messages = store.deliver(name, member, sent.seq);
-                    let seqs = messages.iter().map(|message| message.seq).collect();
-                    (!messages.is_empty()).then(|| (member.clone(), seqs, prompt(name, &messages)))
-                })
-                .collect();
-            (sent, made, prompts)
+            // Queued under the same lock as the send, so each thread gets a
+            // message once and in seq order.
+            let mut waking = self.jobs();
+            let (mut woken, mut workers) = (0, Vec::new());
+            for member in &sent.wake {
+                let Some(thread) = member.thread.clone() else {
+                    continue;
+                };
+                if waking.unreachable.contains(&thread) {
+                    continue;
+                }
+                let messages = store.deliver(name, member, sent.seq);
+                if messages.is_empty() {
+                    continue;
+                }
+                let job = Job {
+                    room: name.to_owned(),
+                    member: member.clone(),
+                    seqs: messages.iter().map(|message| message.seq).collect(),
+                    prompt: prompt(name, &messages),
+                };
+                woken += 1;
+                match waking.queued.entry(thread) {
+                    Entry::Occupied(mut queued) => queued.get_mut().push(job),
+                    Entry::Vacant(free) => {
+                        workers.push(free.key().clone());
+                        free.insert(vec![job]);
+                    }
+                }
+            }
+            (sent, made, woken, workers)
         };
         if made {
             tracing::info!("room {name}: made by {}", reader.node);
@@ -110,23 +161,11 @@ impl Rooms {
             sent.seq,
             reader.node,
             sent.delivered,
-            prompts.len()
+            woken
         );
         self.said.send_modify(|count| *count += 1);
-        for (member, seqs, prompt) in prompts {
-            let Some(thread) = member.thread.clone() else {
-                continue;
-            };
-            let woke = (self.wake)(thread, prompt);
-            let rooms = self.clone();
-            let name = name.to_owned();
-            tokio::spawn(async move {
-                if !woke.await {
-                    rooms.lock().give_back(&name, &member, &seqs);
-                    rooms.said.send_modify(|count| *count += 1);
-                    tracing::info!("room {name}: {} given back to a thread", seqs.len());
-                }
-            });
+        for thread in workers {
+            tokio::spawn(self.clone().work(thread));
         }
         if sent.paused {
             tracing::info!("room {name}: paused after {BUDGET} agent messages");
@@ -170,6 +209,49 @@ impl Rooms {
         }
     }
 
+    /// Wakes `thread` with everything queued for it, until nothing is. The
+    /// key leaves the map under the same lock a send queues under, so no job
+    /// is left without a worker.
+    async fn work(self, thread: Thread) {
+        loop {
+            let jobs = {
+                let mut waking = self.jobs();
+                match waking.queued.get_mut(&thread) {
+                    Some(jobs) if !jobs.is_empty() => std::mem::take(jobs),
+                    _ => {
+                        waking.queued.remove(&thread);
+                        return;
+                    }
+                }
+            };
+            let prompt = jobs
+                .iter()
+                .map(|job| job.prompt.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let woke = (self.wake)(thread.clone(), prompt).await;
+            if woke == Woke::Started {
+                continue;
+            }
+            if woke == Woke::Never {
+                self.jobs().unreachable.insert(thread.clone());
+            }
+            {
+                let mut store = self.lock();
+                for job in &jobs {
+                    store.give_back(&job.room, &job.member, &job.seqs);
+                }
+            }
+            self.said.send_modify(|count| *count += 1);
+            let given: usize = jobs.iter().map(|job| job.seqs.len()).sum();
+            tracing::info!(
+                "chat {}: {given} room messages given back to thread {}",
+                thread.workspace,
+                thread.thread
+            );
+        }
+    }
+
     /// The owner acted: the count goes back to 0 and the pause lifts.
     pub fn resume(&self, name: &str) -> Result<(), room::Error> {
         self.lock().resume(name)
@@ -209,40 +291,57 @@ pub async fn tell(relay: Relay, mut pauses: mpsc::UnboundedReceiver<notify::Mess
 #[allow(clippy::expect_used)]
 pub(crate) mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     pub(crate) type Woken = Arc<Mutex<Vec<(Thread, String)>>>;
+    type Answer = Arc<Mutex<Woke>>;
 
     /// Rooms whose wakes land in a list, and whose pauses land in a channel.
     pub(crate) fn rooms() -> (Rooms, Woken, mpsc::UnboundedReceiver<notify::Message>) {
-        let (rooms, woken, heard, _) = failing();
+        let (rooms, woken, heard, _) = answering();
         (rooms, woken, heard)
     }
 
-    /// [`rooms`], with a switch that makes each later wake fail.
-    fn failing() -> (
+    /// [`rooms`], with what each later wake comes to.
+    fn answering() -> (
         Rooms,
         Woken,
         mpsc::UnboundedReceiver<notify::Message>,
-        Arc<AtomicBool>,
+        Answer,
     ) {
         let woken = Woken::default();
         let into = Arc::clone(&woken);
-        let fails = Arc::new(AtomicBool::new(false));
-        let failed = Arc::clone(&fails);
+        let answer = Arc::new(Mutex::new(Woke::Started));
+        let answers = Arc::clone(&answer);
         let (pauses, heard) = mpsc::unbounded_channel();
         let wake: Wake = Arc::new(move |thread, prompt| {
             into.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push((thread, prompt));
-            let woke = !failed.load(Ordering::SeqCst);
+            let woke = *answers.lock().unwrap_or_else(PoisonError::into_inner);
             Box::pin(async move { woke })
         });
-        (Rooms::waking(wake, Some(pauses)), woken, heard, fails)
+        (Rooms::waking(wake, Some(pauses)), woken, heard, answer)
     }
 
-    pub(crate) fn woken(woken: &Woken) -> Vec<(Thread, String)> {
+    fn answer(answer: &Answer, woke: Woke) {
+        *answer.lock().unwrap_or_else(PoisonError::into_inner) = woke;
+    }
+
+    /// The wakes so far, once every worker has run.
+    pub(crate) async fn woken(woken: &Woken) -> Vec<(Thread, String)> {
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
         woken.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// How many messages the wakes so far carried.
+    async fn carried(woke: &Woken) -> usize {
+        woken(woke)
+            .await
+            .iter()
+            .map(|(_, prompt)| prompt.matches("<room ").count())
+            .sum()
     }
 
     fn reader(node: &str, thread: Option<&str>) -> Reader {
@@ -276,7 +375,7 @@ pub(crate) mod tests {
             .expect("sent");
         assert_eq!((sent.seq, sent.delivered), (1, 2));
         assert_eq!(
-            woken(&woke),
+            woken(&woke).await,
             [(
                 b.thread.clone().expect("a thread"),
                 "<room name=\"r1\" from=\"alpha · chat A\" seq=\"1\" budget=\"1/20\">\n\
@@ -294,16 +393,15 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn a_failed_wake_gives_the_message_back_to_the_threads_next_read() {
-        let (rooms, woke, _, fails) = failing();
+        let (rooms, woke, _, answers) = answering();
         let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
         let closing = watch::Sender::new(false);
         rooms
             .read(&b, "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
-        fails.store(true, Ordering::SeqCst);
+        answer(&answers, Woke::Failed);
         rooms.send(&a, "alpha", "r1", "lost?").expect("sent");
-        assert_eq!(woken(&woke).len(), 1, "a wake was tried");
         let read = tokio::time::timeout(
             Duration::from_secs(5),
             rooms.read(&b, "r1", Duration::from_secs(50), &closing),
@@ -312,12 +410,13 @@ pub(crate) mod tests {
         .expect("the give-back ends the wait")
         .expect("read")
         .expect("not closing");
+        assert_eq!(woken(&woke).await.len(), 1, "a wake was tried");
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].text, "lost?");
 
-        fails.store(false, Ordering::SeqCst);
+        answer(&answers, Woke::Started);
         rooms.send(&a, "alpha", "r1", "next").expect("sent");
-        tokio::task::yield_now().await;
+        assert_eq!(woken(&woke).await.len(), 2);
         let read = rooms
             .read(&b, "r1", Duration::ZERO, &closing)
             .await
@@ -326,13 +425,81 @@ pub(crate) mod tests {
         assert!(read.is_empty(), "a wake that took keeps the cursor moved");
     }
 
+    /// An ACP thread or a gone one: its messages wait for a read, and no
+    /// later message tries to wake it, so nothing piles up to give back.
+    #[tokio::test]
+    async fn a_thread_no_wake_reaches_is_not_woken_again() {
+        let (rooms, woke, _, answers) = answering();
+        let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
+        let closing = watch::Sender::new(false);
+        rooms
+            .read(&b, "r1", Duration::ZERO, &closing)
+            .await
+            .expect("joins");
+        answer(&answers, Woke::Never);
+        rooms.send(&a, "alpha", "r1", "one").expect("sent");
+        assert_eq!(woken(&woke).await.len(), 1);
+        rooms.send(&a, "alpha", "r1", "two").expect("sent");
+        assert_eq!(woken(&woke).await.len(), 1, "not tried again");
+        let read = rooms
+            .read(&b, "r1", Duration::ZERO, &closing)
+            .await
+            .expect("read")
+            .expect("not closing");
+        let texts: Vec<&str> = read.iter().map(|message| message.text.as_str()).collect();
+        assert_eq!(texts, ["one", "two"]);
+    }
+
+    /// The review's finding: one task per send let a thread get seq 2 before
+    /// seq 1. Now a thread's second wake waits for its first to resolve.
+    #[tokio::test]
+    async fn one_threads_wakes_go_one_at_a_time_in_seq_order() {
+        let woken = Woken::default();
+        let into = Arc::clone(&woken);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let opens = Arc::clone(&gate);
+        let wake: Wake = Arc::new(move |thread, prompt| {
+            into.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((thread, prompt));
+            let opens = Arc::clone(&opens);
+            Box::pin(async move {
+                opens.notified().await;
+                Woke::Started
+            })
+        });
+        let rooms = Rooms::waking(wake, None);
+        let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
+        let closing = watch::Sender::new(false);
+        rooms
+            .read(&b, "r1", Duration::ZERO, &closing)
+            .await
+            .expect("joins");
+        rooms.send(&a, "alpha", "r1", "first").expect("sent");
+        assert_eq!(
+            super::tests::woken(&woken).await.len(),
+            1,
+            "the first wake waits"
+        );
+        rooms.send(&a, "alpha", "r1", "second").expect("sent");
+        let seen = super::tests::woken(&woken).await;
+        assert_eq!(seen.len(), 1, "the second waits: {seen:?}");
+        assert!(seen[0].1.contains("seq=\"1\""), "{}", seen[0].1);
+        gate.notify_one();
+        let seen = super::tests::woken(&woken).await;
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert!(seen[1].1.contains("seq=\"2\""), "{}", seen[1].1);
+        assert!(!seen[1].1.contains("seq=\"1\""), "{}", seen[1].1);
+        gate.notify_one();
+    }
+
     #[tokio::test]
     async fn no_thread_wakes_on_its_own_message() {
         let (rooms, woke, _) = rooms();
         let a = reader("alpha", Some("A"));
         rooms.send(&a, "a", "r1", "one").expect("sent");
         rooms.send(&a, "a", "r1", "two").expect("sent");
-        assert!(woken(&woke).is_empty());
+        assert!(woken(&woke).await.is_empty());
     }
 
     #[tokio::test]
@@ -348,12 +515,12 @@ pub(crate) mod tests {
                 .send(&a, "alpha", "r2", &format!("secret {n}"))
                 .expect("sent");
         }
-        assert_eq!(woken(&woke).len(), 19, "the 20th wakes nothing");
+        assert_eq!(carried(&woke).await, 19, "the 20th wakes nothing");
         assert_eq!(
             rooms.send(&a, "alpha", "r2", "secret 21"),
             Err(room::Error::Paused("r2".to_owned()))
         );
-        assert_eq!(woken(&woke).len(), 19);
+        assert_eq!(carried(&woke).await, 19);
 
         let told = heard.try_recv().expect("one notification");
         assert!(told.body.contains("r2"), "{}", told.body);
@@ -362,7 +529,7 @@ pub(crate) mod tests {
 
         rooms.resume("r2").expect("known");
         rooms.send(&a, "alpha", "r2", "again").expect("sent");
-        assert_eq!(woken(&woke).len(), 20);
+        assert_eq!(carried(&woke).await, 21, "the 20th went with the next wake");
         assert_eq!(
             rooms.resume("nope"),
             Err(room::Error::Unknown("nope".to_owned()))

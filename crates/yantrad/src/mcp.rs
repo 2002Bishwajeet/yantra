@@ -13,9 +13,13 @@
 //! nodes reach a room in this row. The label comes from identity and never
 //! from the body: the caller's machine is `whois` joined to the tailnet list on
 //! the stable id, as `/api/join` does. `X-Yantra-Thread` only routes, and only
-//! when the workspace it names is on the caller's machine.
+//! when the workspace it names is on the caller's machine: the workspace's ssh
+//! destination, or the host ssh resolves it to, names that node.
+//!
+//! **A tool's failure is a result with `isError`**, as MCP asks, so the agent
+//! reads it; only the identity check refuses with an HTTP status.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,7 +31,8 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tokio::sync::watch;
-use yantra_core::inventory::Inventory;
+use yantra_core::identity;
+use yantra_core::inventory::{Inventory, MachineInfo};
 use yantra_core::room::{self, Call, Reader, Thread};
 use yantra_core::workspace;
 
@@ -43,12 +48,15 @@ const INVALID_PARAMS: i64 = -32602;
 
 /// Turns a workspace's name into its machine. A test names its own.
 type Locate = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+/// Turns an ssh destination into the host ssh connects to. A blocking call.
+type Resolve = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 #[derive(Clone)]
 struct Served<I> {
     authoriser: Authoriser<I>,
     rooms: Rooms,
     locate: Locate,
+    resolve: Resolve,
     /// [`crate::heartbeat::Fleet::closing`].
     closing: watch::Sender<bool>,
 }
@@ -63,13 +71,20 @@ where
     S: Clone + Send + Sync + 'static,
 {
     let locate: Locate = Arc::new(|name| workspace::load(name).ok().map(|w| w.machine));
-    routes(authoriser, rooms, locate, closing)
+    routes(
+        authoriser,
+        rooms,
+        locate,
+        Arc::new(identity::host_of),
+        closing,
+    )
 }
 
 fn routes<I, S>(
     authoriser: Authoriser<I>,
     rooms: Rooms,
     locate: Locate,
+    resolve: Resolve,
     closing: watch::Sender<bool>,
 ) -> Router<S>
 where
@@ -83,6 +98,7 @@ where
             authoriser,
             rooms,
             locate,
+            resolve,
             closing,
         })
 }
@@ -160,21 +176,23 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
             let arguments = params.get("arguments").unwrap_or(&Value::Null);
             match room::call(name, arguments) {
                 Err(why) => error(id, INVALID_PARAMS, &why),
-                Ok(call) => {
-                    let machine = machine_of(&state.authoriser, &caller.node).await?;
-                    let thread = thread_of(&headers, &machine, &state.locate);
-                    let label = match &thread {
-                        Some(thread) => format!("{machine} · chat {}", thread.thread),
-                        None => machine,
-                    };
-                    let session = thread.is_none().then(|| session_of(&headers)).flatten();
-                    let reader = Reader {
-                        node: caller.node,
-                        thread,
-                        session,
-                    };
-                    result(id, tool(&state, &reader, &label, call).await?)
-                }
+                Ok(call) => match machine_of(&state.authoriser, &caller.node).await {
+                    Err(said) => result(id, outcome(Err(said))),
+                    Ok(machine) => {
+                        let thread = thread_of(&headers, &machine, &state).await;
+                        let label = match &thread {
+                            Some(thread) => format!("{} · chat {}", machine.name, thread.thread),
+                            None => machine.name,
+                        };
+                        let session = thread.is_none().then(|| session_of(&headers)).flatten();
+                        let reader = Reader {
+                            node: caller.node,
+                            thread,
+                            session,
+                        };
+                        result(id, tool(&state, &reader, &label, call).await)
+                    }
+                },
             }
         }
         _ => error(id, METHOD_NOT_FOUND, "Method not found"),
@@ -185,29 +203,20 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     })
 }
 
-async fn tool<I>(
-    state: &Served<I>,
-    reader: &Reader,
-    label: &str,
-    call: Call,
-) -> Result<Value, Refused> {
+async fn tool<I>(state: &Served<I>, reader: &Reader, label: &str, call: Call) -> Value {
     let said = match call {
         Call::Send { room, text } => state
             .rooms
             .send(reader, label, &room, &text)
-            .map(|sent| json!({"seq": sent.seq, "delivered": sent.delivered}).to_string()),
+            .map(|sent| json!({"seq": sent.seq, "delivered": sent.delivered}).to_string())
+            .map_err(|error| error.to_string()),
         Call::Read { room, wait } => {
             let read = state
                 .rooms
                 .read(reader, &room, Duration::from_secs(wait), &state.closing)
                 .await;
             match read {
-                Ok(None) => {
-                    return Err(Refused::Verb {
-                        status: StatusCode::SERVICE_UNAVAILABLE,
-                        said: "yantrad is shutting down; read again once it is back".to_owned(),
-                    });
-                }
+                Ok(None) => Err("yantrad is shutting down; read again once it is back".to_owned()),
                 Ok(Some(messages)) if messages.is_empty() => {
                     Ok(format!("No new messages in room {room}."))
                 }
@@ -216,13 +225,18 @@ async fn tool<I>(
                     .map(|message| room::wrap(&room, message))
                     .collect::<Vec<_>>()
                     .join("\n\n")),
-                Err(error) => Err(error),
+                Err(error) => Err(error.to_string()),
             }
         }
     };
+    outcome(said)
+}
+
+/// A `tools/call` result: the text, and whether it says what went wrong.
+fn outcome(said: Result<String, String>) -> Value {
     let is_error = said.is_err();
-    let text = said.unwrap_or_else(|error| error.to_string());
-    Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
+    let text = said.unwrap_or_else(|error| error);
+    json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
 
 /// I-5 and I-52: `whois` spells the stable id `StableID`, which is what
@@ -230,35 +244,81 @@ async fn tool<I>(
 async fn machine_of<I: Inventory>(
     authoriser: &Authoriser<I>,
     node: &str,
-) -> Result<String, Refused> {
+) -> Result<MachineInfo, String> {
     authoriser
         .inventory()
         .machines()
         .await
-        .map_err(Refused::CannotAsk)?
+        .map_err(|error| format!("tailscale could not list the tailnet: {error}"))?
         .into_iter()
         .find(|machine| machine.id == node)
-        .map(|machine| machine.name)
-        .ok_or_else(|| Refused::Verb {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            said: format!(
+        .ok_or_else(|| {
+            format!(
                 "tailscale knows the caller as {node} but does not list it, so there is no machine name to label with"
-            ),
+            )
         })
 }
 
 /// The header's thread, when its workspace is on the caller's machine.
-fn thread_of(headers: &HeaderMap, machine: &str, locate: &Locate) -> Option<Thread> {
+async fn thread_of<I>(
+    headers: &HeaderMap,
+    machine: &MachineInfo,
+    state: &Served<I>,
+) -> Option<Thread> {
     let (workspace, thread) = headers.get(THREAD)?.to_str().ok()?.split_once('/')?;
     let usable = !thread.is_empty()
         && thread
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-');
-    let on = locate(workspace)?;
-    (usable && on.eq_ignore_ascii_case(machine)).then(|| Thread {
+    if !usable {
+        return None;
+    }
+    let destination = (state.locate)(workspace)?;
+    let on = names(&destination, machine) || {
+        // I-13: `ssh -G` is a blocking spawn.
+        let resolve = Arc::clone(&state.resolve);
+        let asked = destination.clone();
+        tokio::task::spawn_blocking(move || resolve(&asked))
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|host| names(&host, machine))
+    };
+    if !on {
+        tracing::info!(
+            "a room call names workspace {workspace}, which is not on {}",
+            machine.name
+        );
+    }
+    on.then(|| Thread {
         workspace: workspace.to_owned(),
         thread: thread.to_owned(),
     })
+}
+
+/// Whether ssh destination `destination` names the node `machine`. Its host,
+/// without `ssh://`, `user@` or a URL's port, is the node's name, its whole
+/// DNS name, a name under another domain whose first label is the node's
+/// name, or one of its addresses (ADR-0009).
+fn names(destination: &str, machine: &MachineInfo) -> bool {
+    let (url, rest) = match destination.strip_prefix("ssh://") {
+        Some(rest) => (true, rest),
+        None => (false, destination),
+    };
+    let host = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
+    let host = match host.strip_prefix('[') {
+        Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
+        None if url => host.split(':').next().unwrap_or_default(),
+        None => host,
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return machine.addresses.contains(&address);
+    }
+    let name = machine.name.to_ascii_lowercase();
+    host == name
+        || host == machine.dns_name.trim_end_matches('.').to_ascii_lowercase()
+        || host.split_once('.').is_some_and(|(first, _)| first == name)
 }
 
 /// The spec's session id is visible ASCII; any other value is ignored.
@@ -335,8 +395,12 @@ mod tests {
     }
 
     fn fake() -> Fake {
+        let alpha = MachineInfo {
+            addresses: vec![IpAddr::from(ALPHA)],
+            ..machine("nALPHA", "alpha")
+        };
         Fake {
-            machines: vec![machine("nALPHA", "alpha"), machine("nBETA", "beta")],
+            machines: vec![alpha, machine("nBETA", "beta")],
             addresses: Vec::new(),
             callers: [
                 (IpAddr::from(ALPHA), caller("nALPHA", ME)),
@@ -349,12 +413,22 @@ mod tests {
         }
     }
 
-    /// `wa` is on alpha and `wb` on beta.
+    /// `wa` is on alpha and `wb` on beta. `wu` names alpha as a user at its
+    /// DNS name, and `wl` by an ssh alias whose `HostName` is its address.
     fn locate() -> Locate {
         Arc::new(|name| match name {
             "wa" => Some("alpha".to_owned()),
             "wb" => Some("beta".to_owned()),
+            "wu" => Some("yantra@alpha.example.ts.net".to_owned()),
+            "wl" => Some("alpha-box".to_owned()),
             _ => None,
+        })
+    }
+
+    fn resolve() -> Resolve {
+        Arc::new(|destination| match destination {
+            "alpha-box" => Some("100.64.0.2".to_owned()),
+            other => Some(other.to_owned()),
         })
     }
 
@@ -375,6 +449,7 @@ mod tests {
                 Authoriser::new(inventory, &[]),
                 rooms,
                 locate(),
+                resolve(),
                 watch::Sender::new(false),
             ),
             woke,
@@ -602,7 +677,7 @@ mod tests {
             serde_json::from_str::<Value>(text(&sent)).expect("JSON"),
             json!({"seq": 1, "delivered": 1})
         );
-        let woke = woken(&app.woke);
+        let woke = woken(&app.woke).await;
         assert_eq!(woke.len(), 1);
         assert_eq!(
             woke[0].0,
@@ -628,7 +703,7 @@ mod tests {
         )
         .await;
         assert_eq!(back["isError"], false, "{back}");
-        let woke = woken(&app.woke);
+        let woke = woken(&app.woke).await;
         assert_eq!(woke.len(), 2, "{woke:?}");
         assert_eq!(
             woke[1].0,
@@ -675,7 +750,7 @@ mod tests {
         .await;
         assert_eq!(sent["isError"], false, "{sent}");
         assert!(
-            woken(&app.woke).is_empty(),
+            woken(&app.woke).await.is_empty(),
             "beta reads as a node, so nothing wakes"
         );
         let read = tool(&app, BETA, None, "room_read", json!({"room": "r1"})).await;
@@ -866,5 +941,95 @@ mod tests {
             "No new messages in room r1.",
             "the wake delivered it to the thread already"
         );
+    }
+
+    /// The review's finding: a workspace names its machine as ssh does, which
+    /// is rarely the bare Tailscale name, so the header was always dropped.
+    #[test]
+    fn a_destination_names_the_node_as_ssh_would_reach_it() {
+        let alpha = MachineInfo {
+            addresses: vec![IpAddr::from(ALPHA), "fd7a::2".parse().expect("v6")],
+            ..machine("nALPHA", "alpha")
+        };
+        for named in [
+            "alpha",
+            "ALPHA",
+            "yantra@alpha",
+            "alpha.example.ts.net",
+            "alpha.example.ts.net.",
+            "yantra@alpha.lan",
+            "ssh://yantra@alpha:2222",
+            "100.64.0.2",
+            "yantra@100.64.0.2",
+            "ssh://[fd7a::2]:22",
+        ] {
+            assert!(names(named, &alpha), "{named}");
+        }
+        for other in [
+            "beta",
+            "alphabet",
+            "beta.example.ts.net",
+            "alpha-box",
+            "100.64.0.3",
+            "yantra@beta",
+        ] {
+            assert!(!names(other, &alpha), "{other}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_thread_on_a_machine_ssh_names_another_way_is_still_woken() {
+        let app = app();
+        for header in ["wu/U1", "wl/L1"] {
+            tool(
+                &app,
+                ALPHA,
+                Some(header),
+                "room_read",
+                json!({"room": "r1"}),
+            )
+            .await;
+        }
+        tool(
+            &app,
+            BETA,
+            None,
+            "room_send",
+            json!({"room": "r1", "text": "hi"}),
+        )
+        .await;
+        let mut woke: Vec<String> = woken(&app.woke)
+            .await
+            .into_iter()
+            .map(|(thread, _)| format!("{}/{}", thread.workspace, thread.thread))
+            .collect();
+        woke.sort();
+        assert_eq!(woke, ["wl/L1", "wu/U1"]);
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_tailscale_cannot_place_is_an_error_result_not_a_status() {
+        #[derive(Clone)]
+        struct Unlisted;
+        impl Inventory for Unlisted {
+            async fn machines(&self) -> Result<Vec<MachineInfo>, inventory::Error> {
+                Err(inventory::Error::Command {
+                    stderr: "failed to connect to local tailscaled".into(),
+                })
+            }
+            async fn addresses(&self) -> Result<Vec<IpAddr>, inventory::Error> {
+                Ok(Vec::new())
+            }
+            async fn whois(&self, _: IpAddr) -> Result<Option<Caller>, inventory::Error> {
+                Ok(Some(caller("nALPHA", ME)))
+            }
+            async fn owner(&self) -> Result<u64, inventory::Error> {
+                Ok(ME)
+            }
+        }
+        let app = app_with(Unlisted);
+        let answer = tool(&app, ALPHA, None, "room_read", json!({"room": "r1"})).await;
+        assert_eq!(answer["isError"], true, "{answer}");
+        assert!(text(&answer).contains("could not list"), "{answer}");
     }
 }

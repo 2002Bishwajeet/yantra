@@ -123,15 +123,20 @@ impl Rooms {
         self.rooms.contains_key(name)
     }
 
-    /// Makes or joins `name` for `reader`. `true` is a room made now.
+    /// Makes or joins `name` for `reader`. `true` is a room made now. Every
+    /// room's expired members go first, and a room left with no member and
+    /// no message goes with them.
     pub fn join(&mut self, name: &str, reader: &Reader, now: SystemTime) -> Result<bool, Error> {
         if !valid_name(name) {
             return Err(Error::BadName(name.to_owned()));
         }
+        self.rooms.retain(|_, room| {
+            room.members
+                .retain(|_, member| age(member.seen, now) < MEMBER_FOR);
+            !room.members.is_empty() || !room.messages.is_empty()
+        });
         let made = !self.rooms.contains_key(name);
         let room = self.rooms.entry(name.to_owned()).or_default();
-        room.members
-            .retain(|_, member| age(member.seen, now) < MEMBER_FOR);
         // A new member sees what is said after it joins.
         let last = room.last;
         room.members
@@ -565,6 +570,19 @@ mod tests {
         let sent = rooms.send("r", &a, "a", "hi", at(day)).expect("sent");
         assert_eq!(sent.delivered, 1, "b expired, c did not");
         assert!(sent.wake.is_empty());
+    }
+
+    #[test]
+    fn a_room_with_no_member_and_no_message_is_gone_after_a_day() {
+        let mut rooms = Rooms::default();
+        let (a, b) = (node("a"), node("b"));
+        rooms.join("quiet", &a, at(0)).expect("joins");
+        rooms.send("spoken", &a, "a", "hi", at(0)).expect("sent");
+        let day = MEMBER_FOR.as_secs();
+        rooms.join("other", &b, at(day)).expect("joins");
+        assert!(!rooms.contains("quiet"), "no member and no message");
+        assert!(rooms.contains("spoken"), "its message is still there");
+        assert!(rooms.contains("other"));
     }
 
     #[test]
