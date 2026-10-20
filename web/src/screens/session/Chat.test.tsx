@@ -8,7 +8,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
 import { IMAGE_LIMIT, PAUSES } from '@/api/chat'
-import { chatAttached, chatCheckpointFailed, chatCheckpoints, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
+import {
+  chatAttached,
+  chatCheckpointFailed,
+  chatCheckpoints,
+  chatDiffFailed,
+  chatEvents,
+  chatNotAttached,
+  chatNotLoggedIn,
+} from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -576,6 +584,18 @@ describe('checkpoints', () => {
     expect(alert.textContent).toContain('fatal: unable to write new index file')
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
     await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+  })
+
+  it('draws a branch diff that failed under its own heading, and the turn goes on', async () => {
+    await open()
+    type('fix it')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude is answering.'))
+    say(chatDiffFailed)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByRole('heading').textContent).toBe("The branch's changes could not be read")
+    expect(alert.textContent).toContain("could not diff this chat's branch")
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
   })
 })
 

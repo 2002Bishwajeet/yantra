@@ -1,6 +1,7 @@
 import {
   HARNESSES,
   type ChatAttached,
+  type ChatBranchDiff,
   type ChatFailure,
   type ChatFrame,
   type ChatNotAttached,
@@ -26,6 +27,8 @@ export type ChatErrorKind =
   | 'badFrame'
   // git could not keep, diff or restore a checkpoint (Y-448).
   | 'checkpoint'
+  // git could not diff the thread's branch (Y-490).
+  | 'diff'
   // The agent's turn ended failed: ssh refused, the harness not found.
   | 'turnFailed'
   // The socket closed after it opened, and every reopen failed.
@@ -39,6 +42,7 @@ const sentences: Record<ChatErrorKind, string> = {
   busy: 'The agent is still answering. Stop it, or wait for it to end.',
   badFrame: 'The daemon could not read what the dashboard sent.',
   checkpoint: "git on the workspace's machine could not keep or restore this chat's files.",
+  diff: "git on the workspace's machine could not diff this chat's branch.",
   turnFailed: 'The agent could not finish the turn.',
   closed: 'The chat socket closed and did not reopen. A running turn continues on the machine. Try again to see it.',
 }
@@ -140,6 +144,8 @@ export type ChatSocket = {
   stop: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
   revert: (turn: number) => boolean
+  /** Asks for the thread's whole-branch diff, which `onBranchDiff` receives. */
+  diff: () => boolean
   /** Sends an image and resolves to its path on the machine, or rejects with
    *  an `AttachError`. The daemon replies to images in the order they went. */
   attach: (file: Blob) => Promise<string>
@@ -147,7 +153,7 @@ export type ChatSocket = {
   close: () => void
 }
 
-const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn', 'checkpoint'])
+const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn', 'checkpoint', 'diff'])
 const NAMES: ReadonlySet<string> = new Set(HARNESSES)
 
 function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
@@ -162,7 +168,9 @@ function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
 }
 
 /** A daemon frame, or `null` for one this dashboard cannot read. */
-export function frameOf(text: string): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | null {
+export function frameOf(
+  text: string,
+): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | null {
   let said: unknown
   try {
     said = JSON.parse(text)
@@ -177,6 +185,15 @@ export function frameOf(text: string): ThreadEvent | ChatFailure | ChatAttached 
     const refused = said as Partial<ChatNotAttached>
     return (refused.kind === 'notAnImage' || refused.kind === 'unreachable') && typeof refused.said === 'string'
       ? (said as ChatNotAttached)
+      : null
+  }
+  if (said.type === 'branchDiff') {
+    const reply = said as Partial<ChatBranchDiff>
+    return typeof reply.threadId === 'string' &&
+      typeof reply.base === 'string' &&
+      Array.isArray(reply.files) &&
+      typeof reply.unifiedDiff === 'string'
+      ? (said as ChatBranchDiff)
       : null
   }
   if (said.type === 'error') {
@@ -203,9 +220,12 @@ export function openChat(
     onOpen,
     onDropped,
     onRestart,
+    onBranchDiff,
     pauses = PAUSES,
   }: {
     onEvent: (event: ThreadEvent) => void
+    /** The reply to `diff`, which is no event of the timeline. */
+    onBranchDiff?: (diff: ChatBranchDiff) => void
     onError: (error: ChatError) => void
     onOpen?: () => void
     /** The socket dropped and a reopen is waiting. */
@@ -282,6 +302,10 @@ export function openChat(
         }
         return
       }
+      if (frame.type === 'branchDiff') {
+        onBranchDiff?.(frame)
+        return
+      }
       if (frame.type === 'error') {
         said = frame.kind === 'unknownThread' || frame.kind === 'unreachable' || frame.kind === 'notLoggedIn'
         onError(
@@ -342,6 +366,7 @@ export function openChat(
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
     revert: (turn) => send({ type: 'revert', turn }),
+    diff: () => send({ type: 'diff' }),
     attach: (file) => {
       if (file.size > IMAGE_LIMIT) return Promise.reject(new AttachError('tooLarge'))
       if (!IMAGE_TYPES.includes(file.type)) return Promise.reject(new AttachError('notAnImage'))
