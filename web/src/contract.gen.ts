@@ -999,6 +999,12 @@ export const chatCheckpointFailed = {
   "type": "error"
 } satisfies ChatFailure
 
+export const chatDiffFailed = {
+  "kind": "diff",
+  "said": "git could not keep or restore a checkpoint: fatal: bad object HEAD",
+  "type": "error"
+} satisfies ChatFailure
+
 export const chatNotLoggedIn = {
   "command": "opencode auth login",
   "harness": "opencode",

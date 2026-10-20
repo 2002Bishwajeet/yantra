@@ -412,7 +412,9 @@ export function Chat(props: ChatProps) {
               ? 'The turn failed'
               : error.kind === 'checkpoint'
                 ? 'The files could not be kept or put back'
-                : 'The chat could not go on'
+                : error.kind === 'diff'
+                  ? "The branch's changes could not be read"
+                  : 'The chat could not go on'
           }
         />
       ) : null}

@@ -33,14 +33,26 @@ pub(crate) const DIFF_FLAGS: &str =
     "--no-color --no-ext-diff --no-textconv --no-relative --src-prefix=a/ --dst-prefix=b/";
 /// `git diff` dies of SIGPIPE when `head` has read enough, which is no failure.
 const SIGPIPE: i32 = 128 + 13;
-/// Writes the whole worktree, untracked files too, as `$tree` through a
-/// private index, so the real one is untouched. `cp -p` keeps the index's
-/// time, so git's racy check still sees a file changed in its second.
-pub(crate) const SNAPSHOT: &str = "tmp=$(mktemp) || exit\n\
-     trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
-     cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n\
-     GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
-     && tree=$(GIT_INDEX_FILE=$tmp git write-tree)";
+/// A copy of the index as `$tmp`, so the real one is untouched. `cp -p` keeps
+/// the index's time, so git's racy check still sees a file changed in its second.
+macro_rules! private_index {
+    () => {
+        "tmp=$(mktemp) || exit\n\
+         trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
+         cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n"
+    };
+}
+const PRIVATE_INDEX: &str = private_index!();
+/// Writes the whole worktree, untracked files too, as `$tree` through the
+/// private index. It writes a blob for each changed file.
+pub(crate) const SNAPSHOT: &str = concat!(
+    private_index!(),
+    "GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
+     && tree=$(GIT_INDEX_FILE=$tmp git write-tree)"
+);
+/// How `branch` reads a file list and a diff from one pass: each may be
+/// [`LIMIT`] + 1 bytes, with one NUL between them, and one byte more says it was cut.
+const BRANCH_OVER: usize = 2 * (LIMIT + 1) + 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -62,11 +74,11 @@ pub struct Diff {
     pub truncated: bool,
 }
 
-/// Everything a thread changed since its branch left the repository's `HEAD`:
-/// its commits and its uncommitted files (Y-490). Never logged (Q5).
+/// Everything a thread changed since `base`: its commits and its uncommitted
+/// files (Y-490). Never logged (Q5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchDiff {
-    /// The merge-base of the thread's branch and the repository's `HEAD`.
+    /// The newest commit the thread shares with its start or the repository's `HEAD`.
     pub base: String,
     pub files: Vec<FileStat>,
     /// The file list was longer than [`LIMIT`] and was cut at a whole file.
@@ -128,9 +140,8 @@ fn number(stdout: &str) -> Result<u32, Error> {
     })
 }
 
-/// The next number is the count of the thread's refs.
-/// The empty old value makes `update-ref` refuse a ref that exists, so two
-/// captures at once never overwrite each other; the loser counts again once.
+/// The next number is the count of the thread's refs. The empty old value makes
+/// `update-ref` refuse a ref that exists, so a capture that lost a race counts again.
 fn keep(place: &Place, first: bool) -> String {
     let refs = sq(&refs(place));
     let count = format!("n=$(git for-each-ref --format=x {refs} | wc -l) && n=$((n)) || exit\n");
@@ -170,9 +181,10 @@ pub async fn diff<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<Diff, E
              for c in {from} {to}; do \
              git rev-parse -q --verify \"$c\" >/dev/null || exit {NO_CHECKPOINT}; done\n\
              {}",
-            capped(&format!(
-                "git -c core.quotePath=false diff {DIFF_FLAGS} {from} {to}"
-            )),
+            capped(
+                &format!("git -c core.quotePath=false diff {DIFF_FLAGS} {from} {to}"),
+                LIMIT + 1
+            ),
             worktree = sq(&place.worktree),
         ))
         .await?;
@@ -183,30 +195,31 @@ pub async fn diff<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<Diff, E
     }
 }
 
-/// The whole tree of the thread's worktree, untracked files too, against the
-/// merge-base of its branch and the repository's `HEAD`. The base is asked
-/// fresh, because `HEAD` moves after the thread opens.
+/// The thread's worktree, untracked files too, against the newest commit its
+/// `HEAD` shares with its start or with the repository's `HEAD`.
 pub async fn branch<E: Exec>(exec: &E, place: &Place) -> Result<BranchDiff, Error> {
-    let changes = |flags: &str| {
-        capped(&format!(
-            "git -c core.quotePath=false diff {flags} {DIFF_FLAGS} \"$b\" \"$tree\""
-        ))
-    };
     let out = exec
         .exec(&format!(
             "cd {worktree} || exit\n\
-             b=$(git -C {repo} merge-base {branch} HEAD) \
-             || {{ echo 'fatal: the branch has no merge-base with HEAD' >&2; exit 1; }}\n\
-             {SNAPSHOT} || exit\n\
+             h=$(git -C {repo} rev-parse -q --verify HEAD)\n\
+             b=$(git merge-base HEAD {start} $h); s=$?\n\
+             if [ \"$s\" -ne 0 ]; then [ \"$s\" -eq 1 ] && [ -z \"$b\" ] \
+             && echo 'fatal: the thread shares no commit with its start or HEAD' >&2; \
+             exit \"$s\"; fi\n\
+             {PRIVATE_INDEX}\
+             GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A -N || exit\n\
              echo \"$b\"\n\
-             {numstat}\n\
-             printf '\\0'\n\
-             {unified}",
+             {}",
+            capped(
+                &format!(
+                    "GIT_INDEX_FILE=$tmp git -c core.quotePath=false -c core.fsmonitor=false \
+                     diff --numstat -p -z -M {DIFF_FLAGS} \"$b\""
+                ),
+                BRANCH_OVER
+            ),
             worktree = sq(&place.worktree),
             repo = sq(&place.repo),
-            branch = sq(&place.branch),
-            numstat = changes("--numstat -z -M"),
-            unified = changes("-M"),
+            start = sq(&place.base),
         ))
         .await?;
     if !out.success() {
@@ -221,36 +234,37 @@ pub async fn branch<E: Exec>(exec: &E, place: &Place) -> Result<BranchDiff, Erro
         .position(|&b| b == b'\n')
         .ok_or_else(unreadable)?;
     let (base, rest) = (&out.stdout[..line], &out.stdout[line + 1..]);
-    let (numstat, unified) = numstat_end(rest)
-        .map(|end| (&rest[..end], &rest[end + 1..]))
-        .ok_or_else(unreadable)?;
+    let whole = rest.len() < BRANCH_OVER;
+    let (numstat, unified) = match numstat_end(rest) {
+        Some(end) => (&rest[..end], &rest[end + 1..]),
+        None if !whole || rest.is_empty() => (rest, &rest[rest.len()..]),
+        None => return Err(unreadable()),
+    };
     let (files, files_truncated) = stats(numstat)?;
+    let mut diff = cut(unified);
+    diff.truncated |= !whole;
     Ok(BranchDiff {
         base: String::from_utf8_lossy(base).into_owned(),
         files,
         files_truncated,
-        diff: cut(unified),
+        diff,
     })
 }
 
-/// Where the numstat ends in `numstat NUL unified`. A whole `--numstat -z` is
-/// empty or ends in a NUL and never holds two NULs together; a cut one is
-/// [`LIMIT`] + 1 bytes long.
+/// Where the numstat ends in `numstat NUL patch`, which `--numstat -p -z`
+/// prints: no numstat record holds two NULs together, and no patch a NUL.
 fn numstat_end(rest: &[u8]) -> Option<usize> {
-    let end = match rest.first() {
-        Some(0) => 0,
+    match rest.first() {
+        Some(0) => Some(0),
         _ => rest
             .windows(2)
             .position(|pair| pair == [0, 0])
-            .map_or(LIMIT + 1, |at| at + 1)
-            .min(LIMIT + 1),
-    };
-    (end < rest.len()).then_some(end)
+            .map(|at| at + 1),
+    }
 }
 
-/// Reads `git diff --numstat -z`: `added\tdeleted\tpath\0`, or
-/// `added\tdeleted\t\0from\0path\0` for a rename, and `-` for a binary count.
-/// A record the cap cut is dropped.
+/// Reads `added\tdeleted\tpath\0`, or `added\tdeleted\t\0from\0path\0` for a
+/// rename, with `-` for a binary count. A record the cap cut is dropped.
 fn stats(numstat: &[u8]) -> Result<(Vec<FileStat>, bool), Error> {
     let truncated = numstat.len() > LIMIT;
     let mut fields: Vec<&[u8]> = numstat[..numstat.len().min(LIMIT)]
@@ -294,14 +308,13 @@ fn stats(numstat: &[u8]) -> Result<(Vec<FileStat>, bool), Error> {
     Ok((files, truncated))
 }
 
-/// Runs `command` and passes on one byte more than [`LIMIT`], so a caller can
-/// tell that it was cut.
-pub(crate) fn capped(command: &str) -> String {
+/// Runs `command` and passes on at most `over` bytes, one more than a caller
+/// keeps, so it can tell that it was cut.
+pub(crate) fn capped(command: &str, over: usize) -> String {
     format!(
         "exec 3>&1\n\
          s=$({{ {{ {command}; echo $? >&4; }} | head -c {over} >&3; }} 4>&1)\n\
-         [ \"$s\" -eq 0 ] || [ \"$s\" -eq {SIGPIPE} ] || exit \"$s\"",
-        over = LIMIT + 1,
+         [ \"$s\" -eq 0 ] || [ \"$s\" -eq {SIGPIPE} ] || exit \"$s\""
     )
 }
 
@@ -326,9 +339,8 @@ fn cut(stdout: &[u8]) -> Diff {
     }
 }
 
-/// Puts the worktree's files back as checkpoint `turn` kept them, and leaves
-/// the index at `HEAD`. Then deletes every checkpoint above it, so the next
-/// turn is `turn + 1` and diffs against the restored tree.
+/// Puts the files back as checkpoint `turn` kept them, with the index at `HEAD`,
+/// and deletes every checkpoint above it, so the next turn is `turn + 1`.
 pub async fn revert<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<(), Error> {
     let out = exec
         .exec(&format!(
@@ -621,7 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn branch_snapshots_the_tree_against_a_fresh_merge_base_and_diffs_it() {
+    async fn branch_diffs_the_worktree_against_a_fresh_base_in_one_pass() {
         let numstat =
             b"2\t1\tkeep.txt\x000\t0\t\x00old-name.txt\x00new-name.txt\x00-\t-\tblob.bin\x00";
         let mut reply = format!("{BASE}\n").into_bytes();
@@ -650,26 +662,79 @@ mod tests {
             machine.asked(),
             [format!(
                 "cd '{WORKTREE}' || exit\n\
-                     b=$(git -C '/home/u/repo' merge-base 'yantra/chat/web/11111111' HEAD) \
-                     || {{ echo 'fatal: the branch has no merge-base with HEAD' >&2; exit 1; }}\n\
+                     h=$(git -C '/home/u/repo' rev-parse -q --verify HEAD)\n\
+                     b=$(git merge-base HEAD '0123abcd' $h); s=$?\n\
+                     if [ \"$s\" -ne 0 ]; then [ \"$s\" -eq 1 ] && [ -z \"$b\" ] \
+                     && echo 'fatal: the thread shares no commit with its start or HEAD' >&2; \
+                     exit \"$s\"; fi\n\
                      tmp=$(mktemp) || exit\n\
                      trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
                      cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null \
                      || rm -f \"$tmp\"\n\
-                     GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
-                     && tree=$(GIT_INDEX_FILE=$tmp git write-tree) || exit\n\
+                     GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A -N || exit\n\
                      echo \"$b\"\n\
                      exec 3>&1\n\
-                     s=$({{ {{ git -c core.quotePath=false diff --numstat -z -M {flags} \
-                     \"$b\" \"$tree\"; echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
-                     [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\"\n\
-                     printf '\\0'\n\
-                     exec 3>&1\n\
-                     s=$({{ {{ git -c core.quotePath=false diff -M {flags} \
-                     \"$b\" \"$tree\"; echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
+                     s=$({{ {{ GIT_INDEX_FILE=$tmp git -c core.quotePath=false \
+                     -c core.fsmonitor=false diff --numstat -p -z -M {flags} \
+                     \"$b\"; echo $? >&4; }} | head -c 524292 >&3; }} 4>&1)\n\
                      [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\""
             ),]
         );
+    }
+
+    #[tokio::test]
+    async fn a_branch_with_no_change_is_an_empty_diff() {
+        let machine = Machine::answering(vec![out(0, format!("{BASE}\n").as_bytes(), "")]);
+        assert_eq!(
+            branch(&machine, &place()).await.expect("diffed"),
+            BranchDiff {
+                base: BASE.to_owned(),
+                files: vec![],
+                files_truncated: false,
+                diff: Diff {
+                    unified: String::new(),
+                    truncated: false,
+                },
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_branch_diff_past_the_cap_is_cut_however_the_cap_falls() {
+        let record = b"1\t1\tf\x00";
+        let ask = |rest: Vec<u8>| async move {
+            let mut reply = format!("{BASE}\n").into_bytes();
+            reply.extend(rest);
+            branch(&Machine::answering(vec![out(0, &reply, "")]), &place())
+                .await
+                .expect("diffed")
+        };
+
+        // A short list and a long diff: the diff is cut, the list whole.
+        let mut long_diff = record.to_vec();
+        long_diff.push(0);
+        long_diff.resize(BRANCH_OVER, b'+');
+        let cut_diff = ask(long_diff).await;
+        assert!(!cut_diff.files_truncated);
+        assert_eq!(cut_diff.files.len(), 1);
+        assert!(cut_diff.diff.truncated);
+        assert_eq!(cut_diff.diff.unified.len(), LIMIT);
+
+        // A list past the cap leaves less of the diff, which is still cut.
+        let mut long_list = record.repeat(LIMIT / record.len() + 10);
+        long_list.push(0);
+        long_list.resize(BRANCH_OVER, b'+');
+        let cut_list = ask(long_list).await;
+        assert!(cut_list.files_truncated);
+        assert!(cut_list.diff.truncated, "the pass was cut");
+        assert!(cut_list.diff.unified.len() < LIMIT);
+
+        // A list that fills the pass leaves no diff.
+        let all_list = record.repeat(BRANCH_OVER / record.len() + 1);
+        let no_diff = ask(all_list[..BRANCH_OVER].to_vec()).await;
+        assert!(no_diff.files_truncated);
+        assert_eq!(no_diff.diff.unified, "");
+        assert!(no_diff.diff.truncated);
     }
 
     #[test]
@@ -721,20 +786,12 @@ mod tests {
     }
 
     #[test]
-    fn the_numstat_ends_at_the_separator_or_at_the_cap() {
-        assert_eq!(numstat_end(b"\0"), Some(0), "no change");
+    fn the_numstat_ends_at_the_separator() {
         assert_eq!(numstat_end(b"\0diff"), Some(0));
         assert_eq!(numstat_end(b"1\t1\tf\0\0diff"), Some(6));
         assert_eq!(numstat_end(b"0\t0\t\0a\0b\0\0"), Some(9), "a rename");
-        let mut cut = b"1\t1\t".to_vec();
-        cut.resize(LIMIT + 1, b'f');
-        let whole = cut.len();
-        cut.extend_from_slice(b"\0\0\0diff");
-        assert_eq!(numstat_end(&cut), Some(whole), "cut mid-path");
-        cut[whole - 1] = 0;
-        assert_eq!(numstat_end(&cut), Some(whole), "cut after a NUL");
-        assert_eq!(numstat_end(&cut[..whole]), None, "no separator");
-        assert_eq!(numstat_end(b"1\t1\tf\0"), None);
+        assert_eq!(numstat_end(b""), None, "no change");
+        assert_eq!(numstat_end(b"1\t1\tf\0"), None, "no separator");
     }
 
     #[tokio::test]
@@ -744,16 +801,11 @@ mod tests {
             branch(&gone, &place()).await,
             Err(Error::Git { stderr }) if stderr == "sh: cd: can't cd to /x"
         ));
-        let unrelated = Machine::answering(vec![out(
-            1,
-            b"",
-            "fatal: the branch has no merge-base with HEAD\n",
-        )]);
-        assert!(matches!(
-            branch(&unrelated, &place()).await,
-            Err(Error::Git { stderr }) if stderr == "fatal: the branch has no merge-base with HEAD"
-        ));
-        for odd in [&b""[..], b"no newline", format!("{BASE}\n").as_bytes()] {
+        for odd in [
+            &b""[..],
+            b"no newline",
+            format!("{BASE}\n1\t1\tf\0").as_bytes(),
+        ] {
             assert!(
                 matches!(
                     branch(&Machine::answering(vec![out(0, odd, "")]), &place()).await,
