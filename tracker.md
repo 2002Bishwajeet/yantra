@@ -394,6 +394,7 @@ deleted everywhere else.
 | Y-542 | Act on the minor findings of the Y-447 post-merge review | ⬜ todo | claude | Y-541 | **Done** when each minor finding listed in PR #481 is fixed with a test or answered as not needed. |
 | Y-543 | Fix the open review findings of Y-490 | 🔵 review | claude | Y-490 | **Done** when a `diff` during a turn does not stall the socket, a diff waits for or refuses a running revert, a diff failure has its own error kind, the branch diff is one remote command, and each has a test that fails on bbdf6b1. **Merged 2026-10-20.** |
 | Y-544 | Fix the open review findings of Y-492 | 🔵 review | claude | Y-492 | **Done** when drafting and pushing work on a Mac, a failed commit leaves the index as it was, commit and push refuse a running turn or revert, and each fix has a test that fails on 2ba20af. **Merged 2026-10-20.** The owner still checks a draft and an `osxkeychain` push on the real Mac. |
+| Y-545 | The build loop's reviewer sorts every finding | 🔵 review | claude | — | **Done** when the review step returns every finding as blocking or minor, with a written test for blocking, so a finding the reviewer says should hold the merge cannot pass the gate. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
