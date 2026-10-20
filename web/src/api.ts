@@ -616,3 +616,28 @@ export type Placement = { ranked: Placed[]; rejected: Unplaced[] }
 /** Neither field ranks on the heartbeat alone. `folders` is the clone folder
  *  this browser remembers per machine, and it wins over the one the daemon finds. */
 export type PlacementAsk = { repo?: string; path?: string; folders?: Record<string, string> }
+
+// Y-536: rooms (ADR-0038). They live in yantrad's memory, so a restart
+// empties the list and turns a room's page into a 404.
+
+/** `GET /api/rooms`. `spent` counts agent messages since the owner last
+ *  acted; at `budget` the room pauses. `last_at` is Unix seconds. */
+export type RoomSummary = {
+  name: string
+  spent: number
+  budget: number
+  paused: boolean
+  members: number
+  messages: number
+  last_at: number | null
+}
+
+/** `from` is the label the daemon wrote from identity: a machine, a machine
+ *  and a Chat thread, or `owner on <machine>`. `text` is untrusted. */
+export type RoomMessage = { seq: number; at: number; from: string; text: string; budget: number }
+
+/** `GET /api/rooms/{room}`: the summary and the messages the room keeps. */
+export type Room = RoomSummary & { log: RoomMessage[] }
+
+/** `POST /api/rooms/{room}/messages` with `{ text }`. */
+export type RoomPosted = { seq: number; delivered: number }

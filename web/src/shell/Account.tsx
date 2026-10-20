@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Info, Settings as SettingsIcon } from 'lucide-react'
+import { Info, MessagesSquare, Settings as SettingsIcon } from 'lucide-react'
 import { Menu, MenuLinkItem, MenuPopup } from '@/m3/menu/Menu'
 import { guardOutsidePress, useReady, type PopupProps } from './useReady'
 
@@ -10,6 +10,9 @@ export function AccountMenu(props: PopupProps) {
   return (
     <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
       <MenuPopup anchor={props.anchor} finalFocus={props.anchor}>
+        <MenuLinkItem icon={<MessagesSquare />} render={<Link to="/rooms" />}>
+          Rooms
+        </MenuLinkItem>
         <MenuLinkItem icon={<SettingsIcon />} render={<Link to="/settings" />}>
           Settings
         </MenuLinkItem>

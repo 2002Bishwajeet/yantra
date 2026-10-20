@@ -81,6 +81,8 @@ function defaults() {
     // `yantra ssh-identity` has not made, a 404.
     connection: contract.github,
     sshIdentity: contract.sshIdentity,
+    // Y-536: the rooms yantrad holds in memory, by name. The `rooms` scenario fills it.
+    rooms: {},
     status: Object.fromEntries(
       contract.agents.map((one) => [one.data.workspace, one]),
     ),
@@ -240,6 +242,25 @@ function entriesOf(state, path) {
   return made
 }
 
+const BUDGET = 20
+// The fixture's clock: scenario.ts pins the browser at 2026-09-06T12:00:00Z.
+const FIXTURE_NOW = 1788696000
+
+function roomSummary(name, room) {
+  return {
+    name,
+    spent: room.spent,
+    budget: BUDGET,
+    paused: room.paused,
+    members: room.members,
+    messages: room.log.length,
+    last_at: room.log.at(-1)?.at ?? null,
+  }
+}
+
+// yantra_core::room::Error, as the daemon words it.
+const noRoom = (name) => `no room ${name}: it was never made, or yantrad has restarted since`
+
 /** Route table: method, path pattern, handler. A handler answers
  *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
  *  for an empty body. */
@@ -261,6 +282,42 @@ const routes = [
     },
   ],
   ['GET', /^\/api\/workspaces$/, (s) => [200, s.workspaces]],
+  // Y-536: mcp.rs's owner routes. A post is labelled from identity, here the phone.
+  ['GET', /^\/api\/rooms$/, (s) => [200, Object.entries(s.rooms).map(([name, room]) => roomSummary(name, room))]],
+  [
+    'GET',
+    /^\/api\/rooms\/([^/]+)$/,
+    (s, [name]) => {
+      const room = s.rooms[name]
+      return room ? [200, { ...roomSummary(name, room), log: room.log }] : [404, noRoom(name)]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/rooms\/([^/]+)\/messages$/,
+    (s, [name], sent) => {
+      const text = typeof sent.text === 'string' ? sent.text : ''
+      if (!s.rooms[name]) return [404, noRoom(name)]
+      if (text.trim() === '') return [400, 'a message needs some text']
+      if (Buffer.byteLength(text) > 16 * 1024) {
+        return [400, `a message is at most 16 KiB, and this one is ${Buffer.byteLength(text)} bytes`]
+      }
+      const room = s.rooms[name]
+      const seq = (room.log.at(-1)?.seq ?? 0) + 1
+      Object.assign(room, { spent: 0, paused: false })
+      room.log.push({ seq, at: FIXTURE_NOW, from: 'owner on pixel', text, budget: 0 })
+      return [200, { seq, delivered: room.members }]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/rooms\/([^/]+)\/resume$/,
+    (s, [name]) => {
+      if (!s.rooms[name]) return [404, noRoom(name)]
+      Object.assign(s.rooms[name], { spent: 0, paused: false })
+      return [204]
+    },
+  ],
   ['GET', /^\/api\/sessions$/, (s) => [200, s.sessions]],
   ['GET', /^\/api\/readiness$/, (s) => [200, s.readiness]],
   ['GET', /^\/api\/attention$/, (s) => [200, s.attention]],

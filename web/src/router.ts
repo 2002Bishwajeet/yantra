@@ -12,6 +12,8 @@ import {
   machinesQuery,
   notificationsQuery,
   readinessQuery,
+  roomQuery,
+  roomsQuery,
   sessionsQuery,
   statusQuery,
   workspacesQuery,
@@ -238,6 +240,28 @@ const notifications = createRoute({
   head: () => titled('Notifications'),
 })
 
+// Y-536: the rooms live agents share (ADR-0038). Not a destination: the
+// palette and the account menu reach it, and a phone pushes it.
+const rooms = createRoute({
+  getParentRoute: () => root,
+  path: '/rooms',
+  component: lazyRouteComponent(() => import('@/screens/rooms/Rooms'), 'Rooms'),
+  loader: ({ context: { client } }) => {
+    void client.prefetchQuery(roomsQuery())
+  },
+  head: () => titled('Rooms'),
+})
+
+const room = createRoute({
+  getParentRoute: () => root,
+  path: '/rooms/$room',
+  component: lazyRouteComponent(() => import('@/screens/rooms/Room'), 'Room'),
+  loader: ({ context: { client }, params }) => {
+    void client.prefetchQuery(roomQuery(params.room))
+  },
+  head: ({ params }) => titled(params.room),
+})
+
 // Y-339: the component gallery, for the reviewer and Playwright. Not in what
 // ships: the shipped tree has the route and no chunk behind it. `vite build
 // --mode e2e` is the only build that carries the chunk, and Y-360 made that
@@ -266,6 +290,8 @@ export const routeTree = root.addChildren([
   settingsCategory,
   addDevice,
   notifications,
+  rooms,
+  room,
   gallery,
 ])
 

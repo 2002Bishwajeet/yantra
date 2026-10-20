@@ -1,18 +1,19 @@
 # yantra web — the dashboard
 
-Thirteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+Sixteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every workspace and machine at `/fleet`, the machines compared at
 `/machines`, the guided Add a device at `/machines/add`, one machine at `/m/$machine`, one tmux session's terminal at
 `/m/$machine/s/$session`, one workspace's chat, terminal, transcript and spend
 at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
 spend at `/usage`, the preferences at `/settings` and `/settings/$category`, and
-the phone's notifications at `/notifications`. A thirteenth, `/m3`, is the
+the phone's notifications at `/notifications`, and the rooms live agents share at
+`/rooms` and `/rooms/$room` (Y-536). A sixteenth, `/m3`, is the
 component gallery and has a chunk behind it in dev builds only.
 `/` is the one eager route; every other screen arrives with its own chunk
 (ADR-0024 §3). The readings poll on TanStack Query and every write is a
 mutation in [`src/api/`](src/api/README.md).
 
-`⌘K` opens the palette ([`shell/Palette.tsx`](src/shell/Palette.tsx)): six
+`⌘K` opens the palette ([`shell/Palette.tsx`](src/shell/Palette.tsx)): seven
 pages, the workspaces that loaded, and the machines. **No entry is a verb**
 (D3 §3.2), which is what keeps a destructive action further than two keystrokes
 from anywhere.
@@ -821,6 +822,9 @@ src/
     new-session/     `/new` — four steps on one TanStack Form
     settings/        `/settings` and `/settings/$category`
     usage/           `/usage`
+    rooms/           `/rooms` and `/rooms/$room` — read a room, post into it,
+                     resume it (ADR-0038). Reached from the palette and the
+                     account menu, never a fifth destination
     setup/           the checklist: `/` until the key and a ready machine
                      exist, then the dashboard's Finish setup card (D7 §4.1)
     add-device/      `/machines/add` — one flow per platform, each beat seen
@@ -829,7 +833,7 @@ src/
                      `inApp`, and the vitest setup
 e2e/
   lib/               sizes, scenario, axe, screenshot, keyboard, routes
-  fixture/           the Node daemon and its twelve scenarios
+  fixture/           the Node daemon and its seventeen scenarios
   __screenshots__/   one baseline per screen, scenario and size
 design/              Y-330's options round. A second Vite root; ships nothing
 ```

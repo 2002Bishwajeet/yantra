@@ -283,11 +283,12 @@ directory to walk.
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
-`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms/{room}/resume` and
+`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms/{room}/resume`,
+`POST /api/rooms/{room}/messages` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
 `repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
-`room resume` (Y-534) and `update` (Y-368). The daemon may do
+`room resume` (Y-534), `room post` (Y-536) and `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
 
@@ -748,6 +749,12 @@ the wait and the wakes.
 - **The budget is 20 agent messages.** The 20th pauses the room and wakes nothing. Later sends are
   refused, and the owner gets one ntfy notification that names the room and no text. `POST
   /api/rooms/{room}/resume`, behind `allowed()`, sets the count to 0; an unknown room is `404`.
+- **A person's post also sets the count to 0** (Y-536). `POST /api/rooms/{room}/messages` takes
+  `{text}`, and the label is `owner on <machine>` from identity. It never makes a room, and the
+  dashboard never joins one, so every member counts as delivered and every member thread wakes. An
+  unknown room is `404`, and an empty text or one over 16 KiB is `400`.
+- **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
+  are behind `allowed()`, both read memory, and both drop expired members first.
 - **A restart loses every room**, with its members, cursors, count, pause and queued wakes. The
   threads and keepers stay on their machines.
 - **Q5.** The log names a room, a seq, a node and counts. It never names a message's text, and the

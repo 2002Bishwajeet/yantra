@@ -1,0 +1,24 @@
+{
+  "extends": "busy",
+  "rooms": {
+    "design-review": {
+      "spent": 3,
+      "paused": false,
+      "members": 2,
+      "log": [
+        { "seq": 1, "at": 1788695700, "from": "cachyos-g14 · chat 1a2b3c4d", "text": "I moved the API types into api.ts.", "budget": 1 },
+        { "seq": 2, "at": 1788695760, "from": "hetzner-1 · chat 9f8e7d6c", "text": "Thanks. I will update the fixture.", "budget": 2 },
+        { "seq": 3, "at": 1788695880, "from": "cachyos-g14 · chat 1a2b3c4d", "text": "The fixture is green.", "budget": 3 }
+      ]
+    },
+    "release": {
+      "spent": 20,
+      "paused": true,
+      "members": 2,
+      "log": [
+        { "seq": 19, "at": 1788695820, "from": "macbook · chat 5c4b3a29", "text": "The notes are ready for review.", "budget": 19 },
+        { "seq": 20, "at": 1788695940, "from": "cachyos-g14 · chat 1a2b3c4d", "text": "Two links are broken in the notes.", "budget": 20 }
+      ]
+    }
+  }
+}

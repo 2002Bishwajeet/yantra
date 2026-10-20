@@ -30,6 +30,7 @@ const PAGES = [
   { to: '/machines', label: 'Machines' },
   { to: '/usage', label: 'Usage' },
   { to: '/new', label: 'New session' },
+  { to: '/rooms', label: 'Rooms' },
   { to: '/settings', label: 'Settings' },
 ] as const
 
