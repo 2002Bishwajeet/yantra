@@ -283,6 +283,19 @@ describe('a line comment', () => {
     fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
     expect(onComment).toHaveBeenCalledWith('> logo.png\n\ntoo big')
   })
+
+  it('opens a whole-file box beside a file that has hunks, and keeps line comments alive after Cancel', async () => {
+    listing(200, threads)
+    const onComment = open()
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on file: src/new.rs' }))
+    const box = await waitFor(compose)
+    expect(box.getAttribute('aria-label')).toBe('Comment on src/new.rs whole file')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('textbox', { name: /^Comment on/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'plus on src/new.rs' }))
+    await waitFor(compose)
+    expect(onComment).not.toHaveBeenCalled()
+  })
 })
 
 describe('open in editor', () => {

@@ -892,4 +892,45 @@ describe('the branch diff', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
     await settled(() => expect(frames()).toEqual([{ type: 'diff' }, { type: 'diff' }]))
   })
+
+  async function asked() {
+    await open()
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalled())
+    fireEvent.click(diffButton())
+    await settled(() => expect(frames()).toEqual([{ type: 'diff' }]))
+  }
+
+  it('fails the panel when the socket drops before the reply', async () => {
+    await asked()
+    server.hangUp()
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The diff could not be asked for')
+  })
+
+  it('fails the panel on the badFrame a diff with no thread draws', async () => {
+    await asked()
+    say({ type: 'error', kind: 'badFrame', said: 'no thread is open, so there is nothing to diff' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('There is no branch to compare yet')
+  })
+
+  it('leaves Refresh on while the panel waits', async () => {
+    await asked()
+    const refresh = screen.getByRole('button', { name: 'Refresh the diff' })
+    expect(refresh.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(refresh)
+    await settled(() => expect(frames()).toEqual([{ type: 'diff' }, { type: 'diff' }]))
+  })
+
+  it("gives a turn's checkpoint failure to the conversation, not the panel", async () => {
+    await asked()
+    type('go')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(frames()).toHaveLength(2))
+    say(chatCheckpointFailed)
+    await settled(() => expect(screen.getByText('Reading the diff')).toBeTruthy())
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('alert').textContent).toContain(chatCheckpointFailed.said)
+  })
 })

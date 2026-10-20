@@ -92,8 +92,8 @@ function FileSection(props: {
         <FileDiff
           fileDiff={parsed}
           lineAnnotations={
-            mine
-              ? [{ side: mine.range?.endSide ?? mine.range?.side ?? 'additions', lineNumber: mine.range ? Math.max(mine.range.start, mine.range.end) : 0 }]
+            mine?.range
+              ? [{ side: mine.range.endSide ?? mine.range.side ?? 'additions', lineNumber: Math.max(mine.range.start, mine.range.end) }]
               : []
           }
           options={{
@@ -111,14 +111,15 @@ function FileSection(props: {
           }}
           renderAnnotation={() => (
             <DiffComment
-              label={`${entry.path} ${mine?.range ? rangeLabel(mine.range) : 'whole file'}`}
+              label={`${entry.path} ${mine?.range ? rangeLabel(mine.range) : ''}`}
               onCancel={onCancel}
               onSubmit={onSubmit}
             />
           )}
           selectedLines={mine?.range ?? null}
         />
-      ) : mine ? (
+      ) : null}
+      {mine && !mine.range ? (
         <DiffComment label={`${entry.path} whole file`} onCancel={onCancel} onSubmit={onSubmit} />
       ) : null}
     </section>

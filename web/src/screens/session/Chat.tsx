@@ -411,7 +411,6 @@ export function Chat(props: ChatProps) {
         {showDiff ? (
           <Button
             aria-label="Refresh the diff"
-            disabled={branch.state === 'loading'}
             icon={<RefreshCw />}
             onClick={chat.requestDiff}
             variant="text"

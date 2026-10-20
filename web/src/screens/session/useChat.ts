@@ -30,11 +30,19 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
   const socket = useRef<ChatSocket | null>(null)
   const attach = useRef(thread)
   const named = useEffectEvent((id: string) => onThread(id))
+  const idle = useEffectEvent(() => timeline.turn === 'idle')
 
   useEffect(() => {
     const live = openChat((after) => chatAddress(workspace, attach.current, after), {
       onOpen: () => setLink('open'),
-      onDropped: () => setLink('connecting'),
+      onDropped: () => {
+        setLink('connecting')
+        // The reply to a diff asked on the dropped socket is lost (ADR-0035).
+        if (asking.current) {
+          asking.current = false
+          setBranch({ state: 'failed', error: new DiffError('notOpen') })
+        }
+      },
       // The daemon replays the whole thread, so it is drawn again.
       onRestart: () => dispatch({ type: 'reset' }),
       onEvent: (event) => {
@@ -49,11 +57,18 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         setBranch({ state: 'ready', diff })
       },
       onError: (failure) => {
-        // The daemon answers a diff it cannot read with a `checkpoint` error,
-        // which belongs to the panel that asked and not to the conversation.
-        if (asking.current && failure.kind === 'checkpoint') {
+        // The daemon answers a diff it cannot read with a `checkpoint` error. The
+        // frame carries no request id, so while a turn or a revert runs it is taken
+        // as theirs; Refresh stays enabled for a diff left waiting.
+        if (asking.current && failure.kind === 'checkpoint' && idle()) {
           asking.current = false
           setBranch({ state: 'failed', error: new DiffError('failed', failure.said) })
+          return
+        }
+        // The daemon answers a diff with no attached thread with a badFrame.
+        if (asking.current && failure.kind === 'badFrame' && idle()) {
+          asking.current = false
+          setBranch({ state: 'failed', error: new DiffError('noThread') })
           return
         }
         if (asking.current && (failure.kind === 'closed' || failure.kind === 'refused')) {
@@ -129,7 +144,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       setError(null)
       setLink('connecting')
       asking.current = false
-      setBranch({ state: 'idle' })
+      // A diff panel left open shows this and waits for Refresh, not a skeleton nobody fills.
+      setBranch({ state: 'failed', error: new DiffError('notOpen') })
       dispatch({ type: 'reset' })
       reopen((n) => n + 1)
     },
