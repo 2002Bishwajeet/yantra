@@ -326,7 +326,7 @@ pub async fn threads(name: &str, github: Option<(&Github, &Token)>) -> Result<Ve
     Ok(threads)
 }
 
-async fn pr_of(github: Option<(&Github, &Token)>, url: &str, branch: &str) -> Pr {
+pub(crate) async fn pr_of(github: Option<(&Github, &Token)>, url: &str, branch: &str) -> Pr {
     let Some((github, token)) = github else {
         return Pr::Unknown {
             said: github::Error::NoGrant.to_string(),

@@ -1,4 +1,4 @@
-//! GitHub, read with the grant this process holds
+//! GitHub, read and written with the grant this process holds
 //! ([ADR-0023](../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md)).
 //!
 //! **The token is an OAuth App token from the device flow**: it does not
@@ -327,6 +327,11 @@ pub enum Error {
     #[error("{issue} is a pull request, not an issue")]
     IsAPull { issue: String },
 
+    /// GitHub's `message` and its first `errors[].message`, and never the
+    /// title or the body that was sent.
+    #[error("GitHub refused the pull request: {said}")]
+    Unprocessable { said: String },
+
     #[error("could not read {what} from what GitHub sent")]
     Parse {
         what: &'static str,
@@ -549,6 +554,69 @@ impl Github {
         .await
     }
 
+    /// `GET /repos/{o}/{r}`'s `default_branch`, which a new PR targets.
+    pub async fn default_branch(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+    ) -> Result<String, Error> {
+        let url = format!("{}/repos/{owner}/{repo}", self.api);
+        let token = token.clone();
+        blocking(move || {
+            let mut response = get(&url, &token, &[]).map_err(unreachable)?;
+            ok(&response, "the repository")?;
+            let found: RepoAnswer = read_json(&mut response, "the repository")?;
+            Ok(found.default_branch)
+        })
+        .await
+    }
+
+    /// `POST /repos/{o}/{r}/pulls` (ADR-0034 decision 1). `head` is
+    /// `owner:branch`. A 422 is [`Error::Unprocessable`]: a PR already open, or
+    /// no commits between the two branches.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_pull(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<Pull, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls", self.api);
+        let token = token.clone();
+        let sent = serde_json::json!({"head": head, "base": base, "title": title, "body": body});
+        blocking(move || {
+            let mut response = post(&url, &token, &sent).map_err(unreachable)?;
+            match response.status().as_u16() {
+                201 => {}
+                401 => return Err(Error::Refused),
+                422 => {
+                    let refusal: Refusal = read_json(&mut response, "the refusal")?;
+                    return Err(Error::Unprocessable {
+                        said: refusal.said(),
+                    });
+                }
+                status => {
+                    return Err(Error::Status {
+                        status,
+                        what: "the new pull request",
+                    });
+                }
+            }
+            let made: PullAnswer = read_json(&mut response, "the new pull request")?;
+            Ok(Pull {
+                number: made.number,
+                url: made.html_url,
+                state: PullState::Open,
+            })
+        })
+        .await
+    }
+
     /// The work inbox over the REST API. Three independent reads, so they are
     /// three blocking threads rather than one that triples the worst case.
     pub async fn attention(&self, token: &Token) -> Result<Attention, Error> {
@@ -677,6 +745,39 @@ struct PullAnswer {
 }
 
 #[derive(serde::Deserialize)]
+struct RepoAnswer {
+    default_branch: String,
+}
+
+/// A 422's two messages. `errors[].field` and `.value` are not named: a
+/// value can echo what was sent.
+#[derive(serde::Deserialize)]
+struct Refusal {
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    errors: Vec<Reason>,
+}
+
+#[derive(serde::Deserialize)]
+struct Reason {
+    #[serde(default)]
+    message: Option<String>,
+}
+
+impl Refusal {
+    fn said(self) -> String {
+        let first = self.errors.into_iter().find_map(|error| error.message);
+        match (self.message.trim(), first) {
+            ("", None) => "422 with no reason".to_owned(),
+            (message, None) => message.to_owned(),
+            ("", Some(first)) => first,
+            (message, Some(first)) => format!("{message}: {first}"),
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
 struct Latest {
     tag_name: String,
 }
@@ -755,6 +856,16 @@ fn request(
     request.call()
 }
 
+fn post(url: &str, token: &Token, body: &serde_json::Value) -> Result<Response, ureq::Error> {
+    agent()
+        .post(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("Authorization", &format!("Bearer {}", token.reveal()))
+        .header("Content-Type", "application/json")
+        .send(body.to_string())
+}
+
 fn ok(response: &Response, what: &'static str) -> Result<(), Error> {
     match response.status().as_u16() {
         200 => Ok(()),
@@ -821,7 +932,7 @@ async fn blocking<T: Send + 'static>(
 // `expect` in a test is a deliberate abort with a message; the workspace lint
 // targets library code, where the same call would take the daemon down.
 #[allow(clippy::expect_used, clippy::panic)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{SocketAddr, TcpListener};
@@ -938,7 +1049,7 @@ mod tests {
 
     /// A bound port, so a scripted reply can name it in a `Link` header
     /// before anything is served.
-    fn listen() -> (TcpListener, SocketAddr) {
+    pub(crate) fn listen() -> (TcpListener, SocketAddr) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let address = listener.local_addr().expect("the port it got");
         (listener, address)
@@ -948,7 +1059,7 @@ mod tests {
     /// lines, and a JSON body. Plain HTTP on loopback — what is under test is
     /// the request that leaves and how the answer is read, and nothing about
     /// TLS. Returns every request as it arrived.
-    fn serve(
+    pub(crate) fn serve(
         listener: TcpListener,
         replies: Vec<(&'static str, String, String)>,
     ) -> JoinHandle<Vec<String>> {
@@ -997,16 +1108,16 @@ mod tests {
         body.len() >= length
     }
 
-    fn reply(status: &'static str, body: &str) -> (&'static str, String, String) {
+    pub(crate) fn reply(status: &'static str, body: &str) -> (&'static str, String, String) {
         (status, String::new(), body.to_owned())
     }
 
-    fn at(address: SocketAddr) -> Github {
+    pub(crate) fn at(address: SocketAddr) -> Github {
         let base = format!("http://{address}");
         Github::at(&base, &base)
     }
 
-    fn token() -> Token {
+    pub(crate) fn token() -> Token {
         Token::new("gho_notarealtoken".to_owned())
     }
 
@@ -1586,5 +1697,131 @@ mod tests {
             ),
             "{first}"
         );
+    }
+
+    #[tokio::test]
+    async fn pr_open_reads_the_default_branch_and_posts_the_pull_as_json() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply(
+                    "200 OK",
+                    r#"{"full_name":"o/r","default_branch":"trunk","private":false}"#,
+                ),
+                reply(
+                    "201 Created",
+                    r#"{"number":21,"html_url":"https://github.com/o/r/pull/21","state":"open","merged_at":null}"#,
+                ),
+            ],
+        );
+        let github = at(address);
+
+        let base = github
+            .default_branch(&token(), "o", "r")
+            .await
+            .expect("a branch");
+        let pull = github
+            .create_pull(
+                &token(),
+                "o",
+                "r",
+                "o:yantra/7-0a1b",
+                &base,
+                "Fix it",
+                "Closes #7",
+            )
+            .await
+            .expect("created");
+
+        assert_eq!(base, "trunk");
+        assert_eq!(
+            pull,
+            Pull {
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+                state: PullState::Open,
+            }
+        );
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[0].starts_with("GET /repos/o/r HTTP/1.1\r\n"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            seen[1].starts_with("POST /repos/o/r/pulls HTTP/1.1\r\n"),
+            "{}",
+            seen[1]
+        );
+        let headers = seen[1].to_lowercase();
+        assert!(
+            headers.contains("authorization: bearer gho_notarealtoken"),
+            "{headers}"
+        );
+        assert!(
+            headers.contains("content-type: application/json"),
+            "{headers}"
+        );
+        assert!(
+            headers.contains("x-github-api-version: 2022-11-28"),
+            "{headers}"
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(seen[1].rsplit("\r\n\r\n").next().unwrap_or_default())
+                .expect("a JSON body");
+        assert_eq!(
+            body,
+            serde_json::json!({"head":"o:yantra/7-0a1b","base":"trunk","title":"Fix it","body":"Closes #7"})
+        );
+    }
+
+    #[tokio::test]
+    async fn pr_open_refused_with_422_names_githubs_reason_and_not_the_title() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply(
+                    "422 Unprocessable Entity",
+                    r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"A pull request already exists for o:yantra/7-0a1b."}],"documentation_url":"https://docs.github.com"}"#,
+                ),
+                reply(
+                    "422 Unprocessable Entity",
+                    r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","field":"title","code":"missing_field","value":"secret title"}]}"#,
+                ),
+            ],
+        );
+        let (github, token) = (at(address), token());
+        let create = || {
+            github.create_pull(
+                &token,
+                "o",
+                "r",
+                "o:b",
+                "main",
+                "secret title",
+                "secret body",
+            )
+        };
+
+        let exists = create().await.expect_err("422");
+        let bare = create().await.expect_err("422");
+
+        match &exists {
+            Error::Unprocessable { said } => assert_eq!(
+                said,
+                "Validation Failed: A pull request already exists for o:yantra/7-0a1b."
+            ),
+            other => panic!("{other:?}"),
+        }
+        match &bare {
+            Error::Unprocessable { said } => assert_eq!(said, "Validation Failed"),
+            other => panic!("{other:?}"),
+        }
+        for refused in [exists, bare] {
+            let text = refused.to_string();
+            assert!(!text.contains("secret"), "{text}");
+        }
     }
 }

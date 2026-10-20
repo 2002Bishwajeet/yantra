@@ -10,7 +10,8 @@
  * directory. Changed: the diff is the whole worktree through a private index rather than the
  * staged patch, the run happens on the machine over ssh, and no session is kept.
  */
-//! Commit and push a chat thread's branch (Y-492, ADR-0034 decisions 2 and 5).
+//! Commit and push a chat thread's branch (Y-492, ADR-0034 decisions 2 and 5),
+//! and open its PR with the daemon's grant (Y-449, decisions 1 and 3).
 //!
 //! Every call is one remote command in the thread's worktree, with the
 //! machine's own git identity and credential. Yantra keeps nothing: the
@@ -22,7 +23,7 @@
 use crate::agent;
 use crate::checkpoint::{self, DIFF_FLAGS, SNAPSHOT, capped};
 use crate::delegate::said;
-use crate::github::IssueRef;
+use crate::github::{self, Github, IssueRef, PullState, Token};
 use crate::ssh::{self, Exec, Os, Ssh};
 use crate::thread::{self, Place};
 use crate::tmux::{self, Tmux, run_shell, sq};
@@ -41,6 +42,8 @@ const NO_IDENTITY: i32 = 3;
 const NOTHING: i32 = 4;
 const NO_REMOTE: i32 = 5;
 const GIT_FAILED: i32 = 6;
+const NOT_PUSHED: i32 = 7;
+const AHEAD: i32 = 8;
 const TIMED_OUT: i32 = 124;
 const NO_CLAUDE: i32 = 127;
 /// How long a draft, a commit with its hooks, or a push may run.
@@ -97,6 +100,14 @@ pub struct Committed {
 pub struct Pushed {
     pub remote: String,
     pub branch: String,
+}
+
+/// A thread's PR. `created` is `false` when one was already open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opened {
+    pub number: u64,
+    pub url: String,
+    pub created: bool,
 }
 
 /// A commit message for everything the worktree changed, untracked files
@@ -413,6 +424,104 @@ fn redact(text: &str) -> String {
     out
 }
 
+/// The tip's subject and body, which a PR's title and body default to.
+#[derive(Debug, PartialEq, Eq)]
+struct Tip {
+    subject: String,
+    body: String,
+}
+
+/// The pushed tip, or a refusal when the local branch is not at it. Reads
+/// only local refs, so it needs no credential and no Mac tmux server.
+async fn tip<E: Exec>(exec: &E, place: &Place, branch: &str) -> Result<Tip, Failed> {
+    let out = exec
+        .exec(&tip_command(place, branch))
+        .await
+        .map_err(Error::Ssh)?;
+    match out.status {
+        NOT_PUSHED => return Err(Failed::NotPushed),
+        AHEAD => return Err(Failed::Ahead),
+        0 => {}
+        _ => return Err(failed(&out).into()),
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let (subject, body) = stdout.split_once('\0').unwrap_or((&stdout, ""));
+    Ok(Tip {
+        subject: subject.trim().to_owned(),
+        body: body.trim().to_owned(),
+    })
+}
+
+/// `branch` is the upstream's branch, as [`thread::Listed`] read it.
+fn tip_command(place: &Place, branch: &str) -> String {
+    format!(
+        "cd {worktree} || exit {GIT_FAILED}\n\
+         r=$(git config --get {remote}) || exit {NOT_PUSHED}\n\
+         l=$(git rev-parse -q --verify {local}) || exit {GIT_FAILED}\n\
+         t=$(git rev-parse -q --verify \"refs/remotes/$r/\"{branch}) || exit {NOT_PUSHED}\n\
+         [ \"$l\" = \"$t\" ] || exit {AHEAD}\n\
+         git log -1 --no-show-signature --format=%s%x00%b \"$t\"",
+        worktree = sq(&place.worktree),
+        remote = sq(&format!("branch.{}.remote", place.branch)),
+        local = sq(&format!("refs/heads/{}", place.branch)),
+        branch = sq(branch),
+    )
+}
+
+/// `Closes #n` in the PR's own repository, `Closes owner/repo#n` elsewhere.
+fn closes(issue: &IssueRef, owner: &str, repo: &str) -> String {
+    if issue.owner.eq_ignore_ascii_case(owner) && issue.repo.eq_ignore_ascii_case(repo) {
+        format!("Closes #{}", issue.number)
+    } else {
+        format!("Closes {issue}")
+    }
+}
+
+/// Opens a PR from the thread's pushed branch to the repository's default
+/// branch, or answers the one already open (§B4). Yantra keeps no link: the
+/// threads list reads the PR from the upstream (ADR-0034 decision 3).
+pub async fn open_pr<E: Exec>(
+    exec: &E,
+    found: &thread::Listed,
+    github: &Github,
+    token: &Token,
+    title: Option<&str>,
+    body: Option<&str>,
+) -> Result<Opened, Failed> {
+    let (url, branch) = found.upstream.as_ref().ok_or(Failed::NotPushed)?;
+    let (owner, repo) = github::repo_of(url).ok_or(Failed::NotGithub)?;
+    let tip = tip(exec, &found.place, branch).await?;
+    if let Some(pull) = github.pull_for_head(token, &owner, &repo, branch).await?
+        && pull.state == PullState::Open
+    {
+        return Ok(Opened {
+            number: pull.number,
+            url: pull.url,
+            created: false,
+        });
+    }
+    let base = github.default_branch(token, &owner, &repo).await?;
+    let title = title
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or(&tip.subject);
+    let mut body = body.unwrap_or(&tip.body).trim().to_owned();
+    if let Some(issue) = found.issue.as_deref().and_then(|issue| issue.parse().ok()) {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(&closes(&issue, &owner, &repo));
+    }
+    let head = format!("{owner}:{branch}");
+    let pull = github
+        .create_pull(token, &owner, &repo, &head, &base, title, &body)
+        .await?;
+    Ok(Opened {
+        number: pull.number,
+        url: pull.url,
+        created: true,
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Failed {
     #[error(transparent)]
@@ -420,6 +529,19 @@ pub enum Failed {
 
     #[error("the workspace has no thread {id}")]
     NoThread { id: String },
+
+    #[error("the thread's branch has no upstream; push it first with `yantra push`")]
+    NotPushed,
+
+    // The URL is not repeated: a remote can carry a credential in it.
+    #[error("the thread's upstream is not a github.com repository")]
+    NotGithub,
+
+    #[error("the thread's branch is not at its upstream's tip; push it first with `yantra push`")]
+    Ahead,
+
+    #[error(transparent)]
+    Github(#[from] github::Error),
 
     #[error(transparent)]
     Thread(#[from] thread::Error),
@@ -452,6 +574,16 @@ async fn login_server(ssh: &Ssh) -> Result<Option<String>, Failed> {
         return Err(Error::NoLoginServer.into());
     }
     Ok(Some(tmux.path().to_owned()))
+}
+
+async fn find_listed(name: &str, id: &str) -> Result<(Ssh, thread::Listed), Failed> {
+    let (workspace, ssh) = reach(name).await?;
+    let found = thread::listed(&ssh, &workspace)
+        .await?
+        .into_iter()
+        .find(|found| thread::name(&found.place) == id)
+        .ok_or_else(|| Failed::NoThread { id: id.to_owned() })?;
+    Ok((ssh, found))
 }
 
 async fn find(name: &str, id: &str) -> Result<(Ssh, Place), Failed> {
@@ -491,21 +623,30 @@ pub async fn commit_for(name: &str, id: &str, message: Option<&str>) -> Result<C
 /// [`push`] for thread `id` of workspace `name`. An issue thread's remote
 /// branch carries the issue's number.
 pub async fn push_for(name: &str, id: &str) -> Result<Pushed, Failed> {
-    let (workspace, ssh) = reach(name).await?;
-    let found = thread::listed(&ssh, &workspace)
-        .await?
-        .into_iter()
-        .find(|found| thread::name(&found.place) == id)
-        .ok_or_else(|| Failed::NoThread { id: id.to_owned() })?;
+    let (ssh, found) = find_listed(name, id).await?;
     let issue = found.issue.and_then(|issue| issue.parse::<IssueRef>().ok());
     let tmux = login_server(&ssh).await?;
     Ok(push(&ssh, &found.place, issue.as_ref(), tmux.as_deref()).await?)
 }
 
+/// [`open_pr`] for thread `id` of workspace `name`.
+pub async fn open_pr_for(
+    name: &str,
+    id: &str,
+    github: &Github,
+    token: &Token,
+    title: Option<&str>,
+    body: Option<&str>,
+) -> Result<Opened, Failed> {
+    let (ssh, found) = find_listed(name, id).await?;
+    open_pr(&ssh, &found, github, token, title, body).await
+}
+
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::github::tests::{at, listen, reply, serve, token};
     use std::sync::{Mutex, PoisonError};
 
     const WORKTREE: &str = "/home/u/.yantra/worktrees/chat/web/11111111";
@@ -980,6 +1121,300 @@ mod tests {
             (7, &b"out\n"[..], &b"err\n"[..])
         );
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const UPSTREAM: &str = "yantra/42-11111111";
+    const NONE_OPEN: &str = "[]";
+    const REPO: &str = r#"{"full_name":"o/r","default_branch":"main"}"#;
+    const MADE: &str = r#"{"number":21,"html_url":"https://github.com/o/r/pull/21","state":"open","merged_at":null}"#;
+    const OPEN: &str = r#"[{"number":21,"html_url":"https://github.com/o/r/pull/21","state":"open","merged_at":null}]"#;
+
+    fn listed(issue: Option<&str>, remote: Option<&str>) -> thread::Listed {
+        thread::Listed {
+            place: place(),
+            issue: issue.map(str::to_owned),
+            upstream: remote.map(|url| (url.to_owned(), UPSTREAM.to_owned())),
+        }
+    }
+
+    fn pushed_tip() -> ssh::Output {
+        out(0, "Fix the thing\0- one\n- two\n\n", "")
+    }
+
+    /// The JSON body of the POST among `seen`.
+    fn posted(seen: &[String]) -> serde_json::Value {
+        let post = seen
+            .iter()
+            .find(|request| request.starts_with("POST "))
+            .expect("a POST");
+        serde_json::from_str(post.rsplit("\r\n\r\n").next().unwrap_or_default())
+            .expect("a JSON body")
+    }
+
+    #[tokio::test]
+    async fn pr_open_for_an_issue_thread_says_closes_n_and_defaults_to_the_tip() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply("200 OK", NONE_OPEN),
+                reply("200 OK", REPO),
+                reply("201 Created", MADE),
+            ],
+        );
+        let machine = Machine::answering(vec![pushed_tip()]);
+
+        let opened = open_pr(
+            &machine,
+            &listed(Some("o/r#42"), Some("git@github.com:o/r.git")),
+            &at(address),
+            &token(),
+            None,
+            None,
+        )
+        .await
+        .expect("opened");
+
+        assert_eq!(
+            opened,
+            Opened {
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+                created: true,
+            }
+        );
+        let seen = served.join().expect("the listener thread");
+        assert_eq!(
+            posted(&seen),
+            serde_json::json!({
+                "head": "o:yantra/42-11111111",
+                "base": "main",
+                "title": "Fix the thing",
+                "body": "- one\n- two\n\nCloses #42",
+            })
+        );
+        let script = format!(
+            "cd '{WORKTREE}' || exit 6\n\
+             r=$(git config --get 'branch.yantra/chat/web/11111111.remote') || exit 7\n\
+             l=$(git rev-parse -q --verify 'refs/heads/yantra/chat/web/11111111') || exit 6\n\
+             t=$(git rev-parse -q --verify \"refs/remotes/$r/\"'yantra/42-11111111') || exit 7\n\
+             [ \"$l\" = \"$t\" ] || exit 8\n\
+             git log -1 --no-show-signature --format=%s%x00%b \"$t\""
+        );
+        assert_eq!(machine.asked(), [script]);
+    }
+
+    #[tokio::test]
+    async fn pr_open_for_another_repositorys_issue_names_it_whole_and_takes_the_given_text() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply("200 OK", NONE_OPEN),
+                reply("200 OK", REPO),
+                reply("201 Created", MADE),
+            ],
+        );
+        let machine = Machine::answering(vec![pushed_tip()]);
+
+        open_pr(
+            &machine,
+            &listed(Some("other/tracker#9"), Some("https://github.com/o/r.git")),
+            &at(address),
+            &token(),
+            Some("My title"),
+            Some(""),
+        )
+        .await
+        .expect("opened");
+
+        let body = posted(&served.join().expect("the listener thread"));
+        assert_eq!(body["title"], "My title");
+        assert_eq!(body["body"], "Closes other/tracker#9");
+    }
+
+    #[test]
+    fn pr_open_closes_the_same_repository_in_any_case() {
+        let issue: IssueRef = "O/R#3".parse().expect("an issue");
+        assert_eq!(closes(&issue, "o", "r"), "Closes #3");
+        assert_eq!(closes(&issue, "o", "fork"), "Closes O/R#3");
+    }
+
+    /// §B4: twice is one PR. The stub answers one request, so a POST would
+    /// find nothing listening.
+    #[tokio::test]
+    async fn pr_open_answers_the_open_pr_and_posts_nothing() {
+        let (listener, address) = listen();
+        let served = serve(listener, vec![reply("200 OK", OPEN)]);
+        let machine = Machine::answering(vec![pushed_tip()]);
+
+        let opened = open_pr(
+            &machine,
+            &listed(None, Some("git@github.com:o/r.git")),
+            &at(address),
+            &token(),
+            None,
+            None,
+        )
+        .await
+        .expect("the open one");
+
+        assert!(!opened.created);
+        assert_eq!(opened.number, 21);
+        let seen = served.join().expect("the listener thread");
+        assert_eq!(seen.len(), 1);
+        assert!(
+            seen[0].starts_with("GET /repos/o/r/pulls?head=o%3Ayantra%2F42-11111111"),
+            "{}",
+            seen[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn pr_open_refuses_no_upstream_a_foreign_remote_and_an_unpushed_tip() {
+        let (listener, address) = listen();
+        drop(listener);
+        let github = at(address);
+        let machine = Machine::answering(vec![out(AHEAD, "", ""), out(NOT_PUSHED, "", "")]);
+        let open = |found: thread::Listed| {
+            let (machine, github) = (&machine, &github);
+            async move { open_pr(machine, &found, github, &token(), None, None).await }
+        };
+
+        assert!(matches!(
+            open(listed(None, None)).await,
+            Err(Failed::NotPushed)
+        ));
+        let foreign = open(listed(None, Some("https://me:secret@gitlab.com/o/r.git")))
+            .await
+            .expect_err("not github");
+        assert!(matches!(foreign, Failed::NotGithub));
+        assert!(!foreign.to_string().contains("secret"), "{foreign}");
+        assert_eq!(machine.asked().len(), 0, "both refused before the machine");
+
+        let github_remote = Some("git@github.com:o/r.git");
+        assert!(matches!(
+            open(listed(None, github_remote)).await,
+            Err(Failed::Ahead)
+        ));
+        assert!(matches!(
+            open(listed(None, github_remote)).await,
+            Err(Failed::NotPushed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn pr_open_refused_by_github_is_its_own_failure() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("200 OK", NONE_OPEN),
+                reply("200 OK", REPO),
+                reply(
+                    "422 Unprocessable Entity",
+                    r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"No commits between main and yantra/42-11111111"}]}"#,
+                ),
+            ],
+        );
+        let machine = Machine::answering(vec![pushed_tip()]);
+
+        let refused = open_pr(
+            &machine,
+            &listed(None, Some("git@github.com:o/r.git")),
+            &at(address),
+            &token(),
+            None,
+            None,
+        )
+        .await
+        .expect_err("422");
+
+        match refused {
+            Failed::Github(github::Error::Unprocessable { said }) => {
+                assert_eq!(
+                    said,
+                    "Validation Failed: No commits between main and yantra/42-11111111"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The threads list reads the PR from the upstream, so a new PR shows
+    /// there with nothing kept.
+    #[tokio::test]
+    async fn pr_open_then_shows_in_the_threads_list() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("200 OK", NONE_OPEN),
+                reply("200 OK", REPO),
+                reply("201 Created", MADE),
+                reply("200 OK", OPEN),
+            ],
+        );
+        let (github, token) = (at(address), token());
+        let found = listed(None, Some("git@github.com:o/r.git"));
+        let machine = Machine::answering(vec![pushed_tip()]);
+        open_pr(&machine, &found, &github, &token, None, None)
+            .await
+            .expect("opened");
+
+        let (url, branch) = found.upstream.as_ref().expect("an upstream");
+        assert_eq!(
+            thread::pr_of(Some((&github, &token)), url, branch).await,
+            thread::Pr::Open {
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+            }
+        );
+    }
+
+    /// The tip command on a real git: pushed, then a commit ahead, then no
+    /// remote-tracking ref at all.
+    #[test]
+    fn pr_open_reads_the_tip_on_a_real_git() {
+        let dir = std::env::temp_dir().join(format!("yt-pr-tip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let work = dir.join("work");
+        let mut here = place();
+        here.worktree = work.display().to_string();
+        let git = format!(
+            "export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+             GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t\n\
+             git init -q --bare {dir}/bare.git && git init -q -b {b} {work} && cd {work} \
+             && git commit -q --allow-empty -m 'Fix the thing' -m 'why' \
+             && git remote add origin {dir}/bare.git \
+             && git push -q -u origin {b}:{UPSTREAM}",
+            dir = dir.display(),
+            work = work.display(),
+            b = here.branch,
+        );
+        assert!(sh(&git).success(), "the fixture is made");
+        let env = "export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1\n";
+        let tip = || sh(&format!("{env}{}", tip_command(&here, UPSTREAM)));
+
+        let pushed = tip();
+        assert_eq!(pushed.status, 0);
+        assert!(pushed.stdout.starts_with(b"Fix the thing\0why\n"));
+        let ahead = format!(
+            "{env}cd {} && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t \
+             GIT_COMMITTER_EMAIL=t@t git commit -q --allow-empty -m more",
+            work.display()
+        );
+        assert!(sh(&ahead).success());
+        assert_eq!(tip().status, AHEAD);
+        assert!(
+            sh(&format!(
+                "{env}cd {} && git update-ref -d refs/remotes/origin/{UPSTREAM}",
+                work.display()
+            ))
+            .success()
+        );
+        assert_eq!(tip().status, NOT_PUSHED);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

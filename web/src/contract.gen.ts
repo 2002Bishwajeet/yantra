@@ -40,6 +40,7 @@ import type {
   ThreadEvent,
   ThreadMessage,
   ThreadOpened,
+  ThreadPrOpened,
   ThreadPushed,
   Transcript,
   Workspace,
@@ -765,6 +766,12 @@ export const threadPushed = {
   "branch": "yantra/492-0a1b2c3d4e5f6a7b",
   "remote": "origin"
 } satisfies ThreadPushed
+
+export const threadPrOpened = {
+  "created": true,
+  "number": 497,
+  "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
+} satisfies ThreadPrOpened
 
 export const cloning = {
   "machine": "cachyos-g14",
