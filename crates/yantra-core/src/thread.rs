@@ -596,7 +596,7 @@ mod tests {
                 "top=$(git -C '{REPO}' rev-parse --show-toplevel 2>/dev/null) || exit 3\n\
                  wt=\"$HOME\"/.yantra/worktrees/'chat/web/{id}'\n\
                  mkdir -p \"$HOME/.yantra/worktrees\" \
-                 && git -C \"$top\" worktree add -q -b 'yantra/chat/web/{id}' \"$wt\" HEAD >&2 \
+                 && git -C \"$top\" worktree add -q --no-track -b 'yantra/chat/web/{id}' \"$wt\" HEAD >&2 \
                  && printf '%s\\n%s\\n' \"$top\" \"$wt\" && git -C \"$wt\" rev-parse HEAD"
             )
         );

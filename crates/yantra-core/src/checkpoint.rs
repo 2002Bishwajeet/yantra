@@ -29,15 +29,27 @@ const NO_CHECKPOINT: i32 = 3;
 const IDENTITY: &str = "GIT_AUTHOR_NAME=Yantra GIT_AUTHOR_EMAIL=yantra@localhost \
                         GIT_COMMITTER_NAME=Yantra GIT_COMMITTER_EMAIL=yantra@localhost";
 /// The browser reads `a/` and `b/`, so no user config may change the format.
-const DIFF_FLAGS: &str =
+pub(crate) const DIFF_FLAGS: &str =
     "--no-color --no-ext-diff --no-textconv --no-relative --src-prefix=a/ --dst-prefix=b/";
 /// `git diff` dies of SIGPIPE when `head` has read enough, which is no failure.
 const SIGPIPE: i32 = 128 + 13;
 /// A copy of the index as `$tmp`, so the real one is untouched. `cp -p` keeps
 /// the index's time, so git's racy check still sees a file changed in its second.
-const PRIVATE_INDEX: &str = "tmp=$(mktemp) || exit\n\
-     trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
-     cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n";
+macro_rules! private_index {
+    () => {
+        "tmp=$(mktemp) || exit\n\
+         trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
+         cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n"
+    };
+}
+const PRIVATE_INDEX: &str = private_index!();
+/// Writes the whole worktree, untracked files too, as `$tree` through the
+/// private index. It writes a blob for each changed file.
+pub(crate) const SNAPSHOT: &str = concat!(
+    private_index!(),
+    "GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
+     && tree=$(GIT_INDEX_FILE=$tmp git write-tree)"
+);
 /// How `branch` reads a file list and a diff from one pass: each may be
 /// [`LIMIT`] + 1 bytes, with one NUL between them, and one byte more says it was cut.
 const BRANCH_OVER: usize = 2 * (LIMIT + 1) + 2;
@@ -146,9 +158,7 @@ fn keep(place: &Place, first: bool) -> String {
         "cd {worktree} || exit\n\
          {count}\
          {only_first}\
-         {PRIVATE_INDEX}\
-         GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
-         && tree=$(GIT_INDEX_FILE=$tmp git write-tree) \
+         {SNAPSHOT} \
          && commit=$({IDENTITY} git commit-tree -m 'yantra checkpoint' \"$tree\") || exit\n\
          if ! git update-ref {refs}/\"$n\" \"$commit\" '' 2>/dev/null; then\n\
          {again}\
@@ -300,7 +310,7 @@ fn stats(numstat: &[u8]) -> Result<(Vec<FileStat>, bool), Error> {
 
 /// Runs `command` and passes on at most `over` bytes, one more than a caller
 /// keeps, so it can tell that it was cut.
-fn capped(command: &str, over: usize) -> String {
+pub(crate) fn capped(command: &str, over: usize) -> String {
     format!(
         "exec 3>&1\n\
          s=$({{ {{ {command}; echo $? >&4; }} | head -c {over} >&3; }} 4>&1)\n\

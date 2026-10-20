@@ -40,6 +40,9 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
 | `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
+| `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
+| `POST /api/workspaces/{name}/threads/{thread}/commit` | `yantra commit [-m MSG]` |
+| `POST /api/workspaces/{name}/threads/{thread}/push` | `yantra push` |
 | `POST /api/workspaces/{name}/tokens` | `yantra tokens`; an optional `{"since": <RFC 3339>}` body is the dashboard's window and has no CLI flag (Y-354) |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
