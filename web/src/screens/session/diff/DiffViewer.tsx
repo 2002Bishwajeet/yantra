@@ -5,31 +5,29 @@
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
-import { useId, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useId, useMemo, useRef, useState } from 'react'
 import { getFiletypeFromFileName, parsePatchFiles, type FileDiffMetadata, type SelectedLineRange } from '@pierre/diffs'
 import { FileDiff } from '@pierre/diffs/react'
 import { MessageSquarePlus } from 'lucide-react'
 import type { Workspace } from '@/api'
-import { asApiError } from '@/api/errors'
-import { threadsQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mono, Text } from '@/m3/text/Text'
-import { commentBlock, quotedLines, rangeLabel } from './comment'
+import { anchorOf, commentBlock, quotedLines, rangeLabel } from './comment'
 import type { DiffData } from './data'
 import { DiffComment } from './DiffComment'
 import { DiffTree } from './DiffTree'
 import { EditorMenu } from './EditorMenu'
-import { DiffError } from './errors'
 import { knows } from './shiki'
-import { filesOfPatch, treeEntries, type TreeEntry } from './tree'
+import { binaryPaths, filesOfPatch, treeEntries, type TreeEntry } from './tree'
+import type { Editors } from './useEditors'
 
 export type DiffViewerProps = {
   workspace: Workspace
-  /** The chat's thread, whose worktree the editor links name. */
-  thread: string | null
   data: DiffData
+  editors: Editors
+  /** A turn's card says nothing of the editors: the menu is off with its reason. */
+  quiet?: boolean
   /** Gets the quoted block. The caller puts it in the composer; nothing is sent. */
   onComment: (block: string) => void
 }
@@ -61,9 +59,11 @@ function FileSection(props: {
         ? 'A binary file has no lines to show.'
         : 'The diff was cut before this file.'
       : parsed.hunks.length === 0
-        ? parsed.type === 'rename-pure'
-          ? 'Renamed with no change to its lines.'
-          : 'A binary file has no lines to show.'
+        ? entry.binary
+          ? 'A binary file has no lines to show.'
+          : parsed.type === 'rename-pure'
+            ? 'Renamed with no change to its lines.'
+            : 'No lines changed: the file is empty or only its mode changed.'
         : null
   return (
     <section aria-labelledby={id} className="diff__file" data-path={entry.path}>
@@ -75,6 +75,7 @@ function FileSection(props: {
         </h3>
         <Button
           aria-label={`Comment on file: ${entry.path}`}
+          disabled={draft !== null && mine === null}
           icon={<MessageSquarePlus />}
           onClick={() => onStart({ path: entry.path, range: null })}
           variant="text"
@@ -93,7 +94,7 @@ function FileSection(props: {
           fileDiff={parsed}
           lineAnnotations={
             mine?.range
-              ? [{ side: mine.range.endSide ?? mine.range.side ?? 'additions', lineNumber: Math.max(mine.range.start, mine.range.end) }]
+              ? [anchorOf(parsed, mine.range)]
               : []
           }
           options={{
@@ -102,8 +103,9 @@ function FileSection(props: {
             diffStyle: 'unified',
             disableFileHeader: true,
             overflow: 'scroll',
-            enableGutterUtility: mine === null,
-            enableLineSelection: mine === null,
+            // One open comment box at a time: a second selection would drop what is typed in it.
+            enableGutterUtility: draft === null,
+            enableLineSelection: draft === null,
             onGutterUtilityClick: (range) => onStart({ path: entry.path, range }),
             onLineSelectionEnd: (range) => {
               if (range) onStart({ path: entry.path, range })
@@ -127,35 +129,27 @@ function FileSection(props: {
 }
 
 export default function DiffViewer(props: DiffViewerProps) {
-  const { workspace, thread, data, onComment } = props
-  const parsed = new Map(
-    parsePatchFiles(data.unified)
-      .flatMap((patch) => patch.files)
-      // A grammar the build leaves out would fail the file; text draws it plain.
-      .map((file): [string, FileDiffMetadata] => {
-        const lang = getFiletypeFromFileName(file.name)
-        return [file.name, lang === 'text' || knows(lang) ? file : { ...file, lang: 'text' }]
-      }),
-  )
-  const types = new Map([...parsed].map(([name, file]) => [name, file.type]))
-  const entries = treeEntries(data.files ?? filesOfPatch([...parsed.values()]), types)
+  const { workspace, data, editors, quiet, onComment } = props
+  const { parsed, entries } = useMemo(() => {
+    const parsed = new Map(
+      parsePatchFiles(data.unified)
+        .flatMap((patch) => patch.files)
+        // A grammar the build leaves out would fail the file; text draws it plain.
+        .map((file): [string, FileDiffMetadata] => {
+          const lang = getFiletypeFromFileName(file.name)
+          return [file.name, lang === 'text' || knows(lang) ? file : { ...file, lang: 'text' }]
+        }),
+    )
+    const types = new Map([...parsed].map(([name, file]) => [name, file.type]))
+    return { parsed, entries: treeEntries(data.files ?? filesOfPatch([...parsed.values()], binaryPaths(data.unified)), types) }
+  }, [data])
 
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const sections = useRef(new Map<string, HTMLElement>())
   const heads = useRef(new Map<string, HTMLElement>())
 
-  const threads = useQuery({ ...threadsQuery(workspace.name), enabled: thread !== null })
-  const found = threads.data?.find((one) => one.id === thread)
-  const trouble =
-    thread === null
-      ? new DiffError('threadsFailed', 'this chat has no thread yet')
-      : threads.isError
-        ? new DiffError('threadsFailed', asApiError(threads.error).said)
-        : threads.isSuccess && found === undefined
-          ? new DiffError('threadsFailed', `this workspace lists no thread ${thread}`)
-          : null
-  const worktree = found?.worktree ?? null
+  const { worktree, trouble, retry } = editors
   const why = trouble ? trouble.describe() : 'The editor menu waits for this thread’s worktree.'
 
   const reveal = (path: string) => {
@@ -169,11 +163,11 @@ export default function DiffViewer(props: DiffViewerProps) {
 
   return (
     <div className="diff">
-      {trouble ? (
+      {trouble && !quiet ? (
         <ErrorSurface.Inline
           error={trouble}
           eyebrow={`on ${workspace.machine}`}
-          reset={() => void threads.refetch()}
+          reset={retry}
           title="Files cannot open in an editor"
         />
       ) : null}

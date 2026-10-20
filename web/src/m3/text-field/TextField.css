@@ -144,11 +144,26 @@
   opacity: 0.38;
 }
 
-/* A multi-line field starts one line tall and grows with its text. */
 textarea.m3-text-field__input {
-  height: auto;
-  max-height: 40vh;
   resize: none;
-  field-sizing: content;
   font-family: inherit;
+}
+
+/* Where the field can size itself to its text, the box grows with it; elsewhere the text scrolls in 56px. */
+@supports (field-sizing: content) {
+  .m3-text-field__box:has(textarea.m3-text-field__input) {
+    height: auto;
+    min-height: 56px;
+  }
+
+  textarea.m3-text-field__input {
+    field-sizing: content;
+    height: auto;
+    max-height: 40vh;
+    padding-block: 8px;
+  }
+
+  .m3-text-field[data-variant="filled"] textarea.m3-text-field__input {
+    padding-block: 24px 8px;
+  }
 }

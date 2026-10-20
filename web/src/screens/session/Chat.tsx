@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Diff, ImagePlus, RefreshCw, Square, X } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ArrowUp, CornerDownLeft, Diff, ImagePlus, RefreshCw, Square, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
@@ -18,6 +18,7 @@ import { useFormFactor } from '@/shell/formFactor'
 import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
+import { useEditors } from './diff/useEditors'
 import { HarnessPicker } from './HarnessPicker'
 import { keepMode, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
@@ -295,6 +296,8 @@ export type ChatProps = {
   thread?: string
   /** The daemon named a new thread; the URL keeps it. */
   onThread: (thread: string) => void
+  /** Y-489: the issue's first text, from the picker that opened this thread. */
+  initialDraft?: string
 }
 
 /** The streaming chat (ADR-0026, Y-356, ADR-0033). The first turn picks the
@@ -302,20 +305,30 @@ export type ChatProps = {
  *  writes the tree the Terminal tab's agent is in. Every harness draws on the
  *  one timeline. */
 export function Chat(props: ChatProps) {
-  const { workspace, thread, onThread } = props
+  const { workspace, thread, onThread, initialDraft } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(initialDraft ?? '')
   const [showDiff, setShowDiff] = useState(false)
   const [added, setAdded] = useState(false)
   const diffButton = useRef<HTMLButtonElement>(null)
   const { branch } = chat
-  const sheet: DiffState =
-    branch.state === 'ready'
-      ? { state: 'ready', data: branchData(branch.diff) }
-      : branch.state === 'failed'
-        ? branch
-        : { state: 'loading' }
+  // The viewer parses by identity, so a keystroke in the composer must not make a new one.
+  const sheet = useMemo<DiffState>(
+    () =>
+      branch.state === 'ready'
+        ? { state: 'ready', data: branchData(branch.diff) }
+        : branch.state === 'failed'
+          ? branch
+          : { state: 'loading' },
+    [branch],
+  )
+  const editors = useEditors(
+    workspace.name,
+    timeline.thread,
+    showDiff || timeline.entries.some((entry) => entry.kind === 'diff'),
+  )
+  const field = useRef<HTMLFormElement>(null)
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
   // A new thread is named on its first turn, and keeps the mode it was sent with.
@@ -385,6 +398,20 @@ export function Chat(props: ChatProps) {
             ? 'Type a message to send it.'
             : null
 
+  const addComment = (block: string) => {
+    setDraft((now) => appendToDraft(now, block))
+    setAdded(true)
+  }
+
+  const asks = timeline.requests.map((request) => (
+    <Asking
+      agent={agent}
+      key={request.requestId}
+      onAnswer={(decision) => chat.answer(request.requestId, decision)}
+      request={request}
+    />
+  ))
+
   const toggleDiff = () => {
     if (showDiff) {
       setShowDiff(false)
@@ -425,15 +452,18 @@ export function Chat(props: ChatProps) {
       {showDiff ? (
         <section aria-label="Branch diff" className="chat__branch">
           <DiffSheet
-            onComment={(block) => {
-              setDraft((now) => appendToDraft(now, block))
-              setAdded(true)
-            }}
+            editors={editors}
+            onComment={addComment}
             onRetry={chat.requestDiff}
             state={sheet}
-            thread={timeline.thread}
             workspace={workspace}
           />
+        </section>
+      ) : null}
+      {/* The diff hides the conversation, but the agent still waits on these. */}
+      {showDiff && asks.length > 0 ? (
+        <section aria-label="Waiting for your answer" className="chat__asks">
+          {asks}
         </section>
       ) : null}
       <section aria-label="Conversation" className="chat__turns" hidden={showDiff}>
@@ -453,24 +483,14 @@ export function Chat(props: ChatProps) {
               disabled={busy || link !== 'open'}
               diff={entry}
               key={entry.id}
-              onComment={(block) => {
-                setDraft((now) => appendToDraft(now, block))
-                setAdded(true)
-              }}
+              editors={editors}
+              onComment={addComment}
               onRevert={chat.revert}
-              thread={timeline.thread}
               workspace={workspace}
             />
           ),
         )}
-        {timeline.requests.map((request) => (
-          <Asking
-            agent={agent}
-            key={request.requestId}
-            onAnswer={(decision) => chat.answer(request.requestId, decision)}
-            request={request}
-          />
-        ))}
+        {showDiff ? null : asks}
         <div ref={end} />
       </section>
       {error?.login ? (
@@ -485,7 +505,9 @@ export function Chat(props: ChatProps) {
               ? 'The turn failed'
               : error.kind === 'checkpoint'
                 ? 'The files could not be kept or put back'
-                : 'The chat could not go on'
+                : error.kind === 'diff'
+                  ? "The branch's changes could not be read"
+                  : 'The chat could not go on'
           }
         />
       ) : null}
@@ -541,12 +563,27 @@ export function Chat(props: ChatProps) {
               value={harness}
             />
           ) : null}
+          {phone ? (
+            // A phone keyboard has no Shift+Enter, and Enter sends.
+            <IconButton
+              disabled={link === 'closed'}
+              label="New line"
+              onClick={() => {
+                setDraft((now) => `${now}\n`)
+                field.current?.querySelector('textarea')?.focus()
+              }}
+              type="button"
+            >
+              <CornerDownLeft />
+            </IconButton>
+          ) : null}
           <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
           {timeline.usage ? <Meter usage={timeline.usage} /> : null}
         </div>
         {images.length > 0 ? <Images images={images} onRemove={remove} /> : null}
         <form
           className="chat__field"
+          ref={field}
           onSubmit={(event) => {
             event.preventDefault()
             send()

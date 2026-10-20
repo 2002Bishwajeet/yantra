@@ -12,7 +12,6 @@ import type {
   Readiness,
   Repo,
   Spend,
-  Thread,
   Transcript,
   WorkspaceStatus,
 } from '@/api'
@@ -163,16 +162,6 @@ export const transcriptQuery = (name: string, window: Window) =>
       }),
     staleTime: 0,
     ...onRequest,
-  })
-
-/** `POST …/threads` (Y-488): the workspace's threads with their worktrees, which
- *  the editor links name. It may ask GitHub for each PR, so it is held for a
- *  sweep and never polled. */
-export const threadsQuery = (name: string) =>
-  queryOptions({
-    queryKey: keys.threads(name),
-    queryFn: ({ signal }) => fetchJson<Thread[]>(workspace(name, 'threads'), { method: 'POST', signal }),
-    staleTime: SWEEP_MS,
   })
 
 /** `GET …/repair` answers 409 for a file that loads, so opening it is itself

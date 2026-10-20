@@ -426,17 +426,29 @@ const routes = [
   ],
   ['POST', /^\/api\/workspaces\/([^/]+)\/tokens$/, () => [200, contract.spend]],
   ['POST', /^\/api\/workspaces\/([^/]+)\/logs$/, () => [200, contract.logs]],
-  // Y-488's listing, with the fixture chat's thread in the first place so the editor links have a worktree.
+  // Y-489: Y-488's two thread routes. The second thread carries THREAD and a worktree, so editor links resolve (Y-491).
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads$/,
-    (_s, [name]) => [
-      200,
-      [
-        { ...contract.threads[0], id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}` },
-        ...contract.threads.slice(1),
-      ],
-    ],
+    (s, [name]) =>
+      findWorkspace(s, name)
+        ? [200, contract.threads.map((one, at) =>
+            at === 1 ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}` } : one,
+          )]
+        : [404, notFound(name)],
+  ],
+  [
+    'POST',
+    /^\/api\/workspaces\/([^/]+)\/threads\/new$/,
+    (s, [name], sent) => {
+      const one = findWorkspace(s, name)
+      if (!one) return [404, notFound(name)]
+      const repo = String(sent.issue ?? '').split('#')[0].split('/').pop()?.toLowerCase()
+      if (!repo || one.repo.split('/').pop().toLowerCase() !== repo) {
+        return [404, `\`${name}\` does not hold ${sent.issue}`]
+      }
+      return [200, { ...contract.threadOpened, thread: THREAD, issue: sent.issue }]
+    },
   ],
   [
     'GET',
@@ -701,9 +713,8 @@ function oneOff(state, request, socket, head, machine, index, at) {
   })
 }
 
-/** The reply to a `diff` frame (Y-491): contract.gen.ts's `chatBranchDiff` with
- *  a real patch behind it, whose files are a rename with changes, a binary
- *  file, and two edits in nested directories. The counts are the patch's own. */
+/** The reply to a `diff` frame (Y-491): `chatBranchDiff` with a real patch behind it,
+ *  holding a rename, a binary file and two nested edits. */
 const BRANCH_PATCH = [
   'diff --git a/src/old.rs b/src/new.rs',
   'similarity index 80%',
@@ -873,8 +884,8 @@ function converse(state, request, socket, head, name, thread) {
         if (running.has(THREAD)) return fail('busy', elsewhere)
         say({ threadId: THREAD, type: 'thread.reverted', payload: { turn: frame.turn } })
       } else if (frame?.type === 'diff') {
-        // The scenario `difffails` is git failing to read the branch, which chat.rs sends as `checkpoint`.
-        if (state.diffFails) return fail('checkpoint', 'git could not read the branch diff: fatal: bad revision HEAD')
+        // The scenario `difffails` is git failing to read the branch, which chat.rs sends as `diff`.
+        if (state.diffFails) return fail('diff', 'git could not read the branch diff: fatal: bad revision HEAD')
         say({ ...BRANCH_DIFF, threadId: THREAD })
       } else if (frame?.type === 'answer') {
         fail('badFrame', 'no turn is running, so nothing is waiting')

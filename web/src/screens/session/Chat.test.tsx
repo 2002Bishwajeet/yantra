@@ -4,24 +4,44 @@
  * serialises, and every frame asserted below crossed a socket.
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render as bare, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
 import { IMAGE_LIMIT, PAUSES } from '@/api/chat'
-import { chatAttached, chatBranchDiff, chatCheckpointFailed, chatCheckpoints, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
+import {
+  chatAttached,
+  chatBranchDiff,
+  chatCheckpointFailed,
+  chatCheckpoints,
+  chatDiffFailed,
+  chatFailure,
+  chatEvents,
+  chatNotAttached,
+  chatNotLoggedIn,
+} from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
 // Pierre's viewer is its own test file's business (diff/DiffViewer.test.tsx).
+const seen: unknown[] = []
 vi.mock('./diff/DiffViewer', () => ({
-  default: (props: { data: { unified: string; truncated: boolean }; thread: string | null; onComment: (block: string) => void }) => (
-    <pre data-thread={props.thread ?? ''} data-truncated={String(props.data.truncated)} data-testid="viewer">
-      {props.data.unified}
-      <button onClick={() => props.onComment('> a.rs:L1\n> +x\n\nrename it')} type="button">
-        stub comment
-      </button>
-    </pre>
-  ),
+  default: (props: {
+    data: { unified: string; truncated: boolean }
+    quiet?: boolean
+    onComment: (block: string) => void
+  }) => {
+    seen.push(props.data)
+    return (
+      <pre data-quiet={String(props.quiet === true)} data-truncated={String(props.data.truncated)} data-testid="viewer">
+        {props.data.unified}
+        <button onClick={() => props.onComment('> a.rs:L1\n> +x\n\nrename it')} type="button">
+          stub comment
+        </button>
+      </pre>
+    )
+  },
 }))
 
 const web: Workspace = {
@@ -30,6 +50,9 @@ const web: Workspace = {
   repo: '/home/biswa/Github/yantra',
   startup: null,
 }
+
+const render = (ui: ReactElement) =>
+  bare(<QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>{ui}</QueryClientProvider>)
 
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 10_000 })
 
@@ -63,6 +86,7 @@ function type(text: string) {
 }
 
 beforeEach(async () => {
+  seen.length = 0
   browser()
   onThread = vi.fn<(thread: string) => void>()
   server = await daemon()
@@ -73,6 +97,22 @@ afterEach(async () => {
   cleanup()
   vi.unstubAllGlobals()
   await server.stop()
+})
+
+describe('the initial draft', () => {
+  it('seeds the composer with the issue text and leaves it editable', async () => {
+    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+    const composer = screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement
+    expect(composer.value).toBe('Work on o/r#1: a title')
+    type('changed')
+    expect(composer.value).toBe('changed')
+  })
+
+  it('starts empty without one', async () => {
+    await open()
+    expect((screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement).value).toBe('')
+  })
 })
 
 describe('the harness picker', () => {
@@ -476,7 +516,7 @@ describe('checkpoints', () => {
     expect(within(files).getByText('a.txt')).toBeTruthy()
     const viewer = await settled(() => within(card).getByTestId('viewer'))
     expect(viewer.textContent).toContain(chatCheckpoints[0]!.payload.unifiedDiff)
-    expect(viewer.getAttribute('data-thread')).toBe('1a2b3c4d')
+    expect(viewer.getAttribute('data-quiet')).toBe('true')
     expect(within(card).queryByText('+two')).toBeNull()
     expect(within(card).getByRole('button', { name: 'Revert to before this turn' })).toBeTruthy()
     expect(within(card).queryByText('Cut at 256 KiB')).toBeNull()
@@ -573,6 +613,18 @@ describe('checkpoints', () => {
     expect(alert.textContent).toContain('fatal: unable to write new index file')
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
     await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+  })
+
+  it('draws a branch diff that failed under its own heading, and the turn goes on', async () => {
+    await open()
+    type('fix it')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude is answering.'))
+    say(chatDiffFailed)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByRole('heading').textContent).toBe("The branch's changes could not be read")
+    expect(alert.textContent).toContain("could not diff this chat's branch")
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
   })
 })
 
@@ -883,10 +935,10 @@ describe('the branch diff', () => {
     await settled(() => expect(onThread).toHaveBeenCalled())
     fireEvent.click(diffButton())
     await settled(() => expect(frames()).toEqual([{ type: 'diff' }]))
-    say(chatCheckpointFailed)
+    say(chatDiffFailed)
     const alert = await settled(() => screen.getByRole('alert'))
     expect(alert.textContent).toContain('The diff could not be read')
-    expect(alert.textContent).toContain(chatCheckpointFailed.said)
+    expect(alert.textContent).toContain(chatDiffFailed.said)
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     // Try again asks once more.
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
@@ -901,18 +953,45 @@ describe('the branch diff', () => {
     await settled(() => expect(frames()).toEqual([{ type: 'diff' }]))
   }
 
-  it('fails the panel when the socket drops before the reply', async () => {
+  it('asks again on the socket that replaces a dropped one, and shows that reply', async () => {
     await asked()
     server.hangUp()
-    const alert = await settled(() => screen.getByRole('alert'))
-    expect(alert.textContent).toContain('The diff could not be asked for')
+    await settled(() => expect(frames().filter((frame) => frame.type === 'diff')).toHaveLength(2))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('Reading the diff')).toBeTruthy()
+    say(chatBranchDiff)
+    await settled(() => screen.getByTestId('viewer'))
   })
 
-  it('fails the panel on the badFrame a diff with no thread draws', async () => {
+  it('settles on the busy a diff draws while a revert runs, and Refresh asks again', async () => {
     await asked()
-    say({ type: 'error', kind: 'badFrame', said: 'no thread is open, so there is nothing to diff' })
+    say(chatFailure)
     const alert = await settled(() => screen.getByRole('alert'))
-    expect(alert.textContent).toContain('There is no branch to compare yet')
+    expect(alert.textContent).toContain('The diff waits for the revert')
+    expect(screen.queryByText('Reading the diff')).toBeNull()
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh the diff' }))
+    await settled(() => expect(frames().filter((frame) => frame.type === 'diff')).toHaveLength(2))
+  })
+
+  it('settles on a diff error while a turn runs, and the turn goes on', async () => {
+    await asked()
+    type('go')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    const foot = () => document.querySelector('.chat__foot')?.textContent
+    await settled(() => expect(foot()).toBe('Claude is answering.'))
+    say(chatDiffFailed)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain(chatDiffFailed.said)
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(foot()).toBe('Claude is answering.')
+  })
+
+  it("leaves a client's badFrame to the conversation, and the panel keeps waiting", async () => {
+    await asked()
+    say({ type: 'error', kind: 'badFrame', said: 'no turn is running, so nothing is waiting' })
+    await settled(() => expect(screen.getByText('The chat could not go on')).toBeTruthy())
+    expect(screen.getByText('Reading the diff')).toBeTruthy()
   })
 
   it('leaves Refresh on while the panel waits', async () => {
@@ -932,5 +1011,36 @@ describe('the branch diff', () => {
     await settled(() => expect(screen.getByText('Reading the diff')).toBeTruthy())
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(screen.getByRole('alert').textContent).toContain(chatCheckpointFailed.said)
+  })
+
+  it('keeps the agent’s permission request in view while the diff hides the conversation', async () => {
+    await asked()
+    say(of('request.opened'))
+    const asking = await settled(() => screen.getByRole('region', { name: 'Waiting for your answer' }))
+    expect(within(asking).getByText('Run the unit tests')).toBeTruthy()
+    expect(document.querySelector('.chat__turns')?.hasAttribute('hidden')).toBe(true)
+    fireEvent.click(within(asking).getByRole('button', { name: 'Accept' }))
+    await settled(() => expect(frames().at(-1)).toMatchObject({ type: 'answer', requestId: 'r1' }))
+  })
+
+  it('hands the viewer one data object while the composer changes', async () => {
+    await asked()
+    say(chatBranchDiff)
+    await settled(() => screen.getByTestId('viewer'))
+    type('a')
+    type('ab')
+    type('abc')
+    expect(new Set(seen.slice(-4)).size).toBe(1)
+  })
+})
+
+describe('a phone composer', () => {
+  it('has a New line button, because Enter sends', async () => {
+    browser('phone')
+    await open()
+    const box = screen.getByLabelText<HTMLTextAreaElement>('Message Claude')
+    fireEvent.change(box, { target: { value: 'first' } })
+    fireEvent.click(screen.getByRole('button', { name: 'New line' }))
+    expect(box.value).toBe('first\n')
   })
 })

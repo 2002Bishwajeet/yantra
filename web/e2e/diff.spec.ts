@@ -122,6 +122,22 @@ test.describe('a turn’s diff', () => {
   })
 })
 
+test.describe('a request the agent is waiting on', () => {
+  test('stays in view while the diff hides the conversation', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto(`/w/${NAME}`)
+    await composer(page, size).fill('run the core tests')
+    await page.getByRole('button', { name: 'Send' }).click()
+    const accept = page.getByRole('button', { name: 'Accept', exact: true })
+    await expect(accept).toBeVisible()
+    await diffButton(page).click()
+    await expect(page.getByRole('region', { name: 'Waiting for your answer' })).toBeVisible()
+    await expect(accept).toBeVisible()
+    await accept.click()
+    await expect(accept).toHaveCount(0)
+  })
+})
+
 test.describe('a diff that cannot be read', () => {
   test('says so in git’s words, offers Try again, and leaves the conversation alone', async ({ page }) => {
     await openBranch(page, 'difffails')

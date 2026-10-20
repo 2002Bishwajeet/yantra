@@ -27,6 +27,8 @@ export type ChatErrorKind =
   | 'badFrame'
   // git could not keep, diff or restore a checkpoint (Y-448).
   | 'checkpoint'
+  // git could not diff the thread's branch (Y-490).
+  | 'diff'
   // The agent's turn ended failed: ssh refused, the harness not found.
   | 'turnFailed'
   // The socket closed after it opened, and every reopen failed.
@@ -40,6 +42,7 @@ const sentences: Record<ChatErrorKind, string> = {
   busy: 'The agent is still answering. Stop it, or wait for it to end.',
   badFrame: 'The daemon could not read what the dashboard sent.',
   checkpoint: "git on the workspace's machine could not keep or restore this chat's files.",
+  diff: "git on the workspace's machine could not diff this chat's branch.",
   turnFailed: 'The agent could not finish the turn.',
   closed: 'The chat socket closed and did not reopen. A running turn continues on the machine. Try again to see it.',
 }
@@ -141,7 +144,7 @@ export type ChatSocket = {
   stop: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
   revert: (turn: number) => boolean
-  /** Asks for the branch diff (Y-491); it comes back through `onBranchDiff`. */
+  /** Asks for the thread's whole-branch diff, which `onBranchDiff` receives. */
   diff: () => boolean
   /** Sends an image and resolves to its path on the machine, or rejects with
    *  an `AttachError`. The daemon replies to images in the order they went. */
@@ -150,7 +153,7 @@ export type ChatSocket = {
   close: () => void
 }
 
-const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn', 'checkpoint'])
+const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn', 'checkpoint', 'diff'])
 const NAMES: ReadonlySet<string> = new Set(HARNESSES)
 
 function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
@@ -166,7 +169,7 @@ function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
 
 const isCount = (n: unknown) => n === undefined || (typeof n === 'number' && Number.isInteger(n) && n >= 0)
 
-/** `chatBranchDiff` in the contract is what the daemon sends. */
+/** A reply whose files the tree cannot read is a badFrame, not a crash in the panel. */
 function branchDiffOf(said: object): ChatBranchDiff | null {
   const d = said as Partial<Record<keyof ChatBranchDiff, unknown>>
   if (
@@ -202,13 +205,13 @@ export function frameOf(
   if (said.type === 'attached') {
     return 'path' in said && typeof said.path === 'string' && said.path !== '' ? (said as ChatAttached) : null
   }
-  if (said.type === 'branchDiff') return branchDiffOf(said)
   if (said.type === 'notAttached') {
     const refused = said as Partial<ChatNotAttached>
     return (refused.kind === 'notAnImage' || refused.kind === 'unreachable') && typeof refused.said === 'string'
       ? (said as ChatNotAttached)
       : null
   }
+  if (said.type === 'branchDiff') return branchDiffOf(said)
   if (said.type === 'error') {
     const failure = said as Partial<ChatFailure> & Partial<Record<keyof Login, unknown>>
     if (typeof failure.kind !== 'string' || !KINDS.has(failure.kind) || typeof failure.said !== 'string') return null
@@ -237,12 +240,13 @@ export function openChat(
     pauses = PAUSES,
   }: {
     onEvent: (event: ThreadEvent) => void
+    /** The reply to `diff`, which is no event of the timeline. */
+    onBranchDiff?: (diff: ChatBranchDiff) => void
     onError: (error: ChatError) => void
     onOpen?: () => void
     /** The socket dropped and a reopen is waiting. */
     onDropped?: () => void
     onRestart?: () => void
-    onBranchDiff?: (diff: ChatBranchDiff) => void
     pauses?: readonly number[]
   },
 ): ChatSocket {
@@ -303,10 +307,6 @@ export function openChat(
         return
       }
       attempts = 0
-      if (frame.type === 'branchDiff') {
-        onBranchDiff?.(frame)
-        return
-      }
       if (frame.type === 'attached' || frame.type === 'notAttached') {
         const waiting = pending.shift()
         if (!waiting) {
@@ -316,6 +316,10 @@ export function openChat(
         } else {
           waiting.reject(new AttachError(frame.kind, frame.said))
         }
+        return
+      }
+      if (frame.type === 'branchDiff') {
+        onBranchDiff?.(frame)
         return
       }
       if (frame.type === 'error') {

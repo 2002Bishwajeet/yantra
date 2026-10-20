@@ -37,6 +37,13 @@ and the `claude -p` flags of
 [`apps/server/src/textGeneration/ClaudeTextGeneration.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/textGeneration/ClaudeTextGeneration.ts)
 at commit `1451e7c`.
 
+[`web/src/screens/session/ThreadList.tsx`](web/src/screens/session/ThreadList.tsx) and
+[`web/src/screens/session/threads.ts`](web/src/screens/session/threads.ts) adapt the thread grouping
+and the PR status marks of
+[`apps/web/src/components/Sidebar.logic.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/Sidebar.logic.ts)
+and
+[`apps/web/src/components/ThreadStatusIndicators.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/ThreadStatusIndicators.tsx).
+
 `PermissionMode` in [`crates/yantra-core/src/chat.rs`](crates/yantra-core/src/chat.rs) and
 [`web/src/screens/session/ModePicker.tsx`](web/src/screens/session/ModePicker.tsx) copy the four
 permission modes, their names and their descriptions from

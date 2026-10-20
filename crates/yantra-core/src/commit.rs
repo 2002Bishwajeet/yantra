@@ -211,7 +211,7 @@ fn draft_command(place: &Place) -> String {
         searched = agent::CANDIDATES.join(", "),
         prompt = sq(PROMPT),
         stat = diff("--stat "),
-        patch = capped(&diff("")),
+        patch = capped(&diff(""), checkpoint::LIMIT + 1),
         limit = checkpoint::LIMIT,
         cut = sq(CUT_NOTE),
         schema = sq(SCHEMA),

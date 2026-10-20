@@ -1,7 +1,5 @@
-// Stands in for `shiki` in the build (vite.config.ts). The package's entry
-// points at every grammar it ships, and each became a file in the daemon's
-// embedded dashboard; Pierre reaches them only by name, so this lists the few
-// a diff of this repository shows. Any other file draws as plain text.
+// Stands in for `shiki` in the build (vite.config.ts): the real entry ships every grammar.
+// Only the few a diff of this repository shows are listed; other files draw as text.
 import { createBundledHighlighter, createSingletonShorthands } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 

@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Undo2 } from 'lucide-react'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -6,7 +6,9 @@ import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dia
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import type { Workspace } from '@/api'
+import type { DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
+import type { Editors } from './diff/useEditors'
 import type { TurnDiff as Diff } from './timeline'
 
 /** The paths a unified diff names. */
@@ -66,10 +68,14 @@ export function TurnDiff(props: {
   disabled: boolean
   onRevert: (turn: number) => boolean
   workspace: Workspace
-  thread: string | null
+  editors: Editors
   onComment: (block: string) => void
 }) {
-  const { diff, disabled, onRevert, workspace, thread, onComment } = props
+  const { diff, disabled, onRevert, workspace, editors, onComment } = props
+  const state = useMemo<DiffState>(
+    () => ({ state: 'ready', data: { unified: diff.unified, truncated: false, filesTruncated: false } }),
+    [diff.unified],
+  )
   const files = filesOf(diff.unified)
   if (files.length === 0) return null
   return (
@@ -103,9 +109,10 @@ export function TurnDiff(props: {
         ) : null}
         {/* The note above is this turn's cut, so the viewer is told nothing was. */}
         <DiffSheet
+          editors={editors}
           onComment={onComment}
-          state={{ state: 'ready', data: { unified: diff.unified, truncated: false, filesTruncated: false } }}
-          thread={thread}
+          quiet
+          state={state}
           workspace={workspace}
         />
       </Disclosure>

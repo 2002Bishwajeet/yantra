@@ -11,9 +11,8 @@
 // xterm in the entry by 33 KiB and every screen eager by 47 KiB, which is what
 // the route split exists for.
 //
-// The diff panel (Y-491) is a lazy chunk that `/` never loads, so it has a
-// ceiling of its own: the viewer, Pierre's diffs and tree, and the shared chunks
-// only it needs. The grammars load one at a time, by the file's language.
+// The diff panel (Y-491) is a lazy chunk `/` never loads, so it has its own ceiling.
+// It counts the viewer, Pierre's diffs and tree, and the shared chunks only it needs.
 //
 //   npm run budget            builds, then measures
 //   npm run budget -- --no-build   measures the dist that is there
@@ -66,9 +65,8 @@ for (const { url } of chunks.filter((c) => c.url.endsWith('.css'))) {
   }
 }
 
-// The diff chunk has no stable name but its module's: Vite names a lazy chunk
-// after the file, so `DiffViewer-<hash>.js` is it. Its static imports that the
-// first load did not already fetch are part of what opening the panel costs.
+// Vite names the lazy diff chunk after its file, `DiffViewer-<hash>.js`. Its static imports
+// that the first load did not fetch count too.
 const diffEntry = readdirSync(join(dist, 'assets')).find((name) => /^DiffViewer-[\w-]+\.js$/.test(name))
 if (!diffEntry) {
   console.error('\nno DiffViewer chunk in dist/assets: the diff panel is no longer lazy-loaded')

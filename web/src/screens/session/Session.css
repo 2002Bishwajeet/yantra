@@ -784,3 +784,83 @@
   flex: 1;
   min-width: 0;
 }
+
+/* Y-489: the thread list above the views. */
+
+.threads {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.threads__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.threads__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.threads__empty {
+  margin: 0;
+  padding: 0 4px;
+}
+
+.threads__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.threads__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.threads__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-height: 48px;
+  padding: 6px 14px;
+  border-radius: var(--md-sys-shape-corner-medium, 12px);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: inherit;
+  text-decoration: none;
+}
+
+.threads__row[aria-current='true'] {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.threads__issue,
+.threads__said {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.threads__row[aria-current='true'] .threads__issue,
+.threads__row[aria-current='true'] .threads__said {
+  color: inherit;
+}
+
+.threads__pr {
+  margin-left: auto;
+}
+
+.chat__asks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

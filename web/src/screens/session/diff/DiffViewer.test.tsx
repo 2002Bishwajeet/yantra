@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Workspace } from '@/api'
 import { threads } from '@/contract.gen'
+import { useEditors } from './useEditors'
 import { answer } from '@/test/daemon'
 import type { DiffData } from './data'
 import DiffViewer from './DiffViewer'
@@ -24,7 +25,7 @@ type FileDiffProps = {
     enableGutterUtility: boolean
     enableLineSelection: boolean
     onGutterUtilityClick: (range: { start: number; end: number }) => void
-    onLineSelectionEnd: (range: { start: number; end: number; side?: string } | null) => void
+    onLineSelectionEnd: (range: { start: number; end: number; side?: string; endSide?: string } | null) => void
   }
   lineAnnotations: { side: string; lineNumber: number }[]
   renderAnnotation: (annotation: unknown) => React.ReactNode
@@ -76,6 +77,12 @@ vi.mock('@pierre/diffs/react', () => ({
       <button onClick={() => props.options.onLineSelectionEnd({ start: 2, end: 3 })} type="button">
         select lines in {props.fileDiff.name}
       </button>
+      <button
+        onClick={() => props.options.onLineSelectionEnd({ start: 2, side: 'deletions', end: 3, endSide: 'additions' })}
+        type="button"
+      >
+        select across in {props.fileDiff.name}
+      </button>
       <button onClick={() => props.options.onGutterUtilityClick({ start: 1, end: 1 })} type="button">
         plus on {props.fileDiff.name}
       </button>
@@ -83,7 +90,7 @@ vi.mock('@pierre/diffs/react', () => ({
         clear selection in {props.fileDiff.name}
       </button>
       {props.lineAnnotations.map((annotation, at) => (
-        <div data-line={annotation.lineNumber} key={at}>
+        <div data-line={annotation.lineNumber} data-side={annotation.side} key={at}>
           {props.renderAnnotation(annotation)}
         </div>
       ))}
@@ -136,12 +143,19 @@ function listing(status: number, body?: unknown) {
   vi.stubGlobal('fetch', asked)
 }
 
+
+/** The viewer with the editors its chat would give it. */
+function Viewer(props: { data: DiffData; onComment: (block: string) => void; thread: string | null }) {
+  const editors = useEditors(web.name, props.thread, true)
+  return <DiffViewer data={props.data} editors={editors} onComment={props.onComment} workspace={web} />
+}
+
 function open(data: DiffData = branch, thread: string | null = THREAD) {
   const onComment = vi.fn<(block: string) => void>()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={client}>
-      <DiffViewer data={data} onComment={onComment} thread={thread} workspace={web} />
+      <Viewer data={data} onComment={onComment} thread={thread} />
     </QueryClientProvider>,
   )
   return onComment
@@ -239,6 +253,48 @@ describe('a line comment', () => {
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: /src\/new\.rs/ }))
   })
 
+  it('quotes and anchors a range that runs from a removed line to an added one', async () => {
+    listing(200, threads)
+    const onComment = open()
+    fireEvent.click(screen.getByRole('button', { name: 'select across in src/new.rs' }))
+    const box = await waitFor(compose)
+    expect(box.getAttribute('aria-label')).toBe('Comment on src/new.rs L2 (removed)-L3')
+    const anchor = box.closest('[data-line]')!
+    expect([anchor.getAttribute('data-side'), anchor.getAttribute('data-line')]).toEqual(['additions', '3'])
+    fireEvent.change(box, { target: { value: 'why' } })
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
+    expect(onComment).toHaveBeenCalledWith('> src/new.rs:L2 (removed)-L3\n> -b\n> +c\n> +d\n\nwhy')
+  })
+
+  it('keeps an open comment when another file is selected: its tools go quiet instead', async () => {
+    listing(200, threads)
+    open({
+      unified: [
+        'diff --git a/a.rs b/a.rs',
+        '--- a/a.rs',
+        '+++ b/a.rs',
+        '@@ -1,1 +1,2 @@',
+        ' x',
+        '+y',
+        'diff --git a/b.rs b/b.rs',
+        '--- a/b.rs',
+        '+++ b/b.rs',
+        '@@ -1,1 +1,2 @@',
+        ' x',
+        '+z',
+        '',
+      ].join('\n'),
+      truncated: false,
+      filesTruncated: false,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'select lines in a.rs' }))
+    const box = await waitFor(compose)
+    fireEvent.change(box, { target: { value: 'half typed' } })
+    for (const one of screen.getAllByTestId('file-diff')) expect(one.getAttribute('data-gutter')).toBe('false')
+    expect(screen.getByRole('button', { name: 'Comment on file: b.rs' }).hasAttribute('disabled')).toBe(true)
+    expect((compose() as HTMLTextAreaElement).value).toBe('half typed')
+  })
+
   it('opens from the gutter button, and submits with its button and Ctrl+Enter', async () => {
     listing(200, threads)
     const onComment = open()
@@ -309,6 +365,7 @@ describe('open in editor', () => {
   it('offers VS Code, Cursor and Zed for the thread’s worktree, with the first line where it counts', async () => {
     listing(200, threads)
     open()
+    await waitFor(() => expect(asked).toHaveBeenCalled())
     expect(asked.mock.calls[0]).toEqual(['/api/workspaces/site/threads', expect.objectContaining({ method: 'POST' })])
     const worktree = threads[1]!.worktree.slice(1).split('/').map(encodeURIComponent).join('/')
     await ready()
@@ -363,7 +420,10 @@ describe('open in editor', () => {
     listing(200, threads)
     open(branch, null)
     expect(asked).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert').textContent).toContain('this chat has no thread yet')
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('this chat has no thread yet')
+    // Asking again cannot help without a thread, so there is nothing to press.
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 
   it('waits quietly while the list is read', () => {

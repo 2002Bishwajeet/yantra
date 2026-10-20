@@ -6,6 +6,8 @@ export type DiffErrorKind =
   | 'noThread'
   // The daemon's `error` frame for a diff: git could not read the branch.
   | 'failed'
+  // The daemon is reverting a turn, and answers a diff with `busy`.
+  | 'busy'
   // The thread list failed, so the editor links have no worktree to name.
   | 'threadsFailed'
   // The panel's lazy chunk did not load.
@@ -15,6 +17,7 @@ const sentences: Record<DiffErrorKind, string> = {
   notOpen: 'The chat is not connected, so the diff could not be asked for.',
   noThread: 'This chat has no branch yet. Send a first message, then open the diff.',
   failed: "git on the workspace's machine could not read this branch's changes.",
+  busy: 'A turn is being reverted, so the diff could not be read. Refresh once it is done.',
   threadsFailed: 'The daemon could not list this workspace’s threads, so files cannot open in an editor.',
   loadFailed: 'The diff viewer did not load. The network may have dropped.',
 }

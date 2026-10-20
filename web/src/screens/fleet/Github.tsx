@@ -12,6 +12,7 @@ import { IconTile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
 import { Empty } from './Empty'
+import { StartSession } from './StartSession'
 
 /** D6 §3.4: the daemon's reasons are already instructions, and the one about
  *  a missing sign-in has a page to send a reader to. */
@@ -96,7 +97,7 @@ function Group(props: { items: Item[]; title: string; verb: string }) {
           const clock = at(item.updated_at)
           const ref = factor === 'phone' ? item.repo.split('/').pop() : item.repo
           return (
-            <li key={item.url}>
+            <li className="github__item" key={item.url}>
               <Row className="github__row" render={<a href={item.url} rel="noreferrer" target="_blank" />}>
                 <IconTile className="github__tile">
                   <Icon />
@@ -111,6 +112,7 @@ function Group(props: { items: Item[]; title: string; verb: string }) {
                 <Mono className="github__when">{clock?.text ?? item.updated_at}</Mono>
                 <span className="github__verb">{verb}</span>
               </Row>
+              {verb === 'Open' ? <StartSession item={item} /> : null}
             </li>
           )
         })}

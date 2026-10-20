@@ -210,6 +210,7 @@ async fn a_branch_diff_is_the_whole_tree_against_the_merge_base() -> Result<()> 
     let commit = "git -c user.name=t -c user.email=t@example.com commit -q";
     fixture.run(&format!(
         "mkdir -p {BRANCH_REPO} && cd {BRANCH_REPO} && git init -q \
+         && printf 'zero\\n' > zero.txt && git add zero.txt && {commit} -m zero \
          && printf 'one\\n' > keep.txt && seq 1 40 > old-name.txt \
          && git add keep.txt old-name.txt && {commit} -m one"
     ))?;
@@ -279,6 +280,33 @@ async fn a_branch_diff_is_the_whole_tree_against_the_merge_base() -> Result<()> 
     assert!(!unified.contains("main-only.txt"), "{unified}");
     assert!(!unified.contains('\x1b'), "no colour");
 
+    // Y-543: the main checkout on an older branch does not move the base.
+    fixture.run(&format!(
+        "cd {BRANCH_REPO} && git checkout -q -b older \"$(git rev-list --max-parents=0 HEAD)\""
+    ))?;
+    let older = checkpoint::branch(&ssh, &place).await?;
+    assert_eq!(older.base, diff.base, "the thread's start still bounds it");
+    assert_eq!(older.files, diff.files);
+
+    // Y-543: an untracked file is read from the worktree, and no blob is written.
+    fixture.run(&format!(
+        "cd {wt} && printf 'y543-only-here\\n' > fresh.txt"
+    ))?;
+    let objects = format!(
+        "cd {wt} && for f in fresh.txt blob.bin; do \
+         git cat-file -e \"$(git hash-object \"$f\")\" 2>/dev/null && echo \"$f\"; done; true"
+    );
+    let fresh = checkpoint::branch(&ssh, &place).await?;
+    let listed = fresh
+        .files
+        .iter()
+        .find(|file| file.path == "fresh.txt")
+        .expect("the untracked file");
+    assert_eq!((listed.added, listed.deleted), (Some(1), Some(0)));
+    assert!(fresh.diff.unified.contains("+y543-only-here"));
+    assert_eq!(fixture.run(&objects)?.trim(), "", "no blob was written");
+    fixture.run(&format!("rm {wt}/fresh.txt"))?;
+
     // A diff past the cap is cut, and its file is still listed whole.
     fixture.run(&format!("cd {wt} && seq 1 60000 > big.txt"))?;
     let big = checkpoint::branch(&ssh, &place).await?;
@@ -291,6 +319,33 @@ async fn a_branch_diff_is_the_whole_tree_against_the_merge_base() -> Result<()> 
         .find(|file| file.path == "big.txt")
         .expect("the big file");
     assert_eq!((listed.added, listed.deleted), (Some(60_000), Some(0)));
+
+    // Y-543: git's own error passes alone; only no shared commit adds a line.
+    let bogus = thread::Place {
+        base: "0".repeat(40),
+        ..place.clone()
+    };
+    fixture.run(&format!(
+        "cd {BRANCH_REPO} && git checkout -q --orphan lone"
+    ))?;
+    let refused = checkpoint::branch(&ssh, &bogus).await;
+    assert!(
+        matches!(&refused, Err(Error::Git { stderr })
+            if stderr.starts_with("fatal:") && stderr.lines().count() == 1),
+        "git's line alone: {refused:?}"
+    );
+    let lone = fixture.run(&format!(
+        "cd {BRANCH_REPO} && {commit} -m lone && git rev-parse HEAD"
+    ))?;
+    let unrelated = thread::Place {
+        base: lone.trim().to_owned(),
+        ..place.clone()
+    };
+    assert!(matches!(
+        checkpoint::branch(&ssh, &unrelated).await,
+        Err(Error::Git { stderr })
+            if stderr == "fatal: the thread shares no commit with its start or HEAD"
+    ));
 
     // A diff git cannot read is a failure, not an empty diff.
     fixture.run(&format!(

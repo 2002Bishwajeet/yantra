@@ -14,6 +14,8 @@ import type {
   Removed,
   Resumed,
   Stopped,
+  Thread,
+  ThreadOpened,
   Workspace,
 } from '@/api'
 import { fetchJson, json } from '@/api/client'
@@ -285,5 +287,25 @@ export function useMakeDir() {
 export function usePlacement() {
   return useMutation<Placement, ApiError, PlacementAsk>({
     mutationFn: (ask) => fetchJson<Placement>('/api/placement', { method: 'POST', ...json(ask) }),
+  })
+}
+
+// Y-489: the thread routes of Y-488. Both reach git over ssh, so they are POSTs
+// a person asks for, and neither polls (ADR-0019).
+
+/** `POST …/threads`: the workspace's threads with their PR state. Asked on
+ *  mount and by Refresh. 404, 502 (GitHub) and 503 (machine) come back typed. */
+export function useThreads(name: string) {
+  return useMutation<Thread[], ApiError, void>({
+    mutationFn: () => fetchJson<Thread[]>(workspace(name, '/threads'), { method: 'POST' }),
+  })
+}
+
+/** `POST …/threads/new`: a worktree and branch for `owner/repo#n`, and the
+ *  composer's first text. 400 is not an issue, 409 is no grant. */
+export function useOpenThread(name: string) {
+  return useMutation<ThreadOpened, ApiError, string>({
+    mutationFn: (issue) =>
+      fetchJson<ThreadOpened>(workspace(name, '/threads/new'), { method: 'POST', ...json({ issue }) }),
   })
 }

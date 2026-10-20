@@ -21,6 +21,7 @@ async function frameWith(viewer: () => Record<string, unknown>) {
 
 afterEach(() => cleanup())
 
+const editors = { worktree: '/w', trouble: null }
 const ready = { state: 'ready' as const, data: branchData(chatBranchDiff) }
 
 describe('a viewer chunk that does not arrive', () => {
@@ -32,7 +33,7 @@ describe('a viewer chunk that does not arrive', () => {
       if (attempts === 1) throw new Error('Failed to fetch dynamically imported module')
       return { default: () => <p data-testid="viewer">arrived</p> }
     })
-    await renderInApp(<Sheet onComment={() => {}} state={ready} thread="t" workspace={web} />)
+    await renderInApp(<Sheet onComment={() => {}} state={ready} editors={editors} workspace={web} />)
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByRole('heading', { name: 'The diff viewer did not load' })).toBeTruthy()
     expect(alert.textContent).toContain(new DiffError('loadFailed').describe())
@@ -52,7 +53,7 @@ describe('a viewer that throws while it draws', () => {
         throw new Error('boom')
       },
     }))
-    await renderInApp(<Sheet onComment={() => {}} state={ready} thread="t" workspace={web} />)
+    await renderInApp(<Sheet onComment={() => {}} state={ready} editors={editors} workspace={web} />)
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByRole('heading', { name: 'The diff could not be drawn' })).toBeTruthy()
     await waitFor(() => expect(alert.textContent).toContain('Something in this part of the page broke.'))

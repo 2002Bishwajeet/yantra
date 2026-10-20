@@ -66,19 +66,28 @@ export function ancestors(path: string): string[] {
   return folders
 }
 
+/** The paths git calls binary in a patch. A file with no hunks is binary only if git says so:
+ *  an empty file or a mode change has none either. */
+export function binaryPaths(unified: string): Set<string> {
+  const paths = new Set<string>()
+  for (const section of unified.split(/^(?=diff --git )/m)) {
+    if (!/^(Binary files .* differ|GIT binary patch)$/m.test(section)) continue
+    const path = /^diff --git a\/.* b\/(.+)$/m.exec(section)?.[1]
+    if (path !== undefined) paths.add(path)
+  }
+  return paths
+}
+
 /** The daemon's list for a turn, which has none: read from the patch itself. */
-export function filesOfPatch(parsed: readonly FileDiffMetadata[]): ChangedFile[] {
-  return parsed.map((file) => {
-    const binary = file.hunks.length === 0 && file.type !== 'rename-pure'
-    return {
-      path: file.name,
-      ...(file.prevName === undefined ? {} : { from: file.prevName }),
-      ...(binary
-        ? {}
-        : {
-            added: file.hunks.reduce((sum, hunk) => sum + hunk.additionLines, 0),
-            deleted: file.hunks.reduce((sum, hunk) => sum + hunk.deletionLines, 0),
-          }),
-    }
-  })
+export function filesOfPatch(parsed: readonly FileDiffMetadata[], binaries: ReadonlySet<string> = new Set()): ChangedFile[] {
+  return parsed.map((file) => ({
+    path: file.name,
+    ...(file.prevName === undefined ? {} : { from: file.prevName }),
+    ...(binaries.has(file.name)
+      ? {}
+      : {
+          added: file.hunks.reduce((sum, hunk) => sum + hunk.additionLines, 0),
+          deleted: file.hunks.reduce((sum, hunk) => sum + hunk.deletionLines, 0),
+        }),
+  }))
 }

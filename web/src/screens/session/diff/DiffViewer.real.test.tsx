@@ -11,6 +11,8 @@ import type { Workspace } from '@/api'
 import { chatBranchDiff, threads } from '@/contract.gen'
 import { answer } from '@/test/daemon'
 import DiffViewer from './DiffViewer'
+import type { DiffData } from './data'
+import { useEditors } from './useEditors'
 
 const web: Workspace = { name: 'site', machine: 'cachyos-g14', repo: '/r', startup: null }
 
@@ -34,6 +36,13 @@ const PATCH = [
   'Binary files /dev/null and b/logo.png differ',
   '',
 ].join('\n')
+
+const DATA: DiffData = { unified: PATCH, files: chatBranchDiff.files, truncated: false, filesTruncated: false }
+
+function Viewer(props: { data: DiffData; onComment: (block: string) => void }) {
+  const editors = useEditors(web.name, threads[1]!.id, true)
+  return <DiffViewer data={props.data} editors={editors} onComment={props.onComment} workspace={web} />
+}
 
 class Quiet {
   observe() {}
@@ -63,12 +72,7 @@ describe('the viewer on the real renderers', () => {
     const onComment = vi.fn<(block: string) => void>()
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <DiffViewer
-          data={{ unified: PATCH, files: chatBranchDiff.files, truncated: false, filesTruncated: false }}
-          onComment={onComment}
-          thread={threads[1]!.id}
-          workspace={web}
-        />
+        <Viewer data={DATA} onComment={onComment} />
       </QueryClientProvider>,
     )
     const cell = await gutter('change-addition', 3)
@@ -88,12 +92,7 @@ describe('the viewer on the real renderers', () => {
     Element.prototype.scrollIntoView = reveal
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <DiffViewer
-          data={{ unified: PATCH, files: chatBranchDiff.files, truncated: false, filesTruncated: false }}
-          onComment={() => {}}
-          thread={threads[1]!.id}
-          workspace={web}
-        />
+        <Viewer data={DATA} onComment={() => {}} />
       </QueryClientProvider>,
     )
     const rows = () => [...(document.querySelector('.diff__tree')?.shadowRoot?.querySelectorAll('[role="treeitem"]') ?? [])]

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parsePatchFiles } from '@pierre/diffs'
 import { chatBranchDiff } from '@/contract.gen'
-import { ancestors, decoration, filesOfPatch, treeEntries } from './tree'
+import { ancestors, binaryPaths, decoration, filesOfPatch, treeEntries } from './tree'
 
 const PATCH = [
   'diff --git a/logo.png b/logo.png',
@@ -24,6 +24,12 @@ const PATCH = [
   'similarity index 100%',
   'rename from docs/deep/pure.md',
   'rename to docs/pure.md',
+  'diff --git a/run.sh b/run.sh',
+  'old mode 100644',
+  'new mode 100755',
+  'diff --git a/empty.txt b/empty.txt',
+  'new file mode 100644',
+  'index 0000000..e69de29',
   '',
 ].join('\n')
 
@@ -55,11 +61,14 @@ describe('the file tree rows', () => {
     expect(ancestors('c.ts')).toEqual([])
   })
 
-  it("builds a turn's list from the patch: binary has no counts, a pure rename has zero", () => {
-    expect(filesOfPatch(parsed())).toEqual([
+  it("builds a turn's list from the patch: only git's binary files lack counts", () => {
+    expect(binaryPaths(PATCH)).toEqual(new Set(['logo.png']))
+    expect(filesOfPatch(parsed(), binaryPaths(PATCH))).toEqual([
       { path: 'logo.png' },
       { path: 'src/new.rs', from: 'src/old.rs', added: 2, deleted: 1 },
       { path: 'docs/pure.md', from: 'docs/deep/pure.md', added: 0, deleted: 0 },
+      { path: 'run.sh', added: 0, deleted: 0 },
+      { path: 'empty.txt', added: 0, deleted: 0 },
     ])
   })
 

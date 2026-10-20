@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parsePatchFiles } from '@pierre/diffs'
-import { appendToDraft, commentBlock, isSubmit, quotedLines, rangeLabel } from './comment'
+import { anchorOf, appendToDraft, commentBlock, isSubmit, quotedLines, rangeLabel } from './comment'
 
 const [file] = parsePatchFiles(
   [
@@ -30,6 +30,23 @@ describe('the quoted comment', () => {
     expect(quotedLines(file!, { start: 1, end: 4 })).toEqual([' a', '+c', '+d', ' e'])
     expect(quotedLines(file!, { start: 1, end: 2, side: 'deletions' })).toEqual([' a', '-b'])
     expect(quotedLines(file!, { start: 40, end: 41 })).toEqual([])
+  })
+
+  it('quotes every row drawn between a removed line and an added one', () => {
+    const down = { start: 2, side: 'deletions', end: 3, endSide: 'additions' } as const
+    expect(rangeLabel(down)).toBe('L2 (removed)-L3')
+    expect(quotedLines(file!, down)).toEqual(['-b', '+c', '+d'])
+    const up = { start: 3, side: 'additions', end: 2, endSide: 'deletions' } as const
+    expect(quotedLines(file!, up)).toEqual(['-b', '+c', '+d'])
+  })
+
+  it('anchors the box under the row drawn last, not the larger number', () => {
+    expect(anchorOf(file!, { start: 2, side: 'deletions', end: 3, endSide: 'additions' })).toEqual({ side: 'additions', lineNumber: 3 })
+    // Old line 3 is the context row `e`, drawn after added line 2.
+    const range = { start: 3, side: 'deletions', end: 2, endSide: 'additions' } as const
+    expect(quotedLines(file!, range)).toEqual(['+c', '+d', ' e'])
+    expect(anchorOf(file!, range)).toEqual({ side: 'deletions', lineNumber: 3 })
+    expect(anchorOf(file!, { start: 4, end: 2 })).toEqual({ side: 'additions', lineNumber: 4 })
   })
 
   it('writes the path, the lines, then the comment', () => {
