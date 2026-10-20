@@ -8,7 +8,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
 import { IMAGE_LIMIT, PAUSES } from '@/api/chat'
-import { chatAttached, chatCheckpointFailed, chatCheckpoints, chatEvents, chatNotAttached, chatNotLoggedIn } from '@/contract.gen'
+import {
+  chatAttached,
+  chatCheckpointFailed,
+  chatCheckpoints,
+  chatDiffFailed,
+  chatEvents,
+  chatNotAttached,
+  chatNotLoggedIn,
+} from '@/contract.gen'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -61,6 +69,22 @@ afterEach(async () => {
   cleanup()
   vi.unstubAllGlobals()
   await server.stop()
+})
+
+describe('the initial draft', () => {
+  it('seeds the composer with the issue text and leaves it editable', async () => {
+    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+    const composer = screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement
+    expect(composer.value).toBe('Work on o/r#1: a title')
+    type('changed')
+    expect(composer.value).toBe('changed')
+  })
+
+  it('starts empty without one', async () => {
+    await open()
+    expect((screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement).value).toBe('')
+  })
 })
 
 describe('the harness picker', () => {
@@ -560,6 +584,18 @@ describe('checkpoints', () => {
     expect(alert.textContent).toContain('fatal: unable to write new index file')
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
     await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+  })
+
+  it('draws a branch diff that failed under its own heading, and the turn goes on', async () => {
+    await open()
+    type('fix it')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude is answering.'))
+    say(chatDiffFailed)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByRole('heading').textContent).toBe("The branch's changes could not be read")
+    expect(alert.textContent).toContain("could not diff this chat's branch")
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
   })
 })
 

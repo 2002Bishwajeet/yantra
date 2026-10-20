@@ -148,7 +148,7 @@ export type ChatFrame =
 /** The one daemon frame that is not an event. `notLoggedIn` names the
  *  command to run on the machine, because the login stays there (ADR-0033 §6). */
 export type ChatFailure =
-  | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable' | 'checkpoint'; said: string }
+  | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable' | 'checkpoint' | 'diff'; said: string }
   | { type: 'error'; kind: 'notLoggedIn'; said: string; harness: Harness; machine: string; command: string }
 
 /** The one reply to each image the browser sends as a binary frame (Y-424),
@@ -162,8 +162,7 @@ export type ChatNotAttached = { type: 'notAttached'; kind: 'notAnImage' | 'unrea
 export type ChangedFile = { path: string; from?: string; added?: number; deleted?: number }
 
 /** The reply to a `diff` frame (Y-490): the thread's committed and uncommitted
- *  work against the merge-base of its branch and `HEAD`. `filesTruncated` and
- *  `truncated` are a list or a diff cut at 256 KiB. A failure is `checkpoint`. */
+ *  work since `base`. Each flag says a list or a diff was cut at 256 KiB. A failure is `diff`. */
 export type ChatBranchDiff = {
   type: 'branchDiff'
   threadId: string

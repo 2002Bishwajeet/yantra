@@ -67,6 +67,10 @@ function answer(state: Scenario, method: string, path: string): [number, unknown
   const kill = /^\/api\/machines\/([^/]+)\/sessions\/([^/]+)$/.exec(path)
   if (kill) return [200, { machine: kill[1], session: kill[2], killed: true }]
   if (method === 'DELETE' && /^\/api\/workspaces\/[^/]+$/.test(path)) return [204, undefined]
+  // Y-489: the picker's ranking and the thread routes, answered from the contract.
+  if (path === '/api/placement') return [200, contract.placement]
+  const threads = /^\/api\/workspaces\/([^/]+)\/threads(\/new)?$/.exec(path)
+  if (threads) return [200, threads[2] ? contract.threadOpened : contract.threads]
   const read = path.replace('/api/', '')
   return read in state ? [200, state[read]] : [404, 'no']
 }

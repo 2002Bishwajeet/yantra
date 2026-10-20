@@ -129,9 +129,9 @@ test.describe('the shell on busy', () => {
     // page under it and sometimes catches the dashboard alone.
     await screenshot(page, 'shell-palette', 'busy', size, { overlay: true })
 
-    // `logs` and `tokens` are reads a person asked for, POSTed by design
+    // `logs`, `tokens` and `threads` are reads a person asked for, POSTed by design
     // (ADR-0019); `viewing` is presence. None is a verb.
-    const READS = /\/api\/viewing$|\/(logs|tokens)$/
+    const READS = /\/api\/viewing$|\/(logs|tokens|threads)$/
     const verbs: string[] = []
     page.on('request', (request) => {
       if (request.url().includes('/api/') && request.method() !== 'GET' && !READS.test(request.url())) {

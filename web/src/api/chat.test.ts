@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import {
   chatAttached,
+  chatBranchDiff,
   chatCheckpoints,
+  chatDiffFailed,
   chatEvents,
   chatFailure,
   chatFrames,
@@ -31,16 +33,18 @@ function connect(url: string | ((after?: string) => string) = chatAddress('yantr
   const opened = vi.fn()
   const dropped = vi.fn()
   const restarted = vi.fn()
+  const diffs: unknown[] = []
   const socket = openChat(typeof url === 'string' ? () => url : url, {
     onEvent: (event) => events.push(event),
     onError: (error) => errors.push(error),
     onOpen: opened,
     onDropped: dropped,
     onRestart: restarted,
+    onBranchDiff: (diff) => diffs.push(diff),
     pauses,
   })
   sockets.push(socket)
-  return { socket, events, errors, opened, dropped, restarted }
+  return { socket, events, errors, opened, dropped, restarted, diffs }
 }
 
 beforeEach(async () => {
@@ -330,6 +334,25 @@ describe('a daemon frame', () => {
     expect(frameOf('[]')).toBeNull()
     expect(frameOf('{"type":"turn.started"}')).toBeNull()
     expect(frameOf('{"type":"error","kind":"busy"}')).toBeNull()
+  })
+
+  it('is a branch diff, and never an event, though it carries a thread id', () => {
+    expect(frameOf(JSON.stringify(chatBranchDiff))).toEqual(chatBranchDiff)
+    expect(frameOf(JSON.stringify({ ...chatBranchDiff, files: 'x' }))).toBeNull()
+    expect(frameOf(JSON.stringify(chatDiffFailed))).toEqual(chatDiffFailed)
+  })
+
+  it('reaches onBranchDiff, and a failed diff is its own kind', async () => {
+    const { socket, events, errors, diffs, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    expect(socket.diff()).toBe(true)
+    await settled(() => expect(server.heard.map((frame) => ('text' in frame ? frame.text : ''))).toContain('{"type":"diff"}'))
+    server.say(JSON.stringify(chatBranchDiff))
+    await settled(() => expect(diffs).toEqual([chatBranchDiff]))
+    expect(events).toEqual([])
+    server.say(JSON.stringify(chatDiffFailed))
+    await settled(() => expect(errors.map((error) => error.kind)).toEqual(['diff']))
+    expect(errors[0]?.describe()).toBe("git on the workspace's machine could not diff this chat's branch.")
   })
 
   it('is a missing login only with a known harness, a machine and a command', () => {
