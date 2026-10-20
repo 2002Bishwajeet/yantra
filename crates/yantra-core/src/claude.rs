@@ -89,7 +89,7 @@ impl Turn {
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree, images, mode))?;
+        } = ssh.stdio(&command(&place.worktree, images, mode, None))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let said: Said = Box::pin(async move { diagnosis.await.unwrap_or_default() });
         let (turn, events) = Self::wire(
@@ -231,23 +231,57 @@ impl Turn {
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
-/// cannot turn approval off.
-pub fn command(worktree: &str, images: Option<&str>, mode: chat::PermissionMode) -> String {
+/// cannot turn approval off. `mcp` adds the room server and lets a woken turn
+/// use its tools without a prompt (ADR-0038 decision 2).
+pub fn command(
+    worktree: &str,
+    images: Option<&str>,
+    mode: chat::PermissionMode,
+    mcp: Option<&Mcp>,
+) -> String {
     format!(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}{rooms}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
+        rooms = mcp.map_or_else(String::new, |mcp| format!(
+            "--mcp-config {} --allowedTools {ROOM_TOOLS} ",
+            sq(&mcp.config())
+        )),
         mode = flag(mode),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
     )
+}
+
+/// Named apart from a `yantra` stdio server a person may have added by hand.
+const ROOM_SERVER: &str = "yantra-room";
+const ROOM_TOOLS: &str = "mcp__yantra-room__room_send,mcp__yantra-room__room_read";
+
+/// Where a Chat turn reaches `yantrad`'s room tools, and the thread it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mcp {
+    /// `http://<daemon>:7717/api/mcp`.
+    pub url: String,
+    /// `<workspace>/<thread>`, sent as `X-Yantra-Thread`.
+    pub thread: String,
+}
+
+impl Mcp {
+    fn config(&self) -> String {
+        json!({"mcpServers": {ROOM_SERVER: {
+            "type": "http",
+            "url": self.url,
+            "headers": {"X-Yantra-Thread": self.thread},
+        }}})
+        .to_string()
+    }
 }
 
 /// T3 Code maps the same two modes to Claude's own (`ClaudeAdapter.ts`).
@@ -1463,6 +1497,7 @@ mod tests {
             "/home/u/.yantra/worktrees/chat/w/11111111",
             None,
             PermissionMode::Supervised,
+            None,
         );
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
@@ -1482,6 +1517,7 @@ mod tests {
             "/tmp/x'; touch /tmp/pwned; '",
             None,
             PermissionMode::Supervised,
+            None,
         );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
@@ -1494,6 +1530,7 @@ mod tests {
             "/w",
             Some("/tmp/yantra-chat-Y01"),
             PermissionMode::Supervised,
+            None,
         );
         assert!(
             script.contains(
@@ -1505,6 +1542,7 @@ mod tests {
             "/w",
             Some("/tmp/a'; touch /tmp/pwned; '"),
             PermissionMode::Supervised,
+            None,
         );
         assert!(
             hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' --permission-mode "),
@@ -1523,7 +1561,7 @@ mod tests {
             (PermissionMode::Supervised, "default"),
             (PermissionMode::FullAccess, "default"),
         ] {
-            let script = command("/w", Some("/tmp/i"), mode);
+            let script = command("/w", Some("/tmp/i"), mode, None);
             assert!(
                 script.contains(&format!(
                     "exec \"$c\" --add-dir '/tmp/i' --permission-mode {flag} -p --input-format"
@@ -1532,6 +1570,40 @@ mod tests {
             );
             assert_eq!(script.matches("--permission-mode").count(), 1, "{script}");
         }
+    }
+
+    /// ADR-0038 decision 2: a Chat turn reaches the room tools over HTTP,
+    /// names its thread in a header, and may use them without a prompt.
+    #[test]
+    fn the_room_server_and_its_tools_are_added_before_the_mode() {
+        let mcp = Mcp {
+            url: "http://100.64.0.1:7717/api/mcp".to_owned(),
+            thread: "web/1a2b3c4d".to_owned(),
+        };
+        let script = command("/w", Some("/tmp/i"), PermissionMode::FullAccess, Some(&mcp));
+        assert!(
+            script.contains(
+                "exec \"$c\" --add-dir '/tmp/i' --mcp-config '{\"mcpServers\":{\"yantra-room\":\
+                 {\"headers\":{\"X-Yantra-Thread\":\"web/1a2b3c4d\"},\"type\":\"http\",\
+                 \"url\":\"http://100.64.0.1:7717/api/mcp\"}}}' \
+                 --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read \
+                 --permission-mode default -p"
+            ),
+            "{script}"
+        );
+
+        let hostile = Mcp {
+            url: mcp.url.clone(),
+            thread: "web/x'; touch /tmp/pwned; '\"".to_owned(),
+        };
+        let script = command("/w", None, PermissionMode::Supervised, Some(&hostile));
+        assert!(
+            script.contains(
+                r#"--mcp-config '{"mcpServers":{"yantra-room":{"headers":{"X-Yantra-Thread":"web/x'\''; touch /tmp/pwned; '\''\""},"#
+            ),
+            "the quote ends nothing and the JSON stays one string: {script}"
+        );
+        assert_eq!(script.matches("--mcp-config").count(), 1, "{script}");
     }
 
     /// Claude's acceptEdits still asks about an edit outside its directories,

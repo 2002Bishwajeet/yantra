@@ -288,6 +288,11 @@ enum Command {
         #[arg(long)]
         daemon: String,
     },
+    /// Steer the rooms live agents talk in (ADR-0038)
+    Room {
+        #[command(subcommand)]
+        action: RoomAction,
+    },
     /// Rank the machines whose heartbeat is fresh, and say why each one won
     /// or lost. Exits 1 when none can be placed
     Why {
@@ -364,6 +369,18 @@ enum PrAction {
         /// The PR's body; the tip commit's body when absent
         #[arg(long)]
         body: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RoomAction {
+    /// Set a room's turn budget back to 0, so its agents may send again
+    Resume {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
     },
 }
 
@@ -535,6 +552,9 @@ async fn main() -> ExitCode {
         }
         Some(Command::Update { check: false }) => update_apply().await,
         Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
+        Some(Command::Room {
+            action: RoomAction::Resume { room, daemon },
+        }) => room_resume(room, daemon).await,
         Some(Command::Why {
             workspace,
             repo,
@@ -567,6 +587,28 @@ async fn serve_mcp(daemon: String) -> ExitCode {
         }
         Err(error) => {
             eprintln!("yantra mcp: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn room_resume(name: String, daemon: String) -> ExitCode {
+    if !yantra_core::room::valid_name(&name) {
+        eprintln!("yantra: {}", yantra_core::room::Error::BadName(name));
+        return ExitCode::FAILURE;
+    }
+    let room = name.clone();
+    match tokio::task::spawn_blocking(move || mcp::resume(&daemon, &room)).await {
+        Ok(Ok(())) => {
+            println!("room {name} resumed");
+            ExitCode::SUCCESS
+        }
+        Ok(Err(said)) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra room resume: {error}");
             ExitCode::FAILURE
         }
     }
@@ -2674,6 +2716,26 @@ mod tests {
             Some(Command::Mcp { daemon }) if daemon == "http://x:7717"
         ));
         assert!(Cli::try_parse_from(["yantra", "mcp"]).is_err());
+    }
+
+    #[test]
+    fn room_resume_needs_a_room_and_the_daemons_address() {
+        let parsed = Cli::try_parse_from([
+            "yantra",
+            "room",
+            "resume",
+            "r2",
+            "--daemon",
+            "http://x:7717",
+        ])
+        .expect("`room resume <room> --daemon <url>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Room { action: RoomAction::Resume { room, daemon } })
+                if room == "r2" && daemon == "http://x:7717"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "room", "resume", "r2"]).is_err());
+        assert!(Cli::try_parse_from(["yantra", "room", "resume", "--daemon", "x"]).is_err());
     }
 
     #[test]

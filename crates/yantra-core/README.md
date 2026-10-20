@@ -45,6 +45,12 @@ branch to the default branch with the daemon's GitHub grant, or answers the one 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.
 
+`room` reaches no machine either. It holds the rooms that live agents talk in, as pure logic with
+an injected clock: the ring of messages, the members and their cursors, the turn budget, and the
+`<room>` wrapper a receiver reads. It also defines the two MCP tools, `room_send` and `room_read`,
+and their argument checks, so `yantrad` and `yantra mcp` list the same tools
+([ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)).
+
 `history::stage()` is the exception: it reaches no machine. It writes a redacted copy of this
 account's agent transcripts for Syncthing to send to the appliance
 ([ADR-0032](../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md)).
