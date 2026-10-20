@@ -292,6 +292,8 @@ export type ChatProps = {
   thread?: string
   /** The daemon named a new thread; the URL keeps it. */
   onThread: (thread: string) => void
+  /** Y-489: the issue's first text, from the picker that opened this thread. */
+  initialDraft?: string
 }
 
 /** The streaming chat (ADR-0026, Y-356, ADR-0033). The first turn picks the
@@ -299,10 +301,10 @@ export type ChatProps = {
  *  writes the tree the Terminal tab's agent is in. Every harness draws on the
  *  one timeline. */
 export function Chat(props: ChatProps) {
-  const { workspace, thread, onThread } = props
+  const { workspace, thread, onThread, initialDraft } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(initialDraft ?? '')
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
   // A new thread is named on its first turn, and keeps the mode it was sent with.

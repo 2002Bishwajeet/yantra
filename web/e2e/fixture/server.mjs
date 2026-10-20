@@ -426,6 +426,28 @@ const routes = [
   ],
   ['POST', /^\/api\/workspaces\/([^/]+)\/tokens$/, () => [200, contract.spend]],
   ['POST', /^\/api\/workspaces\/([^/]+)\/logs$/, () => [200, contract.logs]],
+  // Y-489: Y-488's two thread routes. The second thread carries THREAD, the one chat attach knows.
+  [
+    'POST',
+    /^\/api\/workspaces\/([^/]+)\/threads$/,
+    (s, [name]) =>
+      findWorkspace(s, name)
+        ? [200, contract.threads.map((one, at) => (at === 1 ? { ...one, id: THREAD } : one))]
+        : [404, notFound(name)],
+  ],
+  [
+    'POST',
+    /^\/api\/workspaces\/([^/]+)\/threads\/new$/,
+    (s, [name], sent) => {
+      const one = findWorkspace(s, name)
+      if (!one) return [404, notFound(name)]
+      const repo = String(sent.issue ?? '').split('#')[0].split('/').pop()?.toLowerCase()
+      if (!repo || one.repo.split('/').pop().toLowerCase() !== repo) {
+        return [404, `\`${name}\` does not hold ${sent.issue}`]
+      }
+      return [200, { ...contract.threadOpened, thread: THREAD, issue: sent.issue }]
+    },
+  ],
   [
     'GET',
     /^\/api\/workspaces\/([^/]+)\/repair$/,

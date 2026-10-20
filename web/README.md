@@ -226,6 +226,12 @@ answer rather than the row it replaced.
 machines over ssh, so it is a `POST` and the page asks it when a person acts: once when New session
 opens, and once when a source is picked. It invalidates nothing.
 
+`useThreads` and `useOpenThread` are the same kind of mutation (Y-489, ADR-0019): `POST
+/api/workspaces/{name}/threads` lists a workspace's threads with their PR state, and `…/threads/new`
+opens one from an issue. The session page reads the list on mount and on Refresh, and never polls.
+Start session on an inbox issue passes the issue's draft to Chat in router location state, not in
+the URL, so the issue text stays out of logs (ADR-0034).
+
 - **There is no machine argument on a verb, and adding one would be a bug.** The
   target is `workspace.machine`, chosen when the workspace was written. A
   transient override would place a session where `down`, `resume`, `status` and

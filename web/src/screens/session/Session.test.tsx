@@ -183,6 +183,42 @@ describe('one workspace, four views the URL carries', () => {
     expect(chats).toHaveLength(1)
     expect(chats[0]?.closed).toBe(false)
   })
+
+  it('reattaches the chat when the URL names another thread', async () => {
+    daemon()
+    const sockets: { url: string; closed: boolean }[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        static OPEN = 1
+        readyState = 0
+        record: { url: string; closed: boolean }
+        constructor(url: string) {
+          this.record = { url, closed: false }
+          sockets.push(this.record)
+        }
+        send() {}
+        close() {
+          this.record.closed = true
+        }
+      },
+    )
+    const control: { pick: (thread: string) => void } = { pick: () => {} }
+    function Switch() {
+      const [thread, setThread] = useState('aaaaaaaa')
+      useEffect(() => {
+        control.pick = setThread
+      }, [setThread])
+      return <Workspace name="landing" thread={thread} view="chat" />
+    }
+    await renderInApp(<Switch />, new QueryClient({ defaultOptions: { queries: { retry: false } } }))
+
+    await waitFor(() => expect(sockets.some((one) => one.url.includes('thread=aaaaaaaa'))).toBe(true))
+    act(() => control.pick('bbbbbbbb'))
+
+    await waitFor(() => expect(sockets.some((one) => one.url.includes('thread=bbbbbbbb'))).toBe(true))
+    expect(sockets.find((one) => one.url.includes('thread=aaaaaaaa'))?.closed).toBe(true)
+  })
 })
 
 describe('what `/w/{name}` draws when there is no session behind it', () => {
