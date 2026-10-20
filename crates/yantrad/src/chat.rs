@@ -553,6 +553,9 @@ trait Machine: Send + Sync + 'static {
     fn revert(&self, place: &Place, turn: u32) -> impl Future<Output = Result<(), String>> + Send;
     fn branch_diff(&self, place: &Place)
     -> impl Future<Output = Result<BranchDiff, String>> + Send;
+    /// Kills the keeper of thread `thread`, which is gone, once its agent has
+    /// ended. `false` is an agent that still runs.
+    fn kill_orphan(&self, thread: &str) -> impl Future<Output = Result<bool, String>> + Send;
 }
 
 struct Fleet {
@@ -644,8 +647,7 @@ impl Machine for Fleet {
     }
 
     async fn remove(&self, place: &Place) -> Result<(), String> {
-        // No tmux means no keeper, and the worktree still goes.
-        thread::remove(&self.ssh, self.tmux().await.ok(), place)
+        thread::remove(&self.ssh, place)
             .await
             .map_err(|error| chain(&error))
     }
@@ -935,6 +937,21 @@ impl Machine for Fleet {
             .await
             .map_err(|error| chain(&error))
     }
+
+    async fn kill_orphan(&self, thread: &str) -> Result<bool, String> {
+        let tmux = self.tmux().await?;
+        let keeper = Keeper::new(&self.workspace.name, thread);
+        let pane = keep::pane(&self.ssh, tmux, &keeper)
+            .await
+            .map_err(|error| chain(&error))?;
+        if pane.is_some_and(|pane| !pane.dead) {
+            return Ok(false);
+        }
+        keep::kill(&self.ssh, tmux, &keeper)
+            .await
+            .map_err(|error| chain(&error))?;
+        Ok(true)
+    }
 }
 
 /// A wait that nobody is attached to see (ADR-0035 decision 10). It names the
@@ -994,8 +1011,8 @@ struct Held {
     /// Room prompts that wait for a thread's turn to end, each with the
     /// sender that tells its wake what came of it.
     queued: HashMap<String, Vec<Queued>>,
-    /// Keeper sessions whose workspace or thread is gone, which a refresh
-    /// pass no longer tries to adopt.
+    /// Keeper sessions whose workspace or thread is gone, already warned
+    /// about. A refresh pass still looks at each.
     gone: HashSet<String>,
 }
 
@@ -1044,15 +1061,13 @@ impl Registry {
         self.lock().lives.get(id).cloned()
     }
 
-    /// Whether this daemon reads the keeper `session` names, or gave up on it
-    /// because its workspace or its thread is gone.
+    /// Whether this daemon reads the keeper `session` names.
     pub fn holds(&self, session: &str) -> bool {
-        let held = self.lock();
-        held.gone.contains(session)
-            || Keeper::parse(session).is_some_and(|keeper| {
-                let id = format!("chat/{}/{}", keeper.workspace(), keeper.thread());
-                held.lives.contains_key(&id) || held.claimed.contains(&id)
-            })
+        Keeper::parse(session).is_some_and(|keeper| {
+            let id = format!("chat/{}/{}", keeper.workspace(), keeper.thread());
+            let held = self.lock();
+            held.lives.contains_key(&id) || held.claimed.contains(&id)
+        })
     }
 
     /// Whether a turn runs, starts, keeps its checkpoint or reverts in thread
@@ -1349,7 +1364,7 @@ impl Live {
     /// A subscription, the last cursor sent before it, and what the daemon
     /// made for the last turn that no replay of `out` makes again: its end,
     /// then its diff.
-    fn subscribe(&self) -> Option<(Option<Cursor>, Vec<ThreadEvent>, broadcast::Receiver<Sent>)> {
+    fn subscribe(&self) -> Option<Subscribed> {
         let state = self.lock();
         let receiver = state.sender.as_ref()?.subscribe();
         let remade = state.ended.iter().chain(&state.diff).cloned().collect();
@@ -1403,9 +1418,8 @@ fn repeated(sent: &Sent, seen: Option<&Cursor>) -> bool {
     }
 }
 
-/// Sends what the socket's subscription still holds, before a new one
-/// replaces it, so the last turn's end and diff are not dropped. `false` is a
-/// socket that went away, or fell too far behind and closes to reconnect.
+/// Sends what the old subscription still holds before a new one replaces it, so no end or diff
+/// is dropped. `false` is a socket that went away, or fell too far behind.
 async fn flush<P: Peer>(sub: &mut Option<Sub>, peer: &mut P) -> bool {
     let Some(open) = sub else {
         return true;
@@ -1727,11 +1741,8 @@ async fn land<M: Machine>(
     }
 }
 
-/// Frees the thread for its next turn, then keeps the tree the turn left and
-/// sends what the turn changed to every socket of the thread. No revert runs
-/// until the tree is kept. The diff is never logged (Q5). After a turn that
-/// failed, a checkpoint failure is only logged, so the browser keeps the
-/// turn's own error.
+/// Frees the thread for its next turn, keeps the tree and sends the turn's
+/// diff to every socket; no revert runs meanwhile. The diff is never logged.
 async fn checkpointed<M: Machine>(
     machine: &M,
     name: &str,
@@ -1757,6 +1768,7 @@ async fn checkpointed<M: Machine>(
         }
         Err(said) => {
             tracing::warn!("chat {name}: no checkpoint: {said}");
+            // A failed turn's own error is the one the browser keeps.
             if !failed {
                 live.publish(&failure(Kind::Checkpoint, said), None);
             }
@@ -2069,7 +2081,22 @@ async fn replay_live<M: Machine, P: Peer>(
     after: Option<Cursor>,
     peer: &mut P,
 ) -> Option<Sub> {
-    let (last, remade, receiver) = live.subscribe()?;
+    let subscribed = live.subscribe()?;
+    replay_subscribed(machine, here, &live.run, subscribed, after, peer).await
+}
+
+/// A live keeper's subscription.
+type Subscribed = (Option<Cursor>, Vec<ThreadEvent>, broadcast::Receiver<Sent>);
+
+/// [`replay_live`] with the subscription already taken.
+async fn replay_subscribed<M: Machine, P: Peer>(
+    machine: &M,
+    here: &Here,
+    run: &str,
+    (last, remade, receiver): Subscribed,
+    after: Option<Cursor>,
+    peer: &mut P,
+) -> Option<Sub> {
     let upto = last.as_ref().map_or(0, |last| last.end);
     let journals = match machine.journals(&here.place, Some(upto)).await {
         Ok(journals) => journals,
@@ -2104,7 +2131,7 @@ async fn replay_live<M: Machine, P: Peer>(
                 }
                 if let Some(prompt) = prompt
                     && !peer
-                        .say(&delta(&here.place, StreamKind::UserText, prompt, &live.run))
+                        .say(&delta(&here.place, StreamKind::UserText, prompt, run))
                         .await
                 {
                     return None;
@@ -2232,19 +2259,34 @@ async fn begin<M: Machine, P: Peer>(
     if here.harness.is_none() {
         machine.registry().remember_mode(&here.place.id, said.mode);
     }
+    // A keeper that ended closes the subscription before the loop sees it.
+    let unsubscribed = sub.as_ref().is_none_or(|open| open.receiver.is_closed());
     let started = match here.harness {
-        None => claude_turn(machine, name, &here.place, said).await,
-        Some(harness) => acp_turn(machine, name, here, harness, said, sub.is_none()).await,
+        None => claude_turn(machine, name, &here.place, said)
+            .await
+            .map(|receiver| receiver.map(Follow::New)),
+        Some(harness) => acp_turn(machine, name, here, harness, said, unsubscribed).await,
     };
     match started {
-        Ok(Some(receiver)) => {
+        Ok(Some(follow)) => {
             if !flush(sub, peer).await {
                 return false;
             }
-            *sub = Some(Sub {
-                receiver,
-                seen: None,
-            });
+            *sub = match follow {
+                Follow::New(receiver) => Some(Sub {
+                    receiver,
+                    seen: None,
+                }),
+                Follow::Replay(run, subscribed) => {
+                    let replayed =
+                        replay_subscribed(machine.as_ref(), here, &run, subscribed, None, peer)
+                            .await;
+                    if replayed.is_none() {
+                        return false;
+                    }
+                    replayed
+                }
+            };
             true
         }
         Ok(None) => true,
@@ -2366,9 +2408,16 @@ async fn claude_turn<M: Machine>(
     Ok(receiver)
 }
 
-/// Sends a turn to the thread's ACP keeper, starting a keeper that loads the
-/// session when the last one has gone. A socket whose subscription ended,
-/// `unsubscribed`, subscribes to the keeper that takes the turn.
+/// How a socket follows the keeper that takes its turn.
+enum Follow {
+    /// A subscription taken before the keeper sent anything.
+    New(broadcast::Receiver<Sent>),
+    /// A keeper of run `.0` that another task started; its events so far are replayed.
+    Replay(String, Subscribed),
+}
+
+/// Sends a turn to the thread's ACP keeper, starting one that loads the session when it has gone.
+/// A socket whose subscription ended, `unsubscribed`, follows the keeper that takes the turn.
 async fn acp_turn<M: Machine>(
     machine: &Arc<M>,
     name: &str,
@@ -2376,7 +2425,7 @@ async fn acp_turn<M: Machine>(
     harness: Harness,
     Typed { text, mode, .. }: Typed<'_>,
     unsubscribed: bool,
-) -> Result<Option<broadcast::Receiver<Sent>>, Failure> {
+) -> Result<Option<Follow>, Failure> {
     let mut subscribed = None;
     // A keeper that is stopping takes no turn; the next one loads the session.
     let deadline = tokio::time::Instant::now() + STOP_GRACE + STOP_GRACE;
@@ -2389,18 +2438,23 @@ async fn acp_turn<M: Machine>(
     let live = match machine.registry().live(&here.place.id) {
         Some(live) => {
             if unsubscribed {
-                subscribed = live.subscribe().map(|(_, _, receiver)| receiver);
+                subscribed = live
+                    .subscribe()
+                    .map(|(_, _, receiver)| Follow::New(receiver));
             }
             live
         }
         None => {
             let (_, receiver) =
                 connect(machine, name, &here.place, harness, here.session.clone()).await?;
-            subscribed = Some(subscribing(machine.as_ref(), &here.place, receiver)?);
-            machine
-                .registry()
-                .live(&here.place.id)
-                .ok_or_else(|| failure(Kind::Unreachable, "the agent went away"))?
+            let gone = || failure(Kind::Unreachable, "the agent's keeper went away");
+            let live = machine.registry().live(&here.place.id).ok_or_else(gone)?;
+            subscribed = Some(match receiver {
+                Some(receiver) => Follow::New(receiver),
+                // Another task started it meanwhile, and has sent events already.
+                None => Follow::Replay(live.run.clone(), live.subscribe().ok_or_else(gone)?),
+            });
+            live
         }
     };
     {
@@ -2418,11 +2472,8 @@ async fn acp_turn<M: Machine>(
     Ok(subscribed)
 }
 
-/// Starts `harness` in a keeper in the thread's worktree, and loads `session`
-/// or makes one and keeps it. A keeper already there is read back instead.
-/// Returns the session and, for a keeper it started, a subscription taken
-/// before any event is sent. `None` is a live keeper that another task reads,
-/// which may have sent events already.
+/// Starts `harness` in a keeper and loads `session` or makes one, or reads back a keeper already
+/// there. The subscription is `None` for a keeper another task reads, which may have sent events.
 async fn connect<M: Machine>(
     machine: &Arc<M>,
     name: &str,
@@ -2853,17 +2904,20 @@ async fn keep_acp<M: Machine>(
             }
             Step::Kill => {
                 kill_at = None;
-                if live.busy() {
-                    tracing::info!("chat {name}: the turn did not stop, so its keeper is killed");
+                let closing = live.lock().closing;
+                if live.busy() || closing {
+                    tracing::info!("chat {name}: the agent did not stop, so its keeper is killed");
                     if let Err(said) = machine.finish(&place, Duration::ZERO).await {
                         tracing::warn!("chat {name}: {said}");
+                        // The keeper stays, so it takes turns again.
+                        live.lock().closing = false;
                     }
                 }
             }
             Step::Idle => {
                 if !live.busy() && !live.watched() && quiet_since.elapsed() >= IDLE {
                     tracing::info!("chat {name}: the thread is idle, so its agent stops");
-                    close_agent(machine.as_ref(), &name, &place, &live).await;
+                    close_agent(machine.as_ref(), &name, &place, &live, &mut kill_at).await;
                     quiet_since = tokio::time::Instant::now();
                 }
             }
@@ -2890,15 +2944,19 @@ async fn turn_ended<M: Machine>(
         && size > Limits::default().cap / 2
     {
         tracing::info!("chat {name}: the keeper's out is past half its cap, so it is replaced");
-        close_agent(machine, name, place, live).await;
+        close_agent(machine, name, place, live, kill_at).await;
     }
 }
 
-/// Closes the stdin of a keeper's agent with no turn, so it ends. Meanwhile
-/// the keeper takes no turn, and the next turn waits for a new keeper. A
-/// keeper that took a turn first is left running, as is one whose stdin did
-/// not close.
-async fn close_agent<M: Machine>(machine: &M, name: &str, place: &Place, live: &Live) {
+/// Ends an idle agent: it takes no turn while it closes, and the kill at
+/// `kill_at` ends one that ignores the closed stdin.
+async fn close_agent<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+    kill_at: &mut Option<tokio::time::Instant>,
+) {
     {
         let mut state = live.lock();
         if state.busy {
@@ -2906,9 +2964,12 @@ async fn close_agent<M: Machine>(machine: &M, name: &str, place: &Place, live: &
         }
         state.closing = true;
     }
-    if let Err(said) = machine.close_stdin(place, &live.run).await {
-        tracing::warn!("chat {name}: {said}");
-        live.lock().closing = false;
+    match machine.close_stdin(place, &live.run).await {
+        Ok(()) => *kill_at = Some(tokio::time::Instant::now() + STOP_GRACE),
+        Err(said) => {
+            tracing::warn!("chat {name}: {said}");
+            live.lock().closing = false;
+        }
     }
 }
 
@@ -3052,43 +3113,58 @@ fn wake_on<M: Machine>(
 
 /// Reads back the keeper of the thread `thread` in workspace `workspace`,
 /// which no task of this daemon holds (ADR-0035 decision 9). The refresh pass
-/// calls it for each keeper session it finds. A keeper whose workspace or
-/// thread is gone is noted, so the pass skips it and warns once.
+/// calls it for each keeper session it finds.
 pub async fn adopt(registry: &Registry, workspace: &str, thread: &str) {
-    let session = Keeper::new(workspace, thread).session();
-    if registry.holds(&session) {
+    if registry.holds(&Keeper::new(workspace, thread).session()) {
         return;
     }
-    // `true` with the error is a workspace or a thread that is gone.
-    let adopted = async {
-        let loaded = match workspace::load(workspace) {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                let gone = matches!(error, workspace::Error::NotFound { .. });
-                return Err((gone, chain(&error)));
-            }
-        };
-        let fleet = Arc::new(Fleet::on(loaded, registry.clone()).map_err(|said| (false, said))?);
-        let place = fleet
-            .find(thread)
-            .await
-            .map_err(|said| (false, said))?
-            .ok_or_else(|| (true, format!("{workspace} has no chat thread {thread}")))?;
-        // A pass never waits: a task that holds the thread reads its keeper.
-        let Some(claim) = Claim::take(&fleet, &place) else {
-            return Ok(());
-        };
-        adopt_claimed(&fleet, workspace, place, &claim)
-            .await
-            .map_err(|refusal| (false, refusal.said))
-    }
-    .await;
-    if let Err((gone, said)) = adopted {
-        if gone {
-            registry.lock().gone.insert(session);
+    let adopted = match workspace::load(workspace) {
+        Ok(loaded) => match Fleet::on(loaded, registry.clone()) {
+            Ok(fleet) => adopt_in(&Arc::new(fleet), workspace, thread).await,
+            Err(said) => Err(said),
+        },
+        Err(error @ workspace::Error::NotFound { .. }) => Ok(Some(chain(&error))),
+        Err(error) => Err(chain(&error)),
+    };
+    let session = Keeper::new(workspace, thread).session();
+    match adopted {
+        Ok(None) => {
+            registry.lock().gone.remove(&session);
         }
-        tracing::warn!("chat {workspace}: keeper {thread} was not adopted: {said}");
+        // Said once while it stays, and looked at again on every pass.
+        Ok(Some(said)) => {
+            if registry.lock().gone.insert(session) {
+                tracing::warn!("chat {workspace}: keeper {thread} was not adopted: {said}");
+            }
+        }
+        Err(said) => tracing::warn!("chat {workspace}: keeper {thread} was not adopted: {said}"),
     }
+}
+
+/// [`adopt`] on a workspace's machine. `Some` says why a keeper whose thread
+/// is gone stays: its agent still runs, so it is killed only once it ends.
+async fn adopt_in<M: Machine>(
+    machine: &Arc<M>,
+    name: &str,
+    thread: &str,
+) -> Result<Option<String>, String> {
+    let Some(place) = machine.find(thread).await? else {
+        if machine.kill_orphan(thread).await? {
+            tracing::info!("chat {name}: thread {thread} is gone, so its keeper was killed");
+            return Ok(None);
+        }
+        return Ok(Some(format!(
+            "{name} has no chat thread {thread}, and its agent still runs"
+        )));
+    };
+    // A pass never waits: a task that holds the thread reads its keeper.
+    let Some(claim) = Claim::take(machine, &place) else {
+        return Ok(None);
+    };
+    adopt_claimed(machine, name, place, &claim)
+        .await
+        .map(|()| None)
+        .map_err(|refusal| refusal.said)
 }
 
 /// Reads back a thread's keeper unless a task reads it already, waiting while
@@ -3718,6 +3794,10 @@ mod tests {
         branch_gate: Option<Arc<tokio::sync::Notify>>,
         /// How many keepers were read back.
         adopted: Mutex<usize>,
+        /// Each orphan keeper killed.
+        orphans: Mutex<Vec<String>>,
+        /// An orphan's agent still runs, so it is not killed.
+        orphan_runs: bool,
         /// Shared by every tab connected to this script.
         registry: Registry,
     }
@@ -4082,6 +4162,14 @@ mod tests {
             }
             lock(&self.reverted).push(turn);
             Ok(())
+        }
+
+        async fn kill_orphan(&self, thread: &str) -> Result<bool, String> {
+            if self.orphan_runs {
+                return Ok(false);
+            }
+            lock(&self.orphans).push(thread.to_owned());
+            Ok(true)
         }
     }
 
@@ -6724,16 +6812,185 @@ mod tests {
         assert_eq!(*lock(&script.adopted), 0, "one reader for the keeper");
     }
 
-    /// Y-542: a keeper whose workspace is gone is tried once, so the refresh
-    /// pass warns once and not every 30 s.
+    /// Y-542: a keeper whose workspace is gone is warned about once, and the
+    /// refresh pass still looks at it, so a workspace made again adopts it.
     #[tokio::test]
-    async fn a_keeper_whose_workspace_is_gone_is_skipped_after_one_try() {
+    async fn a_keeper_whose_workspace_is_gone_is_noted_once_and_not_hidden() {
         let registry = Registry::default();
         let gone = "y542-no-such-workspace";
         let session = Keeper::new(gone, THREAD).session();
-        assert!(!registry.holds(&session));
         adopt(&registry, gone, THREAD).await;
-        assert!(registry.holds(&session), "the refresh pass skips it");
-        assert!(!registry.holds(&Keeper::new("web", THREAD).session()));
+        assert!(registry.lock().gone.contains(&session), "warned once");
+        assert!(!registry.holds(&session), "the next pass looks again");
+    }
+
+    /// Y-542: a keeper whose thread is gone is killed once its agent ended,
+    /// and left while it runs.
+    #[tokio::test]
+    async fn a_keeper_whose_thread_is_gone_is_killed_once_its_agent_ends() {
+        let ended = Arc::new(Script::default());
+        assert_eq!(adopt_in(&ended, "web", THREAD).await, Ok(None));
+        assert_eq!(*lock(&ended.orphans), [THREAD]);
+
+        let running = Arc::new(Script {
+            orphan_runs: true,
+            ..Script::default()
+        });
+        assert!(matches!(
+            adopt_in(&running, "web", THREAD).await,
+            Ok(Some(_))
+        ));
+        assert!(lock(&running.orphans).is_empty());
+    }
+
+    /// Y-542: an agent that ignores its closed stdin is killed after the
+    /// grace, so the next turn reaches a new keeper and is never busy.
+    #[tokio::test(start_paused = true)]
+    async fn an_agent_that_ignores_its_closed_stdin_is_killed_after_the_grace() {
+        let script = Arc::new(Script {
+            out_bytes: Some(Limits::default().cap / 2 + 1),
+            ..Script::default()
+        });
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        assert_eq!(tab.next().await["type"], "turn.completed");
+        assert_eq!(tab.next().await["type"], "turn.diff.updated");
+        until_script(&script, |script| *lock(&script.stdin_closed) == 1).await;
+        // The agent holds its end and never exits.
+        tokio::time::sleep(STOP_GRACE + Duration::from_secs(1)).await;
+        until_script(&script, |script| {
+            script.registry.live(&place().id).is_none()
+        })
+        .await;
+        assert_eq!(lock(&script.finished)[0], Duration::ZERO, "it was killed");
+
+        tab.send(json!({"type": "turn", "text": "again"}));
+        let mut next = script.agent().await;
+        next.initialized().await;
+        let load = next.heard().await;
+        assert_eq!(load["method"], "session/load");
+        next.reply(&load, json!({})).await;
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:2:1");
+        drop(agent);
+    }
+
+    fn here() -> Here {
+        Here {
+            place: place(),
+            harness: Some(Harness::Opencode),
+            session: Some(SESSION.to_owned()),
+        }
+    }
+
+    fn browser() -> (Browser, mpsc::UnboundedReceiver<String>) {
+        let (to, heard) = mpsc::unbounded_channel();
+        let (_, from) = mpsc::unbounded_channel();
+        let browser = Browser {
+            from,
+            to,
+            held: None,
+        };
+        (browser, heard)
+    }
+
+    fn typed(text: &str) -> Typed<'static> {
+        Typed {
+            text: text.to_owned(),
+            images: None,
+            mode: PermissionMode::default(),
+        }
+    }
+
+    /// Y-542: a socket whose keeper ended before its loop saw the end still
+    /// follows the keeper another tab reads.
+    #[tokio::test]
+    async fn a_turn_after_an_unseen_end_follows_the_next_keeper() {
+        let script = Arc::new(Script::default());
+        let (mut other, mut agent, prompt) = an_opencode_thread(&script).await;
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        through(&mut other, "turn.diff.updated").await;
+        let (ended, _commands) = Live::new(&place(), "0".to_owned(), false);
+        let mut sub = ended.subscribe().map(|(_, _, receiver)| Sub {
+            receiver,
+            seen: None,
+        });
+        ended.close();
+
+        let (mut browser, _heard) = browser();
+        let mut here = Some(here());
+        let begun = begin(
+            &script,
+            "web",
+            &mut here,
+            &mut sub,
+            &mut None,
+            None,
+            typed("again"),
+            &mut browser,
+        )
+        .await;
+        assert!(begun);
+        let open = sub.expect("a subscription");
+        assert!(!open.receiver.is_closed(), "it follows the live keeper");
+        assert_eq!(agent.heard().await["method"], "session/prompt");
+    }
+
+    /// Y-542: a turn that waits while another tab starts the keeper gets the
+    /// history that keeper sent meanwhile.
+    #[tokio::test]
+    async fn a_turn_that_waits_for_a_keeper_another_tab_starts_gets_its_history() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            ..Script::default()
+        });
+        let (mut first, _a) = connect(Arc::clone(&script), Some(THREAD));
+        let mut agent = script.agent().await;
+
+        let waiting = {
+            let script = Arc::clone(&script);
+            tokio::spawn(async move {
+                let (mut browser, heard) = browser();
+                let mut sub = None;
+                let begun = begin(
+                    &script,
+                    "web",
+                    &mut Some(here()),
+                    &mut sub,
+                    &mut None,
+                    None,
+                    typed("again"),
+                    &mut browser,
+                )
+                .await;
+                (begun, sub.is_some(), heard)
+            })
+        };
+        // The turn waits on the claim the first tab holds.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        agent.initialized().await;
+        let load = agent.heard().await;
+        assert_eq!(load["method"], "session/load");
+        agent
+            .update(
+                json!({"sessionUpdate": "user_message_chunk", "messageId": "m0",
+                           "content": {"type": "text", "text": "list the files"}}),
+            )
+            .await;
+        agent.reply(&load, json!({})).await;
+        assert_eq!(first.next().await["type"], "thread.started");
+        let history = first.next().await;
+        assert_eq!(history["payload"]["delta"], "list the files", "{history}");
+
+        let (begun, subscribed, mut heard) = waiting.await.expect("the turn ends");
+        assert!(begun && subscribed);
+        let said: Value =
+            serde_json::from_str(&heard.recv().await.expect("a frame")).expect("JSON");
+        assert_eq!(said, history, "the session/load history");
+        assert_eq!(agent.heard().await["method"], "session/prompt");
     }
 }

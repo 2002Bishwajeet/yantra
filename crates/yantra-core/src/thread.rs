@@ -27,7 +27,7 @@ use crate::github::{self, Github, Issue, IssueRef, PullState, Token};
 use crate::keep::{self, Keeper};
 use crate::logs::{self, Transcript};
 use crate::ssh::{self, Exec, Ssh};
-use crate::tmux::{Tmux, sq};
+use crate::tmux::{self, Tmux, sq};
 use crate::tokens::{self, Spend};
 use crate::workspace::{self, Workspace};
 
@@ -452,16 +452,16 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
     }
 }
 
-/// Removes the worktree, the branch, the checkpoints and the keeper's
-/// journals and images, uncommitted work included. The only path that deletes
-/// a thread.
-/// Removes the thread: its keeper's session first, so no agent writes to the
-/// journals while they go (I-30), then the worktree, the branch, the
-/// checkpoints and the journals. `None` is a machine where tmux was not
-/// found, so no keeper runs there.
-pub async fn remove<E: Exec>(exec: &E, tmux: Option<&Tmux>, place: &Place) -> Result<(), Error> {
-    if let (Some(tmux), Some(keeper)) = (tmux, Keeper::of(place)) {
-        keep::kill(exec, tmux, &keeper).await?;
+/// Kills the keeper, then removes the worktree, branch, checkpoints, journals and images: the
+/// only path that deletes a thread. A keeper that will not go keeps all of it.
+pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
+    if let Some(keeper) = Keeper::of(place) {
+        match Tmux::resolve(exec).await {
+            Ok(tmux) => keep::kill(exec, &tmux, &keeper).await?,
+            // A machine with no tmux runs no keeper.
+            Err(tmux::Error::NotFound { .. }) => {}
+            Err(error) => return Err(keep::Error::from(error).into()),
+        }
     }
     removal(exec, place).await
 }
@@ -738,23 +738,34 @@ mod tests {
         ));
     }
 
-    async fn tmux() -> Tmux {
-        Tmux::resolve(&Machine::answering(vec![out(0, b"/usr/bin/tmux\n", "")]))
-            .await
-            .expect("a tmux")
+    const KILL: &str = "'/usr/bin/tmux' kill-session -t '=yantra-keep-web-11111111'";
+
+    fn found() -> ssh::Output {
+        out(0, b"/usr/bin/tmux\n", "")
     }
 
-    const KILL: &str = "'/usr/bin/tmux' kill-session -t '=yantra-keep-web-11111111'";
+    /// A machine whose every command fails before it reaches the shell.
+    struct Away(Mutex<usize>);
+
+    impl Exec for Away {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            *self.0.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            Err(ssh::Error::Transport {
+                host: "m".to_owned(),
+                diagnosis: "Connection timed out".to_owned(),
+            })
+        }
+    }
 
     #[tokio::test]
     async fn remove_kills_the_keeper_then_runs_the_removal_and_names_a_refusal() {
-        let tmux = tmux().await;
-        let machine = Machine::answering(vec![out(0, b"", ""), out(0, b"", "")]);
-        remove(&machine, Some(&tmux), &place())
-            .await
-            .expect("removed");
+        let machine = Machine::answering(vec![found(), out(0, b"", ""), out(0, b"", "")]);
+        remove(&machine, &place()).await.expect("removed");
+        let asked = machine.asked();
+        assert_eq!(asked.len(), 3, "{asked:?}");
+        assert!(asked[0].contains("command -v tmux"));
         assert_eq!(
-            machine.asked(),
+            asked[1..],
             [
                 KILL.to_owned(),
                 format!(
@@ -773,27 +784,44 @@ mod tests {
         );
 
         let refused = Machine::answering(vec![
+            found(),
             out(0, b"", ""),
             out(128, b"", "fatal: not a working tree\n"),
         ]);
         assert!(matches!(
-            remove(&refused, Some(&tmux), &place()).await,
+            remove(&refused, &place()).await,
             Err(Error::Worktree { stderr }) if stderr == "fatal: not a working tree"
         ));
 
         // A keeper that stays keeps its journals too.
-        let kept = Machine::answering(vec![out(1, b"", "permission denied\n")]);
+        let kept = Machine::answering(vec![found(), out(1, b"", "permission denied\n")]);
         assert!(matches!(
-            remove(&kept, Some(&tmux), &place()).await,
+            remove(&kept, &place()).await,
             Err(Error::Keeper(_))
         ));
-        assert_eq!(kept.asked().len(), 1, "nothing is removed");
+        assert_eq!(kept.asked().len(), 2, "nothing is removed");
 
-        // A machine with no tmux has no keeper to kill (Y-542).
-        let bare = Machine::answering(vec![out(0, b"", "")]);
-        remove(&bare, None, &place()).await.expect("removed");
-        assert_eq!(bare.asked().len(), 1, "the removal alone");
-        assert!(bare.asked()[0].contains("worktree remove --force"));
+        // A machine with no tmux has no keeper to kill.
+        let bare = Machine::answering(vec![out(1, b"", ""), out(0, b"", "")]);
+        remove(&bare, &place()).await.expect("removed");
+        assert_eq!(bare.asked().len(), 2, "the probe, then the removal");
+        assert!(bare.asked()[1].contains("worktree remove --force"));
+    }
+
+    /// Y-542: a machine that cannot say whether tmux runs a keeper keeps
+    /// the thread, so no journal goes from under a running agent.
+    #[tokio::test]
+    async fn remove_on_a_machine_that_does_not_answer_removes_nothing() {
+        let away = Away(Mutex::new(0));
+        assert!(matches!(
+            remove(&away, &place()).await,
+            Err(Error::Keeper(_))
+        ));
+        assert_eq!(
+            *away.0.lock().unwrap_or_else(PoisonError::into_inner),
+            1,
+            "only the tmux probe"
+        );
     }
 
     #[tokio::test]

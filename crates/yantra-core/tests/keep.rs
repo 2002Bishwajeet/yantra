@@ -511,9 +511,8 @@ async fn a_writer_behind_in_ends_the_keeper_and_says_why() -> Result<()> {
     Ok(())
 }
 
-/// Y-542: a writer whose keeper was replaced lands nothing in the new
-/// keeper's `in` and leaves its session alone, though its offset is wrong
-/// there.
+/// Y-542: a writer whose keeper was replaced lands nothing in the new keeper's `in` and leaves
+/// its session alone, though its offset is wrong there.
 #[tokio::test]
 async fn a_writer_of_a_replaced_keeper_leaves_the_new_one() -> Result<()> {
     let Some(lab) = Lab::start("replaced").await? else {

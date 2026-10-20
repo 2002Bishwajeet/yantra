@@ -181,7 +181,7 @@ async fn a_thread_edits_its_own_worktree_while_the_tui_keeps_the_repo() -> Resul
         branch = ended.branch
     ))?;
 
-    thread::remove(&ssh, Some(&tmux), &ended).await?;
+    thread::remove(&ssh, &ended).await?;
     assert_eq!(
         fixture
             .run(&format!("test -e {} && echo there || true", ended.worktree))?
@@ -197,7 +197,7 @@ async fn a_thread_edits_its_own_worktree_while_the_tui_keeps_the_repo() -> Resul
         std::slice::from_ref(&two)
     );
 
-    thread::remove(&ssh, Some(&tmux), &two).await?;
+    thread::remove(&ssh, &two).await?;
     tmux.kill(&ssh, NAME).await?;
     std::fs::remove_dir_all(&dir)?;
     Ok(())
@@ -242,7 +242,7 @@ async fn a_thread_remembers_its_harness_and_acp_session() -> Result<()> {
         Some((Harness::Opencode, session.to_owned()))
     );
 
-    thread::remove(&ssh, Some(&Tmux::resolve(&ssh).await?), &place).await?;
+    thread::remove(&ssh, &place).await?;
     let left = fixture.run(&format!(
         "git -C {repo} config --get-regexp '^branch\\.' || true"
     ))?;
@@ -313,9 +313,8 @@ async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()>
         ))
     );
 
-    let tmux = Tmux::resolve(&ssh).await?;
-    thread::remove(&ssh, Some(&tmux), &from_issue).await?;
-    thread::remove(&ssh, Some(&tmux), &plain).await?;
+    thread::remove(&ssh, &from_issue).await?;
+    thread::remove(&ssh, &plain).await?;
     let left = fixture.run(&format!(
         "git -C {repo} config --get-regexp '^branch\\.' || true"
     ))?;
@@ -369,7 +368,7 @@ async fn removing_a_thread_ends_its_keeper_and_its_journals() -> Result<()> {
     .await?;
     assert!(matches!(started, Started::Running { .. }), "{started:?}");
 
-    thread::remove(&ssh, Some(&tmux), &place).await?;
+    thread::remove(&ssh, &place).await?;
     assert!(
         keep::pane(&ssh, &tmux, &keeper).await?.is_none(),
         "the keeper's session is gone"

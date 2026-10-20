@@ -635,8 +635,9 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   replaced by the next start, and an adoption kills it: its pane never got the script, or its
   agent waits on an empty `in` (`keep::stale`, Y-541).
 - **`refresh.rs` adopts what a restart left.** The sessions sweep lists `yantra-keep-` sessions,
-  and each one the registry does not hold is adopted. A keeper whose workspace or thread is gone
-  is tried once, warned about once, and skipped until the daemon restarts (Y-542). The session
+  and each one the registry does not hold is adopted. A keeper whose workspace is gone is warned
+  about once and looked at again on each pass (Y-542). A keeper whose thread is gone is killed
+  once its agent has ended. The session
   listing hides them, and `validate_name` refuses the prefix to a workspace.
 - **A request nobody is attached to see sends one notification** (Y-451), titled with
   `Phase::WaitingForApproval`'s headline. The body names the workspace and the thread, and nothing
@@ -644,7 +645,8 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 - **A Claude keeper ends with its turn.** The task keeps the checkpoint and kills the session.
   **An ACP keeper stays for the next turn** and stops after 15 minutes with no turn, or once `out`
   passes half the journal cap. While its agent ends, it takes no turn, and the next turn waits
-  for a new keeper, which calls `session/load` (Y-542).
+  for a new keeper, which calls `session/load`. An agent that has not ended 10 s after its stdin
+  closed is killed (Y-542).
 
 The rules from before the keeper still hold:
 
