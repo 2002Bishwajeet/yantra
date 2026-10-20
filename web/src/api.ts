@@ -555,7 +555,16 @@ export type Joined = {
 
 // Y-356, Y-424: the chat socket's shapes, whose home is `api/thread.ts`.
 // Re-exported so `contract.gen.ts` checks them with every other shape.
-export type { ChatAttached, ChatFailure, ChatFrame, ChatNotAttached, ChatQuery, ThreadEvent } from './api/thread'
+export type {
+  ChangedFile,
+  ChatAttached,
+  ChatBranchDiff,
+  ChatFailure,
+  ChatFrame,
+  ChatNotAttached,
+  ChatQuery,
+  ThreadEvent,
+} from './api/thread'
 
 // Y-517: `POST /api/placement`, which machine a new session should open on.
 

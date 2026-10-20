@@ -19,9 +19,9 @@
 //! `cancel` frame and the thread's removal stop a turn. `?after=` is the last
 //! cursor the browser drew, and the socket sends only the events after it.
 //!
-//! The browser sends four frames, `turn`, `answer`, `cancel` and `revert`, and
-//! one turn runs at a time in a thread, across every tab and every restart.
-//! The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
+//! The browser sends five frames, `turn`, `answer`, `cancel`, `revert` and
+//! `diff`, and one turn runs at a time in a thread, across every tab and every
+//! restart. The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
 //!
 //! **Each `turn` carries the thread's [`PermissionMode`]** (Y-453), and the
 //! keeper's `mode` file keeps it for a daemon that adopts the turn. A request
@@ -37,6 +37,10 @@
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
 //! `turn.diff.updated`, and `revert` puts the files back as a checkpoint kept
 //! them. The conversation is not rewound.
+//!
+//! **`diff` gets one [`BranchDiffReply`]** (Y-490): everything the thread
+//! changed since its branch left the repository's `HEAD`, read through a
+//! private index, so it is answered while a turn runs.
 //!
 //! **A binary frame is an image** (Y-424). It goes to the thread's keeper
 //! directory through [`Images`] and gets exactly one [`Attachment`] in reply,
@@ -72,7 +76,7 @@ use yantra_core::chat::{
     ContentDelta, Decision, Event, PermissionMode, RequestOption, Scope, StopReason, StreamKind,
     ThreadEvent, TurnDiff, TurnState,
 };
-use yantra_core::checkpoint::{self, Diff};
+use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Turn};
 use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
@@ -247,6 +251,8 @@ enum Frame {
     Revert {
         turn: u32,
     },
+    /// Asks for the thread's whole-branch diff.
+    Diff,
 }
 
 /// The one frame the daemon sends that is not a [`ThreadEvent`].
@@ -283,6 +289,56 @@ enum NotAttached {
     Unreachable,
 }
 
+/// The reply to a `diff` frame. Like [`Attachment`], it is no journalled event.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BranchDiffReply {
+    #[serde(rename = "type")]
+    tag: &'static str,
+    thread_id: String,
+    /// The merge-base of the thread's branch and the repository's `HEAD`.
+    base: String,
+    files: Vec<ChangedFile>,
+    files_truncated: bool,
+    unified_diff: String,
+    truncated: bool,
+}
+
+/// No counts is a binary file; `from` is a rename's old path.
+#[derive(Debug, Serialize)]
+struct ChangedFile {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    added: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted: Option<u32>,
+}
+
+impl BranchDiffReply {
+    fn of(place: &Place, diff: BranchDiff) -> Self {
+        Self {
+            tag: "branchDiff",
+            thread_id: thread::name(place).to_owned(),
+            base: diff.base,
+            files: diff
+                .files
+                .into_iter()
+                .map(|file| ChangedFile {
+                    path: file.path,
+                    from: file.from,
+                    added: file.added,
+                    deleted: file.deleted,
+                })
+                .collect(),
+            files_truncated: diff.files_truncated,
+            unified_diff: diff.diff.unified,
+            truncated: diff.diff.truncated,
+        }
+    }
+}
+
 /// What a `notLoggedIn` failure names: whose login, where, and how to make it.
 #[derive(Debug, Clone, Serialize)]
 struct Login {
@@ -304,7 +360,8 @@ enum Kind {
     Unreachable,
     /// The harness has no login on the machine (ADR-0033 decision 6).
     NotLoggedIn,
-    /// git could not keep, diff or restore a checkpoint.
+    /// git could not keep, diff or restore a checkpoint, or diff the
+    /// thread's branch.
     Checkpoint,
 }
 
@@ -487,6 +544,8 @@ trait Machine: Send + Sync + 'static {
     /// The newest checkpoint that has a diff, which is the last turn's.
     fn latest(&self, place: &Place) -> impl Future<Output = Result<Option<u32>, String>> + Send;
     fn revert(&self, place: &Place, turn: u32) -> impl Future<Output = Result<(), String>> + Send;
+    fn branch_diff(&self, place: &Place)
+    -> impl Future<Output = Result<BranchDiff, String>> + Send;
 }
 
 struct Fleet {
@@ -850,6 +909,12 @@ impl Machine for Fleet {
 
     async fn revert(&self, place: &Place, turn: u32) -> Result<(), String> {
         checkpoint::revert(&self.ssh, place, turn)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn branch_diff(&self, place: &Place) -> Result<BranchDiff, String> {
+        checkpoint::branch(&self.ssh, place)
             .await
             .map_err(|error| chain(&error))
     }
@@ -1453,8 +1518,17 @@ async fn heard_frame<M: Machine, P: Peer>(
                 said
             }
         },
+        // Read-only through a private index, so a running turn does not refuse it.
+        Ok(Frame::Diff) => match here.as_ref() {
+            None => {
+                let said = "no thread is open, so there is nothing to diff";
+                peer.say(&failure(Kind::BadFrame, said)).await
+            }
+            Some(here) => branch_diff(machine.as_ref(), name, &here.place, peer).await,
+        },
         Err(error) => {
-            let said = format!("a frame is a turn, an answer, a cancel or a revert: {error}");
+            let said =
+                format!("a frame is a turn, an answer, a cancel, a revert or a diff: {error}");
             peer.say(&failure(Kind::BadFrame, said)).await
         }
     }
@@ -1603,6 +1677,26 @@ async fn revert<M: Machine, P: Peer>(
         }
         Err(said) => {
             tracing::warn!("chat {name}: no revert: {said}");
+            peer.say(&failure(Kind::Checkpoint, said)).await
+        }
+    }
+}
+
+/// Sends the thread's whole-branch diff. git's words are not logged either,
+/// because they may name a path (Q5).
+async fn branch_diff<M: Machine, P: Peer>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    peer: &mut P,
+) -> bool {
+    match within(machine.branch_diff(place)).await {
+        Ok(diff) => {
+            tracing::info!("chat {name}: branch diff sent");
+            peer.say(&BranchDiffReply::of(place, diff)).await
+        }
+        Err(said) => {
+            tracing::warn!("chat {name}: no branch diff");
             peer.say(&failure(Kind::Checkpoint, said)).await
         }
     }
@@ -2818,6 +2912,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
         Item, ItemStatus, ItemType, RequestOpened, RequestResolved, RequestType, Scope, TokenUsage,
         TurnCompleted,
     };
+    use yantra_core::checkpoint::FileStat;
     let at = |cursor: Option<&str>, event| {
         serde_json::to_value(ThreadEvent {
             thread_id: "1a2b3c4d".to_owned(),
@@ -2951,6 +3046,42 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             .expect("an attachment serialises"),
         ),
         (
+            "chatBranchDiff",
+            "ChatBranchDiff",
+            serde_json::to_value(BranchDiffReply::of(
+                &Place {
+                    id: "chat/web/1a2b3c4d".to_owned(),
+                    repo: "/home/u/web".to_owned(),
+                    worktree: "/home/u/.yantra/worktrees/chat/web/1a2b3c4d".to_owned(),
+                    branch: "yantra/chat/web/1a2b3c4d".to_owned(),
+                    base: "0123abcd".to_owned(),
+                },
+                BranchDiff {
+                    base: "0123abcd0123abcd0123abcd0123abcd0123abcd".to_owned(),
+                    files: vec![
+                        FileStat {
+                            path: "src/new.rs".to_owned(),
+                            from: Some("src/old.rs".to_owned()),
+                            added: Some(3),
+                            deleted: Some(1),
+                        },
+                        FileStat {
+                            path: "logo.png".to_owned(),
+                            from: None,
+                            added: None,
+                            deleted: None,
+                        },
+                    ],
+                    files_truncated: false,
+                    diff: Diff {
+                        unified: "diff --git a/src/old.rs b/src/new.rs\n".to_owned(),
+                        truncated: false,
+                    },
+                },
+            ))
+            .expect("a branch diff serialises"),
+        ),
+        (
             "chatNotAttached",
             "ChatNotAttached",
             serde_json::to_value(Attachment::NotAttached {
@@ -2979,6 +3110,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 }),
                 frame(Frame::Cancel),
                 frame(Frame::Revert { turn: 0 }),
+                frame(Frame::Diff),
             ]),
         ),
         (
@@ -3003,6 +3135,7 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::watch;
+    use yantra_core::checkpoint::FileStat;
     use yantra_core::inventory::{Caller, Fake};
 
     const ME: u64 = 1;
@@ -3249,6 +3382,7 @@ mod tests {
         base_fails: bool,
         capture_fails: bool,
         revert_fails: bool,
+        branch_fails: bool,
         /// How many checkpoints the thread holds.
         checkpoints: Mutex<u32>,
         reverted: Mutex<Vec<u32>>,
@@ -3580,6 +3714,34 @@ mod tests {
                 .filter(|&turn| turn > 0))
         }
 
+        async fn branch_diff(&self, _: &Place) -> Result<BranchDiff, String> {
+            if self.branch_fails {
+                return Err("git: fatal: the branch has no merge-base with HEAD".to_owned());
+            }
+            Ok(BranchDiff {
+                base: "0123abcd".to_owned(),
+                files: vec![
+                    FileStat {
+                        path: "new.txt".to_owned(),
+                        from: Some("old.txt".to_owned()),
+                        added: Some(2),
+                        deleted: Some(0),
+                    },
+                    FileStat {
+                        path: "blob.bin".to_owned(),
+                        from: None,
+                        added: None,
+                        deleted: None,
+                    },
+                ],
+                files_truncated: false,
+                diff: Diff {
+                    unified: "diff --git a/old.txt b/new.txt\n".to_owned(),
+                    truncated: false,
+                },
+            })
+        }
+
         async fn revert(&self, _: &Place, turn: u32) -> Result<(), String> {
             if self.revert_fails {
                 return Err("the thread has no checkpoint 4".to_owned());
@@ -3784,6 +3946,7 @@ mod tests {
             ),
             (r#"{"type":"cancel"}"#, Frame::Cancel),
             (r#"{"type":"revert","turn":2}"#, Frame::Revert { turn: 2 }),
+            (r#"{"type":"diff"}"#, Frame::Diff),
         ] {
             let parsed: Frame = serde_json::from_str(text).expect("a frame parses");
             assert_eq!(format!("{parsed:?}"), format!("{frame:?}"));
@@ -5006,6 +5169,61 @@ mod tests {
             json!({"type": "error", "kind": "checkpoint",
                    "said": "the thread has no checkpoint 4"})
         );
+    }
+
+    #[tokio::test]
+    async fn branch_diff_with_no_thread_is_a_bad_frame() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        let said = tab.next_after(json!({"type": "diff"})).await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+    }
+
+    #[tokio::test]
+    async fn branch_diff_of_a_thread_is_one_reply() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(
+            tab.next_after(json!({"type": "diff"})).await,
+            json!({"type": "branchDiff", "threadId": THREAD, "base": "0123abcd",
+                   "files": [{"path": "new.txt", "from": "old.txt", "added": 2, "deleted": 0},
+                             {"path": "blob.bin"}],
+                   "filesTruncated": false,
+                   "unifiedDiff": "diff --git a/old.txt b/new.txt\n", "truncated": false})
+        );
+    }
+
+    #[tokio::test]
+    async fn branch_diff_that_fails_is_a_checkpoint_failure_in_gits_words() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            branch_fails: true,
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        tab.next().await;
+        assert_eq!(
+            tab.next_after(json!({"type": "diff"})).await,
+            json!({"type": "error", "kind": "checkpoint",
+                   "said": "git: fatal: the branch has no merge-base with HEAD"})
+        );
+    }
+
+    #[tokio::test]
+    async fn branch_diff_while_a_turn_runs_is_answered() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        let said = tab.next_after(json!({"type": "diff"})).await;
+        assert_eq!(said["type"], "branchDiff", "{said}");
     }
 
     /// The first turn of a Claude thread in `mode`, up to Claude's prompt.

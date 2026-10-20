@@ -184,3 +184,131 @@ async fn a_revert_restores_the_tree_and_moves_no_branch() -> Result<()> {
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }
+
+const BRANCH_REPO: &str = "/home/yantra/branchdiff";
+
+/// Y-490: the whole branch, committed and uncommitted work, against the
+/// merge-base, read through a hostile git config, with no index or branch moved.
+#[tokio::test]
+async fn a_branch_diff_is_the_whole_tree_against_the_merge_base() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    // Its own directory: nextest runs this beside the test above.
+    let dir = std::path::PathBuf::from("/tmp").join("yt-brd");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    std::fs::create_dir_all(&dir)?;
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(USER.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.clone(),
+    })?;
+    let commit = "git -c user.name=t -c user.email=t@example.com commit -q";
+    fixture.run(&format!(
+        "mkdir -p {BRANCH_REPO} && cd {BRANCH_REPO} && git init -q \
+         && printf 'one\\n' > keep.txt && seq 1 40 > old-name.txt \
+         && git add keep.txt old-name.txt && {commit} -m one"
+    ))?;
+    let workspace = Workspace {
+        name: "brd".to_owned(),
+        machine: "fixture".to_owned(),
+        repo: BRANCH_REPO.into(),
+        startup: None,
+    };
+    let place = thread::open(&ssh, &workspace).await?;
+    let wt = place.worktree.clone();
+
+    fixture.run(&format!(
+        "cd {wt} && printf 'two\\n' >> keep.txt && git add keep.txt && {commit} -m two \
+         && mv old-name.txt new-name.txt && printf 'a\\000b\\000c' > blob.bin"
+    ))?;
+    fixture.run(&format!(
+        "cd {BRANCH_REPO} && printf 'main\\n' > main-only.txt && git add main-only.txt \
+         && {commit} -m main"
+    ))?;
+    fixture.run(&format!(
+        "git -C {BRANCH_REPO} config diff.renames false \
+         && git -C {BRANCH_REPO} config diff.noprefix true \
+         && git -C {BRANCH_REPO} config color.ui always \
+         && git -C {BRANCH_REPO} config core.quotePath true \
+         && git -C {BRANCH_REPO} config diff.external /bin/false"
+    ))?;
+    let state = format!(
+        "git -C {wt} status --porcelain && git -C {wt} ls-files --stage \
+         && git -C {BRANCH_REPO} for-each-ref --format='%(refname) %(objectname)' refs/heads"
+    );
+    let before = fixture.run(&state)?;
+
+    let diff = checkpoint::branch(&ssh, &place).await?;
+    assert_eq!(fixture.run(&state)?, before, "no index or branch moved");
+    assert_eq!(
+        diff.base,
+        fixture
+            .run(&format!(
+                "git -C {BRANCH_REPO} merge-base {} HEAD",
+                place.branch
+            ))?
+            .trim()
+    );
+    let file = |path: &str| diff.files.iter().find(|file| file.path == path);
+    let renamed = file("new-name.txt").expect("the rename");
+    assert_eq!(renamed.from.as_deref(), Some("old-name.txt"));
+    let blob = file("blob.bin").expect("the untracked binary");
+    assert_eq!((blob.added, blob.deleted), (None, None));
+    let keep = file("keep.txt").expect("the committed change");
+    assert_eq!((keep.added, keep.deleted), (Some(1), Some(0)));
+    assert!(
+        file("main-only.txt").is_none(),
+        "main's own commit is not the thread's"
+    );
+    assert_eq!(diff.files.len(), 3, "{:?}", diff.files);
+    assert!(!diff.files_truncated);
+    assert!(!diff.diff.truncated);
+    let unified = &diff.diff.unified;
+    assert!(
+        unified.contains("diff --git a/keep.txt b/keep.txt"),
+        "{unified}"
+    );
+    assert!(unified.contains("+two"), "{unified}");
+    assert!(unified.contains("rename from old-name.txt"), "{unified}");
+    assert!(unified.contains("Binary files"), "{unified}");
+    assert!(!unified.contains("main-only.txt"), "{unified}");
+    assert!(!unified.contains('\x1b'), "no colour");
+
+    // A diff past the cap is cut, and its file is still listed whole.
+    fixture.run(&format!("cd {wt} && seq 1 60000 > big.txt"))?;
+    let big = checkpoint::branch(&ssh, &place).await?;
+    assert!(big.diff.truncated);
+    assert!(big.diff.unified.len() <= checkpoint::LIMIT);
+    assert!(!big.files_truncated);
+    let listed = big
+        .files
+        .iter()
+        .find(|file| file.path == "big.txt")
+        .expect("the big file");
+    assert_eq!((listed.added, listed.deleted), (Some(60_000), Some(0)));
+
+    // A diff git cannot read is a failure, not an empty diff.
+    fixture.run(&format!(
+        "cd {wt} && h=$(git rev-parse {}:keep.txt) \
+         && rm \"$(git rev-parse --git-common-dir)/objects/$(echo $h | cut -c1-2)/$(echo $h | cut -c3-)\"",
+        diff.base
+    ))?;
+    assert!(matches!(
+        checkpoint::branch(&ssh, &place).await,
+        Err(Error::Git { stderr }) if !stderr.is_empty()
+    ));
+    fixture.run(&format!("rm -rf {wt}"))?;
+    assert!(matches!(
+        checkpoint::branch(&ssh, &place).await,
+        Err(Error::Git { stderr }) if !stderr.is_empty()
+    ));
+
+    thread::remove(&ssh, &place).await?;
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}

@@ -59,6 +59,7 @@ import type {
   Attention,
   Broken,
   ChatAttached,
+  ChatBranchDiff,
   ChatFailure,
   ChatFrame,
   ChatNotAttached,

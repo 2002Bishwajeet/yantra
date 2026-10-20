@@ -33,6 +33,14 @@ const DIFF_FLAGS: &str =
     "--no-color --no-ext-diff --no-textconv --no-relative --src-prefix=a/ --dst-prefix=b/";
 /// `git diff` dies of SIGPIPE when `head` has read enough, which is no failure.
 const SIGPIPE: i32 = 128 + 13;
+/// Writes the whole worktree, untracked files too, as `$tree` through a
+/// private index, so the real one is untouched. `cp -p` keeps the index's
+/// time, so git's racy check still sees a file changed in its second.
+const SNAPSHOT: &str = "tmp=$(mktemp) || exit\n\
+     trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
+     cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n\
+     GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
+     && tree=$(GIT_INDEX_FILE=$tmp git write-tree)";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -52,6 +60,28 @@ pub struct Diff {
     pub unified: String,
     /// The diff was longer than [`LIMIT`] and was cut there.
     pub truncated: bool,
+}
+
+/// Everything a thread changed since its branch left the repository's `HEAD`:
+/// its commits and its uncommitted files (Y-490). Never logged (Q5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchDiff {
+    /// The merge-base of the thread's branch and the repository's `HEAD`.
+    pub base: String,
+    pub files: Vec<FileStat>,
+    /// The file list was longer than [`LIMIT`] and was cut at a whole file.
+    pub files_truncated: bool,
+    pub diff: Diff,
+}
+
+/// One file of a [`BranchDiff`]. The counts are `None` for a binary file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStat {
+    pub path: String,
+    /// The path the file was renamed from.
+    pub from: Option<String>,
+    pub added: Option<u32>,
+    pub deleted: Option<u32>,
 }
 
 fn refs(place: &Place) -> String {
@@ -98,8 +128,7 @@ fn number(stdout: &str) -> Result<u32, Error> {
     })
 }
 
-/// The next number is the count of the thread's refs. `cp -p` keeps the
-/// index's time, so git's racy check still sees a file changed in its second.
+/// The next number is the count of the thread's refs.
 /// The empty old value makes `update-ref` refuse a ref that exists, so two
 /// captures at once never overwrite each other; the loser counts again once.
 fn keep(place: &Place, first: bool) -> String {
@@ -118,11 +147,7 @@ fn keep(place: &Place, first: bool) -> String {
         "cd {worktree} || exit\n\
          {count}\
          {only_first}\
-         tmp=$(mktemp) || exit\n\
-         trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
-         cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null || rm -f \"$tmp\"\n\
-         GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
-         && tree=$(GIT_INDEX_FILE=$tmp git write-tree) \
+         {SNAPSHOT} \
          && commit=$({IDENTITY} git commit-tree -m 'yantra checkpoint' \"$tree\") || exit\n\
          if ! git update-ref {refs}/\"$n\" \"$commit\" '' 2>/dev/null; then\n\
          {again}\
@@ -144,12 +169,11 @@ pub async fn diff<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<Diff, E
             "cd {worktree} || exit\n\
              for c in {from} {to}; do \
              git rev-parse -q --verify \"$c\" >/dev/null || exit {NO_CHECKPOINT}; done\n\
-             exec 3>&1\n\
-             s=$({{ {{ git -c core.quotePath=false diff {DIFF_FLAGS} {from} {to}; echo $? >&4; }} \
-             | head -c {over} >&3; }} 4>&1)\n\
-             [ \"$s\" -eq 0 ] || [ \"$s\" -eq {SIGPIPE} ] || exit \"$s\"",
+             {}",
+            capped(&format!(
+                "git -c core.quotePath=false diff {DIFF_FLAGS} {from} {to}"
+            )),
             worktree = sq(&place.worktree),
-            over = LIMIT + 1,
         ))
         .await?;
     match out.status {
@@ -157,6 +181,120 @@ pub async fn diff<E: Exec>(exec: &E, place: &Place, turn: u32) -> Result<Diff, E
         NO_CHECKPOINT => Err(Error::NoCheckpoint { turn }),
         _ => Err(failed(&out)),
     }
+}
+
+/// The whole tree of the thread's worktree, untracked files too, against the
+/// merge-base of its branch and the repository's `HEAD`. The base is asked
+/// fresh, because `HEAD` moves after the thread opens.
+pub async fn branch<E: Exec>(exec: &E, place: &Place) -> Result<BranchDiff, Error> {
+    let worktree = sq(&place.worktree);
+    let out = exec
+        .exec(&format!(
+            "cd {worktree} || exit\n\
+             b=$(git -C {repo} merge-base {branch} HEAD) \
+             || {{ echo 'fatal: the branch has no merge-base with HEAD' >&2; exit 1; }}\n\
+             {SNAPSHOT} || exit\n\
+             echo \"$b $tree\"\n\
+             {numstat}",
+            repo = sq(&place.repo),
+            branch = sq(&place.branch),
+            numstat = capped(&format!(
+                "git -c core.quotePath=false diff --numstat -z -M {DIFF_FLAGS} \"$b\" \"$tree\""
+            )),
+        ))
+        .await?;
+    if !out.success() {
+        return Err(failed(&out));
+    }
+    let mut lines = out.stdout.splitn(2, |&b| b == b'\n');
+    let named = String::from_utf8_lossy(lines.next().unwrap_or_default());
+    // Both go into the next command unquoted, so each must be an object name.
+    let object = |word: &str| !word.is_empty() && word.bytes().all(|b| b.is_ascii_hexdigit());
+    let Some((base, tree)) = named
+        .split_once(' ')
+        .filter(|&(b, t)| object(b) && object(t))
+    else {
+        return Err(Error::Git {
+            stderr: "git did not name the merge-base and the tree".to_owned(),
+        });
+    };
+    let (files, files_truncated) = stats(lines.next().unwrap_or_default())?;
+
+    let out = exec
+        .exec(&format!(
+            "cd {worktree} || exit\n\
+             {}",
+            capped(&format!(
+                "git -c core.quotePath=false diff -M {DIFF_FLAGS} {base} {tree}"
+            )),
+        ))
+        .await?;
+    if !out.success() {
+        return Err(failed(&out));
+    }
+    Ok(BranchDiff {
+        base: base.to_owned(),
+        files,
+        files_truncated,
+        diff: cut(&out.stdout),
+    })
+}
+
+/// Reads `git diff --numstat -z`: `added\tdeleted\tpath\0`, or
+/// `added\tdeleted\t\0from\0path\0` for a rename, and `-` for a binary count.
+/// A record the cap cut is dropped.
+fn stats(numstat: &[u8]) -> Result<(Vec<FileStat>, bool), Error> {
+    let truncated = numstat.len() > LIMIT;
+    let mut fields: Vec<&[u8]> = numstat[..numstat.len().min(LIMIT)]
+        .split(|&b| b == 0)
+        .collect();
+    // What follows the last NUL is empty, or a field the cap cut.
+    fields.pop();
+    let unreadable = || Error::Git {
+        stderr: "git printed a file list Yantra cannot read".to_owned(),
+    };
+    let count = |count: &str| match count {
+        "-" => Ok(None),
+        _ => count.parse().map(Some).map_err(|_| unreadable()),
+    };
+    let lossy = |field: &[u8]| String::from_utf8_lossy(field).into_owned();
+    let mut fields = fields.into_iter();
+    let mut files = Vec::new();
+    while let Some(field) = fields.next() {
+        let field = lossy(field);
+        let mut parts = field.splitn(3, '\t');
+        let (Some(added), Some(deleted), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(unreadable());
+        };
+        let (path, from) = if path.is_empty() {
+            match (fields.next(), fields.next()) {
+                (Some(from), Some(path)) => (lossy(path), Some(lossy(from))),
+                _ if truncated => break,
+                _ => return Err(unreadable()),
+            }
+        } else {
+            (path.to_owned(), None)
+        };
+        files.push(FileStat {
+            path,
+            from,
+            added: count(added)?,
+            deleted: count(deleted)?,
+        });
+    }
+    Ok((files, truncated))
+}
+
+/// Runs `command` and passes on one byte more than [`LIMIT`], so a caller can
+/// tell that it was cut.
+fn capped(command: &str) -> String {
+    format!(
+        "exec 3>&1\n\
+         s=$({{ {{ {command}; echo $? >&4; }} | head -c {over} >&3; }} 4>&1)\n\
+         [ \"$s\" -eq 0 ] || [ \"$s\" -eq {SIGPIPE} ] || exit \"$s\"",
+        over = LIMIT + 1,
+    )
 }
 
 /// At most [`LIMIT`] bytes, cut where a character ends.
@@ -460,6 +598,156 @@ mod tests {
         assert!(matches!(
             revert(&refused, &place(), 0).await,
             Err(Error::Git { stderr }) if stderr == "error: unable to unlink old 'a': Permission denied"
+        ));
+    }
+
+    const BASE: &str = "0123abcd0123abcd0123abcd0123abcd0123abcd";
+    const TREE: &str = "4567ef014567ef014567ef014567ef014567ef01";
+
+    fn stat(path: &str, from: Option<&str>, counts: Option<(u32, u32)>) -> FileStat {
+        FileStat {
+            path: path.to_owned(),
+            from: from.map(str::to_owned),
+            added: counts.map(|(added, _)| added),
+            deleted: counts.map(|(_, deleted)| deleted),
+        }
+    }
+
+    #[tokio::test]
+    async fn branch_snapshots_the_tree_against_a_fresh_merge_base_and_diffs_it() {
+        let numstat =
+            b"2\t1\tkeep.txt\x000\t0\t\x00old-name.txt\x00new-name.txt\x00-\t-\tblob.bin\x00";
+        let mut first = format!("{BASE} {TREE}\n").into_bytes();
+        first.extend_from_slice(numstat);
+        let machine = Machine::answering(vec![
+            out(0, &first, ""),
+            out(0, b"diff --git a/keep.txt b/keep.txt\n", ""),
+        ]);
+        assert_eq!(
+            branch(&machine, &place()).await.expect("diffed"),
+            BranchDiff {
+                base: BASE.to_owned(),
+                files: vec![
+                    stat("keep.txt", None, Some((2, 1))),
+                    stat("new-name.txt", Some("old-name.txt"), Some((0, 0))),
+                    stat("blob.bin", None, None),
+                ],
+                files_truncated: false,
+                diff: Diff {
+                    unified: "diff --git a/keep.txt b/keep.txt\n".to_owned(),
+                    truncated: false,
+                },
+            }
+        );
+        let flags = "--no-color --no-ext-diff --no-textconv --no-relative \
+                     --src-prefix=a/ --dst-prefix=b/";
+        assert_eq!(
+            machine.asked(),
+            [
+                format!(
+                    "cd '{WORKTREE}' || exit\n\
+                     b=$(git -C '/home/u/repo' merge-base 'yantra/chat/web/11111111' HEAD) \
+                     || {{ echo 'fatal: the branch has no merge-base with HEAD' >&2; exit 1; }}\n\
+                     tmp=$(mktemp) || exit\n\
+                     trap 'rm -f \"$tmp\" \"$tmp.lock\"' EXIT\n\
+                     cp -p \"$(git rev-parse --git-path index)\" \"$tmp\" 2>/dev/null \
+                     || rm -f \"$tmp\"\n\
+                     GIT_INDEX_FILE=$tmp git -c core.fsmonitor=false add -A \
+                     && tree=$(GIT_INDEX_FILE=$tmp git write-tree) || exit\n\
+                     echo \"$b $tree\"\n\
+                     exec 3>&1\n\
+                     s=$({{ {{ git -c core.quotePath=false diff --numstat -z -M {flags} \
+                     \"$b\" \"$tree\"; echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
+                     [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\""
+                ),
+                format!(
+                    "cd '{WORKTREE}' || exit\n\
+                     exec 3>&1\n\
+                     s=$({{ {{ git -c core.quotePath=false diff -M {flags} {BASE} {TREE}; \
+                     echo $? >&4; }} | head -c 262145 >&3; }} 4>&1)\n\
+                     [ \"$s\" -eq 0 ] || [ \"$s\" -eq 141 ] || exit \"$s\""
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn numstat_reads_odd_paths_and_drops_a_cut_record() {
+        let odd = b"1\t0\ta\tb.txt\x003\t2\tline\nbreak.txt\x000\t1\t\xc3\xa9.txt\x00\
+                    0\t0\t\x00from\ttab\x00to\nline\x00";
+        assert_eq!(
+            stats(odd).expect("read"),
+            (
+                vec![
+                    stat("a\tb.txt", None, Some((1, 0))),
+                    stat("line\nbreak.txt", None, Some((3, 2))),
+                    stat("é.txt", None, Some((0, 1))),
+                    stat("to\nline", Some("from\ttab"), Some((0, 0))),
+                ],
+                false
+            )
+        );
+        assert_eq!(stats(b"").expect("read"), (vec![], false));
+
+        // One byte over the cap is a cut, wherever it falls.
+        let record = b"1\t1\tf\x00";
+        let mut long: Vec<u8> = record.repeat(LIMIT / record.len());
+        let whole = long.len() / record.len();
+        long.extend_from_slice(b"7\t7\tcut-in-half.txt\x00");
+        let (files, cut) = stats(&long).expect("read");
+        assert!(cut);
+        assert_eq!(files.len(), whole, "the record the cap cut is dropped");
+        assert!(files.iter().all(|file| file.path == "f"));
+
+        // The cap falls after a rename's old path and before its new one.
+        let mut renamed = format!("1\t1\t{}\0", "f".repeat(LIMIT - 14)).into_bytes();
+        renamed.extend_from_slice(b"0\t0\t\x00old\x00new\x00");
+        assert_eq!(renamed.len(), LIMIT + 4);
+        let (files, cut) = stats(&renamed).expect("read");
+        assert!(cut);
+        assert_eq!(files.len(), 1, "a rename without its new path is dropped");
+    }
+
+    #[test]
+    fn numstat_git_should_never_print_is_a_git_error() {
+        for odd in [&b"1\t1\x00"[..], b"x\t1\tf\x00", b"1\t1\t\x00old\x00"] {
+            assert!(
+                matches!(stats(odd), Err(Error::Git { .. })),
+                "{}",
+                String::from_utf8_lossy(odd)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_branch_diff_git_refused_is_named_in_gits_words() {
+        let gone = Machine::answering(vec![out(2, b"", "sh: cd: can't cd to /x\n")]);
+        assert!(matches!(
+            branch(&gone, &place()).await,
+            Err(Error::Git { stderr }) if stderr == "sh: cd: can't cd to /x"
+        ));
+        let unrelated = Machine::answering(vec![out(
+            1,
+            b"",
+            "fatal: the branch has no merge-base with HEAD\n",
+        )]);
+        assert!(matches!(
+            branch(&unrelated, &place()).await,
+            Err(Error::Git { stderr }) if stderr == "fatal: the branch has no merge-base with HEAD"
+        ));
+        let odd = Machine::answering(vec![out(0, b"$(reboot) x\n", "")]);
+        assert!(
+            matches!(branch(&odd, &place()).await, Err(Error::Git { .. })),
+            "a base that is no object name never reaches a command"
+        );
+        assert_eq!(odd.asked().len(), 1);
+        let corrupt = Machine::answering(vec![
+            out(0, format!("{BASE} {TREE}\n").as_bytes(), ""),
+            out(128, b"", "fatal: unable to read 89ab\n"),
+        ]);
+        assert!(matches!(
+            branch(&corrupt, &place()).await,
+            Err(Error::Git { stderr }) if stderr == "fatal: unable to read 89ab"
         ));
     }
 
