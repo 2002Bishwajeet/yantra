@@ -1,0 +1,270 @@
+//! Y-492 against a real sshd and real git, per §B3: a thread commits with the
+//! machine's own identity and a message a stubbed `claude -p` writes, and
+//! pushes to a bare `origin` in the container. The fixture has no git
+//! identity, which is the case the commit must refuse.
+
+#![allow(clippy::expect_used)]
+
+mod common;
+
+use anyhow::Result;
+use base64::Engine as _;
+use common::{SshFixture, USER};
+use yantra_core::commit::{self, Error};
+use yantra_core::github::IssueRef;
+use yantra_core::ssh::{Exec as _, Machine, Ssh};
+use yantra_core::thread::{self, Place};
+use yantra_core::workspace::Workspace;
+
+/// Where Claude Code's installer puts the binary, as in `tests/agent.rs`.
+const INSTALLED_AT: &str = "/home/yantra/.local/bin/claude";
+const SEEN_CWD: &str = "/tmp/commit-claude-cwd";
+const SEEN_STDIN: &str = "/tmp/commit-claude-stdin";
+const SUBJECT: &str = "Don't add $(id) or `id`";
+
+/// Short on purpose: `%C` adds 40 characters and the socket path budget is 90.
+fn state_dir(label: &str) -> Result<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from("/tmp").join(label);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+async fn lab(label: &str, repo: &str) -> Result<Option<(SshFixture, Ssh, Workspace)>> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(None);
+    };
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(USER.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: state_dir(label)?,
+    })?;
+    assert_eq!(
+        fixture
+            .run("git config --global user.email || echo none")?
+            .trim(),
+        "none",
+        "the fixture has no git identity"
+    );
+    fixture.run(&format!(
+        "mkdir -p {repo} && cd {repo} && git init -q -b main && printf 'one\\n' > kept.txt \
+         && git add kept.txt && git -c user.name=t -c user.email=t@example.com commit -qm one"
+    ))?;
+    let workspace = Workspace {
+        name: label.to_owned(),
+        machine: "fixture".to_owned(),
+        repo: repo.into(),
+        startup: None,
+    };
+    Ok(Some((fixture, ssh, workspace)))
+}
+
+/// Records where it ran and what it read, and answers as `claude -p
+/// --output-format json --json-schema` does.
+async fn install_claude(ssh: &Ssh) -> Result<()> {
+    let reply = serde_json::json!({
+        "type": "result",
+        "is_error": false,
+        "result": "",
+        "structured_output": {"subject": SUBJECT, "body": "- tracked and untracked"},
+    });
+    let script = format!(
+        "#!/bin/sh\n\
+         pwd > {SEEN_CWD}\n\
+         cat > {SEEN_STDIN}\n\
+         cat <<'EOF'\n{reply}\nEOF\n"
+    );
+    let b64 = base64::engine::general_purpose::STANDARD.encode(script);
+    let out = ssh
+        .exec(&format!(
+            "mkdir -p ~/.local/bin && printf %s '{b64}' | base64 -d > {INSTALLED_AT} \
+             && chmod 755 {INSTALLED_AT}"
+        ))
+        .await?;
+    assert!(out.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    Ok(())
+}
+
+fn head(fixture: &SshFixture, place: &Place) -> Result<String> {
+    Ok(fixture
+        .run(&format!("git -C {} rev-parse HEAD", place.worktree))?
+        .trim()
+        .to_owned())
+}
+
+#[tokio::test]
+async fn a_thread_commits_with_the_machines_identity_and_claudes_message() -> Result<()> {
+    const REPO: &str = "/home/yantra/commits";
+    let Some((fixture, ssh, workspace)) = lab("yt-cmt", REPO).await? else {
+        return Ok(());
+    };
+    install_claude(&ssh).await?;
+    let place = thread::open(&ssh, &workspace).await?;
+    let wt = place.worktree.clone();
+    fixture.run(&format!(
+        "cd {wt} && printf 'two\\n' >> kept.txt && printf 'new\\n' > made.txt"
+    ))?;
+    let before = head(&fixture, &place)?;
+
+    // (a) No identity: refused before anything is staged, and HEAD stays.
+    assert!(matches!(
+        commit::commit(&ssh, &place, "Add x").await,
+        Err(Error::NoIdentity)
+    ));
+    assert_eq!(head(&fixture, &place)?, before);
+    assert_eq!(
+        fixture.run(&format!("git -C {wt} status --porcelain"))?,
+        " M kept.txt\n?? made.txt\n",
+        "nothing was staged"
+    );
+
+    // (b) A repository identity: claude's message commits both files.
+    fixture.run(&format!(
+        "git -C {REPO} config user.name Owner && git -C {REPO} config user.email owner@example.com"
+    ))?;
+    let message = commit::draft(&ssh, &place).await?;
+    assert_eq!(message, format!("{SUBJECT}\n\n- tracked and untracked"));
+    let seen = fixture.run(&format!("cat {SEEN_STDIN}"))?;
+    assert!(seen.starts_with("You write concise git commit messages."));
+    assert!(seen.contains("diff --git a/kept.txt b/kept.txt"), "{seen}");
+    assert!(seen.contains("+two"), "{seen}");
+    assert!(seen.contains("diff --git a/made.txt b/made.txt"), "{seen}");
+    let cwd = fixture.run(&format!("cat {SEEN_CWD}"))?;
+    assert!(!cwd.trim().starts_with(&wt), "claude ran in {cwd}");
+    assert!(
+        fixture
+            .run(&format!("test -e {} && echo left || echo gone", cwd.trim()))?
+            .trim()
+            == "gone",
+        "the directory claude ran in is removed"
+    );
+    assert_eq!(
+        fixture.run(&format!("git -C {wt} status --porcelain"))?,
+        " M kept.txt\n?? made.txt\n",
+        "drafting leaves the real index alone"
+    );
+
+    let committed = commit::commit(&ssh, &place, &message).await?;
+    assert_eq!(committed.subject, SUBJECT);
+    assert_eq!(committed.commit, head(&fixture, &place)?);
+    assert_eq!(
+        fixture.run(&format!("git -C {wt} log -1 --format=%B"))?,
+        format!("{message}\n\n")
+    );
+    assert_eq!(
+        fixture.run(&format!("git -C {wt} log -1 --format='%an <%ae>'"))?,
+        "Owner <owner@example.com>\n"
+    );
+    assert_eq!(
+        fixture.run(&format!(
+            "git -C {wt} show --name-only --format= HEAD | sort"
+        ))?,
+        "kept.txt\nmade.txt\n"
+    );
+    assert_eq!(fixture.run(&format!("git -C {wt} status --porcelain"))?, "");
+
+    // (c) Nothing left to commit, and nothing to draft.
+    assert!(matches!(
+        commit::commit(&ssh, &place, "again").await,
+        Err(Error::NothingToCommit)
+    ));
+    assert!(matches!(
+        commit::draft(&ssh, &place).await,
+        Err(Error::NothingToCommit)
+    ));
+    assert_eq!(head(&fixture, &place)?, committed.commit);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()> {
+    const REPO: &str = "/home/yantra/pushes";
+    const ORIGIN: &str = "/home/yantra/origin.git";
+    let Some((fixture, ssh, workspace)) = lab("yt-psh", REPO).await? else {
+        return Ok(());
+    };
+    fixture.run(&format!(
+        "git -C {REPO} config user.name Owner && git -C {REPO} config user.email owner@example.com"
+    ))?;
+
+    // No origin yet.
+    let place = thread::open(&ssh, &workspace).await?;
+    let wt = place.worktree.clone();
+    assert!(matches!(
+        commit::push(&ssh, &place, None).await,
+        Err(Error::NoRemote)
+    ));
+    fixture.run(&format!(
+        "git init -q --bare {ORIGIN} && git -C {REPO} remote add origin {ORIGIN} \
+         && printf '#!/bin/sh\\necho declined >&2\\nexit 1\\n' > {ORIGIN}/hooks/pre-receive \
+         && chmod 755 {ORIGIN}/hooks/pre-receive"
+    ))?;
+    let issue: IssueRef = "o/r#7".parse()?;
+    let named = format!("yantra/7-{}", thread::name(&place));
+    let merge = format!(
+        "git -C {REPO} config --get branch.{}.merge || true",
+        place.branch
+    );
+
+    fixture.run(&format!("cd {wt} && printf 'a\\n' > a.txt"))?;
+    commit::commit(&ssh, &place, "Add a").await?;
+
+    // (e) A hook that declines: refused, and no upstream is set.
+    assert!(matches!(
+        commit::push(&ssh, &place, Some(&issue)).await,
+        Err(Error::Refused { reason }) if reason.contains("pre-receive hook declined")
+    ));
+    assert_eq!(fixture.run(&merge)?, "", "no upstream after a refusal");
+
+    // (d) The push sets the upstream to the generated name.
+    fixture.run(&format!("rm {ORIGIN}/hooks/pre-receive"))?;
+    let pushed = commit::push(&ssh, &place, Some(&issue)).await?;
+    assert_eq!(pushed.remote, "origin");
+    assert_eq!(pushed.branch, named);
+    assert_eq!(fixture.run(&merge)?, format!("refs/heads/{named}\n"));
+    assert_eq!(
+        fixture.run(&format!("git -C {ORIGIN} rev-parse refs/heads/{named}"))?,
+        format!("{}\n", head(&fixture, &place)?)
+    );
+
+    // A second commit goes to the same upstream, whatever issue is passed.
+    fixture.run(&format!("cd {wt} && printf 'b\\n' > b.txt"))?;
+    commit::commit(&ssh, &place, "Add b").await?;
+    let again = commit::push(&ssh, &place, None).await?;
+    assert_eq!(again.branch, named);
+    assert_eq!(
+        fixture.run(&format!("git -C {ORIGIN} rev-parse refs/heads/{named}"))?,
+        format!("{}\n", head(&fixture, &place)?)
+    );
+
+    // (e) A non-fast-forward: the generated name already holds other work.
+    let other = thread::open(&ssh, &workspace).await?;
+    let other_named = format!("yantra/{}", thread::name(&other));
+    let other_merge = format!(
+        "git -C {REPO} config --get branch.{}.merge || true",
+        other.branch
+    );
+    fixture.run(&format!(
+        "cd {REPO} && printf 'theirs\\n' > theirs.txt && git add theirs.txt \
+         && git commit -qm theirs && git push -q origin HEAD:refs/heads/{other_named}"
+    ))?;
+    fixture.run(&format!(
+        "cd {} && printf 'mine\\n' > mine.txt",
+        other.worktree
+    ))?;
+    commit::commit(&ssh, &other, "Add mine").await?;
+    assert!(matches!(
+        commit::push(&ssh, &other, None).await,
+        Err(Error::Refused { reason }) if reason.contains("non-fast-forward")
+    ));
+    assert_eq!(
+        fixture.run(&other_merge)?,
+        "",
+        "no upstream after a refusal"
+    );
+    Ok(())
+}

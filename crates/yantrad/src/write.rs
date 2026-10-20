@@ -33,8 +33,8 @@ use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
-    agent, clone, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
-    terminfo, thread, tmux, tokens, up, workspace,
+    agent, clone, commit, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions,
+    status, terminfo, thread, tmux, tokens, up, workspace,
 };
 use yantra_core::{identity, join, update};
 
@@ -129,6 +129,18 @@ where
         .route("/machines/{machine}/probe", post(ask::<I>))
         .route("/machines/{machine}/dirs", post(walk::<I>))
         .route("/machines/{machine}/clone", post(fetch::<I>))
+        .route(
+            "/workspaces/{name}/threads/{thread}/message",
+            post(drafting::<I>),
+        )
+        .route(
+            "/workspaces/{name}/threads/{thread}/commit",
+            post(committing::<I>),
+        )
+        .route(
+            "/workspaces/{name}/threads/{thread}/push",
+            post(pushing::<I>),
+        )
         .with_state(authoriser.clone());
 
     // `{name}` rather than `{machine}`, which the routes above prefer: the `GET`
@@ -1511,6 +1523,93 @@ fn from_github(error: &github::Error) -> StatusCode {
     }
 }
 
+/// `yantra commit <workspace> <thread> --draft` on the wire (Y-492): the message
+/// `claude -p` writes on the machine. Neither it nor the diff is logged (Q5).
+async fn drafting<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+) -> Result<Json<ThreadMessage>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("commit draft {name} {id} for {}", caller.node);
+    let message = commit::draft_for(&name, &id).await.map_err(refuse_commit)?;
+    Ok(Json(ThreadMessage { message }))
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommitBody {
+    /// Absent drafts one first, as `yantra commit` with no `-m` does.
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// `yantra commit <workspace> <thread> [-m MSG]` on the wire (Y-492), with the
+/// machine's own git identity (ADR-0034 decision 2).
+async fn committing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+    body: Option<Json<CommitBody>>,
+) -> Result<Json<ThreadCommitted>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let Json(CommitBody { message }) = body.unwrap_or_default();
+    tracing::info!("commit {name} {id} for {}", caller.node);
+    let committed = commit::commit_for(&name, &id, message.as_deref())
+        .await
+        .map_err(refuse_commit)?;
+    Ok(Json(ThreadCommitted {
+        commit: committed.commit,
+        subject: committed.subject,
+    }))
+}
+
+/// `yantra push <workspace> <thread>` on the wire (Y-492), with the machine's
+/// own credential. The answer names the remote, never its URL.
+async fn pushing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+) -> Result<Json<ThreadPushed>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("push {name} {id} for {}", caller.node);
+    let pushed = commit::push_for(&name, &id).await.map_err(refuse_commit)?;
+    Ok(Json(ThreadPushed {
+        remote: pushed.remote,
+        branch: pushed.branch,
+    }))
+}
+
+fn refuse_commit(error: commit::Failed) -> Refused {
+    Refused::Verb {
+        status: from_commit(&error),
+        said: chain(&error),
+    }
+}
+
+/// No wildcard, per Y-135. What the owner can fix on the machine is `409`; a
+/// `claude` that could not answer is `502`, as a GitHub that could not is.
+fn from_commit(error: &commit::Failed) -> StatusCode {
+    match error {
+        commit::Failed::Workspace(workspace) => from_workspace(workspace),
+        commit::Failed::NoThread { .. } => StatusCode::NOT_FOUND,
+        commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
+        commit::Failed::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+        commit::Failed::Commit(error) => match error {
+            commit::Error::NoIdentity
+            | commit::Error::NothingToCommit
+            | commit::Error::NoRemote
+            | commit::Error::Refused { .. } => StatusCode::CONFLICT,
+            commit::Error::Claude { .. } => StatusCode::BAD_GATEWAY,
+            commit::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+            commit::Error::Git { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        },
+    }
+}
+
 /// Stops a session by machine and name — the sessions `ls sessions` finds that
 /// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
 ///
@@ -1908,6 +2007,25 @@ impl ThreadOpened {
             draft: opened.draft,
         }
     }
+}
+
+/// The message is never logged (Q5).
+#[derive(Debug, serde::Serialize)]
+struct ThreadMessage {
+    message: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ThreadCommitted {
+    commit: String,
+    subject: String,
+}
+
+/// The remote's name, never its URL, which can carry a credential.
+#[derive(Debug, serde::Serialize)]
+struct ThreadPushed {
+    remote: String,
+    branch: String,
 }
 
 /// What a `202` carries: where to watch. The session is
@@ -2393,6 +2511,30 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 draft: "Work on 2002Bishwajeet/yantra#488: A workspace lists its threads\n\nThe \
                         listing is a POST."
                     .to_owned(),
+            }),
+        ),
+        (
+            "threadMessage",
+            "ThreadMessage",
+            of(&ThreadMessage {
+                message: "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
+                    .to_owned(),
+            }),
+        ),
+        (
+            "threadCommitted",
+            "ThreadCommitted",
+            of(&ThreadCommitted {
+                commit: "89abcdef0123456789abcdef0123456789abcdef".to_owned(),
+                subject: "Add the commit and push verbs".to_owned(),
+            }),
+        ),
+        (
+            "threadPushed",
+            "ThreadPushed",
+            of(&ThreadPushed {
+                remote: "origin".to_owned(),
+                branch: "yantra/492-0a1b2c3d4e5f6a7b".to_owned(),
             }),
         ),
         (
@@ -3448,6 +3590,91 @@ mod tests {
                 .expect("the router is infallible");
             assert_eq!(answered.status(), StatusCode::FORBIDDEN);
         }
+    }
+
+    /// Y-492: drafting, committing and pushing refuse a stranger before any
+    /// workspace or machine is asked.
+    #[tokio::test]
+    async fn a_thread_is_committed_and_pushed_only_for_the_owner() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let app = router::<Fake, ()>(direct(tailnet(vec![])), Fleet::default());
+        for request in [
+            Request::post("/workspaces/site/threads/0a1b/message").body(Body::empty()),
+            Request::post("/workspaces/site/threads/0a1b/commit")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"message":"Add x"}"#)),
+            Request::post("/workspaces/site/threads/0a1b/push").body(Body::empty()),
+        ] {
+            let mut request = request.expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            let answered = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    #[test]
+    fn a_commit_body_names_a_message_or_nothing() {
+        let asked: CommitBody = serde_json::from_str(r#"{"message":"Add x"}"#).expect("a message");
+        assert_eq!(asked.message.as_deref(), Some("Add x"));
+        let empty: CommitBody = serde_json::from_str("{}").expect("no message");
+        assert_eq!(empty.message, None);
+        assert!(serde_json::from_str::<CommitBody>(r#"{"message":"x","amend":true}"#).is_err());
+    }
+
+    #[test]
+    fn what_the_owner_can_fix_on_the_machine_is_a_conflict() {
+        use yantra_core::ssh;
+        let of = |error: commit::Error| from_commit(&commit::Failed::Commit(error));
+        assert_eq!(of(commit::Error::NoIdentity), StatusCode::CONFLICT);
+        assert_eq!(of(commit::Error::NothingToCommit), StatusCode::CONFLICT);
+        assert_eq!(of(commit::Error::NoRemote), StatusCode::CONFLICT);
+        assert_eq!(
+            of(commit::Error::Refused {
+                reason: "rejected (non-fast-forward)".to_owned()
+            }),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            of(commit::Error::Claude {
+                said: "Not logged in".to_owned()
+            }),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            of(commit::Error::Ssh(ssh::Error::Spawn(
+                std::io::Error::other("no ssh")
+            ))),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            of(commit::Error::Git {
+                stderr: "fatal".to_owned()
+            }),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            from_commit(&commit::Failed::NoThread {
+                id: "0a1b".to_owned()
+            }),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            from_commit(&commit::Failed::Workspace(workspace::Error::NoConfigDir)),
+            from_workspace(&workspace::Error::NoConfigDir)
+        );
+        assert_eq!(
+            from_commit(&commit::Failed::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[test]

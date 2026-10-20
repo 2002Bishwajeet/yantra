@@ -30,6 +30,13 @@ and the checkpoint operations of
 [`apps/server/src/vcs/GitVcsDriver.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/vcs/GitVcsDriver.ts)
 at commit `72d5c32`. Its name, wordmark and icon are not used.
 
+[`crates/yantra-core/src/commit.rs`](crates/yantra-core/src/commit.rs) copies the commit-message prompt
+of
+[`packages/provider-core/src/server/textGenerationPrompts.ts`](https://github.com/pingdotgg/t3code/blob/main/packages/provider-core/src/server/textGenerationPrompts.ts)
+and the `claude -p` flags of
+[`apps/server/src/textGeneration/ClaudeTextGeneration.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/textGeneration/ClaudeTextGeneration.ts)
+at commit `1451e7c`.
+
 `PermissionMode` in [`crates/yantra-core/src/chat.rs`](crates/yantra-core/src/chat.rs) and
 [`web/src/screens/session/ModePicker.tsx`](web/src/screens/session/ModePicker.tsx) copy the four
 permission modes, their names and their descriptions from

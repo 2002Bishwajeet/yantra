@@ -36,8 +36,11 @@ import type {
   TerminalExit,
   TerminalSize,
   Thread,
+  ThreadCommitted,
   ThreadEvent,
+  ThreadMessage,
   ThreadOpened,
+  ThreadPushed,
   Transcript,
   Workspace,
   WorkspaceStatus,
@@ -748,6 +751,20 @@ export const threadOpened = {
   "thread": "0a1b2c3d4e5f6a7b",
   "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
 } satisfies ThreadOpened
+
+export const threadMessage = {
+  "message": "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
+} satisfies ThreadMessage
+
+export const threadCommitted = {
+  "commit": "89abcdef0123456789abcdef0123456789abcdef",
+  "subject": "Add the commit and push verbs"
+} satisfies ThreadCommitted
+
+export const threadPushed = {
+  "branch": "yantra/492-0a1b2c3d4e5f6a7b",
+  "remote": "origin"
+} satisfies ThreadPushed
 
 export const cloning = {
   "machine": "cachyos-g14",
