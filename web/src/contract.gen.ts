@@ -10,6 +10,7 @@ import type {
   Attention,
   Broken,
   ChatAttached,
+  ChatBranchDiff,
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
@@ -995,6 +996,26 @@ export const chatAttached = {
   "type": "attached"
 } satisfies ChatAttached
 
+export const chatBranchDiff = {
+  "base": "0123abcd0123abcd0123abcd0123abcd0123abcd",
+  "files": [
+    {
+      "added": 3,
+      "deleted": 1,
+      "from": "src/old.rs",
+      "path": "src/new.rs"
+    },
+    {
+      "path": "logo.png"
+    }
+  ],
+  "filesTruncated": false,
+  "threadId": "1a2b3c4d",
+  "truncated": false,
+  "type": "branchDiff",
+  "unifiedDiff": "diff --git a/src/old.rs b/src/new.rs\n"
+} satisfies ChatBranchDiff
+
 export const chatNotAttached = {
   "kind": "notAnImage",
   "said": "that is not a PNG, JPEG, GIF or WebP image",
@@ -1024,6 +1045,9 @@ export const chatFrames = [
   {
     "turn": 0,
     "type": "revert"
+  },
+  {
+    "type": "diff"
   }
 ] satisfies ChatFrame[]
 

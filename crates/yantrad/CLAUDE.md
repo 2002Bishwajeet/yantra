@@ -615,8 +615,8 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 
 The rules from before the keeper still hold:
 
-- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel` and
-  `revert`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
+- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`
+  and `diff`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn` and `checkpoint`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.
@@ -629,6 +629,15 @@ The rules from before the keeper still hold:
   conversation is not rewound. A git that refused, or did not answer in 60 s, is a `checkpoint`
   failure, except after a turn that failed: the turn's own error stays, and the log has the
   checkpoint's. No diff is logged.
+- **`diff` asks for the thread's whole-branch diff** (Y-490,
+  [`checkpoint::branch`](../yantra-core/src/checkpoint.rs)). It answers one
+  `{"type":"branchDiff","threadId","base","files","filesTruncated","unifiedDiff","truncated"}`, a
+  reply like an image's and not a `ThreadEvent`. `base` is the merge-base of the thread's branch and
+  the repository's `HEAD`, and the diff holds committed and uncommitted work. Each of `files` is
+  `{path, from?, added?, deleted?}`: `from` is a rename's old path, and a binary file has no counts.
+  The list and the diff are each cut at 256 KiB. It is `badFrame` with no thread, and it is
+  answered while a turn runs, because it reads through a private index. A failure is a
+  `checkpoint` failure. The log says `branch diff sent`, and no path, no diff and no git error.
 - **A binary frame is an image** (Y-424). The upgrade's limit is 16 MiB a message and a frame, so a
   10 MB screenshot fits. The route sends the bytes through
   [`image::Images`](../yantra-core/src/image.rs) to `images/` in the thread's keeper directory,
