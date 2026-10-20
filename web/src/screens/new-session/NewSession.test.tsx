@@ -243,7 +243,7 @@ describe('step 2, the local browser', () => {
             ? [200, listing('/')]
             : [200, { ...listing(HOME), truncated: true }],
     })
-    expect(await folders.findByText(/sent the first 4 entries and stopped/)).toBeTruthy()
+    expect(await folders.findByText(/sent the first 4 entries and stopped.*Edit path, or press \//)).toBeTruthy()
 
     const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
     fireEvent.click(where.getByRole('button', { name: '/' }))
