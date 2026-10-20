@@ -245,9 +245,11 @@ export function openChat(
   // Whether an earlier socket drew anything, and so whether a replay from the
   // start would draw it again.
   let drawn = false
-  // An unknown thread is said, and then the daemon closes; that close is not
-  // a second failure.
+  // An unknown thread or a missing login is said, and then the daemon closes;
+  // that close is not a second failure. A retryable error may answer next time.
   let said = false
+  // A reopen sends a failed turn's end again; it is reported once per turn.
+  let failureSaid = false
   // One per image sent and not yet answered, oldest first.
   const pending: { resolve: (path: string) => void; reject: (error: AttachError) => void }[] = []
 
@@ -290,7 +292,9 @@ export function openChat(
         )
         return
       }
-      attempts = 0
+      // An error frame is no sign the daemon can answer, so it does not refill
+      // the reopen budget.
+      if (frame.type !== 'error') attempts = 0
       if (frame.type === 'attached' || frame.type === 'notAttached') {
         const waiting = pending.shift()
         if (!waiting) {
@@ -307,7 +311,7 @@ export function openChat(
         return
       }
       if (frame.type === 'error') {
-        said = frame.kind === 'unknownThread' || frame.kind === 'unreachable' || frame.kind === 'notLoggedIn'
+        said = frame.kind === 'unknownThread' || frame.kind === 'notLoggedIn'
         onError(
           frame.kind === 'notLoggedIn'
             ? new ChatError(frame.kind, frame.said, `Run this on ${frame.machine}, then retry.`, {
@@ -327,7 +331,9 @@ export function openChat(
       if (frame.cursor) cursor = frame.cursor
       drawn = true
       onEvent(frame)
-      if (frame.type === 'turn.completed' && frame.payload.state === 'failed') {
+      if (frame.type === 'turn.started') failureSaid = false
+      if (frame.type === 'turn.completed' && frame.payload.state === 'failed' && !failureSaid) {
+        failureSaid = true
         onError(new ChatError('turnFailed', frame.payload.message ?? ''))
       }
     }
@@ -362,7 +368,11 @@ export function openChat(
   waiting = setTimeout(open, 0)
 
   return {
-    send: (text, harness, mode) => send({ type: 'turn', text, ...(harness ? { harness } : {}), ...(mode ? { mode } : {}) }),
+    send: (text, harness, mode) => {
+      // A turn that fails before it starts still gets its own error.
+      failureSaid = false
+      return send({ type: 'turn', text, ...(harness ? { harness } : {}), ...(mode ? { mode } : {}) })
+    },
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
     revert: (turn) => send({ type: 'revert', turn }),
