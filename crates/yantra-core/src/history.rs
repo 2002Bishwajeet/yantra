@@ -59,6 +59,8 @@ pub const HARNESSES: [Harness; 4] = [
     Harness {
         name: "claude",
         root: ".claude/projects",
+        // Not `<session>/tool-results/*.txt`: R18 T8 resumed without them, and raw
+        // text cannot be checked whole after redaction (#410, finding 8).
         keeps: is_jsonl,
     },
     Harness {
@@ -895,6 +897,10 @@ mod tests {
         // Not transcripts: Gemini's other files, and anything not JSON lines.
         put(&home.join(".gemini/tmp/abc/logs.jsonl"), &line("no"));
         put(&home.join(".claude/projects/-w-app/notes.md"), "no");
+        put(
+            &home.join(".claude/projects/-w-app/1/tool-results/t.txt"),
+            "no",
+        );
 
         let report = stage_in(&home, &data, &Fake::new()).unwrap();
         assert!(report.failed.is_empty(), "{:?}", report.failed);
