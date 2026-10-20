@@ -84,6 +84,7 @@ use yantra_core::inventory::Inventory;
 use yantra_core::keep::{self, Cursor, File, Keeper, Limits};
 use yantra_core::logs::{self, Who};
 use yantra_core::notify::{self, Phase, Relay};
+use yantra_core::room;
 use yantra_core::ssh::{self, Ssh};
 use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
@@ -659,7 +660,11 @@ impl Machine for Fleet {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
         let run = keep::run_id().map_err(|error| chain(&error))?;
-        let agent = claude::command(&place.worktree, images, mode);
+        let mcp = self.registry.daemon.map(|daemon| claude::Mcp {
+            url: format!("http://{daemon}/api/mcp"),
+            thread: format!("{}/{}", self.workspace.name, thread::name(place)),
+        });
+        let agent = claude::command(&place.worktree, images, mode, mcp.as_ref());
         let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
             .await
             .map_err(|error| chain(&error))?;
@@ -962,6 +967,8 @@ pub async fn tell(relay: Relay, mut waits: mpsc::UnboundedReceiver<Wait>) {
 pub struct Registry {
     held: Arc<Mutex<Held>>,
     waits: Option<mpsc::UnboundedSender<Wait>>,
+    /// Where a Claude turn reaches the room tools (ADR-0038 decision 2).
+    daemon: Option<SocketAddr>,
 }
 
 #[derive(Default)]
@@ -972,6 +979,10 @@ struct Held {
     /// Keepers a task is starting or reading back, so a refresh pass does not
     /// adopt a keeper between its start and its registration.
     claimed: HashSet<String>,
+    /// The mode of each thread's last Claude turn a person sent.
+    modes: HashMap<String, PermissionMode>,
+    /// Room prompts that wait for a thread's turn to end.
+    queued: HashMap<String, Vec<String>>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -986,7 +997,15 @@ impl Registry {
         Self {
             held: Arc::default(),
             waits: Some(waits),
+            daemon: None,
         }
+    }
+
+    /// This registry, whose Claude turns reach the room tools at `daemon`.
+    #[must_use]
+    pub fn reaching(mut self, daemon: SocketAddr) -> Self {
+        self.daemon = Some(daemon);
+        self
     }
 
     fn lock(&self) -> MutexGuard<'_, Held> {
@@ -1039,6 +1058,32 @@ impl Registry {
 
     fn release(&self, id: &str) {
         self.lock().claimed.remove(id);
+    }
+
+    fn remember_mode(&self, id: &str, mode: PermissionMode) {
+        self.lock().modes.insert(id.to_owned(), mode);
+    }
+
+    fn mode(&self, id: &str) -> Option<PermissionMode> {
+        self.lock().modes.get(id).copied()
+    }
+
+    /// Queues `prompt` while a keeper holds thread `id`; its task's end
+    /// sends it. `false` is a thread with no keeper.
+    fn queue(&self, id: &str, prompt: &str) -> bool {
+        let mut held = self.lock();
+        if !held.lives.contains_key(id) {
+            return false;
+        }
+        held.queued
+            .entry(id.to_owned())
+            .or_default()
+            .push(prompt.to_owned());
+        true
+    }
+
+    fn take_queued(&self, id: &str) -> Vec<String> {
+        self.lock().queued.remove(id).unwrap_or_default()
     }
 
     fn forget(&self, live: &Live) {
@@ -2101,6 +2146,9 @@ async fn begin<M: Machine, P: Peer>(
             return peer.say(&failure(Kind::Checkpoint, said)).await;
         }
     }
+    if here.harness.is_none() {
+        machine.registry().remember_mode(&here.place.id, said.mode);
+    }
     let started = match here.harness {
         None => claude_turn(machine, name, &here.place, said).await,
         Some(harness) => acp_turn(machine, name, here, harness, said).await,
@@ -2522,6 +2570,10 @@ async fn keep_claude<M: Machine>(
     .await;
     finish(machine.as_ref(), &name, &place, &live).await;
     drop(turn);
+    let queued = machine.registry().take_queued(&place.id);
+    if !queued.is_empty() {
+        tokio::spawn(wake_on(machine, name, place, queued.join("\n\n")));
+    }
 }
 
 async fn until(at: Option<tokio::time::Instant>) {
@@ -2779,6 +2831,97 @@ fn answer(acp: &AcpAgent, request: &str, decision: Decision) -> Result<(), Strin
     acp.agent
         .answer(request, answer)
         .map_err(|error| chain(&error))
+}
+
+/// Starts a turn in thread `thread` of `workspace` with a room's `prompt`,
+/// or queues it while a turn runs there (ADR-0038 decision 3).
+pub async fn wake(registry: Registry, workspace: String, thread: String, prompt: String) {
+    let woke = async {
+        let fleet = Arc::new(Fleet::of(&workspace, registry)?);
+        let place = fleet
+            .find(&thread)
+            .await?
+            .ok_or_else(|| format!("{workspace} has no chat thread {thread}"))?;
+        wake_on(fleet, workspace.clone(), place, prompt).await;
+        Ok::<(), String>(())
+    }
+    .await;
+    if let Err(said) = woke {
+        tracing::warn!("chat {workspace}: thread {thread} was not woken: {said}");
+    }
+}
+
+/// The turn runs at [`room::cap`] of the person's last mode, and as
+/// `Supervised` when this daemon has not seen one. An ACP thread is not woken:
+/// `--mcp-config` is Claude's. Boxed, because a turn's end may wake its thread
+/// again.
+fn wake_on<M: Machine>(
+    machine: Arc<M>,
+    name: String,
+    place: Place,
+    prompt: String,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let thread = thread::name(&place).to_owned();
+        match machine.recall(&place).await {
+            Ok(None) => {}
+            Ok(Some((harness, _))) => {
+                tracing::info!(
+                    "chat {name}: thread {thread} is {}'s, so a room message does not wake it",
+                    harness.name()
+                );
+                return;
+            }
+            Err(said) => {
+                tracing::warn!("chat {name}: thread {thread} was not woken: {said}");
+                return;
+            }
+        }
+        if machine.registry().queue(&place.id, &prompt) {
+            tracing::info!("chat {name}: a room message waits for thread {thread}'s turn");
+            return;
+        }
+        if let Err(said) = within(machine.base(&place)).await {
+            tracing::warn!("chat {name}: no checkpoint, so thread {thread} was not woken: {said}");
+            return;
+        }
+        let deadline = tokio::time::Instant::now() + CONNECT_WITHIN;
+        loop {
+            if machine.registry().queue(&place.id, &prompt) {
+                tracing::info!("chat {name}: a room message waits for thread {thread}'s turn");
+                return;
+            }
+            if !machine.registry().lock().reverting.contains(&place.id) {
+                let mode = room::cap(machine.registry().mode(&place.id).unwrap_or_default());
+                let turn = Typed {
+                    text: prompt.clone(),
+                    images: None,
+                    mode,
+                };
+                match claude_turn(&machine, &name, &place, turn).await {
+                    Ok(_) => {
+                        tracing::info!("chat {name}: a room message woke thread {thread}");
+                        return;
+                    }
+                    Err(refusal) if refusal.kind != Kind::Busy => {
+                        tracing::warn!(
+                            "chat {name}: thread {thread} was not woken: {}",
+                            refusal.said
+                        );
+                        return;
+                    }
+                    Err(_) => {}
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!(
+                    "chat {name}: thread {thread} stayed busy, so a room message was dropped"
+                );
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
 }
 
 /// Reads back the keeper of the thread `thread` in workspace `workspace`,
@@ -6033,5 +6176,119 @@ mod tests {
         assert_eq!(kept, ["c", "made last"]);
         let upto = Cursor::parse("r:20:0").expect("a cursor");
         assert_eq!(sent_by(events, Some(&upto)).len(), 3, "a, made before b, b");
+    }
+
+    /// A room prompt, as `room::wrap` makes one.
+    const ROOM_PROMPT: &str =
+        "<room name=\"r1\" from=\"alpha · chat A\" seq=\"1\" budget=\"1/20\">\nhi\n</room>";
+
+    fn prompt_of(line: &Value) -> &str {
+        line["message"]["content"][0]["text"]
+            .as_str()
+            .expect("a user prompt")
+    }
+
+    /// ADR-0038 decisions 3 and 5: an idle thread wakes with the message as
+    /// its prompt, never above acceptEdits, and as Supervised when this
+    /// daemon has seen no turn of it.
+    #[tokio::test]
+    async fn wake_starts_a_turn_on_an_idle_thread_in_the_capped_mode() {
+        for (last, capped) in [
+            (None, PermissionMode::Supervised),
+            (Some(PermissionMode::Supervised), PermissionMode::Supervised),
+            (Some(PermissionMode::Auto), PermissionMode::AutoAcceptEdits),
+            (
+                Some(PermissionMode::FullAccess),
+                PermissionMode::AutoAcceptEdits,
+            ),
+        ] {
+            let script = Arc::new(Script::default());
+            if let Some(mode) = last {
+                script.registry.remember_mode(&place().id, mode);
+            }
+            wake_on(
+                Arc::clone(&script),
+                "web".to_owned(),
+                place(),
+                ROOM_PROMPT.to_owned(),
+            )
+            .await;
+            let mut claude = script.claude().await;
+            assert_eq!(
+                prompt_of(&claude.heard().await.expect("a line")),
+                ROOM_PROMPT
+            );
+            assert_eq!(*lock(&script.modes), [capped], "{last:?}");
+            assert_eq!(*lock(&script.started_with), [None], "no images");
+        }
+    }
+
+    #[tokio::test]
+    async fn wake_queues_on_a_busy_thread_and_sends_one_prompt_when_its_turn_ends() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "work", "mode": "full-access"}));
+        tab.next().await;
+        tab.next().await;
+        let mut first = script.claude().await;
+        first.heard().await;
+        for prompt in ["one", "two"] {
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                wake_on(
+                    Arc::clone(&script),
+                    "web".to_owned(),
+                    place(),
+                    prompt.to_owned(),
+                ),
+            )
+            .await
+            .expect("a busy thread queues at once");
+        }
+        assert_eq!(
+            lock(&script.modes).len(),
+            1,
+            "no second turn beside the first"
+        );
+
+        first
+            .say(json!({"type": "result", "subtype": "success", "is_error": false}))
+            .await;
+        let mut second = script.claude().await;
+        assert_eq!(
+            prompt_of(&second.heard().await.expect("a line")),
+            "one\n\ntwo"
+        );
+        assert_eq!(
+            *lock(&script.modes),
+            [PermissionMode::FullAccess, PermissionMode::AutoAcceptEdits]
+        );
+        second
+            .say(json!({"type": "result", "subtype": "success", "is_error": false}))
+            .await;
+        until_script(&script, |script| lock(&script.finished).len() == 2).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), script.claude())
+                .await
+                .is_err(),
+            "the queue was sent once"
+        );
+    }
+
+    #[tokio::test]
+    async fn wake_leaves_an_acp_thread_alone() {
+        let script = Arc::new(Script {
+            kept: Some((Harness::Opencode, SESSION.to_owned())),
+            ..Script::default()
+        });
+        wake_on(
+            Arc::clone(&script),
+            "web".to_owned(),
+            place(),
+            ROOM_PROMPT.to_owned(),
+        )
+        .await;
+        assert!(lock(&script.turns).is_empty());
+        assert!(lock(&script.modes).is_empty());
     }
 }

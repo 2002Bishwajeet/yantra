@@ -118,7 +118,7 @@ impl Agent {
     fn process(self) -> &'static str {
         match self {
             Self::Acp => "bin/gemin[i] --acp",
-            Self::StandIn | Self::RealClaude => "bin/claud[e] --permission-mode",
+            Self::StandIn | Self::RealClaude => "bin/claud[e] .*--permission-mode",
         }
     }
 

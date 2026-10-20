@@ -45,7 +45,8 @@ yantra join-script               # the script a new machine pipes into sh (GET /
 yantra about                     # version, target and build date of this binary
 yantra update --check            # running and published version, and whether a newer one exists
 sudo yantra update               # install the current release and restart what runs
-yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks
+yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks and talks in rooms
+yantra room resume <room> --daemon http://<appliance>:7717  # lift a room's pause after its 20 agent messages
 yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost
 yantra why --repo owner/name --daemon http://<appliance>:7717  # the same, scoring where the repo is, as new session does
 ```

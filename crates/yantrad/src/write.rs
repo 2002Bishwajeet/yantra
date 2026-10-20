@@ -67,6 +67,11 @@ impl<I: Inventory> Authoriser<I> {
         }
     }
 
+    /// Who to ask, for a route that names the caller's machine.
+    pub(crate) fn inventory(&self) -> &I {
+        &self.inventory
+    }
+
     /// ADR-0017 §1. The TCP peer is the caller, unless the peer is one of our
     /// own bind addresses: nothing off this machine can open a connection that
     /// appears to come from one, so a request that does was opened here by a

@@ -11,7 +11,9 @@
  * refused, and a cancel has no child tasks to reach.
  */
 //! `yantra mcp`: a stdio MCP server whose tools call `yantrad`'s `/api/tasks`,
-//! so the main agent can delegate work (ADR-0033 decision 5).
+//! so the main agent can delegate work (ADR-0033 decision 5). The room tools
+//! are `yantra_core::room`'s, forwarded to `/api/mcp`, where the reader is
+//! the daemon's own node with no thread (ADR-0038 decision 2).
 //!
 //! JSON-RPC 2.0, one message per line. **Stdout carries protocol and nothing
 //! else**, because the client reads every byte there as a message.
@@ -21,6 +23,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use yantra_core::delegate;
+use yantra_core::room::{self, PROTOCOL_VERSIONS as SUPPORTED};
 
 const PARSE_ERROR: i64 = -32700;
 const METHOD_NOT_FOUND: i64 = -32601;
@@ -28,8 +31,6 @@ const INVALID_PARAMS: i64 = -32602;
 /// Starting a task connects to the machine and makes a worktree; stopping one
 /// waits up to ten seconds for its turn to end.
 const TIMEOUT: Duration = Duration::from_secs(60);
-/// The MCP revisions this server speaks, newest first.
-const SUPPORTED: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 /// The daemon caps a wait at [`delegate::WAIT_LIMIT`]; this is what its
 /// answer may take beyond that.
 const WAIT_SLACK: Duration = Duration::from_secs(30);
@@ -96,6 +97,14 @@ fn error(id: &Value, code: i64, message: &str) -> Value {
 }
 
 fn tools() -> Value {
+    let mut tools = task_tools();
+    if let (Some(all), Value::Array(rooms)) = (tools.as_array_mut(), room::tools()) {
+        all.extend(rooms);
+    }
+    tools
+}
+
+fn task_tools() -> Value {
     let id = json!({"type": "object", "required": ["id"], "additionalProperties": false,
                     "properties": {"id": {"type": "string", "description": "The task id start_task returned"}}});
     json!([
@@ -152,6 +161,13 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .ok_or("tools/call needs a tool name")?;
     let arguments = params.get("arguments").unwrap_or(&Value::Null);
+    if room::TOOLS.contains(&name) {
+        room::call(name, arguments)?;
+        let params = json!({"name": name, "arguments": arguments});
+        return Ok(daemon.forward(&params).unwrap_or_else(
+            |text| json!({"content": [{"type": "text", "text": text}], "isError": true}),
+        ));
+    }
     let task = || -> Result<&str, String> {
         arguments
             .get("id")
@@ -207,6 +223,13 @@ fn call(daemon: &Daemon, params: &Value) -> Result<Value, String> {
     Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
 }
 
+/// `yantra room resume`: the owner lifts a room's pause (ADR-0038 decision 4).
+pub fn resume(daemon: &str, name: &str) -> Result<(), String> {
+    Daemon::new(daemon)
+        .send(Method::Post(None), &format!("/api/rooms/{name}/resume"))
+        .map(drop)
+}
+
 enum Method {
     Get,
     /// A `GET` that may last as long as the daemon's longest wait.
@@ -230,6 +253,23 @@ impl Daemon {
         Self {
             base: base.trim_end_matches('/').to_owned(),
             agent,
+        }
+    }
+
+    /// A room tool's result from the daemon's own MCP route.
+    fn forward(&self, params: &Value) -> Result<Value, String> {
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params});
+        let said = self.send(Method::Post(Some(body)), "/api/mcp")?;
+        let answer: Value = serde_json::from_str(&said).map_err(|error| {
+            format!(
+                "yantrad at {} sent an unreadable answer: {error}",
+                self.base
+            )
+        })?;
+        match (answer.get("result"), answer.pointer("/error/message")) {
+            (Some(result), _) => Ok(result.clone()),
+            (None, Some(message)) => Err(format!("yantrad refused the call: {message}")),
+            (None, None) => Err(format!("yantrad at {} sent no result", self.base)),
         }
     }
 
@@ -341,6 +381,24 @@ mod tests {
                 ),
             )
             .route(
+                "/api/mcp",
+                post(|axum::Json(body): axum::Json<Value>| async move {
+                    let said = json!({"heard": body}).to_string();
+                    axum::Json(json!({"jsonrpc": "2.0", "id": body["id"], "result":
+                        {"content": [{"type": "text", "text": said}], "isError": false}}))
+                }),
+            )
+            .route(
+                "/api/rooms/{room}/resume",
+                post(|Path(room): Path<String>| async move {
+                    if room == "r2" {
+                        (StatusCode::NO_CONTENT, String::new())
+                    } else {
+                        (StatusCode::NOT_FOUND, format!("no room {room}"))
+                    }
+                }),
+            )
+            .route(
                 "/api/tasks/{id}/wait",
                 get(
                     |Path(id): Path<String>, RawQuery(query): RawQuery| async move {
@@ -387,7 +445,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_handshake_echoes_the_version_and_lists_seven_tools() {
+    async fn the_handshake_echoes_the_version_and_lists_the_task_and_room_tools() {
         let answers = exchange(
             fake_daemon().await,
             vec![
@@ -425,9 +483,12 @@ mod tests {
                 "steer_task",
                 "wait_task",
                 "cancel_task",
-                "remove_task"
+                "remove_task",
+                "room_send",
+                "room_read"
             ]
         );
+        assert_eq!(answers[1]["result"]["tools"][7], room::tools()[0]);
         let tools = &answers[1]["result"]["tools"];
         assert_eq!(tools[3]["inputSchema"]["required"], json!(["id", "prompt"]));
         assert_eq!(
@@ -674,5 +735,47 @@ mod tests {
             ]
         );
         assert_eq!(answers[4]["error"]["message"], "start_task needs `harness`");
+    }
+
+    /// ADR-0038 decision 2: the checks are yantra-core's, and a good call
+    /// reaches the daemon's own MCP route unchanged.
+    #[tokio::test]
+    async fn a_room_call_is_checked_here_and_forwarded_to_the_daemon() {
+        let daemon = fake_daemon().await;
+        let sent = one_call(
+            daemon.clone(),
+            "room_send",
+            json!({"room": "r1", "text": "hello"}),
+        )
+        .await;
+        assert_eq!(sent["isError"], false, "{sent}");
+        let heard: Value = serde_json::from_str(text(&sent)).expect("JSON");
+        assert_eq!(heard["heard"]["method"], "tools/call");
+        assert_eq!(
+            heard["heard"]["params"],
+            json!({"name": "room_send", "arguments": {"room": "r1", "text": "hello"}})
+        );
+
+        let answers = exchange(
+            daemon,
+            vec![json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                        "params": {"name": "room_read", "arguments": {"room": "R1"}}})],
+        )
+        .await;
+        assert_eq!(answers[0]["error"]["code"], INVALID_PARAMS, "{answers:?}");
+    }
+
+    #[tokio::test]
+    async fn resume_reaches_the_route_and_names_a_refusal() {
+        let daemon = fake_daemon().await;
+        let resumed =
+            tokio::task::spawn_blocking(move || (resume(&daemon, "r2"), resume(&daemon, "r9")))
+                .await
+                .expect("the thread");
+        assert_eq!(resumed.0, Ok(()));
+        assert_eq!(
+            resumed.1,
+            Err("yantrad answered 404: no room r9".to_owned())
+        );
     }
 }
