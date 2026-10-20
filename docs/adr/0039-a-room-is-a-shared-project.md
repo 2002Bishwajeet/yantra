@@ -1,11 +1,11 @@
 # ADR-0039 — A room is a shared project
 
 - **Date:** 2026-10-20
-- **Status:** Proposed 2026-10-20 ([Y-549](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Accepted 2026-10-20 by the owner on the Yantra Desk ([Y-549](../../tracker.md)), with the four recommended answers: code moves as git bundles, the definition is saved and the messages are not, the *Trusted friend* default, and one grant per device with one tap for the same friend's next device.
 - **Evidence:** [the rooms v2 plan](../plans/rooms-v2.md), which holds the flows, the screens, the
   test plan and the sources.
-- **Changes, on acceptance:** [ADR-0038](0038-rooms-and-guest-devices.md) decisions 1, 4 and 5, and
-  the list of what the daemon writes in CLAUDE.md §B1. Each gets a dated note then, and not before.
+- **Amends:** [ADR-0038](0038-rooms-and-guest-devices.md) decisions 1, 4 and 5, and the list of what
+  the daemon writes in CLAUDE.md §B1. Each carries a dated note.
 - **Reads against:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md),
   [ADR-0017](0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md),
   [ADR-0023](0023-the-github-grant-lives-beside-the-relay.md) (no third credential),
@@ -92,7 +92,7 @@ shape what comes next.
 **Costs.**
 
 - `yantrad` gains two streaming routes and a third configuration file kind, beside workspaces and
-  guest grants. CLAUDE.md §B1 gets a dated note on acceptance.
+  guest grants. CLAUDE.md §B1 carries a dated note.
 - A guest's message can now make the owner's agent edit files in a thread worktree without a tap.
   Checkpoints revert it, and Bash still asks.
 - The text scan can miss a secret with no known shape. *Strict* exists for that.

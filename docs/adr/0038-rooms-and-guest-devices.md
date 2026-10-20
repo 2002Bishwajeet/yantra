@@ -126,3 +126,11 @@ existing write. The keeper (ADR-0035). The existing task tools.
 
 **Not decided here.** A *propose a task* scope that the owner approves. Channels for the TUI, once
 they leave the research preview. A room that survives a restart.
+
+> **2026-10-20 ([Y-549](../../tracker.md)): a room is saved, has sides and a policy.**
+> [ADR-0039](0039-a-room-is-a-shared-project.md) changes three decisions. Decision 1: a room's
+> definition now persists in `~/.config/yantra/rooms/<name>.toml`; messages, cursors and counts still
+> stay in memory, and a restart keeps the room. Decision 4: the turn budget becomes one budget for each
+> side, 30 agent messages by default, and only a person on that side resets it. Decision 5: in a guest
+> room the default policy is *Trusted friend* (`acceptEdits` at most, owner messages out unless the
+> `gitleaks` scan matches); the *Strict* policy keeps the text above. The rest of this ADR stands.
