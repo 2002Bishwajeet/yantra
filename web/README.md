@@ -333,7 +333,7 @@ permission mode, Supervised by default (Y-453). Each turn frame carries it, and
 this browser keeps it per thread. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
-harness. Six things about the code:
+harness. Seven things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -364,8 +364,31 @@ harness. Six things about the code:
   marks every later card Reverted. A revert puts the files back and leaves the
   conversation as it is. The button waits while a turn runs or the socket is
   not open. A card is drawn only for a turn run on this socket, because a
-  replayed transcript names no turn numbers. No diff library: the lines are
-  read by their first character.
+  replayed transcript names no turn numbers. Since Y-491 the diff in the
+  disclosure is the diff panel below, in place of the plain `<pre>`.
+- **The diff panel** (Y-491, [ADR-0034](../docs/adr/0034-the-coding-loop-writes-to-github.md)
+  decisions 6 and 7) lives in [`diff/`](src/screens/session/diff/). The Diff button
+  in the Chat bar sends `{type:'diff'}`, and the daemon answers `branchDiff`: the
+  files, the unified patch against the merge-base, and two cut flags
+  (`ChatSocket.diff`, `useChat().requestDiff`). A turn's card draws the same
+  viewer from its own patch. `DiffSheet` is the frame and the only part in the
+  Chat chunk. It draws the loading and error states, and loads `DiffViewer` with
+  `React.lazy`: `@pierre/diffs` for the code, `@pierre/trees` for the file tree
+  (rename, binary, counts, select to reveal). Selecting a line or range, or the
+  Comment button on a file, opens a box. Cmd or Ctrl with Enter adds a quoted
+  block (`> path:L3-L5`, the lines, then the words) to the composer's draft.
+  Nothing is sent. Each file has an Open in editor menu that links VS Code,
+  Cursor or Zed over ssh to the thread's worktree, read from `POST
+  …/threads`; the last editor is kept in `localStorage`. The composer is a
+  textarea for this, because a quoted block has lines: Enter sends and
+  Shift+Enter starts a line. Five `DiffError` kinds, each drawn as an
+  `ErrorSurface`: `notOpen`, `noThread`, `failed`, `threadsFailed` (the editor
+  menu is off and says why) and `loadFailed`. T3 Code's files are credited at
+  the top of each copy.
+  The build swaps Shiki's and `@pierre/theming`'s entry points for short lists
+  (`shiki.ts`, `themes.ts`, `vite.config.ts`), because the full ones put about
+  400 grammar and theme files in the dashboard the daemon embeds. A file in a
+  language outside that list draws as plain text.
 - **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
   `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it
   costs about 48 KB gzip (15 KB to 63 KB). The first load did not move.
@@ -671,6 +694,11 @@ dashboard is interactive within 2 s on a cold load on Lighthouse's mobile preset
 and a kilobyte costs 5.25 ms, so the headroom to 2 s is 75 KiB and the ceiling
 spends 52 of it. It still refuses xterm in the entry by 33 KiB and every screen
 eager by 47 KiB.
+
+**The diff panel has a ceiling of its own** (Y-491). It is a lazy chunk that `/`
+never loads, so `budget.mjs` finds `DiffViewer-<hash>.js`, adds the chunks only
+it needs, and fails above its ceiling. The grammars load one at a time by the
+file's language and are not in that figure.
 
 `npm run budget` prints the current first load, the fonts and the headroom of
 each. It prints the fonts' headroom as well as the first load's (Y-325). `web.yml`

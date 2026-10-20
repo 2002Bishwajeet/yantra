@@ -1,0 +1,136 @@
+.diff {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.diff__reading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff__body {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.diff__tree {
+  position: sticky;
+  top: 0;
+  display: block;
+  height: clamp(160px, 40vh, 420px);
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container-low);
+  /* Pierre's own status colours miss 4.5:1 on this surface; the M3 roles do not. */
+  --trees-bg-override: var(--md-sys-color-surface-container-low);
+  --trees-fg-override: var(--md-sys-color-on-surface);
+  --trees-fg-muted-override: var(--md-sys-color-on-surface-variant);
+  --trees-status-added-override: var(--md-sys-color-primary);
+  --trees-status-untracked-override: var(--md-sys-color-primary);
+  --trees-status-modified-override: var(--md-sys-color-secondary);
+  --trees-status-renamed-override: var(--md-sys-color-tertiary);
+  --trees-status-deleted-override: var(--md-sys-color-error);
+}
+
+.diff__files {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.diff__file {
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container-low);
+  overflow: hidden;
+}
+
+.diff__file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  padding: 4px 8px 4px 16px;
+}
+
+.diff__file-name {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  margin: 0;
+  font: var(--md-sys-typescale-label-large);
+  overflow-wrap: anywhere;
+}
+
+.diff__from,
+.diff__counts {
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-small);
+}
+
+.diff__empty {
+  margin: 0;
+  padding: 8px 16px 16px;
+}
+
+.diff-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-high);
+  font-family: var(--md-ref-typeface-brand, sans-serif);
+}
+
+.diff-comment__text {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--md-sys-color-surface);
+  font: var(--md-sys-typescale-body-medium);
+  resize: vertical;
+}
+
+.diff-comment__text:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+.diff-comment__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.diff-comment__hint {
+  flex: 1 1 14rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-small);
+}
+
+@media (max-width: 719px) {
+  .diff__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diff__tree {
+    position: static;
+    height: clamp(120px, 30vh, 240px);
+  }
+}

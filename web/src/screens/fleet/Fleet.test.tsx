@@ -87,8 +87,7 @@ describe('/fleet Start session', () => {
     expect(location.search).not.toContain('Work')
     expect((history.state as { draft?: string }).draft).toBe(contract.threadOpened.draft)
     const composer = await screen.findByRole('textbox', { name: /Message/ }, { timeout: 5000 })
-    // The composer is single-line in jsdom, which drops the newlines.
-    expect((composer as HTMLTextAreaElement).value).toBe(contract.threadOpened.draft.replaceAll('\n', ''))
+    expect((composer as HTMLTextAreaElement).value).toBe(contract.threadOpened.draft)
     expect(asked).toContain('POST /api/workspaces/yantra-web/threads')
   })
 

@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, ImagePlus, Square, X } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ArrowUp, CornerDownLeft, Diff, ImagePlus, RefreshCw, Square, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +15,10 @@ import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
+import { appendToDraft } from './diff/comment'
+import { branchData, type DiffState } from './diff/data'
+import { DiffSheet } from './diff/DiffSheet'
+import { useEditors } from './diff/useEditors'
 import { HarnessPicker } from './HarnessPicker'
 import { keepMode, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
@@ -305,6 +309,26 @@ export function Chat(props: ChatProps) {
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
   const [draft, setDraft] = useState(initialDraft ?? '')
+  const [showDiff, setShowDiff] = useState(false)
+  const [added, setAdded] = useState(false)
+  const diffButton = useRef<HTMLButtonElement>(null)
+  const { branch } = chat
+  // The viewer parses by identity, so a keystroke in the composer must not make a new one.
+  const sheet = useMemo<DiffState>(
+    () =>
+      branch.state === 'ready'
+        ? { state: 'ready', data: branchData(branch.diff) }
+        : branch.state === 'failed'
+          ? branch
+          : { state: 'loading' },
+    [branch],
+  )
+  const editors = useEditors(
+    workspace.name,
+    timeline.thread,
+    showDiff || timeline.entries.some((entry) => entry.kind === 'diff'),
+  )
+  const field = useRef<HTMLFormElement>(null)
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
   // A new thread is named on its first turn, and keeps the mode it was sent with.
@@ -374,9 +398,75 @@ export function Chat(props: ChatProps) {
             ? 'Type a message to send it.'
             : null
 
+  const addComment = (block: string) => {
+    setDraft((now) => appendToDraft(now, block))
+    setAdded(true)
+  }
+
+  const asks = timeline.requests.map((request) => (
+    <Asking
+      agent={agent}
+      key={request.requestId}
+      onAnswer={(decision) => chat.answer(request.requestId, decision)}
+      request={request}
+    />
+  ))
+
+  const toggleDiff = () => {
+    if (showDiff) {
+      setShowDiff(false)
+      setAdded(false)
+      diffButton.current?.focus()
+      return
+    }
+    setShowDiff(true)
+    chat.requestDiff()
+  }
+
   return (
     <div className="chat">
-      <section aria-label="Conversation" className="chat__turns">
+      <div className="chat__bar">
+        <Button
+          aria-pressed={showDiff}
+          icon={<Diff />}
+          onClick={toggleDiff}
+          ref={diffButton}
+          variant={showDiff ? 'tonal' : 'text'}
+        >
+          Diff
+        </Button>
+        {showDiff ? (
+          <Button
+            aria-label="Refresh the diff"
+            icon={<RefreshCw />}
+            onClick={chat.requestDiff}
+            variant="text"
+          >
+            Refresh
+          </Button>
+        ) : null}
+        <span aria-live="polite" className="chat__added">
+          {added ? 'Comment added to your message.' : ''}
+        </span>
+      </div>
+      {showDiff ? (
+        <section aria-label="Branch diff" className="chat__branch">
+          <DiffSheet
+            editors={editors}
+            onComment={addComment}
+            onRetry={chat.requestDiff}
+            state={sheet}
+            workspace={workspace}
+          />
+        </section>
+      ) : null}
+      {/* The diff hides the conversation, but the agent still waits on these. */}
+      {showDiff && asks.length > 0 ? (
+        <section aria-label="Waiting for your answer" className="chat__asks">
+          {asks}
+        </section>
+      ) : null}
+      <section aria-label="Conversation" className="chat__turns" hidden={showDiff}>
         {timeline.entries.length === 0 && link !== 'connecting' ? (
           <Text className="chat__empty" render={<p />} scale="body-medium" tone="variant">
             Ask {agent} something about {workspace.name}. It works on a branch of its own, so the session in the
@@ -389,17 +479,18 @@ export function Chat(props: ChatProps) {
           ) : entry.kind === 'tool' ? (
             <ToolCard key={entry.id} tool={entry} />
           ) : (
-            <TurnDiff disabled={busy || link !== 'open'} diff={entry} key={entry.id} onRevert={chat.revert} />
+            <TurnDiff
+              disabled={busy || link !== 'open'}
+              diff={entry}
+              key={entry.id}
+              editors={editors}
+              onComment={addComment}
+              onRevert={chat.revert}
+              workspace={workspace}
+            />
           ),
         )}
-        {timeline.requests.map((request) => (
-          <Asking
-            agent={agent}
-            key={request.requestId}
-            onAnswer={(decision) => chat.answer(request.requestId, decision)}
-            request={request}
-          />
-        ))}
+        {showDiff ? null : asks}
         <div ref={end} />
       </section>
       {error?.login ? (
@@ -472,12 +563,27 @@ export function Chat(props: ChatProps) {
               value={harness}
             />
           ) : null}
+          {phone ? (
+            // A phone keyboard has no Shift+Enter, and Enter sends.
+            <IconButton
+              disabled={link === 'closed'}
+              label="New line"
+              onClick={() => {
+                setDraft((now) => `${now}\n`)
+                field.current?.querySelector('textarea')?.focus()
+              }}
+              type="button"
+            >
+              <CornerDownLeft />
+            </IconButton>
+          ) : null}
           <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
           {timeline.usage ? <Meter usage={timeline.usage} /> : null}
         </div>
         {images.length > 0 ? <Images images={images} onRemove={remove} /> : null}
         <form
           className="chat__field"
+          ref={field}
           onSubmit={(event) => {
             event.preventDefault()
             send()
@@ -486,8 +592,15 @@ export function Chat(props: ChatProps) {
           <TextField
             autoComplete="off"
             disabled={link === 'closed'}
+            render={<textarea rows={1} />}
             label={phone ? `Message ${agent}` : `Message ${agent} in ${workspace.name}`}
             onChange={(event) => setDraft(event.target.value)}
+            // A quoted diff comment makes the draft several lines; Shift+Enter writes more.
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+              event.preventDefault()
+              send()
+            }}
             onPaste={(event) => {
               if (event.clipboardData.files.length === 0) return
               event.preventDefault()

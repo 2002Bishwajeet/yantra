@@ -426,13 +426,15 @@ const routes = [
   ],
   ['POST', /^\/api\/workspaces\/([^/]+)\/tokens$/, () => [200, contract.spend]],
   ['POST', /^\/api\/workspaces\/([^/]+)\/logs$/, () => [200, contract.logs]],
-  // Y-489: Y-488's two thread routes. The second thread carries THREAD, the one chat attach knows.
+  // Y-489: Y-488's two thread routes. The second thread carries THREAD and a worktree, so editor links resolve (Y-491).
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads$/,
     (s, [name]) =>
       findWorkspace(s, name)
-        ? [200, contract.threads.map((one, at) => (at === 1 ? { ...one, id: THREAD } : one))]
+        ? [200, contract.threads.map((one, at) =>
+            at === 1 ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}` } : one,
+          )]
         : [404, notFound(name)],
   ],
   [
@@ -711,6 +713,58 @@ function oneOff(state, request, socket, head, machine, index, at) {
   })
 }
 
+/** The reply to a `diff` frame (Y-491): `chatBranchDiff` with a real patch behind it,
+ *  holding a rename, a binary file and two nested edits. */
+const BRANCH_PATCH = [
+  'diff --git a/src/old.rs b/src/new.rs',
+  'similarity index 80%',
+  'rename from src/old.rs',
+  'rename to src/new.rs',
+  'index 3f1c2aa..9be4d1c 100644',
+  '--- a/src/old.rs',
+  '+++ b/src/new.rs',
+  '@@ -1,3 +1,5 @@',
+  ' fn main() {',
+  '-    println!("hello");',
+  '+    let name = "yantra";',
+  '+    println!("hello {name}");',
+  '+    run();',
+  ' }',
+  'diff --git a/logo.png b/logo.png',
+  'new file mode 100644',
+  'index 0000000..e69de29',
+  'Binary files /dev/null and b/logo.png differ',
+  'diff --git a/docs/guide/intro.md b/docs/guide/intro.md',
+  'index 1111111..2222222 100644',
+  '--- a/docs/guide/intro.md',
+  '+++ b/docs/guide/intro.md',
+  '@@ -1,2 +1,4 @@',
+  ' # Intro',
+  ' ',
+  '+Yantra runs agents over ssh.',
+  '+It keeps no state of its own.',
+  'diff --git a/web/src/app.ts b/web/src/app.ts',
+  'index 3333333..4444444 100644',
+  '--- a/web/src/app.ts',
+  '+++ b/web/src/app.ts',
+  '@@ -1,3 +1,3 @@',
+  ' const a = 1',
+  '-const b = 2',
+  '+const b = 3',
+  ' export { a, b }',
+  '',
+].join('\n')
+
+const BRANCH_DIFF = {
+  ...contract.chatBranchDiff,
+  files: [
+    ...contract.chatBranchDiff.files,
+    { path: 'docs/guide/intro.md', added: 2, deleted: 0 },
+    { path: 'web/src/app.ts', added: 1, deleted: 1 },
+  ].sort((a, b) => BRANCH_PATCH.indexOf(`b/${a.path}`) - BRANCH_PATCH.indexOf(`b/${b.path}`)),
+  unifiedDiff: BRANCH_PATCH,
+}
+
 /** chat.rs's socket (Y-356). A turn replays what yantrad really serialises,
  *  contract.gen.ts's `chatEvents`, as far as the permission request, and the
  *  rest once it is answered. A completed turn is followed by its checkpoint
@@ -829,10 +883,14 @@ function converse(state, request, socket, head, name, thread) {
       } else if (frame?.type === 'revert' && typeof frame.turn === 'number') {
         if (running.has(THREAD)) return fail('busy', elsewhere)
         say({ threadId: THREAD, type: 'thread.reverted', payload: { turn: frame.turn } })
+      } else if (frame?.type === 'diff') {
+        // The scenario `difffails` is git failing to read the branch, which chat.rs sends as `diff`.
+        if (state.diffFails) return fail('diff', 'git could not read the branch diff: fatal: bad revision HEAD')
+        say({ ...BRANCH_DIFF, threadId: THREAD })
       } else if (frame?.type === 'answer') {
         fail('badFrame', 'no turn is running, so nothing is waiting')
       } else {
-        fail('badFrame', 'a frame is a turn, an answer, a cancel or a revert')
+        fail('badFrame', 'a frame is a turn, an answer, a cancel, a revert or a diff')
       }
     })
   })
