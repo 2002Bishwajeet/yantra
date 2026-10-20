@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useLocation } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
@@ -146,6 +146,22 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const [chatFor, setChatFor] = useState(view === 'chat' ? name : null)
   if (view === 'chat' && chatFor !== name) setChatFor(name)
   const chatOpened = chatFor === name
+  // A chat reads its thread only when its socket opens, so a thread picked from the list
+  // remounts it. A thread the chat itself named is already attached and does not.
+  const named = useRef(thread)
+  const [seen, setSeen] = useState(thread)
+  const [epoch, setEpoch] = useState(0)
+  if (thread !== seen) {
+    setSeen(thread)
+    if (thread !== named.current) {
+      named.current = thread
+      setEpoch(epoch + 1)
+    }
+  }
+  const chatNamed = (id: string) => {
+    named.current = id
+    onThread(id)
+  }
 
   const { data: agent } = useQuery(statusQuery(name))
   const status: WorkspaceStatus | null =
@@ -200,7 +216,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div hidden={view !== 'chat'}>
-            <Chat initialDraft={draft} key={name} onThread={onThread} thread={thread} workspace={workspace} />
+            <Chat initialDraft={draft} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
           </div>
         ) : null}
         {view === 'terminal' ? (
