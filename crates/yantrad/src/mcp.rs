@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -451,12 +452,16 @@ async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
-    body: Bytes,
+    post: Result<Json<Post>, JsonRejection>,
 ) -> Result<Json<RoomPosted>, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
-    let post: Post = serde_json::from_slice(&body).map_err(|error| Refused::Verb {
-        status: StatusCode::BAD_REQUEST,
-        said: format!("the body is not {{\"text\": \"...\"}}: {error}"),
+    // Only application/json is taken: a text/plain cross-site form post needs no preflight.
+    let Json(post) = post.map_err(|error| Refused::Verb {
+        status: match error {
+            JsonRejection::MissingJsonContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            _ => StatusCode::BAD_REQUEST,
+        },
+        said: format!("the body is not {{\"text\": \"...\"}} as application/json: {error}"),
     })?;
     let machine = machine_of(&state.authoriser, &caller.node)
         .await
@@ -1129,6 +1134,23 @@ mod tests {
             let (got, said) = send(&app, Method::POST, path, Some(body), ALPHA, None).await;
             assert_eq!(got, status, "{path}: {said}");
         }
+
+        let mut forged = Request::builder()
+            .method(Method::POST)
+            .uri("/rooms/r4/messages")
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::from(r#"{"text":"forged"}"#))
+            .expect("a request");
+        forged
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+        let refused = app
+            .router
+            .clone()
+            .oneshot(forged)
+            .await
+            .expect("infallible");
+        assert_eq!(refused.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 
         let (status, said) = send(&app, Method::POST, "/rooms/r4/resume", None, ALPHA, None).await;
         assert_eq!(status, StatusCode::NO_CONTENT, "{said}");
