@@ -35,8 +35,11 @@ API the CLI cannot reach.
 | `DELETE /api/machines/{machine}/sessions/{session}` | `yantra kill` |
 | `POST /api/machines/{machine}/probe` | `yantra probe` |
 | `POST /api/machines/{machine}/dirs` | `yantra ls dirs` |
+| `POST /api/placement` | `yantra why --repo` / `--path`. Both call `placement::ask`; the CLI has no `folders` override, so it finds each clone folder on the machine (Y-517) |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
+| `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
+| `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/tokens` | `yantra tokens`; an optional `{"since": <RFC 3339>}` body is the dashboard's window and has no CLI flag (Y-354) |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
@@ -48,7 +51,7 @@ API the CLI cannot reach.
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/steer`, `GET /api/tasks/{id}/wait`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `steer_task`, `wait_task`, `cancel_task`, `remove_task` (ADR-0033, Y-435, Y-454). The `GET`s read memory |
-| `GET /api/workspaces/{name}/chat` | **None yet**, which breaks the rule above: an open gap, not a decision. A WebSocket for the dashboard's Chat tab; each turn runs the thread's harness in its own worktree: `claude -p`, or an ACP agent (ADR-0026, ADR-0033, Y-356, Y-434) |
+| `GET /api/workspaces/{name}/chat` | **None yet for a turn**, which breaks the rule above: an open gap, not a decision. `yantra chat new` and `chat ls` open and list threads (Y-488). A WebSocket for the dashboard's Chat tab; each turn runs the thread's harness in its own worktree: `claude -p`, or an ACP agent (ADR-0026, ADR-0033, Y-356, Y-434) |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |
 | `GET /api/machines/{machine}/mic` | — (a WebSocket that carries push-to-talk audio into `pw-cat`, ADR-0031 §5) |
 | `POST /heartbeat` | — (`yantra-agent` posts it every 10 s) |

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { ByRoleMatcher, ByRoleOptions, Matcher } from '@testing-library/dom'
 import * as contract from '@/contract.gen'
 import { readPrefs, writePrefs } from '@/shell/prefs'
@@ -230,6 +230,111 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
 
     fireEvent.keyDown(screen.getByLabelText('Filter this folder'), { key: '/' })
     expect(screen.queryByLabelText('Path')).toBeNull()
+  })
+
+  it('says why a path without a leading slash does nothing', async () => {
+    await toLocal()
+    press('Edit path')
+    const field = screen.getByLabelText('Path')
+    fireEvent.change(field, { target: { value: 'Documents' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(await screen.findByText(/A path starts with \//)).toBeTruthy()
+    fireEvent.change(field, { target: { value: '/' } })
+    expect(screen.queryByText(/A path starts with \//)).toBeNull()
+  })
+
+  it('does not take Ctrl+L from a text field, an overlay, or a typed path', async () => {
+    await toLocal()
+    fireEvent.keyDown(screen.getByLabelText('Filter this folder'), { key: 'l', ctrlKey: true })
+    expect(screen.queryByLabelText('Path')).toBeNull()
+
+    const palette = document.createElement('div')
+    palette.setAttribute('role', 'dialog')
+    document.body.append(palette)
+    fireEvent.keyDown(palette, { key: 'l', ctrlKey: true })
+    palette.remove()
+    expect(screen.queryByLabelText('Path')).toBeNull()
+
+    press('Edit path')
+    const field = screen.getByLabelText('Path') as HTMLInputElement
+    fireEvent.change(field, { target: { value: '/tmp/typed' } })
+    fireEvent.keyDown(document.body, { key: 'l', ctrlKey: true })
+    expect((screen.getByLabelText('Path') as HTMLInputElement).value).toBe('/tmp/typed')
+  })
+
+  it('shows the path field on a failed listing, and lets Escape reach the dialog', async () => {
+    mountNew('desktop', '/new', {
+      'POST /api/machines/cachyos-g14/dirs': [503, 'ssh: connect to host cachyos-g14 port 22: No route to host'],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    press(await screen.findByRole('button', { name: /Local directory/ }).then(() => /Local directory/))
+    const field = await screen.findByLabelText('Path')
+    fireEvent.keyDown(field, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New session' })).toBeNull())
+  })
+
+  it('keeps the crumbs, not the path field, while the next folder loads', async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await toLocal({
+      'POST /api/machines/cachyos-g14/dirs': async (sent) => {
+        if (sent.path === `${HOME}/Documents`) await held
+        return dirs(sent)
+      },
+    })
+    fireEvent.click(await folders.findByRole('button', { name: /^Documents/ }))
+    expect(screen.queryByLabelText('Path')).toBeNull()
+    expect(crumbsNow().getByText('~')).toBeTruthy()
+    release()
+    await waitFor(() => expect(crumbsNow().getByText('Documents')).toBeTruthy())
+    await waitFor(() => expect(document.activeElement).toBe(folders.getByRole('button', { name: /^GitHub/ })))
+  })
+
+  it('ignores a slow probe once the user has walked elsewhere', async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await toLocal({
+      'POST /api/machines/cachyos-g14/probe': async (sent) => {
+        await held
+        return probe(sent)
+      },
+    })
+    press('Edit path')
+    const field = screen.getByLabelText('Path')
+    fireEvent.change(field, { target: { value: `${DOCS}/GitHub` } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    fireEvent.click(await folders.findByRole('button', { name: /^Projects/ }))
+    await waitFor(() => expect(crumbsNow().getByText('Projects')).toBeTruthy())
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(crumbsNow().getByText('Projects').getAttribute('aria-current')).toBe('location')
+  })
+
+  it('falls back to the first drawn row when the active row is hidden again', async () => {
+    await toLocal()
+    press('Show hidden')
+    const config = await folders.findByRole('button', { name: /^\.config/ })
+    act(() => config.focus())
+    expect(config.getAttribute('tabindex')).toBe('0')
+    press('Show hidden')
+    const stops = folders.getAllByRole('button', { name: /^(?!Show folders)/ }).filter((one) => one.getAttribute('tabindex') === '0')
+    expect(stops.map((one) => one.textContent?.slice(0, 7))).toEqual(['configs'])
+  })
+
+  it('falls back to the first drawn row when the parent of the active row collapses', async () => {
+    await toLocal()
+    const toggle = await folders.findByRole('button', { name: 'Show folders in Documents' })
+    fireEvent.click(toggle)
+    const child = await folders.findByRole('button', { name: /^GitHub/ })
+    act(() => child.focus())
+    expect(child.getAttribute('tabindex')).toBe('0')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(folders.queryByRole('button', { name: /^GitHub/ })).toBeNull())
+    const stops = folders.getAllByRole('button', { name: /^(?!Show folders)/ }).filter((one) => one.getAttribute('tabindex') === '0')
+    expect(stops.length).toBe(1)
   })
 
   it('chooses a typed path that is missing, with the error line, and stays put', async () => {

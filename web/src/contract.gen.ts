@@ -24,6 +24,7 @@ import type {
   Machine,
   MachineSessions,
   Opened,
+  Placement,
   Readiness,
   Repo,
   Resumed,
@@ -32,7 +33,9 @@ import type {
   Stopped,
   TerminalExit,
   TerminalSize,
+  Thread,
   ThreadEvent,
+  ThreadOpened,
   Transcript,
   Workspace,
   WorkspaceStatus,
@@ -681,6 +684,69 @@ export const joinedKept = {
   "user": "<user>"
 } satisfies Joined
 
+export const threads = [
+  {
+    "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
+    "id": "0a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "state": "none"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/1a1b2c3d4e5f6a7b",
+    "id": "1a1b2c3d4e5f6a7b",
+    "issue": "2002Bishwajeet/yantra#488",
+    "pr": {
+      "number": 512,
+      "state": "open",
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/512"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/1a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/2a1b2c3d4e5f6a7b",
+    "id": "2a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "number": 511,
+      "state": "closed",
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/511"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/2a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/3a1b2c3d4e5f6a7b",
+    "id": "3a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "number": 510,
+      "state": "merged",
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/510"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/3a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/4a1b2c3d4e5f6a7b",
+    "id": "4a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "said": "no GitHub grant — run `yantra github login`",
+      "state": "unknown"
+    },
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/4a1b2c3d4e5f6a7b"
+  }
+] satisfies Thread[]
+
+export const threadOpened = {
+  "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
+  "draft": "Work on 2002Bishwajeet/yantra#488: A workspace lists its threads\n\nThe listing is a POST.",
+  "issue": "2002Bishwajeet/yantra#488",
+  "thread": "0a1b2c3d4e5f6a7b",
+  "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
+} satisfies ThreadOpened
+
 export const cloning = {
   "machine": "cachyos-g14",
   "session": "clone-yantra"
@@ -726,6 +792,47 @@ export const listing = {
   "path": "/home/<user>/Github",
   "truncated": false
 } satisfies Listing
+
+export const placement = {
+  "ranked": [
+    {
+      "machine": "cachyos-g14",
+      "path": "/home/<user>/Github/yantra",
+      "reason": "the repo is there and a workspace ran it there",
+      "score": 92.8,
+      "terms": {
+        "affinity": 20.0,
+        "cpu": 12.8,
+        "power": 10.0,
+        "ram": 20.0,
+        "repo": 30.0
+      }
+    },
+    {
+      "machine": "pi",
+      "reason": "it is on AC power",
+      "score": 18.5,
+      "terms": {
+        "affinity": 0.0,
+        "cpu": 6.0,
+        "power": 10.0,
+        "ram": 2.5,
+        "repo": 0.0
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "machine": "bishwajeets-macbook-pro",
+      "why": "asleep_or_off"
+    },
+    {
+      "age_seconds": 45,
+      "machine": "winbox",
+      "why": "not_reporting"
+    }
+  ]
+} satisfies Placement
 
 export const terminalSize = {
   "cols": 120,

@@ -34,7 +34,7 @@ use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
     agent, clone, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions, status,
-    terminfo, tmux, tokens, up, workspace,
+    terminfo, thread, tmux, tokens, up, workspace,
 };
 use yantra_core::{identity, join, update};
 
@@ -147,12 +147,16 @@ where
         )
         .route("/join", post(join_as::<I>))
         .route("/update", post(renew::<I>))
+        // Here for the grant: a thread's PR and its issue are read with it.
+        .route("/workspaces/{name}/threads", post(threads::<I>))
+        .route("/workspaces/{name}/threads/new", post(thread_new::<I>))
         .with_state(Remembered {
             authoriser: authoriser.clone(),
             fleet: fleet.clone(),
         });
 
     let tasks = crate::tasks::router(authoriser.clone(), fleet.closing.clone());
+    let placement = crate::placement::router(authoriser.clone(), fleet.clone());
 
     let installs: Router<S> = Router::new()
         .route("/machines/{machine}/install", post(put_basics::<I>))
@@ -162,7 +166,10 @@ where
             running: Running::default(),
         });
 
-    acts.merge(remembered).merge(installs).merge(tasks)
+    acts.merge(remembered)
+        .merge(installs)
+        .merge(tasks)
+        .merge(placement)
 }
 
 /// `GET /join`, the script a person pipes into `sh` on a new machine (Y-387).
@@ -1408,6 +1415,102 @@ async fn said<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(Transcript::of(&read)))
 }
 
+/// `yantra chat ls <workspace>` on the wire (Y-488): each thread's branch,
+/// issue and PR.
+///
+/// **A `POST` for [`spent`]'s reason** ([ADR-0019]): it lists worktrees over
+/// ssh and asks GitHub for each upstream's PR, a person asks for it, and
+/// nothing polls it. A daemon with no grant still lists, and says each PR it
+/// could not read is unknown.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn threads<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Vec<Thread>>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    tracing::info!("threads {name} for {}", caller.node);
+    let token = state.fleet.github.token().await;
+    let github = github::Github::default();
+    let found = thread::threads(&name, token.as_ref().map(|token| (&github, token)))
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_thread(&error),
+            said: chain(&error),
+        })?;
+    Ok(Json(found.into_iter().map(Thread::of).collect()))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FromIssue {
+    issue: String,
+}
+
+/// `yantra chat new <workspace> --issue owner/repo#n` on the wire (Y-488). It
+/// reads the issue with the grant, opens a worktree and answers the draft the
+/// composer starts from. The issue's text is never logged (ADR-0034
+/// decision 4).
+async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(asked): Json<FromIssue>,
+) -> Result<Json<ThreadOpened>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let refuse = |error: thread::Failed| Refused::Verb {
+        status: from_thread(&error),
+        said: chain(&error),
+    };
+    let issue: github::IssueRef = asked
+        .issue
+        .parse()
+        .map_err(|error| refuse(thread::Failed::Github(error)))?;
+    let token = state
+        .fleet
+        .github
+        .token()
+        .await
+        .ok_or_else(|| refuse(thread::Failed::Github(github::Error::NoGrant)))?;
+    tracing::info!("thread new {name} for {}", caller.node);
+    let opened = thread::start(&name, &issue, &github::Github::default(), &token)
+        .await
+        .map_err(refuse)?;
+    Ok(Json(ThreadOpened::of(opened)))
+}
+
+/// No wildcard, per Y-135. A machine that could not be asked is `503`, as in
+/// [`from_logs`]; a GitHub that refused or could not be reached is `502`.
+fn from_thread(error: &thread::Failed) -> StatusCode {
+    match error {
+        thread::Failed::Workspace(workspace) => from_workspace(workspace),
+        thread::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
+        thread::Failed::Github(github) => from_github(github),
+        thread::Failed::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn from_github(error: &github::Error) -> StatusCode {
+    match error {
+        github::Error::NotAnIssue { .. } | github::Error::IsAPull { .. } => StatusCode::BAD_REQUEST,
+        github::Error::Status { status: 404, .. } => StatusCode::NOT_FOUND,
+        github::Error::NoGrant => StatusCode::CONFLICT,
+        github::Error::Refused
+        | github::Error::Status { .. }
+        | github::Error::Unreachable { .. }
+        | github::Error::Parse { .. } => StatusCode::BAD_GATEWAY,
+        // The sign-in and release reads' own failures; no thread reaches them.
+        github::Error::NoClientId
+        | github::Error::Expired
+        | github::Error::Denied
+        | github::Error::Rejected { .. }
+        | github::Error::NotAVersion { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 /// Stops a session by machine and name — the sessions `ls sessions` finds that
 /// no workspace claims, so `POST /workspaces/{name}/down` cannot reach them.
 ///
@@ -1736,6 +1839,73 @@ struct Walked {
 struct Fetch {
     url: String,
     path: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Thread {
+    id: String,
+    branch: String,
+    worktree: String,
+    issue: Option<String>,
+    pr: ThreadPr,
+}
+
+impl Thread {
+    fn of(thread: thread::Thread) -> Self {
+        Self {
+            id: thread.id,
+            branch: thread.branch,
+            worktree: thread.worktree,
+            issue: thread.issue,
+            pr: ThreadPr::of(thread.pr),
+        }
+    }
+}
+
+/// Five states by name, so the page never reads *no PR* from a missing field.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+enum ThreadPr {
+    None,
+    Open { number: u64, url: String },
+    Closed { number: u64, url: String },
+    Merged { number: u64, url: String },
+    Unknown { said: String },
+}
+
+impl ThreadPr {
+    fn of(pr: thread::Pr) -> Self {
+        match pr {
+            thread::Pr::None => Self::None,
+            thread::Pr::Open { number, url } => Self::Open { number, url },
+            thread::Pr::Closed { number, url } => Self::Closed { number, url },
+            thread::Pr::Merged { number, url } => Self::Merged { number, url },
+            thread::Pr::Unknown { said } => Self::Unknown { said },
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadOpened {
+    thread: String,
+    branch: String,
+    worktree: String,
+    issue: String,
+    draft: String,
+}
+
+impl ThreadOpened {
+    fn of(opened: thread::Opened) -> Self {
+        Self {
+            thread: opened.thread,
+            branch: opened.branch,
+            worktree: opened.worktree,
+            issue: opened.issue,
+            draft: opened.draft,
+        }
+    }
 }
 
 /// What a `202` carries: where to watch. The session is
@@ -2161,6 +2331,66 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 user: "<user>".to_owned(),
                 kept: true,
                 logs_in_as: Some("yantra".to_owned()),
+            }),
+        ),
+        (
+            "threads",
+            "Thread[]",
+            of(&[
+                (None, thread::Pr::None),
+                (
+                    Some("2002Bishwajeet/yantra#488"),
+                    thread::Pr::Open {
+                        number: 512,
+                        url: "https://github.com/2002Bishwajeet/yantra/pull/512".to_owned(),
+                    },
+                ),
+                (
+                    None,
+                    thread::Pr::Closed {
+                        number: 511,
+                        url: "https://github.com/2002Bishwajeet/yantra/pull/511".to_owned(),
+                    },
+                ),
+                (
+                    None,
+                    thread::Pr::Merged {
+                        number: 510,
+                        url: "https://github.com/2002Bishwajeet/yantra/pull/510".to_owned(),
+                    },
+                ),
+                (
+                    None,
+                    thread::Pr::Unknown {
+                        said: "no GitHub grant — run `yantra github login`".to_owned(),
+                    },
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(n, (issue, pr))| {
+                let id = format!("{n}a1b2c3d4e5f6a7b");
+                Thread::of(thread::Thread {
+                    branch: format!("yantra/chat/site/{id}"),
+                    worktree: format!("/home/<user>/.yantra/worktrees/chat/site/{id}"),
+                    id,
+                    issue: issue.map(str::to_owned),
+                    pr,
+                })
+            })
+            .collect::<Vec<_>>()),
+        ),
+        (
+            "threadOpened",
+            "ThreadOpened",
+            of(&ThreadOpened {
+                thread: "0a1b2c3d4e5f6a7b".to_owned(),
+                branch: "yantra/chat/site/0a1b2c3d4e5f6a7b".to_owned(),
+                worktree: "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b".to_owned(),
+                issue: "2002Bishwajeet/yantra#488".to_owned(),
+                draft: "Work on 2002Bishwajeet/yantra#488: A workspace lists its threads\n\nThe \
+                        listing is a POST."
+                    .to_owned(),
             }),
         ),
         (
@@ -3178,6 +3408,102 @@ mod tests {
         assert!(
             !fleet.github.read().await.pending,
             "a refused caller starts no flow"
+        );
+    }
+
+    /// Y-488: listing threads and opening one from an issue both refuse a
+    /// stranger before any workspace, machine or GitHub is asked.
+    #[tokio::test]
+    async fn threads_are_listed_and_opened_only_for_the_owner() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app = router::<Fake, ()>(direct(tailnet(vec![])), fleet);
+
+        for request in [
+            Request::post("/workspaces/site/threads").body(Body::empty()),
+            Request::post("/workspaces/site/threads/new")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"issue":"o/r#7"}"#)),
+        ] {
+            let mut request = request.expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            let answered = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    #[test]
+    fn a_thread_body_names_its_issue_and_nothing_else() {
+        let asked: FromIssue = serde_json::from_str(r#"{"issue":"o/r#7"}"#).expect("an issue");
+        assert_eq!(asked.issue, "o/r#7");
+        assert!(serde_json::from_str::<FromIssue>(r#"{"issue":"o/r#7","title":"x"}"#).is_err());
+        assert!(serde_json::from_str::<FromIssue>("{}").is_err());
+    }
+
+    /// Y-135: the caller's mistakes are 4xx, a missing grant is the 409 that
+    /// names the login, and GitHub's own failures are 502.
+    #[test]
+    fn a_thread_refusal_says_whose_it_is() {
+        let github = |error| from_thread(&thread::Failed::Github(error));
+        assert_eq!(
+            github(github::Error::NotAnIssue { input: "x".into() }),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            github(github::Error::IsAPull {
+                issue: "o/r#1".into()
+            }),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            github(github::Error::Status {
+                status: 404,
+                what: "the issue"
+            }),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(github(github::Error::NoGrant), StatusCode::CONFLICT);
+        assert!(
+            github::Error::NoGrant
+                .to_string()
+                .contains("yantra github login")
+        );
+        assert_eq!(github(github::Error::Refused), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            github(github::Error::Status {
+                status: 500,
+                what: "the issue"
+            }),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            github(github::Error::Unreachable { reason: "x".into() }),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            from_thread(&thread::Failed::Workspace(workspace::Error::NotFound {
+                name: "x".into(),
+                path: PathBuf::from("/x.toml"),
+            })),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            from_thread(&thread::Failed::Thread(thread::Error::Ssh(
+                yantra_core::ssh::Error::Transport {
+                    host: "m".into(),
+                    diagnosis: "no route".into(),
+                }
+            ))),
+            StatusCode::SERVICE_UNAVAILABLE
         );
     }
 

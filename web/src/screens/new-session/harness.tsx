@@ -19,7 +19,7 @@ vi.mock('@/screens/dashboard/Dashboard', () => ({ Dashboard: () => null }))
 const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 1440 }
 
 export type Answer = [status: number, body?: unknown]
-export type Answers = Record<string, Answer | ((sent: Record<string, unknown>) => Answer)>
+export type Answers = Record<string, Answer | ((sent: Record<string, unknown>) => Answer | Promise<Answer>)>
 
 export const HOME = '/home/biswa'
 
@@ -78,6 +78,7 @@ const fleet: Answers = {
   'GET /api/repos': [200, contract.repos],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, listing(String(sent.path ?? HOME))],
   'POST /api/viewing': [204],
+  'POST /api/placement': [200, contract.placement],
 }
 
 /** `<App/>` at `/new`, one width, over the contract fixtures with `answers`
@@ -106,15 +107,16 @@ export function mountNew(size: FormFactor, path: string, answers: Answers = {}) 
   }))
   vi.stubGlobal(
     'fetch',
-    vi.fn((path: string, init?: RequestInit) => {
+    vi.fn(async (path: string, init?: RequestInit) => {
       const key = `${init?.method ?? 'GET'} ${path.split('?')[0]}`
       asked.push(key)
       const found = { ...fleet, ...answers }[key]
-      const [status, body] =
+      const [status, body] = await (
         typeof found === 'function'
           ? found(init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {})
           : (found ?? [404, { error: `no fixture for ${key}` }])
-      return Promise.resolve(answer(status, body))
+      )
+      return answer(status, body)
     }),
   )
   history.pushState(null, '', path)

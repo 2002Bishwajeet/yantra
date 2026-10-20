@@ -280,11 +280,11 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair}`, `POST /api/relay`,
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id` and `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair`, `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
+`repair`, `chat ls`, `chat new` (Y-488), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393) and
 `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
@@ -437,6 +437,19 @@ measured as forty-one turns. The projection is the library's: who spoke, when, t
 `Call { name, target }` per tool. **The tool results never cross the wire** (I-46), and the target is
 capped on the far side, so widening either is an edit to
 [`logs.rs`](../yantra-core/src/logs.rs) rather than to this route.
+
+**`threads` lists a workspace's chat threads, and `threads/new` opens one from an issue** (Y-488,
+[ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md)). Both sit in the `remembered`
+router, because both read the grant in `fleet.github`. The M16 plan says `GET …/threads`, but the
+list awaits ssh (`git worktree list`) and one GitHub read per thread with an upstream. A person asks
+for it and nothing polls it, so it is a `POST`, as `logs` is
+([ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)). Each thread carries
+its issue and a `pr` whose `state` is `none`, `open`, `closed`, `merged` or `unknown`; `unknown`
+says why. With no grant the list still answers. `threads/new` takes `{issue}` as `owner/repo#n`.
+A bad issue is `400`, an issue GitHub does not have is `404`, no grant is `409` naming
+`yantra github login`, GitHub's own failure is `502`, and a machine that could not be asked is
+`503`, as in `from_logs`. The issue's title and body are never logged (ADR-0034 decision 4); the log
+says `threads {name} for {node}` and `thread new {name} for {node}`.
 
 **`repair` is the one that writes bytes this daemon did not compose**, and
 [ADR-0020](../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md) is the only reason it may.
@@ -597,8 +610,9 @@ is a worktree of a workspace's repository, and a bare session names none.
 - **A socket that closes mid-turn cancels the turn**, waits up to 10 s for it to end, then drops it.
   The worktree stays, as `thread.rs` requires.
 - **Q5 binds it as hard as the terminal.** The lifecycle is logged; no prompt, reply or tool output.
-- **It has no CLI verb yet**, and [ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)
-  asks for one. No ADR exempts the chat, so this is an open gap and not a decision.
+- **A turn has no CLI verb yet**, and [ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)
+  asks for one. No ADR exempts the chat, so this is an open gap and not a decision. The gap is
+  partly closed: `yantra chat new` and `chat ls` open and list threads (Y-488).
 - **It holds ssh after the upgrade has answered**, as the terminal does, so it is not a read handler
   that awaits ssh.
 - The calls it makes of a machine sit behind a `Machine` trait, so the tests drive the socket
@@ -674,7 +688,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Nine things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Eleven things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -716,7 +730,17 @@ queues its prompt in memory; a steer the task ended before sending shows as `ste
 **Y-418 is the ninth, on `terminal.rs`'s licence**: `mic.rs` holds one ssh for as long as a button
 is held, and only after the upgrade has answered.
 
-None of the nine licenses a **read handler** that awaits ssh, which is still the bug this module
+**Y-488 is the tenth, and it is a read on the probe licence.** `POST /api/workspaces/{name}/threads`
+lists worktrees over ssh and asks GitHub for each upstream's PR. The page reads it when it opens
+and on Refresh, and nothing polls it.
+
+**Y-517 is the eleventh, and it is a read on the probe licence.** `POST /api/placement`
+([`placement.rs`](src/placement.rs)) asks each machine with a fresh beat whether it holds the
+repository or folder a person picked, for at most 5 s each. The new-session page asks once when it
+opens and once when a source is picked, and nothing polls it. A machine that does not answer in time
+scores 0 on that term and is never filtered out.
+
+None of the eleven licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

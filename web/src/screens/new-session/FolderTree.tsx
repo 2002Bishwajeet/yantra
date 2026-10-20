@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, File, Folder, FolderGit2, FolderLock } from 'lucide-react'
 import type { Entry } from '@/api'
@@ -23,13 +23,22 @@ const note = (text: string) => (
 
 /** `tab` is the roving tabindex: 0 for the one row Tab reaches, -1 for the
  *  rest. Without it every row is a tab stop, as in the clone folder picker. */
-type Walk = { machine: string; hidden: boolean; onWalk: (entry: Entry) => void; tab?: (path: string) => 0 | -1 }
+type Walk = {
+  machine: string
+  hidden: boolean
+  onWalk: (entry: Entry) => void
+  tab?: (path: string) => 0 | -1
+  /** A folder's subfolders stopped being drawn. */
+  onDrop?: (path: string) => void
+}
 
 /** The folders under one folder, fetched when it opens: one level per
  *  request, as everywhere else (D4 §2). Files are not drawn here. */
 function Children(props: Walk & { entry: Entry }) {
   const { entry, ...walk } = props
   const listing = useQuery({ ...dirsQuery(walk.machine, entry.path), enabled: true })
+  const { onDrop } = walk
+  useEffect(() => () => onDrop?.(entry.path), [onDrop, entry.path])
   if (listing.isPending) {
     return (
       <div aria-busy="true" className="ns__sub">

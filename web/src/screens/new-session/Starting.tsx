@@ -84,7 +84,7 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
         probe: (path) => client.fetchQuery(probeQuery(plan.machine, path)),
         create: async (body) => {
           const made = await create.mutateAsync(body)
-          rememberFolder(plan.machine, plan.path)
+          if (plan.local) rememberFolder(plan.machine, plan.path)
           return made
         },
         up: up.mutateAsync,

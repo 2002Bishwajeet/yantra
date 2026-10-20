@@ -10,23 +10,33 @@ import { typing } from './keys'
 export function PathBar(props: {
   here: string | null
   home: string | null
+  /** The listing failed: the field is then the only way in (D4 §4.2). */
+  failed?: boolean
   onGo: (path: string | null) => void
   onEdit?: (path: string) => Promise<void>
 }) {
   const { here, home, onGo, onEdit } = props
+  const failed = props.failed ?? false
   const [text, setText] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [bad, setBad] = useState(false)
+  // Set only when the user leaves an edit, so a field that closes for another reason keeps focus where it is.
+  const leaving = useRef(false)
   const field = useRef<HTMLDivElement>(null)
   const bar = useRef<HTMLDivElement>(null)
   const was = useRef(false)
-  // With no folder to show (the listing is pending or failed) the field is the only way in (D4 §4.2).
-  const editing = text !== null || here === null
+  const editing = text !== null || failed
 
-  const open = useEffectEvent(() => setText(here ?? ''))
+  const open = useEffectEvent(() => setText((held) => held ?? here ?? ''))
   useEffect(() => {
     if (!onEdit) return
     const listen = (event: KeyboardEvent) => {
-      const slash = event.key === '/' && !typing(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey
+      if (event.defaultPrevented || typing(event.target)) return
+      // A key pressed in another overlay (the command palette) is not ours.
+      const mine = (field.current ?? bar.current)?.closest('[role="dialog"]') ?? null
+      const target = event.target instanceof Element ? event.target.closest('[role="dialog"]') : null
+      if (target !== null && target !== mine) return
+      const slash = event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey
       const location = event.key.toLowerCase() === 'l' && event.ctrlKey
       if (!slash && !location) return
       event.preventDefault()
@@ -37,16 +47,22 @@ export function PathBar(props: {
   }, [onEdit])
   useEffect(() => {
     if (editing) field.current?.querySelector('input')?.select()
-    else if (was.current) bar.current?.querySelector<HTMLElement>('button[data-edit]')?.focus()
+    else if (was.current && leaving.current) bar.current?.querySelector<HTMLElement>('button[data-edit]')?.focus()
+    if (!editing) leaving.current = false
     was.current = editing
   }, [editing])
 
   const submit = async () => {
     const path = (text ?? '').trim()
-    if (!onEdit || !path.startsWith('/')) return
+    if (!onEdit) return
+    if (!path.startsWith('/')) {
+      setBad(true)
+      return
+    }
     setBusy(true)
     await onEdit(path)
     setBusy(false)
+    leaving.current = true
     setText(null)
   }
 
@@ -56,18 +72,23 @@ export function PathBar(props: {
         <TextField
           autoComplete="off"
           disabled={busy}
+          error={bad ? 'A path starts with /, like /home/you/project' : undefined}
           label="Path"
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
               void submit()
-            } else if (event.key === 'Escape') {
+            } else if (event.key === 'Escape' && !failed) {
               // The dialog around this form closes on Escape; this one press is the field's.
               event.stopPropagation()
+              leaving.current = true
               setText(null)
             }
           }}
-          onValueChange={setText}
+          onValueChange={(value) => {
+            setBad(false)
+            setText(value)
+          }}
           supporting={busy ? 'checking…' : 'absolute, on this machine; checked before anything is written. Escape goes back'}
           value={text ?? ''}
         />
@@ -75,7 +96,7 @@ export function PathBar(props: {
     )
   }
 
-  const parts = crumbs(here, home)
+  const parts = here === null ? [] : crumbs(here, home)
   return (
     <div className="ns__pathbar" ref={bar}>
       <nav aria-label="Where you are" className="ns__crumbs">

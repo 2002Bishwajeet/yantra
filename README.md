@@ -167,6 +167,8 @@ yantra rm yantra [--force]       # delete the workspace file, refusing while a s
 yantra kill mac scratch          # stop a session by machine and name, workspace or not
 yantra probe mac /code/site      # is that directory there, and what git origin does it hold?
 yantra mic mac                   # stream this laptop's microphone into a session there until Ctrl-C
+yantra chat new site --issue o/r#7   # open a thread from a GitHub issue, and print its draft prompt
+yantra chat ls site              # the workspace's threads, each with its issue and PR
 yantra ls machines               # what Tailscale can see
 yantra ls workspaces             # what you have defined
 yantra ls sessions               # what tmux is holding, across every machine it can reach

@@ -19,6 +19,8 @@ yantra kill mac scratch          # stop any session by machine and name
 yantra probe mac /code/site      # is it there, and what origin does it hold?
 yantra clone <url> --machine mac --into ~/code/site   # git clone there, inside a tmux session
 yantra mic mac                   # stream this laptop's microphone into mac's virtual mic until Ctrl-C
+yantra chat new site --issue o/r#7   # open a thread from a GitHub issue; print its draft prompt
+yantra chat ls site              # the workspace's threads, each with its issue and PR
 
 yantra ls machines               # the tailnet
 yantra ls dirs mac [/code] [--make NAME]   # one level of a machine, with the repositories marked
@@ -43,6 +45,7 @@ yantra update --check            # running and published version, and whether a 
 sudo yantra update               # install the current release and restart what runs
 yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks
 yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost
+yantra why --repo owner/name --daemon http://<appliance>:7717  # the same, scoring where the repo is, as new session does
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:

@@ -1,5 +1,5 @@
-import { type KeyboardEvent, useEffect, useEffectEvent, useId, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { type KeyboardEvent, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Entry, Listing, Probed } from '@/api'
 import { asApiError, isApiError } from '@/api/errors'
 import { useMakeDir } from '@/api/mutations'
@@ -72,8 +72,9 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   const machine = values.machine
   const client = useQueryClient()
   const prefs = usePrefs()
-  // The folder this machine opened at last time; if it is gone, `$HOME` and a note.
-  const [remembered] = useState(() => lastFolder(prefs, machine))
+  // A source kept across a machine switch opens where it is (Y-517); else the folder this
+  // machine opened at last time. If it is gone: `$HOME` and a note.
+  const [remembered] = useState(() => (values.source?.kind === 'local' ? values.source.path : lastFolder(prefs, machine)))
   // `null` is the machine's own `$HOME`, which only the far side can name.
   const [where, setWhere] = useState<string | null>(remembered)
   const [filter, setFilter] = useState('')
@@ -83,7 +84,8 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   const list = useRef<HTMLUListElement>(null)
   const keys = useId()
   const home = useQuery({ ...dirsQuery(machine, null), enabled: true })
-  const asked = useQuery({ ...dirsQuery(machine, where), enabled: true })
+  // The old folder stays drawn while the next one loads, so a walk does not blank the list under the keyboard.
+  const asked = useQuery({ ...dirsQuery(machine, where), enabled: true, placeholderData: keepPreviousData })
   const refusedAt = asked.error ? asApiError(asked.error).status : null
   const gone = where !== null && where === remembered && (refusedAt === 404 || refusedAt === 409)
   const listing = gone ? home : asked
@@ -105,25 +107,48 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
     if (here !== null) arrived(here)
   }, [here])
 
+  const moves = useRef(0)
+  const refocus = useRef(false)
   const go = (path: string | null) => {
+    moves.current += 1
     setWhere(path)
     setFilter('')
     setActive(null)
   }
+  // A walk from the list or the crumbs puts focus back on the list once the new folder is drawn.
+  const goFocused = (path: string | null) => {
+    refocus.current = true
+    go(path)
+  }
+  useEffect(() => {
+    if (!refocus.current || listing.isPlaceholderData || !listing.data) return
+    refocus.current = false
+    list.current?.querySelector<HTMLElement>('[data-row][tabindex="0"]')?.focus()
+  }, [here, listing.data, listing.isPlaceholderData])
 
   const walk = (entry: Entry) => {
-    go(entry.path)
+    goFocused(entry.path)
     choose(entry.path, entry.origin, 'yes')
   }
+
+  // A row that is no longer drawn cannot be the tab stop.
+  const dropped = useCallback(
+    (prefix: string) =>
+      setActive((held) => (held !== null && (held === prefix || held.startsWith(`${prefix}/`)) ? null : held)),
+    [],
+  )
 
   // Typing a path and pressing a recent folder both ask the machine first.
   const visit = async (typed: string) => {
     const path = trimSlash(typed.trim())
+    const seen = moves.current
     // R-23: a machine that could not be asked is not the path being absent —
     // D4 §5 lets that through and says so.
     const probed: Probed | Error = await client
       .fetchQuery(probeQuery(machine, path))
       .catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))))
+    // The user walked elsewhere while the machine answered.
+    if (seen !== moves.current) return
     if (probed instanceof Error) {
       choose(path, null, 'unknown', isApiError(probed) ? probed.said : probed.message)
       return
@@ -143,7 +168,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
     const up = here === null ? null : dirOf(here)
     if (here === null || here === '/' || up === null) return
     event.preventDefault()
-    go(up === root ? null : up)
+    goFocused(up === root ? null : up)
   }
 
   return (
@@ -170,8 +195,14 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
       ) : null}
 
       <div className="ns__where">
-        <PathBar here={here} home={root} onEdit={visit} onGo={go} />
-        <FilterChip onPressedChange={setHidden} pressed={hidden}>
+        <PathBar failed={Boolean(listing.error)} here={here} home={root} onEdit={visit} onGo={goFocused} />
+        <FilterChip
+          onPressedChange={(on) => {
+            setHidden(on)
+            if (!on) setActive((held) => (held?.split('/').some((part) => part.startsWith('.')) ? null : held))
+          }}
+          pressed={hidden}
+        >
           Show hidden
         </FilterChip>
       </div>
@@ -233,11 +264,11 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
                 </Text>
               </li>
             ) : null}
-            <FolderTree entries={shown} hidden={hidden} machine={machine} onWalk={walk} tab={tab} />
+            <FolderTree entries={shown} hidden={hidden} machine={machine} onDrop={dropped} onWalk={walk} tab={tab} />
             {listing.data.truncated ? (
               <li>
                 <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                  {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Type a path to reach the rest.`}
+                  {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Choose Edit path, or press /, and type a path to reach the rest.`}
                 </Text>
               </li>
             ) : null}

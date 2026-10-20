@@ -30,6 +30,17 @@ function held(prefs: Prefs, machine: string): string | null {
   return typeof path === 'string' ? path : null
 }
 
+/** Every clone folder this browser remembers, by machine, for the placement ask. */
+export function cloneFolders(prefs: Prefs): Record<string, string> {
+  const folders = prefs.general.cloneFolders
+  if (!folders || typeof folders !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(folders as Record<string, unknown>).filter(
+      (pair): pair is [string, string] => typeof pair[1] === 'string',
+    ),
+  )
+}
+
 export function rememberCloneFolder(machine: string, path: string) {
   const { general } = readPrefs()
   const folders = (general.cloneFolders ?? {}) as Record<string, unknown>

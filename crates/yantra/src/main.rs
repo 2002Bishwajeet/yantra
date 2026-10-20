@@ -23,6 +23,7 @@ use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
 use yantra_core::logs;
 use yantra_core::mic;
 use yantra_core::notify;
+use yantra_core::placement;
 use yantra_core::price;
 use yantra_core::probe;
 use yantra_core::remove;
@@ -30,6 +31,7 @@ use yantra_core::resume;
 use yantra_core::sessions::{self, MachineSessions};
 use yantra_core::status::Verdict;
 use yantra_core::terminfo::{self, Chosen};
+use yantra_core::thread;
 use yantra_core::tokens;
 use yantra_core::up;
 use yantra_core::update;
@@ -207,6 +209,11 @@ enum Command {
         #[command(subcommand)]
         action: GithubAction,
     },
+    /// A workspace's chat threads, each in its own worktree
+    Chat {
+        #[command(subcommand)]
+        action: ChatAction,
+    },
     /// This machine's conversation history, as the appliance receives it
     History {
         #[command(subcommand)]
@@ -256,8 +263,15 @@ enum Command {
     /// Rank the machines whose heartbeat is fresh, and say why each one won
     /// or lost. Exits 1 when none can be placed
     Why {
-        /// Workspace name, without the `.toml`
-        workspace: String,
+        /// Workspace name, without the `.toml`; its machine is marked
+        #[arg(required_unless_present_any = ["repo", "path"])]
+        workspace: Option<String>,
+        /// Ask each fresh machine over ssh whether it holds `owner/name`
+        #[arg(long, value_parser = placement::Wanted::repo, conflicts_with = "path")]
+        repo: Option<placement::Wanted>,
+        /// Ask each fresh machine over ssh whether it holds this folder
+        #[arg(long, value_parser = placement::Wanted::path)]
+        path: Option<placement::Wanted>,
         /// yantrad's address, such as http://appliance:7717
         #[arg(long)]
         daemon: String,
@@ -287,6 +301,23 @@ enum GithubAction {
         /// Remove it, falling back to the build's own id
         #[arg(long, conflicts_with = "id")]
         clear: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ChatAction {
+    /// Open a thread from a GitHub issue, and print the issue as a draft prompt
+    New {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The issue, as owner/repo#number
+        #[arg(long)]
+        issue: github::IssueRef,
+    },
+    /// List the workspace's threads with each one's issue and PR
+    Ls {
+        /// Workspace name, without the `.toml`
+        workspace: String,
     },
 }
 
@@ -419,6 +450,12 @@ async fn main() -> ExitCode {
         Some(Command::Github {
             action: GithubAction::ClientId { id, clear },
         }) => github_client_id(id.as_deref(), clear),
+        Some(Command::Chat {
+            action: ChatAction::New { workspace, issue },
+        }) => chat_new(&workspace, &issue).await,
+        Some(Command::Chat {
+            action: ChatAction::Ls { workspace },
+        }) => chat_ls(&workspace).await,
         Some(Command::History {
             action: HistoryAction::Stage,
         }) => history_stage(),
@@ -436,7 +473,12 @@ async fn main() -> ExitCode {
         }
         Some(Command::Update { check: false }) => update_apply().await,
         Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
-        Some(Command::Why { workspace, daemon }) => why(workspace, daemon).await,
+        Some(Command::Why {
+            workspace,
+            repo,
+            path,
+            daemon,
+        }) => why(workspace, repo.or(path), daemon).await,
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -468,11 +510,11 @@ async fn serve_mcp(daemon: String) -> ExitCode {
     }
 }
 
-async fn why(name: String, daemon: String) -> ExitCode {
-    let answered =
-        tokio::task::spawn_blocking(move || why::why(workspace::load(&name), &daemon)).await;
-    match answered {
-        Ok(Ok(report)) => {
+async fn why(name: Option<String>, wanted: Option<placement::Wanted>, daemon: String) -> ExitCode {
+    let workspace = name.map(|name| workspace::load(&name));
+    let find = placement::find();
+    match why::why(workspace, wanted, workspace::list, daemon, &find).await {
+        Ok(report) => {
             print!("{}", report.text);
             if report.placed {
                 ExitCode::SUCCESS
@@ -480,12 +522,8 @@ async fn why(name: String, daemon: String) -> ExitCode {
                 ExitCode::FAILURE
             }
         }
-        Ok(Err(err)) => {
-            report_error(&err);
-            ExitCode::FAILURE
-        }
         Err(err) => {
-            eprintln!("yantra why: {err}");
+            report_error(&err);
             ExitCode::FAILURE
         }
     }
@@ -1824,6 +1862,72 @@ fn grant() -> Option<github::Token> {
     token
 }
 
+/// The draft goes to stdout after a blank line, so `| tail -n +5` or a
+/// script can take it alone.
+async fn chat_new(workspace: &str, issue: &github::IssueRef) -> ExitCode {
+    let Some(token) = grant() else {
+        return ExitCode::FAILURE;
+    };
+    match thread::start(workspace, issue, &Github::default(), &token).await {
+        Ok(opened) => {
+            print!("{}", render_opened(&opened));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_opened(opened: &thread::Opened) -> String {
+    format!(
+        "thread:   {}\nbranch:   {}\nworktree: {}\n\n{}\n",
+        opened.thread, opened.branch, opened.worktree, opened.draft
+    )
+}
+
+/// Lists without a grant too: each PR it could not read says so.
+async fn chat_ls(workspace: &str) -> ExitCode {
+    let token = github::from_env();
+    let github = Github::default();
+    match thread::threads(workspace, token.as_ref().map(|token| (&github, token))).await {
+        Ok(threads) => {
+            print!("{}", render_threads(&threads));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_threads(threads: &[thread::Thread]) -> String {
+    if threads.is_empty() {
+        return "no threads\n".to_owned();
+    }
+    let rows: Vec<Vec<String>> = threads
+        .iter()
+        .map(|t| {
+            let pr = match &t.pr {
+                thread::Pr::None => "-".to_owned(),
+                thread::Pr::Open { number, .. } => format!("#{number} open"),
+                thread::Pr::Closed { number, .. } => format!("#{number} closed"),
+                thread::Pr::Merged { number, .. } => format!("#{number} merged"),
+                thread::Pr::Unknown { said } => format!("unknown: {said}"),
+            };
+            vec![
+                t.id.clone(),
+                t.branch.clone(),
+                t.issue.clone().unwrap_or_else(|| "-".to_owned()),
+                pr,
+            ]
+        })
+        .collect();
+    table(&["THREAD", "BRANCH", "ISSUE", "PR"], &rows)
+}
+
 fn grant_note() -> String {
     format!(
         "\x20 note: `yantra github login` writes the grant to {} for yantrad;\n\
@@ -2431,15 +2535,32 @@ mod tests {
     }
 
     #[test]
-    fn why_needs_a_workspace_and_the_daemons_address() {
+    fn why_needs_a_workspace_or_a_target_and_the_daemons_address() {
         let parsed = Cli::try_parse_from(["yantra", "why", "demo", "--daemon", "http://x:7717"])
             .expect("`why <workspace> --daemon <url>` parses");
         assert!(matches!(
             parsed.command,
-            Some(Command::Why { workspace, daemon }) if workspace == "demo" && daemon == "http://x:7717"
+            Some(Command::Why { workspace: Some(workspace), repo: None, path: None, daemon })
+                if workspace == "demo" && daemon == "http://x:7717"
         ));
+        let parsed =
+            Cli::try_parse_from(["yantra", "why", "--repo", "o/n", "--daemon", "http://x"])
+                .expect("`why --repo owner/name --daemon <url>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Why { workspace: None, repo: Some(placement::Wanted::Repo(slug)), .. })
+                if slug == "o/n"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "why", "--path", "/srv", "--daemon", "x"]).is_ok());
         assert!(Cli::try_parse_from(["yantra", "why", "demo"]).is_err());
         assert!(Cli::try_parse_from(["yantra", "why", "--daemon", "http://x:7717"]).is_err());
+        assert!(Cli::try_parse_from(["yantra", "why", "--repo", "n", "--daemon", "x"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "yantra", "why", "--repo", "o/n", "--path", "/s", "--daemon", "x"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -4016,5 +4137,102 @@ mod tests {
             "short",
             "under the width is untouched"
         );
+    }
+
+    #[test]
+    fn chat_new_takes_a_workspace_and_an_issue_and_refuses_a_bad_one() {
+        let parsed = Cli::try_parse_from(["yantra", "chat", "new", "site", "--issue", "o/r#7"])
+            .expect("parses");
+        assert!(
+            matches!(
+                &parsed.command,
+                Some(Command::Chat {
+                    action: ChatAction::New { workspace, issue },
+                }) if workspace == "site" && issue.to_string() == "o/r#7"
+            ),
+            "{parsed:?}"
+        );
+        assert!(Cli::try_parse_from(["yantra", "chat", "new", "site"]).is_err());
+        let bad = Cli::try_parse_from(["yantra", "chat", "new", "site", "--issue", "o/r"])
+            .expect_err("no number");
+        assert!(bad.to_string().contains("owner/repo#number"), "{bad}");
+
+        let ls = Cli::try_parse_from(["yantra", "chat", "ls", "site"]).expect("parses");
+        assert!(matches!(
+            ls.command,
+            Some(Command::Chat { action: ChatAction::Ls { workspace } }) if workspace == "site"
+        ));
+    }
+
+    #[test]
+    fn a_new_thread_prints_where_it_is_then_the_draft_after_a_blank_line() {
+        let opened = thread::Opened {
+            thread: "0a1b".to_owned(),
+            branch: "yantra/chat/site/0a1b".to_owned(),
+            worktree: "/w/0a1b".to_owned(),
+            issue: "o/r#7".to_owned(),
+            draft: "Work on o/r#7: Fix\n\nBody".to_owned(),
+        };
+        assert_eq!(
+            render_opened(&opened),
+            "thread:   0a1b\nbranch:   yantra/chat/site/0a1b\nworktree: /w/0a1b\n\n\
+             Work on o/r#7: Fix\n\nBody\n"
+        );
+    }
+
+    #[test]
+    fn the_thread_list_shows_each_issue_and_pr_state() {
+        let thread = |id: &str, issue: Option<&str>, pr| thread::Thread {
+            id: id.to_owned(),
+            branch: format!("yantra/chat/site/{id}"),
+            worktree: format!("/w/{id}"),
+            issue: issue.map(str::to_owned),
+            pr,
+        };
+        let url = || "https://github.com/o/r/pull/1".to_owned();
+        let rendered = render_threads(&[
+            thread(
+                "a",
+                Some("o/r#7"),
+                thread::Pr::Open {
+                    number: 12,
+                    url: url(),
+                },
+            ),
+            thread("b", None, thread::Pr::None),
+            thread(
+                "c",
+                None,
+                thread::Pr::Merged {
+                    number: 3,
+                    url: url(),
+                },
+            ),
+            thread(
+                "d",
+                None,
+                thread::Pr::Closed {
+                    number: 4,
+                    url: url(),
+                },
+            ),
+            thread(
+                "e",
+                None,
+                thread::Pr::Unknown {
+                    said: "no GitHub grant".to_owned(),
+                },
+            ),
+        ]);
+        assert_eq!(
+            rendered,
+            "THREAD  BRANCH              ISSUE  PR\n\
+             a       yantra/chat/site/a  o/r#7  #12 open\n\
+             b       yantra/chat/site/b  -      -\n\
+             c       yantra/chat/site/c  -      #3 merged\n\
+             d       yantra/chat/site/d  -      #4 closed\n\
+             e       yantra/chat/site/e  -      unknown: no GitHub grant\n"
+        );
+        assert_eq!(render_threads(&[]), "no threads\n");
     }
 }

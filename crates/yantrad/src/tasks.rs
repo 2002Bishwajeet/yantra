@@ -208,7 +208,7 @@ fn bad(said: String) -> Refused {
 
 /// The caller named a directory that is not a repository; git or ssh failing
 /// on a machine the caller named correctly is not the caller's fault.
-fn from_delegate(error: &delegate::Error) -> StatusCode {
+pub(crate) fn from_delegate(error: &delegate::Error) -> StatusCode {
     match error {
         delegate::Error::NotARepo { .. } | delegate::Error::RepoPath { .. } => {
             StatusCode::BAD_REQUEST
