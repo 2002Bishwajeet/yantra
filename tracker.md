@@ -397,6 +397,7 @@ deleted everywhere else.
 | Y-545 | The build loop's reviewer sorts every finding | ✅ done | claude | — | **Done** when the review step returns every finding as blocking or minor, with a written test for blocking, so a finding the reviewer says should hold the merge cannot pass the gate. |
 | Y-547 | The composer's draft overlaps its label | ⬜ todo | claude | Y-489 | Found by the Y-546 capture: after an issue starts a session, the "Work on …" draft sits over the "Message Claude" label. **Done** when a prefilled draft floats the label, with a test and a Playwright baseline at three sizes. |
 | Y-548 | v0.8.0, and the owner's pass on the real fleet | 🔵 review | owner | Y-459 | **Owner, 2026-10-20.** **Done** when v0.8.0 is published with the rows from Y-473 to Y-545 that are ✅ done, the owner installs it, and walks [the v0.8.0 pass](docs/plans/v0.8.0-qa-pass.md) on the real fleet. Each failure becomes a row. Every release row also links the [smoke pass](docs/plans/smoke-pass.md). |
+| Y-559 | rustls-webpki 0.103.16 and webpki-roots 1.0.10 for two advisories | 🔵 review | claude | — | **Red suite, 2026-10-20:** `cargo deny` fails on RUSTSEC-2026-0382 (rustls-webpki 0.103.15) and RUSTSEC-2026-0381 (webpki-roots 1.0.9), so every PR is blocked. **Done** when `Cargo.lock` has both fixed versions and the deny check passes. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
