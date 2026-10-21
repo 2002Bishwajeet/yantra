@@ -407,6 +407,7 @@ deleted everywhere else.
 | Y-556 | The owner's room screens v2 | ⬜ todo | claude | Y-551, Y-552, Y-555 | **Done** when the dashboard makes a room from a workspace, shows presence, budgets, handoff and held cards, runs the invite sheet, and ends a room, with tests for each error kind and Playwright baselines at three sizes. |
 | Y-557 | The friend's web room | ⬜ todo | claude | Y-551, Y-535 | **Done** when `GET /api/me` answers each role, a guest's browser draws only its room and the waiting page, owner machine names are hidden, a second device of the same person is let in with one tap, and Playwright baselines cover phone and laptop. |
 | Y-558 | The owner's walk with a real friend in a room | ⬜ todo | owner, claude | Y-553, Y-554, Y-556, Y-557 | **Parks:** needs the owner and a second person with their own Tailscale and Claude accounts. **Done** when a friend joins on a laptop and a phone, both agents talk, and one handoff goes each way. Each failure becomes a row. |
+| Y-559 | rustls-webpki 0.103.16 and webpki-roots 1.0.10 for two advisories | 🔵 review | claude | — | **Red suite, 2026-10-20:** `cargo deny` fails on RUSTSEC-2026-0382 (rustls-webpki 0.103.15) and RUSTSEC-2026-0381 (webpki-roots 1.0.9), so every PR is blocked. **Done** when `Cargo.lock` has both fixed versions and the deny check passes. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
