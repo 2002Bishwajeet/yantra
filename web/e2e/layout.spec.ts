@@ -197,9 +197,9 @@ test('a supporting line with a state and an age keeps a gap between them', async
   expect(gap).toBeGreaterThanOrEqual(6)
 })
 
-for (const [label, path] of [
-  ['an empty thread', '/w/landing'],
-  ['a short thread', '/w/yantra-web?thread=1a2b3c4d'],
+for (const [label, path, scrolls] of [
+  ['an empty thread', '/w/landing', false],
+  ['a short thread', '/w/yantra-web?thread=1a2b3c4d', true],
 ] as const) {
   test(`the last block of ${label} stays clear of the dock's scrim on a phone`, async ({ page, size }) => {
     test.skip(size !== 'phone', 'the dock is sticky only on the phone')
@@ -209,13 +209,17 @@ for (const [label, path] of [
     await expect(dock).toBeVisible()
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Threads' })).toBeVisible()
-    // The thread list loads after the dock draws, so the gap is read once the page has stopped moving.
+    // The thread list loads after the dock draws and must not leave the last block under it.
     await expect
       .poll(async () => {
-        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        // A thread opens at its top, so only the empty page is read as it opens; it carries itself to the end.
+        if (scrolls) await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
         return dock.evaluate((el) => {
           const scrim = parseFloat(getComputedStyle(el, '::before').height)
-          const last = el.previousElementSibling!.getBoundingClientRect().bottom
+          // The text, not its box: the intro and a turn can run past the block that holds them.
+          const last = Math.max(
+            ...[...el.previousElementSibling!.querySelectorAll('p, .turn, .chat__tool')].map((one) => one.getBoundingClientRect().bottom),
+          )
           return el.getBoundingClientRect().top - scrim - last
         })
       })
