@@ -12,7 +12,7 @@ import './ErrorSurface.css'
 export type Described = Pick<ApiError, 'said' | 'retryable'> & { kind: string; describe: () => string }
 
 export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
-  /** The eyebrow: "Fleet", "Session / Chat". */
+  /** The eyebrow names the failing read ("Fleet read", "Session / Chat"), never the title the PageHeader already draws. */
   eyebrow?: string
   title: string
   error: Described

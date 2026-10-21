@@ -57,7 +57,7 @@ export function Machines() {
         <PageHeader title="Machines" />
         <ErrorSurface.Page
           error={fromReading(machines)!}
-          eyebrow="Machines"
+          eyebrow="Machines read"
           reset={() => void client.invalidateQueries()}
           title="Nothing here can be reached"
           unknowns={['off the tailnet', 'yantrad down']}

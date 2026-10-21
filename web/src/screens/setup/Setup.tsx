@@ -245,7 +245,17 @@ export function Setup() {
   useScreenTitle('Set up Yantra')
   return (
     <Page className="setup" width="reading">
-      <PageHeader title="Set up Yantra" />
+      <PageHeader
+        stamp={
+          machines.looked !== 'pending' && read ? (
+            <Mono>
+              as of {ago(read.age, now).text}
+              {read.late.map((one) => ` · ${one.name} ${ago(one.age, now).text}`)}
+            </Mono>
+          ) : undefined
+        }
+        title="Set up Yantra"
+      />
       <Text className="setup__lead" render={<p />} scale="body-medium" tone="variant">
         Yantra runs AI agents on your own machines. Four steps get the first one ready, and each step checks itself.
       </Text>
@@ -274,12 +284,6 @@ export function Setup() {
               <Mono>
                 {done} of {REQUIRED} done
               </Mono>
-              {read ? (
-                <Mono className="setup__stamp">
-                  as of {ago(read.age, now).text}
-                  {read.late.map((one) => ` · ${one.name} ${ago(one.age, now).text}`)}
-                </Mono>
-              ) : null}
             </div>
             <Track className="setup__track" label={`${done} of ${REQUIRED} steps done`} value={done / REQUIRED} />
           </div>

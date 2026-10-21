@@ -40,4 +40,26 @@ describe('Row', () => {
     expect(css).toMatch(/\.m3-row__supporting \{\s*display: block;/)
     expect(css).toMatch(/\.m3-row__supporting > \.m3-state \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s)
   })
+
+  // A state then an age: the block rule alone would put the age flush against the state's line.
+  it('keeps the 6 px gap when a state is followed by a sibling', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/m3/row/Row.css'), 'utf8')
+    expect(css).toMatch(
+      /\.m3-row__supporting:has\(> \.m3-state \+ \*\) \{\s*display: flex;\s*align-items: center;\s*gap: 6px;/,
+    )
+    render(
+      <Row>
+        <RowText
+          headline="landing"
+          supporting={
+            <>
+              <State state="running" size="small">running</State>
+              <span data-testid="age">3h</span>
+            </>
+          }
+        />
+      </Row>,
+    )
+    expect(screen.getByTestId('age').previousElementSibling?.className).toContain('m3-state')
+  })
 })

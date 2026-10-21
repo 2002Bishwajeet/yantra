@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { Page } from './Page'
+import { Page, PagePending } from './Page'
 
 const css = readFileSync(resolve(process.cwd(), 'src/m3/page/Page.css'), 'utf8')
 
@@ -27,23 +27,23 @@ describe('Page', () => {
     expect(css).toMatch(/margin-inline: auto;/)
   })
 
-  it('starts a reading page where the wide column starts, and centres only a conversation', () => {
-    render(
-      <>
-        <Page data-testid="form" width="reading">
-          a
-        </Page>
-        <Page centered data-testid="chat" width="reading">
-          b
-        </Page>
-      </>,
-    )
-    expect(screen.getByTestId('form').dataset.align).toBeUndefined()
-    expect(screen.getByTestId('chat').dataset.align).toBe('center')
+  it('starts every reading page where the wide column starts, a conversation included', () => {
     expect(css).toMatch(
       /\[data-width="reading"\] \{[^}]*margin-inline: max\(0px, calc\(\(100% - var\(--m3-page-max-wide\)\) \/ 2\)\) auto;/,
     )
-    expect(css).toMatch(/\[data-align="center"\] \{\s*margin-inline: auto;/)
+    expect(css).not.toContain('data-align')
+  })
+
+  it('keeps aria-busy off the title: PagePending wraps the skeletons only', () => {
+    render(
+      <Page data-testid="page">
+        <h1>Title</h1>
+        <PagePending data-testid="pending">x</PagePending>
+      </Page>,
+    )
+    expect(screen.getByTestId('page').getAttribute('aria-busy')).toBeNull()
+    expect(screen.getByTestId('pending').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByTestId('pending').dataset.slot).toBe('reading')
   })
 
   it('has the same inset from the top under every shell', () => {

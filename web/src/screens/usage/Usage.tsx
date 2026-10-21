@@ -165,9 +165,7 @@ function Read(props: { fanned: Fanned; factor: FormFactor }) {
   if (fanned.fanned === 'no') {
     return (
       <Card className="usage__card">
-        <EmptyState state="unknown" title="Nothing read yet">
-          each figure costs one ssh round trip, so Read spend asks and nothing polls
-        </EmptyState>
+        <EmptyState state="unknown" title="Nothing read yet" />
       </Card>
     )
   }
@@ -226,7 +224,7 @@ export function Usage() {
         <PageHeader title="Usage" />
         <ErrorSurface.Page
           error={fromReading(listed)!}
-          eyebrow="Usage"
+          eyebrow="Workspaces read"
           reset={() => void client.invalidateQueries()}
           title="Nothing here can be reached"
           unknowns={['off the tailnet', 'yantrad down']}

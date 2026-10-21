@@ -77,26 +77,151 @@ for (const one of SWEEP) {
   })
 }
 
-test('a reading page starts where the wide column starts, and the chat stays centred', async ({ page, size }) => {
+test('every reading page starts where the wide column starts, the conversations included', async ({ page, size }) => {
   test.skip(size !== 'desktop', 'the frame is wider than the wide column only on the desktop')
-  const edge = async (path: string, which: 'busy' | 'adding') => {
+  const edge = async (path: string, which: 'busy' | 'adding' | 'rooms') => {
     await scenario(page, which)
     await page.goto(path)
     return (await page.locator('.m3-page-header__h1').boundingBox())!.x
   }
-  const wide = await edge('/machines', 'busy')
-  expect(Math.abs((await edge('/machines/add', 'adding')) - wide)).toBeLessThanOrEqual(1)
-  expect(Math.abs((await edge('/no-such-page', 'busy')) - wide)).toBeLessThanOrEqual(1)
-  expect(Math.abs((await edge('/w/landing', 'busy')) - wide)).toBeGreaterThan(100)
+  // The sessions rail narrows the frame on the dashboard, the session and New session, so each group
+  // is compared with a wide page under the same shell.
+  const groups = [
+    ['/machines', 'busy', [['/machines/add', 'adding'], ['/no-such-page', 'busy'], ['/rooms/release', 'rooms'], ['/rooms', 'rooms']]],
+    ['/', 'busy', [['/w/landing', 'busy'], ['/new', 'busy']]],
+  ] as const
+  for (const [wide, which, others] of groups) {
+    const start = await edge(wide, which)
+    for (const [path, one] of others) {
+      expect(Math.abs((await edge(path, one)) - start), path).toBeLessThanOrEqual(1)
+    }
+  }
 })
 
-test('the chat tab draws the reading width and the terminal tab the wide one', async ({ page }) => {
+test('the session title and tabs stay put on the chat, the terminal and the open diff', async ({ page, size }) => {
+  test.skip(size === 'phone', 'the phone draws its title in the app bar')
   await scenario(page, 'busy')
-  await page.goto('/w/landing')
-  await expect(page.locator('.m3-page.session')).toHaveAttribute('data-width', 'reading')
-  await page.goto('/w/landing?view=terminal')
+  const at = async () => ({
+    title: (await page.locator('.m3-page-header__h1').boundingBox())!,
+    tabs: (await page.getByRole('navigation', { name: 'Views' }).boundingBox())!,
+  })
+  await page.goto('/w/landing?view=chat')
   await expect(page.locator('.m3-page.session')).toHaveAttribute('data-width', 'wide')
+  const chat = await at()
+  await page.goto('/w/landing?view=terminal')
+  const terminal = await at()
+  await page.goto('/w/yantra-web?thread=1a2b3c4d')
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  const first = await at()
+  await page.getByRole('button', { name: 'Diff', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Branch diff' })).toBeVisible()
+  const diff = await at()
+  expect(Math.abs(terminal.title.x - chat.title.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(terminal.tabs.x - chat.tabs.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(diff.title.x - first.title.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(diff.title.y - first.title.y)).toBeLessThanOrEqual(1)
+  expect(Math.abs(diff.tabs.x - first.tabs.x)).toBeLessThanOrEqual(1)
 })
+
+test.describe('at the iPad portrait width, 768 px', () => {
+  test.use({ viewport: { width: 768, height: 1024 } })
+
+  for (const path of ['/fleet', '/machines', '/', '/usage', '/notifications']) {
+    test(`${path} keeps every button inside its row and its card`, async ({ page, size }) => {
+      test.skip(size !== 'tablet', 'one project owns the 768 px viewport')
+      await scenario(page, path === '/notifications' ? 'notifications' : 'busy')
+      await page.goto(path)
+      await expect(page.locator('.m3-page-header__h1')).toBeVisible()
+      await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+      const out = await page.evaluate(() => {
+        const bad: string[] = []
+        const inside = (inner: DOMRect, outer: DOMRect) =>
+          inner.left >= outer.left - 1 && inner.right <= outer.right + 1
+        for (const control of document.querySelectorAll('.m3-page button, .m3-page a[role="button"]')) {
+          const box = control.getBoundingClientRect()
+          if (box.width === 0) continue
+          const row = control.closest('.fleet__row, .m3-row, .github__item')
+          if (row && !inside(box, row.getBoundingClientRect())) bad.push(`${control.textContent} leaves its row`)
+          const card = control.closest('.m3-card')
+          if (card && !inside(box, card.getBoundingClientRect())) bad.push(`${control.textContent} leaves its card`)
+        }
+        return bad
+      })
+      expect(out).toEqual([])
+    })
+  }
+
+  test('a machine check drops its detail under its name', async ({ page, size }) => {
+    test.skip(size !== 'tablet', 'one project owns the 768 px viewport')
+    await scenario(page, 'busy')
+    await page.goto('/machines')
+    await expect(page.locator('.machines__check').first()).toBeVisible()
+    for (const line of await page.locator('.machines__check').all()) {
+      const name = (await line.locator('.m3-state').boundingBox())!
+      const detail = (await line.locator('.machines__detail').boundingBox())!
+      expect(detail.y).toBeGreaterThanOrEqual(name.y + name.height - 1)
+      // Three lines at most, not a column of words.
+      expect(detail.height).toBeLessThanOrEqual(52)
+    }
+  })
+
+  test('a fleet row keeps its name, machine and age readable', async ({ page, size }) => {
+    test.skip(size !== 'tablet', 'one project owns the 768 px viewport')
+    await scenario(page, 'busy')
+    await page.goto('/fleet')
+    await expect(page.locator('.fleet__row').first()).toBeVisible()
+    for (const title of await page.locator('.github__title').all()) {
+      // A title in a column a word wide wraps to six lines.
+      expect((await title.boundingBox())!.height).toBeLessThanOrEqual(48)
+    }
+    for (const name of await page.locator('.fleet__name').all()) {
+      expect((await name.boundingBox())!.height).toBeLessThanOrEqual(48)
+    }
+  })
+})
+
+test('a supporting line with a state and an age keeps a gap between them', async ({ page }) => {
+  await scenario(page, 'busy')
+  await page.goto('/')
+  const supporting = page.locator('.m3-row__supporting:has(> .m3-state)').first()
+  await expect(supporting).toBeVisible()
+  const gap = await supporting.evaluate((line) => {
+    const clone = line.cloneNode(true) as HTMLElement
+    const age = document.createElement('span')
+    age.textContent = '3h'
+    clone.append(age)
+    line.after(clone)
+    const state = clone.querySelector('.m3-state')!.getBoundingClientRect()
+    return age.getBoundingClientRect().left - state.right
+  })
+  expect(gap).toBeGreaterThanOrEqual(6)
+})
+
+for (const [label, path] of [
+  ['an empty thread', '/w/landing'],
+  ['a short thread', '/w/yantra-web?thread=1a2b3c4d'],
+] as const) {
+  test(`the last block of ${label} stays clear of the dock's scrim on a phone`, async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the dock is sticky only on the phone')
+    await scenario(page, 'busy')
+    await page.goto(path)
+    const dock = page.locator('.chat__dock')
+    await expect(dock).toBeVisible()
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Threads' })).toBeVisible()
+    // The thread list loads after the dock draws, so the gap is read once the page has stopped moving.
+    await expect
+      .poll(async () => {
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        return dock.evaluate((el) => {
+          const scrim = parseFloat(getComputedStyle(el, '::before').height)
+          const last = el.previousElementSibling!.getBoundingClientRect().bottom
+          return el.getBoundingClientRect().top - scrim - last
+        })
+      })
+      .toBeGreaterThanOrEqual(-0.5)
+  })
+}
 
 test('the fleet keeps its stamp and its action in one row on a phone', async ({ page, size }) => {
   test.skip(size !== 'phone', 'the phone is the one size that can wrap')

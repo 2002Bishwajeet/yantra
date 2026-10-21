@@ -151,6 +151,17 @@
 }
 
 /* The text keeps a column of its own and the verbs wrap under it, so a session name never breaks per character. */
+[data-shell="tablet"] .machines__text,
 [data-shell="phone"] .machines__text {
   flex-basis: 8rem;
+}
+
+/* Two cards share the tablet, so a card is too narrow for the detail beside the name: it drops under it. */
+[data-shell="tablet"] .machines__check {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  row-gap: 2px;
+}
+
+[data-shell="tablet"] .machines__check > .machines__detail {
+  grid-column: 1 / -1;
 }

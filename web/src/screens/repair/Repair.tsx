@@ -10,7 +10,7 @@ import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface, type Described } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
-import { Page } from '@/m3/page/Page'
+import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
@@ -210,10 +210,12 @@ export function Repair() {
 
   if (!opened.data) {
     return (
-      <Page aria-busy="true" data-slot="reading">
+      <Page>
         {heading}
-        <Skeleton lines={2} shape="card" />
-        <Skeleton lines={7} shape="card" />
+        <PagePending>
+          <Skeleton lines={2} shape="card" />
+          <Skeleton lines={7} shape="card" />
+        </PagePending>
       </Page>
     )
   }

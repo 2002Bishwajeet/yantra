@@ -116,17 +116,23 @@ describe('one workspace, four views the URL carries', () => {
     expect(screen.getByRole('button', { name: 'Stop' }).getAttribute('aria-describedby')).toBeNull()
   })
 
-  /** Y-566: the page reports the width it draws, so a check can read it. The
-   *  terminal is the one view that takes the wide column. */
-  it('draws the reading column, and the wide one for the terminal', async () => {
+  /** Y-566: one Page width for every view, so the title and the tabs never move. */
+  it('draws the wide page on every view', async () => {
     daemon()
-    const { unmount } = await open('landing', 'transcript')
-    await screen.findByRole('button', { name: 'Stop' })
-    expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('reading')
-    unmount()
-    await open('landing', 'terminal')
-    await screen.findByRole('button', { name: 'Stop' })
-    expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('wide')
+    for (const view of ['transcript', 'terminal'] as const) {
+      const { unmount } = await open('landing', view)
+      await screen.findByRole('button', { name: 'Stop' })
+      expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('wide')
+      unmount()
+    }
+  })
+
+  it('keeps aria-busy off the title while the workspaces load', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    await open('landing')
+    const title = await screen.findByRole('heading', { level: 1 })
+    expect(title.closest('[aria-busy="true"]')).toBeNull()
+    expect(document.querySelector('[aria-busy="true"] [data-slot="skeleton"]')).toBeTruthy()
   })
 
   /** D5 §3.2: a view is navigation, so each pill is a link the browser can

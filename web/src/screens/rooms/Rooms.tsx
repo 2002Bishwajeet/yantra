@@ -57,7 +57,7 @@ export function Rooms() {
         </ErrorBoundary>
       ) : rooms.error ? (
         <ErrorSurface.Page
-          eyebrow="Rooms"
+          eyebrow="Rooms read"
           error={asApiError(rooms.error)}
           reset={() => void rooms.refetch()}
           title="The rooms could not be read"

@@ -47,6 +47,13 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* A state followed by anything else (a state, then an age) keeps the flex row and its gap. */
+.m3-row__supporting:has(> .m3-state + *) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* A block, not a flex row: `text-overflow` draws its ellipsis only on a block
    container, so a flex line cut the words with no mark. The state's mark rides
    inline, and the state itself is the block that clips. */

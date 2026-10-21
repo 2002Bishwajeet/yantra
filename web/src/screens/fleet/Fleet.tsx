@@ -78,7 +78,7 @@ export function Fleet() {
         <PageHeader title="Fleet" />
         <ErrorSurface.Page
           error={fromReading(listed)!}
-          eyebrow="Fleet"
+          eyebrow="Workspaces read"
           reset={() => void client.invalidateQueries()}
           title="Nothing here can be reached"
           unknowns={['off the tailnet', 'yantrad down']}

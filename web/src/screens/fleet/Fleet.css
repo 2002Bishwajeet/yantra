@@ -293,9 +293,11 @@ a.fleet__machine:hover {
 
 /* Tablet: the tile appears, the columns narrow, the GitHub groups stack. */
 
+/* The tablet row is 580 px at 768, too narrow for six columns and the actions. The name, the machine
+   and the age share one cell, as on the phone, so the actions keep their width inside the row. */
 [data-shell="tablet"] .fleet__row {
-  grid-template-columns: var(--m3-tile-size) 160px 104px 84px 48px minmax(0, 1fr) auto;
-  grid-template-areas: "tile state name machine age detail actions" "said said said said said said said";
+  grid-template-columns: var(--m3-tile-size) minmax(0, 150px) minmax(0, 1fr) auto;
+  grid-template-areas: "tile state meta actions" "said said said said";
   padding: 4px 6px 4px 8px;
 }
 
@@ -323,9 +325,6 @@ a.fleet__machine:hover {
   padding-left: 8px;
 }
 
-[data-shell="tablet"] .github__ref {
-  width: 196px;
-}
 
 /* Phone: the state on one line, the name and machine on the next. */
 
@@ -341,6 +340,7 @@ a.fleet__machine:hover {
   padding: 6px 6px 6px 8px;
 }
 
+[data-shell="tablet"] .fleet__meta,
 [data-shell="phone"] .fleet__meta {
   display: flex;
   flex-wrap: wrap;
@@ -355,23 +355,27 @@ a.fleet__machine:hover {
 
 /* The name has a line of its own, and the machine and the age share the next, so a name never shares a
    narrow column and breaks per character at 390. It still wraps rather than ends in an ellipsis (finding 107). */
+[data-shell="tablet"] .fleet__meta > *,
 [data-shell="phone"] .fleet__meta > * {
   grid-area: auto;
   min-width: 0;
   overflow-wrap: break-word;
 }
 
+[data-shell="tablet"] .fleet__meta > .fleet__name,
 [data-shell="phone"] .fleet__meta > .fleet__name {
   flex-basis: 100%;
 }
 
 /* WCAG 2.5.8: two links on stacked lines are each 24 px tall. */
+[data-shell="tablet"] .fleet__meta > a,
 [data-shell="phone"] .fleet__meta > a {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
 }
 
+[data-shell="tablet"] .fleet__meta > .fleet__machine ~ *::before,
 [data-shell="phone"] .fleet__meta > .fleet__machine ~ *::before {
   content: "· ";
 }
@@ -386,6 +390,7 @@ a.fleet__machine:hover {
   display: none;
 }
 
+[data-shell="tablet"] .fleet__row .verb__said,
 [data-shell="phone"] .fleet__row .verb__said {
   grid-area: said;
   margin-top: 6px;
@@ -396,6 +401,7 @@ a.fleet__machine:hover {
   min-height: 44px;
 }
 
+[data-shell="tablet"] .github__text,
 [data-shell="phone"] .github__text {
   display: flex;
   flex-direction: column;
@@ -404,6 +410,7 @@ a.fleet__machine:hover {
   min-width: 0;
 }
 
+[data-shell="tablet"] .github__ref,
 [data-shell="phone"] .github__ref {
   width: auto;
 }
@@ -469,11 +476,13 @@ a.fleet__machine:hover {
   line-height: var(--md-sys-typescale-body-small-line-height);
 }
 
+[data-shell="tablet"] .github__item,
 [data-shell="phone"] .github__item {
   flex-direction: column;
   align-items: stretch;
 }
 
+[data-shell="tablet"] .github__item > button,
 [data-shell="phone"] .github__item > button {
   align-self: flex-start;
 }

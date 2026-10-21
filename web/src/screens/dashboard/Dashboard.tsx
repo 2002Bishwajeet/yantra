@@ -32,7 +32,7 @@ import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
-import { Page } from '@/m3/page/Page'
+import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row, RowText } from '@/m3/row/Row'
@@ -703,13 +703,15 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
 
 function Pending() {
   return (
-    <Page aria-busy="true" data-slot="reading">
+    <Page>
       <PageHeader title="Dashboard" />
-      <Skeleton shape="text" style={{ width: 320 }} />
-      <Skeleton lines={3} shape="card" />
-      <Skeleton lines={4} shape="card" />
-      <Skeleton shape="row" />
-      <Skeleton shape="row" />
+      <PagePending>
+        <Skeleton shape="text" style={{ width: 320 }} />
+        <Skeleton lines={3} shape="card" />
+        <Skeleton lines={4} shape="card" />
+        <Skeleton shape="row" />
+        <Skeleton shape="row" />
+      </PagePending>
     </Page>
   )
 }
@@ -762,7 +764,7 @@ export function Dashboard() {
             </Button>
           }
           error={new ApiError('network', nothing, { sentence: UNREACHABLE })}
-          eyebrow="Dashboard"
+          eyebrow="Fleet read"
           meta={good === null ? undefined : `last good read ${ago((now - good.at) / 1000, now).text} ago`}
           reset={retry}
           title="Nothing here can be reached"
@@ -812,13 +814,18 @@ export function Dashboard() {
   const band = (which: WorkRow['band']) => placed.filter((row) => row.band === which)
   const notAnswering = placed.flatMap((row) => (row.kind === 'machine' ? [row.machine] : []))
   const unread = band('unknown')
+  // On a phone the app bar is the title, so the strip takes the header's row and the stamp rides at its end.
+  const strip = (
+    <ErrorBoundary layout="inline" title="The status line could not be drawn">
+      <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} />
+    </ErrorBoundary>
+  )
+  const headed = phone && machines.looked !== 'failed'
 
   return (
     <Page className="dash">
-      <PageHeader stamp={<Stamp now={now} reads={reads} />} title="Dashboard" />
-      <ErrorBoundary layout="inline" title="The status line could not be drawn">
-        <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} />
-      </ErrorBoundary>
+      <PageHeader stamp={<Stamp now={now} reads={reads} />} subtitle={headed ? strip : undefined} title="Dashboard" />
+      {headed ? null : strip}
       {gate.passed ? (
         <ErrorBoundary layout="inline" title="Finish setup could not be drawn">
           <FinishSetup now={now} />

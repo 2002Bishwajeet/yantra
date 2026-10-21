@@ -42,17 +42,17 @@ describe('ErrorSurface', () => {
     expect(screen.getByText("This browser is not on a node this tailnet's owner holds.")).toBeTruthy()
   })
 
-  it('draws under the PageHeader, so the title stays, with the route as its eyebrow', () => {
+  it('draws under the PageHeader, so the title stays, with the failing read as its eyebrow', () => {
     render(
       <Page>
         <PageHeader title="Fleet" />
-        <ErrorSurface.Page eyebrow="Fleet" error={network} reset={() => {}} title="Nothing here can be reached" />
+        <ErrorSurface.Page eyebrow="Fleet read" error={network} reset={() => {}} title="Nothing here can be reached" />
       </Page>,
     )
     expect(screen.getByRole('heading', { level: 1, name: 'Fleet' })).toBeTruthy()
     const alert = screen.getByRole('alert')
     expect(alert.closest('.m3-page')).toBeTruthy()
-    expect(alert.querySelector('.m3-eyebrow')?.textContent).toBe('Fleet')
+    expect(alert.querySelector('.m3-eyebrow')?.textContent).toBe('Fleet read')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })
 

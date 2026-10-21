@@ -18,6 +18,8 @@
   margin-inline: max(0px, calc((100% - var(--m3-page-max-wide)) / 2)) auto;
 }
 
-.m3-page[data-width="reading"][data-align="center"] {
-  margin-inline: auto;
+.m3-page__pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
 }
