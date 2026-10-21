@@ -121,7 +121,7 @@ function Compose({ name }: { name: string }) {
 function Body({ room }: { room: RoomData }) {
   const now = useTick(true)
   return (
-    <>
+    <div className="room__body">
       <Mono className="room__facts">{facts(room)}</Mono>
       {room.paused ? <Paused budget={room.budget} name={room.name} /> : null}
       {room.log.length === 0 ? (
@@ -136,7 +136,7 @@ function Body({ room }: { room: RoomData }) {
         </ol>
       )}
       <Compose name={room.name} />
-    </>
+    </div>
   )
 }
 

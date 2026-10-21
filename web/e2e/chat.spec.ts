@@ -108,6 +108,15 @@ const PNG = Buffer.from(
 const png = (name: string) => ({ name, mimeType: 'image/png', buffer: PNG })
 // A phone's picture is the screen as held: its composer is pinned to the foot, and a whole-page capture moves it.
 const shell = (page: Page) => page.locator('[data-slot="composer-shell"]')
+/** Write `shell/prefs.ts`'s key before the first paint, as dashboard.spec.ts does. */
+async function dark(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'yantra.prefs',
+      JSON.stringify({ v: 1, seenAt: null, seed: null, general: {}, theme: 'dark', density: 'clean' }),
+    )
+  })
+}
 const kept = (page: Page) => page.evaluate(() => localStorage.getItem(`yantra.chat.draft.workspace/yantra-web`))
 
 test.describe('the composer', () => {
@@ -131,6 +140,62 @@ test.describe('the composer', () => {
     const box = await composer(page).boundingBox()
     expect(box?.height ?? 0).toBeGreaterThan(72)
     await screenshot(page, 'composer-draft', 'busy', size, { overlay: size === 'phone' })
+  })
+
+  test('shows the keyboard focus on the card, since the field draws no outline', async ({ page }) => {
+    const edge = () =>
+      page.locator('.composer__card').evaluate((card) => getComputedStyle(card, '::after').borderTopColor)
+    const resting = await edge()
+    await page.keyboard.press('Tab')
+    await expect(composer(page)).toBeFocused()
+    await expect.poll(edge).not.toBe(resting)
+  })
+
+  test('focuses the field on a press on the card that lands on no control', async ({ page }) => {
+    await expect(composer(page)).not.toBeFocused()
+    const controls = page.locator('.composer__controls')
+    const box = (await controls.boundingBox())!
+    await page.mouse.click(box.x + box.width - 6, box.y + box.height / 2)
+    await expect(composer(page)).toBeFocused()
+    await composer(page).blur()
+    await page.getByRole('button', { name: /^Permissions: / }).click()
+    await expect(page.getByRole('menu')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(composer(page)).not.toBeFocused()
+  })
+
+  test('words its resting line so that no placeholder is cut mid-word', async ({ page }) => {
+    const fits = await composer(page).evaluate((field: HTMLTextAreaElement) => {
+      const style = getComputedStyle(field)
+      const context = document.createElement('canvas').getContext('2d')!
+      context.font = style.font
+      const room = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      return context.measureText(field.placeholder).width <= room
+    })
+    expect(fits).toBe(true)
+  })
+
+  test('keeps the remove button of a tile off the next tile', async ({ page }) => {
+    await page.locator('input[type="file"]').setInputFiles([png('a.png'), png('b.png')])
+    const images = page.getByRole('list', { name: 'Images' })
+    await expect(images.getByRole('listitem')).toHaveCount(2)
+    const remove = page.getByRole('button', { name: 'Remove image 1' })
+    const next = page.getByRole('button', { name: 'Preview image 2' })
+    const owns = async (button: typeof remove, dx: number, dy: number, from: 'middle' | 'corner') => {
+      const box = (await button.boundingBox())!
+      const at = from === 'middle' ? [box.x + dx, box.y + box.height / 2 + dy] : [box.x + dx, box.y + dy]
+      return button.evaluate((one, point) => document.elementFromPoint(point[0]!, point[1]!)?.closest('button') === one, at)
+    }
+    // The tiles settle a frame after they are drawn, so each point is read with its box in one step.
+    await expect
+      .poll(async () => [
+        // A point 23 px right of the button's middle is still its own 48 px target.
+        await owns(remove, 12 + 23, 0, 'middle'),
+        // The next tile's near edge, level with the first button's hit area, belongs to its preview.
+        await owns(next, 1, 0, 'middle'),
+        await owns(next, 1, 16, 'corner'),
+      ])
+      .toEqual([true, true, true])
   })
 
   test('stops growing at 40vh and then scrolls', async ({ page }) => {
@@ -205,6 +270,9 @@ test.describe('the composer', () => {
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription(
       'The chat is not connected, so nothing can be sent.',
     )
+    // Where a phone ends up scrolled depends on whether the thread list or the banner arrived first, so the capture is the top.
+    await expect(page.getByRole('link', { name: /^3a1b2c3d4e5f6a7b/ })).toBeVisible()
+    await page.evaluate(() => window.scrollTo(0, 0))
     await screenshot(page, 'composer-closed', 'busy', size, { overlay: size === 'phone' })
   })
 
@@ -215,6 +283,12 @@ test.describe('the composer', () => {
     await page.getByRole('button', { name: 'Send' }).click()
     await expect(page.getByRole('alert').getByRole('heading')).toHaveText('Gemini is not logged in on cachyos-g14')
     await expect(page.getByLabel(`Message Gemini in ${NAME}`, { exact: true })).toHaveValue('hello')
+    // The banner and the card are one column: the same left edge and the same width.
+    const column = async (locator: ReturnType<Page['locator']>) => {
+      const box = (await locator.boundingBox())!
+      return [Math.round(box.x), Math.round(box.width)]
+    }
+    expect(await column(page.getByRole('alert'))).toEqual(await column(shell(page)))
   })
 
   test('passes axe at rest and with a draft', async ({ page }) => {
@@ -296,6 +370,39 @@ test.describe('the composer, running a turn with a plan', () => {
     await screenshot(page, 'composer-plan', 'composer', size, { overlay: size === 'phone' })
   })
 
+  test('keeps the request answerable on a phone after the plan opens', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the dock is sticky on the phone only')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.getByRole('button', { name: /^Plan: / }).click()
+    await expect(page.getByRole('list', { name: /^Plan\./ })).toBeVisible()
+    // In the viewport is not enough: the dock must not be what sits over the button.
+    const accept = page.getByRole('button', { name: 'Accept', exact: true })
+    for (const name of ['Accept', 'Accept always', 'Decline']) {
+      const button = page.getByRole('button', { name, exact: true })
+      await expect(button).toBeInViewport({ ratio: 1 })
+      await expect
+        .poll(() =>
+          button.evaluate((one) => {
+            const box = one.getBoundingClientRect()
+            return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest('button') === one
+          }),
+        )
+        .toBe(true)
+    }
+    await accept.click()
+  })
+
+  test('opens the plan on the spring, and the reduced-motion page opens it on opacity alone', async ({ page }) => {
+    const transition = () =>
+      page.locator('.composer-plan__reveal').evaluate((one) => getComputedStyle(one).transitionProperty)
+    await page.getByRole('button', { name: /^Plan: / }).click()
+    expect(await transition()).toBe('opacity')
+    await page.getByRole('button', { name: /^Collapse plan: / }).click()
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.getByRole('button', { name: /^Plan: / }).click()
+    expect(await transition()).toContain('grid-template-rows')
+  })
+
   test('turns the context ring red above 90 percent, and passes axe with its popover open', async ({ page }) => {
     const ring = page.getByRole('button', { name: 'Context window 93% used' })
     await expect(ring).toBeVisible()
@@ -325,4 +432,30 @@ test('an issue draft fills the card with no label over it', async ({ page, size 
   await expect(composer(page)).toHaveValue(/^Work on /)
   await expect(shell(page).locator('label')).toHaveCount(0)
   await screenshot(page, 'composer-issue-draft', 'busy', size, { overlay: size === 'phone' })
+})
+
+test.describe('the composer in the dark', () => {
+  test.beforeEach(async ({ page }) => {
+    await dark(page)
+  })
+
+  test('rests on the dark roles, and looks like the board', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'the dark board is a desktop board')
+    await scenario(page, 'busy')
+    await page.goto(PATH)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+    await expect(composer(page)).toBeVisible()
+    await screenshot(page, 'composer-dark-resting', 'busy', size)
+  })
+
+  test('runs a turn with its plan open on the dark roles, and looks like the board', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'the dark board is a desktop board')
+    await scenario(page, 'composer')
+    await page.goto(PATH)
+    await turn(page)
+    await page.getByRole('button', { name: /^Plan: / }).click()
+    await expect(page.getByRole('list', { name: /^Plan\./ })).toBeVisible()
+    await axe(page)
+    await screenshot(page, 'composer-dark-plan', 'composer', size)
+  })
 })

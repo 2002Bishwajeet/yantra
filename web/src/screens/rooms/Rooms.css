@@ -26,6 +26,16 @@
   flex: none;
 }
 
+/* One column at the Chat's width, so the messages, the banner and the composer share both edges. */
+.room__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+  width: 100%;
+  max-width: 880px;
+  min-width: 0;
+}
+
 .room__facts {
   color: var(--md-sys-color-on-surface-variant);
 }
@@ -90,4 +100,18 @@
 .room__resume {
   min-height: 48px;
   min-width: 48px;
+}
+
+/* Phone: the post form rides at the foot while the log scrolls, as the Chat's does. A room is a detail
+   screen with no navigation bar, so the form owns the page's bottom padding. */
+[data-shell="phone"] .shell__main:has(.room__compose) {
+  padding-bottom: 0;
+}
+
+[data-shell="phone"] .room__compose {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--md-sys-color-surface);
 }

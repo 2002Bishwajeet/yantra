@@ -242,6 +242,7 @@ export function Chat(props: ChatProps) {
   const [dropping, setDropping] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const end = useRef<HTMLDivElement>(null)
+  const dock = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const busy = timeline.turn !== 'idle'
   const enterSends = useEnterSends()
@@ -268,6 +269,28 @@ export function Chat(props: ChatProps) {
   useEffect(() => {
     if (pinned.current) end.current?.scrollIntoView?.({ block: 'end' })
   }, [timeline.entries, timeline.requests])
+
+  // The phone's dock is sticky, so a taller one (a plan, an error, a long draft) covers the newest words.
+  // Session.css reads its height for scroll-padding, and a pinned reader is carried to the end again.
+  useEffect(() => {
+    const box = dock.current
+    if (!box || typeof ResizeObserver === 'undefined') return
+    const root = document.documentElement
+    const watching = new ResizeObserver(() => {
+      root.style.setProperty('--chat-dock-height', `${box.offsetHeight}px`)
+      // Only a sticky dock (the phone's) covers anything. It sits after the end, so its growth never moves
+      // the end: where the end is now says if the reader is at the foot. The observer's own answer can be one scroll behind.
+      const foot = end.current
+      if (foot && getComputedStyle(box).position === 'sticky' && (pinned.current || foot.getBoundingClientRect().top <= window.innerHeight)) {
+        foot.scrollIntoView?.({ block: 'end' })
+      }
+    })
+    watching.observe(box)
+    return () => {
+      watching.disconnect()
+      root.style.removeProperty('--chat-dock-height')
+    }
+  }, [])
 
   const uploading = images.some((one) => one.state === 'uploading')
   // The agent reads an image by its path, so each goes on a line of its own.
@@ -423,7 +446,7 @@ export function Chat(props: ChatProps) {
         {showDiff ? null : asks}
         <div ref={end} />
       </section>
-      <div className="chat__dock">
+      <div className="chat__dock" ref={dock}>
         {error?.login ? (
           <LoggedOut error={error} login={error.login} retry={chat.retry} />
         ) : error ? (
@@ -533,8 +556,10 @@ export function Chat(props: ChatProps) {
             }
           />
         </Composer.Root>
-        {/* 4.1.3: the turn's state, said politely and shown. */}
-        <Composer.Status>{status(timeline, harness)}</Composer.Status>
+        {/* 4.1.3: the turn's state, said politely and shown, except while the empty field's placeholder says it. */}
+        <Composer.Status quiet={timeline.requests.length > 0 && draft === '' && link === 'open'}>
+          {status(timeline, harness)}
+        </Composer.Status>
       </div>
     </div>
   )

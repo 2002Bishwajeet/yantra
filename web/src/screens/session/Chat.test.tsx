@@ -360,6 +360,11 @@ describe('the chat', () => {
     await settled(() => expect(screen.getByText('Claude asks to run')).toBeTruthy())
     expect(screen.getByText('Run the unit tests')).toBeTruthy()
     expect(screen.getByRole('status').textContent).toBe('Claude is waiting for your answer.')
+    // The placeholder says it on screen, so the line is read out and not drawn twice.
+    expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(true)
+    type('look')
+    expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(false)
+    type('')
 
     fireEvent.click(screen.getByRole('button', { name: label }))
     await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision }]))
@@ -1069,7 +1074,7 @@ describe('the composer', () => {
     render(<Chat onThread={onThread} workspace={web} />)
     const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
     expect(field.placeholder).toBe('Connecting to the chat…')
-    await settled(() => expect(field.placeholder).toBe('Ask for changes, send follow-ups, or attach images'))
+    await settled(() => expect(field.placeholder).toBe('Ask for changes or attach images'))
     say(started())
     say(of('turn.started'))
     say(of('request.opened'))

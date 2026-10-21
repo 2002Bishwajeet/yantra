@@ -37,11 +37,11 @@ export function PrimaryAction(props: PrimaryActionProps) {
         <button
           aria-busy={running.stopping || undefined}
           aria-describedby={why}
+          aria-disabled={running.stopping || undefined}
           aria-label={`Stop ${running.agent}`}
           className="composer-action"
           data-kind="stop"
-          disabled={running.stopping}
-          onClick={running.onStop}
+          onClick={running.stopping ? undefined : running.onStop}
           type="button"
         >
           <span className="composer-action__disc">

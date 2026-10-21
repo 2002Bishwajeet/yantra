@@ -15,5 +15,5 @@ export function placeholder(state: {
   if (state.link === 'closed') return 'The chat is closed. Try again above.'
   if (state.link === 'connecting') return 'Connecting to the chat…'
   if (state.waiting) return `${state.agent} is waiting for your answer above`
-  return 'Ask for changes, send follow-ups, or attach images'
+  return 'Ask for changes or attach images'
 }

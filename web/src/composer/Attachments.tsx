@@ -6,7 +6,7 @@
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 import { memo, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, ImageOff, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, CircleAlert, ImageOff, X } from 'lucide-react'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
@@ -87,7 +87,7 @@ export function Attachments(props: { images: Picked[]; onRemove: (id: number) =>
               </span>
             ) : (
               <span className="composer-tile__badge">
-                <X aria-hidden="true" />
+                <CircleAlert aria-hidden="true" />
                 <span className="m3-sr-only">Not attached</span>
               </span>
             )}

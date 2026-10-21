@@ -39,6 +39,13 @@ describe('the attachments', () => {
     expect(screen.getByRole('listitem').getAttribute('data-state')).toBe('failed')
   })
 
+  it('marks a failed tile with an alert glyph, so the only X on it is the remove button', () => {
+    render(<Attachments images={[tile(1, 'failed')]} onRemove={() => {}} />)
+    const item = screen.getByRole('listitem')
+    expect(item.querySelector('.composer-tile__badge svg')?.classList.contains('lucide-circle-alert')).toBe(true)
+    expect(item.querySelectorAll('svg.lucide-x')).toHaveLength(1)
+  })
+
   it('removes the image it is asked to', () => {
     const onRemove = vi.fn()
     render(<Attachments images={[tile(1, 'attached'), tile(2, 'attached')]} onRemove={onRemove} />)

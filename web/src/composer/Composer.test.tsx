@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import * as Composer from './Composer'
 import { PrimaryAction, type PrimaryActionProps } from './PrimaryAction'
 
@@ -118,10 +119,17 @@ describe('the primary action', () => {
     expect(why?.textContent).toBe('Claude is answering. Stop it to send something else.')
   })
 
-  it('holds the Stop while it stops, with a spinner', () => {
-    render(<Harness action={{ running: { agent: 'Claude', stopping: true, onStop: () => {}, reason: 'Claude is answering.' } }} />)
+  it('holds the Stop while it stops, with a spinner, and keeps the focus on it', () => {
+    const onStop = vi.fn()
+    render(<Harness action={{ running: { agent: 'Claude', stopping: true, onStop, reason: 'Claude is answering.' } }} />)
     const stop = screen.getByRole('button', { name: 'Stop Claude' })
-    expect(stop).toHaveProperty('disabled', true)
+    // aria-disabled, not disabled: a disabled button drops the keyboard's focus to the body.
+    expect(stop.getAttribute('aria-disabled')).toBe('true')
+    expect(stop).toHaveProperty('disabled', false)
+    stop.focus()
+    fireEvent.click(stop)
+    expect(onStop).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(stop)
     expect(within(stop).getByText('', { selector: '.composer-spinner' })).toBeTruthy()
   })
 })
@@ -133,5 +141,35 @@ describe('the card', () => {
     expect(shell.hasAttribute('data-empty')).toBe(true)
     type('words')
     expect(shell.hasAttribute('data-empty')).toBe(false)
+  })
+
+  it('puts the caret in the field when a press lands on the card and on no control', () => {
+    render(<Harness action={{ reason: null }} />)
+    const card = document.querySelector('.composer__card')!
+    expect(fireEvent.mouseDown(card)).toBe(false)
+    expect(document.activeElement).toBe(box())
+    box().blur()
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Send' }))
+    expect(document.activeElement).not.toBe(box())
+  })
+
+  it('leaves a press in a menu portalled out of the card alone', () => {
+    render(
+      <Composer.Root empty onSubmit={(event) => event.preventDefault()}>
+        <Composer.Input aria-label="Message" enterSends onSend={() => {}} value="" />
+        {createPortal(<div data-testid="menu">item</div>, document.body)}
+      </Composer.Root>,
+    )
+    expect(fireEvent.mouseDown(screen.getByTestId('menu'))).toBe(true)
+    expect(document.activeElement).not.toBe(box())
+  })
+})
+
+describe('the status line', () => {
+  it('stays in the page when quiet, so the words are still said', () => {
+    render(<Composer.Status quiet>Claude is waiting for your answer.</Composer.Status>)
+    const line = screen.getByRole('status')
+    expect(line.textContent).toBe('Claude is waiting for your answer.')
+    expect(line.classList.contains('m3-sr-only')).toBe(true)
   })
 })

@@ -51,7 +51,7 @@ export type Timeline = {
   /** Requests the agent is waiting on, oldest first. */
   requests: RequestOpened[]
   usage: { used: number; max: number } | null
-  /** The newest plan the agent sent; none until it sends one. */
+  /** The newest plan the agent sent in this turn; a new turn starts with none. */
   plan: Plan
   /** `sent` is the frame on its way, before the agent says it started. */
   turn: 'idle' | 'sent' | 'running' | 'stopping'
@@ -84,7 +84,7 @@ const WHO = { user_text: 'you', assistant_text: 'agent', reasoning_text: 'thinki
 export function reduce(timeline: Timeline, action: Action): Timeline {
   switch (action.type) {
     case 'sent':
-      return { ...timeline, turn: 'sent', ended: null }
+      return { ...timeline, turn: 'sent', ended: null, plan: [] }
     case 'stopping':
       return timeline.turn === 'idle' ? timeline : { ...timeline, turn: 'stopping' }
     case 'refused':
@@ -101,7 +101,7 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
     case 'thread.started':
       return { ...timeline, thread: event.payload.thread, harness: event.payload.harness }
     case 'turn.started':
-      return { ...timeline, turn: timeline.turn === 'stopping' ? 'stopping' : 'running', ended: null }
+      return { ...timeline, turn: timeline.turn === 'stopping' ? 'stopping' : 'running', ended: null, plan: [] }
     case 'turn.completed':
       return { ...timeline, turn: 'idle', requests: [], ended: event.payload }
     case 'thread.token-usage.updated':

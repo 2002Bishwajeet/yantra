@@ -756,3 +756,36 @@
   flex-direction: column;
   gap: 12px;
 }
+
+/* Phone: the composer rides at the foot of the screen while the page scrolls. The session
+   screen has no navigation bar, so the dock owns the page's bottom padding. A sticky box
+   stays inside its parent, so the chat gives its children to the session's column. */
+
+.chat__dock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+[data-shell="phone"] .session__chat:not([hidden]),
+[data-shell="phone"] .session__chat:not([hidden]) > .chat {
+  display: contents;
+}
+
+[data-shell="phone"] .shell__main:has(.session__chat:not([hidden]) .chat__dock) {
+  padding-bottom: 0;
+}
+
+[data-shell="phone"] .chat__dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--md-sys-color-surface);
+}
+
+/* WCAG 2.4.11: a focused control and the pinned end scroll to clear the dock, whose height Chat measures
+   into --chat-dock-height as a draft, a plan or an error grows it. */
+:root:has([data-shell="phone"] .session__chat:not([hidden]) .chat__dock) {
+  scroll-padding-bottom: calc(var(--chat-dock-height, 260px) + 8px);
+}

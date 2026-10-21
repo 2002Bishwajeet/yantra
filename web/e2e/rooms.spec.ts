@@ -102,6 +102,32 @@ test.describe('rooms', () => {
     await screenshot(page, 'room-composer', 'rooms', size)
   })
 
+  test('the messages, the banner and the post form are one column', async ({ page }) => {
+    await page.goto('/rooms/release')
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+    const column = async (locator: ReturnType<typeof page.locator>) => {
+      const box = (await locator.boundingBox())!
+      return [Math.round(box.x), Math.round(box.width)]
+    }
+    const card = await column(page.locator('[data-slot="composer-shell"]'))
+    expect(await column(page.getByRole('list', { name: 'Messages' }))).toEqual(card)
+    expect(await column(page.locator('.room__paused'))).toEqual(card)
+  })
+
+  test('the post form rides at the foot of the screen on a phone, as the Chat does', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the dock is sticky on the phone only')
+    await page.setViewportSize({ width: 390, height: 420 })
+    await page.goto('/rooms/release')
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+    const form = page.locator('.room__compose')
+    for (const to of [0, 'end'] as const) {
+      await page.evaluate((y) => window.scrollTo(0, y === 'end' ? document.body.scrollHeight : y), to)
+      await expect(form).toBeInViewport({ ratio: 1 })
+      const box = (await form.boundingBox())!
+      expect(Math.round(box.y + box.height)).toBeGreaterThanOrEqual(420 - 1)
+    }
+  })
+
   test('Shift+Enter writes a new line in the post form, and Enter posts', async ({ page, size }) => {
     test.skip(size === 'phone', 'a phone keeps Enter for a new line')
     await page.goto('/rooms/release')

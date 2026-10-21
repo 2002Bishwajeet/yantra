@@ -8,10 +8,19 @@
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 import { Menu as Base } from '@base-ui/react/menu'
-import { Bot, Check } from 'lucide-react'
+import { Check, Gem, Orbit, Sparkles, SquareTerminal, Terminal, type LucideIcon } from 'lucide-react'
 import { HARNESSES, LABEL, type Harness } from '@/api/thread'
 import { Chevron, Control, Icon, Label } from '@/composer/Control'
 import { Menu, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
+
+// A phone drops the names, so each harness keeps a glyph of its own.
+const GLYPH: Record<Harness, LucideIcon> = {
+  claude: Sparkles,
+  codex: Terminal,
+  gemini: Gem,
+  grok: Orbit,
+  opencode: SquareTerminal,
+}
 
 export type HarnessPickerProps = {
   value: Harness
@@ -29,7 +38,7 @@ export function HarnessPicker(props: HarnessPickerProps) {
   if (locked) {
     return (
       <Control aria-label={`${name}, kept by this chat`} disabled>
-        <Icon icon={Bot} />
+        <Icon icon={GLYPH[value]} />
         <Label>{LABEL[value]}</Label>
       </Control>
     )
@@ -37,7 +46,7 @@ export function HarnessPicker(props: HarnessPickerProps) {
   return (
     <Menu>
       <MenuTrigger render={<Control aria-label={name} disabled={disabled} />}>
-        <Icon icon={Bot} />
+        <Icon icon={GLYPH[value]} />
         <Label>{LABEL[value]}</Label>
         <Chevron />
       </MenuTrigger>

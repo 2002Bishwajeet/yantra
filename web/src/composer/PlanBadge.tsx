@@ -53,20 +53,24 @@ export function PlanBadge(props: { plan: Plan }) {
         <ChevronDown aria-hidden="true" className="composer-plan__chevron" />
       </button>
       {open ? (
-        <ul aria-label={`Plan. ${done} of ${total} complete.`} className="composer-plan__steps" id={list}>
-          {plan.map((one, at) => {
-            const Glyph = GLYPH[one.status]
-            return (
-              <li data-status={one.status} key={at}>
-                <Glyph aria-hidden="true" />
-                <span>
-                  <span className="m3-sr-only">{WORD[one.status]}: </span>
-                  {one.step}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+        <div className="composer-plan__reveal">
+          <div>
+            <ul aria-label={`Plan. ${done} of ${total} complete.`} className="composer-plan__steps" id={list}>
+              {plan.map((one, at) => {
+                const Glyph = GLYPH[one.status]
+                return (
+                  <li data-status={one.status} key={at}>
+                    <Glyph aria-hidden="true" />
+                    <span>
+                      <span className="m3-sr-only">{WORD[one.status]}: </span>
+                      {one.step}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </div>
       ) : null}
     </div>
   )

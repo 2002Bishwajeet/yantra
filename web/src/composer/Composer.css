@@ -16,8 +16,6 @@
   isolation: isolate;
   box-sizing: border-box;
   width: 100%;
-  max-width: 46rem;
-  margin: 0 auto;
   container: composer / inline-size;
 }
 
@@ -59,6 +57,11 @@
   border-radius: inherit;
   pointer-events: none;
   transition: border-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+/* WCAG 2.4.7: the field draws no outline of its own, so the card's edge shows the focus. */
+.composer__card:has(.composer__input:focus-visible)::after {
+  border-color: var(--md-sys-color-outline);
 }
 
 .composer[data-dropping] .composer__card::before {
@@ -123,6 +126,11 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A placeholder does not take text-overflow, so a long one fades out where it would be cut. */
+.composer[data-empty]:not(:has(.composer__input:focus)) .composer__input:placeholder-shown {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
 /* Footer */
@@ -206,6 +214,10 @@
   background: var(--md-sys-color-secondary-container);
 }
 
+.composer-control[data-tone="warning"] {
+  color: var(--md-sys-color-error);
+}
+
 .composer-control__icon {
   flex: none;
   width: 18px;
@@ -261,7 +273,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.composer-action:disabled {
+.composer-action:is(:disabled, [aria-disabled="true"]) {
   cursor: default;
 }
 
@@ -285,7 +297,7 @@
   background: var(--md-sys-color-error);
 }
 
-.composer-action:disabled .composer-action__disc {
+.composer-action:is(:disabled, [aria-disabled="true"]) .composer-action__disc {
   opacity: 0.38;
 }
 
@@ -294,12 +306,12 @@
   outline-offset: -4px;
 }
 
-.composer-action:active:not(:disabled) .composer-action__disc {
+.composer-action:active:not(:is(:disabled, [aria-disabled="true"])) .composer-action__disc {
   transform: scale(0.95);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .composer-action:hover:not(:disabled) .composer-action__disc {
+  .composer-action:hover:not(:is(:disabled, [aria-disabled="true"])) .composer-action__disc {
     transform: scale(1.05);
   }
 }
@@ -565,12 +577,46 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* The steps open in 150 ms by their rows and their opacity, and close at once: a close is the reader's own act. */
+.composer-plan__reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 150ms var(--md-sys-motion-easing-emphasized-decelerate),
+    opacity 150ms linear;
+}
+
+@starting-style {
+  .composer-plan__reveal {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.composer-plan__reveal > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-plan__reveal {
+    transition: opacity 150ms linear;
+  }
+
+  @starting-style {
+    .composer-plan__reveal {
+      grid-template-rows: 1fr;
+    }
+  }
+}
+
 /* Attachments */
 
 .composer-images {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* The remove button's 48 px hit area reaches 16 px past a tile, and this gap keeps it off the next tile. */
+  gap: 12px 16px;
   margin: 0;
   padding: 12px 12px 0;
   list-style: none;
@@ -675,8 +721,8 @@
 
 .composer-tile .composer-tile__remove.m3-icon-button {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -4px;
+  right: -4px;
   z-index: 1;
   width: 24px;
   height: 24px;
@@ -714,36 +760,4 @@
 .composer-preview__nav {
   display: flex;
   gap: 8px;
-}
-
-/* Phone: the composer rides at the foot of the screen while the page scrolls. The session
-   screen has no navigation bar, so the dock owns the page's bottom padding. A sticky box
-   stays inside its parent, so the chat gives its children to the session's column. */
-
-.chat__dock {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-[data-shell="phone"] .session__chat:not([hidden]),
-[data-shell="phone"] .session__chat:not([hidden]) > .chat {
-  display: contents;
-}
-
-[data-shell="phone"] .shell__main:has(.session__chat:not([hidden]) .chat__dock) {
-  padding-bottom: 0;
-}
-
-[data-shell="phone"] .chat__dock {
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--md-sys-color-surface);
-}
-
-/* WCAG 2.4.11: a focused control scrolls to clear the dock, which grows with a draft. */
-:root:has([data-shell="phone"] .session__chat:not([hidden]) .chat__dock) {
-  scroll-padding-bottom: calc(260px + env(safe-area-inset-bottom, 0px));
 }

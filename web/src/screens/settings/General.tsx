@@ -66,7 +66,7 @@ export function General() {
       <Group label="Chat">
         <ListItem
           headline="Enter sends"
-          supporting="Off: Enter writes a new line and Ctrl or Cmd+Enter sends"
+          supporting="Off: Ctrl or Cmd+Enter sends"
           trailing={<Switch checked={enterSends} label="Enter sends" onCheckedChange={(on) => write({ enterSends: on })} />}
         />
       </Group>

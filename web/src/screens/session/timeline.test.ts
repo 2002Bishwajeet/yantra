@@ -155,4 +155,16 @@ describe('the timeline', () => {
     expect(fold([plan(steps), plan([steps[0]!])]).plan).toEqual([steps[0]])
     expect(fold([plan(steps), { type: 'reset' }]).plan).toEqual([])
   })
+
+  it("drops the last turn's plan when a new turn starts", () => {
+    const steps = [{ step: 'Fix the parser', status: 'inProgress' as const }]
+    const planned = fold([
+      event({ threadId: 't', type: 'turn.started' }),
+      event({ threadId: 't', type: 'turn.plan.updated', payload: { plan: steps } }),
+      event({ threadId: 't', type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } }),
+    ])
+    expect(planned.plan).toEqual(steps)
+    expect(reduce(planned, { type: 'sent' }).plan).toEqual([])
+    expect(fold([event({ threadId: 't', type: 'turn.started' })], planned).plan).toEqual([])
+  })
 })
