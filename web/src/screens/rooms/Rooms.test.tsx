@@ -26,7 +26,16 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-beforeEach(() => vi.stubGlobal('scrollTo', () => {}))
+beforeEach(() => {
+  vi.stubGlobal('scrollTo', () => {})
+  // The composer asks the form factor whether Enter sends; this is a laptop.
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: true,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+})
 
 const NOW = 1_800_000_000
 
@@ -205,8 +214,9 @@ describe('one room', () => {
     const box = await screen.findByLabelText('Message')
     fireEvent.change(box, { target: { value: 'Go ahead.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Post' }))
-    expect(await screen.findByText('Go ahead.')).toBeTruthy()
-    expect(screen.getByText('owner on pixel')).toBeTruthy()
+    // The sender's name is only in the log, where the draft in the box is not.
+    expect(await screen.findByText('owner on pixel')).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'Messages' }).textContent).toContain('Go ahead.')
     expect((box as HTMLInputElement).value).toBe('')
     expect(read().text).toBe('Posted to review. 2 members see it.')
     expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull()

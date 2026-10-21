@@ -7,9 +7,9 @@
  */
 import { useId } from 'react'
 import { Menu as Base } from '@base-ui/react/menu'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ShieldCheck } from 'lucide-react'
 import { MODES, type PermissionMode } from '@/api/thread'
-import { Button } from '@/m3/button/Button'
+import { Chevron, Control, Icon, Label } from '@/composer/Control'
 import { Menu, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 
 export type ModePickerProps = {
@@ -27,18 +27,10 @@ export function ModePicker(props: ModePickerProps) {
   const id = useId()
   return (
     <Menu>
-      <MenuTrigger
-        render={
-          <Button
-            aria-label={`Permissions: ${LABEL[value]}`}
-            className="chat__harness"
-            disabled={disabled}
-            variant="text"
-          />
-        }
-      >
-        {LABEL[value]}
-        <ChevronDown aria-hidden="true" className="chat__harness-chevron" />
+      <MenuTrigger render={<Control aria-label={`Permissions: ${LABEL[value]}`} disabled={disabled} />}>
+        <Icon icon={ShieldCheck} />
+        <Label>{LABEL[value]}</Label>
+        <Chevron />
       </MenuTrigger>
       <MenuPopup align="start" aria-label="Permissions" side="top">
         <Base.RadioGroup onValueChange={(picked) => onChange(picked as PermissionMode)} value={value}>

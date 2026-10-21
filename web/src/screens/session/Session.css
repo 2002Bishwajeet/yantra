@@ -62,7 +62,6 @@
 
 .session__name a,
 .session__banner a,
-.chat__foot a,
 .transcript__foot a,
 .spend__ask a {
   color: var(--md-sys-color-primary);
@@ -419,85 +418,6 @@
   gap: 8px;
 }
 
-.chat__composer {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.chat__composer[data-dropping] {
-  outline: 2px dashed var(--md-sys-color-primary);
-  outline-offset: -2px;
-  border-radius: 16px;
-}
-
-.chat__drop {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  border-radius: 16px;
-  font: var(--md-sys-typescale-title-small);
-  color: var(--md-sys-color-on-primary-container);
-  background: color-mix(in srgb, var(--md-sys-color-primary-container) 92%, transparent);
-  pointer-events: none;
-}
-
-.chat__images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0 8px;
-  list-style: none;
-}
-
-.chat__image {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  padding: 4px 0 4px 4px;
-  border-radius: 12px;
-  background: var(--md-sys-color-surface-container);
-}
-
-.chat__image img {
-  flex: none;
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.chat__image-state {
-  min-width: 0;
-  font: var(--md-sys-typescale-body-small);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.chat__image[data-state="failed"] .chat__image-state {
-  color: var(--md-sys-color-error);
-}
-
-.chat__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-}
-
-.chat__harness-chevron {
-  width: 18px;
-  height: 18px;
-}
-
 /* A mode's description sits under its name, so the menu reads as T3 Code's. */
 .chat__mode {
   align-items: flex-start;
@@ -515,34 +435,6 @@
   font-size: 0.8125rem;
   line-height: 1.25rem;
   white-space: normal;
-}
-
-.chat__meter {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  font-size: var(--md-sys-typescale-body-small-size);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.chat__meter meter {
-  flex: 1;
-  max-width: 160px;
-}
-
-.chat__field {
-  margin: 0;
-}
-
-/* Y-380 leaves this one at the shell's tracking: the role's 0.4 px wraps the
-   phone's 53-character line and leaves `s` alone on the second. */
-.chat__foot {
-  margin: 0;
-  padding: 0 16px;
-  font: var(--md-sys-typescale-body-small);
-  color: var(--md-sys-color-on-surface-variant);
 }
 
 /* Transcript */

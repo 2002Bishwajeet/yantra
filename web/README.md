@@ -334,7 +334,12 @@ permission mode, Supervised by default (Y-453). Each turn frame carries it, and
 this browser keeps it per thread. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
-harness. Seven things about the code:
+harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
+one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
+Attach, harness and permission controls, a context ring that turns red above 90%,
+the agent's plan on the card's top edge, one Send or Stop button, a draft kept
+per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
+Settings → General. Seven things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -801,6 +806,10 @@ src/
     theme/           the colour engine, loaded only for a seed that is not brass
     gallery/         every component on one page, for the reviewer and
                      Playwright. Dev builds only
+  composer/          the card the Chat and the Room both write in (Y-560): its
+                     input, footer controls, send and stop button, context ring,
+                     plan badge, image strip, draft and prompt history. Copied
+                     from T3 Code's composer, credited at the top of each file
   shell/
     Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
                      navigation resets
@@ -833,7 +842,7 @@ src/
                      `inApp`, and the vitest setup
 e2e/
   lib/               sizes, scenario, axe, screenshot, keyboard, routes
-  fixture/           the Node daemon and its seventeen scenarios
+  fixture/           the Node daemon and its eighteen scenarios
   __screenshots__/   one baseline per screen, scenario and size
 design/              Y-330's options round. A second Vite root; ships nothing
 ```

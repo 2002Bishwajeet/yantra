@@ -10,8 +10,7 @@ const THREAD = '1a2b3c4d'
 const ATTACHED = `/w/${NAME}?thread=${THREAD}`
 const WORKTREE = `/home/biswa/.yantra/worktrees/chat/${NAME}/${THREAD}`
 
-const composer = (page: Page, size: string) =>
-  page.getByLabel(size === 'phone' ? 'Message Claude' : `Message Claude in ${NAME}`, { exact: true })
+const composer = (page: Page) => page.getByLabel(`Message Claude in ${NAME}`, { exact: true })
 const diffButton = (page: Page) => page.getByRole('button', { name: 'Diff', exact: true })
 const branch = (page: Page) => page.getByRole('region', { name: 'Branch diff' })
 const row = (page: Page, name: string) => branch(page).locator('.diff__tree').getByRole('treeitem', { name })
@@ -25,7 +24,7 @@ async function openBranch(page: Page, name: Parameters<typeof scenario>[1] = 'bu
 }
 
 test.describe('the branch diff', () => {
-  test('lists the changed files, reveals one, and puts a line comment in the composer', async ({ page, size }) => {
+  test('lists the changed files, reveals one, and puts a line comment in the composer', async ({ page }) => {
     await openBranch(page)
     await expect(diffButton(page)).toHaveAttribute('aria-pressed', 'true')
 
@@ -51,24 +50,24 @@ test.describe('the branch diff', () => {
 
     await expect(box).toHaveCount(0)
     await expect(file(page, 'src/new.rs').getByRole('heading', { level: 3 })).toBeFocused()
-    await expect(composer(page, size)).toHaveValue('> src/new.rs:L3\n> +    println!("hello {name}");\n\nlooks fine\n')
+    await expect(composer(page)).toHaveValue('> src/new.rs:L3\n> +    println!("hello {name}");\n\nlooks fine\n')
     // Nothing was sent: the chat shows no new turn.
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText('looks fine')).toHaveCount(0)
   })
 
-  test('comments on a whole file from its button, and Escape cancels', async ({ page, size }) => {
+  test('comments on a whole file from its button, and Escape cancels', async ({ page }) => {
     await openBranch(page)
     await file(page, 'logo.png').getByRole('button', { name: 'Comment on file: logo.png' }).click()
     const box = page.getByRole('textbox', { name: 'Comment on logo.png whole file' })
     await expect(box).toBeFocused()
     await box.press('Escape')
     await expect(box).toHaveCount(0)
-    await expect(composer(page, size)).toHaveValue('')
+    await expect(composer(page)).toHaveValue('')
 
     await file(page, 'logo.png').getByRole('button', { name: 'Comment on file: logo.png' }).click()
     await page.getByRole('textbox', { name: 'Comment on logo.png whole file' }).fill('too large')
     await page.getByRole('button', { name: 'Add to message' }).click()
-    await expect(composer(page, size)).toHaveValue('> logo.png\n\ntoo large\n')
+    await expect(composer(page)).toHaveValue('> logo.png\n\ntoo large\n')
   })
 
   test('opens each file in VS Code, Cursor or Zed over ssh', async ({ page }) => {
@@ -104,10 +103,10 @@ test.describe('the branch diff', () => {
 })
 
 test.describe('a turn’s diff', () => {
-  test('opens in the same viewer, and keeps Revert', async ({ page, size }) => {
+  test('opens in the same viewer, and keeps Revert', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(`/w/${NAME}`)
-    await composer(page, size).fill('run the core tests')
+    await composer(page).fill('run the core tests')
     await page.getByRole('button', { name: 'Send' }).click()
     await page.getByRole('button', { name: 'Accept', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
@@ -123,10 +122,10 @@ test.describe('a turn’s diff', () => {
 })
 
 test.describe('a request the agent is waiting on', () => {
-  test('stays in view while the diff hides the conversation', async ({ page, size }) => {
+  test('stays in view while the diff hides the conversation', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(`/w/${NAME}`)
-    await composer(page, size).fill('run the core tests')
+    await composer(page).fill('run the core tests')
     await page.getByRole('button', { name: 'Send' }).click()
     const accept = page.getByRole('button', { name: 'Accept', exact: true })
     await expect(accept).toBeVisible()

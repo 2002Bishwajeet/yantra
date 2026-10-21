@@ -1,7 +1,9 @@
 import { useMachines } from '@/api/hooks'
+import { useEnterSends } from '@/composer/enterSends'
 import { Button } from '@/m3/button/Button'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
+import { Switch } from '@/m3/switch/Switch'
 import { readPrefs, usePrefs, writePrefs } from '@/shell/prefs'
 import { setupCardHidden, showSetupCard } from '@/screens/dashboard/setupCard'
 import { Group, Note } from './Group'
@@ -18,6 +20,7 @@ function write(patch: Partial<Held>) {
 export function General() {
   const prefs = usePrefs()
   const held = readGeneral(prefs)
+  const enterSends = useEnterSends()
   const machines = useMachines()
   const names = machines.looked === 'ok' ? machines.data.map((one) => one.name) : []
   // A machine the list no longer has still shows as chosen: it is what was
@@ -58,6 +61,13 @@ export function General() {
               ))}
             </select>
           }
+        />
+      </Group>
+      <Group label="Chat">
+        <ListItem
+          headline="Enter sends"
+          supporting="Off: Enter writes a new line and Ctrl or Cmd+Enter sends"
+          trailing={<Switch checked={enterSends} label="Enter sends" onCheckedChange={(on) => write({ enterSends: on })} />}
         />
       </Group>
       <Group label="Dashboard">

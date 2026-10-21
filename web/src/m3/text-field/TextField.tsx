@@ -19,13 +19,15 @@ export type TextFieldProps = Field.Control.Props & {
  *  and the error line is wired to it. */
 export function TextField(props: TextFieldProps) {
   const { label, variant, supporting, error, leading, trailing, className, ...rest } = props
+  // A value set before the first paint is not typed, so :placeholder-shown alone leaves the label over it (Y-547).
+  const filled = String(rest.value ?? rest.defaultValue ?? '') !== ''
   return (
     <Field.Root
       className={clsx('m3-text-field', className)}
       data-variant={variant ?? 'outlined'}
       invalid={error ? true : undefined}
     >
-      <div className="m3-text-field__box">
+      <div className="m3-text-field__box" data-filled={filled ? '' : undefined}>
         {leading ? <span className="m3-text-field__leading">{leading}</span> : null}
         <Field.Control className="m3-text-field__input" placeholder=" " {...rest} />
         <Field.Label className="m3-text-field__label">{label}</Field.Label>

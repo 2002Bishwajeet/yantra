@@ -21,6 +21,7 @@ import {
   chatNotAttached,
   chatNotLoggedIn,
 } from '@/contract.gen'
+import { writePrefs } from '@/shell/prefs'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
 
@@ -87,6 +88,7 @@ function type(text: string) {
 
 beforeEach(async () => {
   seen.length = 0
+  localStorage.clear()
   browser()
   onThread = vi.fn<(thread: string) => void>()
   server = await daemon()
@@ -296,7 +298,8 @@ describe('the chat', () => {
     await settled(() => expect(screen.getByText(/Ask Claude something about yantra-web/)).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
     expect(screen.getByText('Type a message to send it.')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toContain('own worktree on cachyos-g14')
+    // The line under the card says only a change of state, and nothing has changed yet.
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
   it('attaches to the thread the URL names', async () => {
@@ -407,9 +410,12 @@ describe('the chat', () => {
   it('shows the context the last turn used', async () => {
     await open()
     say(of('thread.token-usage.updated'))
-    const meter = await settled(() => screen.getByRole('meter', { name: 'Context used' }))
-    expect(meter.getAttribute('value')).toBe('29149')
-    expect(screen.getByText('context 15% · 29k of 200k')).toBeTruthy()
+    const ring = await settled(() => screen.getByRole('button', { name: 'Context window 15% used' }))
+    fireEvent.click(ring)
+    const popup = await settled(() => screen.getByRole('dialog', { name: 'Context window' }))
+    expect(within(popup).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('15')
+    expect(popup.textContent).toContain('29k tokens')
+    expect(popup.textContent).toContain('200k tokens')
   })
 
   it("draws a failed turn in Claude's own words", async () => {
@@ -633,7 +639,7 @@ const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7]
 const png = (name = 'shot.png') => new File([new Uint8Array(PNG)], name, { type: 'image/png' })
 const images = () => server.heard.filter((frame) => 'bytes' in frame)
 const turns = () => server.heard.flatMap((frame) => ('text' in frame ? [JSON.parse(frame.text)] : []))
-const composerBox = () => document.querySelector<HTMLElement>('.chat__composer')!
+const composerBox = () => document.querySelector<HTMLElement>('[data-slot="composer-shell"]')!
 const picker = () => document.querySelector<HTMLInputElement>('input[type="file"]')!
 
 describe('images in the composer', () => {
@@ -978,7 +984,7 @@ describe('the branch diff', () => {
     await asked()
     type('go')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    const foot = () => document.querySelector('.chat__foot')?.textContent
+    const foot = () => document.querySelector('.composer__status')?.textContent
     await settled(() => expect(foot()).toBe('Claude is answering.'))
     say(chatDiffFailed)
     const alert = await settled(() => screen.getByRole('alert'))
@@ -1034,13 +1040,189 @@ describe('the branch diff', () => {
   })
 })
 
+const reasonOf = (name: string) =>
+  document.getElementById(screen.getByRole('button', { name }).getAttribute('aria-describedby') ?? '')?.textContent
+
+describe('the composer', () => {
+  it('says why it cannot send in each state: not connected, answering, uploading and empty', async () => {
+    URL.createObjectURL = (() => 'blob:preview/1') as typeof URL.createObjectURL
+    URL.revokeObjectURL = () => {}
+    render(<Chat onThread={onThread} workspace={web} />)
+    expect(reasonOf('Send')).toBe('The chat is not connected, so nothing can be sent.')
+    await settled(() => expect(server.asked).toHaveLength(1))
+    await settled(() => expect(reasonOf('Send')).toBe('Type a message to send it.'))
+
+    type('look')
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File([new Uint8Array(PNG)], 'a.png', { type: 'image/png' })] },
+    })
+    await settled(() => expect(reasonOf('Send')).toBe('An image is still uploading. Send once it is attached.'))
+    say(chatAttached)
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false))
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('aria-describedby')).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(reasonOf('Stop Claude')).toBe('Claude is answering. Stop it to send something else.'))
+  })
+
+  it('words the empty field for each state', async () => {
+    render(<Chat onThread={onThread} workspace={web} />)
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
+    expect(field.placeholder).toBe('Connecting to the chat…')
+    await settled(() => expect(field.placeholder).toBe('Ask for changes, send follow-ups, or attach images'))
+    say(started())
+    say(of('turn.started'))
+    say(of('request.opened'))
+    await settled(() => expect(field.placeholder).toBe('Claude is waiting for your answer above'))
+    server.hangUp()
+    await settled(() => expect(field.placeholder).toBe('Connecting to the chat…'))
+  })
+
+  it('disables the field with its reason when the chat is closed', async () => {
+    await open()
+    say({ type: 'error', kind: 'unknownThread', said: 'no chat thread 1a2b3c4d' })
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
+    await settled(() => expect(field.disabled).toBe(true))
+    expect(field.placeholder).toBe('The chat is closed. Try again above.')
+    expect(reasonOf('Send')).toBe('The chat is not connected, so nothing can be sent.')
+  })
+
+  it('draws the plan on the card, and the steps when it is opened', async () => {
+    await open()
+    expect(screen.queryByRole('button', { name: /^Plan:/ })).toBeNull()
+    say({
+      threadId: 't',
+      type: 'turn.plan.updated',
+      payload: {
+        plan: [
+          { step: 'Read the tests', status: 'completed' },
+          { step: 'Fix the parser', status: 'inProgress' },
+        ],
+      },
+    })
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: /^Plan: 1 of 2 complete/ })))
+    const steps = within(screen.getByRole('list', { name: /^Plan\./ })).getAllByRole('listitem')
+    expect(steps.map((one) => one.textContent)).toEqual(['Completed: Read the tests', 'Running: Fix the parser'])
+  })
+
+  it('recalls earlier prompts with ArrowUp, walks forward with ArrowDown, and leaves a typed draft alone', async () => {
+    await open('1a2b3c4d')
+    say(started())
+    for (const [at, text] of ['first prompt', 'second prompt'].entries()) {
+      say({ threadId: 't', type: 'content.delta', payload: { streamKind: 'user_text', delta: text, itemId: `user:${at}` } })
+    }
+    await settled(() => expect(screen.getByText('second prompt')).toBeTruthy())
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
+    const key = (name: string) => fireEvent.keyDown(field, { key: name })
+    key('ArrowUp')
+    expect(field.value).toBe('second prompt')
+    key('ArrowUp')
+    expect(field.value).toBe('first prompt')
+    key('ArrowDown')
+    expect(field.value).toBe('second prompt')
+    key('ArrowDown')
+    expect(field.value).toBe('')
+
+    type('a half-written idea')
+    expect(fireEvent.keyDown(field, { key: 'ArrowUp' })).toBe(true)
+    expect(field.value).toBe('a half-written idea')
+  })
+
+  it('has nothing to recall in a thread with no prompts', async () => {
+    await open()
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
+    expect(fireEvent.keyDown(field, { key: 'ArrowUp' })).toBe(true)
+    expect(field.value).toBe('')
+  })
+})
+
+describe('the draft', () => {
+  it('is kept for the thread, comes back on a remount, and is gone after a send', async () => {
+    await open()
+    type('half a thought')
+    cleanup()
+    expect(localStorage.getItem('yantra.chat.draft.workspace/yantra-web')).toBe('half a thought')
+
+    render(<Chat onThread={onThread} workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(2))
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false))
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
+    expect(field.value).toBe('half a thought')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(turns()).toHaveLength(1))
+    expect(field.value).toBe('')
+    cleanup()
+    expect(localStorage.getItem('yantra.chat.draft.workspace/yantra-web')).toBeNull()
+  })
+
+  it('keeps each thread its own words', async () => {
+    localStorage.setItem('yantra.chat.draft.1a2b3c4d', 'for this thread')
+    await open('1a2b3c4d')
+    say(started())
+    const field = await settled(() => screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web'))
+    expect(field.value).toBe('for this thread')
+  })
+
+  it('lets the issue text in only over an empty kept draft', async () => {
+    localStorage.setItem('yantra.chat.draft.workspace/yantra-web', 'my own words')
+    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web').value).toBe('my own words')
+  })
+
+  it('still sends when the browser refuses site data', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError')
+    })
+    onTestFinished(() => void vi.restoreAllMocks())
+    await open()
+    type('no storage')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(turns()).toEqual([{ type: 'turn', text: 'no storage', harness: 'claude', mode: 'supervised' }]))
+  })
+})
+
+describe('Enter in the composer', () => {
+  it('sends on Enter by default on a laptop, and writes a new line with Shift', async () => {
+    await open()
+    type('send me')
+    const field = screen.getByLabelText('Message Claude in yantra-web')
+    fireEvent.keyDown(field, { key: 'Enter', shiftKey: true })
+    expect(turns()).toEqual([])
+    fireEvent.keyDown(field, { key: 'Enter' })
+    await settled(() => expect(turns()).toHaveLength(1))
+  })
+
+  it('writes a new line on Enter when the setting is off, and sends on Ctrl+Enter', async () => {
+    writePrefs({ general: { enterSends: false } })
+    onTestFinished(() => writePrefs({ general: {} }))
+    await open()
+    type('send me')
+    const field = screen.getByLabelText('Message Claude in yantra-web')
+    expect(fireEvent.keyDown(field, { key: 'Enter' })).toBe(true)
+    expect(turns()).toEqual([])
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
+    await settled(() => expect(turns()).toHaveLength(1))
+  })
+})
+
 describe('a phone composer', () => {
-  it('has a New line button, because Enter sends', async () => {
+  it('has no New line button, because Enter writes a new line there', async () => {
     browser('phone')
     await open()
-    const box = screen.getByLabelText<HTMLTextAreaElement>('Message Claude')
+    expect(screen.queryByRole('button', { name: 'New line' })).toBeNull()
+    const box = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
     fireEvent.change(box, { target: { value: 'first' } })
-    fireEvent.click(screen.getByRole('button', { name: 'New line' }))
-    expect(box.value).toBe('first\n')
+    // A phone's Enter writes a new line by default, so it sends nothing.
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(turns()).toEqual([])
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    await settled(() => expect(turns()).toHaveLength(1))
   })
 })

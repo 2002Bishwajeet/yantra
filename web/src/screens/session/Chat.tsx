@@ -1,20 +1,28 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { ArrowUp, CornerDownLeft, Diff, ImagePlus, RefreshCw, Square, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Diff, ImagePlus, RefreshCw } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { Workspace } from '@/api'
-import { AttachError, IMAGE_TYPES, type ChatError } from '@/api/chat'
+import { IMAGE_TYPES, type ChatError } from '@/api/chat'
 import { LABEL, type Harness, type ItemType, type PermissionMode, type RequestOpened } from '@/api/thread'
+import { Attachments } from '@/composer/Attachments'
+import * as Composer from '@/composer/Composer'
+import { Icon as ControlIcon, Control, Separator } from '@/composer/Control'
+import { ContextRing } from '@/composer/ContextRing'
+import { draftId, useDraft } from '@/composer/draft'
+import { useEnterSends } from '@/composer/enterSends'
+import { buildPromptHistoryEntries, stepPromptHistory, type PromptHistoryPosition } from '@/composer/history'
+import { placeholder } from '@/composer/placeholder'
+import { PlanBadge } from '@/composer/PlanBadge'
+import { PrimaryAction } from '@/composer/PrimaryAction'
+import { useImages } from '@/composer/useImages'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { IconButton } from '@/m3/icon-button/IconButton'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
-import { TextField } from '@/m3/text-field/TextField'
-import { useFormFactor } from '@/shell/formFactor'
 import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
@@ -24,7 +32,7 @@ import { keepMode, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
-import { useChat, type Link } from './useChat'
+import { useChat } from './useChat'
 
 // Module constants, so the renderer is not handed new plugin lists per delta.
 const REMARK = [remarkGfm]
@@ -142,31 +150,15 @@ function Asking(props: {
   )
 }
 
-/** How full the context window is, from the last turn's usage. */
-function Meter(props: { usage: NonNullable<Timeline['usage']> }) {
-  const { used, max } = props.usage
-  const share = Math.round((used / max) * 100)
-  return (
-    <div className="chat__meter">
-      <meter aria-label="Context used" max={max} min={0} value={used} />
-      <Mono>
-        context {share}% · {Math.round(used / 1000)}k of {Math.round(max / 1000)}k
-      </Mono>
-    </div>
-  )
-}
-
-/** What the polite region says, and the line under the composer shows. */
-function status(timeline: Timeline, harness: Harness | null, machine: string, phone: boolean): string {
+/** What the polite region says: only a change in the turn's state. */
+function status(timeline: Timeline, harness: Harness | null): string {
   const agent = harness ? LABEL[harness] : 'The agent'
   if (timeline.requests.length > 0) return `${agent} is waiting for your answer.`
   if (timeline.turn === 'stopping') return `Stopping ${agent}…`
   if (timeline.turn !== 'idle') return `${agent} is answering.`
   if (timeline.ended?.state === 'cancelled') return `${agent} stopped.`
   if (timeline.ended?.state === 'completed') return `${agent} finished.`
-  return phone
-    ? 'Each turn runs in this chat’s own worktree.'
-    : `Each turn runs ${harness ?? 'the agent'} in this chat’s own worktree on ${machine}, apart from the terminal’s.`
+  return ''
 }
 
 /** A harness with no login: the command to run on its machine, and a Retry
@@ -190,106 +182,6 @@ function LoggedOut(props: { error: ChatError; login: NonNullable<ChatError['logi
   )
 }
 
-/** One image in the composer: a local preview, and how its upload went. */
-type Picked = { id: number; url: string } & (
-  | { state: 'uploading' }
-  | { state: 'attached'; path: string }
-  | { state: 'failed'; error: AttachError }
-)
-
-/** The composer's images (Y-424). Each uploads as it is added, and its
- *  preview URL is revoked when it goes or the chat does. */
-function useImages(attach: (file: Blob) => Promise<string>, link: Link) {
-  const [images, setImages] = useState<Picked[]>([])
-  const next = useRef(1)
-  const urls = useRef(new Map<number, string>())
-
-  // The daemon removes a socket's images when the socket closes, and Retry
-  // opens a socket with none, so a path from the old socket names nothing.
-  const [was, setWas] = useState(link)
-  if (link !== was) {
-    setWas(link)
-    if (link !== 'open') {
-      setImages((now) =>
-        now.map((one) =>
-          one.state === 'attached' ? { id: one.id, url: one.url, state: 'failed', error: new AttachError('closed') } : one,
-        ),
-      )
-    }
-  }
-
-  useEffect(() => {
-    const held = urls.current
-    return () => {
-      for (const url of held.values()) URL.revokeObjectURL(url)
-      held.clear()
-    }
-  }, [])
-
-  const settle = (id: number, change: (one: Picked) => Picked) =>
-    setImages((now) => now.map((one) => (one.id === id ? change(one) : one)))
-
-  const forget = (ids: Iterable<number>) => {
-    for (const id of ids) {
-      const url = urls.current.get(id)
-      if (url) URL.revokeObjectURL(url)
-      urls.current.delete(id)
-    }
-  }
-
-  return {
-    images,
-    add: (files: Iterable<File>) => {
-      for (const file of files) {
-        const id = next.current++
-        const url = URL.createObjectURL(file)
-        urls.current.set(id, url)
-        setImages((now) => [...now, { id, url, state: 'uploading' }])
-        attach(file).then(
-          (path) => settle(id, ({ url }) => ({ id, url, state: 'attached', path })),
-          (cause: unknown) =>
-            settle(id, ({ url }) => ({
-              id,
-              url,
-              state: 'failed',
-              error: cause instanceof AttachError ? cause : new AttachError('unreachable', String(cause)),
-            })),
-        )
-      }
-    },
-    remove: (id: number) => {
-      forget([id])
-      setImages((now) => now.filter((one) => one.id !== id))
-    },
-    clear: () => {
-      forget([...urls.current.keys()])
-      setImages([])
-    },
-  }
-}
-
-const UPLOAD: Record<Exclude<Picked['state'], 'failed'>, string> = {
-  uploading: 'Uploading…',
-  attached: 'Attached',
-}
-
-function Images(props: { images: Picked[]; onRemove: (id: number) => void }) {
-  const { images, onRemove } = props
-  return (
-    <ul aria-label="Images" aria-live="polite" className="chat__images">
-      {images.map((one, at) => (
-        <li className="chat__image" data-state={one.state} key={one.id}>
-          <img alt={`Image ${at + 1}`} src={one.url} />
-          <span className="chat__image-state">{one.state === 'failed' ? one.error.describe() : UPLOAD[one.state]}</span>
-          <IconButton label={`Remove image ${at + 1}`} onClick={() => onRemove(one.id)} type="button">
-            <X />
-          </IconButton>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 export type ChatProps = {
   workspace: Workspace
   /** `?thread=`: the chat to continue. Read when the socket opens. */
@@ -308,7 +200,7 @@ export function Chat(props: ChatProps) {
   const { workspace, thread, onThread, initialDraft } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
-  const [draft, setDraft] = useState(initialDraft ?? '')
+  const [draft, setDraft] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
   const [showDiff, setShowDiff] = useState(false)
   const [added, setAdded] = useState(false)
   const diffButton = useRef<HTMLButtonElement>(null)
@@ -328,7 +220,6 @@ export function Chat(props: ChatProps) {
     timeline.thread,
     showDiff || timeline.entries.some((entry) => entry.kind === 'diff'),
   )
-  const field = useRef<HTMLFormElement>(null)
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
   // A new thread is named on its first turn, and keeps the mode it was sent with.
@@ -346,15 +237,21 @@ export function Chat(props: ChatProps) {
   const lastSent = useRef('')
   useEffect(() => {
     if (error?.kind === 'notLoggedIn' && timeline.entries.length === 0) setDraft((now) => now || lastSent.current)
-  }, [error, timeline.entries.length])
+  }, [error, timeline.entries.length, setDraft])
   const { images, add, remove, clear } = useImages(chat.attach, link)
   const [dropping, setDropping] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const end = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
-  const why = useId()
-  const phone = useFormFactor() === 'phone'
   const busy = timeline.turn !== 'idle'
+  const enterSends = useEnterSends()
+  const box = useRef<HTMLTextAreaElement>(null)
+  const recalled = useRef<PromptHistoryPosition | null>(null)
+  const caretToEnd = useRef(false)
+  const history = useMemo(
+    () => buildPromptHistoryEntries(timeline.entries.filter((entry) => entry.kind === 'message')),
+    [timeline.entries],
+  )
 
   // The newest words are at the bottom, but a reader who scrolled up is not
   // dragged down by every delta: the foot leaving the viewport unpins it.
@@ -382,16 +279,49 @@ export function Chat(props: ChatProps) {
     if (text === '' || busy || uploading) return
     if (chat.send(text, locked ? undefined : picked, mode)) {
       lastSent.current = draft.trim()
+      recalled.current = null
       setDraft('')
       clear()
     }
   }
 
+  // ArrowUp on the first line brings back the thread's earlier prompts, ArrowDown walks forward.
+  const recall = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const up = event.key === 'ArrowUp'
+    if (!up && event.key !== 'ArrowDown') return
+    if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey || event.nativeEvent.isComposing) return
+    const field = event.currentTarget
+    if (field.selectionStart !== field.selectionEnd) return
+    const edge = up
+      ? !field.value.slice(0, field.selectionStart).includes('\n')
+      : !field.value.slice(field.selectionEnd).includes('\n')
+    if (!edge) return
+    const step = stepPromptHistory({
+      direction: up ? 'backward' : 'forward',
+      entries: history,
+      position: recalled.current,
+      currentPrompt: draft,
+    })
+    if (!step) return
+    event.preventDefault()
+    recalled.current = step.position
+    caretToEnd.current = true
+    setDraft(step.prompt)
+  }
+
+  useLayoutEffect(() => {
+    if (!caretToEnd.current) return
+    caretToEnd.current = false
+    const field = box.current
+    if (field) field.setSelectionRange(field.value.length, field.value.length)
+  }, [draft])
+
+  const answering = `${agent} is answering. Stop it to send something else.`
   const cannotSend =
     link !== 'open'
       ? 'The chat is not connected, so nothing can be sent.'
       : busy
-        ? `${agent} is answering. Stop it to send something else.`
+        ? answering
         : uploading
           ? 'An image is still uploading. Send once it is attached.'
           : text === ''
@@ -493,154 +423,118 @@ export function Chat(props: ChatProps) {
         {showDiff ? null : asks}
         <div ref={end} />
       </section>
-      {error?.login ? (
-        <LoggedOut error={error} login={error.login} retry={chat.retry} />
-      ) : error ? (
-        <ErrorSurface.Inline
-          error={error}
-          eyebrow={`on ${workspace.machine}`}
-          reset={chat.retry}
-          title={
-            error.kind === 'turnFailed'
-              ? 'The turn failed'
-              : error.kind === 'checkpoint'
-                ? 'The files could not be kept or put back'
-                : error.kind === 'diff'
-                  ? "The branch's changes could not be read"
-                  : 'The chat could not go on'
-          }
-        />
-      ) : null}
-      <div
-        className="chat__composer"
-        data-dropping={dropping ? '' : undefined}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false)
-        }}
-        onDragOver={(event) => {
-          if (!event.dataTransfer.types.includes('Files')) return
-          event.preventDefault()
-          setDropping(true)
-        }}
-        onDrop={(event) => {
-          if (event.dataTransfer.files.length === 0) return
-          event.preventDefault()
-          setDropping(false)
-          add(event.dataTransfer.files)
-        }}
-      >
-        {dropping ? (
-          <p aria-hidden="true" className="chat__drop">
-            Drop an image to attach it.
-          </p>
-        ) : null}
-        <div className="chat__controls">
-          <IconButton
-            disabled={link !== 'open'}
-            label="Attach an image"
-            onClick={() => picker.current?.click()}
-            type="button"
-          >
-            <ImagePlus />
-          </IconButton>
-          <input
-            accept={IMAGE_TYPES.join(',')}
-            hidden
-            multiple
-            onChange={(event) => {
-              if (event.target.files) add(event.target.files)
-              // The same file picked twice is a second image.
-              event.target.value = ''
-            }}
-            ref={picker}
-            type="file"
+      <div className="chat__dock">
+        {error?.login ? (
+          <LoggedOut error={error} login={error.login} retry={chat.retry} />
+        ) : error ? (
+          <ErrorSurface.Inline
+            error={error}
+            eyebrow={`on ${workspace.machine}`}
+            reset={chat.retry}
+            title={
+              error.kind === 'turnFailed'
+                ? 'The turn failed'
+                : error.kind === 'checkpoint'
+                  ? 'The files could not be kept or put back'
+                  : error.kind === 'diff'
+                    ? "The branch's changes could not be read"
+                    : 'The chat could not go on'
+            }
           />
-          {harness ? (
-            <HarnessPicker
-              disabled={busy || link !== 'open'}
-              locked={locked}
-              onChange={setPicked}
-              value={harness}
-            />
-          ) : null}
-          {phone ? (
-            // A phone keyboard has no Shift+Enter, and Enter sends.
-            <IconButton
-              disabled={link === 'closed'}
-              label="New line"
-              onClick={() => {
-                setDraft((now) => `${now}\n`)
-                field.current?.querySelector('textarea')?.focus()
-              }}
-              type="button"
-            >
-              <CornerDownLeft />
-            </IconButton>
-          ) : null}
-          <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
-          {timeline.usage ? <Meter usage={timeline.usage} /> : null}
-        </div>
-        {images.length > 0 ? <Images images={images} onRemove={remove} /> : null}
-        <form
-          className="chat__field"
-          ref={field}
+        ) : null}
+        <Composer.Root
+          above={<PlanBadge plan={timeline.plan} />}
+          dropping={dropping}
+          empty={draft === '' && images.length === 0}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false)
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return
+            event.preventDefault()
+            setDropping(true)
+          }}
+          onDrop={(event) => {
+            if (event.dataTransfer.files.length === 0) return
+            event.preventDefault()
+            setDropping(false)
+            add(event.dataTransfer.files)
+          }}
           onSubmit={(event) => {
             event.preventDefault()
             send()
           }}
         >
-          <TextField
-            autoComplete="off"
+          <Attachments images={images} onRemove={remove} />
+          <Composer.Input
+            aria-label={`Message ${agent} in ${workspace.name}`}
             disabled={link === 'closed'}
-            render={<textarea rows={1} />}
-            label={phone ? `Message ${agent}` : `Message ${agent} in ${workspace.name}`}
+            enterSends={enterSends}
             onChange={(event) => setDraft(event.target.value)}
-            // A quoted diff comment makes the draft several lines; Shift+Enter writes more.
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-              event.preventDefault()
-              send()
-            }}
+            onKeyDown={recall}
             onPaste={(event) => {
               if (event.clipboardData.files.length === 0) return
               event.preventDefault()
               add(event.clipboardData.files)
             }}
-            trailing={
-              busy ? (
-                <IconButton
-                  disabled={timeline.turn === 'stopping'}
-                  label={`Stop ${agent}`}
-                  onClick={chat.stop}
-                  type="button"
-                >
-                  <Square />
-                </IconButton>
-              ) : (
-                <IconButton
-                  aria-describedby={cannotSend ? why : undefined}
-                  disabled={cannotSend !== null}
-                  label="Send"
-                  type="submit"
-                  variant="filled"
-                >
-                  <ArrowUp />
-                </IconButton>
-              )
-            }
+            onSend={send}
+            placeholder={placeholder({ link, waiting: timeline.requests.length > 0, agent })}
+            ref={box}
             value={draft}
-            variant="filled"
           />
-          {cannotSend ? (
-            <span className="m3-sr-only" id={why}>
-              {cannotSend}
-            </span>
-          ) : null}
-        </form>
+          <Composer.Footer
+            actions={
+              <>
+                <ContextRing usage={timeline.usage} />
+                <PrimaryAction
+                  label="Send"
+                  pending={uploading}
+                  reason={cannotSend}
+                  running={
+                    busy
+                      ? { agent, stopping: timeline.turn === 'stopping', onStop: chat.stop, reason: answering }
+                      : null
+                  }
+                />
+              </>
+            }
+            controls={
+              <>
+                <Control
+                  aria-label="Attach an image"
+                  disabled={link !== 'open'}
+                  onClick={() => picker.current?.click()}
+                >
+                  <ControlIcon icon={ImagePlus} />
+                </Control>
+                <input
+                  accept={IMAGE_TYPES.join(',')}
+                  hidden
+                  multiple
+                  onChange={(event) => {
+                    if (event.target.files) add(event.target.files)
+                    // The same file picked twice is a second image.
+                    event.target.value = ''
+                  }}
+                  ref={picker}
+                  type="file"
+                />
+                <Separator />
+                {harness ? (
+                  <HarnessPicker
+                    disabled={busy || link !== 'open'}
+                    locked={locked}
+                    onChange={setPicked}
+                    value={harness}
+                  />
+                ) : null}
+                <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
+              </>
+            }
+          />
+        </Composer.Root>
         {/* 4.1.3: the turn's state, said politely and shown. */}
-        <p className="chat__foot" role="status">
-          {status(timeline, harness, workspace.machine, phone)}
-        </p>
+        <Composer.Status>{status(timeline, harness)}</Composer.Status>
       </div>
     </div>
   )

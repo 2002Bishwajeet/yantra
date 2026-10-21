@@ -19,6 +19,23 @@ describe('General', () => {
     expect(JSON.parse(localStorage.getItem('yantra.prefs')!).general.time).toBe('clock')
   })
 
+  it('writes the Enter sends switch to this device, on by default on a laptop and off on a phone', async () => {
+    mountSettings('desktop', '/settings/general')
+    const row = await screen.findByRole('switch', { name: 'Enter sends' })
+    expect(row.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(row)
+    expect(readPrefs().general.enterSends).toBe(false)
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Enter sends' }).getAttribute('aria-checked')).toBe('false'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Enter sends' }))
+    expect(readPrefs().general.enterSends).toBe(true)
+    expect(JSON.parse(localStorage.getItem('yantra.prefs')!).general.enterSends).toBe(true)
+  })
+
+  it('starts the Enter sends switch off on a phone', async () => {
+    mountSettings('phone', '/settings/general')
+    expect((await screen.findByRole('switch', { name: 'Enter sends' })).getAttribute('aria-checked')).toBe('false')
+  })
+
   it('offers the machines the daemon lists as the default, and writes the one picked', async () => {
     mountSettings('desktop', '/settings/general')
     const select = await screen.findByRole('combobox', { name: 'Default machine for new sessions' })

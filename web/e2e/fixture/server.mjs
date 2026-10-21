@@ -850,9 +850,29 @@ function converse(state, request, socket, head, name, thread) {
     type: 'content.delta',
     payload: { streamKind, delta: text, itemId },
   })
-  const stream = contract.chatEvents.filter(
-    (one) => one.type !== 'thread.started' && !(one.type === 'turn.completed' && one.payload.state === 'failed'),
-  )
+  // The `composer` scenario: the agent sends a plan, and the window is 93% full.
+  const plan = {
+    threadId: THREAD,
+    type: 'turn.plan.updated',
+    payload: {
+      plan: [
+        { step: 'Read the failing tests', status: 'completed' },
+        { step: 'Fix the parser for nested fences', status: 'inProgress' },
+        { step: 'Run the core suite', status: 'pending' },
+        { step: 'Open the pull request', status: 'pending' },
+      ],
+    },
+  }
+  const usage = contract.chatEvents.find((one) => one.type === 'thread.token-usage.updated')
+  const stream = contract.chatEvents
+    .filter((one) => one.type !== 'thread.started' && !(one.type === 'turn.completed' && one.payload.state === 'failed'))
+    .flatMap((one) => {
+      if (!state.composer) return [one]
+      // The usage arrives with the turn rather than after it, so a running turn draws the ring.
+      if (one.type === 'turn.started') return [one, plan, { ...usage, payload: { ...usage.payload, usedTokens: 186000 } }]
+      if (one.type === 'thread.token-usage.updated') return []
+      return [one]
+    })
   const asked = stream.findIndex((one) => one.type === 'request.opened') + 1
   sockets.handleUpgrade(request, socket, head, (ws) => {
     const say = (frame) => ws.send(JSON.stringify(frame), { binary: false })

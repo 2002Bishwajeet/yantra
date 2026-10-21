@@ -38,6 +38,9 @@ export type TurnDiff = {
 
 export type Entry = Message | Tool | TurnDiff
 
+/** The agent's plan: its steps, and how far each has come (`turn.plan.updated`). */
+export type Plan = { step: string; status: 'pending' | 'inProgress' | 'completed' }[]
+
 /** What the chat draws, folded from the socket's events. */
 export type Timeline = {
   /** The id `?thread=` keeps, once the daemon has named one. */
@@ -48,6 +51,8 @@ export type Timeline = {
   /** Requests the agent is waiting on, oldest first. */
   requests: RequestOpened[]
   usage: { used: number; max: number } | null
+  /** The newest plan the agent sent; none until it sends one. */
+  plan: Plan
   /** `sent` is the frame on its way, before the agent says it started. */
   turn: 'idle' | 'sent' | 'running' | 'stopping'
   /** How the last turn ended, until the next one starts. */
@@ -60,6 +65,7 @@ export const empty: Timeline = {
   entries: [],
   requests: [],
   usage: null,
+  plan: [],
   turn: 'idle',
   ended: null,
 }
@@ -142,8 +148,9 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
         ...timeline,
         requests: timeline.requests.filter((one) => one.requestId !== event.payload.requestId),
       }
-    case 'thread.metadata.updated':
     case 'turn.plan.updated':
+      return { ...timeline, plan: event.payload.plan }
+    case 'thread.metadata.updated':
       return timeline
   }
 }

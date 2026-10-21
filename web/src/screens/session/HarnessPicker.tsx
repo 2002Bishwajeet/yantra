@@ -1,15 +1,16 @@
 /*
  * The shape of this picker is T3 Code's provider picker: a composer control
  * that names the active provider, opens a menu of the others, and is locked
- * once the thread has one:
+ * once the thread has one, and its trigger is the composer control copied from
+ * apps/web/src/components/chat/ComposerControl.tsx:
  * https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/ProviderModelPicker.tsx
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 import { Menu as Base } from '@base-ui/react/menu'
-import { Check, ChevronDown } from 'lucide-react'
+import { Bot, Check } from 'lucide-react'
 import { HARNESSES, LABEL, type Harness } from '@/api/thread'
-import { Button } from '@/m3/button/Button'
+import { Chevron, Control, Icon, Label } from '@/composer/Control'
 import { Menu, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 
 export type HarnessPickerProps = {
@@ -27,18 +28,18 @@ export function HarnessPicker(props: HarnessPickerProps) {
   const name = `Harness: ${LABEL[value]}`
   if (locked) {
     return (
-      <Button aria-label={`${name}, kept by this chat`} className="chat__harness" disabled variant="text">
-        {LABEL[value]}
-      </Button>
+      <Control aria-label={`${name}, kept by this chat`} disabled>
+        <Icon icon={Bot} />
+        <Label>{LABEL[value]}</Label>
+      </Control>
     )
   }
   return (
     <Menu>
-      <MenuTrigger
-        render={<Button aria-label={name} className="chat__harness" disabled={disabled} variant="text" />}
-      >
-        {LABEL[value]}
-        <ChevronDown aria-hidden="true" className="chat__harness-chevron" />
+      <MenuTrigger render={<Control aria-label={name} disabled={disabled} />}>
+        <Icon icon={Bot} />
+        <Label>{LABEL[value]}</Label>
+        <Chevron />
       </MenuTrigger>
       <MenuPopup align="start" aria-label="Harness" side="top">
         <Base.RadioGroup onValueChange={(picked) => onChange(picked as Harness)} value={value}>

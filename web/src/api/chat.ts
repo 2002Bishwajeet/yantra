@@ -108,12 +108,15 @@ const attachSentences: Record<AttachErrorKind, string> = {
 export class AttachError extends Error {
   readonly kind: AttachErrorKind
   readonly said: string
+  /** Adding the image again may work after a machine or a socket failure, and never after a bad file. */
+  readonly retryable: boolean
 
   constructor(kind: AttachErrorKind, said = '') {
     super(said || attachSentences[kind])
     this.name = 'AttachError'
     this.kind = kind
     this.said = said
+    this.retryable = kind === 'unreachable' || kind === 'closed'
   }
 
   describe(): string {

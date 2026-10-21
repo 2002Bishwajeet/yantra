@@ -17,15 +17,11 @@ const open = (page: Page, name: string) => views(page).getByRole('link', { name 
 /** Claude's request arrives a socket and a turn after the page does. */
 const asking = (page: Page) => page.getByText('Claude asks to run')
 
-/** The composer's label. The PhoneSessionChat board writes the short one, and
- *  the desktop boards name the workspace (finding 114). */
-const composer = (page: Page, size: string) =>
-  page.getByLabel(size === 'phone' ? 'Message Claude' : `Message Claude in ${NAME}`, {
-    exact: true,
-  })
+/** The composer's label names the agent and the workspace at every width. */
+const composer = (page: Page) => page.getByLabel(`Message Claude in ${NAME}`, { exact: true })
 
-async function turn(page: Page, size: string) {
-  await composer(page, size).fill('run the core tests')
+async function turn(page: Page) {
+  await composer(page).fill('run the core tests')
   await page.getByRole('button', { name: 'Send' }).click()
   await expect(asking(page)).toBeVisible()
 }
@@ -67,8 +63,8 @@ test.describe('the session screen, chat first', () => {
     await expect(page.locator('.session__name')).toContainText('waiting for trust')
   })
 
-  test("streams a turn, and draws Claude's request with three answers", async ({ page, size }) => {
-    await turn(page, size)
+  test("streams a turn, and draws Claude's request with three answers", async ({ page }) => {
+    await turn(page)
     await expect(page.getByText('Running the tests.')).toBeVisible()
     await expect(page.getByText('cargo test').first()).toBeVisible()
     for (const name of ['Accept', 'Accept always', 'Decline']) {
@@ -79,28 +75,28 @@ test.describe('the session screen, chat first', () => {
     await expect(page).toHaveURL(new RegExp(`thread=${THREAD}`))
   })
 
-  test('Accept answers the request, and the turn ends with its output and usage', async ({ page, size }) => {
-    await turn(page, size)
+  test('Accept answers the request, and the turn ends with its output and usage', async ({ page }) => {
+    await turn(page)
     await page.getByRole('button', { name: 'Accept', exact: true }).click()
 
     await expect(asking(page)).toHaveCount(0)
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
-    await expect(page.getByRole('meter', { name: 'Context used' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Context window 15% used' })).toBeVisible()
     await page.getByText('Output').click()
     await expect(page.getByText('test result: ok')).toBeVisible()
   })
 
-  test('Stop cancels a turn that is waiting', async ({ page, size }) => {
-    await turn(page, size)
+  test('Stop cancels a turn that is waiting', async ({ page }) => {
+    await turn(page)
     await page.getByRole('button', { name: 'Stop Claude' }).click()
     await expect(page.getByRole('status')).toHaveText('Claude stopped.')
     await expect(asking(page)).toHaveCount(0)
   })
 
-  test('the picker sends the harness picked, and the thread keeps it', async ({ page, size }) => {
+  test('the picker sends the harness picked, and the thread keeps it', async ({ page }) => {
     await page.getByRole('button', { name: 'Harness: Claude' }).click()
     await page.getByRole('menuitemradio', { name: 'opencode' }).click()
-    const label = size === 'phone' ? 'Message opencode' : `Message opencode in ${NAME}`
+    const label = `Message opencode in ${NAME}`
     await page.getByLabel(label, { exact: true }).fill('list the files')
     await page.getByRole('button', { name: 'Send' }).click()
     await expect(page.getByText('opencode asks to run')).toBeVisible()
@@ -109,10 +105,10 @@ test.describe('the session screen, chat first', () => {
     ).toBeDisabled()
   })
 
-  test('a harness with no login names the command to run on the machine', async ({ page, size }) => {
+  test('a harness with no login names the command to run on the machine', async ({ page }) => {
     await page.getByRole('button', { name: 'Harness: Claude' }).click()
     await page.getByRole('menuitemradio', { name: 'Gemini' }).click()
-    const label = size === 'phone' ? 'Message Gemini' : `Message Gemini in ${NAME}`
+    const label = `Message Gemini in ${NAME}`
     await page.getByLabel(label, { exact: true }).fill('hello')
     await page.getByRole('button', { name: 'Send' }).click()
     const alert = page.getByRole('alert')
@@ -135,13 +131,13 @@ test.describe('the session screen, chat first', () => {
     await expect(alert).toContainText(`${NAME} has no chat thread ffffffff`)
   })
 
-  test('passes axe', async ({ page, size }) => {
-    await turn(page, size)
+  test('passes axe', async ({ page }) => {
+    await turn(page)
     await axe(page)
   })
 
   /** Y-424: the image goes to the daemon, and the turn carries its path. */
-  test('attaches an image, removes it, and sends the path of the one kept', async ({ page, size }) => {
+  test('attaches an image, removes it, and sends the path of the one kept', async ({ page }) => {
     const shot = {
       name: 'shot.png',
       mimeType: 'image/png',
@@ -156,7 +152,7 @@ test.describe('the session screen, chat first', () => {
 
     await picker.setInputFiles(shot)
     await expect(page.getByText('Attached')).toBeVisible()
-    await composer(page, size).fill('what is in it?')
+    await composer(page).fill('what is in it?')
     await page.getByRole('button', { name: 'Send' }).click()
     const you = page.locator('.turn[data-who="you"]')
     await expect(you).toContainText('what is in it?')
@@ -164,23 +160,16 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('list', { name: 'Images' })).toHaveCount(0)
   })
 
-  /** **Finding 114.** The PhoneSessionChat board shortens the strings the
-   *  desktop boards write in full. */
-  test('writes the phone board’s strings at 390 and the desktop ones above it', async ({
-    page,
-    size,
-  }) => {
-    await expect(composer(page, size)).toBeVisible()
-    await expect(page.getByRole('status')).toHaveText(
-      size === 'phone'
-        ? 'Each turn runs in this chat’s own worktree.'
-        : 'Each turn runs claude in this chat’s own worktree on cachyos-g14, apart from the terminal’s.',
-    )
+  /** The composer names the agent and the workspace at every width, and its status line
+   *  says nothing until the turn's state changes. */
+  test('names the agent and the workspace on the phone too, with a silent status line', async ({ page }) => {
+    await expect(composer(page)).toBeVisible()
+    await expect(page.locator('.composer__status')).toHaveText('')
   })
 
   /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and
    *  Send is off until something is typed. Neither may go quiet about it. */
-  test('says why Send and Resume are off', async ({ page, size }) => {
+  test('says why Send and Resume are off', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription(
       'Type a message to send it.',
     )
@@ -188,7 +177,7 @@ test.describe('the session screen, chat first', () => {
       `Resume needs an agent that has ended, and ${NAME} is waiting for trust.`,
     )
 
-    await composer(page, size).fill('run the whole crate')
+    await composer(page).fill('run the whole crate')
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription('')
   })
 
@@ -202,7 +191,7 @@ test.describe('the session screen, chat first', () => {
   })
 
   test('looks like the board', async ({ page, size }) => {
-    await turn(page, size)
+    await turn(page)
     await screenshot(page, 'session-chat', 'busy', size)
   })
 })
@@ -313,12 +302,12 @@ test.describe('the session screen, the other three views', () => {
 /** `docs-sweep` finished and its tmux session is gone. The chat runs in a
  *  worktree of its own, so it stays open; Resume is the header's. */
 test.describe('a session that has ended', () => {
-  test('keeps the chat open, and offers Resume in the header', async ({ page, size }) => {
+  test('keeps the chat open, and offers Resume in the header', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto('/w/docs-sweep')
 
     await expect(
-      page.getByLabel(size === 'phone' ? 'Message Claude' : 'Message Claude in docs-sweep', { exact: true }),
+      page.getByLabel('Message Claude in docs-sweep', { exact: true }),
     ).toBeVisible()
     await expect(page.getByRole('button', { name: 'Resume' })).toBeEnabled()
     await axe(page)

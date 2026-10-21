@@ -20,6 +20,16 @@ describe('TextField', () => {
     expect(onValueChange).toHaveBeenLastCalledWith('yantra-web', expect.anything())
   })
 
+  it('floats the label over a value that is set before the first paint (Y-547)', () => {
+    const { rerender } = render(<TextField label="Name" onValueChange={() => {}} value="Work on o/r#1: a title" />)
+    const box = () => screen.getByRole('textbox', { name: 'Name' }).closest('.m3-text-field__box')!
+    expect(box().hasAttribute('data-filled')).toBe(true)
+    rerender(<TextField label="Name" onValueChange={() => {}} value="" />)
+    expect(box().hasAttribute('data-filled')).toBe(false)
+    rerender(<TextField defaultValue="kept" label="Name" />)
+    expect(box().hasAttribute('data-filled')).toBe(true)
+  })
+
   it('marks an error, says it in the described line, and drops the supporting line for it', () => {
     render(
       <TextField
