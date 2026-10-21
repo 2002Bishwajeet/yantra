@@ -676,6 +676,15 @@ every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
 - **Call sites pass a role, never a colour.** State is a mark plus a word
   ([`m3/mark/`](src/m3/mark/Mark.tsx)), never colour alone (D3 §6). The mark's
   colours are `--yantra-state-*`, the same under every seed.
+- **Every route draws in one [`Page`](src/m3/page/Page.tsx) under one
+  [`PageHeader`](src/m3/page/PageHeader.tsx)** (Y-566), which read `--m3-gutter`,
+  `--m3-page-max-wide`, `--m3-page-max-reading`, `--m3-page-gap` and the page
+  title scale from `tokens.css`. An empty block is an
+  [`EmptyState`](src/m3/empty-state/EmptyState.tsx), a read in flight is a
+  `Skeleton` card or row, and a failure is an `ErrorSurface` under the header, so
+  the title stays. [`m3/layout.test.ts`](src/m3/layout.test.ts) fails on a
+  screen stylesheet with a literal radius, a literal max width or a gap above
+  16 px.
 
 **Tailwind v4 stays, and now emits only its preflight reset.** `index.css` is
 `@import "tailwindcss" source(none)` with no `@source`, because no call site

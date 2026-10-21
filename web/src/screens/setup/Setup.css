@@ -1,26 +1,11 @@
-.setup {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
-  max-width: 880px;
-  min-width: 0;
-  margin: 0 auto;
-  padding-top: 8px;
-}
-
-.setup__head {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 4px;
+.setup__lead {
+  margin: 0;
 }
 
 .setup__progress {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 4px;
 }
 
 .setup__count {
@@ -79,7 +64,7 @@
   box-sizing: border-box;
   min-height: 44px;
   padding: 6px 4px 6px 12px;
-  border-radius: 14px;
+  border-radius: var(--m3-row-radius);
   background: var(--md-sys-color-surface);
 }
 

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ApiError } from '@/api/errors'
 import { Button } from '../button/Button'
+import { Page } from '../page/Page'
+import { PageHeader } from '../page/PageHeader'
 import { ErrorSurface } from './ErrorSurface'
 
 const network = new ApiError('network', 'fetch failed')
@@ -36,6 +38,20 @@ describe('ErrorSurface', () => {
     expect(screen.getByRole('alert').dataset.layout).toBe('card')
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     expect(screen.getByText("This browser is not on a node this tailnet's owner holds.")).toBeTruthy()
+  })
+
+  it('draws under the PageHeader, so the title stays, with the route as its eyebrow', () => {
+    render(
+      <Page>
+        <PageHeader title="Fleet" />
+        <ErrorSurface.Page eyebrow="Fleet" error={network} reset={() => {}} title="Nothing here can be reached" />
+      </Page>,
+    )
+    expect(screen.getByRole('heading', { level: 1, name: 'Fleet' })).toBeTruthy()
+    const alert = screen.getByRole('alert')
+    expect(alert.closest('.m3-page')).toBeTruthy()
+    expect(alert.querySelector('.m3-eyebrow')?.textContent).toBe('Fleet')
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })
 
   it('has an inline row', () => {

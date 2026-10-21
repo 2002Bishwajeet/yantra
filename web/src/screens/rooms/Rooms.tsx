@@ -7,10 +7,11 @@ import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Text } from '@/m3/text/Text'
-import { Empty } from '@/screens/fleet/Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { facts } from './facts'
 import './Rooms.css'
 
@@ -18,10 +19,10 @@ function List({ rooms }: { rooms: RoomSummary[] }) {
   if (rooms.length === 0) {
     return (
       <Card className="rooms__empty">
-        <Empty title="No rooms">
+        <EmptyState title="No rooms">
           A room starts when an agent calls room_send or room_read. yantrad holds rooms in memory,
           so a restart clears them.
-        </Empty>
+        </EmptyState>
       </Card>
     )
   }
@@ -48,10 +49,8 @@ function List({ rooms }: { rooms: RoomSummary[] }) {
 export function Rooms() {
   const rooms = useQuery(roomsQuery())
   return (
-    <div className="rooms">
-      <Text render={<h1 />} emphasized scale="display-small">
-        Rooms
-      </Text>
+    <Page>
+      <PageHeader title="Rooms" />
       {rooms.data ? (
         <ErrorBoundary layout="card" title="The rooms could not be drawn">
           <List rooms={rooms.data} />
@@ -65,10 +64,10 @@ export function Rooms() {
         />
       ) : (
         <div aria-busy="true" className="rooms__list" data-slot="reading">
-          <Skeleton style={{ height: 56 }} />
-          <Skeleton style={{ height: 56 }} />
+          <Skeleton shape="row" />
+          <Skeleton shape="row" />
         </div>
       )}
-    </div>
+    </Page>
   )
 }

@@ -9,6 +9,8 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
@@ -62,15 +64,11 @@ export function Workspace(props: {
 
   if (listed.looked === 'pending') {
     return (
-      <>
-        <Text render={<h1 />} scale="headline-medium" emphasized>
-          {name}
-        </Text>
-        <div aria-busy="true" className="session__pending">
-          <Skeleton />
-          <Skeleton shape="text" />
-        </div>
-      </>
+      <Page aria-busy="true" data-slot="reading" width="reading">
+        <PageHeader title={name} />
+        <Skeleton shape="row" />
+        <Skeleton shape="text" />
+      </Page>
     )
   }
 
@@ -78,10 +76,8 @@ export function Workspace(props: {
     // The Unreachable board: this page cannot tell the two apart, so it draws
     // both unknown and offers the one thing that helps.
     return (
-      <>
-        <Text render={<h1 />} scale="headline-medium" emphasized>
-          {name}
-        </Text>
+      <Page width="reading">
+        <PageHeader title={name} />
         <ErrorSurface.Page
           error={{
             kind: 'network',
@@ -97,7 +93,7 @@ export function Workspace(props: {
           title="The workspaces could not be read"
           unknowns={['off the tailnet', 'yantrad down']}
         />
-      </>
+      </Page>
     )
   }
 
@@ -106,10 +102,8 @@ export function Workspace(props: {
 
   if (entry.loaded === 'no') {
     return (
-      <>
-        <Text render={<h1 />} scale="headline-medium" emphasized>
-          {name}
-        </Text>
+      <Page width="reading">
+        <PageHeader title={name} />
         <Card className="session__broken" surface="error">
           <Text render={<h2 />} scale="title-large">
             {name} is not usable.
@@ -123,7 +117,7 @@ export function Workspace(props: {
             </Button>
           </div>
         </Card>
-      </>
+      </Page>
     )
   }
 
@@ -179,7 +173,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const readAt = transcript.said.said === 'held' ? at(transcript.said.at, now) : null
 
   return (
-    <div className="session" data-view={view}>
+    <Page className="session" data-view={view} width="reading">
       <Header now={now} sessions={sessions} status={status} workspace={workspace} />
       <div className="session__bar">
         {/* Links, not a tab widget: a tab here changes the URL, and that is
@@ -256,6 +250,6 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
           <Spend asked={spend.asked} now={now} onAsk={() => void spend.ask(workspace)} workspace={workspace} />
         ) : null}
       </ErrorBoundary>
-    </div>
+    </Page>
   )
 }

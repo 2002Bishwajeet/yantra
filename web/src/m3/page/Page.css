@@ -1,0 +1,16 @@
+.m3-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+  flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--m3-page-max-wide);
+  min-width: 0;
+  margin-inline: auto;
+  padding-block-start: var(--m3-page-top);
+}
+
+.m3-page[data-width="reading"] {
+  max-width: var(--m3-page-max-reading);
+}

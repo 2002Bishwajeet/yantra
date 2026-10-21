@@ -10,12 +10,14 @@ import { Chip } from '@/m3/chip/Chip'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { List, ListItem } from '@/m3/list/List'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Text } from '@/m3/text/Text'
+import { Eyebrow } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
 import { useFab } from '@/shell/primary'
 import { unreachable } from '@/work'
-import { Empty } from '@/screens/fleet/Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Looked } from '@/screens/fleet/age'
 import { checksOf, unclaimed } from './facts'
 import { MachineCard } from './MachineCard'
@@ -30,7 +32,7 @@ function Waiting() {
           <Card aria-busy="true" className="machines__card">
             <Skeleton shape="text" style={{ width: '48%' }} />
             <Skeleton shape="text" style={{ width: '72%' }} />
-            <Skeleton />
+            <Skeleton shape="row" />
           </Card>
         </li>
       ))}
@@ -51,13 +53,16 @@ export function Machines() {
   const nothing = unreachable([machines, readiness, sessions])
   if (nothing) {
     return (
-      <ErrorSurface.Page
-        error={fromReading(machines)!}
-        eyebrow="Machines"
-        reset={() => void client.invalidateQueries()}
-        title="Nothing here can be reached"
-        unknowns={['off the tailnet', 'yantrad down']}
-      />
+      <Page>
+        <PageHeader title="Machines" />
+        <ErrorSurface.Page
+          error={fromReading(machines)!}
+          eyebrow="Machines"
+          reset={() => void client.invalidateQueries()}
+          title="Nothing here can be reached"
+          unknowns={['off the tailnet', 'yantrad down']}
+        />
+      </Page>
     )
   }
 
@@ -75,18 +80,18 @@ export function Machines() {
       : []
 
   return (
-    <div className="machines">
-      <div className="machines__title">
-        <Text render={<h1 />} emphasized scale="display-small">
-          Machines
-        </Text>
-        <Looked className="machines__looked" reads={[machines, readiness, sessions]} />
-        {fab ? null : (
-          <Button className="machines__add" icon={<Plus />} render={<Link to="/machines/add" />} role="link" variant="tonal">
-            Add a device
-          </Button>
-        )}
-      </div>
+    <Page>
+      <PageHeader
+        actions={
+          fab ? null : (
+            <Button icon={<Plus />} render={<Link to="/machines/add" />} role="link" variant="tonal">
+              Add a device
+            </Button>
+          )
+        }
+        stamp={<Looked reads={[machines, readiness, sessions]} />}
+        title="Machines"
+      />
 
       <ErrorBoundary eyebrow="Machines" title="The machines could not be drawn">
         {machines.looked === 'failed' ? (
@@ -112,9 +117,9 @@ export function Machines() {
             </ul>
           ) : (
             <Card>
-              <Empty title="No machine can run a session yet.">
+              <EmptyState title="No machine can run a session yet.">
                 <Link to="/machines/add">Add a device</Link>
-              </Empty>
+              </EmptyState>
             </Card>
           )
         ) : (
@@ -168,6 +173,6 @@ export function Machines() {
           pending={sessions.looked === 'pending' || workspaces.looked === 'pending'}
         />
       </ErrorBoundary>
-    </div>
+    </Page>
   )
 }

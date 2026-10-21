@@ -93,8 +93,8 @@ test.describe('the fleet when nothing answers', () => {
   test('keeps the screen’s own title', async ({ page }) => {
     await scenario(page, 'unreachable')
     await page.goto('/fleet')
-    const title = page.locator('h1.m3-text')
+    const title = page.locator('h1.m3-page-header__h1')
     await expect(title).toHaveText('Fleet')
-    await expect(title).toHaveAttribute('data-scale', 'display-small')
+    await expect(page.getByRole('alert')).toBeVisible()
   })
 })

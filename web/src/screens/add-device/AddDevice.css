@@ -1,34 +1,16 @@
-/* D7 §4.2: one column, 720 at most, at every size. */
-.add-device {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
-  max-width: 720px;
-  min-width: 0;
-  margin: 0 auto;
-  padding-top: 8px;
-}
-
-.add-device__head,
-.add-device__pick {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 4px;
+.add-device__lead {
+  margin: 0;
 }
 
 .add-device__pick {
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: 8px;
 }
 
 .add-device__pick .m3-segmented {
   max-width: 100%;
-}
-
-.add-device__beats {
-  padding: 0 4px;
 }
 
 .add-device__card {
@@ -75,7 +57,7 @@
 .add-device__qr {
   flex: none;
   padding: 8px;
-  border-radius: 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
   background: #fff;
   line-height: 0;
 }
@@ -98,11 +80,7 @@
 .add-device__link:focus-visible {
   outline: 2px solid var(--md-sys-color-primary);
   outline-offset: 2px;
-  border-radius: 4px;
-}
-
-[data-shell="phone"] .add-device {
-  gap: 16px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
 }
 
 [data-shell="phone"] .add-device__join {
@@ -116,7 +94,7 @@
   width: 100%;
   grid-auto-flow: row;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-radius: 20px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
   overflow: hidden;
 }
 

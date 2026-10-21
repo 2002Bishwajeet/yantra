@@ -1,76 +1,27 @@
-.session {
-  /* One measure per screen: the chat reads at the card's 46rem, and the diff, the terminal and the others take 880 px. */
-  --session-measure: 880px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  flex: 1;
-  min-width: 0;
-}
-
-.session:has(.session__chat:not([hidden])) {
-  --session-measure: 46rem;
-}
-
-.session:has(.chat__branch) {
-  --session-measure: 880px;
-}
-
-.session__pending {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 640px;
-}
-
-/* Header */
-
-.session__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-  padding: 8px 8px 0;
-}
-
-.session__title {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex: 1;
-  min-width: 0;
-}
-
-.session__name {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-.session__name > * {
-  margin: 0;
-}
-
-.session__line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 14px;
-  min-width: 0;
-}
-
-.session__line h1 {
-  margin: 0;
-  min-width: 0;
+/* The page is the one column: the header, the tabs, the thread list, the chat
+   with its composer, the transcript and the spend share both edges. The
+   terminal and the diff take the wide width. */
+.m3-page.session[data-view="terminal"],
+.m3-page.session:has(.chat__branch) {
+  max-width: var(--m3-page-max-wide);
 }
 
 .session__age {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.session__name a,
+.session__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.session__meta > * {
+  margin: 0;
+}
+
+.session__meta a,
 .session__banner a,
 .transcript__foot a,
 .spend__ask a {
@@ -89,17 +40,6 @@
   overflow-wrap: anywhere;
 }
 
-.session__verbs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-
-.session__refusal {
-  flex-basis: 100%;
-}
-
 /* Tab bar */
 
 .session__bar {
@@ -108,7 +48,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 8px;
 }
 
 .session__bar nav {
@@ -138,13 +77,7 @@
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 880px;
   min-width: 0;
-  align-self: center;
-}
-
-.chat {
-  max-width: var(--session-measure, 880px);
 }
 
 .session__banner {
@@ -197,7 +130,7 @@
 .turn__text {
   margin: 0;
   padding: 14px 18px;
-  border-radius: 20px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
   background: var(--md-sys-color-surface-container-lowest);
   font: var(--md-sys-typescale-body-medium);
   letter-spacing: var(--md-sys-typescale-body-medium-tracking);
@@ -262,7 +195,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 480px;
+  max-width: 60ch;
 }
 
 .turns__reading > * {
@@ -302,7 +235,7 @@
   margin: 0;
   padding: 12px;
   overflow-x: auto;
-  border-radius: 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-highest);
   font-family: var(--md-ref-typeface-mono, monospace);
   font-size: var(--md-sys-typescale-body-small-size);
@@ -330,7 +263,7 @@
   gap: 6px;
   width: min(100%, 720px);
   padding: 12px 16px;
-  border-radius: 16px;
+  border-radius: var(--md-sys-shape-corner-large);
 }
 
 .chat__tool-head {
@@ -356,7 +289,7 @@
   gap: 8px;
   width: min(100%, 720px);
   padding: 12px 16px;
-  border-radius: 16px;
+  border-radius: var(--md-sys-shape-corner-large);
 }
 
 .chat__diff-summary {
@@ -368,7 +301,7 @@
 
 .chat__diff-reverted {
   padding: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-corner-small);
   background: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
   font: var(--md-sys-typescale-label-small);
@@ -386,7 +319,7 @@
   margin: 0;
   padding: 12px 0;
   overflow: auto;
-  border-radius: 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-highest);
   font-family: var(--md-ref-typeface-mono, monospace);
   font-size: var(--md-sys-typescale-body-small-size);
@@ -418,7 +351,7 @@
   gap: 12px;
   width: min(100%, 720px);
   padding: 20px;
-  border-radius: 24px;
+  border-radius: var(--m3-card-radius);
 }
 
 .chat__asking-head {
@@ -554,7 +487,7 @@
   box-sizing: border-box;
   min-height: 64px;
   padding: 12px 16px;
-  border-radius: 18px;
+  border-radius: var(--md-sys-shape-corner-large);
   background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 70%, transparent);
 }
 
@@ -629,8 +562,7 @@
 
 .session__notfound,
 .session__broken {
-  gap: 16px;
-  max-width: 640px;
+  gap: var(--m3-card-gap);
 }
 
 .session__notfound > div,
@@ -652,25 +584,22 @@
   overflow-wrap: anywhere;
 }
 
-/* Phone: the app bar carries the name, so the header stacks what is left —
-   the state line, then the verbs — instead of competing for one row. */
+/* Phone: the app bar carries the name. */
 
-[data-shell="phone"] .session__head {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  padding: 8px 0 0;
+/* Four tabs fit in 390 px: the group takes the row and the pills share it. */
+[data-shell="phone"] .session__bar nav {
+  width: 100%;
 }
 
-[data-shell="phone"] .session__title {
-  gap: 12px;
+[data-shell="phone"] .session__bar .m3-pill-group {
+  display: flex;
 }
 
-[data-shell="phone"] .session__verbs {
-  justify-content: flex-start;
+[data-shell="phone"] .session__bar .m3-pill {
+  flex: 1 1 auto;
+  padding: 0 12px;
 }
 
-[data-shell="phone"] .session__bar,
 [data-shell="phone"] .session__banner {
   padding: 0;
 }
@@ -704,9 +633,7 @@
   flex-direction: column;
   gap: 8px;
   width: 100%;
-  max-width: var(--session-measure, 880px);
   min-width: 0;
-  align-self: center;
 }
 
 .threads__head {
@@ -750,7 +677,7 @@
   gap: 4px 16px;
   min-height: 48px;
   padding: 6px 14px;
-  border-radius: var(--md-sys-shape-corner-medium, 12px);
+  border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-lowest);
   color: inherit;
   text-decoration: none;
@@ -795,8 +722,6 @@
 .chat__dock > .m3-error {
   box-sizing: border-box;
   width: 100%;
-  max-width: 46rem;
-  margin-inline: auto;
 }
 
 [data-shell="phone"] .session__chat:not([hidden]),

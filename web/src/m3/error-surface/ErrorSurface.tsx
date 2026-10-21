@@ -84,7 +84,8 @@ export function ErrorSurface(props: ErrorSurfaceProps) {
   return <Body layout="card" {...props} />
 }
 
-/** Centred, full height: the Unreachable board. */
+/** Centred in what the page has left under its PageHeader, so the title
+ *  stays: the Unreachable board. */
 ErrorSurface.Page = function Page(props: ErrorSurfaceProps) {
   return <Body layout="page" {...props} />
 }

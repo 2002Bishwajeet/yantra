@@ -31,6 +31,8 @@ import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -136,9 +138,8 @@ function Strip(props: {
   notAnswering: string[]
   now: number
   retry: () => void
-  stamp: ReactNode
 }) {
-  const { machines, notAnswering, now, retry, stamp: aged } = props
+  const { machines, notAnswering, now, retry } = props
   if (machines.looked === 'pending') {
     return (
       <div className="dash__strip" data-slot="reading">
@@ -155,7 +156,6 @@ function Strip(props: {
     return (
       <div className="dash__strip">
         <NotLooked what="Machines have" />
-        {aged}
       </div>
     )
   }
@@ -194,7 +194,6 @@ function Strip(props: {
           </span>
         ))}
       </div>
-      {aged}
     </div>
   )
 }
@@ -311,9 +310,8 @@ function Hero(props: {
   events: Event[]
   now: number
   retry: () => void
-  stamp: ReactNode
 }) {
-  const { rows, attention, events, now, retry, stamp: aged } = props
+  const { rows, attention, events, now, retry } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
   const items = attention.looked === 'ok' ? attention.data.reviews.length + attention.data.issues.length : 0
@@ -333,7 +331,6 @@ function Hero(props: {
             </Text>
           </>
         )}
-        {aged}
       </div>
       {empty ? (
         <>
@@ -480,7 +477,7 @@ function Worth(props: {
 }) {
   const { sessions, workspaces, now, retry } = props
   if (sessions.looked === 'pending') {
-    return <Skeleton style={{ height: 64 }} />
+    return <Skeleton shape="row" />
   }
   if (sessions.looked === 'failed') {
     return (
@@ -702,13 +699,14 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
 
 function Pending() {
   return (
-    <div aria-busy="true" className="dash" data-slot="reading">
+    <Page aria-busy="true" data-slot="reading">
+      <PageHeader title="Dashboard" />
       <Skeleton shape="text" style={{ width: 320 }} />
-      <Skeleton style={{ height: 220 }} />
-      <Skeleton style={{ height: 280 }} />
-      <Skeleton style={{ height: 64 }} />
-      <Skeleton style={{ height: 52 }} />
-    </div>
+      <Skeleton lines={3} shape="card" />
+      <Skeleton lines={4} shape="card" />
+      <Skeleton shape="row" />
+      <Skeleton shape="row" />
+    </Page>
   )
 }
 
@@ -748,16 +746,10 @@ export function Dashboard() {
     setGood({ reading: machines, at: now })
   }
 
-  const title = (
-    <Text render={<h1 />} className="dash__title" emphasized scale="headline-medium">
-      Dashboard
-    </Text>
-  )
-
   if (nothing) {
     return (
-      <>
-        {title}
+      <Page>
+        <PageHeader title="Dashboard" />
         <PrimaryAction action={null} />
         <ErrorSurface.Page
           action={
@@ -772,14 +764,13 @@ export function Dashboard() {
           title="Nothing here can be reached"
           unknowns={['off the tailnet', 'yantrad down']}
         />
-      </>
+      </Page>
     )
   }
 
   if (reading === 'pending' || (firstRun && gate.key === 'reading')) {
     return (
       <>
-        {title}
         {home ? <PrimaryAction action={null} /> : null}
         <Pending />
       </>
@@ -814,17 +805,15 @@ export function Dashboard() {
   ]
   const phone = factor === 'phone'
   const compact = density === 'compact'
-  const stripStamp = phone ? null : <Stamp now={now} reads={reads} />
-  const heroStamp = phone ? <Stamp className="dash__hero-stamp" now={now} reads={reads} /> : null
   const band = (which: WorkRow['band']) => placed.filter((row) => row.band === which)
   const notAnswering = placed.flatMap((row) => (row.kind === 'machine' ? [row.machine] : []))
   const unread = band('unknown')
 
   return (
-    <div className="dash">
-      {title}
+    <Page className="dash">
+      <PageHeader stamp={<Stamp now={now} reads={reads} />} title="Dashboard" />
       <ErrorBoundary layout="inline" title="The status line could not be drawn">
-        <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} stamp={stripStamp} />
+        <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} />
       </ErrorBoundary>
       {gate.passed ? (
         <ErrorBoundary layout="inline" title="Finish setup could not be drawn">
@@ -858,7 +847,6 @@ export function Dashboard() {
               now={now}
               retry={retry}
               rows={band('needs').filter((row) => row.kind !== 'machine')}
-              stamp={heroStamp}
             />
           </ErrorBoundary>
           <ErrorBoundary eyebrow="Running" title="Running could not be drawn">
@@ -891,6 +879,6 @@ export function Dashboard() {
           <State state="unknown">{names(unread)}</State>
         </div>
       ) : null}
-    </div>
+    </Page>
   )
 }

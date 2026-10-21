@@ -167,6 +167,24 @@ describe('the other tokens', () => {
     expect(compact).toContain('--m3-row-min-height: 40px;')
     expect(compact).toContain('--m3-list-gap: 4px;')
     expect(compact).toContain('--m3-tile-size: 28px;')
+    expect(compact).toContain('--m3-page-header-height: 48px;')
+  })
+
+  it('has the page layout tokens, and the gutter shrinks with the form factor', () => {
+    for (const line of [
+      '--m3-gutter: 24px;',
+      '--m3-page-max-wide: 1280px;',
+      '--m3-page-max-reading: 760px;',
+      '--m3-page-top: 16px;',
+      '--m3-page-header-height: 56px;',
+      '--m3-page-header-gap: 16px;',
+      '--m3-page-title: var(--md-sys-typescale-emphasized-headline-large);',
+      '--m3-page-title-tracking: var(--md-sys-typescale-emphasized-headline-large-tracking);',
+    ]) {
+      expect(css).toContain(line)
+    }
+    expect(/@media \(width < 1240px\) \{\s*:root \{\s*--m3-gutter: 20px;/.test(css)).toBe(true)
+    expect(/@media \(width < 600px\) \{\s*:root \{\s*--m3-gutter: 16px;/.test(css)).toBe(true)
   })
 
   it('maps the roles onto Tailwind', () => {

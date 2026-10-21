@@ -154,7 +154,7 @@ describe('/fleet on an empty fleet', () => {
     mount('desktop', '/fleet', scenario('empty'))
     await screen.findByText('Nothing needs you', {}, { timeout: 2000 })
     expect(screen.getByText('Nothing is running')).toBeTruthy()
-    expect(screen.getByText('no workspaces yet')).toBeTruthy()
+    expect(screen.getByText('No workspaces yet')).toBeTruthy()
   })
 })
 

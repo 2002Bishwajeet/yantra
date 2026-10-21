@@ -14,6 +14,8 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { List, ListItem } from '@/m3/list/List'
 import { State, type MarkState } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
@@ -242,15 +244,11 @@ export function Setup() {
 
   useScreenTitle('Set up Yantra')
   return (
-    <div className="setup">
-      <div className="setup__head">
-        <Text render={<h1 />} emphasized scale="display-small">
-          Set up Yantra
-        </Text>
-        <Text scale="body-medium" tone="variant">
-          Yantra runs AI agents on your own machines. Four steps get the first one ready, and each step checks itself.
-        </Text>
-      </div>
+    <Page className="setup" width="reading">
+      <PageHeader title="Set up Yantra" />
+      <Text className="setup__lead" render={<p />} scale="body-medium" tone="variant">
+        Yantra runs AI agents on your own machines. Four steps get the first one ready, and each step checks itself.
+      </Text>
       {/* The target machine's line publishes Install itself. */}
       {next === 'install' ? null : (
         <PrimaryAction
@@ -267,7 +265,7 @@ export function Setup() {
       {machines.looked === 'pending' ? (
         <div className="setup__progress" data-slot="reading">
           <Skeleton shape="text" style={{ width: 200 }} />
-          <Skeleton style={{ height: 320 }} />
+          <Skeleton lines={5} shape="card" />
         </div>
       ) : (
         <>
@@ -469,6 +467,6 @@ export function Setup() {
           Skip for now
         </Button>
       </div>
-    </div>
+    </Page>
   )
 }

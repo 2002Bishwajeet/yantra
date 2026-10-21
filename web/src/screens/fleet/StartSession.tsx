@@ -8,7 +8,7 @@ import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dia
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
-import { Empty } from './Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { pickWorkspaces, type Choice } from './issuePick'
 
 /** What a refusal of `threads/new` means here. A status alone is ambiguous: 409 is
@@ -82,9 +82,9 @@ export function StartSession(props: { item: Item }) {
             </Text>
           ) : null}
           {picks && picks.choices.length === 0 ? (
-            <Empty state="idle" title="No workspace holds this repository">
+            <EmptyState state="idle" title="No workspace holds this repository">
               A new session can clone it.
-            </Empty>
+            </EmptyState>
           ) : null}
           {picks && picks.choices.length === 0 ? (
             <Button render={<Link to="/new" />} role="link" variant="tonal">

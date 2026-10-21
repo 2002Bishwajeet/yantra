@@ -9,12 +9,14 @@ import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { type FormFactor, useFormFactor } from '@/shell/formFactor'
-import { Empty } from '@/screens/fleet/Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { count, money } from './format'
 import { byModel, byWorkspace, type Fanned, lines, type Row, useFleetSpend } from './read'
 import { SessionsTable } from './Sessions'
@@ -32,8 +34,8 @@ function Waiting() {
   return (
     <div aria-busy="true" className="usage__pending">
       <Skeleton shape="text" style={{ width: '46%' }} />
-      <Skeleton />
-      <Skeleton style={{ width: '78%' }} />
+      <Skeleton shape="row" />
+      <Skeleton shape="row" style={{ width: '78%' }} />
     </div>
   )
 }
@@ -68,7 +70,7 @@ function ByWorkspace(props: { rows: Row[] }) {
         </Text>
       </div>
       {spent.length === 0 ? (
-        <Empty title="Nothing was counted">no workspace answered with a figure</Empty>
+        <EmptyState title="Nothing was counted">no workspace answered with a figure</EmptyState>
       ) : (
         <ul className="usage__rows">
           {spent.map((one) => (
@@ -109,7 +111,7 @@ function ByModel(props: { rows: Row[] }) {
         </Text>
       </div>
       {models.length === 0 ? (
-        <Empty title="No model was named">a transcript with no response names none</Empty>
+        <EmptyState title="No model was named">a transcript with no response names none</EmptyState>
       ) : (
         <ul className="usage__rows">
           {models.map((one) => (
@@ -163,9 +165,9 @@ function Read(props: { fanned: Fanned; factor: FormFactor }) {
   if (fanned.fanned === 'no') {
     return (
       <Card className="usage__card">
-        <Empty state="unknown" title="Nothing read yet">
+        <EmptyState state="unknown" title="Nothing read yet">
           each figure costs one ssh round trip, so Read spend asks and nothing polls
-        </Empty>
+        </EmptyState>
       </Card>
     )
   }
@@ -198,7 +200,7 @@ function Read(props: { fanned: Fanned; factor: FormFactor }) {
             </Text>
           </div>
           {table.length === 0 ? (
-            <Empty title="No transcript answered">nothing was counted, so the table has no row</Empty>
+            <EmptyState title="No transcript answered">nothing was counted, so the table has no row</EmptyState>
           ) : (
             <SessionsTable data={table} factor={factor} />
           )}
@@ -220,13 +222,16 @@ export function Usage() {
 
   if (listed.looked === 'failed') {
     return (
-      <ErrorSurface.Page
-        error={fromReading(listed)!}
-        eyebrow="Usage"
-        reset={() => void client.invalidateQueries()}
-        title="Nothing here can be reached"
-        unknowns={['off the tailnet', 'yantrad down']}
-      />
+      <Page>
+        <PageHeader title="Usage" />
+        <ErrorSurface.Page
+          error={fromReading(listed)!}
+          eyebrow="Usage"
+          reset={() => void client.invalidateQueries()}
+          title="Nothing here can be reached"
+          unknowns={['off the tailnet', 'yantrad down']}
+        />
+      </Page>
     )
   }
 
@@ -237,39 +242,42 @@ export function Usage() {
   const asOf = stamp === undefined ? undefined : (on(stamp)?.text ?? stamp)
 
   return (
-    <div className="usage">
-      <div className="usage__title">
-        <Text render={<h1 />} emphasized scale="display-small">
-          Usage
-        </Text>
-        <Mono className="usage__as">as read · {AS_READ[span]}</Mono>
-        {asOf ? <Mono className="usage__as">prices from {asOf}</Mono> : null}
-        <span className="usage__spacer" />
-        {list.length > 0 ? (
+    <Page>
+      <PageHeader
+        actions={
+          list.length > 0 ? (
+            <>
+              <Segmented
+                label="Window"
+                onValueChange={(value) =>
+                  void navigate({ search: { window: asSpan(value) }, replace: true })
+                }
+                value={span}
+              >
+                {SPANS.map((one) => (
+                  <Segment key={one} value={one}>
+                    {SPAN_LABEL[one]}
+                  </Segment>
+                ))}
+              </Segmented>
+              <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
+                {fanned.fanned === 'reading'
+                  ? `reading ${fanned.of}…`
+                  : fanned.fanned === 'done'
+                    ? 'Read again'
+                    : 'Read spend'}
+              </Button>
+            </>
+          ) : null
+        }
+        stamp={
           <>
-            <Segmented
-              label="Window"
-              onValueChange={(value) =>
-                void navigate({ search: { window: asSpan(value) }, replace: true })
-              }
-              value={span}
-            >
-              {SPANS.map((one) => (
-                <Segment key={one} value={one}>
-                  {SPAN_LABEL[one]}
-                </Segment>
-              ))}
-            </Segmented>
-            <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
-              {fanned.fanned === 'reading'
-                ? `reading ${fanned.of}…`
-                : fanned.fanned === 'done'
-                  ? 'Read again'
-                  : 'Read spend'}
-            </Button>
+            <Mono>as read · {AS_READ[span]}</Mono>
+            {asOf ? <Mono> · prices from {asOf}</Mono> : null}
           </>
-        ) : null}
-      </div>
+        }
+        title="Usage"
+      />
 
       {workspaces.looked === 'pending' ? (
         <Card className="usage__card">
@@ -277,10 +285,10 @@ export function Usage() {
         </Card>
       ) : list.length === 0 ? (
         <Card className="usage__card">
-          <Empty title="No spend yet">
+          <EmptyState title="No spend yet">
             money is read from a workspace's transcript, and <Link to="/new">New session</Link>{' '}
             makes the first one
-          </Empty>
+          </EmptyState>
         </Card>
       ) : (
         <Read factor={factor} fanned={fanned} />
@@ -290,6 +298,6 @@ export function Usage() {
         Each figure is read from the transcript on the machine that wrote it, over ssh, when you
         ask. Nothing here polls, and there is no fleet total.
       </Text>
-    </div>
+    </Page>
   )
 }

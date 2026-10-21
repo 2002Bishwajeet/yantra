@@ -1,28 +1,3 @@
-.machine {
-  display: flex;
-  flex-direction: column;
-  gap: var(--m3-page-gap);
-}
-
-.machine__title {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  min-width: 0;
-}
-
-.machine__looked {
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.machine__h1 {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 /* D7 B2: nothing here may be wider than the screen, so every track can
    shrink and every machine-written line can break anywhere. */
 .machine__columns {

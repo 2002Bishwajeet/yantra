@@ -24,6 +24,16 @@
   border-radius: var(--md-sys-shape-corner-full);
 }
 
+/* Sized from the tokens the real card and row read, so the page does not jump when they land. */
+.m3-skeleton[data-shape="card"] {
+  height: calc(2 * var(--m3-card-padding) + var(--m3-skeleton-lines, 3) * var(--m3-row-min-height));
+  border-radius: var(--m3-card-radius);
+}
+
+.m3-skeleton[data-shape="row"] {
+  height: var(--m3-row-min-height);
+}
+
 @keyframes m3-shimmer {
   from {
     background-position: 200% 0;

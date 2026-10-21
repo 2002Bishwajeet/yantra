@@ -32,7 +32,7 @@
   flex: none;
   box-sizing: border-box;
   height: 64px;
-  padding: 12px 24px;
+  padding: 12px var(--m3-gutter);
 }
 
 .shell__wordmark {
@@ -61,14 +61,10 @@
 
 .shell__body {
   display: flex;
-  gap: 24px;
+  gap: var(--m3-gutter);
   flex: 1;
   min-height: 0;
-  padding: 0 24px 24px;
-}
-
-[data-shell="desktop"] .shell__main {
-  padding-top: 16px;
+  padding: 0 var(--m3-gutter) 24px;
 }
 
 .rail {
@@ -116,6 +112,17 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* The rail is 280 px of text: the failure's words get the width and Try again drops under them. */
+.rail .m3-error[data-layout="inline"] {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.rail .m3-error__said {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .rail__all {
   margin-top: auto;
   font: var(--md-sys-typescale-label-large);
@@ -136,7 +143,7 @@
   gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 16px 20px 24px;
+  padding: 0 var(--m3-gutter) 24px;
 }
 
 /* WCAG 1.4.10, and what TabletNotifications.dc.html draws: the sheet floats
@@ -165,7 +172,7 @@
 }
 
 [data-shell="phone"] .shell__main {
-  padding: 0 16px calc(136px + env(safe-area-inset-bottom, 0px));
+  padding: 0 var(--m3-gutter) calc(136px + env(safe-area-inset-bottom, 0px));
 }
 
 [data-shell="phone"] .shell__main h1 {
@@ -226,18 +233,4 @@
 /* The page is where focus lands when a focused FAB goes away, not a control. */
 .shell__main:focus {
   outline: none;
-}
-
-.shell__nowhere {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 24px;
-  border-radius: var(--m3-card-radius);
-  background: var(--md-sys-color-surface-container);
-}
-
-.shell__nowhere > * {
-  margin: 0;
 }

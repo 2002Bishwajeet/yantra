@@ -7,6 +7,7 @@ import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Row, RowText } from '@/m3/row/Row'
 import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
@@ -52,7 +53,7 @@ export type HeaderProps = {
   now: number
 }
 
-/** Tile, name, state and age, where it lives, and the three verbs. Stop and
+/** Name, state and age, where it lives, and the three verbs. Stop and
  *  Resume never confirm; Delete does (BRIEF.md). */
 export function Header(props: HeaderProps) {
   const { workspace, status, sessions, now } = props
@@ -66,83 +67,82 @@ export function Header(props: HeaderProps) {
   const failed = stop.error ?? resume.error
 
   return (
-    <header className="session__head">
-      <div className="session__title">
-        <Tile name={workspace.name} />
-        <div className="session__name">
-          <div className="session__line">
-            <Text render={<h1 />} className="m3-wrap" scale="headline-medium" emphasized>
-              {workspace.name}
-            </Text>
-            <State state={mark}>
-              {words}
-              {started !== null ? <Mono className="session__age"> · {ago(now / 1000 - started, now).text}</Mono> : null}
-            </State>
-          </div>
-          <Text render={<p />} scale="body-small" tone="variant" clip>
-            {workspace.machine} · {home(workspace.repo)}
-            {URL.test(workspace.repo) ? (
-              <>
-                {' '}
-                ·{' '}
-                <a href={workspace.repo} rel="noreferrer" target="_blank">
-                  {workspace.repo.replace(URL, '')}
-                </a>
-              </>
-            ) : null}
-          </Text>
-          {status?.reached === 'no' ? (
-            <Mono className="session__unreachable">{status.error}</Mono>
-          ) : null}
-        </div>
-      </div>
-      <div className="session__verbs">
-        {/* A disabled verb reads as broken unless it says why, and the boards
-            draw no line for the reason, so the reason is the description. */}
-        <Button
-          aria-describedby={live.stop ? undefined : `${said}-stop`}
-          disabled={!live.stop || stop.isPending}
-          onClick={() => stop.mutate(workspace.name)}
-          variant="tonal"
-        >
-          {stop.isPending ? 'Stopping…' : 'Stop'}
-        </Button>
-        <Button
-          aria-describedby={live.resume ? undefined : `${said}-resume`}
-          disabled={!live.resume || resume.isPending}
-          onClick={() => resume.mutate(workspace.name)}
-          variant="tonal"
-        >
-          {resume.isPending ? 'Resuming…' : 'Resume'}
-        </Button>
-        {live.stop ? null : (
-          <span className="m3-sr-only" id={`${said}-stop`}>
-            {why.stop}
-          </span>
-        )}
-        {live.resume ? null : (
-          <span className="m3-sr-only" id={`${said}-resume`}>
-            {why.resume}
-          </span>
-        )}
-        <Delete
-          status={status}
-          trigger={
-            <Button tone="error" variant="text">
-              Delete
+    <>
+      <PageHeader
+        actions={
+          <>
+            {/* A disabled verb reads as broken unless it says why, and the boards
+                draw no line for the reason, so the reason is the description. */}
+            <Button
+              aria-describedby={live.stop ? undefined : `${said}-stop`}
+              disabled={!live.stop || stop.isPending}
+              onClick={() => stop.mutate(workspace.name)}
+              variant="tonal"
+            >
+              {stop.isPending ? 'Stopping…' : 'Stop'}
             </Button>
-          }
-          workspace={workspace}
-        />
+            <Button
+              aria-describedby={live.resume ? undefined : `${said}-resume`}
+              disabled={!live.resume || resume.isPending}
+              onClick={() => resume.mutate(workspace.name)}
+              variant="tonal"
+            >
+              {resume.isPending ? 'Resuming…' : 'Resume'}
+            </Button>
+            {live.stop ? null : (
+              <span className="m3-sr-only" id={`${said}-stop`}>
+                {why.stop}
+              </span>
+            )}
+            {live.resume ? null : (
+              <span className="m3-sr-only" id={`${said}-resume`}>
+                {why.resume}
+              </span>
+            )}
+            <Delete
+              status={status}
+              trigger={
+                <Button tone="error" variant="text">
+                  Delete
+                </Button>
+              }
+              workspace={workspace}
+            />
+          </>
+        }
+        subtitle={
+          <State state={mark}>
+            {words}
+            {started !== null ? <Mono className="session__age"> · {ago(now / 1000 - started, now).text}</Mono> : null}
+          </State>
+        }
+        title={workspace.name}
+      />
+      <div className="session__meta">
+        <Text render={<p />} scale="body-small" tone="variant" clip>
+          {workspace.machine} · {home(workspace.repo)}
+          {URL.test(workspace.repo) ? (
+            <>
+              {' '}
+              ·{' '}
+              <a href={workspace.repo} rel="noreferrer" target="_blank">
+                {workspace.repo.replace(URL, '')}
+              </a>
+            </>
+          ) : null}
+        </Text>
+        {status?.reached === 'no' ? (
+          <Mono className="session__unreachable">{status.error}</Mono>
+        ) : null}
+        <Talk machine={workspace.machine} />
+        {failed ? (
+          <ErrorSurface.Inline
+            className="session__refusal"
+            error={failed}
+            title={stop.error ? `${workspace.name} was not stopped` : `${workspace.name} was not resumed`}
+          />
+        ) : null}
       </div>
-      <Talk machine={workspace.machine} />
-      {failed ? (
-        <ErrorSurface.Inline
-          className="session__refusal"
-          error={failed}
-          title={stop.error ? `${workspace.name} was not stopped` : `${workspace.name} was not resumed`}
-        />
-      ) : null}
-    </header>
+    </>
   )
 }

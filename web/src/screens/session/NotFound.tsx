@@ -3,6 +3,8 @@ import { ArrowRight } from 'lucide-react'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Text } from '@/m3/text/Text'
 
 /** The WorkspaceNotFound board: the name the URL carried, and the way to the
@@ -10,10 +12,8 @@ import { Text } from '@/m3/text/Text'
 export function NotFound(props: { name: string }) {
   const { name } = props
   return (
-    <>
-      <Text render={<h1 />} scale="display-small" emphasized clip>
-        {name}
-      </Text>
+    <Page width="reading">
+      <PageHeader title={name} />
       <Card className="session__notfound">
         <State state="unknown">not found</State>
         <div>
@@ -30,6 +30,6 @@ export function NotFound(props: { name: string }) {
           </Button>
         </div>
       </Card>
-    </>
+    </Page>
   )
 }

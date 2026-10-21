@@ -10,6 +10,8 @@ import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface, type Described } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { errorLine, shortError } from './line'
@@ -189,42 +191,35 @@ export function Repair() {
   const save = useRepairWorkspace()
 
   const heading = (
-    <div className="repair__head">
-      <Text render={<h1 />} className="repair__title" emphasized scale="display-small">
-        Repair {name}
-      </Text>
-      {opened.data ? <Mono className="repair__path">{opened.data.path}</Mono> : null}
-      {opened.data ? (
-        <Text className="repair__where" scale="body-small" tone="variant">
-          the file as it is on the machine running the daemon
-        </Text>
-      ) : null}
-    </div>
+    <PageHeader
+      stamp={opened.data ? <Mono title="the file as it is on the machine running the daemon">{opened.data.path}</Mono> : null}
+      title={`Repair ${name}`}
+    />
   )
 
   // A save invalidates this read, and the refetch answers 409 while the
   // mutation is still pending: the editor stays until the navigation.
   if (opened.error && !opened.isFetching && !save.isPending) {
     return (
-      <div className="repair">
+      <Page>
         {heading}
         <Refused error={opened.error} name={name} reset={() => void opened.refetch()} />
-      </div>
+      </Page>
     )
   }
 
   if (!opened.data) {
     return (
-      <div aria-busy="true" className="repair" data-slot="reading">
+      <Page aria-busy="true" data-slot="reading">
         {heading}
-        <Skeleton style={{ height: 120 }} />
-        <Skeleton style={{ height: 420 }} />
-      </div>
+        <Skeleton lines={2} shape="card" />
+        <Skeleton lines={7} shape="card" />
+      </Page>
     )
   }
 
   return (
-    <div className="repair">
+    <Page>
       {heading}
       <ErrorBoundary layout="card" title="The editor could not be drawn">
         <Editor
@@ -241,6 +236,6 @@ export function Repair() {
           saving={save.isPending}
         />
       </ErrorBoundary>
-    </div>
+    </Page>
   )
 }

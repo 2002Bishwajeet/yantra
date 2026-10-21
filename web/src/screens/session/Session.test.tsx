@@ -96,7 +96,7 @@ describe('one workspace, four views the URL carries', () => {
     expect(heading.textContent).toBe('landing')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     // `~` for the home directory, as a shell and the boards print a path.
-    expect(heading.closest('.session__name')?.textContent).toContain(
+    expect(heading.closest('.m3-page')?.querySelector('.session__meta')?.textContent).toContain(
       'macbook · ~/Github/yantra-landing',
     )
     // A running agent can be stopped and has nothing to resume (ADR-0015).

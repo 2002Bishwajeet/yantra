@@ -1,0 +1,74 @@
+.m3-page-header {
+  display: flex;
+  align-items: center;
+  gap: var(--m3-page-header-gap);
+  flex-wrap: wrap;
+  box-sizing: border-box;
+  min-height: var(--m3-page-header-height);
+  min-width: 0;
+}
+
+/* The title takes what the stamp and the actions leave, and the row wraps only
+   when those two together are wider than the page (Usage's window and Read). */
+.m3-page-header__title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.m3-page-header__line {
+  display: flex;
+  align-items: center;
+  gap: var(--m3-page-header-gap);
+  min-width: 0;
+}
+
+.m3-page-header__line > :not(h1) {
+  flex: none;
+  white-space: nowrap;
+}
+
+.m3-page-header__h1 {
+  min-width: 0;
+  margin: 0;
+  font: var(--m3-page-title);
+  letter-spacing: var(--m3-page-title-tracking);
+}
+
+.m3-page-header__stamp {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+}
+
+.m3-page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  max-width: 100%;
+  margin-inline-start: auto;
+  gap: var(--m3-list-gap);
+  flex: none;
+}
+
+/* The app bar is the h1 (Shell.css hides this one), so a header with nothing
+   else in it takes no room, and one with a stamp or actions stays one row. */
+[data-shell="phone"] .m3-page-header {
+  min-height: var(--m3-row-min-height);
+}
+
+[data-shell="phone"] .m3-page-header[data-bare] {
+  display: none;
+}
+
+[data-shell="phone"] .m3-page-header__stamp {
+  margin-inline-start: auto;
+}
+

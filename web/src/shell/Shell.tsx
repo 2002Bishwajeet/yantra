@@ -9,9 +9,12 @@ import { IconButton } from '@/m3/icon-button/IconButton'
 import { LiveRegion } from '@/m3/live/Live'
 import { BarDestination, NavigationBar } from '@/m3/navigation-bar/NavigationBar'
 import { NavigationRail, RailDestination } from '@/m3/navigation-rail/NavigationRail'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { SideSheet } from '@/m3/side-sheet/SideSheet'
-import { Text } from '@/m3/text/Text'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { Card } from '@/m3/card/Card'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
 import { useSetupHome } from '@/screens/setup/progress'
 import { StatusAnnouncer } from './Announce'
@@ -66,7 +69,7 @@ function RouteAction() {
 
 /** The outlet, under one boundary that a navigation resets — or, when nothing
  *  reached the daemon, the one screen that says so in its place. */
-function Page({ down }: { down: ReactNode }) {
+function Main({ down }: { down: ReactNode }) {
   return (
     // Focusable, not tabbable: where focus lands when a focused FAB goes away.
     <main className="shell__main" tabIndex={-1}>
@@ -442,7 +445,7 @@ export function Shell() {
               {pathname === '/' || pathname === '/new' ? <HomeRail /> : <SessionsRail />}
             </Guarded>
           ) : null}
-          <Page down={down} />
+          <Main down={down} />
         </div>
         {factor === 'tablet' ? (
           <SideSheet className="shell__sheet" id={SHEET} onClose={() => setOpen(false)} open={open} title="Notifications">
@@ -470,16 +473,21 @@ export function Shell() {
 export function Nowhere() {
   useScreenTitle('Nowhere')
   return (
-    <div className="shell__nowhere">
-      <Text render={<h1 />} scale="headline-small">
-        Nowhere
-      </Text>
-      <Text render={<p />} scale="body-medium" tone="variant">
-        Nothing is at {location.pathname}. The dashboard is where the sessions and machines are.
-      </Text>
-      <Button role="link" render={<Link to="/" />} variant="tonal">
-        Dashboard
-      </Button>
-    </div>
+    <Page width="reading">
+      <PageHeader title="Nowhere" />
+      <Card>
+        <EmptyState
+          action={
+            <Button role="link" render={<Link to="/" />} variant="tonal">
+              Dashboard
+            </Button>
+          }
+          state="unknown"
+          title="Nothing is here"
+        >
+          Nothing is at {location.pathname}. The dashboard is where the sessions and machines are.
+        </EmptyState>
+      </Card>
+    </Page>
   )
 }

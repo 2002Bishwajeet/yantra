@@ -242,7 +242,7 @@ test.describe('the shell on busy', () => {
     await axe(page)
 
     await list.getByRole('button', { name: 'Mark all read' }).click()
-    await expect(list.getByText('Nothing unread.')).toBeVisible()
+    await expect(list.getByText('Nothing unread')).toBeVisible()
     await list.getByRole('radio', { name: 'All', exact: true }).click()
     await expect(list.getByText('yantra-web is waiting for trust')).toBeVisible()
   })

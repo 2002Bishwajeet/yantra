@@ -24,7 +24,7 @@
   display: block;
   height: clamp(160px, 40vh, 420px);
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-low);
   /* Pierre's own status colours miss 4.5:1 on this surface; the M3 roles do not. */
   --trees-bg-override: var(--md-sys-color-surface-container-low);
@@ -46,7 +46,7 @@
 
 .diff__file {
   min-width: 0;
-  border-radius: 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-low);
   overflow: hidden;
 }
@@ -98,7 +98,7 @@
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--md-sys-color-outline);
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-corner-small);
   color: inherit;
   background: var(--md-sys-color-surface);
   font: var(--md-sys-typescale-body-medium);

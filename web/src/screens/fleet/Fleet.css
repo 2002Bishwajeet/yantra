@@ -1,29 +1,3 @@
-.fleet {
-  display: flex;
-  flex-direction: column;
-  gap: var(--m3-page-gap);
-}
-
-.fleet__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.fleet__title {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  min-width: 0;
-}
-
-.fleet__looked {
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .fleet__card {
   gap: 10px;
   padding: 16px 20px;
@@ -355,10 +329,6 @@ a.fleet__machine:hover {
 
 /* Phone: the state on one line, the name and machine on the next. */
 
-[data-shell="phone"] .fleet__head {
-  gap: 8px;
-}
-
 [data-shell="phone"] .fleet__card {
   padding: 16px;
 }
@@ -373,8 +343,9 @@ a.fleet__machine:hover {
 
 [data-shell="phone"] .fleet__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 0 6px;
   grid-area: meta;
   min-width: 0;
   font: var(--md-sys-typescale-body-small);
@@ -382,11 +353,26 @@ a.fleet__machine:hover {
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* The name has a line of its own, and the machine and the age share the next, so a name never shares a
+   narrow column and breaks per character at 390. It still wraps rather than ends in an ellipsis (finding 107). */
 [data-shell="phone"] .fleet__meta > * {
   grid-area: auto;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
-[data-shell="phone"] .fleet__meta > * + *::before {
+[data-shell="phone"] .fleet__meta > .fleet__name {
+  flex-basis: 100%;
+}
+
+/* WCAG 2.5.8: two links on stacked lines are each 24 px tall. */
+[data-shell="phone"] .fleet__meta > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+[data-shell="phone"] .fleet__meta > .fleet__machine ~ *::before {
   content: "· ";
 }
 

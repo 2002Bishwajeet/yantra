@@ -10,12 +10,9 @@
   flex: 1;
   align-items: center;
   justify-content: center;
-  gap: 24px;
+  gap: var(--m3-gutter);
   width: 100%;
-  max-width: 640px;
-  min-height: 100%;
-  margin: 0 auto;
-  padding: 24px;
+  padding: var(--m3-gutter);
   text-align: center;
 }
 

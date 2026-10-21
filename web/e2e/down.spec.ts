@@ -17,7 +17,7 @@ const DESTINATIONS = ['dashboard', 'fleet', 'machines', 'usage']
 const FIXTURE = ['cachyos-g14', 'price-table', 'thinkpad', 'landing']
 
 for (const one of ROUTES) {
-  test(`${one.path} draws the one screen and nothing else`, async ({ page, size }) => {
+  test(`${one.id} ${one.path} draws the one screen and nothing else`, async ({ page, size }) => {
     await scenario(page, 'down')
     await page.goto(one.path)
 

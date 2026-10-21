@@ -3,6 +3,7 @@
   align-items: center;
   gap: 12px;
   box-sizing: border-box;
+  min-width: 0;
   min-height: var(--m3-row-min-height);
   padding: var(--m3-row-padding);
   border-radius: var(--m3-row-radius);

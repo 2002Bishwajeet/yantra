@@ -1,9 +1,12 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { Plus } from 'lucide-react'
 import type { AgentRow, MachineSessions } from '@/api'
+import { fromReading } from '@/api/client'
 import { loaded, useAgents, useSessions, useWorkspaces, type Reading } from '@/api/hooks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
+import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -59,6 +62,7 @@ function Group(props: { label: string; rows: AgentRow[]; sessions: Reading<Machi
 /** The desktop's left rail on `/` and `/new` (BRIEF.md, Shell): every
  *  workspace, live ones first, and a way to the fleet for the rest. */
 export function SessionsRail() {
+  const client = useQueryClient()
   const agents = useAgents(loaded(useWorkspaces()))
   const sessions = useSessions()
   const now = useTick(true)
@@ -79,19 +83,23 @@ export function SessionsRail() {
       </div>
       {agents.looked === 'pending' ? (
         <div className="rail__list" aria-busy="true">
-          <Skeleton />
-          <Skeleton />
-          <Skeleton />
+          <Skeleton shape="row" />
+          <Skeleton shape="row" />
+          <Skeleton shape="row" />
         </div>
       ) : agents.looked === 'ok' ? (
         <>
           <Group label="Live" now={now} open={open} rows={live} sessions={sessions} />
           <Group label="History" now={now} open={open} rows={history} sessions={sessions} />
         </>
+      ) : agents.looked === 'failed' ? (
+        <ErrorSurface.Inline
+          error={fromReading(agents)!}
+          reset={() => void client.invalidateQueries()}
+          title="Sessions could not be read"
+        />
       ) : (
-        <p className="rail__note">
-          {agents.looked === 'never' ? 'Sessions have not been read yet.' : 'Sessions could not be read.'}
-        </p>
+        <p className="rail__note">Sessions have not been read yet.</p>
       )}
       <Link className="rail__all" to="/fleet">
         All sessions →
