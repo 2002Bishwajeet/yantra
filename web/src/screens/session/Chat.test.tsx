@@ -1088,7 +1088,7 @@ describe('the composer', () => {
     say({ type: 'error', kind: 'unknownThread', said: 'no chat thread 1a2b3c4d' })
     const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
     await settled(() => expect(field.disabled).toBe(true))
-    expect(field.placeholder).toBe('The chat is closed. Try again above.')
+    expect(field.placeholder).toBe('The chat is closed.')
     expect(reasonOf('Send')).toBe('The chat is not connected, so nothing can be sent.')
   })
 

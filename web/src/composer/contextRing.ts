@@ -11,6 +11,9 @@ export type Usage = { used: number; max: number }
 /** Above this share the ring turns to the error colour. */
 export const OVERLOADED = 90
 
+/** From this share the ring carries its number: a phone has no hover to show it. */
+export const LABELLED = 70
+
 export function usedShare(usage: Usage): number {
   if (usage.max <= 0) return 0
   return Math.max(0, Math.min(100, (usage.used / usage.max) * 100))

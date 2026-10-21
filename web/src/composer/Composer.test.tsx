@@ -153,6 +153,19 @@ describe('the card', () => {
     expect(document.activeElement).not.toBe(box())
   })
 
+  it('leaves a press on an error alone, so its words can be selected', () => {
+    render(
+      <Composer.Root empty onSubmit={(event) => event.preventDefault()}>
+        <Composer.Input aria-label="Message" enterSends onSend={() => {}} value="" />
+        <section className="m3-error">
+          <p data-testid="said">The image is too large.</p>
+        </section>
+      </Composer.Root>,
+    )
+    expect(fireEvent.mouseDown(screen.getByTestId('said'))).toBe(true)
+    expect(document.activeElement).not.toBe(box())
+  })
+
   it('leaves a press in a menu portalled out of the card alone', () => {
     render(
       <Composer.Root empty onSubmit={(event) => event.preventDefault()}>
@@ -162,6 +175,15 @@ describe('the card', () => {
     )
     expect(fireEvent.mouseDown(screen.getByTestId('menu'))).toBe(true)
     expect(document.activeElement).not.toBe(box())
+  })
+})
+
+describe('the footer', () => {
+  it('marks a footer with no controls, so the action sits beside the field', () => {
+    const { container, rerender } = render(<Composer.Footer actions={<button type="button">Post</button>} />)
+    expect(container.querySelector('.composer__footer')?.hasAttribute('data-bare')).toBe(true)
+    rerender(<Composer.Footer actions={<button type="button">Post</button>} controls={<button type="button">Attach</button>} />)
+    expect(container.querySelector('.composer__footer')?.hasAttribute('data-bare')).toBe(false)
   })
 })
 

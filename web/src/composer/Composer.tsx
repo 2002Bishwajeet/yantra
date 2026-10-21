@@ -13,10 +13,11 @@ export type RootProps = Omit<ComponentProps<'form'>, 'children'> & {
 }
 
 /** A press on the card that lands on no control puts the caret in the field, as T3 Code does. A menu is
- *  portalled out of the card, but React still bubbles its events here, so the DOM must hold the target. */
+ *  portalled out of the card, but React still bubbles its events here, so the DOM must hold the target.
+ *  An error's text stays selectable, so a reader can copy it. */
 function focusField(event: MouseEvent<HTMLDivElement>) {
   const target = event.target as Element
-  if (!event.currentTarget.contains(target) || target.closest('button, input, textarea, a, [role="dialog"]')) return
+  if (!event.currentTarget.contains(target) || target.closest('button, input, textarea, a, [role="dialog"], .m3-error')) return
   const field = event.currentTarget.querySelector('textarea')
   if (!field || field.disabled) return
   event.preventDefault()
@@ -50,7 +51,7 @@ export function Root(props: RootProps) {
 /** Controls on the left scroll sideways with their bar hidden; actions stay on the right. */
 export function Footer(props: { controls?: ReactNode; actions: ReactNode }) {
   return (
-    <div className="composer__footer">
+    <div className="composer__footer" data-bare={props.controls ? undefined : ''}>
       <div className="composer__controls">{props.controls}</div>
       <div className="composer__actions">{props.actions}</div>
     </div>

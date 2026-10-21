@@ -1,6 +1,6 @@
 /*
  * Adapted from T3 Code at 810e8f6, apps/web/src/components/chat/ComposerControl.tsx
- * (ComposerControl, Icon, Chevron, Separator), on Yantra's M3 tokens:
+ * (ComposerControl, Icon, Chevron, Separator), on Yantra's M3 tokens. SelectControl is not copied: nothing uses it.
  * https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerControl.tsx
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.

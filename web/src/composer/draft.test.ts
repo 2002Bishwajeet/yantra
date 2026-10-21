@@ -56,6 +56,33 @@ describe('the draft', () => {
     expect(renderHook(() => useDraft('9f8e', 'Work on o/r#1')).result.current[0]).toBe('my own words')
   })
 
+  it('does not keep the issue text or a recalled prompt until the reader edits it', () => {
+    const seeded = renderHook(() => useDraft('1a2b', 'Work on o/r#1'))
+    act(() => void vi.advanceTimersByTime(300))
+    seeded.unmount()
+    expect(recallDraft('1a2b')).toBe('')
+
+    const { result } = renderHook(() => useDraft('9f8e'))
+    act(() => result.current[1]('my words'))
+    act(() => void vi.advanceTimersByTime(300))
+    act(() => result.current[2]('an old prompt'))
+    act(() => void vi.advanceTimersByTime(300))
+    expect(result.current[0]).toBe('an old prompt')
+    expect(recallDraft('9f8e')).toBe('my words')
+    window.dispatchEvent(new Event('pagehide'))
+    expect(recallDraft('9f8e')).toBe('my words')
+    act(() => result.current[1]('an old prompt, edited'))
+    act(() => void vi.advanceTimersByTime(300))
+    expect(recallDraft('9f8e')).toBe('an old prompt, edited')
+  })
+
+  it('keeps the issue text once the reader edits it', () => {
+    const { result } = renderHook(() => useDraft('1a2b', 'Work on o/r#1'))
+    act(() => result.current[1]((now) => `${now} please`))
+    act(() => void vi.advanceTimersByTime(300))
+    expect(recallDraft('1a2b')).toBe('Work on o/r#1 please')
+  })
+
   it('moves to the thread key when the first turn names the thread', () => {
     const { result, rerender } = renderHook(({ id }) => useDraft(id), { initialProps: { id: 'workspace/web' } })
     act(() => result.current[1]('typed'))

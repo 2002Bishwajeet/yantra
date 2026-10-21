@@ -200,7 +200,7 @@ export function Chat(props: ChatProps) {
   const { workspace, thread, onThread, initialDraft } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
-  const [draft, setDraft] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
+  const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
   const [showDiff, setShowDiff] = useState(false)
   const [added, setAdded] = useState(false)
   const diffButton = useRef<HTMLButtonElement>(null)
@@ -329,7 +329,7 @@ export function Chat(props: ChatProps) {
     event.preventDefault()
     recalled.current = step.position
     caretToEnd.current = true
-    setDraft(step.prompt)
+    recallInto(step.prompt)
   }
 
   useLayoutEffect(() => {
@@ -501,7 +501,7 @@ export function Chat(props: ChatProps) {
               add(event.clipboardData.files)
             }}
             onSend={send}
-            placeholder={placeholder({ link, waiting: timeline.requests.length > 0, agent })}
+            placeholder={placeholder({ link, waiting: timeline.requests.length > 0, agent, retryable: error?.retryable })}
             ref={box}
             value={draft}
           />

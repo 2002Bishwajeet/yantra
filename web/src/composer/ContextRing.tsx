@@ -6,7 +6,7 @@
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 import { Popover, PopoverPopup, PopoverTrigger } from '@/m3/popover/Popover'
-import { formatPercentage, formatTokens, isOverloaded, usedShare, type Usage } from './contextRing'
+import { formatPercentage, formatTokens, isOverloaded, LABELLED, usedShare, type Usage } from './contextRing'
 
 const RADIUS = 9.75
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS
@@ -29,7 +29,11 @@ export function ContextRing(props: { usage: Usage | null }) {
         openOnHover
         style={{ width: 32, padding: 0 }}
       >
-        <span className="composer-ring" data-over={over ? '' : undefined}>
+        <span
+          className="composer-ring"
+          data-labelled={share >= LABELLED ? '' : undefined}
+          data-over={over ? '' : undefined}
+        >
           <svg aria-hidden="true" viewBox="0 0 24 24">
             <circle className="composer-ring__track" cx="12" cy="12" fill="none" r={RADIUS} strokeWidth="3" />
             <circle
@@ -44,6 +48,11 @@ export function ContextRing(props: { usage: Usage | null }) {
               strokeWidth="3"
             />
           </svg>
+          {share >= LABELLED ? (
+            <span aria-hidden="true" className="composer-ring__label">
+              {Math.round(share)}
+            </span>
+          ) : null}
         </span>
       </PopoverTrigger>
       <PopoverPopup

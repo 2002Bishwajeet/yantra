@@ -327,6 +327,27 @@ test.describe('the composer', () => {
     }
   })
 
+  test('keeps a tap beside an icon off the next control', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'a mouse on a wide card has no neighbour a thumb could miss into')
+    await composer(page).fill('send me')
+    await composer(page).focus()
+    // 20 px either side of a 32 px icon's middle is 4 px past its drawn edge, still inside its own 48 px target.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const all = [...document.querySelectorAll<HTMLElement>('.composer__controls button')]
+          return all.flatMap((control) => {
+            const box = control.getBoundingClientRect()
+            return [-20, 20].map((dx) => {
+              const hit = document.elementFromPoint(box.x + box.width / 2 + dx, box.y + box.height / 2)?.closest('button')
+              return !hit || hit === control || !all.includes(hit)
+            })
+          })
+        }),
+      )
+      .toEqual([true, true, true, true, true, true])
+  })
+
   test('rides at the foot of the screen on a phone while the page scrolls', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the dock is sticky on the phone only')
     await page.setViewportSize({ width: 390, height: 520 })

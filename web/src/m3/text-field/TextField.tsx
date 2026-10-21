@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Field } from '@base-ui/react/field'
 import { clsx } from 'clsx'
 import './TextField.css'
@@ -18,9 +18,11 @@ export type TextFieldProps = Field.Control.Props & {
 /** M3's 56 px text field on Base UI's Field: the label floats over the input
  *  and the error line is wired to it. */
 export function TextField(props: TextFieldProps) {
-  const { label, variant, supporting, error, leading, trailing, className, ...rest } = props
+  const { label, variant, supporting, error, leading, trailing, className, onValueChange, ...rest } = props
   // A value set before the first paint is not typed, so :placeholder-shown alone leaves the label over it (Y-547).
-  const filled = String(rest.value ?? rest.defaultValue ?? '') !== ''
+  // A default stops counting at the first edit: an uncontrolled field then follows what it holds.
+  const [typed, setTyped] = useState<string | null>(null)
+  const filled = String(rest.value ?? typed ?? rest.defaultValue ?? '') !== ''
   return (
     <Field.Root
       className={clsx('m3-text-field', className)}
@@ -29,7 +31,15 @@ export function TextField(props: TextFieldProps) {
     >
       <div className="m3-text-field__box" data-filled={filled ? '' : undefined}>
         {leading ? <span className="m3-text-field__leading">{leading}</span> : null}
-        <Field.Control className="m3-text-field__input" placeholder=" " {...rest} />
+        <Field.Control
+          className="m3-text-field__input"
+          onValueChange={(value, details) => {
+            setTyped(value)
+            onValueChange?.(value, details)
+          }}
+          placeholder=" "
+          {...rest}
+        />
         <Field.Label className="m3-text-field__label">{label}</Field.Label>
         {trailing ? <span className="m3-text-field__trailing">{trailing}</span> : null}
       </div>

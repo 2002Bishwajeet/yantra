@@ -30,6 +30,17 @@ describe('TextField', () => {
     expect(box().hasAttribute('data-filled')).toBe(true)
   })
 
+  it('lets the label fall back once the reader clears a default value', () => {
+    render(<TextField defaultValue="kept" label="Name" />)
+    const input = screen.getByRole('textbox', { name: 'Name' })
+    const box = input.closest('.m3-text-field__box')!
+    expect(box.hasAttribute('data-filled')).toBe(true)
+    fireEvent.change(input, { target: { value: '' } })
+    expect(box.hasAttribute('data-filled')).toBe(false)
+    fireEvent.change(input, { target: { value: 'again' } })
+    expect(box.hasAttribute('data-filled')).toBe(true)
+  })
+
   it('marks an error, says it in the described line, and drops the supporting line for it', () => {
     render(
       <TextField

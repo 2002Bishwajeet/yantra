@@ -1,9 +1,19 @@
 .session {
+  /* One measure per screen: the chat reads at the card's 46rem, and the diff, the terminal and the others take 880 px. */
+  --session-measure: 880px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   flex: 1;
   min-width: 0;
+}
+
+.session:has(.session__chat:not([hidden])) {
+  --session-measure: 46rem;
+}
+
+.session:has(.chat__branch) {
+  --session-measure: 880px;
 }
 
 .session__pending {
@@ -114,6 +124,12 @@
 
 /* Views */
 
+/* A block would leave .chat's own centring with nothing to act on. */
+.session__chat:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
 .session__terminal,
 .chat,
 .transcript,
@@ -125,6 +141,10 @@
   max-width: 880px;
   min-width: 0;
   align-self: center;
+}
+
+.chat {
+  max-width: var(--session-measure, 880px);
 }
 
 .session__banner {
@@ -683,6 +703,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  max-width: var(--session-measure, 880px);
+  min-width: 0;
+  align-self: center;
 }
 
 .threads__head {
@@ -767,6 +791,14 @@
   gap: 12px;
 }
 
+/* An error above the card shares the card's column. */
+.chat__dock > .m3-error {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 46rem;
+  margin-inline: auto;
+}
+
 [data-shell="phone"] .session__chat:not([hidden]),
 [data-shell="phone"] .session__chat:not([hidden]) > .chat {
   display: contents;
@@ -782,6 +814,16 @@
   z-index: 4;
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--md-sys-color-surface);
+}
+
+/* A scrim, the one gradient the house allows: text scrolling under the dock fades out and is not sliced. */
+[data-shell="phone"] .chat__dock::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 100%;
+  height: 16px;
+  background: linear-gradient(to top, var(--md-sys-color-surface), transparent);
+  pointer-events: none;
 }
 
 /* WCAG 2.4.11: a focused control and the pinned end scroll to clear the dock, whose height Chat measures
