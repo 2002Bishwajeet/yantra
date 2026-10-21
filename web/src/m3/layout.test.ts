@@ -11,8 +11,9 @@ import { describe, expect, it } from 'vitest'
 
 const src = resolve(process.cwd(), 'src')
 
-/** Gaps up to this many px are the small spacing inside a component. A larger
- *  one is a space between blocks of the page, which a token owns. */
+/** Gaps up to this many px are the small spacing inside a component, and 259
+ *  of them are literal today. A larger one is a space between blocks of the
+ *  page, which a token owns. The Y-566 row and web/README.md say the same. */
 const SMALL_GAP = 16
 
 function stylesheets(dir: string): string[] {
@@ -28,16 +29,17 @@ export function offences(css: string): string[] {
   const bare = css.replace(/\/\*[\s\S]*?\*\//g, '')
   const found: string[] = []
   for (const [, prop, value] of bare.matchAll(
-    /(?:^|[;{\s])(border(?:-[a-z]+){0,2}-radius|max-width|(?:row-|column-)?gap)\s*:\s*([^;}]+)/g,
+    /(?:^|[;{\s])(border(?:-[a-z]+){0,2}-radius|max-width|max-inline-size|(?:row-|column-)?gap)\s*:\s*([^;}]+)/g,
   )) {
     const px = [...value!.matchAll(/(\d*\.?\d+)px/g)].map((one) => Number(one[1]))
-    if (px.length === 0) continue
-    if (prop!.endsWith('radius')) found.push(`${prop}: ${value!.trim()}`)
-    else if (prop === 'max-width') {
-      // A calc against the viewport is a bound, not a width.
-      if (/^\d*\.?\d+px$/.test(value!.trim())) found.push(`${prop}: ${value!.trim()}`)
-    }
-    else if (px.some((one) => one > SMALL_GAP)) found.push(`${prop}: ${value!.trim()}`)
+    // ch, rem and em are still literals: a measure is a token too.
+    const literal = /^\d*\.?\d+(?:px|ch|rem|em)$/.test(value!.trim())
+    if (prop!.endsWith('radius')) {
+      if (px.length > 0) found.push(`${prop}: ${value!.trim()}`)
+    } else if (prop === 'max-width' || prop === 'max-inline-size') {
+      // A bare length is a width; a calc against the viewport is a bound.
+      if (literal) found.push(`${prop}: ${value!.trim()}`)
+    } else if (px.some((one) => one > SMALL_GAP)) found.push(`${prop}: ${value!.trim()}`)
   }
   return found
 }
@@ -47,6 +49,8 @@ describe('offences', () => {
     expect(offences('.a { border-radius: 22px; }')).toEqual(['border-radius: 22px'])
     expect(offences('.a { border-top-left-radius: var(--x, 12px); }')).toHaveLength(1)
     expect(offences('.a { max-width: 640px; }')).toEqual(['max-width: 640px'])
+    expect(offences('.a { max-width: 60ch; }')).toEqual(['max-width: 60ch'])
+    expect(offences('.a { max-inline-size: 40rem; }')).toEqual(['max-inline-size: 40rem'])
     expect(offences('.a { max-width: calc(100vw - 120px); }')).toEqual([])
     expect(offences('.a { gap: 24px; }')).toEqual(['gap: 24px'])
     expect(offences('.a { gap: 8px 40px; }')).toHaveLength(1)
@@ -57,7 +61,7 @@ describe('offences', () => {
     expect(
       offences(`
         .a { border-radius: var(--md-sys-shape-corner-large); max-width: var(--m3-page-max-reading); }
-        .b { max-width: 60ch; gap: 8px 16px; border-radius: 50%; }
+        .b { max-width: 100%; max-inline-size: var(--m3-measure); gap: 8px 16px; border-radius: 50%; }
         /* border-radius: 99px; */
         @media (max-width: 599px) { .c { gap: var(--m3-gutter); } }
       `),

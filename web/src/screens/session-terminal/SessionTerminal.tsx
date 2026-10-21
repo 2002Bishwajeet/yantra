@@ -31,44 +31,49 @@ export function SessionTerminal() {
   const now = useTick(true)
   const host = sessions.looked === 'ok' ? sessions.data.find((one) => one.machine === machine) : null
   const one = host?.reached === 'yes' ? host.sessions.find((each) => each.name === session) : undefined
+  // The phone hides the title row, so a lone Kill there would cost a row of its own.
+  const kill = (
+    <KillSession
+      machine={machine}
+      onDone={() => void navigate({ params: { machine }, to: '/m/$machine' })}
+      session={session}
+      trigger={
+        <Button tone="error" variant="text">
+          Kill
+        </Button>
+      }
+    />
+  )
   return (
     <Page>
       <PageHeader
-        actions={
-          <KillSession
-            machine={machine}
-            onDone={() => void navigate({ params: { machine }, to: '/m/$machine' })}
-            session={session}
-            trigger={
-              <Button tone="error" variant="text">
-                Kill
-              </Button>
-            }
-          />
-        }
+        actions={factor === 'phone' ? undefined : kill}
         // The route's own title, so the phone app bar and the page say the
         // same thing (`router.test.tsx`).
         title={`${session} on ${machine}`}
       />
-      <div className="session-terminal__meta">
-        <Text render={<p />} scale="body-small" tone="variant">
-          <Mono>{session}</Mono> is a tmux session on{' '}
-          <Link params={{ machine }} to="/m/$machine">
-            {machine}
-          </Link>{' '}
-          that no workspace claims
-        </Text>
-        {/* The swept list says how old it is; a bar until it answers, so
-            the line never flashes empty (EmptyStates board). */}
-        {sessions.looked === 'pending' ? (
-          <Skeleton className="session-terminal__age" shape="text" />
-        ) : one ? (
-          <Mono className="session-terminal__age">
-            started {ago(now / 1000 - one.created_at, now).text}
-            {isAge(now / 1000 - one.created_at) ? ' ago' : null} · {one.windows} window
-            {one.windows === 1 ? '' : 's'}
-          </Mono>
-        ) : null}
+      <div className="session-terminal__row">
+        <div className="session-terminal__meta">
+          <Text render={<p />} scale="body-small" tone="variant">
+            <Mono>{session}</Mono> is a tmux session on{' '}
+            <Link params={{ machine }} to="/m/$machine">
+              {machine}
+            </Link>{' '}
+            that no workspace claims
+          </Text>
+          {/* The swept list says how old it is; a bar until it answers, so
+              the line never flashes empty (EmptyStates board). */}
+          {sessions.looked === 'pending' ? (
+            <Skeleton className="session-terminal__age" shape="text" />
+          ) : one ? (
+            <Mono className="session-terminal__age">
+              started {ago(now / 1000 - one.created_at, now).text}
+              {isAge(now / 1000 - one.created_at) ? ' ago' : null} · {one.windows} window
+              {one.windows === 1 ? '' : 's'}
+            </Mono>
+          ) : null}
+        </div>
+        {factor === 'phone' ? kill : null}
       </div>
       <Talk machine={machine} />
       <Terminal

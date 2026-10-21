@@ -75,6 +75,8 @@ export function Header(props: HeaderProps) {
                 draw no line for the reason, so the reason is the description. */}
             <Button
               aria-describedby={live.stop ? undefined : `${said}-stop`}
+              className="session__verb"
+              data-idle={live.stop || stop.isPending ? undefined : ''}
               disabled={!live.stop || stop.isPending}
               onClick={() => stop.mutate(workspace.name)}
               variant="tonal"
@@ -83,6 +85,8 @@ export function Header(props: HeaderProps) {
             </Button>
             <Button
               aria-describedby={live.resume ? undefined : `${said}-resume`}
+              className="session__verb"
+              data-idle={live.resume || resume.isPending ? undefined : ''}
               disabled={!live.resume || resume.isPending}
               onClick={() => resume.mutate(workspace.name)}
               variant="tonal"

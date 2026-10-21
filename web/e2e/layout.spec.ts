@@ -11,13 +11,19 @@ const MAX = { wide: 1280, reading: 760 } as const
 /** `/new` is a dialog over the dashboard except on the phone, where it is a page. */
 const DIALOG_OFF_PHONE = ['new']
 
-/** The four destinations keep the app bar's title without a back arrow. */
+/** The five top-level routes keep the app bar's title without a back arrow. */
 const TOP = ['dashboard', 'fleet', 'machines', 'usage', 'setup']
 
-for (const one of ROUTES) {
+/** The terminal view is the one session column drawn at the wide width. */
+const SWEEP = [
+  ...ROUTES,
+  { id: 'session-terminal-view', path: '/w/landing?view=terminal', heading: 'landing' },
+] as readonly (Route | { id: string; path: string; heading: string })[]
+
+for (const one of SWEEP) {
   test(`${one.id} ${one.path} keeps one left edge, one width and one scroll`, async ({ page, size }) => {
     test.skip(size !== 'phone' && DIALOG_OFF_PHONE.includes(one.id), 'a dialog, not a page, off the phone')
-    await scenario(page, (one as Route).scenario ?? 'busy')
+    await scenario(page, ('scenario' in one && one.scenario) || 'busy')
     await page.goto(one.path)
     const body = page.locator('.m3-page').first()
     await expect(body).toBeVisible()
@@ -71,6 +77,27 @@ for (const one of ROUTES) {
   })
 }
 
+test('a reading page starts where the wide column starts, and the chat stays centred', async ({ page, size }) => {
+  test.skip(size !== 'desktop', 'the frame is wider than the wide column only on the desktop')
+  const edge = async (path: string, which: 'busy' | 'adding') => {
+    await scenario(page, which)
+    await page.goto(path)
+    return (await page.locator('.m3-page-header__h1').boundingBox())!.x
+  }
+  const wide = await edge('/machines', 'busy')
+  expect(Math.abs((await edge('/machines/add', 'adding')) - wide)).toBeLessThanOrEqual(1)
+  expect(Math.abs((await edge('/no-such-page', 'busy')) - wide)).toBeLessThanOrEqual(1)
+  expect(Math.abs((await edge('/w/landing', 'busy')) - wide)).toBeGreaterThan(100)
+})
+
+test('the chat tab draws the reading width and the terminal tab the wide one', async ({ page }) => {
+  await scenario(page, 'busy')
+  await page.goto('/w/landing')
+  await expect(page.locator('.m3-page.session')).toHaveAttribute('data-width', 'reading')
+  await page.goto('/w/landing?view=terminal')
+  await expect(page.locator('.m3-page.session')).toHaveAttribute('data-width', 'wide')
+})
+
 test('the fleet keeps its stamp and its action in one row on a phone', async ({ page, size }) => {
   test.skip(size !== 'phone', 'the phone is the one size that can wrap')
   await scenario(page, 'busy')
@@ -105,5 +132,32 @@ test('a name does not break per character on a phone row', async ({ page, size }
     const box = (await name.boundingBox())!
     // One line of body text, not a column of letters.
     expect(box.height).toBeLessThanOrEqual(24)
+  }
+})
+
+test('a notification line is cut with an ellipsis or not at all', async ({ page, size }) => {
+  test.skip(size !== 'phone', 'the phone is the narrowest size')
+  await scenario(page, 'notifications')
+  await page.goto('/notifications')
+  await expect(page.locator('.m3-row').first()).toBeVisible()
+  const cut = await page.evaluate(() =>
+    [...document.querySelectorAll('.m3-clip')]
+      .filter((el) => el.scrollWidth > el.clientWidth + 1)
+      .filter((el) => getComputedStyle(el).display !== 'block' || getComputedStyle(el).textOverflow !== 'ellipsis')
+      .map((el) => el.textContent),
+  )
+  expect(cut, 'a line cut with no ellipsis').toEqual([])
+  // The cut lines exist, so the check above is not vacuous.
+  expect(await page.locator('.m3-row__supporting.m3-clip').count()).toBeGreaterThan(0)
+})
+
+test('an unclaimed session name does not break per character on a phone row', async ({ page, size }) => {
+  test.skip(size !== 'phone', 'the phone is the narrowest size')
+  await scenario(page, 'busy')
+  await page.goto('/machines')
+  const names = page.locator('.machines__session .machines__name')
+  await expect(names.first()).toBeVisible()
+  for (const name of await names.all()) {
+    expect((await name.boundingBox())!.height).toBeLessThanOrEqual(24)
   }
 })

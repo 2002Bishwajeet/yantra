@@ -190,7 +190,7 @@ describe('the Dashboard on an empty fleet', () => {
     expect(reads('Worth a look')).toContain(
       'every tmux session on the machines that answered belongs to a workspace',
     )
-    expect(screen.getByText('no workspaces yet')).toBeTruthy()
+    expect(screen.getByText('No workspaces yet')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
   })
 
@@ -199,7 +199,7 @@ describe('the Dashboard on an empty fleet', () => {
     mount('phone', '/', keyed(scenario('empty')))
     await drawn()
     const idle = region('Idle')
-    expect(idle.getByText('no workspaces yet')).toBeTruthy()
+    expect(idle.getByText('No workspaces yet')).toBeTruthy()
     expect(idle.getByRole('link', { name: 'New →' }).getAttribute('href')).toBe('/new')
   })
 })

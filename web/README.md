@@ -680,11 +680,16 @@ every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
   [`PageHeader`](src/m3/page/PageHeader.tsx)** (Y-566), which read `--m3-gutter`,
   `--m3-page-max-wide`, `--m3-page-max-reading`, `--m3-page-gap` and the page
   title scale from `tokens.css`. An empty block is an
-  [`EmptyState`](src/m3/empty-state/EmptyState.tsx), a read in flight is a
-  `Skeleton` card or row, and a failure is an `ErrorSurface` under the header, so
-  the title stays. [`m3/layout.test.ts`](src/m3/layout.test.ts) fails on a
-  screen stylesheet with a literal radius, a literal max width or a gap above
-  16 px.
+  [`EmptyState`](src/m3/empty-state/EmptyState.tsx) (`compact` for a banner or a
+  line), a read in flight is a `Skeleton` card or row, and a failure is an
+  `ErrorSurface` under the header, so the title stays. A reading page starts
+  where the wide column starts, so a title keeps one left edge on a desktop; a
+  conversation (a session, a room) is centred. A measure, a dialog and a menu
+  take `--m3-measure`, `--m3-dialog-width` and `--m3-menu-width`.
+  [`m3/layout.test.ts`](src/m3/layout.test.ts) fails on a screen stylesheet with a
+  literal radius, a literal max width (px, ch or rem) or a gap above 16 px. A
+  literal gap of 16 px or less is the small spacing inside a component and
+  passes.
 
 **Tailwind v4 stays, and now emits only its preflight reset.** `index.css` is
 `@import "tailwindcss" source(none)` with no `@source`, because no call site

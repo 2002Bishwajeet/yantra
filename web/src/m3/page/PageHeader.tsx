@@ -16,15 +16,18 @@ export type PageHeaderProps = {
   className?: string
 }
 
-/** The title row of a page. One flex row of a fixed height. The phone's app
- *  bar already names the page, so the shell hides this `h1` there and the
- *  stamp and the actions keep one row. */
+/** The title row of a page: one flex row at least `--m3-page-header-height`
+ *  tall, which wraps only when the stamp and the actions are wider than the
+ *  page (Usage's window picker at 768 px). The phone's app bar already names
+ *  the page, so the shell hides this `h1` there; a header that holds only a
+ *  stamp shrinks to that line, and one with actions keeps them on one row. */
 export function PageHeader(props: PageHeaderProps) {
   const { title, eyebrow, stamp, subtitle, actions, className } = props
   return (
     <div
       className={clsx('m3-page-header', className)}
       data-bare={eyebrow || stamp || subtitle || actions ? undefined : ''}
+      data-stamp-only={stamp && !eyebrow && !subtitle && !actions ? '' : undefined}
       data-slot="page-header"
     >
       <div className="m3-page-header__title">

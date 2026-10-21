@@ -59,13 +59,20 @@
 }
 
 /* The app bar is the h1 (Shell.css hides this one), so a header with nothing
-   else in it takes no room, and one with a stamp or actions stays one row. */
+   in it takes no room, and one with actions stays one row. A header that holds
+   only a stamp shrinks to the stamp's own line, which the e2e specs and a reader
+   still use to see how old the page is. */
 [data-shell="phone"] .m3-page-header {
   min-height: var(--m3-row-min-height);
 }
 
 [data-shell="phone"] .m3-page-header[data-bare] {
   display: none;
+}
+
+[data-shell="phone"] .m3-page-header[data-stamp-only] {
+  min-height: 0;
+  justify-content: flex-end;
 }
 
 [data-shell="phone"] .m3-page-header__stamp {

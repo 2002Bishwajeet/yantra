@@ -27,6 +27,25 @@ describe('Page', () => {
     expect(css).toMatch(/margin-inline: auto;/)
   })
 
+  it('starts a reading page where the wide column starts, and centres only a conversation', () => {
+    render(
+      <>
+        <Page data-testid="form" width="reading">
+          a
+        </Page>
+        <Page centered data-testid="chat" width="reading">
+          b
+        </Page>
+      </>,
+    )
+    expect(screen.getByTestId('form').dataset.align).toBeUndefined()
+    expect(screen.getByTestId('chat').dataset.align).toBe('center')
+    expect(css).toMatch(
+      /\[data-width="reading"\] \{[^}]*margin-inline: max\(0px, calc\(\(100% - var\(--m3-page-max-wide\)\) \/ 2\)\) auto;/,
+    )
+    expect(css).toMatch(/\[data-align="center"\] \{\s*margin-inline: auto;/)
+  })
+
   it('has the same inset from the top under every shell', () => {
     expect(css).toMatch(/padding-block-start: var\(--m3-page-top\);/)
     expect(css).not.toContain('data-shell')

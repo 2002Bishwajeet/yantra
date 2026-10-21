@@ -52,6 +52,7 @@
 .m3-error[data-layout="page"] .m3-error__text {
   align-items: center;
   gap: 12px;
+  max-inline-size: var(--m3-measure);
 }
 
 .m3-error[data-layout="inline"] .m3-error__text {

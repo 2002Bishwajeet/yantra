@@ -44,6 +44,7 @@ function Paused({ name, budget }: { name: string; budget: number }) {
   return (
     <Card className="room__paused" surface="high">
       <EmptyState
+        compact
         action={
           <Button
             aria-busy={resume.isPending || undefined}
@@ -176,7 +177,7 @@ export function Room() {
   const { room: name } = useParams({ from: '/rooms/$room' })
   const room = useQuery(roomQuery(name))
   return (
-    <Page width="reading">
+    <Page centered width="reading">
       <PageHeader title={name} />
       {/* A 404 on a later poll is a room the daemon lost, so it wins over what was drawn. */}
       {room.error && (!room.data || asApiError(room.error).kind === 'missing') ? (

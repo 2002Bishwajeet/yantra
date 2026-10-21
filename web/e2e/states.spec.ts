@@ -8,8 +8,8 @@ import { ROUTES, type RouteId } from './lib/routes'
 
 /** What a route draws on `empty`, or null where no board has a block. */
 const EMPTY: Record<RouteId, readonly string[] | null> = {
-  dashboard: ['Nothing needs you', 'Nothing is running', 'no workspaces yet'],
-  fleet: ['Nothing needs you', 'Nothing is running', 'no workspaces yet'],
+  dashboard: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
+  fleet: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
   machines: ['every tmux session on the machines that answered belongs to a workspace'],
   machine: null,
   'session-terminal': null,

@@ -48,3 +48,17 @@ describe('an unclaimed session', () => {
     expect(age()).toMatch(/^started \d{1,2} \w{3} · 3 windows$/)
   })
 })
+
+describe('the Kill verb', () => {
+  it('sits in the title row off the phone, and beside the line about the session on a phone', async () => {
+    mount('desktop', '/m/cachyos-g14/s/scratch')
+    await screen.findByRole('button', { name: 'Kill' })
+    expect(screen.getByRole('button', { name: 'Kill' }).closest('.m3-page-header__actions')).toBeTruthy()
+    cleanup()
+    unmount()
+    mount('phone', '/m/cachyos-g14/s/scratch')
+    await screen.findByRole('button', { name: 'Kill' })
+    expect(screen.getByRole('button', { name: 'Kill' }).closest('.session-terminal__row')).toBeTruthy()
+    expect(document.querySelector('.m3-page-header__actions')).toBeNull()
+  })
+})

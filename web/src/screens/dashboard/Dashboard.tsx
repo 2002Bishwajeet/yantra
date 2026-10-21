@@ -28,6 +28,7 @@ import { ago, at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
@@ -601,16 +602,19 @@ function Idle(props: {
   const { rows, sessions, now, compact, fleetEmpty } = props
   const workspaces = rows.flatMap((row) => (row.kind === 'workspace' ? [row] : []))
   const words = `${plural(workspaces.length, 'workspace')}, nothing running`
-  const none = fleetEmpty ? 'no workspaces yet' : 'no idle workspaces'
   const empty = (
-    <>
-      <State state="idle">{none}</State>
-      {fleetEmpty ? (
-        <Button className="dash__new" render={<Link to="/new" />} role="link" variant="text">
-          New →
-        </Button>
-      ) : null}
-    </>
+    <EmptyState
+      action={
+        fleetEmpty ? (
+          <Button render={<Link to="/new" />} role="link" variant="text">
+            New →
+          </Button>
+        ) : undefined
+      }
+      compact
+      state="idle"
+      title={fleetEmpty ? 'No workspaces yet' : 'No idle workspaces'}
+    />
   )
   const list = (
     <ul className={compact ? 'dash__grid' : 'dash__idle-list'}>

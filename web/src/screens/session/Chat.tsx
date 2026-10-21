@@ -190,6 +190,8 @@ export type ChatProps = {
   onThread: (thread: string) => void
   /** Y-489: the issue's first text, from the picker that opened this thread. */
   initialDraft?: string
+  /** Tells the page the branch diff is open, which takes the wide column. */
+  onBranch?: (open: boolean) => void
 }
 
 /** The streaming chat (ADR-0026, Y-356, ADR-0033). The first turn picks the
@@ -197,11 +199,15 @@ export type ChatProps = {
  *  writes the tree the Terminal tab's agent is in. Every harness draws on the
  *  one timeline. */
 export function Chat(props: ChatProps) {
-  const { workspace, thread, onThread, initialDraft } = props
+  const { workspace, thread, onThread, initialDraft, onBranch } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
   const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
   const [showDiff, setShowDiff] = useState(false)
+  useEffect(() => {
+    onBranch?.(showDiff)
+    return () => onBranch?.(false)
+  }, [showDiff, onBranch])
   const [added, setAdded] = useState(false)
   const diffButton = useRef<HTMLButtonElement>(null)
   const { branch } = chat

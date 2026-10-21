@@ -64,7 +64,7 @@ export function Workspace(props: {
 
   if (listed.looked === 'pending') {
     return (
-      <Page aria-busy="true" data-slot="reading" width="reading">
+      <Page aria-busy="true" centered data-slot="reading" width="reading">
         <PageHeader title={name} />
         <Skeleton shape="row" />
         <Skeleton shape="text" />
@@ -76,7 +76,7 @@ export function Workspace(props: {
     // The Unreachable board: this page cannot tell the two apart, so it draws
     // both unknown and offers the one thing that helps.
     return (
-      <Page width="reading">
+      <Page centered width="reading">
         <PageHeader title={name} />
         <ErrorSurface.Page
           error={{
@@ -102,7 +102,7 @@ export function Workspace(props: {
 
   if (entry.loaded === 'no') {
     return (
-      <Page width="reading">
+      <Page centered width="reading">
         <PageHeader title={name} />
         <Card className="session__broken" surface="error">
           <Text render={<h2 />} scale="title-large">
@@ -145,6 +145,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const transcript = useTranscript(name)
   const spend = useSpend()
   // The chat stays mounted once opened: closing its socket cancels Claude's turn.
+  const [branchOpen, setBranchOpen] = useState(false)
   const [chatFor, setChatFor] = useState(view === 'chat' ? name : null)
   if (view === 'chat' && chatFor !== name) setChatFor(name)
   const chatOpened = chatFor === name
@@ -173,7 +174,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const readAt = transcript.said.said === 'held' ? at(transcript.said.at, now) : null
 
   return (
-    <Page className="session" data-view={view} width="reading">
+    <Page centered className="session" data-view={view} width={view === 'terminal' || (view === 'chat' && branchOpen) ? 'wide' : 'reading'}>
       <Header now={now} sessions={sessions} status={status} workspace={workspace} />
       <div className="session__bar">
         {/* Links, not a tab widget: a tab here changes the URL, and that is
@@ -219,7 +220,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div className="session__chat" hidden={view !== 'chat'}>
-            <Chat initialDraft={draft ?? carried} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
+            <Chat initialDraft={draft ?? carried} key={`${name}:${epoch}`} onBranch={setBranchOpen} onThread={chatNamed} thread={thread} workspace={workspace} />
           </div>
         ) : null}
         {view === 'terminal' ? (

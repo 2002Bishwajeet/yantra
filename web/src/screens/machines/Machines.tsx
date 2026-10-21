@@ -117,7 +117,7 @@ export function Machines() {
             </ul>
           ) : (
             <Card>
-              <EmptyState title="No machine can run a session yet.">
+              <EmptyState title="No machine can run a session yet">
                 <Link to="/machines/add">Add a device</Link>
               </EmptyState>
             </Card>

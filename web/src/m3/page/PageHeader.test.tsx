@@ -41,7 +41,15 @@ describe('PageHeader', () => {
     expect(document.querySelector('[data-slot="page-header"]')?.hasAttribute('data-bare')).toBe(false)
   })
 
-  it('is one flex row of the token height, with the title scale from the tokens', () => {
+  it('marks a header that holds only a stamp, which the phone shrinks to one line', () => {
+    const { rerender } = render(<PageHeader stamp={<span>as of 0s</span>} title="Dashboard" />)
+    expect(document.querySelector('[data-slot="page-header"]')?.hasAttribute('data-stamp-only')).toBe(true)
+    rerender(<PageHeader actions={<button type="button">Go</button>} stamp={<span>looked 0s ago</span>} title="Fleet" />)
+    expect(document.querySelector('[data-slot="page-header"]')?.hasAttribute('data-stamp-only')).toBe(false)
+    expect(css).toMatch(/\[data-shell="phone"\] \.m3-page-header\[data-stamp-only\] \{\s*min-height: 0;/)
+  })
+
+  it('is one flex row of at least the token height, with the title scale from the tokens', () => {
     expect(css).toMatch(/\.m3-page-header \{[^}]*display: flex;[^}]*min-height: var\(--m3-page-header-height\);/s)
     expect(css).toMatch(/\.m3-page-header__h1 \{[^}]*font: var\(--m3-page-title\);/s)
   })

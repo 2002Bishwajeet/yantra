@@ -143,6 +143,11 @@
   align-items: end;
 }
 
+/* The resting line is 32 px in a 48 px row: centre it, as the Chat's card does, and keep the action at the end. */
+.composer__card:has(> .composer__footer[data-bare]) > .composer__input {
+  align-self: center;
+}
+
 .composer__card > .composer__footer[data-bare] {
   grid-column: 2;
   grid-row: 1;

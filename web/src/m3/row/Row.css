@@ -41,12 +41,31 @@
 }
 
 .m3-row__supporting {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
   font: var(--md-sys-typescale-body-small);
   letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
+}
+
+/* A block, not a flex row: `text-overflow` draws its ellipsis only on a block
+   container, so a flex line cut the words with no mark. The state's mark rides
+   inline, and the state itself is the block that clips. */
+.m3-row__supporting > .m3-state {
+  display: block;
+  padding-inline-start: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m3-row__supporting > .m3-state > .m3-mark {
+  display: inline-block;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+}
+
+.m3-row__supporting > .m3-state > .m3-mark:is([data-state="needs"], [data-state="failed"]) {
+  margin-block: -1px;
+  margin-inline-start: -1px;
 }
 
 .m3-row[data-tone="selected"] .m3-row__supporting {

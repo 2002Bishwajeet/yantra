@@ -483,9 +483,9 @@ export function Nowhere() {
             </Button>
           }
           state="unknown"
-          title="Nothing is here"
+          title={`Nothing is at ${location.pathname}`}
         >
-          Nothing is at {location.pathname}. The dashboard is where the sessions and machines are.
+          The dashboard is where the sessions and machines are.
         </EmptyState>
       </Card>
     </Page>

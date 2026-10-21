@@ -335,6 +335,10 @@
   --m3-gutter: 24px;
   --m3-page-max-wide: 1280px;
   --m3-page-max-reading: 760px;
+  --m3-measure: 60ch;
+  --m3-dialog-width: 880px;
+  --m3-palette-width: 640px;
+  --m3-menu-width: 22rem;
   --m3-page-top: 16px;
   --m3-page-header-height: 56px;
   --m3-page-header-gap: 16px;

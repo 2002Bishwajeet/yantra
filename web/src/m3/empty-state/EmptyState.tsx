@@ -5,11 +5,19 @@ import './EmptyState.css'
 
 /** One block of the EmptyStates board, drawn in place of a card's rows: a
  *  mark and a word for the answer, one line for why it is an answer, and the
- *  way out when there is one. Titles are sentence case. */
-export function EmptyState(props: { state?: MarkState; title: string; children?: ReactNode; action?: ReactNode }) {
-  const { state, title, children, action } = props
+ *  way out when there is one. Titles are sentence case and end with no full
+ *  stop. `compact` is the banner: a left-aligned row with the action at the far
+ *  end, for a state that is not empty (a paused room) or a line (Idle). */
+export function EmptyState(props: {
+  state?: MarkState
+  title: string
+  children?: ReactNode
+  action?: ReactNode
+  compact?: boolean
+}) {
+  const { state, title, children, action, compact } = props
   return (
-    <div className="m3-empty" data-slot="empty">
+    <div className="m3-empty" data-compact={compact ? '' : undefined} data-slot="empty">
       <State className="m3-empty__title" state={state ?? 'idle'}>
         {title}
       </State>

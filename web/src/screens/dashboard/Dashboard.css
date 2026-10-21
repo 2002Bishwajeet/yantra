@@ -20,13 +20,13 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: var(--m3-list-gap) var(--m3-page-header-gap);
 }
 
 .dash__fact {
   display: inline-flex;
   align-items: center;
-  gap: 8px 16px;
+  gap: var(--m3-list-gap) var(--m3-page-header-gap);
 }
 
 .dash__facts .m3-state {
@@ -108,7 +108,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 56ch;
+  max-width: var(--m3-measure);
 }
 
 .dash__hero-empty-title {
@@ -344,6 +344,42 @@
   width: 452px;
 }
 
+/* The tablet frame is too narrow for the line: the head sits above the list, and a session's words
+   keep one basis instead of wrapping beside the verbs. */
+[data-shell="tablet"] .dash__worth {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--m3-list-gap);
+}
+
+[data-shell="tablet"] .dash__unclaimed-list {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+[data-shell="tablet"] .dash__unclaimed + .dash__unclaimed::before {
+  content: none;
+}
+
+[data-shell="tablet"] .dash__unclaimed .m3-state {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* Idle's summary keeps its words whole and lets the names give way. The phone
+   hides the names and lets the words wrap beside Show instead. */
+:is([data-shell="tablet"], [data-shell="desktop"]) .m3-disclosure__summary .m3-state {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.m3-disclosure__summary .dash__names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 [data-shell="phone"] .dash__pair,
 [data-shell="tablet"] .dash__pair {
   flex-direction: column;
@@ -462,11 +498,12 @@
 .dash__idle-empty {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 
-.dash__new {
-  margin-left: auto;
+.dash__line .m3-empty[data-compact],
+.dash__idle-empty .m3-empty[data-compact] {
+  flex: 1;
+  padding: 0;
 }
 
 /* The FAB floats over the bottom-right of the feed, so the last row's own

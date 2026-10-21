@@ -1,7 +1,7 @@
 .palette {
   align-self: start;
   gap: 8px;
-  max-width: 40rem;
+  max-width: var(--m3-palette-width);
   margin-top: 12vh;
   padding: 12px;
 }

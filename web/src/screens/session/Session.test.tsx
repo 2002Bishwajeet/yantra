@@ -116,6 +116,19 @@ describe('one workspace, four views the URL carries', () => {
     expect(screen.getByRole('button', { name: 'Stop' }).getAttribute('aria-describedby')).toBeNull()
   })
 
+  /** Y-566: the page reports the width it draws, so a check can read it. The
+   *  terminal is the one view that takes the wide column. */
+  it('draws the reading column, and the wide one for the terminal', async () => {
+    daemon()
+    const { unmount } = await open('landing', 'transcript')
+    await screen.findByRole('button', { name: 'Stop' })
+    expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('reading')
+    unmount()
+    await open('landing', 'terminal')
+    await screen.findByRole('button', { name: 'Stop' })
+    expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('wide')
+  })
+
   /** D5 §3.2: a view is navigation, so each pill is a link the browser can
    *  copy and open in a tab. Chat is first (M14 board 13). */
   it('draws the four views as links, chat first, with the open one marked', async () => {

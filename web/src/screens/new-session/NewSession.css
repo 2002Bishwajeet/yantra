@@ -505,7 +505,7 @@ span.ns__crumb {
 /* Tablet and desktop: the boards' modal, a reading column on surface-container-low. */
 
 .m3-dialog.ns-dialog {
-  max-width: var(--m3-page-max-reading);
+  max-width: var(--m3-dialog-width);
   background: var(--md-sys-color-surface-container-low);
   --m3-field-surface: var(--md-sys-color-surface-container-low);
 }
