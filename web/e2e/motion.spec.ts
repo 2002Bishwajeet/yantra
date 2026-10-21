@@ -4,7 +4,20 @@ import { expect, scenario, test } from './lib/test'
  *  a spatial transition lands in one frame under reduce while the fade stays.
  *  The desktop bell's popover is the surface; every project runs under
  *  `reduce` for the screenshots, so the first block opts out of it. */
-const open = async (page: Parameters<typeof scenario>[0]) => {
+const open = async (page: Parameters<typeof scenario>[0], watch = false) => {
+  // A count taken after the open races the 0.36s spring on a loaded runner; a listener cannot miss the run.
+  if (watch)
+    await page.addInitScript(() => {
+      const seen = { runs: 0 }
+      Object.assign(window, { popoverRuns: seen })
+      addEventListener(
+        'transitionrun',
+        (event) => {
+          if ((event.target as Element).classList?.contains('m3-popover')) seen.runs++
+        },
+        true,
+      )
+    })
   await scenario(page, 'busy')
   await page.goto('/')
   await page.getByRole('button', { name: /^Notifications/ }).click()
@@ -30,9 +43,9 @@ test.describe('with motion', () => {
 
   test('the popover opens on the spring and settles', async ({ page, size }) => {
     test.skip(size !== 'desktop', 'the popover is the desktop bell')
-    const popup = await open(page)
+    const popup = await open(page, true)
     expect(await popup.evaluate(durationOf, 'transform')).toBe('0.36s')
-    const ran = await popup.evaluate((el) => el.getAnimations().length)
+    const ran = await page.evaluate(() => (window as unknown as { popoverRuns: { runs: number } }).popoverRuns.runs)
     expect(ran).toBeGreaterThan(0)
     await popup.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
     expect(await popup.evaluate((el) => getComputedStyle(el).transform)).toBe('none')
