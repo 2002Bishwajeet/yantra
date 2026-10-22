@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useId, useRef, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import type { Room as RoomData, RoomMessage } from '@/api'
@@ -8,6 +8,7 @@ import { roomQuery } from '@/api/queries'
 import * as Composer from '@/composer/Composer'
 import { useEnterSends } from '@/composer/enterSends'
 import { PrimaryAction } from '@/composer/PrimaryAction'
+import { useDockHeight } from '@/composer/useDockHeight'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -73,6 +74,8 @@ function Compose({ name }: { name: string }) {
   const post = usePostToRoom()
   const enterSends = useEnterSends()
   const id = useId()
+  const dock = useRef<HTMLDivElement>(null)
+  useDockHeight(dock)
   const submit = () => {
     if (post.isPending || text.trim() === '') return
     post.mutate(
@@ -86,7 +89,7 @@ function Compose({ name }: { name: string }) {
     )
   }
   return (
-    <div className="room__compose">
+    <div className="composer-dock" ref={dock}>
       <Composer.Root
         aria-labelledby={`${id}-title`}
         empty={text === ''}

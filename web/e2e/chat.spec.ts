@@ -348,11 +348,10 @@ test.describe('the composer', () => {
       .toEqual([true, true, true, true, true, true])
   })
 
-  test('rides at the foot of the screen on a phone while the page scrolls', async ({ page, size }) => {
-    test.skip(size !== 'phone', 'the dock is sticky on the phone only')
-    await page.setViewportSize({ width: 390, height: 520 })
+  test('rides at the foot of the screen while the page scrolls', async ({ page }) => {
+    await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 })
     await page.evaluate(() => window.scrollTo(0, 0))
-    const dock = page.locator('.chat__dock')
+    const dock = page.locator('.composer-dock')
     await expect(dock).toBeInViewport({ ratio: 1 })
     const viewport = page.viewportSize()!.height
     const at = async () => {

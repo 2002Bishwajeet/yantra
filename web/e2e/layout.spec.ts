@@ -201,11 +201,10 @@ for (const [label, path, scrolls] of [
   ['an empty thread', '/w/landing', false],
   ['a short thread', '/w/yantra-web?thread=1a2b3c4d', true],
 ] as const) {
-  test(`the last block of ${label} stays clear of the dock's scrim on a phone`, async ({ page, size }) => {
-    test.skip(size !== 'phone', 'the dock is sticky only on the phone')
+  test(`the last block of ${label} stays clear of the dock's scrim`, async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(path)
-    const dock = page.locator('.chat__dock')
+    const dock = page.locator('.composer-dock')
     await expect(dock).toBeVisible()
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Threads' })).toBeVisible()

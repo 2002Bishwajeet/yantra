@@ -730,54 +730,23 @@
   gap: 12px;
 }
 
-/* Phone: the composer rides at the foot of the screen while the page scrolls. The session
-   screen has no navigation bar, so the dock owns the page's bottom padding. A sticky box
-   stays inside its parent, so the chat gives its children to the session's column. */
+/* A sticky dock stays inside its parent, so the chat gives its children to the session's column and the dock
+   pins against the whole page. The children keep the reading width the session gives its own. */
 
-.chat__dock {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* An error above the card shares the card's column. */
-.chat__dock > .m3-error {
-  box-sizing: border-box;
-  width: 100%;
-}
-
-[data-shell="phone"] .session__chat:not([hidden]),
-[data-shell="phone"] .session__chat:not([hidden]) > .chat {
+.session__chat:not([hidden]),
+.session__chat:not([hidden]) > .chat {
   display: contents;
 }
 
-[data-shell="phone"] .shell__main:has(.session__chat:not([hidden]) .chat__dock) {
+.session__chat:not([hidden]) > .chat > * {
+  max-width: var(--m3-page-max-reading);
+}
+
+.session__chat:not([hidden]) > .chat[data-branch] > * {
+  max-width: none;
+}
+
+/* The dock owns the page's bottom padding. */
+[data-shell] :is(.shell__main, .shell__body, .shell__column):has(.session__chat:not([hidden]) .composer-dock) {
   padding-bottom: 0;
-}
-
-[data-shell="phone"] .chat__dock {
-  --chat-scrim: 16px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  /* The scrim is drawn above the dock, so the page gap and this margin hold it clear of the last block. */
-  margin-top: max(0px, calc(var(--chat-scrim) - var(--m3-page-gap)));
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--md-sys-color-surface);
-}
-
-/* A scrim, the one gradient the house allows: text scrolling under the dock fades out and is not sliced. */
-[data-shell="phone"] .chat__dock::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 100%;
-  height: var(--chat-scrim);
-  background: linear-gradient(to top, var(--md-sys-color-surface), transparent);
-  pointer-events: none;
-}
-
-/* WCAG 2.4.11: a focused control and the pinned end scroll to clear the dock, whose height Chat measures
-   into --chat-dock-height as a draft, a plan or an error grows it. */
-:root:has([data-shell="phone"] .session__chat:not([hidden]) .chat__dock) {
-  scroll-padding-bottom: calc(var(--chat-dock-height, 260px) + 8px);
 }
