@@ -6,6 +6,7 @@ import { useAbout, useNotifications } from '@/api/hooks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Row, RowText } from '@/m3/row/Row'
@@ -130,9 +131,11 @@ export function NotificationsList(props: { onOpen?: () => void }) {
         </Button>
       </div>
       {shown.today.length + shown.earlier.length === 0 ? (
-        <p className="notifications__empty">
-          {filter === 'unread' ? 'Nothing unread.' : 'Nothing has happened since the daemon started.'}
-        </p>
+        filter === 'unread' ? (
+          <EmptyState title="Nothing unread" />
+        ) : (
+          <EmptyState title="Nothing yet">Nothing has happened since the daemon started.</EmptyState>
+        )
       ) : null}
       {(['today', 'earlier'] as const).map((when) =>
         shown[when].length ? (

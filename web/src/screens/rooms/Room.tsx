@@ -12,9 +12,11 @@ import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { announce } from '@/m3/live/live'
-import { State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
@@ -41,19 +43,24 @@ function Paused({ name, budget }: { name: string; budget: number }) {
   const resume = useResumeRoom()
   return (
     <Card className="room__paused" surface="high">
-      <State state="needs">paused</State>
-      <Text render={<p />} scale="body-medium">
-        The agents sent {budget} messages, so the room waits for you. Resume it, or post a message.
-      </Text>
-      <Button
-        aria-busy={resume.isPending || undefined}
-        className="room__resume"
-        onClick={() =>
-          resume.mutate(name, { onSuccess: () => announce(`Room ${name} resumed.`) })
+      <EmptyState
+        compact
+        action={
+          <Button
+            aria-busy={resume.isPending || undefined}
+            className="room__resume"
+            onClick={() =>
+              resume.mutate(name, { onSuccess: () => announce(`Room ${name} resumed.`) })
+            }
+          >
+            {resume.isPending ? 'Resuming…' : 'Resume'}
+          </Button>
         }
+        state="needs"
+        title="Paused"
       >
-        {resume.isPending ? 'Resuming…' : 'Resume'}
-      </Button>
+        The agents sent {budget} messages, so the room waits for you. Resume it, or post a message.
+      </EmptyState>
       {resume.error ? (
         <ErrorSurface.Inline error={resume.error} title="The room was not resumed" />
       ) : null}
@@ -122,7 +129,6 @@ function Body({ room }: { room: RoomData }) {
   const now = useTick(true)
   return (
     <div className="room__body">
-      <Mono className="room__facts">{facts(room)}</Mono>
       {room.paused ? <Paused budget={room.budget} name={room.name} /> : null}
       {room.log.length === 0 ? (
         <Text render={<p />} scale="body-medium" tone="variant">
@@ -169,13 +175,15 @@ function Unread({ name, error, reset }: { name: string; error: unknown; reset: (
 export function Room() {
   const { room: name } = useParams({ from: '/rooms/$room' })
   const room = useQuery(roomQuery(name))
+  // A 404 on a later poll is a room the daemon lost, so it wins over what was drawn.
+  const lost = room.error && (!room.data || asApiError(room.error).kind === 'missing')
   return (
-    <div className="rooms">
-      <Text render={<h1 />} emphasized scale="display-small">
-        {name}
-      </Text>
-      {/* A 404 on a later poll is a room the daemon lost, so it wins over what was drawn. */}
-      {room.error && (!room.data || asApiError(room.error).kind === 'missing') ? (
+    <Page width="reading">
+      <PageHeader
+        subtitle={room.data && !lost ? <Mono className="room__facts">{facts(room.data)}</Mono> : undefined}
+        title={name}
+      />
+      {lost ? (
         <Unread error={room.error} name={name} reset={() => void room.refetch()} />
       ) : room.data ? (
         <ErrorBoundary layout="card" title="The room could not be drawn">
@@ -183,10 +191,10 @@ export function Room() {
         </ErrorBoundary>
       ) : (
         <div aria-busy="true" className="rooms__list" data-slot="reading">
-          <Skeleton style={{ height: 80 }} />
-          <Skeleton style={{ height: 80 }} />
+          <Skeleton lines={1} shape="card" />
+          <Skeleton lines={1} shape="card" />
         </div>
       )}
-    </div>
+    </Page>
   )
 }

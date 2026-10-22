@@ -269,7 +269,7 @@ describe('/machines when no machine can run a session', () => {
     )
     mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
-    expect(screen.getByText('No machine can run a session yet.')).toBeTruthy()
+    expect(screen.getByText('No machine can run a session yet')).toBeTruthy()
     // The title row keeps its own Add a device too, so there are two.
     expect(screen.getAllByRole('link', { name: 'Add a device' }).length).toBeGreaterThan(0)
   })

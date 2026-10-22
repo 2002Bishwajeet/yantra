@@ -286,6 +286,9 @@ export function Chat(props: ChatProps) {
       }
     })
     watching.observe(box)
+    // The thread list above loads after the dock draws; the page grows and the dock would cover the intro or the last turn.
+    const page = box.closest('.m3-page')
+    if (page) watching.observe(page)
     return () => {
       watching.disconnect()
       root.style.removeProperty('--chat-dock-height')
@@ -377,7 +380,7 @@ export function Chat(props: ChatProps) {
   }
 
   return (
-    <div className="chat">
+    <div className="chat" data-branch={showDiff ? 'open' : undefined}>
       <div className="chat__bar">
         <Button
           aria-pressed={showDiff}

@@ -1,0 +1,25 @@
+.m3-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+  flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--m3-page-max-wide);
+  min-width: 0;
+  margin-inline: auto;
+  padding-block-start: var(--m3-page-top);
+}
+
+/* A reading page starts at the left edge the wide column has in this frame, so
+   Machines and Add a device share one title edge on a desktop. */
+.m3-page[data-width="reading"] {
+  max-width: var(--m3-page-max-reading);
+  margin-inline: max(0px, calc((100% - var(--m3-page-max-wide)) / 2)) auto;
+}
+
+.m3-page__pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-page-gap);
+}

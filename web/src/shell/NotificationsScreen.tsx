@@ -1,5 +1,6 @@
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
-import { Text } from '@/m3/text/Text'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { NotificationsList } from './Notifications'
 
 /** `/notifications`: the phone's pushed screen. Any width can open it; the
@@ -7,13 +8,11 @@ import { NotificationsList } from './Notifications'
  *  own `h1` is the app bar; Shell.css hides this one there. */
 export function NotificationsScreen() {
   return (
-    <>
-      <Text render={<h1 />} emphasized scale="display-small">
-        Notifications
-      </Text>
+    <Page>
+      <PageHeader title="Notifications" />
       <ErrorBoundary layout="card" title="Notifications could not be drawn">
         <NotificationsList />
       </ErrorBoundary>
-    </>
+    </Page>
   )
 }

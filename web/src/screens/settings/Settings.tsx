@@ -1,6 +1,8 @@
 import { Link, useParams } from '@tanstack/react-router'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { List, ListChevron, ListItem } from '@/m3/list/List'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Eyebrow, Text } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
 import { Nowhere } from '@/shell/Shell'
@@ -17,41 +19,49 @@ export function Settings() {
   const chosen = categoryOf(id)
   if (id !== undefined && chosen === undefined) return <Nowhere />
 
+  // The phone's app bar names the category; its own h1 is hidden there.
   if (factor === 'phone') {
-    return chosen ? <Pane category={chosen} level={1} /> : <Index />
+    return (
+      <Page>
+        <PageHeader title={chosen ? chosen.label : 'Settings'} />
+        {chosen ? <Pane category={chosen} level={1} /> : <Index />}
+      </Page>
+    )
   }
 
   return (
-    <div className="settings" data-factor={factor}>
-      <nav aria-label="Settings" className="settings__nav">
-        <h1 className="settings__title">Settings</h1>
-        {GROUPS.map((group) => (
-          <div className="settings__catgroup" key={group}>
-            <Eyebrow className="settings__eyebrow" id={`settings-${group}`}>
-              {group}
-            </Eyebrow>
-            <ul aria-labelledby={`settings-${group}`} className="settings__cats">
-              {CATEGORIES.filter((one) => one.group === group).map((one) => (
-                <li key={one.id}>
-                  <Link
-                    aria-current={one.id === (chosen ?? CATEGORIES[0]).id ? 'page' : undefined}
-                    className="settings__cat m3-interactive"
-                    params={{ category: one.id }}
-                    to="/settings/$category"
-                  >
-                    <span aria-hidden="true" className="settings__cat-icon">
-                      {one.icon}
-                    </span>
-                    {one.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </nav>
-      <Pane category={chosen ?? CATEGORIES[0]} level={2} />
-    </div>
+    <Page>
+      <PageHeader title="Settings" />
+      <div className="settings" data-factor={factor}>
+        <nav aria-label="Settings" className="settings__nav">
+          {GROUPS.map((group) => (
+            <div className="settings__catgroup" key={group}>
+              <Eyebrow className="settings__eyebrow" id={`settings-${group}`}>
+                {group}
+              </Eyebrow>
+              <ul aria-labelledby={`settings-${group}`} className="settings__cats">
+                {CATEGORIES.filter((one) => one.group === group).map((one) => (
+                  <li key={one.id}>
+                    <Link
+                      aria-current={one.id === (chosen ?? CATEGORIES[0]).id ? 'page' : undefined}
+                      className="settings__cat m3-interactive"
+                      params={{ category: one.id }}
+                      to="/settings/$category"
+                    >
+                      <span aria-hidden="true" className="settings__cat-icon">
+                        {one.icon}
+                      </span>
+                      {one.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+        <Pane category={chosen ?? CATEGORIES[0]} level={2} />
+      </div>
+    </Page>
   )
 }
 
@@ -59,7 +69,6 @@ export function Settings() {
 function Index() {
   return (
     <>
-      <h1>Settings</h1>
       {GROUPS.map((group) => (
         <section aria-label={group} className="settings__group" key={group}>
           <Eyebrow render={<h2 />} className="settings__eyebrow">
@@ -87,14 +96,20 @@ function Index() {
 }
 
 /** One category. `level` 1 is the phone, where the title is the app bar's
- *  and the shell hides the h1; 2 sits under the desktop's "Settings". */
+ *  and the heading is for readers only; 2 sits under the page's "Settings". */
 function Pane(props: { category: Category; level: 1 | 2 }) {
   const { category, level } = props
   const { Screen, label, blurb } = category
   return (
     <section aria-labelledby="settings-category" className="settings__pane" key={category.id}>
       <header className="settings__head">
-        <Text render={level === 1 ? <h1 /> : <h2 />} id="settings-category" scale="headline-small" emphasized>
+        <Text
+          className={level === 1 ? 'm3-sr-only' : undefined}
+          render={<h2 />}
+          id="settings-category"
+          scale="headline-small"
+          emphasized
+        >
           {label}
         </Text>
         <Text render={<p />} scale="body-medium" tone="variant">

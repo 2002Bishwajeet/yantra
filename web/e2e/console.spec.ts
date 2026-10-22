@@ -22,7 +22,7 @@ const SCENARIOS: readonly Scenario[] = [
 const ALLOWED = /^Failed to load resource: the server responded with a status of \d+/
 
 const PATHS = [
-  ...ROUTES.map((one) => one.path),
+  ...new Set(ROUTES.map((one) => one.path)),
   '/w/landing?view=spend',
   '/settings/providers',
   '/nowhere',

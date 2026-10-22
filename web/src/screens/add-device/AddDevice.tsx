@@ -16,6 +16,8 @@ import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State, type MarkState } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Stepper, type StepItem, type StepState } from '@/m3/stepper/Stepper'
 import { Text } from '@/m3/text/Text'
@@ -372,15 +374,11 @@ export function AddDevice() {
   const navigate = useNavigate({ from: '/machines/add' })
   const platform = search.platform ?? guessPlatform(navigator)
   return (
-    <div className="add-device">
-      <div className="add-device__head">
-        <Text emphasized render={<h1 />} scale="display-small">
-          Add a device
-        </Text>
-        <Text scale="body-medium" tone="variant">
-          Each step ticks itself when Yantra sees it happen.
-        </Text>
-      </div>
+    <Page className="add-device" width="reading">
+      <PageHeader title="Add a device" />
+      <Text className="add-device__lead" render={<p />} scale="body-medium" tone="variant">
+        Each step ticks itself when Yantra sees it happen.
+      </Text>
       <div className="add-device__pick">
         <Segmented
           label="Platform"
@@ -396,6 +394,6 @@ export function AddDevice() {
         <Note>{search.platform ? 'chosen by you' : 'guessed from this browser · pick another if it is wrong'}</Note>
       </div>
       {platform === 'windows' ? <Windows /> : <Flow key={platform} named={search.machine} platform={platform} />}
-    </div>
+    </Page>
   )
 }

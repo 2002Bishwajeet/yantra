@@ -115,6 +115,6 @@
   inset-inline: 16px;
   bottom: calc(96px + env(safe-area-inset-bottom));
   z-index: 20;
-  max-width: 480px;
+  max-width: var(--m3-measure);
   margin-inline: auto;
 }

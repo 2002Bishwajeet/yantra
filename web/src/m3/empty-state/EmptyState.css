@@ -1,0 +1,58 @@
+.m3-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--m3-list-gap);
+  padding: var(--m3-card-padding-x);
+  text-align: center;
+}
+
+.m3-empty__title {
+  font: var(--md-sys-typescale-emphasized-body-large);
+  letter-spacing: var(--md-sys-typescale-emphasized-body-large-tracking);
+}
+
+.m3-empty__why {
+  max-width: 48ch;
+}
+
+.m3-empty__action {
+  display: flex;
+  align-items: center;
+  gap: var(--m3-list-gap);
+}
+
+/* A tinted card's empty block takes the card's own text colour. */
+.m3-card[data-surface="primary"] .m3-empty__why,
+.m3-card[data-surface="tertiary"] .m3-empty__why {
+  color: inherit;
+}
+
+/* The banner: title over why on the left, the action at the far end. */
+.m3-empty[data-compact] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title action"
+    "why action";
+  align-items: center;
+  justify-items: start;
+  column-gap: var(--m3-page-header-gap);
+  row-gap: 2px;
+  padding: var(--m3-row-padding);
+  text-align: start;
+}
+
+.m3-empty[data-compact] .m3-empty__title {
+  grid-area: title;
+}
+
+.m3-empty[data-compact] .m3-empty__why {
+  grid-area: why;
+  max-width: none;
+}
+
+.m3-empty[data-compact] .m3-empty__action {
+  grid-area: action;
+}

@@ -10,12 +10,9 @@
   flex: 1;
   align-items: center;
   justify-content: center;
-  gap: 24px;
+  gap: var(--m3-gutter);
   width: 100%;
-  max-width: 640px;
-  min-height: 100%;
-  margin: 0 auto;
-  padding: 24px;
+  padding: var(--m3-gutter);
   text-align: center;
 }
 
@@ -55,6 +52,7 @@
 .m3-error[data-layout="page"] .m3-error__text {
   align-items: center;
   gap: 12px;
+  max-inline-size: var(--m3-measure);
 }
 
 .m3-error[data-layout="inline"] .m3-error__text {

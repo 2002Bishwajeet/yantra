@@ -96,7 +96,7 @@ describe('one workspace, four views the URL carries', () => {
     expect(heading.textContent).toBe('landing')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     // `~` for the home directory, as a shell and the boards print a path.
-    expect(heading.closest('.session__name')?.textContent).toContain(
+    expect(heading.closest('.m3-page')?.querySelector('.session__meta')?.textContent).toContain(
       'macbook · ~/Github/yantra-landing',
     )
     // A running agent can be stopped and has nothing to resume (ADR-0015).
@@ -114,6 +114,25 @@ describe('one workspace, four views the URL carries', () => {
     const said = document.getElementById(resume.getAttribute('aria-describedby') ?? '')
     expect(said?.textContent).toBe('Resume needs an agent that has ended, and landing is running.')
     expect(screen.getByRole('button', { name: 'Stop' }).getAttribute('aria-describedby')).toBeNull()
+  })
+
+  /** Y-566: one Page width for every view, so the title and the tabs never move. */
+  it('draws the wide page on every view', async () => {
+    daemon()
+    for (const view of ['transcript', 'terminal'] as const) {
+      const { unmount } = await open('landing', view)
+      await screen.findByRole('button', { name: 'Stop' })
+      expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('wide')
+      unmount()
+    }
+  })
+
+  it('keeps aria-busy off the title while the workspaces load', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    await open('landing')
+    const title = await screen.findByRole('heading', { level: 1 })
+    expect(title.closest('[aria-busy="true"]')).toBeNull()
+    expect(document.querySelector('[aria-busy="true"] [data-slot="skeleton"]')).toBeTruthy()
   })
 
   /** D5 §3.2: a view is navigation, so each pill is a link the browser can

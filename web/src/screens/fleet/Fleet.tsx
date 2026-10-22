@@ -18,6 +18,8 @@ import { Card, type CardProps } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -26,7 +28,7 @@ import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { type Band, speaks, unreachable, work, type WorkRow } from '@/work'
 import { Looked, Since } from './age'
-import { Empty } from './Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Github } from './Github'
 import { useHeldBands } from './held'
 import { Stop, Verb } from './Verb'
@@ -72,35 +74,31 @@ export function Fleet() {
 
   if (nothing) {
     return (
-      <>
-        <Text render={<h1 />} emphasized scale="display-small">
-          Fleet
-        </Text>
+      <Page>
+        <PageHeader title="Fleet" />
         <ErrorSurface.Page
           error={fromReading(listed)!}
-          eyebrow="Fleet"
+          eyebrow="Workspaces read"
           reset={() => void client.invalidateQueries()}
           title="Nothing here can be reached"
           unknowns={['off the tailnet', 'yantrad down']}
         />
-      </>
+      </Page>
     )
   }
 
   return (
-    <div className="fleet">
-      <div className="fleet__head">
-        <div className="fleet__title">
-          <Text render={<h1 />} emphasized scale="display-small">
-            Fleet
-          </Text>
-          <Looked className="fleet__looked" reads={[machines, listed, sessions, agents]} />
-        </div>
-        {/* §4.4: nothing moves under a thumb; the pill applies the new order. */}
-        <Pill disabled={changed === 0} icon={<RefreshCw />} onClick={reorder}>
-          Reorder{changed > 0 ? ` · ${changed} changed` : ''}
-        </Pill>
-      </div>
+    <Page>
+      <PageHeader
+        // §4.4: nothing moves under a thumb; the pill applies the new order.
+        actions={
+          <Pill disabled={changed === 0} icon={<RefreshCw />} onClick={reorder}>
+            Reorder{changed > 0 ? ` · ${changed} changed` : ''}
+          </Pill>
+        }
+        stamp={<Looked reads={[machines, listed, sessions, agents]} />}
+        title="Fleet"
+      />
 
       {failed && !ready ? (
         <ErrorSurface.Card
@@ -124,9 +122,9 @@ export function Fleet() {
           count={rows('needs').length}
           empty={
             speaks(attention) ? null : (
-              <Empty title="Nothing needs you">
+              <EmptyState title="Nothing needs you">
                 when an agent asks for trust or a review is requested, it appears here first
-              </Empty>
+              </EmptyState>
             )
           }
           pending={!ready}
@@ -143,7 +141,7 @@ export function Fleet() {
         <Group
           band="running"
           count={rows('running').length}
-          empty={<Empty title="Nothing is running">Start a session and its elapsed time shows here</Empty>}
+          empty={<EmptyState title="Nothing is running">Start a session and its elapsed time shows here</EmptyState>}
           pending={!ready}
           rows={rows('running')}
           sessions={live}
@@ -156,11 +154,11 @@ export function Fleet() {
         <Idle
           empty={
             listed.looked === 'ok' && listed.data.length === 0 ? (
-              <Empty title="no workspaces yet">
+              <EmptyState title="No workspaces yet">
                 <Link to="/new">New</Link> makes one
-              </Empty>
+              </EmptyState>
             ) : (
-              <Empty title="Nothing is idle">every workspace is running or waiting on you</Empty>
+              <EmptyState title="Nothing is idle">every workspace is running or waiting on you</EmptyState>
             )
           }
           limit={factor === 'phone' ? 0 : IDLE_SHOWN}
@@ -182,15 +180,15 @@ export function Fleet() {
           title="Not read yet"
         />
       ) : null}
-    </div>
+    </Page>
   )
 }
 
 function Pending() {
   return (
     <div aria-busy="true" className="fleet__pending">
-      <Skeleton />
-      <Skeleton style={{ width: '84%' }} />
+      <Skeleton shape="row" />
+      <Skeleton shape="row" style={{ width: '84%' }} />
     </div>
   )
 }

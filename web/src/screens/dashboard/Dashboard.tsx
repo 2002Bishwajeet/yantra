@@ -28,9 +28,12 @@ import { ago, at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
+import { Page, PagePending } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -136,9 +139,8 @@ function Strip(props: {
   notAnswering: string[]
   now: number
   retry: () => void
-  stamp: ReactNode
 }) {
-  const { machines, notAnswering, now, retry, stamp: aged } = props
+  const { machines, notAnswering, now, retry } = props
   if (machines.looked === 'pending') {
     return (
       <div className="dash__strip" data-slot="reading">
@@ -155,7 +157,6 @@ function Strip(props: {
     return (
       <div className="dash__strip">
         <NotLooked what="Machines have" />
-        {aged}
       </div>
     )
   }
@@ -194,7 +195,6 @@ function Strip(props: {
           </span>
         ))}
       </div>
-      {aged}
     </div>
   )
 }
@@ -311,9 +311,8 @@ function Hero(props: {
   events: Event[]
   now: number
   retry: () => void
-  stamp: ReactNode
 }) {
-  const { rows, attention, events, now, retry, stamp: aged } = props
+  const { rows, attention, events, now, retry } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
   const items = attention.looked === 'ok' ? attention.data.reviews.length + attention.data.issues.length : 0
@@ -333,7 +332,6 @@ function Hero(props: {
             </Text>
           </>
         )}
-        {aged}
       </div>
       {empty ? (
         <>
@@ -480,7 +478,7 @@ function Worth(props: {
 }) {
   const { sessions, workspaces, now, retry } = props
   if (sessions.looked === 'pending') {
-    return <Skeleton style={{ height: 64 }} />
+    return <Skeleton shape="row" />
   }
   if (sessions.looked === 'failed') {
     return (
@@ -604,16 +602,19 @@ function Idle(props: {
   const { rows, sessions, now, compact, fleetEmpty } = props
   const workspaces = rows.flatMap((row) => (row.kind === 'workspace' ? [row] : []))
   const words = `${plural(workspaces.length, 'workspace')}, nothing running`
-  const none = fleetEmpty ? 'no workspaces yet' : 'no idle workspaces'
   const empty = (
-    <>
-      <State state="idle">{none}</State>
-      {fleetEmpty ? (
-        <Button className="dash__new" render={<Link to="/new" />} role="link" variant="text">
-          New →
-        </Button>
-      ) : null}
-    </>
+    <EmptyState
+      action={
+        fleetEmpty ? (
+          <Button render={<Link to="/new" />} role="link" variant="text">
+            New →
+          </Button>
+        ) : undefined
+      }
+      compact
+      state="idle"
+      title={fleetEmpty ? 'No workspaces yet' : 'No idle workspaces'}
+    />
   )
   const list = (
     <ul className={compact ? 'dash__grid' : 'dash__idle-list'}>
@@ -702,13 +703,16 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
 
 function Pending() {
   return (
-    <div aria-busy="true" className="dash" data-slot="reading">
-      <Skeleton shape="text" style={{ width: 320 }} />
-      <Skeleton style={{ height: 220 }} />
-      <Skeleton style={{ height: 280 }} />
-      <Skeleton style={{ height: 64 }} />
-      <Skeleton style={{ height: 52 }} />
-    </div>
+    <Page>
+      <PageHeader title="Dashboard" />
+      <PagePending>
+        <Skeleton shape="text" style={{ width: 320 }} />
+        <Skeleton lines={3} shape="card" />
+        <Skeleton lines={4} shape="card" />
+        <Skeleton shape="row" />
+        <Skeleton shape="row" />
+      </PagePending>
+    </Page>
   )
 }
 
@@ -748,16 +752,10 @@ export function Dashboard() {
     setGood({ reading: machines, at: now })
   }
 
-  const title = (
-    <Text render={<h1 />} className="dash__title" emphasized scale="headline-medium">
-      Dashboard
-    </Text>
-  )
-
   if (nothing) {
     return (
-      <>
-        {title}
+      <Page>
+        <PageHeader title="Dashboard" />
         <PrimaryAction action={null} />
         <ErrorSurface.Page
           action={
@@ -766,20 +764,19 @@ export function Dashboard() {
             </Button>
           }
           error={new ApiError('network', nothing, { sentence: UNREACHABLE })}
-          eyebrow="Dashboard"
+          eyebrow="Fleet read"
           meta={good === null ? undefined : `last good read ${ago((now - good.at) / 1000, now).text} ago`}
           reset={retry}
           title="Nothing here can be reached"
           unknowns={['off the tailnet', 'yantrad down']}
         />
-      </>
+      </Page>
     )
   }
 
   if (reading === 'pending' || (firstRun && gate.key === 'reading')) {
     return (
       <>
-        {title}
         {home ? <PrimaryAction action={null} /> : null}
         <Pending />
       </>
@@ -814,18 +811,21 @@ export function Dashboard() {
   ]
   const phone = factor === 'phone'
   const compact = density === 'compact'
-  const stripStamp = phone ? null : <Stamp now={now} reads={reads} />
-  const heroStamp = phone ? <Stamp className="dash__hero-stamp" now={now} reads={reads} /> : null
   const band = (which: WorkRow['band']) => placed.filter((row) => row.band === which)
   const notAnswering = placed.flatMap((row) => (row.kind === 'machine' ? [row.machine] : []))
   const unread = band('unknown')
+  // On a phone the app bar is the title, so the strip takes the header's row and the stamp rides at its end.
+  const strip = (
+    <ErrorBoundary layout="inline" title="The status line could not be drawn">
+      <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} />
+    </ErrorBoundary>
+  )
+  const headed = phone && machines.looked !== 'failed'
 
   return (
-    <div className="dash">
-      {title}
-      <ErrorBoundary layout="inline" title="The status line could not be drawn">
-        <Strip machines={machines} notAnswering={notAnswering} now={now} retry={retry} stamp={stripStamp} />
-      </ErrorBoundary>
+    <Page className="dash">
+      <PageHeader stamp={<Stamp now={now} reads={reads} />} subtitle={headed ? strip : undefined} title="Dashboard" />
+      {headed ? null : strip}
       {gate.passed ? (
         <ErrorBoundary layout="inline" title="Finish setup could not be drawn">
           <FinishSetup now={now} />
@@ -858,7 +858,6 @@ export function Dashboard() {
               now={now}
               retry={retry}
               rows={band('needs').filter((row) => row.kind !== 'machine')}
-              stamp={heroStamp}
             />
           </ErrorBoundary>
           <ErrorBoundary eyebrow="Running" title="Running could not be drawn">
@@ -891,6 +890,6 @@ export function Dashboard() {
           <State state="unknown">{names(unread)}</State>
         </div>
       ) : null}
-    </div>
+    </Page>
   )
 }

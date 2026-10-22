@@ -80,6 +80,31 @@ describe('every path draws its screen and names it in the title', () => {
     await waitFor(() => expect(document.title).toBe(title))
   })
 
+  /** Y-566: every route is drawn in one Page under one PageHeader, and the
+   *  header owns the page's only h1. */
+  it.each([
+    '/',
+    '/fleet',
+    '/machines',
+    '/m/pi-5',
+    '/m/pi-5/s/scratch',
+    '/usage',
+    '/w/landing',
+    '/w/landing/repair',
+    '/settings',
+    '/settings/about',
+    '/machines/add',
+    '/rooms',
+    '/rooms/design',
+    '/notifications',
+    '/no-such-page',
+  ])('%s draws exactly one PageHeader h1', async (path) => {
+    await open(path)
+    await waitFor(() => expect(document.querySelectorAll('.m3-page-header__h1')).toHaveLength(1))
+    expect(document.querySelectorAll('h1')).toHaveLength(1)
+    expect(document.querySelectorAll('.m3-page')).toHaveLength(1)
+  })
+
   it('/new draws the dialog over the dashboard and names the title', async () => {
     await open('/new')
     expect(await screen.findByRole('dialog', { name: 'New session' })).toBeTruthy()

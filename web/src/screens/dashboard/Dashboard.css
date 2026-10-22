@@ -1,22 +1,3 @@
-.dash {
-  display: flex;
-  flex-direction: column;
-  gap: var(--m3-page-gap);
-  flex: 1;
-  min-width: 0;
-}
-
-/* The tablet board titles the page; the desktop board's tab pill is the title,
-   so the h1 stays for readers only. The phone's is the app bar (Shell.css). */
-[data-shell="desktop"] .dash__title {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
 .dash__head {
   display: flex;
   align-items: flex-end;
@@ -31,7 +12,7 @@
   justify-content: space-between;
   gap: 16px;
   min-height: var(--m3-status-line);
-  padding: 0 24px;
+  padding: 0 var(--m3-card-padding-x);
   color: var(--md-sys-color-on-surface-variant);
 }
 
@@ -39,13 +20,13 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 20px;
+  gap: var(--m3-list-gap) var(--m3-page-header-gap);
 }
 
 .dash__fact {
   display: inline-flex;
   align-items: center;
-  gap: 8px 20px;
+  gap: var(--m3-list-gap) var(--m3-page-header-gap);
 }
 
 .dash__facts .m3-state {
@@ -72,7 +53,6 @@
 }
 
 .dash__stamp,
-.dash__hero-stamp,
 .dash__age,
 .dash__elapsed {
   font-size: var(--md-sys-typescale-body-small-size);
@@ -124,16 +104,11 @@
   padding-bottom: 4px;
 }
 
-.dash__hero-stamp {
-  grid-area: stamp;
-  color: inherit;
-}
-
 .dash__hero-empty {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 560px;
+  max-width: var(--m3-measure);
 }
 
 .dash__hero-empty-title {
@@ -236,7 +211,7 @@
   gap: 16px;
   min-height: 64px;
   padding: 10px 12px 10px 24px;
-  border-radius: 22px;
+  border-radius: var(--m3-list-radius);
 }
 
 .dash__worth-head {
@@ -308,7 +283,7 @@
   min-height: 52px;
   padding: 4px 24px;
   border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: 22px;
+  border-radius: var(--m3-list-radius);
   /* D7 N7: a 1.47:1 outline alone does not make an edge in the dark. */
   background: var(--md-sys-color-surface-container);
 }
@@ -369,12 +344,59 @@
   width: 452px;
 }
 
+/* The tablet frame is too narrow for the line: the head sits above the list, and a session's words
+   keep one basis instead of wrapping beside the verbs. */
+[data-shell="tablet"] .dash__worth {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--m3-list-gap);
+}
+
+[data-shell="tablet"] .dash__unclaimed-list {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+[data-shell="tablet"] .dash__unclaimed + .dash__unclaimed::before {
+  content: none;
+}
+
+[data-shell="tablet"] .dash__unclaimed .m3-state {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* Idle's summary keeps its words whole and lets the names give way. The phone
+   hides the names and lets the words wrap beside Show instead. */
+:is([data-shell="tablet"], [data-shell="desktop"]) .m3-disclosure__summary .m3-state {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.m3-disclosure__summary .dash__names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 [data-shell="phone"] .dash__pair,
 [data-shell="tablet"] .dash__pair {
   flex-direction: column;
 }
 
 /* Phone: the vertical feed. */
+
+/* In the header's row the strip is the title's neighbour: no inset, and the row is as tall as the strip. */
+[data-shell="phone"] .dash .m3-page-header {
+  min-height: 24px;
+}
+
+[data-shell="phone"] .m3-page-header__line > .dash__strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+}
 
 [data-shell="phone"] .dash__strip {
   gap: 8px;
@@ -400,10 +422,10 @@
 }
 
 [data-shell="phone"] .dash__hero-head {
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   grid-template-areas:
-    "number eyebrow stamp"
-    "number words stamp";
+    "number eyebrow"
+    "number words";
   align-items: center;
   padding: 0 4px;
 }
@@ -487,11 +509,12 @@
 .dash__idle-empty {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 
-.dash__new {
-  margin-left: auto;
+.dash__line .m3-empty[data-compact],
+.dash__idle-empty .m3-empty[data-compact] {
+  flex: 1;
+  padding: 0;
 }
 
 /* The FAB floats over the bottom-right of the feed, so the last row's own

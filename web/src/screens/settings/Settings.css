@@ -2,7 +2,7 @@
 
 .settings {
   display: flex;
-  gap: 40px;
+  gap: var(--m3-gutter);
   flex: 1;
   min-width: 0;
 }
@@ -10,25 +10,13 @@
 .settings__nav {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--m3-card-padding);
   flex: none;
   width: 280px;
-  padding-top: 12px;
-}
-
-[data-factor="tablet"] .settings {
-  gap: 24px;
 }
 
 [data-factor="tablet"] .settings__nav {
   width: 200px;
-}
-
-.settings__title {
-  margin: 0;
-  padding: 0 14px;
-  font: var(--md-sys-typescale-emphasized-headline-small);
-  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
 }
 
 .settings__catgroup {
@@ -82,14 +70,10 @@
 .settings__pane {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--m3-page-gap);
   flex: 1;
   min-width: 0;
-  max-width: 760px;
-}
-
-[data-density="compact"] .settings__pane {
-  gap: 16px;
+  max-width: var(--m3-page-max-reading);
 }
 
 .settings__head {

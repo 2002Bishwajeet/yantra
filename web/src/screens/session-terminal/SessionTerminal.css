@@ -1,37 +1,23 @@
-.session-terminal {
+.session-terminal__row {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-.session-terminal__head {
-  display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 8px 8px 0;
+  gap: var(--m3-page-header-gap);
 }
 
-.session-terminal__title {
+.session-terminal__meta {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-}
-
-.session-terminal__name {
-  display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.session-terminal__name > * {
+.session-terminal__meta > * {
   margin: 0;
 }
 
-.session-terminal__name a {
+.session-terminal__meta a {
   color: var(--md-sys-color-primary);
   /* A link inside a sentence needs more than its colour (WCAG 1.4.1). */
   text-decoration: underline;

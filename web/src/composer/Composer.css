@@ -17,7 +17,7 @@
   --composer-plan-inset: 20px;
   box-sizing: border-box;
   width: 100%;
-  max-width: 46rem;
+  max-width: var(--m3-page-max-reading);
   margin-inline: auto;
   container: composer / inline-size;
 }
@@ -143,6 +143,11 @@
   align-items: end;
 }
 
+/* The resting line is 32 px in a 48 px row: centre it, as the Chat's card does, and keep the action at the end. */
+.composer__card:has(> .composer__footer[data-bare]) > .composer__input {
+  align-self: center;
+}
+
 .composer__card > .composer__footer[data-bare] {
   grid-column: 2;
   grid-row: 1;
@@ -198,11 +203,11 @@
   gap: 2px;
 }
 
-.composer__status {
+.composer__status:not(.m3-sr-only) {
   /* The dock's gap sits between the card and this line; the line belongs to the card. */
   box-sizing: border-box;
   width: 100%;
-  max-width: 46rem;
+  max-width: var(--m3-page-max-reading);
   margin: -8px auto 0;
   min-height: 20px;
   padding: 4px 16px 0;

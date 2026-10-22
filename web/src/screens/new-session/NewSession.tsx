@@ -6,6 +6,8 @@ import { useMachines } from '@/api/hooks'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Stepper } from '@/m3/stepper/Stepper'
 import { Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
@@ -99,7 +101,10 @@ export function NewSession() {
   )
   const frame = (slot: ReactNode) =>
     phone ? (
-      slot
+      <Page width="reading">
+        <PageHeader title="New session" />
+        {slot}
+      </Page>
     ) : (
       <Dialog open onOpenChange={(open) => !open && void navigate({ to: '/' })} disablePointerDismissal>
         <DialogPopup
@@ -124,7 +129,6 @@ export function NewSession() {
   if (step === 4 && starting) {
     return screen(
       <div className="ns">
-        {phone ? <h1 className="ns__title">New session</h1> : null}
         <Starting plan={starting} onBack={() => go(3)} />
       </div>,
     )
@@ -144,7 +148,6 @@ export function NewSession() {
     >
       {phone ? (
         <header className="ns__head">
-          <h1 className="ns__title">New session</h1>
           {step === 1 ? (
             <Text render={<p />} className="ns__lead" scale="body-medium" tone="variant">
               a name, a machine, a repository, and what to start in it

@@ -60,7 +60,7 @@ test.describe('the session screen, chat first', () => {
     )
     // The header, because the reason Resume gives for being off names the
     // state too, and that reason is not on screen.
-    await expect(page.locator('.session__name')).toContainText('waiting for trust')
+    await expect(page.locator('.m3-page-header')).toContainText('waiting for trust')
   })
 
   test("streams a turn, and draws Claude's request with three answers", async ({ page }) => {

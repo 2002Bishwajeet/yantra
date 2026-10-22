@@ -8,9 +8,9 @@ afterEach(() => {
 })
 
 describe('the /notifications route (N1)', () => {
-  it('titles the page the same display-small h1 as every other route', async () => {
+  it('titles the page with the PageHeader h1 every other route draws', async () => {
     mount('desktop', '/notifications')
     const heading = await screen.findByRole('heading', { level: 1, name: 'Notifications' })
-    expect(heading.getAttribute('data-scale')).toBe('display-small')
+    expect(heading.className).toContain('m3-page-header__h1')
   })
 })

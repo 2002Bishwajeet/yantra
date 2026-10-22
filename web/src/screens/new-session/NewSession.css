@@ -3,7 +3,6 @@
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  max-width: 880px;
   min-width: 0;
   margin: 0;
 }
@@ -12,12 +11,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.ns__title {
-  margin: 0;
-  font: var(--md-sys-typescale-emphasized-headline-small);
-  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
 }
 
 .ns__lead,
@@ -95,7 +88,7 @@
   min-height: 72px;
   padding: 14px 16px;
   border: 0;
-  border-radius: 20px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
   text-align: left;
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface-container-lowest);
@@ -509,10 +502,10 @@ span.ns__crumb {
   padding-left: 0;
 }
 
-/* Tablet and desktop: the boards' modal, 880 px on surface-container-low. */
+/* Tablet and desktop: the boards' modal, a reading column on surface-container-low. */
 
 .m3-dialog.ns-dialog {
-  max-width: 880px;
+  max-width: var(--m3-dialog-width);
   background: var(--md-sys-color-surface-container-low);
   --m3-field-surface: var(--md-sys-color-surface-container-low);
 }

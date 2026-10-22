@@ -20,11 +20,13 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { List, ListItem, ListValue } from '@/m3/list/List'
 import { Mark, State } from '@/m3/mark/Mark'
+import { Page } from '@/m3/page/Page'
+import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Looked } from '@/screens/fleet/age'
-import { Empty } from '@/screens/fleet/Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Verb } from '@/screens/fleet/Verb'
 import { stateOf } from '@/screens/fleet/verbs'
 import { machineState } from '@/screens/machines/facts'
@@ -84,7 +86,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
           <Skeleton shape="text" style={{ width: '48%' }} />
         </div>
       ) : rows.length === 0 ? (
-        <Empty title="No workspace lives here">
+        <EmptyState title="No workspace lives here">
           {/* D7 B3: offered only where a session can start. */}
           {ready ? (
             <>
@@ -93,7 +95,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
           ) : (
             `A session can start on ${machine} once Readiness says it is ready`
           )}
-        </Empty>
+        </EmptyState>
       ) : (
         <ul className="machine__rows">
           {rows.map(({ workspace, status }) => {
@@ -146,33 +148,39 @@ export function Machine() {
   const nothing = unreachable([machines, readiness, sessions, listed])
   if (nothing) {
     return (
-      <ErrorSurface.Page
-        error={fromReading(machines)!}
-        eyebrow={name}
-        reset={() => void client.invalidateQueries()}
-        title="Nothing here can be reached"
-        unknowns={['off the tailnet', 'yantrad down']}
-      />
+      <Page>
+        <PageHeader title={name} />
+        <ErrorSurface.Page
+          error={fromReading(machines)!}
+          eyebrow="Machine"
+          reset={() => void client.invalidateQueries()}
+          title="Nothing here can be reached"
+          unknowns={['off the tailnet', 'yantrad down']}
+        />
+      </Page>
     )
   }
 
   if (machines.looked === 'ok' && !one) {
     return (
-      <ErrorSurface.Page
-        error={{
-          kind: 'missing',
-          said: `the tailnet lists no node called \`${name}\``,
-          retryable: false,
-          describe: () => `No machine is called ${name}.`,
-        }}
-        eyebrow="Machines"
-        title="No such machine"
-        action={
-          <Button render={<Link to="/machines" />} role="link" variant="text">
-            Machines
-          </Button>
-        }
-      />
+      <Page>
+        <PageHeader title={name} />
+        <ErrorSurface.Page
+          error={{
+            kind: 'missing',
+            said: `the tailnet lists no node called \`${name}\``,
+            retryable: false,
+            describe: () => `No machine is called ${name}.`,
+          }}
+          eyebrow="Machines"
+          title="No such machine"
+          action={
+            <Button render={<Link to="/machines" />} role="link" variant="text">
+              Machines
+            </Button>
+          }
+        />
+      </Page>
     )
   }
 
@@ -181,19 +189,19 @@ export function Machine() {
   const rows = agents.looked === 'ok' ? agents.data : []
 
   return (
-    <div className="machine">
-      <div className="machine__title">
-        <Text render={<h1 />} className="machine__h1" emphasized scale="display-small">
-          {name}
-        </Text>
-        {chip ? (
-          <Chip tone={chip.error ? 'error' : 'lowest'}>
-            <Mark size="small" state={chip.state} />
-            {chip.word}
-          </Chip>
-        ) : null}
-        <Looked className="machine__looked" reads={[machines, readiness, sessions]} />
-      </div>
+    <Page>
+      <PageHeader
+        stamp={<Looked reads={[machines, readiness, sessions]} />}
+        subtitle={
+          chip ? (
+            <Chip tone={chip.error ? 'error' : 'lowest'}>
+              <Mark size="small" state={chip.state} />
+              {chip.word}
+            </Chip>
+          ) : null
+        }
+        title={name}
+      />
 
       {machines.looked === 'failed' ? (
         <ErrorSurface.Inline
@@ -245,6 +253,6 @@ export function Machine() {
           </Card>
         </ErrorBoundary>
       </div>
-    </div>
+    </Page>
   )
 }

@@ -1,26 +1,11 @@
-.setup {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
-  max-width: 880px;
-  min-width: 0;
-  margin: 0 auto;
-  padding-top: 8px;
-}
-
-.setup__head {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 4px;
+.setup__lead {
+  margin: 0;
 }
 
 .setup__progress {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 4px;
 }
 
 .setup__count {
@@ -30,10 +15,6 @@
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line-height);
   letter-spacing: var(--md-sys-typescale-body-small-tracking);
-}
-
-.setup__stamp {
-  color: var(--md-sys-color-on-surface-variant);
 }
 
 .setup__track {
@@ -79,7 +60,7 @@
   box-sizing: border-box;
   min-height: 44px;
   padding: 6px 4px 6px 12px;
-  border-radius: 14px;
+  border-radius: var(--m3-row-radius);
   background: var(--md-sys-color-surface);
 }
 
@@ -168,7 +149,7 @@
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  padding: 10px 12px;
+  padding: var(--m3-row-padding);
 }
 
 [data-shell="phone"] .setup__line > .m3-button {

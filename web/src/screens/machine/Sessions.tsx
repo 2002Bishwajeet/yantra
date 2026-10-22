@@ -8,7 +8,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
-import { Empty } from '@/screens/fleet/Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 
 type Row = { session: Session; workspace: string | null }
 
@@ -61,7 +61,7 @@ export function Sessions(props: {
           <Mono className="machine__detail">{answer.error}</Mono>
         </div>
       ) : rows.length === 0 ? (
-        <Empty title="No session is open here">tmux lists nothing on {machine}</Empty>
+        <EmptyState title="No session is open here">tmux lists nothing on {machine}</EmptyState>
       ) : (
         <ul className="machine__rows">
           {rows.map(({ session, workspace }) => (

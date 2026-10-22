@@ -155,10 +155,11 @@ describe('the Dashboard on a phone', () => {
     )
   })
 
-  it('stamps the hero rather than the strip, which has no room', async () => {
+  it('stamps the page header, which keeps one row of stamp and actions', async () => {
     mount('phone', '/')
     await drawn()
-    expect(region('Needs you').getByText(/^as of /)).toBeTruthy()
+    const stamp = screen.getByText(/^as of /)
+    expect(stamp.closest('.m3-page-header__stamp')).toBeTruthy()
   })
 })
 
@@ -189,7 +190,7 @@ describe('the Dashboard on an empty fleet', () => {
     expect(reads('Worth a look')).toContain(
       'every tmux session on the machines that answered belongs to a workspace',
     )
-    expect(screen.getByText('no workspaces yet')).toBeTruthy()
+    expect(screen.getByText('No workspaces yet')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
   })
 
@@ -198,7 +199,7 @@ describe('the Dashboard on an empty fleet', () => {
     mount('phone', '/', keyed(scenario('empty')))
     await drawn()
     const idle = region('Idle')
-    expect(idle.getByText('no workspaces yet')).toBeTruthy()
+    expect(idle.getByText('No workspaces yet')).toBeTruthy()
     expect(idle.getByRole('link', { name: 'New →' }).getAttribute('href')).toBe('/new')
   })
 })
@@ -264,7 +265,11 @@ describe('the Dashboard on the first run', () => {
 describe('the Dashboard with nothing reachable', () => {
   it('is one surface about the connection, not one per band', async () => {
     mount('desktop', '/', scenario('unreachable'))
-    const alert = await screen.findByRole('alert')
+    // The rail beside the page is its own region and says its own read failed.
+    await screen.findAllByRole('alert')
+    const pages = screen.getAllByRole('alert').filter((one) => (one as HTMLElement).dataset.layout === 'page')
+    expect(pages).toHaveLength(1)
+    const alert = pages[0]!
     expect(within(alert).getByText('Nothing here can be reached')).toBeTruthy()
     expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()

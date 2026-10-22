@@ -3,6 +3,7 @@
   align-items: center;
   gap: 12px;
   box-sizing: border-box;
+  min-width: 0;
   min-height: var(--m3-row-min-height);
   padding: var(--m3-row-padding);
   border-radius: var(--m3-row-radius);
@@ -40,12 +41,38 @@
 }
 
 .m3-row__supporting {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
   font: var(--md-sys-typescale-body-small);
   letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
+}
+
+/* A state followed by anything else (a state, then an age) keeps the flex row and its gap. */
+.m3-row__supporting:has(> .m3-state + *) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A block, not a flex row: `text-overflow` draws its ellipsis only on a block
+   container, so a flex line cut the words with no mark. The state's mark rides
+   inline, and the state itself is the block that clips. */
+.m3-row__supporting > .m3-state {
+  display: block;
+  padding-inline-start: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m3-row__supporting > .m3-state > .m3-mark {
+  display: inline-block;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+}
+
+.m3-row__supporting > .m3-state > .m3-mark:is([data-state="needs"], [data-state="failed"]) {
+  margin-block: -1px;
+  margin-inline-start: -1px;
 }
 
 .m3-row[data-tone="selected"] .m3-row__supporting {

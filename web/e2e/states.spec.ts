@@ -8,8 +8,8 @@ import { ROUTES, type RouteId } from './lib/routes'
 
 /** What a route draws on `empty`, or null where no board has a block. */
 const EMPTY: Record<RouteId, readonly string[] | null> = {
-  dashboard: ['Nothing needs you', 'Nothing is running', 'no workspaces yet'],
-  fleet: ['Nothing needs you', 'Nothing is running', 'no workspaces yet'],
+  dashboard: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
+  fleet: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
   machines: ['every tmux session on the machines that answered belongs to a workspace'],
   machine: null,
   'session-terminal': null,
@@ -19,7 +19,11 @@ const EMPTY: Record<RouteId, readonly string[] | null> = {
   new: null,
   settings: null,
   'settings-category': null,
-  notifications: ['Nothing unread.'],
+  notifications: ['Nothing unread'],
+  rooms: ['No rooms'],
+  room: ['No room is called release'],
+  'add-device': null,
+  setup: null,
 }
 
 /** What `unreachable` does to a route: `page` is the Unreachable board with
@@ -40,11 +44,17 @@ const UNREACHABLE: Record<RouteId, 'page' | 'missing' | 'none'> = {
   // The ring buffer is the daemon's own memory; a failed attention read
   // only leaves the GitHub items out (shell/useEntries.ts).
   notifications: 'none',
+  // The daemon holds rooms in memory and answers an empty list, never a failure.
+  rooms: 'none',
+  room: 'missing',
+  'add-device': 'page',
+  // The unreachable dashboard, which is what `/` draws when nothing answers.
+  setup: 'page',
 }
 
 /** `broken` overlays `/api/machines` with a body missing its `data`: every
  *  route that reads machines meets the contract surface. */
-const READS_MACHINES: readonly RouteId[] = ['dashboard', 'fleet', 'machines', 'machine', 'new']
+const READS_MACHINES: readonly RouteId[] = ['dashboard', 'fleet', 'machines', 'machine', 'new', 'add-device']
 
 /** The write each route offers on `busy`, for `refused`. Only the verbs the
  *  boards name; a screen with none is not asked. */
@@ -77,6 +87,9 @@ type Case = 'unreachable' | 'empty' | 'held' | 'broken' | 'flaky' | 'refused'
 const PENDING: Partial<Record<RouteId, { row: string; why: string; cases?: readonly Case[] }>> = {
 }
 
+/** Routes whose body is a guided flow, not a read: no skeleton comes before it. */
+const DRAWS_AT_ONCE: readonly RouteId[] = ['add-device']
+
 const pending = (id: RouteId, which: Case) => {
   const one = PENDING[id]
   const held = one !== undefined && (one.cases === undefined || one.cases.includes(which))
@@ -84,7 +97,7 @@ const pending = (id: RouteId, which: Case) => {
 }
 
 for (const one of ROUTES) {
-  test.describe(`${one.path} states`, () => {
+  test.describe(`${one.id} ${one.path} states`, () => {
     test(`on unreachable: ${UNREACHABLE[one.id]}`, async ({ page, size }) => {
       const kind = UNREACHABLE[one.id]
       test.skip(kind === 'none', 'reads nothing the tailnet answers')
@@ -123,6 +136,7 @@ for (const one of ROUTES) {
     test('on busy, held: a skeleton and never a flash of empty', async ({ page, size }) => {
       test.skip(size !== 'desktop', 'the wire is the same at every size')
       test.skip(UNREACHABLE[one.id] === 'none', 'reads nothing swept')
+      test.skip(DRAWS_AT_ONCE.includes(one.id), 'draws its steps at once and waits on nothing')
       pending(one.id, 'held')
       await scenario(page, 'busy', { slow: 1500 })
       await page.goto(one.path)

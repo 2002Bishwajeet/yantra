@@ -96,7 +96,7 @@ test.describe('the dashboard on an empty fleet', () => {
         'every tmux session on the machines that answered belongs to a workspace',
       ),
     ).toBeVisible()
-    await expect(page.getByText('no workspaces yet')).toBeVisible()
+    await expect(page.getByText('No workspaces yet')).toBeVisible()
     // The shell's FAB offers the same verb; this is the hero's own.
     await expect(page.getByRole('main').getByRole('link', { name: 'New session' })).toBeVisible()
     await axe(page)

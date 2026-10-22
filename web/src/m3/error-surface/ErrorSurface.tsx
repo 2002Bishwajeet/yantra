@@ -12,7 +12,7 @@ import './ErrorSurface.css'
 export type Described = Pick<ApiError, 'said' | 'retryable'> & { kind: string; describe: () => string }
 
 export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
-  /** The eyebrow: "Fleet", "Session / Chat". */
+  /** The eyebrow names the failing read ("Fleet read", "Session / Chat"), never the title the PageHeader already draws. */
   eyebrow?: string
   title: string
   error: Described
@@ -84,7 +84,8 @@ export function ErrorSurface(props: ErrorSurfaceProps) {
   return <Body layout="card" {...props} />
 }
 
-/** Centred, full height: the Unreachable board. */
+/** Centred in what the page has left under its PageHeader, so the title
+ *  stays: the Unreachable board. */
 ErrorSurface.Page = function Page(props: ErrorSurfaceProps) {
   return <Body layout="page" {...props} />
 }

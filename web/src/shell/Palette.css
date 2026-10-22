@@ -1,7 +1,7 @@
 .palette {
   align-self: start;
   gap: 8px;
-  max-width: 640px;
+  max-width: var(--m3-palette-width);
   margin-top: 12vh;
   padding: 12px;
 }
@@ -38,7 +38,7 @@
 .palette__match {
   color: inherit;
   background: var(--md-sys-color-primary-container);
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
 }
 
 .palette__empty {

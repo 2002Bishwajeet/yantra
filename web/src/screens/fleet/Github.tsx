@@ -11,7 +11,7 @@ import { Mono, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
-import { Empty } from './Empty'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { StartSession } from './StartSession'
 
 /** D6 §3.4: the daemon's reasons are already instructions, and the one about
@@ -53,7 +53,7 @@ export function Github(props: { attention: Reading<Attention> }) {
         </div>
       ) : null}
 
-      {attention.looked === 'never' ? <Empty state="unknown" title="GitHub not looked at yet" /> : null}
+      {attention.looked === 'never' ? <EmptyState state="unknown" title="GitHub not looked at yet" /> : null}
 
       {attention.looked === 'failed' ? (
         <div className="github__failed" role="status">

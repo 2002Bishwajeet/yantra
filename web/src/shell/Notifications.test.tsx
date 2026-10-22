@@ -55,7 +55,7 @@ describe('notifications on the desktop', () => {
     fireEvent.click(popover.getByRole('button', { name: 'Mark all read' }))
     expect(readPrefs().seenAt).toBe(1786471773)
     expect(JSON.parse(localStorage.getItem('yantra.prefs')!).seenAt).toBe(1786471773)
-    expect(await popover.findByText('Nothing unread.')).toBeTruthy()
+    expect(await popover.findByText('Nothing unread')).toBeTruthy()
     // The GitHub items still count: they have no read state of their own.
     await waitFor(() => expect(screen.getByRole('button', { name: /Notifications\s*2 unread/ })).toBeTruthy())
     fireEvent.click(popover.getByRole('radio', { name: 'All' }))

@@ -332,6 +332,18 @@
   --m3-item-min-height: 56px;
   --m3-list-gap: 8px;
   --m3-page-gap: 16px;
+  --m3-gutter: 24px;
+  --m3-page-max-wide: 1280px;
+  --m3-page-max-reading: 760px;
+  --m3-measure: 60ch;
+  --m3-dialog-width: 880px;
+  --m3-palette-width: 640px;
+  --m3-menu-width: 22rem;
+  --m3-page-top: 16px;
+  --m3-page-header-height: 56px;
+  --m3-page-header-gap: 16px;
+  --m3-page-title: var(--md-sys-typescale-emphasized-headline-large);
+  --m3-page-title-tracking: var(--md-sys-typescale-emphasized-headline-large-tracking);
   --m3-tile-size: 36px;
   --m3-tile-radius: var(--md-sys-shape-corner-medium);
   --m3-hero-size: var(--md-sys-typescale-display-large-size);
@@ -351,6 +363,9 @@
   --m3-item-min-height: 48px;
   --m3-list-gap: 4px;
   --m3-page-gap: 8px;
+  --m3-page-top: 8px;
+  --m3-page-header-height: 48px;
+  --m3-page-header-gap: 12px;
   --m3-tile-size: 28px;
   --m3-tile-radius: 10px;
   --m3-hero-size: var(--md-sys-typescale-display-medium-size);
@@ -358,9 +373,17 @@
   --m3-status-line: 36px;
 }
 
+/* Y-566: the gutter follows the form factor's widths (shell/formFactor.ts). */
+@media (width < 1240px) {
+  :root {
+    --m3-gutter: 20px;
+  }
+}
+
 /* ADR-0024 §4: the hero is display-small on a phone. */
 @media (width < 600px) {
   :root {
+    --m3-gutter: 16px;
     --m3-hero-size: var(--md-sys-typescale-display-small-size);
     --m3-hero-line-height: var(--md-sys-typescale-display-small-line-height);
   }
