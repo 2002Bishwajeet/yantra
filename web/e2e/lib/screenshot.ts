@@ -21,15 +21,20 @@ export async function screenshot(
   const before = page.viewportSize()
   const docked = !options.overlay && before !== null && (await page.locator('.composer-dock').first().isVisible())
   if (docked) {
-    // The dock grows with its draft, so the page is measured again until it stops moving.
+    // The page grows after its last assertion (an image settles, a draft wraps), so the viewport follows it
+    // until two reads a frame apart agree with it.
     const frame = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+    let agreed = 0
     await expect
       .poll(async () => {
-        const height = await page.evaluate(() => document.documentElement.scrollHeight)
-        if (page.viewportSize()!.height === height) return true
-        await page.setViewportSize({ width: before.width, height })
         await frame()
-        return false
+        const height = await page.evaluate(() => document.documentElement.scrollHeight)
+        if (page.viewportSize()!.height !== height) {
+          agreed = 0
+          await page.setViewportSize({ width: before.width, height })
+          return false
+        }
+        return ++agreed >= 3
       })
       .toBe(true)
   }
