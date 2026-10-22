@@ -341,7 +341,7 @@
 
 [data-shell="desktop"] .dash__recent {
   flex: none;
-  width: 452px;
+  width: var(--m3-recent-width);
 }
 
 /* The tablet frame is too narrow for the line: the head sits above the list, and a session's words

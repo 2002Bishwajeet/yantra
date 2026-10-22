@@ -6,7 +6,7 @@
   inset-block: 16px;
   right: 16px;
   z-index: 30;
-  inline-size: min(760px, calc(100vw - 32px));
+  inline-size: min(var(--m3-page-max-reading), calc(100vw - 32px));
   overflow-y: auto;
   overscroll-behavior: contain;
 }

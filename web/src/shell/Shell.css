@@ -73,7 +73,7 @@
   gap: 16px;
   flex: none;
   box-sizing: border-box;
-  width: 320px;
+  width: var(--m3-rail-width);
   padding: 20px 20px 24px;
   border-radius: var(--m3-card-radius);
   background: var(--md-sys-color-surface-container-low);

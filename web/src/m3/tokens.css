@@ -339,6 +339,12 @@
   --m3-dialog-width: 880px;
   --m3-palette-width: 640px;
   --m3-menu-width: 22rem;
+  --m3-turn-max: 720px;
+  --m3-turn-you-max: 640px;
+  --m3-rail-width: 320px;
+  --m3-nav-width: 280px;
+  --m3-recent-width: 452px;
+  --m3-tip-max: 260px;
   --m3-page-top: 16px;
   --m3-page-header-height: 56px;
   --m3-page-header-gap: 16px;
