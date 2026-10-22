@@ -12,6 +12,7 @@ import { MessageSquarePlus } from 'lucide-react'
 import type { Workspace } from '@/api'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Mono, Text } from '@/m3/text/Text'
 import { anchorOf, commentBlock, quotedLines, rangeLabel } from './comment'
 import type { DiffData } from './data'
@@ -85,9 +86,7 @@ function FileSection(props: {
         <EditorMenu line={first} machine={machine} path={entry.path} why={why} worktree={worktree} />
       </header>
       {empty !== null ? (
-        <Text className="diff__empty" render={<p />} scale="body-medium" tone="variant">
-          {empty}
-        </Text>
+        <EmptyState title="No lines to show">{empty}</EmptyState>
       ) : null}
       {parsed !== undefined && empty === null ? (
         <FileDiff

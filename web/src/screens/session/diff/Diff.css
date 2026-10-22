@@ -78,11 +78,6 @@
   font: var(--md-sys-typescale-label-small);
 }
 
-.diff__empty {
-  margin: 0;
-  padding: 8px 16px 16px;
-}
-
 .diff-comment {
   display: flex;
   flex-direction: column;

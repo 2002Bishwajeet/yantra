@@ -1,7 +1,7 @@
 /**
  * A screen draws its layout from the page tokens (tokens.css): the radius, the
  * width and the big gaps are token reads, and the shape of the page is `Page`
- * and `PageHeader`. This reads every screen and shell stylesheet as text,
+ * and `PageHeader`. This reads every screen, shell and composer stylesheet as text,
  * because jsdom applies no stylesheet and a literal that creeps back in is
  * otherwise silent.
  */
@@ -16,6 +16,10 @@ const src = resolve(process.cwd(), 'src')
  *  page, which a token owns. The Y-566 row and web/README.md say the same. */
 const SMALL_GAP = 16
 
+/** A fixed width up to this many px is a control or an icon. A wider one is a
+ *  measure of the page, which a token owns. */
+const SMALL_WIDTH = 240
+
 function stylesheets(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name)
@@ -29,7 +33,7 @@ export function offences(css: string): string[] {
   const bare = css.replace(/\/\*[\s\S]*?\*\//g, '')
   const found: string[] = []
   for (const [, prop, value] of bare.matchAll(
-    /(?:^|[;{\s])(border(?:-[a-z]+){0,2}-radius|max-width|max-inline-size|(?:row-|column-)?gap)\s*:\s*([^;}]+)/g,
+    /(?:^|[;{\s])(border(?:-[a-z]+){0,2}-radius|max-width|max-inline-size|width|inline-size|(?:row-|column-)?gap)\s*:\s*([^;}]+)/g,
   )) {
     const px = [...value!.matchAll(/(\d*\.?\d+)px/g)].map((one) => Number(one[1]))
     // ch, rem and em are still literals: a measure is a token too.
@@ -39,6 +43,9 @@ export function offences(css: string): string[] {
     } else if (prop === 'max-width' || prop === 'max-inline-size') {
       // A bare length is a width; a calc against the viewport is a bound.
       if (literal) found.push(`${prop}: ${value!.trim()}`)
+    } else if (prop === 'width' || prop === 'inline-size') {
+      // `min(760px, 100vw - 32px)` is a measure too; the viewport side of it is not read.
+      if (px.some((one) => one > SMALL_WIDTH)) found.push(`${prop}: ${value!.trim()}`)
     } else if (px.some((one) => one > SMALL_GAP)) found.push(`${prop}: ${value!.trim()}`)
   }
   return found
@@ -52,6 +59,8 @@ describe('offences', () => {
     expect(offences('.a { max-width: 60ch; }')).toEqual(['max-width: 60ch'])
     expect(offences('.a { max-inline-size: 40rem; }')).toEqual(['max-inline-size: 40rem'])
     expect(offences('.a { max-width: calc(100vw - 120px); }')).toEqual([])
+    expect(offences('.a { width: 640px; }')).toEqual(['width: 640px'])
+    expect(offences('.a { inline-size: min(760px, calc(100vw - 32px)); }')).toHaveLength(1)
     expect(offences('.a { gap: 24px; }')).toEqual(['gap: 24px'])
     expect(offences('.a { gap: 8px 40px; }')).toHaveLength(1)
     expect(offences('.a { column-gap: 20px; }')).toHaveLength(1)
@@ -61,7 +70,7 @@ describe('offences', () => {
     expect(
       offences(`
         .a { border-radius: var(--md-sys-shape-corner-large); max-width: var(--m3-page-max-reading); }
-        .b { max-width: 100%; max-inline-size: var(--m3-measure); gap: 8px 16px; border-radius: 50%; }
+        .b { width: 100%; inline-size: 24px; width: min(100%, var(--m3-measure)); max-width: 100%; max-inline-size: var(--m3-measure); gap: 8px 16px; border-radius: 50%; }
         /* border-radius: 99px; */
         @media (max-width: 599px) { .c { gap: var(--m3-gutter); } }
       `),
@@ -69,8 +78,12 @@ describe('offences', () => {
   })
 })
 
-describe('every screen and shell stylesheet', () => {
-  const files = [...stylesheets(join(src, 'screens')), ...stylesheets(join(src, 'shell'))]
+describe('every screen, shell and composer stylesheet', () => {
+  const files = [
+    ...stylesheets(join(src, 'screens')),
+    ...stylesheets(join(src, 'shell')),
+    ...stylesheets(join(src, 'composer')),
+  ]
 
   it('finds the stylesheets it is meant to read', () => {
     expect(files.length).toBeGreaterThan(20)

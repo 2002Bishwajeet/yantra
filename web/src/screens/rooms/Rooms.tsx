@@ -7,7 +7,7 @@ import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
-import { Page } from '@/m3/page/Page'
+import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -63,10 +63,10 @@ export function Rooms() {
           title="The rooms could not be read"
         />
       ) : (
-        <div aria-busy="true" className="rooms__list" data-slot="reading">
+        <PagePending>
           <Skeleton shape="row" />
           <Skeleton shape="row" />
-        </div>
+        </PagePending>
       )}
     </Page>
   )

@@ -108,12 +108,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(100%, 720px);
+  width: min(100%, var(--m3-turn-max));
 }
 
 .turn[data-who="you"] {
   align-self: flex-end;
-  width: min(100%, 640px);
+  width: min(100%, var(--m3-turn-you-max));
 }
 
 .turn__head {
@@ -221,11 +221,6 @@
 
 /* Chat */
 
-.chat__empty {
-  margin: 0;
-  padding: 0 8px;
-}
-
 .chat__markdown > :first-child {
   margin-top: 0;
 }
@@ -252,7 +247,7 @@
 }
 
 .chat__thinking {
-  width: min(100%, 720px);
+  width: min(100%, var(--m3-turn-max));
   padding: 0 8px;
   color: var(--md-sys-color-on-surface-variant);
   font: var(--md-sys-typescale-body-small);
@@ -265,7 +260,7 @@
 
 .chat__tool {
   gap: 6px;
-  width: min(100%, 720px);
+  width: min(100%, var(--m3-turn-max));
   padding: var(--m3-row-padding);
   border-radius: var(--md-sys-shape-corner-large);
 }
@@ -291,7 +286,7 @@
 
 .chat__diff {
   gap: 8px;
-  width: min(100%, 720px);
+  width: min(100%, var(--m3-turn-max));
   padding: var(--m3-row-padding);
   border-radius: var(--md-sys-shape-corner-large);
 }
@@ -318,42 +313,9 @@
   overflow-wrap: anywhere;
 }
 
-.chat__diff-text {
-  max-height: 480px;
-  margin: 0;
-  padding: 12px 0;
-  overflow: auto;
-  border-radius: var(--md-sys-shape-corner-medium);
-  background: var(--md-sys-color-surface-container-highest);
-  font-family: var(--md-ref-typeface-mono, monospace);
-  font-size: var(--md-sys-typescale-body-small-size);
-}
-
-.chat__diff-text span {
-  display: block;
-  min-width: max-content;
-  padding: 0 12px;
-  white-space: pre;
-}
-
-.chat__diff-text [data-tone='add'] {
-  background: var(--md-sys-color-tertiary-container);
-  color: var(--md-sys-color-on-tertiary-container);
-}
-
-.chat__diff-text [data-tone='del'] {
-  background: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
-}
-
-.chat__diff-text [data-tone='hunk'],
-.chat__diff-text [data-tone='meta'] {
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .chat__asking {
   gap: 12px;
-  width: min(100%, 720px);
+  width: min(100%, var(--m3-turn-max));
   padding: var(--m3-card-padding);
   border-radius: var(--m3-card-radius);
 }
@@ -672,11 +634,6 @@
   gap: 8px;
 }
 
-.threads__empty {
-  margin: 0;
-  padding: 0 4px;
-}
-
 .threads__group {
   display: flex;
   flex-direction: column;
@@ -730,54 +687,23 @@
   gap: 12px;
 }
 
-/* Phone: the composer rides at the foot of the screen while the page scrolls. The session
-   screen has no navigation bar, so the dock owns the page's bottom padding. A sticky box
-   stays inside its parent, so the chat gives its children to the session's column. */
+/* A sticky dock stays inside its parent, so the chat gives its children to the session's column and the dock
+   pins against the whole page. The children keep the reading width the session gives its own. */
 
-.chat__dock {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* An error above the card shares the card's column. */
-.chat__dock > .m3-error {
-  box-sizing: border-box;
-  width: 100%;
-}
-
-[data-shell="phone"] .session__chat:not([hidden]),
-[data-shell="phone"] .session__chat:not([hidden]) > .chat {
+.session__chat:not([hidden]),
+.session__chat:not([hidden]) > .chat {
   display: contents;
 }
 
-[data-shell="phone"] .shell__main:has(.session__chat:not([hidden]) .chat__dock) {
+.session__chat:not([hidden]) > .chat > * {
+  max-width: var(--m3-page-max-reading);
+}
+
+.session__chat:not([hidden]) > .chat[data-branch] > * {
+  max-width: none;
+}
+
+/* The dock owns the page's bottom padding. */
+[data-shell] :is(.shell__main, .shell__body, .shell__column):has(.session__chat:not([hidden]) .composer-dock) {
   padding-bottom: 0;
-}
-
-[data-shell="phone"] .chat__dock {
-  --chat-scrim: 16px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  /* The scrim is drawn above the dock, so the page gap and this margin hold it clear of the last block. */
-  margin-top: max(0px, calc(var(--chat-scrim) - var(--m3-page-gap)));
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--md-sys-color-surface);
-}
-
-/* A scrim, the one gradient the house allows: text scrolling under the dock fades out and is not sliced. */
-[data-shell="phone"] .chat__dock::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 100%;
-  height: var(--chat-scrim);
-  background: linear-gradient(to top, var(--md-sys-color-surface), transparent);
-  pointer-events: none;
-}
-
-/* WCAG 2.4.11: a focused control and the pinned end scroll to clear the dock, whose height Chat measures
-   into --chat-dock-height as a draft, a plan or an error grows it. */
-:root:has([data-shell="phone"] .session__chat:not([hidden]) .chat__dock) {
-  scroll-padding-bottom: calc(var(--chat-dock-height, 260px) + 8px);
 }

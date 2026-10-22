@@ -396,7 +396,7 @@
 
 .composer-tip {
   box-sizing: border-box;
-  max-width: 260px;
+  max-width: var(--m3-tip-max);
   padding: 6px 12px;
   border-radius: var(--md-sys-shape-corner-small);
   font: var(--md-sys-typescale-body-small);
@@ -844,4 +844,42 @@
 .composer-preview__nav {
   display: flex;
   gap: 8px;
+}
+
+/* The dock pins the composer to the foot of the screen at every size, in the Chat and in the Room. */
+.composer-dock {
+  --composer-scrim: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  /* A short page leaves the dock at the foot of the column rather than under its last block. */
+  margin-top: auto;
+  /* The scrim is drawn above the dock, so the page gap and this padding hold it clear of the last block. */
+  padding: calc(8px + max(0px, var(--composer-scrim) - var(--m3-page-gap))) 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--md-sys-color-surface);
+}
+
+/* An error above the card shares the card's column. */
+.composer-dock > .m3-error {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* A scrim, the one gradient the house allows: text scrolling under the dock fades out and is not sliced. */
+.composer-dock::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 100%;
+  height: var(--composer-scrim);
+  background: linear-gradient(to top, var(--md-sys-color-surface), transparent);
+  pointer-events: none;
+}
+
+/* WCAG 2.4.11: a focused control and the pinned end scroll to clear the dock, whose height useDockHeight
+   measures as a draft, a plan or an error grows it. */
+:root:has([data-shell] .composer-dock) {
+  scroll-padding-bottom: calc(var(--composer-dock-height, 260px) + 8px);
 }

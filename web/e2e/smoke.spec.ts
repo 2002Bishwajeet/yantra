@@ -30,6 +30,8 @@ for (const fleet of ['busy', 'empty'] as const) {
     })
 
     test('looks like the board', async ({ page, size }) => {
+      // Kill is a disabled stand-in until its lazy chunk loads; a capture before that reads as a diff.
+      await expect(page.locator('.dash__kill:disabled')).toHaveCount(0)
       await screenshot(page, 'dashboard', fleet, size)
     })
   })

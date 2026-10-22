@@ -16,11 +16,13 @@ import { buildPromptHistoryEntries, stepPromptHistory, type PromptHistoryPositio
 import { placeholder } from '@/composer/placeholder'
 import { PlanBadge } from '@/composer/PlanBadge'
 import { PrimaryAction } from '@/composer/PrimaryAction'
+import { useDockHeight } from '@/composer/useDockHeight'
 import { useImages } from '@/composer/useImages'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { appendToDraft } from './diff/comment'
@@ -270,30 +272,14 @@ export function Chat(props: ChatProps) {
     if (pinned.current) end.current?.scrollIntoView?.({ block: 'end' })
   }, [timeline.entries, timeline.requests])
 
-  // The phone's dock is sticky, so a taller one (a plan, an error, a long draft) covers the newest words.
-  // Session.css reads its height for scroll-padding, and a pinned reader is carried to the end again.
-  useEffect(() => {
-    const box = dock.current
-    if (!box || typeof ResizeObserver === 'undefined') return
-    const root = document.documentElement
-    const watching = new ResizeObserver(() => {
-      root.style.setProperty('--chat-dock-height', `${box.offsetHeight}px`)
-      // Only a sticky dock (the phone's) covers anything. It sits after the end, so its growth never moves
-      // the end: where the end is now says if the reader is at the foot. The observer's own answer can be one scroll behind.
-      const foot = end.current
-      if (foot && getComputedStyle(box).position === 'sticky' && (pinned.current || foot.getBoundingClientRect().top <= window.innerHeight)) {
-        foot.scrollIntoView?.({ block: 'end' })
-      }
-    })
-    watching.observe(box)
-    // The thread list above loads after the dock draws; the page grows and the dock would cover the intro or the last turn.
-    const page = box.closest('.m3-page')
-    if (page) watching.observe(page)
-    return () => {
-      watching.disconnect()
-      root.style.removeProperty('--chat-dock-height')
+  // A pinned reader is carried to the end again when the dock grows, since it sits after the end and never moves it.
+  // Where the end is now says if the reader is at the foot; the observer's own answer can be one scroll behind.
+  useDockHeight(dock, () => {
+    const foot = end.current
+    if (foot && (pinned.current || foot.getBoundingClientRect().top <= window.innerHeight)) {
+      foot.scrollIntoView?.({ block: 'end' })
     }
-  }, [])
+  })
 
   const uploading = images.some((one) => one.state === 'uploading')
   // The agent reads an image by its path, so each goes on a line of its own.
@@ -424,10 +410,10 @@ export function Chat(props: ChatProps) {
       ) : null}
       <section aria-label="Conversation" className="chat__turns" hidden={showDiff}>
         {timeline.entries.length === 0 && link !== 'connecting' ? (
-          <Text className="chat__empty" render={<p />} scale="body-medium" tone="variant">
+          <EmptyState title="Nothing asked yet">
             Ask {agent} something about {workspace.name}. It works on a branch of its own, so the session in the
             terminal is untouched.
-          </Text>
+          </EmptyState>
         ) : null}
         {timeline.entries.map((entry) =>
           entry.kind === 'message' ? (
@@ -449,7 +435,7 @@ export function Chat(props: ChatProps) {
         {showDiff ? null : asks}
         <div ref={end} />
       </section>
-      <div className="chat__dock" ref={dock}>
+      <div className="composer-dock" ref={dock}>
         {error?.login ? (
           <LoggedOut error={error} login={error.login} retry={chat.retry} />
         ) : error ? (

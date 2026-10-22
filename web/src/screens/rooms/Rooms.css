@@ -18,12 +18,10 @@
   flex: none;
 }
 
-/* The Page is the one column, so the messages, the banner and the composer share both edges. */
+/* The Page is the one column, so the messages, the banner and the composer share both edges. The body gives its
+   children to the Page, so the sticky dock pins against the whole page. */
 .room__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--m3-page-gap);
-  min-width: 0;
+  display: contents;
 }
 
 .room__facts {
@@ -66,41 +64,12 @@
   overflow-wrap: anywhere;
 }
 
-.room__compose {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.room__compose > .m3-error {
-  box-sizing: border-box;
-  width: 100%;
-}
-
 .room__resume {
   min-height: 48px;
   min-width: 48px;
 }
 
-/* Phone: the post form rides at the foot while the log scrolls, as the Chat's does. A room is a detail
-   screen with no navigation bar, so the form owns the page's bottom padding. */
-[data-shell="phone"] .shell__main:has(.room__compose) {
+/* A room is a detail screen with no navigation bar, so the dock owns the page's bottom padding. */
+[data-shell] :is(.shell__main, .shell__body, .shell__column):has(.composer-dock) {
   padding-bottom: 0;
-}
-
-[data-shell="phone"] .room__compose {
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--md-sys-color-surface);
-}
-
-[data-shell="phone"] .room__compose::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 100%;
-  height: 16px;
-  background: linear-gradient(to top, var(--md-sys-color-surface), transparent);
-  pointer-events: none;
 }

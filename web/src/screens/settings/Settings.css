@@ -12,7 +12,7 @@
   flex-direction: column;
   gap: var(--m3-card-padding);
   flex: none;
-  width: 280px;
+  width: var(--m3-nav-width);
 }
 
 [data-factor="tablet"] .settings__nav {

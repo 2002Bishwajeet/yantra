@@ -450,14 +450,7 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
         }
       />
       {live.length === 0 ? (
-        <div className="dash__empty">
-          <State className="dash__empty-title" state="idle">
-            Nothing is running
-          </State>
-          <Text scale="body-medium" tone="variant">
-            Start a session and its elapsed time shows here
-          </Text>
-        </div>
+        <EmptyState title="Nothing is running">Start a session and its elapsed time shows here</EmptyState>
       ) : (
         <div className="dash__rows">
           {timed.map(({ row, started }) => (

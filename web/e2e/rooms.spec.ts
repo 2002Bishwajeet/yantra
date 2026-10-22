@@ -114,12 +114,12 @@ test.describe('rooms', () => {
     expect(await column(page.locator('.room__paused'))).toEqual(card)
   })
 
-  test('the post form rides at the foot of the screen on a phone, as the Chat does', async ({ page, size }) => {
-    test.skip(size !== 'phone', 'the dock is sticky on the phone only')
-    await page.setViewportSize({ width: 390, height: 420 })
+  test('the post form rides at the foot of the screen, as the Chat does', async ({ page }) => {
+    await page.setViewportSize({ width: page.viewportSize()!.width, height: 420 })
     await page.goto('/rooms/release')
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
-    const form = page.locator('.room__compose')
+    const form = page.locator('.composer-dock')
+    await expect(form).toHaveCSS('position', 'sticky')
     for (const to of [0, 'end'] as const) {
       await page.evaluate((y) => window.scrollTo(0, y === 'end' ? document.body.scrollHeight : y), to)
       await expect(form).toBeInViewport({ ratio: 1 })

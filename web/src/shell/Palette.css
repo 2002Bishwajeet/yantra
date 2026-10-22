@@ -41,14 +41,6 @@
   border-radius: var(--md-sys-shape-corner-extra-small);
 }
 
-.palette__empty {
-  margin: 0;
-  padding: 12px;
-  font: var(--md-sys-typescale-body-medium);
-  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .palette__foot {
   display: flex;
   align-items: center;
