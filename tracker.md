@@ -418,6 +418,7 @@ deleted everywhere else.
 | Y-567 | Tidy up the composer and the page layout | ⬜ todo | claude | Y-560, Y-566 | Follow-up to Y-560 and Y-566. **Done** when the composer dock is pinned at every size and shared by the Chat and the Room, the phone screenshot flakes have a root-cause fix, the shared empty and pending surfaces replace the local copies, the layout guard covers the composer, dead CSS is gone, the route count is right in the docs, and the dock-height hook has a unit test. |
 | Y-568 | Show the plan badge for the Claude harness | ⬜ todo | claude | Y-560 | Only `crates/yantra-core/src/acp.rs` emits `turn.plan.updated`; `claude.rs` emits none. **Done** when a Claude turn shows the plan badge (derive it from the `TodoWrite` tool use) and a test covers it. |
 | Y-569 | Fix the podman mic test flake | ⬜ todo | claude | — | The test at `crates/yantrad/tests/mic.rs:205` fails at times. **Done** when the cause is fixed, not retried, and the test passes ten runs in a row. |
+| Y-570 | tokio 1.54.1 for the yanked 1.54.0 | 🔵 review | claude | — | **Red suite, 2026-10-22:** `cargo deny` fails because tokio 1.54.0 is yanked, so every PR is blocked. **Done** when `Cargo.lock` has tokio 1.54.1 and the deny check passes. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
