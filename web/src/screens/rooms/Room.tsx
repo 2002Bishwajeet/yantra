@@ -5,6 +5,9 @@ import type { Room as RoomData, RoomMessage } from '@/api'
 import { asApiError } from '@/api/errors'
 import { usePostToRoom, useResumeRoom } from '@/api/mutations'
 import { roomQuery } from '@/api/queries'
+import * as Composer from '@/composer/Composer'
+import { useEnterSends } from '@/composer/enterSends'
+import { PrimaryAction } from '@/composer/PrimaryAction'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -13,7 +16,6 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { announce } from '@/m3/live/live'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { TextField } from '@/m3/text-field/TextField'
 import { Mono, Text } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
 import { facts } from './facts'
@@ -62,9 +64,9 @@ function Paused({ name, budget }: { name: string; budget: number }) {
 function Compose({ name }: { name: string }) {
   const [text, setText] = useState('')
   const post = usePostToRoom()
+  const enterSends = useEnterSends()
   const id = useId()
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
+  const submit = () => {
     if (post.isPending || text.trim() === '') return
     post.mutate(
       { name, text },
@@ -77,32 +79,49 @@ function Compose({ name }: { name: string }) {
     )
   }
   return (
-    <form aria-labelledby={`${id}-title`} className="room__compose" onSubmit={submit}>
-      <h2 className="m3-sr-only" id={`${id}-title`}>
-        Post to {name}
-      </h2>
-      <TextField
-        autoComplete="off"
-        className="room__field"
-        label="Message"
-        onChange={(event) => setText(event.target.value)}
-        supporting="Every agent in the room reads it. Posting sets the count back to 0."
-        value={text}
-      />
-      <Button aria-busy={post.isPending || undefined} className="room__post" type="submit">
-        {post.isPending ? 'Posting…' : 'Post'}
-      </Button>
-      {post.error ? (
-        <ErrorSurface.Inline className="room__refused" error={post.error} title="The message was not posted" />
-      ) : null}
-    </form>
+    <div className="room__compose">
+      <Composer.Root
+        aria-labelledby={`${id}-title`}
+        empty={text === ''}
+        onSubmit={(event: FormEvent) => {
+          event.preventDefault()
+          submit()
+        }}
+      >
+        <h2 className="m3-sr-only" id={`${id}-title`}>
+          Post to {name}
+        </h2>
+        <Composer.Input
+          aria-describedby={`${id}-hint`}
+          aria-label="Message"
+          enterSends={enterSends}
+          onChange={(event) => setText(event.target.value)}
+          onSend={submit}
+          placeholder="Every agent in the room reads it"
+          value={text}
+        />
+        <span className="m3-sr-only" id={`${id}-hint`}>
+          Every agent in the room reads it. Posting sets the count back to 0.
+        </span>
+        <Composer.Footer
+          actions={
+            <PrimaryAction
+              label="Post"
+              pending={post.isPending}
+              reason={post.isPending ? 'Posting…' : text.trim() === '' ? 'Type a message to post it.' : null}
+            />
+          }
+        />
+      </Composer.Root>
+      {post.error ? <ErrorSurface.Inline error={post.error} title="The message was not posted" /> : null}
+    </div>
   )
 }
 
 function Body({ room }: { room: RoomData }) {
   const now = useTick(true)
   return (
-    <>
+    <div className="room__body">
       <Mono className="room__facts">{facts(room)}</Mono>
       {room.paused ? <Paused budget={room.budget} name={room.name} /> : null}
       {room.log.length === 0 ? (
@@ -117,7 +136,7 @@ function Body({ room }: { room: RoomData }) {
         </ol>
       )}
       <Compose name={room.name} />
-    </>
+    </div>
   )
 }
 

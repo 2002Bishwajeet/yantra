@@ -1,9 +1,19 @@
 .session {
+  /* One measure per screen: the chat reads at the card's 46rem, and the diff, the terminal and the others take 880 px. */
+  --session-measure: 880px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   flex: 1;
   min-width: 0;
+}
+
+.session:has(.session__chat:not([hidden])) {
+  --session-measure: 46rem;
+}
+
+.session:has(.chat__branch) {
+  --session-measure: 880px;
 }
 
 .session__pending {
@@ -62,7 +72,6 @@
 
 .session__name a,
 .session__banner a,
-.chat__foot a,
 .transcript__foot a,
 .spend__ask a {
   color: var(--md-sys-color-primary);
@@ -115,6 +124,12 @@
 
 /* Views */
 
+/* A block would leave .chat's own centring with nothing to act on. */
+.session__chat:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
 .session__terminal,
 .chat,
 .transcript,
@@ -126,6 +141,10 @@
   max-width: 880px;
   min-width: 0;
   align-self: center;
+}
+
+.chat {
+  max-width: var(--session-measure, 880px);
 }
 
 .session__banner {
@@ -419,85 +438,6 @@
   gap: 8px;
 }
 
-.chat__composer {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.chat__composer[data-dropping] {
-  outline: 2px dashed var(--md-sys-color-primary);
-  outline-offset: -2px;
-  border-radius: 16px;
-}
-
-.chat__drop {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  border-radius: 16px;
-  font: var(--md-sys-typescale-title-small);
-  color: var(--md-sys-color-on-primary-container);
-  background: color-mix(in srgb, var(--md-sys-color-primary-container) 92%, transparent);
-  pointer-events: none;
-}
-
-.chat__images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0 8px;
-  list-style: none;
-}
-
-.chat__image {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  padding: 4px 0 4px 4px;
-  border-radius: 12px;
-  background: var(--md-sys-color-surface-container);
-}
-
-.chat__image img {
-  flex: none;
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.chat__image-state {
-  min-width: 0;
-  font: var(--md-sys-typescale-body-small);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.chat__image[data-state="failed"] .chat__image-state {
-  color: var(--md-sys-color-error);
-}
-
-.chat__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-}
-
-.chat__harness-chevron {
-  width: 18px;
-  height: 18px;
-}
-
 /* A mode's description sits under its name, so the menu reads as T3 Code's. */
 .chat__mode {
   align-items: flex-start;
@@ -515,34 +455,6 @@
   font-size: 0.8125rem;
   line-height: 1.25rem;
   white-space: normal;
-}
-
-.chat__meter {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  font-size: var(--md-sys-typescale-body-small-size);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.chat__meter meter {
-  flex: 1;
-  max-width: 160px;
-}
-
-.chat__field {
-  margin: 0;
-}
-
-/* Y-380 leaves this one at the shell's tracking: the role's 0.4 px wraps the
-   phone's 53-character line and leaves `s` alone on the second. */
-.chat__foot {
-  margin: 0;
-  padding: 0 16px;
-  font: var(--md-sys-typescale-body-small);
-  color: var(--md-sys-color-on-surface-variant);
 }
 
 /* Transcript */
@@ -791,6 +703,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  max-width: var(--session-measure, 880px);
+  min-width: 0;
+  align-self: center;
 }
 
 .threads__head {
@@ -863,4 +779,55 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* Phone: the composer rides at the foot of the screen while the page scrolls. The session
+   screen has no navigation bar, so the dock owns the page's bottom padding. A sticky box
+   stays inside its parent, so the chat gives its children to the session's column. */
+
+.chat__dock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* An error above the card shares the card's column. */
+.chat__dock > .m3-error {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 46rem;
+  margin-inline: auto;
+}
+
+[data-shell="phone"] .session__chat:not([hidden]),
+[data-shell="phone"] .session__chat:not([hidden]) > .chat {
+  display: contents;
+}
+
+[data-shell="phone"] .shell__main:has(.session__chat:not([hidden]) .chat__dock) {
+  padding-bottom: 0;
+}
+
+[data-shell="phone"] .chat__dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--md-sys-color-surface);
+}
+
+/* A scrim, the one gradient the house allows: text scrolling under the dock fades out and is not sliced. */
+[data-shell="phone"] .chat__dock::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 100%;
+  height: 16px;
+  background: linear-gradient(to top, var(--md-sys-color-surface), transparent);
+  pointer-events: none;
+}
+
+/* WCAG 2.4.11: a focused control and the pinned end scroll to clear the dock, whose height Chat measures
+   into --chat-dock-height as a draft, a plan or an error grows it. */
+:root:has([data-shell="phone"] .session__chat:not([hidden]) .chat__dock) {
+  scroll-padding-bottom: calc(var(--chat-dock-height, 260px) + 8px);
 }

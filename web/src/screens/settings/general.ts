@@ -7,6 +7,8 @@ export type General = {
   cloneHome: '~/Github' | '~/Gitlab'
   defaultMachine: string | null
   time: 'age' | 'clock'
+  /** Whether a bare Enter sends in the composer. Unset follows the form factor: on for a laptop and a tablet, off for a phone. */
+  enterSends: boolean | undefined
 }
 
 export const CLONE_HOMES: General['cloneHome'][] = ['~/Github', '~/Gitlab']
@@ -17,5 +19,6 @@ export function readGeneral(prefs: Prefs): General {
     cloneHome: held.cloneHome === '~/Gitlab' ? '~/Gitlab' : '~/Github',
     defaultMachine: typeof held.defaultMachine === 'string' ? held.defaultMachine : null,
     time: held.time === 'clock' ? 'clock' : 'age',
+    enterSends: typeof held.enterSends === 'boolean' ? held.enterSends : undefined,
   }
 }

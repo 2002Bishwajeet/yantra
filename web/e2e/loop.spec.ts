@@ -6,7 +6,7 @@ import { route } from './lib/routes'
 const ISSUE = '2002Bishwajeet/yantra#118'
 const THREAD = '1a2b3c4d'
 
-test('an inbox issue starts a session with its draft and lists the threads', async ({ page, size }) => {
+test('an inbox issue starts a session with its draft and lists the threads', async ({ page }) => {
   await scenario(page, 'busy')
   await page.goto(route('fleet').path)
   await page.getByRole('button', { name: `Start session on ${ISSUE}` }).click()
@@ -23,7 +23,7 @@ test('an inbox issue starts a session with its draft and lists the threads', asy
   // The draft is in router state, so the issue text is not in the address.
   expect(page.url()).not.toContain('Work')
 
-  const composer = page.getByLabel(size === 'phone' ? 'Message Claude' : 'Message Claude in yantra-web', { exact: true })
+  const composer = page.getByLabel('Message Claude in yantra-web', { exact: true })
   await expect(composer).toHaveValue(/^Work on /)
 
   const threads = page.getByRole('region', { name: 'Threads' })

@@ -72,6 +72,39 @@ with its logic ([`EditorMenu.tsx`](web/src/screens/session/diff/EditorMenu.tsx),
 [`editors.ts`](web/src/screens/session/diff/editors.ts)), on Yantra's own menu, tokens and daemon frames.
 Its name, wordmark and icon are not used.
 
+The composer in [`web/src/composer/`](web/src/composer/) adapts, at commit `810e8f6`, these files of T3 Code,
+each with its upstream path in the block comment at its top:
+[`ComposerSurface.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerSurface.tsx)
+and the `--chat-composer-*` rules of `index.css`
+([`Composer.css`](web/src/composer/Composer.css)),
+[`ComposerControl.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerControl.tsx)
+([`Control.tsx`](web/src/composer/Control.tsx)),
+[`composerPlaceholder.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/composerPlaceholder.ts)
+and the prompt field of
+[`ChatComposer.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ChatComposer.tsx)
+([`Input.tsx`](web/src/composer/Input.tsx), [`placeholder.ts`](web/src/composer/placeholder.ts)),
+[`ComposerPrimaryActions.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerPrimaryActions.tsx)
+([`PrimaryAction.tsx`](web/src/composer/PrimaryAction.tsx)),
+[`ContextWindowMeter.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ContextWindowMeter.tsx),
+[`ContextWindowMeter.logic.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ContextWindowMeter.logic.ts)
+and
+[`contextWindow.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/lib/contextWindow.ts)
+([`ContextRing.tsx`](web/src/composer/ContextRing.tsx), [`contextRing.ts`](web/src/composer/contextRing.ts)),
+[`ComposerTasksBadge.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerTasksBadge.tsx)
+([`PlanBadge.tsx`](web/src/composer/PlanBadge.tsx)),
+[`ComposerAttachmentStrip.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerAttachmentStrip.tsx),
+[`ComposerImageThumbnail.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerImageThumbnail.tsx)
+and
+[`ExpandedImageDialog.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ExpandedImageDialog.tsx)
+([`Attachments.tsx`](web/src/composer/Attachments.tsx)),
+[`composerPromptHistory.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/composerPromptHistory.ts)
+and its test ([`history.ts`](web/src/composer/history.ts), [`history.test.ts`](web/src/composer/history.test.ts)), and
+[`composer-logic.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/composer-logic.ts)
+([`keys.ts`](web/src/composer/keys.ts)). Yantra keeps the shapes and writes them on its own tokens and daemon
+frames, and leaves out what the daemon does not back. From `ComposerControl.tsx` it copies `ComposerControl`, `Icon`,
+`Chevron` and `Separator`; it leaves out `SelectControl`, which nothing in Yantra uses. Its name, wordmark and icon
+are not used.
+
 ```text
 MIT License
 

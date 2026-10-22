@@ -1,9 +1,9 @@
-import { axe, expect, keyboardWalk, scenario, test } from './lib/test'
+import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /** `/rooms` and `/rooms/$room` (Y-536) on the `rooms` scenario: `design-review`
  *  is live and `release` is paused at 20/20. The `phone` project is the done
- *  proof: the owner steers a room from the phone. No screenshot, because a new
- *  baseline is made in CI's image and the gate refuses a missing one. */
+ *  proof: the owner steers a room from the phone. The post form is the Chat's
+ *  composer (Y-560), and its baseline is made in CI's image. */
 
 // The phone's app bar is a second h1 over the screen's hidden one.
 const heading = (page: Parameters<typeof axe>[0], name: string) =>
@@ -89,6 +89,55 @@ test.describe('rooms', () => {
       expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(48)
       expect(box?.width ?? 0, name).toBeGreaterThanOrEqual(48)
     }
+  })
+
+  test('the post form is the shared composer, and looks like the board', async ({ page, size }) => {
+    await page.goto('/rooms/release')
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveAccessibleDescription(
+      'Every agent in the room reads it. Posting sets the count back to 0.',
+    )
+    await expect(page.getByRole('button', { name: 'Post' })).toHaveAccessibleDescription('Type a message to post it.')
+    await page.getByRole('textbox', { name: 'Message' }).fill('Fix the links, then ship.')
+    await screenshot(page, 'room-composer', 'rooms', size)
+  })
+
+  test('the messages, the banner and the post form are one column', async ({ page }) => {
+    await page.goto('/rooms/release')
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+    const column = async (locator: ReturnType<typeof page.locator>) => {
+      const box = (await locator.boundingBox())!
+      return [Math.round(box.x), Math.round(box.width)]
+    }
+    const card = await column(page.locator('[data-slot="composer-shell"]'))
+    expect(await column(page.getByRole('list', { name: 'Messages' }))).toEqual(card)
+    expect(await column(page.locator('.room__paused'))).toEqual(card)
+  })
+
+  test('the post form rides at the foot of the screen on a phone, as the Chat does', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the dock is sticky on the phone only')
+    await page.setViewportSize({ width: 390, height: 420 })
+    await page.goto('/rooms/release')
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+    const form = page.locator('.room__compose')
+    for (const to of [0, 'end'] as const) {
+      await page.evaluate((y) => window.scrollTo(0, y === 'end' ? document.body.scrollHeight : y), to)
+      await expect(form).toBeInViewport({ ratio: 1 })
+      const box = (await form.boundingBox())!
+      expect(Math.round(box.y + box.height)).toBeGreaterThanOrEqual(420 - 1)
+    }
+  })
+
+  test('Shift+Enter writes a new line in the post form, and Enter posts', async ({ page, size }) => {
+    test.skip(size === 'phone', 'a phone keeps Enter for a new line')
+    await page.goto('/rooms/release')
+    const box = page.getByRole('textbox', { name: 'Message' })
+    await box.fill('one')
+    await box.press('Shift+Enter')
+    await box.pressSequentially('two')
+    await expect(box).toHaveValue('one\ntwo')
+    await box.press('Enter')
+    await expect(page.getByRole('list', { name: 'Messages' }).getByRole('listitem')).toHaveCount(3)
   })
 
   test('with no rooms, the list says so', async ({ page }) => {

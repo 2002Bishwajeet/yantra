@@ -21,6 +21,17 @@ describe('ModePicker', () => {
     expect(options[0].getAttribute('aria-checked')).toBe('true')
   })
 
+  it('draws a glyph of its own for each mode, since a phone shows no words', () => {
+    const glyph = (mode: PermissionMode) => {
+      const { unmount } = render(<ModePicker onChange={() => {}} value={mode} />)
+      const svg = screen.getByRole('button', { name: /^Permissions: / }).querySelector('svg')!
+      unmount()
+      return svg.getAttribute('class')
+    }
+    const drawn = MODES.map((one) => glyph(one.mode))
+    expect(new Set(drawn).size).toBe(MODES.length)
+  })
+
   it('opens and picks with the keyboard alone', async () => {
     const onChange = vi.fn<(mode: PermissionMode) => void>()
     render(<ModePicker onChange={onChange} value="supervised" />)

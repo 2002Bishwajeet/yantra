@@ -224,7 +224,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       </ErrorBoundary>
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
-          <div hidden={view !== 'chat'}>
+          <div className="session__chat" hidden={view !== 'chat'}>
             <Chat initialDraft={draft ?? carried} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
           </div>
         ) : null}

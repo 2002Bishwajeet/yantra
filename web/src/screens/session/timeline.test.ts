@@ -140,9 +140,31 @@ describe('the timeline', () => {
     ])
   })
 
-  it('draws nothing for a plan or a title', () => {
-    const plan = event({ threadId: 't', type: 'turn.plan.updated', payload: { plan: [] } })
+  it('draws nothing for a title', () => {
     const named = event({ threadId: 't', type: 'thread.metadata.updated', payload: { name: 'x' } })
-    expect(fold([plan, named])).toEqual(empty)
+    expect(fold([named])).toEqual(empty)
+  })
+
+  it('keeps the newest plan, and starts it over with the thread', () => {
+    const steps = [
+      { step: 'Read the tests', status: 'completed' as const },
+      { step: 'Fix the parser', status: 'inProgress' as const },
+    ]
+    const plan = (list: typeof steps) => event({ threadId: 't', type: 'turn.plan.updated', payload: { plan: list } })
+    expect(fold([plan(steps)]).plan).toEqual(steps)
+    expect(fold([plan(steps), plan([steps[0]!])]).plan).toEqual([steps[0]])
+    expect(fold([plan(steps), { type: 'reset' }]).plan).toEqual([])
+  })
+
+  it("drops the last turn's plan when a new turn starts", () => {
+    const steps = [{ step: 'Fix the parser', status: 'inProgress' as const }]
+    const planned = fold([
+      event({ threadId: 't', type: 'turn.started' }),
+      event({ threadId: 't', type: 'turn.plan.updated', payload: { plan: steps } }),
+      event({ threadId: 't', type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } }),
+    ])
+    expect(planned.plan).toEqual(steps)
+    expect(reduce(planned, { type: 'sent' }).plan).toEqual([])
+    expect(fold([event({ threadId: 't', type: 'turn.started' })], planned).plan).toEqual([])
   })
 })
