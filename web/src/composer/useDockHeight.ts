@@ -7,7 +7,9 @@ import { useEffect, useRef, type RefObject } from 'react'
  */
 export function useDockHeight(dock: RefObject<HTMLElement | null>, onResize?: (dock: HTMLElement) => void) {
   const latest = useRef(onResize)
-  latest.current = onResize
+  useEffect(() => {
+    latest.current = onResize
+  })
   useEffect(() => {
     const box = dock.current
     if (!box || typeof ResizeObserver === 'undefined') return
