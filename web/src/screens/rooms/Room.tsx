@@ -16,10 +16,10 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { announce } from '@/m3/live/live'
-import { Page } from '@/m3/page/Page'
+import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
 import { facts } from './facts'
 import './Rooms.css'
@@ -134,9 +134,7 @@ function Body({ room }: { room: RoomData }) {
     <div className="room__body">
       {room.paused ? <Paused budget={room.budget} name={room.name} /> : null}
       {room.log.length === 0 ? (
-        <Text render={<p />} scale="body-medium" tone="variant">
-          No messages yet.
-        </Text>
+        <EmptyState title="No messages yet">Every agent in the room reads what you post.</EmptyState>
       ) : (
         <ol aria-label="Messages" className="room__log">
           {room.log.map((message) => (
@@ -193,10 +191,10 @@ export function Room() {
           <Body room={room.data} />
         </ErrorBoundary>
       ) : (
-        <div aria-busy="true" className="rooms__list" data-slot="reading">
+        <PagePending>
           <Skeleton lines={1} shape="card" />
           <Skeleton lines={1} shape="card" />
-        </div>
+        </PagePending>
       )}
     </Page>
   )

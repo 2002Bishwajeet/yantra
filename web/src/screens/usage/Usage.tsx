@@ -9,7 +9,7 @@ import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
-import { Page } from '@/m3/page/Page'
+import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
@@ -32,11 +32,11 @@ const AS_READ: Record<Span, string> = {
 
 function Waiting() {
   return (
-    <div aria-busy="true" className="usage__pending">
+    <PagePending>
       <Skeleton shape="text" style={{ width: '46%' }} />
       <Skeleton shape="row" />
       <Skeleton shape="row" style={{ width: '78%' }} />
-    </div>
+    </PagePending>
   )
 }
 

@@ -11,6 +11,7 @@ import { Link } from '@tanstack/react-router'
 import { useThreads } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
@@ -71,9 +72,7 @@ export function ThreadList(props: { name: string; view: View; thread?: string })
         />
       ) : null}
       {shown && shown.length === 0 ? (
-        <Text render={<p />} className="threads__empty" scale="body-medium" tone="variant">
-          No threads yet. Send a message in Chat to start one.
-        </Text>
+        <EmptyState title="No threads yet">Send a message in Chat to start one.</EmptyState>
       ) : null}
       {shown
         ? groupThreads(shown).map((group) => (

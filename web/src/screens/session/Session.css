@@ -221,11 +221,6 @@
 
 /* Chat */
 
-.chat__empty {
-  margin: 0;
-  padding: 0 8px;
-}
-
 .chat__markdown > :first-child {
   margin-top: 0;
 }
@@ -637,11 +632,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.threads__empty {
-  margin: 0;
-  padding: 0 4px;
 }
 
 .threads__group {

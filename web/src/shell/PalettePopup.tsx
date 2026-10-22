@@ -4,6 +4,7 @@ import { Cpu, FileText, Search } from 'lucide-react'
 import { loaded, useAgents, useMachines, useWorkspaces, type Reading } from '@/api/hooks'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
 import { Kbd } from '@/m3/kbd/Kbd'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Row, RowText } from '@/m3/row/Row'
 import { Eyebrow } from '@/m3/text/Text'
@@ -205,7 +206,7 @@ export function PalettePopup(props: { open: boolean; onOpenChange: (open: boolea
               })}
             </div>
           ))}
-          {flat.length === 0 ? <p className="palette__empty">Nothing matches.</p> : null}
+          {flat.length === 0 ? <EmptyState title="Nothing matches" /> : null}
         </div>
         <div className="palette__foot">
           <span>

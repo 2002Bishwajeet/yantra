@@ -104,12 +104,6 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.usage__pending {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .usage__scroll {
   overflow-x: auto;
 }

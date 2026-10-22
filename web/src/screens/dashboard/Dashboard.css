@@ -185,24 +185,6 @@
   flex: none;
 }
 
-.dash__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px 24px;
-  border: 1.5px dashed var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-large-increased);
-  text-align: center;
-}
-
-.dash__empty-title {
-  gap: 8px;
-  font: var(--md-sys-typescale-emphasized-body-large);
-  letter-spacing: var(--md-sys-typescale-emphasized-body-large-tracking);
-}
-
 /* Worth a look: one tertiary line on the desktop, rows on the phone. */
 
 .dash__worth {

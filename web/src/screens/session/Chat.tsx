@@ -22,6 +22,7 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { appendToDraft } from './diff/comment'
@@ -409,10 +410,10 @@ export function Chat(props: ChatProps) {
       ) : null}
       <section aria-label="Conversation" className="chat__turns" hidden={showDiff}>
         {timeline.entries.length === 0 && link !== 'connecting' ? (
-          <Text className="chat__empty" render={<p />} scale="body-medium" tone="variant">
+          <EmptyState title="Nothing asked yet">
             Ask {agent} something about {workspace.name}. It works on a branch of its own, so the session in the
             terminal is untouched.
-          </Text>
+          </EmptyState>
         ) : null}
         {timeline.entries.map((entry) =>
           entry.kind === 'message' ? (
