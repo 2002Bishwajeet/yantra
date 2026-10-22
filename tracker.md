@@ -415,6 +415,7 @@ deleted everywhere else.
 | Y-564 | Model and effort pickers in the composer | ⬜ todo | claude | Y-560 | Left out of Y-560: a turn names a harness and a permission mode, nothing more. **Done** when the chat frame carries a model and an effort, the daemon passes both to the harness, and the composer shows two pickers. |
 | Y-565 | A Build and Plan toggle in the composer | ⬜ todo | claude | Y-560 | Left out of Y-560: the daemon has no plan-only interaction mode. **Done** when a thread can run in plan mode, the composer toggles it, and a plan-mode turn writes no file. |
 | Y-566 | One page layout for every screen | ⬜ todo | claude | Y-560 | **Owner, 2026-10-21:** the layout is not consistent across screens. **Done** when every route draws its body in one `Page` with one `PageHeader`, uses one gutter, width, gap and radius token set, and one empty, loading and error surface. A unit test fails on a screen stylesheet with a literal radius or max width, or a literal gap above 16 px (a literal gap of 16 px or less stays allowed), and a Playwright test shows each route's title and first card on one left edge at three sizes, with baselines. |
+| Y-570 | tokio 1.54.1 for the yanked 1.54.0 | 🔵 review | claude | — | **Red suite, 2026-10-22:** `cargo deny` fails because tokio 1.54.0 is yanked, so every PR is blocked. **Done** when `Cargo.lock` has tokio 1.54.1 and the deny check passes. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
