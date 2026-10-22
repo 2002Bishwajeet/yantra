@@ -318,39 +318,6 @@
   overflow-wrap: anywhere;
 }
 
-.chat__diff-text {
-  max-height: 480px;
-  margin: 0;
-  padding: 12px 0;
-  overflow: auto;
-  border-radius: var(--md-sys-shape-corner-medium);
-  background: var(--md-sys-color-surface-container-highest);
-  font-family: var(--md-ref-typeface-mono, monospace);
-  font-size: var(--md-sys-typescale-body-small-size);
-}
-
-.chat__diff-text span {
-  display: block;
-  min-width: max-content;
-  padding: 0 12px;
-  white-space: pre;
-}
-
-.chat__diff-text [data-tone='add'] {
-  background: var(--md-sys-color-tertiary-container);
-  color: var(--md-sys-color-on-tertiary-container);
-}
-
-.chat__diff-text [data-tone='del'] {
-  background: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
-}
-
-.chat__diff-text [data-tone='hunk'],
-.chat__diff-text [data-tone='meta'] {
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .chat__asking {
   gap: 12px;
   width: min(100%, 720px);

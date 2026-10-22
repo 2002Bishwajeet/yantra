@@ -792,8 +792,8 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  router.ts          TanStack Router: thirteen routes and a dev-only gallery, one
-                     of them eager, each with a loader that warms its reads
+  router.ts          TanStack Router: sixteen routes, one a dev-only gallery,
+                     one of them eager, each with a loader that warms its reads
   work.ts            D3 §4's bands — who must act next, and the fourth state
                      that is nobody having read yet
   views.ts           the four views of `/w/{name}`. Its own module so `router.ts`
