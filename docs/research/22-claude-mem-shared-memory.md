@@ -158,7 +158,7 @@ CLAUDE_MEM_REDACT_ENABLED=true
 ```
 
 - **What flows.** Observations, session summaries, the full text of user prompts, and `work_state`. Each worker pulls the other machines' rows into its own SQLite and Chroma, so each machine holds the whole memory. Raw transcripts and `tool_uses` do not flow.
-- **Redaction.** `CLAUDE_MEM_REDACT_ENABLED` is off by default and must be on for every machine. `src/utils/tag-stripping.ts` redacts before text reaches the model, the local DB or the sync outbox. It uses claude-mem's own patterns, not the Y-430 gitleaks rules, and a model-written observation can still carry a secret that the patterns miss.
+- **Redaction.** `CLAUDE_MEM_REDACT_ENABLED` is off by default and must be on for every machine. `src/utils/tag-stripping.ts` redacts before text reaches the model, the local DB or the sync outbox. It uses claude-mem's own patterns, not the Y-430 gitleaks rules, and a model-written observation can still carry a secret that the patterns miss. [§9.7](#97-redaction-against-the-y-430-fixtures-2026-10-22) tests this.
 
 ### 9.4 Negative findings
 
@@ -212,6 +212,58 @@ Commands, in order: `podman network create`, `podman volume create`, `podman run
 
 The done condition holds: the self-hosted hub works with stock workers on v14.0.1. The §9.4 risk stands, because upstream can change the verify and projection contract in any release. I do not decide Y-531 here.
 
+### 9.7 Redaction against the Y-430 fixtures, 2026-10-22
+
+**Result: the defaults miss 2 of the 3 Y-430 fixtures. One custom pattern catches both. Redaction does not run on four paths, and that includes the sync push.** Y-530 asked for this. I read `src/utils/redaction.ts` and `src/utils/tag-stripping.ts` at commit `3fae1eb` (v14.0.1). I ran the real functions in a throwaway `oven/bun:1.4-debian` container. The container had no network, and the clone was mounted read-only.
+
+**The fixtures.** Y-430 tests redaction with three fake secrets from R18 §11.3 (`crates/yantra/tests/history.rs`). All three sit in one transcript line.
+
+**How claude-mem applies redaction.**
+
+- `loadRedactionConfig` reads five keys from `~/.claude-mem/settings.json`. Only the string `true` turns `CLAUDE_MEM_REDACT_ENABLED` on.
+- `CLAUDE_MEM_REDACT_CUSTOM_PATTERNS` is a string that holds a JSON array of `{ "name", "regex" }` objects. Each regex compiles with `new RegExp(regex, 'g')`. There is no flags field, so `(?i)` does not work. A bad entry is skipped with a warning.
+- Custom patterns run first, then the 11 built-in patterns. A match becomes `<redacted type='<name>'/>`.
+- `stripTags` calls `redactSensitive` for every captured field: tool input and output, prompts, and the last assistant message. The worker scans `JSON.stringify(toolInput)`, so a quote arrives as `\"`.
+- `CLAUDE_MEM_REDACT_GENERIC_ENABLED=true` adds three built-in patterns for `password=`, `*_token=` and `Authorization: Bearer`. It is off by default.
+
+**Which fixtures the defaults miss.** I called `stripMemoryTags`, the real choke point, with a real `settings.json`, in four input forms: the Y-430 transcript line, plain text, `JSON.stringify` of a tool input, and a JSON object.
+
+| Fixture | Caught by default? | Caught by `CLAUDE_MEM_REDACT_GENERIC_ENABLED`? | Pattern that catches it |
+| --- | --- | --- | --- |
+| `ghp_aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6` | Yes, `github_pat` | Yes | none needed |
+| `API_TOKEN=Zq7Xw2Lp9Rt4Vb8Nm3Kc` | **No**, in all four forms | Yes | `yantra_keyed_secret` |
+| `DATABASE_PASSWORD=Hunter2Correct9xQ` | **No**, in all four forms | Yes | `yantra_keyed_secret` |
+
+With redaction off, all three survive. This matches R18: gitleaks catches the token, and no default rule catches the password.
+
+**The custom pattern.** It redacts the value after a key that ends in `password`, `passwd`, `secret`, `token` or `api_key`. It keeps the key, so the observation still says what was set. It follows the Yantra gitleaks rule of Y-430, with three changes. JavaScript has no `(?i)`, so the case variants are spelt out. The value ends before a `(`, so `password = getPassword()` stays. A value needs 8 characters. The lookbehind is bounded to 40 key characters, which avoids the quadratic scan that the source warns about. The settings value, as `settings.json` must hold it:
+
+```json
+"CLAUDE_MEM_REDACT_CUSTOM_PATTERNS": "[{\"name\":\"yantra_keyed_secret\",\"regex\":\"(?<=\\\\b[A-Za-z0-9_]{0,40}(?:PASSWORD|[Pp]assword|PASSWD|[Pp]asswd|SECRET|[Ss]ecret|TOKEN|[Tt]oken|API_?KEY|[Aa]pi_?[Kk]ey)(?:\\\\\\\\{0,3}[\\\"'])?\\\\s{0,8}[=:]\\\\s{0,8}(?:\\\\\\\\{0,3}[\\\"'])?)(?![\\\\w$]*\\\\()[A-Za-z0-9_\\\\-+/=~@#$%^*!?]{8,}\"}]"
+```
+
+Run with this value, all four forms of both misses were redacted and no fixture survived.
+
+**False positives.** I ran 18 ordinary lines through the same function with the pattern on. These stayed unchanged: `max_tokens=4096`, `const token: string = x;`, `tokenizer = AutoTokenizer.from_pretrained("gpt2")`, `password = getPassword()`, `password: string;`, `PWD=/home/biswa/project`, `TOKEN_TTL=3600`, `password_hash = hash(raw)`, `DATABASE_PASSWORD=${DATABASE_PASSWORD}` and eight more. One line changed: `password = "changeme"`. That is a literal password, so I count it a correct catch. The pattern has no entropy gate, because the fixtures are plain words and digits. Any literal 8-character value after such a key is redacted.
+
+**The generic switch is the other fix.** `CLAUDE_MEM_REDACT_GENERIC_ENABLED=true` also caught both misses. It also redacted `password = getPassword()`, which breaks code text. Y-529 should set the custom pattern. The generic switch is optional and adds no cover the pattern lacks, except `Authorization: Bearer` headers.
+
+**Negative findings. Redaction does not apply on these paths.** I ran the first two in a live worker (`bun plugin/scripts/worker-service.cjs start`, `CLAUDE_MEM_REDACT_ENABLED=true`, no network). I read the other two in the source.
+
+- **`POST /api/memory/save` stores the text raw.** The row in `observations` held the token, the password and the GitHub token. `save-memory.ts` does not call `redactSensitive`. This route is what the MCP `save_memory` tool uses.
+- **`POST /api/import` stores the text raw.** Imported `prompts` and `observations` rows held all three secrets. `/api/memory/ingest` has no redaction call either.
+- **The sync push does not redact.** `CloudSync.ts` strips only its own token from error text. A row that reaches the outbox leaves as it is stored. The pull side writes rows as they arrive. One machine with redaction off, or one raw save, puts the secret on every machine.
+- **The observer's own output is not redacted on the SQLite path.** The model writes the observation text, and `ResponseProcessor.ts` stores it without a redaction call. Redaction cleans only what the model reads. A model that infers a secret can write it. Only the server (Postgres) path scans generated content.
+- **Nothing redacts rows stored before redaction was on.** I found no code that rewrites old rows. The first run on a machine must start with redaction on, or the old rows need a manual clean.
+- **A broken `settings.json` drops the custom patterns.** With no earlier good config in memory, the worker falls back to the built-in patterns only (`BUILTINS_ONLY`). Y-529 must write the file as valid JSON and check it parses.
+- **Server-runtime session metadata is not redacted.** The upstream docs say so.
+
+Y-529 must therefore set `CLAUDE_MEM_REDACT_ENABLED=true` and the pattern on every machine before the first sync. Calls to `save_memory` should not carry secrets. Y-531 should weigh the sync gap: redaction on the source machine does not cover a raw save or import.
+
+**Not tested.** The full observer path with a model, because no model credential was in the container. The server (Postgres) runtime. A pull from a second worker.
+
+Commands, in order: `git clone https://github.com/thedotmack/claude-mem` and `git checkout 3fae1eb` in `~/.cache/yantra-ref/claude-mem`; `podman pull docker.io/oven/bun:1.4-debian`; then for each of `off`, `defaults`, `generic` and `custom`: `podman run --rm -m 1g --network none -v <clone>:/cm:ro -v <harness>:/h:ro -e HOME=/tmp/home oven/bun:1.4-debian bun /h/run.ts <mode>`. The script writes `settings.json`, imports `/cm/src/utils/tag-stripping.ts` and calls `stripMemoryTags`. The live run: `podman run --rm -m 2g --network none ... bash /h/live.sh`, which starts the worker on port 37700 and posts to `/api/memory/save` and `/api/import`. Then it reads `~/.claude-mem/claude-mem.db` with `bun:sqlite`. The worker port is `37700 + uid % 100`, so root uses 37700.
+
 ## Sources
 
 All accessed 2026-10-19.
@@ -234,3 +286,4 @@ All accessed 2026-10-19.
 - DevContainer sharing with socat: https://dev.classmethod.jp/en/articles/share-claude-mem-across-devcontainers/
 - Yantra: `docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md`, `docs/research/18-one-conversation-history.md` §8, §11, `tracker.md` rows Y-426 to Y-432 and Y-518.
 - claude-mem at commit `3fae1eb`: `services/sync-api/src/{index,auth,env,projection,schema,canonical-content}.ts`, `Dockerfile`, `test/helpers.ts`; client `src/services/sync/CloudSync.ts`, `src/services/worker/DatabaseManager.ts`, `src/shared/SettingsDefaultsManager.ts`, `src/utils/tag-stripping.ts`; `docs/public/cloud-sync.mdx`. Local run: `bun test test` in podman, 52 pass.
+- Redaction run, 2026-10-22 (§9.7), accessed 2026-10-22: claude-mem at `3fae1eb` (v14.0.1), `src/utils/redaction.ts`, `src/utils/tag-stripping.ts`, `src/services/memory/save-memory.ts`, `src/services/worker/http/routes/{DataRoutes,MemoryRoutes,MemoryIngestRoutes}.ts`, `src/services/sync/CloudSync.ts`, `src/services/worker/agents/ResponseProcessor.ts`, `docs/public/usage/auto-redaction.mdx`. Yantra: `crates/yantra/tests/history.rs`, `crates/yantra-core/src/history.rs`, `docs/research/18-one-conversation-history.md` §11.3.
