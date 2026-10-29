@@ -419,6 +419,8 @@ deleted everywhere else.
 | Y-568 | Show the plan badge for the Claude harness | ⬜ todo | claude | Y-560 | Only `crates/yantra-core/src/acp.rs` emits `turn.plan.updated`; `claude.rs` emits none. **Done** when a Claude turn shows the plan badge (derive it from the `TodoWrite` tool use) and a test covers it. |
 | Y-569 | Fix the podman mic test flake | ⬜ todo | claude | — | The test at `crates/yantrad/tests/mic.rs:205` fails at times. **Done** when the cause is fixed, not retried, and the test passes ten runs in a row. |
 | Y-570 | tokio 1.54.1 for the yanked 1.54.0 | 🔵 review | claude | — | **Red suite, 2026-10-22:** `cargo deny` fails because tokio 1.54.0 is yanked, so every PR is blocked. **Done** when `Cargo.lock` has tokio 1.54.1 and the deny check passes. |
+| Y-571 | A `Blocked` verdict for an agent that waits mid-run | ⬜ todo | claude | — | **Owner, 2026-10-29:** herdr shows which agent waits for a person; Yantra sees only the trust dialog (`AwaitingTrust`). **Done** when `status` reads the bottom of the pane, a Claude Code permission or question prompt gives `Blocked`, the dashboard and a notification show it, and a podman test drives a real prompt. |
+| Y-572 | Status for agents other than Claude Code | ⬜ todo | claude | Y-571 | **Owner, 2026-10-29:** `Verdict` asks `claude` only, so a Codex session in tmux reads `Unclear`. **Done** when a Codex session gives `Running`, `Blocked` and an exit verdict like a Claude one, with a podman test for each. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
