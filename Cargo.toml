@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/yantra-core", "crates/yantrad", "crates/yantra", "crates/yantra-agent", "crates/yantra-box"]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.97"
 license = "BSD-3-Clause"
