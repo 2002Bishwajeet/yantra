@@ -72,7 +72,7 @@ jobs:
           # The appliance. Static musl, no libc on the Pi 5 to depend on.
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04
-            packages: yantrad yantra yantra-agent
+            packages: yantrad yantra yantra-agent yantra-box
             zigbuild: true
             archive: tar.gz
             dashboard: true
@@ -80,7 +80,7 @@ jobs:
           # Linux dev boxes and the x86 mini-PC alternative to the Pi.
           - target: x86_64-unknown-linux-musl
             os: ubuntu-24.04
-            packages: yantrad yantra yantra-agent
+            packages: yantrad yantra yantra-agent yantra-box
             zigbuild: true
             archive: tar.gz
             dashboard: true
