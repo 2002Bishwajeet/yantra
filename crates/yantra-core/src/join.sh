@@ -321,6 +321,7 @@ report() {
     status=$(printf '%s\n' "$reply" | tail -n 1)
     body=$(printf '%s\n' "$reply" | sed '$d')
     [ "$status" = 200 ] || fail "yantrad answered $status: $body"
+    machine=$(printf '%s\n' "$body" | sed -n 's/.*"machine":"\([^"]*\)".*/\1/p')
     logs_in_as=$(printf '%s\n' "$body" | sed -n 's/.*"logs_in_as":"\([^"]*\)".*/\1/p')
     if [ -z "$logs_in_as" ]; then
         say "yantrad could not read which account its ssh config logs in as here. The dashboard says more."
@@ -339,10 +340,45 @@ report() {
     fi
 }
 
+# Only a real login tells: the tailnet's SSH policy decides, and this machine
+# cannot read it. A check policy waits for a browser the appliance does not have.
+browser_needed() {
+    say "testing a real login from the appliance, which can take a minute."
+    reply=$(curl -sS --max-time 120 -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 1
+    case "$reply" in
+    *'Tailscale SSH requires an additional check'*) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+# Tailscale SSH goes last: it serves this very session if one came in through it.
+use_sshd_instead() {
+    say "the appliance cannot log in. Tailscale SSH asks for a browser sign-in, and the appliance has no browser."
+    say "Normal ssh with the appliance's key works unattended, and the connection stays inside Tailscale."
+    say "sshd listens on every network of this machine, so keep its password login off."
+    if ! ask "Turn on sshd and turn off Tailscale SSH here? A session that came in through Tailscale SSH ends."; then
+        say "nothing changed, so Yantra cannot reach this machine. Allow it in the tailnet's SSH policy, or run this again."
+        return 0
+    fi
+    if [ "$os" = Darwin ]; then
+        sshd_listening || mac_remote_login
+    elif ! sshd_listening && ! linux_sshd; then
+        say "sshd did not start, so Tailscale SSH stays on and Yantra cannot reach this machine yet."
+        return 0
+    fi
+    as_root tailscale set --ssh=false
+    say "Tailscale SSH is off, and the appliance logs in with its key."
+    if browser_needed; then
+        fail "the appliance still cannot log in. The dashboard's Check says why."
+    fi
+}
+
 say "this lets the Yantra appliance at $DAEMON log in here as $user."
 
+via_tailscale=
 if tailscale_ssh; then
-    say "Tailscale SSH is on, so the appliance reaches this machine through it and sshd is not needed."
+    via_tailscale=yes
+    say "Tailscale SSH is on, so the appliance tries it first and sshd stays as it is."
 elif sshd_listening; then
     say "sshd is running."
 elif [ "$os" = Darwin ]; then
@@ -359,4 +395,7 @@ else
     linux_agent
 fi
 report
+if [ -n "$via_tailscale" ] && [ -n "$machine" ] && browser_needed; then
+    use_sshd_instead
+fi
 say "done. Open the dashboard: this machine's Check turns green once Yantra reaches it."

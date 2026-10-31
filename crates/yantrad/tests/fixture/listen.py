@@ -6,8 +6,10 @@ real route's own behaviour is `write.rs`'s tests; this stands in for the
 tailnet, which no container holds.
 
 A file named by the second argument, when present, holds the account the
-"kept" block logs in as — the owner's re-join case. Anything else posted here
-(the agent's heartbeat) is answered 404 and not recorded.
+"kept" block logs in as — the owner's re-join case. A readiness check answers
+the failure Tailscale prints while the fake `tailscale` still has SSH on and
+`/srv/check-mode` exists. Anything else posted here (the agent's heartbeat) is
+answered 404 and not recorded.
 """
 
 import http.server
@@ -20,7 +22,16 @@ reports, kept_as = sys.argv[1], sys.argv[2]
 
 class Join(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        body = self.rfile.read(int(self.headers["Content-Length"]))
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path.endswith("/readiness"):
+            blocked = os.path.exists("/srv/check-mode") and not os.path.exists("/srv/ssh-off")
+            detail = "Tailscale SSH requires an additional check." if blocked else "a command ran"
+            reply = json.dumps({"looked": "ok", "data": {"checks": [{"detail": detail}]}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+            return
         if self.path != "/api/join":
             self.send_response(404)
             self.end_headers()

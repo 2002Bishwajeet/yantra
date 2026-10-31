@@ -40,6 +40,13 @@ name is one more thing to get wrong, and the person must still go to that machin
    > `authorized_keys`, so the key the script places is unused and harmless. The tailnet's SSH
    > policy decides whether the appliance may log in
    > ([Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh), read 2026-09-29).
+
+   > **2026-10-31, [Y-574](../../tracker.md):** that policy can be a `check` rule, which waits for
+   > a browser sign-in the appliance cannot give. A real appliance then timed out on every call.
+   > The script still leaves Tailscale SSH alone at first, then tests a real login from the
+   > appliance. Only when Tailscale refuses it does the script offer `sshd`, the key and
+   > `tailscale set --ssh=false`, in that order. The port 22 cost above then applies, and the
+   > script says so. A machine whose policy allows the appliance changes nothing.
 3. **The account is whoever ran the command.** The script sends `POST /api/join` with `{ "user" }`
    and nothing else.
 4. **The machine is named from the caller's address, never from the body.** The route is behind
