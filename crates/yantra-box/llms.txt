@@ -1,0 +1,8 @@
+# yantra-box
+
+> One command that writes a Yantra box installer to a USB stick.
+
+- [CLAUDE.md](CLAUDE.md): the rules for this crate.
+- [tracker.md](tracker.md): open work.
+- [src/main.rs](src/main.rs): the wizard.
+- [../../box/README.md](../../box/README.md): what the stick does.

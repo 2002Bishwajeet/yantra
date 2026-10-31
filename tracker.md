@@ -444,6 +444,9 @@ deleted everywhere else.
 | Y-593 | Price the Claude 5.5 and Fable 5.1 models | ⬜ todo | claude | — | **Owner, 2026-10-31.** **Done** when `price.rs` holds the official rates for Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1, and a test proves that none of them takes an older model's rate by prefix. |
 | Y-594 | Publish the box builder and its home screen | 🟡 wip | claude | — | **Owner, 2026-10-31.** **Done** when `box/` builds a stick from a stranger's key and settings with no personal data, and that stick installs on a real machine with the home screen at login. |
 | Y-595 | Replace the boot logo on the HP box | ⬜ todo | owner, claude | — | **Owner, 2026-10-31:** #533, EliteDesk 800 G5 Mini, firmware R21 02.27.00. **Done** when the box shows no HP logo at power-on through HP's supported route, or a note proves that no supported route exists. Never flash a modified firmware image. |
+| Y-596 | One-shot box installer application | 🟡 wip | claude | Y-594 | **Owner, 2026-10-31.** **Done** when `yantra-box` takes a stranger from a release download to a written stick, and that stick installs on a real machine. Linux first. |
+| Y-597 | Publish the box article as an artifact | ⬜ todo | claude | Y-596 | **Owner, 2026-10-31.** **Done** when the article is a Claude artifact in ASD-STE100, with exact commands and limits for people and LLMs, and every claim was tested. |
+| Y-598 | Let the daemon reach its own box | ⬜ todo | claude | — | **Owner, 2026-10-31.** `yantra-box` reports `Permission denied` to itself. **Done** when `install.sh` authorises the daemon account's key on its own machine and the dashboard lists the box's sessions. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
