@@ -445,10 +445,10 @@ deleted everywhere else.
 | Y-594 | Publish the box builder and its home screen | 🟡 wip | claude | — | **Owner, 2026-10-31.** **Done** when `box/` builds a stick from a stranger's key and settings with no personal data, and that stick installs on a real machine with the home screen at login. |
 | Y-595 | Replace the boot logo on the HP box | ⬜ todo | owner, claude | — | **Owner, 2026-10-31:** #533, EliteDesk 800 G5 Mini, firmware R21 02.27.00. **Done** when the box shows no HP logo at power-on through HP's supported route, or a note proves that no supported route exists. Parked until the owner has a keyboard at the box; findings on the issue. A modified image is the last resort, with a programmer and two matching chip backups. |
 | Y-596 | One-shot box installer application | 🟡 wip | claude | Y-594 | **Owner, 2026-10-31.** **Done** when `yantra-box` takes a stranger from a release download to a written stick, and that stick installs on a real machine. Linux first. |
-| Y-597 | Publish the box article as an artifact | ⬜ todo | claude | Y-596 | **Owner, 2026-10-31.** **Done** when the article is a Claude artifact in ASD-STE100, with exact commands and limits for people and LLMs, and every claim was tested. |
+| Y-597 | Update the box article in Journal | 🔵 review | claude | Y-596 | **Owner, 2026-10-31.** **Done** when the Journal note has the installer, the home screen and a table of what was tested, in ASD-STE100, and the owner publishes it. |
 | Y-598 | Let the daemon reach its own box | ⬜ todo | claude | — | **Owner, 2026-10-31.** `yantra-box` reports `Permission denied` to itself. **Done** when `install.sh` authorises the daemon account's key on its own machine and the dashboard lists the box's sessions. |
-| Y-599 | v0.9.0 | 🟡 wip | owner, claude | — | **Owner, 2026-10-31:** cut the release. **Done** when v0.9.0 is published with `yantra-box` in the Linux archives. |
-| Y-600 | Make the box home screen fill any window | 🟡 wip | claude | Y-594 | **Owner, 2026-10-31.** **Done** when the cards fill a wide terminal and no tab disappears when its tool exits. |
+| Y-599 | v0.9.0 | 🔵 review | owner, claude | — | **Owner, 2026-10-31:** cut the release. **Done** when v0.9.0 is published with `yantra-box` in the Linux archives. |
+| Y-600 | Make the box home screen fill any window | 🔵 review | claude | Y-594 | **Owner, 2026-10-31.** **Done** when the cards fill a wide terminal and no tab disappears when its tool exits. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
