@@ -1,0 +1,7 @@
+#!/bin/bash
+export ZELLIJ_CONFIG_DIR=${YANTRA_BOX_SHARE:-/usr/local/share/yantra-box}/zellij
+if zellij list-sessions -ns 2>/dev/null | grep -qx yantra; then
+    zellij attach yantra
+else
+    zellij -s yantra
+fi

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Reads the daemon's cache: a direct `yantra ls` waits on every machine over ssh.
+api() { curl -s -m 5 "http://$(tailscale ip -4 | head -1):7717/api/$1"; }
+case $1 in
+    sessions) api sessions | jq -r '.data[] | if .reached == "yes"
+        then "\(.machine)  \(.sessions | length) open", (.sessions[] | "  \(.name? // .)")
+        else "\(.machine)  unreachable" end' ;;
+    machines) api machines | jq -r '.data | sort_by(.online | not)[] | "\(if .online then "●" else "○" end) \(.name)"' ;;
+    attention) api attention | jq -r '.data | (.reviews + .issues)[] | "\(.repo | split("/")[1])#\(.number)  \(.title)"' | head -20 ;;
+    events) api notifications | jq -r '.data | sort_by(-.at)[:10][] | "\(.at | strftime("%d %b %H:%M"))  \(.machine // .workspace // "box")  \(.kind)"' ;;
+    box) printf 'yantrad  %s\n' "$(systemctl is-active yantrad)"
+         printf 'address  %s\n' "$(tailscale ip -4 | head -1)"
+         printf 'up       %s\n' "$(uptime -p | sed 's/^up //')"
+         df -h / | awk 'NR==2{print "disk     " $3 " of " $2}'
+         free -h | awk 'NR==2{print "memory   " $3 " of " $2}' ;;
+esac

@@ -17,6 +17,8 @@ the repo.
 
 ## Start here
 
+- [crates/yantra-box/llms.txt](crates/yantra-box/llms.txt): The wizard that writes the box installer to a USB stick.
+- [box/README.md](box/README.md): Build a USB installer that turns a spare computer into a Yantra appliance with a terminal home screen.
 - [tracker.md](tracker.md): project state — milestones, open tasks, decisions, open questions, risks, and an index of where the invariants live.
 - [CLAUDE.md](CLAUDE.md): how to work in this repo — think before coding, surgical changes, and what "verification" means here (a real sshd and a real tmux, never a mock).
 - [AGENTS.md](AGENTS.md): a symlink to CLAUDE.md, for agents that read AGENTS.md instead (Codex, Grok, opencode).

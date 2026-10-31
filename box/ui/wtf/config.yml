@@ -1,0 +1,56 @@
+wtf:
+  colors:
+    background: "#1D1C13"
+    border: { focusable: "#5C4A32", focused: "#FFB59B", normal: "#5C4A32" }
+    text: "#F6F0E2"
+    title: "#D9734A"
+  grid:
+    columns: [-1, -1, -1]
+    rows: [-3, -2, -5]
+  refreshInterval: 15
+  mods:
+    box:
+      type: cmdrunner
+      title: " Box "
+      cmd: yantra-card
+      args: ["box"]
+      enabled: true
+      focusable: false
+      position: { top: 0, left: 0, height: 1, width: 1 }
+      refreshInterval: 30s
+    machines:
+      type: cmdrunner
+      title: " Machines "
+      cmd: yantra-card
+      args: ["machines"]
+      enabled: true
+      focusable: false
+      position: { top: 0, left: 1, height: 1, width: 1 }
+      refreshInterval: 30s
+    sessions:
+      type: cmdrunner
+      title: " Sessions "
+      cmd: yantra-card
+      args: ["sessions"]
+      enabled: true
+      focusable: false
+      position: { top: 1, left: 0, height: 1, width: 3 }
+      refreshInterval: 15s
+    attention:
+      type: cmdrunner
+      title: " Needs you "
+      cmd: yantra-card
+      args: ["attention"]
+      enabled: true
+      focusable: false
+      position: { top: 2, left: 0, height: 1, width: 3 }
+      refreshInterval: 60s
+    events:
+      type: cmdrunner
+      title: " Events "
+      cmd: yantra-card
+      args: ["events"]
+      enabled: true
+      focusable: false
+      position: { top: 0, left: 2, height: 1, width: 1 }
+      refreshInterval: 30s
