@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn unpack_writes_everything_the_build_reads() {
         let root = std::env::temp_dir().join(format!("yantra-box-{}", std::process::id()));
-        unpack(&root).unwrap();
+        unpack(&root).expect("unpack writes to a temp dir");
         for path in [
             "build.sh",
             "flash.sh",
@@ -214,6 +214,6 @@ mod tests {
         ] {
             assert!(root.join(path).is_file(), "{path}");
         }
-        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(root).expect("the temp dir is ours");
     }
 }
