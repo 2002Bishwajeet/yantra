@@ -1581,6 +1581,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "yantra-box"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "include_dir",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "yantra-core"
 version = "0.8.0"
 dependencies = [

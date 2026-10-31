@@ -7,7 +7,13 @@ desktop: Debian 13, Tailscale, the daemon, Claude Code, and a terminal home scre
 
 ## Build the stick
 
-You need Linux, podman, curl and openssl.
+You need Linux, podman, curl and openssl. The wizard asks every question and writes the stick:
+
+```sh
+cargo run -p yantra-box
+```
+
+The scripts also work alone:
 
 ```sh
 ./build.sh ~/.ssh/id_ed25519.pub

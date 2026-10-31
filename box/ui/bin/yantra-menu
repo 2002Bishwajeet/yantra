@@ -8,6 +8,8 @@ logo='▀▄▀ ▄▀█ █▄ █ ▀█▀ █▀█ ▄▀█
  █  █▀█ █ ▀█  █  █▀▄ █▀█'
 while :; do
     clear
+    printf '\n'
+    cat "${YANTRA_BOX_SHARE:-/usr/local/share/yantra-box}/mark.ansi" 2>/dev/null
     gum style --foreground '#D9734A' --padding '1 1 0 2' "$logo"
     gum style --foreground '#9A9078' --padding '0 2 1 2' "$(hostname)"
     case $(gum choose --height 9 'System' 'Services' 'Shell' 'Restart' 'Shut down') in

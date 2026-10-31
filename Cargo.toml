@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/yantra-core", "crates/yantrad", "crates/yantra", "crates/yantra-agent"]
+members = ["crates/yantra-core", "crates/yantrad", "crates/yantra", "crates/yantra-agent", "crates/yantra-box"]
 
 [workspace.package]
 version = "0.8.0"

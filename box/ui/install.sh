@@ -22,7 +22,7 @@ install -m 755 "$(find "$t" -type f -name zellij)" "$(find "$t" -type f -name sy
     "$(find "$t" -type f -name wtfutil)" bin/yantra-card bin/yantra-home bin/yantra-menu /usr/local/bin/
 
 mkdir -p "$share"
-cp -r zellij wtf "$share/"
+cp -r zellij wtf mark.ansi "$share/"
 
 # Hold Esc at boot for the GRUB menu; timeout 0 would leave no way in.
 # The vt lists are the 16 console colours; 0, 3, 7, 11 and 15 carry the brand.
