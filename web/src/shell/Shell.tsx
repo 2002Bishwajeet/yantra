@@ -216,7 +216,7 @@ function DesktopBar() {
   return (
     <header className="shell__bar">
       <Link className="shell__wordmark" to="/">
-        <span aria-hidden="true" className="shell__disc" />
+        <img alt="" className="shell__mark" height="28" src="/yantra-mark.svg" width="28" />
         Yantra
       </Link>
       <nav aria-label="Main">

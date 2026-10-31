@@ -45,11 +45,9 @@
   text-decoration: none;
 }
 
-.shell__disc {
+.shell__mark {
   width: 28px;
   height: 28px;
-  border-radius: var(--md-sys-shape-corner-full);
-  background: var(--md-sys-color-primary);
 }
 
 .shell__search {
