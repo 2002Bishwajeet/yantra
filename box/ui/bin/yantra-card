@@ -6,7 +6,8 @@ case $1 in
         then "\(.machine)  \(.sessions | length) open", (.sessions[] | "  \(.name? // .)")
         else "\(.machine)  unreachable" end' ;;
     machines) api machines | jq -r '.data | sort_by(.online | not)[] | "\(if .online then "●" else "○" end) \(.name)"' ;;
-    attention) api attention | jq -r '.data | (.reviews + .issues)[] | "\(.repo | split("/")[1])#\(.number)  \(.title)"' | head -6 ;;
+    attention) api attention | jq -r '.data | (.reviews + .issues)[] | "\(.repo | split("/")[1])#\(.number)  \(.title)"' | head -20 ;;
+    events) api notifications | jq -r '.data | sort_by(-.at)[:10][] | "\(.at | strftime("%d %b %H:%M"))  \(.machine // .workspace // "box")  \(.kind)"' ;;
     box) printf 'yantrad  %s\n' "$(systemctl is-active yantrad)"
          printf 'address  %s\n' "$(tailscale ip -4 | head -1)"
          printf 'up       %s\n' "$(uptime -p | sed 's/^up //')"
