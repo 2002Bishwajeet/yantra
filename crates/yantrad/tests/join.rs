@@ -35,6 +35,9 @@ const KEPT_AS: &str = "/srv/kept-as";
 const ALIAS: &str = "fixture-box";
 const EDITED_ENV: &str = "YANTRA_DAEMON=100.64.0.5:7717";
 const TAILSCALE_SSH_ON: &str = "Tailscale SSH is on";
+const NO_BROWSER: &str = "the appliance has no browser";
+/// When present, `listen.py` refuses a login the way a check policy does.
+const CHECK_MODE: &str = "/srv/check-mode";
 
 /// Per process: two runs on one box (`just test` beside `just test-embedded`)
 /// sharing a directory swap the key under each other's container.
@@ -53,8 +56,10 @@ fn fake_tailscale(systemd: &Systemd, run_ssh: bool) -> Result<()> {
     sh(
         systemd,
         &format!(
-            r#"printf '%s\n' '#!/bin/sh' '[ "$*" = "debug prefs" ] || exit 1' \
-                'printf "{{\n\t\"WantRunning\": true,\n\t\"RunSSH\": {run_ssh}\n}}\n"' \
+            r#"printf '%s\n' '#!/bin/sh' 'if [ "$*" = "set --ssh=false" ]; then touch /srv/ssh-off; exit; fi' \
+                '[ "$*" = "debug prefs" ] || exit 1' \
+                'ssh={run_ssh}; [ ! -e /srv/ssh-off ] || ssh=false' \
+                'printf "{{\n\t\"WantRunning\": true,\n\t\"RunSSH\": $ssh\n}}\n"' \
                 > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale"#
         ),
     )?;
@@ -374,6 +379,32 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         "disabled",
         "the answer was yes, and still sshd must stay off:\n{tailnet}"
     );
+    assert!(!tailnet.contains(NO_BROWSER), "{tailnet}");
+
+    // Y-574: a check policy cannot pass with no browser. "No" changes nothing.
+    sh(&systemd, &format!("touch {CHECK_MODE}"))?;
+    let declined = succeeded(&run_join(&systemd, Some("n"))?, "check mode, declined")?;
+    assert!(declined.contains(NO_BROWSER), "{declined}");
+    assert!(declined.contains("nothing changed"), "{declined}");
+    assert_eq!(
+        systemd.property("sshd.service", "UnitFileState")?,
+        "disabled",
+        "{declined}"
+    );
+
+    // "Yes" starts sshd before it gives up Tailscale SSH, and the login then works.
+    let switched = succeeded(&run_join(&systemd, Some("y"))?, "check mode, accepted")?;
+    assert!(switched.contains("Tailscale SSH is off"), "{switched}");
+    assert_eq!(
+        systemd.property("sshd.service", "UnitFileState")?,
+        "enabled",
+        "{switched}"
+    );
+    sh(
+        &systemd,
+        &format!("test -e /srv/ssh-off && rm {CHECK_MODE} /srv/ssh-off"),
+    )?;
+    sh(&systemd, "systemctl disable --now sshd.service")?;
     sh(&systemd, "rm /usr/local/bin/tailscale")?;
 
     // A second run changes nothing that is already there.
