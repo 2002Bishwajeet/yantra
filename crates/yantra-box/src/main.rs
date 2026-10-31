@@ -186,25 +186,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_whole_usb_disks_are_offered() {
+    fn only_whole_usb_disks_are_offered() -> Result<()> {
         let json = r#"{"blockdevices":[
             {"name":"nvme0n1","size":"1T","model":"SSD","tran":"nvme","type":"disk"},
             {"name":"sda","size":"32G","model":"Stick","tran":"usb","type":"disk"},
             {"name":"sr0","size":"1G","model":"DVD","tran":"usb","type":"rom"},
             {"name":"loop0","size":"1G","model":null,"tran":null,"type":"loop"}
         ]}"#;
-        let names: Vec<_> = usb_disks(json)
-            .unwrap()
-            .into_iter()
-            .map(|d| d.name)
-            .collect();
+        let names: Vec<_> = usb_disks(json)?.into_iter().map(|d| d.name).collect();
         assert_eq!(names, ["sda"]);
+        Ok(())
     }
 
     #[test]
-    fn unpack_writes_everything_the_build_reads() {
+    fn unpack_writes_everything_the_build_reads() -> Result<()> {
         let root = std::env::temp_dir().join(format!("yantra-box-{}", std::process::id()));
-        unpack(&root).expect("unpack writes to a temp dir");
+        unpack(&root)?;
         for path in [
             "build.sh",
             "flash.sh",
@@ -214,6 +211,7 @@ mod tests {
         ] {
             assert!(root.join(path).is_file(), "{path}");
         }
-        std::fs::remove_dir_all(root).expect("the temp dir is ours");
+        std::fs::remove_dir_all(root)?;
+        Ok(())
     }
 }
