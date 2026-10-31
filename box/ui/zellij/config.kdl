@@ -1,0 +1,30 @@
+theme "yantra"
+default_layout "yantra"
+show_startup_tips false
+show_release_notes false
+pane_frames false
+on_force_close "detach"
+themes {
+    yantra {
+        fg "#F6F0E2"
+        bg "#2A2A1F"
+        black "#1D1C13"
+        red "#FFB59B"
+        green "#D9734A"
+        yellow "#D9734A"
+        blue "#D9734A"
+        magenta "#9A4523"
+        cyan "#F1E0CA"
+        white "#F6F0E2"
+        orange "#D9734A"
+    }
+}
+keybinds {
+    shared_except "locked" {
+        bind "Alt Right" { GoToNextTab; }
+        bind "Alt Left" { GoToPreviousTab; }
+        bind "F1" { GoToTab 1; }
+        bind "F2" { GoToTab 2; }
+        bind "F3" { GoToTab 3; }
+    }
+}

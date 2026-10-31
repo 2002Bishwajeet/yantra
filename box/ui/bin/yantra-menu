@@ -1,0 +1,20 @@
+#!/bin/bash
+export GUM_CHOOSE_CURSOR_FOREGROUND='#FFB59B' GUM_CHOOSE_SELECTED_FOREGROUND='#FFB59B'
+export GUM_CHOOSE_ITEM_FOREGROUND='#F6F0E2' GUM_CHOOSE_CURSOR='▸ ' GUM_CHOOSE_HEADER=''
+export GUM_CHOOSE_SHOW_HELP=false
+export GUM_CONFIRM_PROMPT_FOREGROUND='#F6F0E2' GUM_CONFIRM_SELECTED_BACKGROUND='#9A4523'
+export GUM_CONFIRM_SELECTED_FOREGROUND='#F6F0E2'
+logo='▀▄▀ ▄▀█ █▄ █ ▀█▀ █▀█ ▄▀█
+ █  █▀█ █ ▀█  █  █▀▄ █▀█'
+while :; do
+    clear
+    gum style --foreground '#D9734A' --padding '1 1 0 2' "$logo"
+    gum style --foreground '#9A9078' --padding '0 2 1 2' "$(hostname)"
+    case $(gum choose --height 9 'System' 'Services' 'Shell' 'Restart' 'Shut down') in
+        System) zellij action go-to-tab 2 ;;
+        Services) zellij action go-to-tab 3 ;;
+        Shell) zellij action detach; sleep 1 ;;
+        Restart) gum confirm 'Restart the box?' --default=false && sudo systemctl reboot ;;
+        'Shut down') gum confirm 'Shut down the box?' --default=false && sudo systemctl poweroff ;;
+    esac
+done

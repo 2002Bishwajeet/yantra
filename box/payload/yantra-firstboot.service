@@ -1,0 +1,17 @@
+[Unit]
+Description=Install Yantra and Claude Code once
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/yantra-firstboot
+# The console shows Tailscale's login link when the stick carries no auth key.
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=0
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+layout {
+    default_tab_template {
+        children
+        pane size=1 borderless=true { plugin location="zellij:compact-bar"; }
+    }
+    tab name="Home" focus=true {
+        pane split_direction="vertical" {
+            pane size=30 command="yantra-menu" focus=true
+            pane command="wtfutil" { args "--config" "/usr/local/share/yantra-box/wtf/config.yml"; }
+        }
+    }
+    tab name="System" { pane command="btop"; }
+    tab name="Services" { pane command="systemctl-tui"; }
+}

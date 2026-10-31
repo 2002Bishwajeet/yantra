@@ -442,6 +442,8 @@ deleted everywhere else.
 | Y-591 | Explain macOS privacy blocks in the directory picker | ⬜ todo | claude | — | **Owner review, 2026-10-31:** #526. **Done** when `access: false` on macOS shows the reason, the fix and its cost, the machine check warns of it, and a test covers it. |
 | Y-592 | Add a terminal dashboard to the CLI | ⬜ todo | claude | — | **Owner, 2026-10-31:** #530. **Done** when a `yantra` command lists machines, sessions and what needs the owner from the daemon, marks each agent's state, attaches on Enter, and has a view-only mode for an appliance console. It adds no multiplexer. |
 | Y-593 | Price the Claude 5.5 and Fable 5.1 models | ⬜ todo | claude | — | **Owner, 2026-10-31.** **Done** when `price.rs` holds the official rates for Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1, and a test proves that none of them takes an older model's rate by prefix. |
+| Y-594 | Publish the box builder and its home screen | 🟡 wip | claude | — | **Owner, 2026-10-31.** **Done** when `box/` builds a stick from a stranger's key and settings with no personal data, and that stick installs on a real machine with the home screen at login. |
+| Y-595 | Replace the boot logo on the HP box | ⬜ todo | owner, claude | — | **Owner, 2026-10-31:** #533, EliteDesk 800 G5 Mini, firmware R21 02.27.00. **Done** when the box shows no HP logo at power-on through HP's supported route, or a note proves that no supported route exists. Never flash a modified firmware image. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
