@@ -9,6 +9,14 @@ layout {
             pane command="wtfutil" { args "--config" "/usr/local/share/yantra-box/wtf/config.yml"; }
         }
     }
-    tab name="System" { pane command="btop"; }
-    tab name="Services" { pane command="systemctl-tui"; }
+    tab name="System" {
+        pane command="bash" {
+            args "-c" "while :; do btop; done"
+        }
+    }
+    tab name="Services" {
+        pane command="bash" {
+            args "-c" "while :; do systemctl-tui; done"
+        }
+    }
 }

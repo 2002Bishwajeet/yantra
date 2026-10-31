@@ -5,8 +5,8 @@ wtf:
     text: "#F6F0E2"
     title: "#D9734A"
   grid:
-    columns: [36, 36]
-    rows: [9, 7, 9]
+    columns: [-1, -1, -1]
+    rows: [-3, -2, -5]
   refreshInterval: 15
   mods:
     box:
@@ -34,7 +34,7 @@ wtf:
       args: ["sessions"]
       enabled: true
       focusable: false
-      position: { top: 1, left: 0, height: 1, width: 2 }
+      position: { top: 1, left: 0, height: 1, width: 3 }
       refreshInterval: 15s
     attention:
       type: cmdrunner
@@ -43,5 +43,14 @@ wtf:
       args: ["attention"]
       enabled: true
       focusable: false
-      position: { top: 2, left: 0, height: 1, width: 2 }
+      position: { top: 2, left: 0, height: 1, width: 3 }
       refreshInterval: 60s
+    events:
+      type: cmdrunner
+      title: " Events "
+      cmd: yantra-card
+      args: ["events"]
+      enabled: true
+      focusable: false
+      position: { top: 0, left: 2, height: 1, width: 1 }
+      refreshInterval: 30s

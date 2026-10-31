@@ -448,6 +448,7 @@ deleted everywhere else.
 | Y-597 | Publish the box article as an artifact | ⬜ todo | claude | Y-596 | **Owner, 2026-10-31.** **Done** when the article is a Claude artifact in ASD-STE100, with exact commands and limits for people and LLMs, and every claim was tested. |
 | Y-598 | Let the daemon reach its own box | ⬜ todo | claude | — | **Owner, 2026-10-31.** `yantra-box` reports `Permission denied` to itself. **Done** when `install.sh` authorises the daemon account's key on its own machine and the dashboard lists the box's sessions. |
 | Y-599 | v0.9.0 | 🟡 wip | owner, claude | — | **Owner, 2026-10-31:** cut the release. **Done** when v0.9.0 is published with `yantra-box` in the Linux archives. |
+| Y-600 | Make the box home screen fill any window | 🟡 wip | claude | Y-594 | **Owner, 2026-10-31.** **Done** when the cards fill a wide terminal and no tab disappears when its tool exits. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
