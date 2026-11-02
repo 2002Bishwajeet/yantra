@@ -160,6 +160,20 @@ describe('step 2, where the code comes from', () => {
       '/settings/providers',
     )
     expect(screen.getByRole('button', { name: /GitLab/ })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('status').textContent).toBe('')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('does not tell anyone to choose from a list that failed to load', async () => {
+    mountNew('desktop', '/new', {
+      'GET /api/repos': [200, { looked: 'failed', age_seconds: 0, error: 'rate limited' }],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByText('The repositories could not be read.')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
   it('browses the machine, and makes a folder where there is none', async () => {

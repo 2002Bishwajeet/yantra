@@ -151,10 +151,12 @@ export function happenings(values: Values, home: string | null): string[] {
 }
 
 /** The line under step 2 that says why Continue is off, or what it will do. */
-export function sourceHint(values: Values, home: string | null): string | null {
+export function sourceHint(values: Values, home: string | null, listed = true): string | null {
   const { source } = values
   if (!source) {
-    return values.provider === 'local' ? 'Choose a folder that exists to continue.' : 'Choose a repository to continue.'
+    if (values.provider === 'local') return 'Choose a folder that exists to continue.'
+    // No rows on screen: the panel already names the blocker, and "choose" would point at nothing.
+    return listed ? 'Choose a repository to continue.' : null
   }
   if (source.kind === 'local') return source.checked === 'no' ? 'Choose a folder that exists to continue.' : null
   const path = tilde(source.path, home)

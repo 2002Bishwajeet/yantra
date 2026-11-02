@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '@tanstack/react-form'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
-import { useMachines } from '@/api/hooks'
+import { useGithub, useMachines, useRepos } from '@/api/hooks'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
@@ -37,8 +37,11 @@ const usePresetMachine = () =>
 const HINT_ID = 'ns-source-hint'
 
 function SourceHint(props: { values: Values }) {
-  const { root } = useCloneFolder(props.values.machine)
-  const hint = sourceHint(props.values, root)
+  const { root, home } = useCloneFolder(props.values.machine)
+  const github = useGithub()
+  const repos = useRepos()
+  const listed = !github.error && github.data?.connected === true && repos.looked === 'ok' && !home.error
+  const hint = sourceHint(props.values, root, listed)
   return (
     <Text className="ns__hint" id={HINT_ID} render={<p role="status" />} scale="body-medium" tone="variant">
       {hint}

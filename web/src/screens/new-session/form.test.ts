@@ -179,6 +179,11 @@ describe('the hint under the source step', () => {
     expect(sourceHint(values({ provider: 'local' }), home)).toBe('Choose a folder that exists to continue.')
   })
 
+  it('stays silent when no repository list is on screen', () => {
+    expect(sourceHint(values(), home, false)).toBeNull()
+    expect(sourceHint(values({ provider: 'local' }), home, false)).toBe('Choose a folder that exists to continue.')
+  })
+
   it('says what a chosen repository will do', () => {
     expect(sourceHint(at('no'), home)).toBe('Will clone into ~/Github/homelab-k8s')
     expect(sourceHint(at('yes'), home)).toBe('On cachyos-g14 at ~/Github/homelab-k8s')
