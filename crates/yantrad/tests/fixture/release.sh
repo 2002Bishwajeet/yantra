@@ -57,9 +57,10 @@ serve() {
 }
 
 # A fourth argument is a real yantrad to publish in place of the stand-in, for
-# the update test that has to run the daemon it installed (Y-368).
+# the update test that has to run the daemon it installed (Y-368). A fifth is a
+# real yantra, for the test that needs `yantra ssh-identity` to run (Y-598).
 publish() {
-    local repo=$1 version=$2 marker=$3 daemon=${4:-}
+    local repo=$1 version=$2 marker=$3 daemon=${4:-} cli=${5:-}
     local stage binary unit
     stage=$(staged "$version")
 
@@ -74,6 +75,9 @@ publish() {
         cp /usr/bin/sleep "$STAGING/$stage/$binary"
         if [ "$binary" = yantrad ] && [ -n "$daemon" ]; then
             cp "$daemon" "$STAGING/$stage/$binary"
+        fi
+        if [ "$binary" = yantra ] && [ -n "$cli" ]; then
+            cp "$cli" "$STAGING/$stage/$binary"
         fi
         printf '\n%s\n' "$marker" >> "$STAGING/$stage/$binary"
     done
