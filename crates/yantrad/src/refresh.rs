@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use yantra_core::attention::Forge;
 use yantra_core::github::{self, Github};
-use yantra_core::inventory::Inventory;
+use yantra_core::inventory::{Inventory, MachineInfo, Os, Ownership};
 use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Readiness, Reading, Snapshot};
 use yantra_core::{doctor, sessions, status, workspace};
@@ -202,12 +202,18 @@ async fn look_at_sessions(model: &Model, chats: &crate::chat::Registry) {
 /// this module's whole subject. The `term` is [`crate::write::term`]'s, because
 /// nobody is sitting at this one either (I-36). An install runs it early (Y-386).
 ///
-/// It also asks each tailnet peer [`sessions::worth_asking`] admits (Y-579). The
+/// It also asks each online peer the dashboard counts as a machine (Y-579). The
 /// peers come from the last machines reading, so this adds no `tailscale` call.
 pub(crate) async fn look_at_readiness(model: &Model) {
     let peers = candidates(&*model.read().await);
     let reading = Reading::new(doctor::fleet_with(&peers, crate::write::term()).await);
     settle(&mut *model.write().await, reading);
+}
+
+/// `runsSessions` in `web/src/lib/platform.ts`: the checks feed the dashboard's
+/// counts, and a node it does not admit is never counted (D7 S2, Y-404).
+fn counted(machine: &MachineInfo) -> bool {
+    machine.ownership == Ownership::Yours && matches!(machine.os, Os::Linux | Os::MacOs)
 }
 
 fn candidates(snapshot: &Snapshot) -> Vec<String> {
@@ -216,7 +222,7 @@ fn candidates(snapshot: &Snapshot) -> Vec<String> {
         .and_then(|looked| looked.as_ref().ok())
         .into_iter()
         .flatten()
-        .filter(|machine| sessions::worth_asking(machine))
+        .filter(|machine| machine.online && counted(machine))
         .map(|machine| machine.name.clone())
         .collect()
 }
@@ -312,12 +318,12 @@ mod tests {
     use super::*;
     use std::net::IpAddr;
     use yantra_core::attention::{self, Attention};
-    use yantra_core::inventory::{Fake, MachineInfo, Os};
+    use yantra_core::inventory::Fake;
     use yantra_core::sessions::MachineSessions;
 
     fn machine(name: &str) -> MachineInfo {
         MachineInfo {
-            ownership: yantra_core::inventory::Ownership::Yours,
+            ownership: Ownership::Yours,
             id: format!("n-{name}"),
             name: name.to_string(),
             dns_name: format!("{name}.example.ts.net."),
@@ -568,6 +574,36 @@ mod tests {
             },
         ]);
         assert_eq!(candidates(&snapshot), ["g14"]);
+    }
+
+    /// D7 S2: a node `runsSessions` does not admit gets no check and no count,
+    /// and `GET /api/readiness` is what the Settings count divides by.
+    #[test]
+    fn the_sweep_asks_only_the_machines_the_dashboard_counts() {
+        let snapshot = on_the_tailnet(vec![
+            machine("g14"),
+            MachineInfo {
+                os: Os::MacOs,
+                ..machine("mac")
+            },
+            MachineInfo {
+                os: Os::Windows,
+                ..machine("pc")
+            },
+            MachineInfo {
+                os: Os::Other("freebsd".into()),
+                ..machine("bsd")
+            },
+            MachineInfo {
+                ownership: Ownership::Shared,
+                ..machine("friend")
+            },
+            MachineInfo {
+                ownership: Ownership::Tagged,
+                ..machine("server")
+            },
+        ]);
+        assert_eq!(candidates(&snapshot), ["g14", "mac"]);
     }
 
     /// The same shape as the port: settable nowhere, and low enough that every

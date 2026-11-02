@@ -134,8 +134,9 @@ to tune and because the load is already this daemon's shape: the agents sweep ru
 --json` on every machine every 30 s, and this adds the auth gate beside it.
 
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
-name and each tailnet peer that `sessions::worth_asking` admits, so every online computer pays
-eleven checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
+name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
+macOS machines. A Windows, shared or tagged peer gets no check, because `presentOn` divides by
+this list and such a peer is never counted. Each machine asked pays eleven checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
 candidates come from the last machines reading, so this adds no `tailscale` call. `Snapshot::checks`
 holds one report per machine with its own age, and `refresh::settle` is the one place a sweep
 lands. A failed sweep changes nothing there, and a machine the sweep skipped keeps its report. An

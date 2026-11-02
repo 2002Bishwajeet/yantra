@@ -319,7 +319,7 @@ has never been given a way to say what is still missing.*
 > blocked units stands.
 >
 > **2026-11-02, [Y-579](../../tracker.md).** The 404 above now reads *"no check has reached a machine
-> called `x`"*. The daemon's sweep also asks each online computer on the tailnet, on its own 30 s
+> called `x`"*. The daemon's sweep also asks each online machine `runsSessions` counts, on its own 30 s
 > clock, and keeps the latest report per machine. So *"nothing fans out on open"* still holds, because
 > opening a page asks nothing. A fresh install no longer depends on a tap to fill the checklist.
 

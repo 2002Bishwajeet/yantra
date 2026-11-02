@@ -185,7 +185,7 @@ pub async fn kill_on<E: ssh::Exec>(
 /// already known from the inventory. Neither exclusion applies to a machine a
 /// workspace names — that name is the owner's instruction and is always asked,
 /// which is why this filter sits on the tailnet half alone.
-pub fn worth_asking(machine: &MachineInfo) -> bool {
+fn worth_asking(machine: &MachineInfo) -> bool {
     machine.online && !matches!(machine.os, Os::Ios | Os::Android)
 }
 
