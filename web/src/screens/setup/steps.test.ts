@@ -95,16 +95,13 @@ describe("a machine's line", () => {
    *  key is the join command, an unanswered host is not. */
   it('separates a refused key from a host that did not answer', () => {
     const refused = report([check('reachable', 'absent', 'Permission denied (publickey)')])
-    expect(line(machine(), refused, null)).toEqual({ kind: 'refused' })
+    expect(line(machine(), refused, null)).toEqual({ kind: 'refused', detail: 'Permission denied (publickey)' })
     const unjoined = report([check('reachable', 'absent', 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).')])
-    expect(line(machine(), unjoined, null)).toEqual({ kind: 'unjoined' })
+    expect(line(machine(), unjoined, null)).toMatchObject({ kind: 'unjoined' })
     const browser = report([check('reachable', 'absent', 'Tailscale SSH requires an additional check')])
-    expect(line(machine(), browser, null)).toEqual({ kind: 'browser' })
+    expect(line(machine(), browser, null)).toMatchObject({ kind: 'browser' })
     const silent = report([check('reachable', 'absent', 'No route to host')])
-    expect(line(machine(), silent, null)).toEqual({
-      kind: 'unreachable',
-      words: 'ssh did not answer · No route to host',
-    })
+    expect(line(machine(), silent, null)).toEqual({ kind: 'unreachable', detail: 'No route to host' })
   })
 
   it('is ready when the seven checks a session needs are present', () => {

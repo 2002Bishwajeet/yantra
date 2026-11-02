@@ -144,6 +144,39 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
   })
 })
 
+describe('the Sessions card with no row', () => {
+  /** Y-585: `sessions.rs` answers an empty list here, and tmux did not run. */
+  it('agrees with Readiness on a machine with no tmux', async () => {
+    mount('desktop', '/m/nas')
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: /tmux.* missing/ })).toBeTruthy()
+    const sessions = card('Sessions')
+    expect(await sessions.findByText('No session can start here')).toBeTruthy()
+    expect(sessions.getByText('tmux is missing on nas. Readiness shows the fix.')).toBeTruthy()
+    expect(sessions.queryByText(/tmux lists nothing/)).toBeNull()
+  })
+
+  it('claims a tmux listing where Readiness found tmux', async () => {
+    mount('desktop', '/m/pi-5')
+    expect(await screen.findByText('tmux lists nothing on pi-5')).toBeTruthy()
+    expect(card('Sessions').getByText('No session is open here')).toBeTruthy()
+  })
+
+  /** A fresh machine no workspace names: the sweep skipped it, so nothing has
+   *  read tmux, and it may not be there. */
+  it('claims nothing about tmux where no check has read it', async () => {
+    const busy = scenario('busy')
+    const state = {
+      ...busy,
+      readiness: { looked: 'never' },
+      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }] },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    expect(await screen.findByText('Readiness has not read tmux on cachyos-g14')).toBeTruthy()
+    expect(card('Sessions').queryByText(/tmux lists nothing/)).toBeNull()
+  })
+})
+
 describe('/m/pi-5, which is missing git and claude', () => {
   /** pi-5's report has no `git` check at all: `missingBasics` (`lib/ready`)
    *  counts an unasked basic as missing too, the same as the machines-list

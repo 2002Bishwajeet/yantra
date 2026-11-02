@@ -208,15 +208,42 @@ describe('beat 3, reachable', () => {
     expect(reachable(done, NAME, reached, [], idle, 'linux')).toEqual({ state: 'done', words: 'reachable over ssh' })
   })
 
-  it("is stuck with the check's own detail, and on a Mac names Remote Login", () => {
+  /** Y-585, #520: a machine that just joined lands here. */
+  it('says the plain cause and the next step, and keeps ssh\'s words apart', () => {
+    const detail = 'sshd refused this connection: Permission denied (publickey)'
+    const refused = report([['reachable', 'absent', detail]])
+    const stuck = reachable(done, NAME, refused, [], idle, 'linux')
+    expect(stuck.state).toBe('stuck')
+    expect(stuck.words).toBe('laptop did not take the appliance’s key.')
+    expect(stuck.ssh).toEqual({ next: 'Run the join command on laptop; it places the key.', detail, join: true })
+  })
+
+  it('offers no join command where it does not help', () => {
+    const silent = report([['reachable', 'absent', 'ssh got no answer: No route to host']])
+    const stuck = reachable(done, NAME, silent, [], idle, 'linux')
+    expect(stuck.words).toMatch(/^Yantra can’t reach laptop over ssh\./)
+    expect(stuck.ssh).toMatchObject({ detail: 'ssh got no answer: No route to host', join: false })
+  })
+
+  it('reads a Tailscale check rule as the browser sign-in it is', () => {
+    const browser = report([['reachable', 'absent', 'Tailscale SSH requires an additional check']])
+    const stuck = reachable(done, NAME, browser, [], idle, 'linux')
+    expect(stuck.words).toMatch(/browser sign-in/)
+    expect(stuck.ssh).toMatchObject({ join: true })
+  })
+
+  it('names Remote Login on a Mac', () => {
     const refused = report([['reachable', 'absent', 'Permission denied (publickey)']])
-    expect(reachable(done, NAME, refused, [], idle, 'linux').words).toBe('Permission denied (publickey)')
-    expect(reachable(done, NAME, refused, [], idle, 'macos').words).toMatch(/check that Remote Login is on$/)
+    expect(reachable(done, NAME, refused, [], idle, 'macos').ssh?.next).toMatch(/check that Remote Login is on$/)
+    expect(reachable(done, NAME, refused, [], idle, 'linux').ssh?.next).not.toMatch(/Remote Login/)
   })
 
   it("is stuck on the daemon's own re-check after the join", () => {
-    const events = [event('unreachable', 6, { said: 'laptop joined, and Yantra could not reach it: timed out' }), event('joined', 5, reply())]
-    expect(reachable(done, NAME, null, events, idle, 'linux')).toMatchObject({ state: 'stuck', words: expect.stringMatching(/could not reach it/) })
+    const said = 'laptop joined, and Yantra could not reach it: timed out'
+    const events = [event('unreachable', 6, { said }), event('joined', 5, reply())]
+    const stuck = reachable(done, NAME, null, events, idle, 'linux')
+    expect(stuck).toMatchObject({ state: 'stuck', words: expect.stringMatching(/^Yantra can’t reach laptop/) })
+    expect(stuck.ssh?.detail).toBe(said)
   })
 
   it('is stuck, with the error, when the ask failed', () => {

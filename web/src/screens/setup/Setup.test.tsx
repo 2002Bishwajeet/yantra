@@ -275,10 +275,26 @@ describe('the machine lines', () => {
     expect(screen.getByText('Tailscale asks for a browser sign-in · run the join command on it')).toBeTruthy()
   })
 
+  /** Y-585, #520: the first-run page speaks plainly, and the join command
+   *  would not help this machine, so it is not offered. */
+  it('gives a machine ssh cannot reach a cause and a next step, with ssh behind a press', async () => {
+    const silent = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([silent as Readiness])] })
+    expect(screen.getByText(/^Yantra can’t reach cachyos-g14 over ssh\./)).toBeTruthy()
+    expect(screen.getByText(/^The join command does not fix this\./)).toBeTruthy()
+    expect(screen.queryByText('No route to host')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
+    expect(await screen.findByText('No route to host')).toBeTruthy()
+  })
+
   it('gives a refused machine the join command to run on it', async () => {
     const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
     expect(screen.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(screen.queryByText('Permission denied (publickey)')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
+    expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
     expect(screen.getAllByText(COMMAND)).toHaveLength(1)
   })

@@ -150,8 +150,10 @@ of itself, and debounce belongs in the browser.
 banner, and `REACH_LIMIT` bounds any other held login at 20 s. Each check carries `took_ms` where a
 step ran. On the machine page the sessions error decides the verdict only where readiness holds
 nothing, because the sweep skips a machine no workspace names. Sessions shows the title Readiness
-shows, and ssh's own words sit behind *What ssh said* on every surface. Two readings taken at
-different times can still differ for one sweep.
+shows, and an empty list claims a tmux listing only where the verdict read tmux, because `sessions.rs`
+answers an empty list for a machine with no tmux. Setup and Add a device give the same plain cause and
+next step as the machine page. ssh's own words sit behind *What ssh said* on every surface. Two readings
+taken at different times can still differ for one sweep.
 
 ## The one thing it sends, and the two rules that keep it useful
 

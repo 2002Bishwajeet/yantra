@@ -1,6 +1,6 @@
 import type { About, Check, Machine, Readiness } from '@/api'
 import { asApiError } from '@/api/errors'
-import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
+import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure } from '@/lib/checks'
 import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -108,11 +108,8 @@ export function push(about: Asked<About>): Step {
  *  is normal and never an error (D7 §3.3). */
 export type Line =
   | { kind: 'asleep'; since: string | null }
-  | { kind: 'unreachable'; words: string }
+  | { kind: ReachableFailure; detail: string }
   | { kind: 'unchecked' }
-  | { kind: 'refused' }
-  | { kind: 'unjoined' }
-  | { kind: 'browser' }
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 
@@ -130,9 +127,7 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   if (!report) return { kind: 'unchecked' }
   const reachable = report.checks.find((one) => one.check === 'reachable')
   if (reachable && reachable.state !== 'present') {
-    const failure = reachableFailure(reachable.detail)
-    if (failure !== 'unreachable') return { kind: failure }
-    return { kind: 'unreachable', words: `ssh did not answer · ${reachable.detail}` }
+    return { kind: reachableFailure(reachable.detail), detail: reachable.detail }
   }
   const present = report.checks.filter((one) => one.state === 'present').length
   const total = report.checks.length

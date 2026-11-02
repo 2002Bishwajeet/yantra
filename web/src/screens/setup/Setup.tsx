@@ -5,6 +5,7 @@ import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
+import { reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
 import { apart, notYours, runsSessions } from '@/lib/platform'
 import { ago } from '@/lib/time'
@@ -25,6 +26,7 @@ import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
 import { password } from '@/screens/add-device/beats'
 import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
+import { SshSaid } from '@/screens/machine/ReachFailure'
 import { stamp } from '../dashboard/bands'
 import { Join } from './Join'
 import { REQUIRED, useChecklist } from './progress'
@@ -123,7 +125,7 @@ function MachineLine(props: {
       : said.kind === 'unchecked'
         ? 'not checked yet · a check costs one ssh round trip'
         : said.kind === 'unreachable'
-          ? said.words
+          ? reachWords(said.kind, name).cause
           : said.kind === 'refused'
             ? 'the key was refused · run the join command on it'
             : said.kind === 'unjoined'
@@ -189,7 +191,13 @@ function MachineLine(props: {
         >
           {words}
         </Text>
+        {said.kind === 'unreachable' ? (
+          <Text scale="body-small" tone="variant">
+            {reachWords(said.kind, name).next}
+          </Text>
+        ) : null}
         {failed && said.kind !== 'unreachable' ? join : null}
+        {failed ? <SshSaid detail={said.detail} /> : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)

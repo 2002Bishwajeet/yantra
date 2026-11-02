@@ -10,7 +10,7 @@ import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { SshSaid } from './ReachFailure'
-import { chipOf, sessionsFailure, titleOf, type Verdict } from './verdict'
+import { chipOf, noRows, sessionsFailure, titleOf, type Verdict } from './verdict'
 
 type Row = { session: Session; workspace: string | null }
 
@@ -38,6 +38,7 @@ export function Sessions(props: {
   const rows = rowsOf(answer, workspaces.looked === 'ok' ? workspaces.data : [])
   const free = rows.filter((row) => row.workspace === null).length
   const failure = answer?.reached === 'no' ? sessionsFailure(verdict, answer.error) : null
+  const empty = noRows(verdict, machine)
 
   return (
     <Card aria-labelledby="machine-sessions" className="machine__card">
@@ -65,7 +66,7 @@ export function Sessions(props: {
           <SshSaid detail={answer.error} />
         </div>
       ) : rows.length === 0 ? (
-        <EmptyState title="No session is open here">tmux lists nothing on {machine}</EmptyState>
+        <EmptyState title={empty.title}>{empty.words}</EmptyState>
       ) : (
         <ul className="machine__rows">
           {rows.map(({ session, workspace }) => (
