@@ -121,7 +121,8 @@ beat is the one thing on this route that `yantra ls machines` cannot yet show.
 `GET /api/readiness` is [D2](../../docs/design/02-setup.md) §3.1's checks per machine, swept in the
 background like every other read, and `GET /api/machines/{name}/readiness` is one machine of it. The
 sweep asks the machines a workspace names, so a machine none of them names is a `404` here even
-though `yantra doctor <machine>` would go and ask it.
+though `yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
+and a check with no step leaves the key out.
 
 **`heartbeat` is the one check these routes answer and the terminal cannot.** The library reports it
 *unknown* from every caller it has, because the beats are in this process and nothing persists them;

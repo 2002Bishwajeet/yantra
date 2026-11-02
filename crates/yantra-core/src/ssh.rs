@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// The longest `ControlPath` that works. The master binds the path plus a
 /// 17-character temporary suffix, so this is below `sun_path` (108 on Linux).
@@ -30,6 +30,15 @@ const CONTROL_PATH_LIMIT: usize = 90;
 
 /// How long an idle multiplexed connection is kept alive, in seconds.
 const CONTROL_PERSIST: &str = "300";
+
+/// What a Tailscale SSH `check` rule says in its banner before it holds the auth
+/// stage. `join.sh` and `tests/fixture/listen.py` in yantrad read these words.
+pub(crate) const BROWSER_CHECK: &str = "Tailscale SSH requires an additional check";
+
+/// No link: the one Tailscale sent dies with this `ssh`, and it is not for a page.
+pub(crate) const BROWSER_DIAGNOSIS: &str = "Tailscale SSH requires an additional check, which \
+                                            needs a browser sign-in that Yantra cannot finish, so \
+                                            ssh was stopped";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Machine {
@@ -352,10 +361,16 @@ impl Exec for Ssh {
                 }
             },
             async {
-                match &mut err {
-                    Some(pipe) => pipe.read_to_end(&mut stderr).await.map(|_| ()),
-                    None => Ok(()),
+                let Some(pipe) = &mut err else {
+                    return Ok(false);
+                };
+                let browser = read_stderr(pipe, &mut stderr, &nonce).await?;
+                // A headless daemon cannot finish the browser step, and neither
+                // ConnectTimeout nor ServerAlive ends a held auth stage quickly.
+                if browser {
+                    let _ = child.start_kill();
                 }
+                Ok(browser)
             }
         );
         let status = child.wait().await;
@@ -365,8 +380,12 @@ impl Exec for Ssh {
             diagnosis,
         };
         read_out.map_err(|e| transport(format!("reading stdout: {e}")))?;
-        read_err.map_err(|e| transport(format!("reading stderr: {e}")))?;
+        let browser =
+            read_err.map_err(|e: std::io::Error| transport(format!("reading stderr: {e}")))?;
         status.map_err(|e| transport(format!("waiting for ssh: {e}")))?;
+        if browser {
+            return Err(transport(BROWSER_DIAGNOSIS.to_owned()));
+        }
 
         let (banner, stderr) = split_start(&stderr, &nonce);
         match split_sentinel(stderr, &nonce) {
@@ -422,6 +441,29 @@ fn split_start<'a>(stderr: &'a [u8], nonce: &str) -> (&'a [u8], &'a [u8]) {
         Some(at) => (&stderr[..at], &stderr[at + marker.len()..]),
         None => (stderr, &[]),
     }
+}
+
+/// Reads stderr to its end, or answers `true` as soon as the text before the
+/// start marker holds [`BROWSER_CHECK`]. A remote command's own stderr comes
+/// after the marker, so it can never end the read.
+async fn read_stderr<R: AsyncRead + Unpin>(
+    pipe: &mut R,
+    stderr: &mut Vec<u8>,
+    nonce: &str,
+) -> std::io::Result<bool> {
+    let phrase = BROWSER_CHECK.as_bytes();
+    let mut started = false;
+    while pipe.read_buf(stderr).await? > 0 {
+        if started {
+            continue;
+        }
+        let (before, _) = split_start(stderr, nonce);
+        started = before.len() < stderr.len();
+        if before.windows(phrase.len()).any(|said| said == phrase) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// What the server said on stderr, then what `ssh` logged. Empty is a real
@@ -564,6 +606,68 @@ mod tests {
             diagnosis(b"", " \n"),
             "no diagnostics; the connection dropped silently"
         );
+    }
+
+    const CHECK_MODE: &[u8] = b"# Tailscale SSH requires an additional check.\n\
+        # To authenticate, visit: https://login.tailscale.com/a/abc\n";
+
+    /// Y-585: read in two pieces, with `ssh` still running, because that is
+    /// how a server holding the auth stage looks from here.
+    #[tokio::test]
+    async fn a_browser_check_before_the_start_marker_ends_the_read_without_eof() {
+        let (mut ours, mut theirs) = tokio::io::duplex(256);
+        let (first, second) = CHECK_MODE.split_at(20);
+        tokio::io::AsyncWriteExt::write_all(&mut theirs, first)
+            .await
+            .expect("the first piece");
+
+        let mut stderr = Vec::new();
+        let read = read_stderr(&mut ours, &mut stderr, "Ydeadbeef");
+        let write = async {
+            tokio::task::yield_now().await;
+            tokio::io::AsyncWriteExt::write_all(&mut theirs, second)
+                .await
+                .expect("the second piece");
+        };
+        let (read, ()) = tokio::join!(read, write);
+
+        assert!(read.expect("the read ends"));
+        drop(theirs);
+    }
+
+    /// A command's own stderr can never stop it, whatever it says.
+    #[tokio::test]
+    async fn a_command_that_prints_the_phrase_is_read_to_its_end() {
+        let mut said = b"Ydeadbeef\n".to_vec();
+        said.extend_from_slice(CHECK_MODE);
+        said.extend_from_slice(b"\nYdeadbeef:0");
+
+        let mut stderr = Vec::new();
+        let asked = read_stderr(&mut said.as_slice(), &mut stderr, "Ydeadbeef")
+            .await
+            .expect("the read ends");
+
+        assert!(!asked);
+        assert_eq!(stderr, said);
+    }
+
+    /// A banner that says something else is only a banner.
+    #[tokio::test]
+    async fn another_banner_is_read_to_its_end() {
+        let said = b"Authorised use only.\nYdeadbeef\n\nYdeadbeef:0".to_vec();
+        let mut stderr = Vec::new();
+        let asked = read_stderr(&mut said.as_slice(), &mut stderr, "Ydeadbeef")
+            .await
+            .expect("the read ends");
+        assert!(!asked);
+    }
+
+    /// `join.sh` and the join fixture read the phrase, and the sign-in link is
+    /// dead once `ssh` stops, so it stays off every page.
+    #[test]
+    fn the_browser_diagnosis_keeps_the_phrase_and_holds_no_link() {
+        assert!(BROWSER_DIAGNOSIS.contains(BROWSER_CHECK));
+        assert!(!BROWSER_DIAGNOSIS.contains("http"), "{BROWSER_DIAGNOSIS}");
     }
 
     #[test]

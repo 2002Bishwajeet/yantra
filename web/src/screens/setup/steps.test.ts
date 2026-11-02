@@ -98,6 +98,8 @@ describe("a machine's line", () => {
     expect(line(machine(), refused, null)).toEqual({ kind: 'refused' })
     const unjoined = report([check('reachable', 'absent', 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).')])
     expect(line(machine(), unjoined, null)).toEqual({ kind: 'unjoined' })
+    const browser = report([check('reachable', 'absent', 'Tailscale SSH requires an additional check')])
+    expect(line(machine(), browser, null)).toEqual({ kind: 'browser' })
     const silent = report([check('reachable', 'absent', 'No route to host')])
     expect(line(machine(), silent, null)).toEqual({
       kind: 'unreachable',

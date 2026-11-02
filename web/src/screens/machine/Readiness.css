@@ -52,6 +52,10 @@
   margin: 0 4px;
 }
 
+.readiness__left .machine__checks {
+  margin-top: 12px;
+}
+
 .readiness__left > p {
   margin: 0;
   padding: 0 4px;

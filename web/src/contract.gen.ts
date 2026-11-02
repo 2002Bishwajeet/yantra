@@ -314,7 +314,8 @@ export const readiness = {
         {
           "check": "reachable",
           "detail": "a command ran there and reported its own status",
-          "state": "present"
+          "state": "present",
+          "took_ms": 120
         },
         {
           "check": "provider-auth",
@@ -334,7 +335,8 @@ export const readiness = {
         {
           "check": "reachable",
           "detail": "a command ran there and reported its own status",
-          "state": "present"
+          "state": "present",
+          "took_ms": 120
         },
         {
           "check": "provider-auth",
@@ -360,7 +362,8 @@ export const oneReadiness = {
       {
         "check": "reachable",
         "detail": "a command ran there and reported its own status",
-        "state": "present"
+        "state": "present",
+        "took_ms": 120
       },
       {
         "check": "provider-auth",

@@ -269,6 +269,12 @@ describe('the machine lines', () => {
     expect(screen.getByRole('link', { name: 'Add a device' })).toBeTruthy()
   })
 
+  it('gives a machine that wants a browser the join command too', async () => {
+    const browser = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Tailscale SSH requires an additional check' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([browser as Readiness])] })
+    expect(screen.getByText('Tailscale asks for a browser sign-in · run the join command on it')).toBeTruthy()
+  })
+
   it('gives a refused machine the join command to run on it', async () => {
     const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })

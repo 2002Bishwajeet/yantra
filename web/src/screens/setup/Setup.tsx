@@ -111,6 +111,7 @@ function MachineLine(props: {
     unreachable: 'unknown',
     refused: 'failed',
     unjoined: 'failed',
+    browser: 'failed',
     missing: 'needs',
     installing: 'running',
     blocked: 'needs',
@@ -127,15 +128,19 @@ function MachineLine(props: {
             ? 'the key was refused · run the join command on it'
             : said.kind === 'unjoined'
               ? 'no account named for it · run the join command on it'
-              : said.kind === 'ready'
-                ? `ready · ${said.present} of ${said.total}`
-                : view === 'installing'
-                  ? `installing on ${name}…`
-                  : view === 'blocked'
-                    ? password(report)
-                    : said.installable
-                      ? said.words
-                      : `${said.words} · the machine page shows how`
+              : said.kind === 'browser'
+                ? 'Tailscale asks for a browser sign-in · run the join command on it'
+                : said.kind === 'ready'
+                  ? `ready · ${said.present} of ${said.total}`
+                  : view === 'installing'
+                    ? `installing on ${name}…`
+                    : view === 'blocked'
+                      ? password(report)
+                      : said.installable
+                        ? said.words
+                        : `${said.words} · the machine page shows how`
+
+  const failed = said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'browser' || said.kind === 'unreachable'
 
   const check = (label: string) => (
     <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
@@ -178,13 +183,13 @@ function MachineLine(props: {
         tabIndex={target ? -1 : undefined}
       >
         <Text
-          className={said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'unreachable' ? 'setup__bad' : undefined}
+          className={failed ? 'setup__bad' : undefined}
           scale="body-small"
-          tone={said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'unreachable' ? undefined : 'variant'}
+          tone={failed ? undefined : 'variant'}
         >
           {words}
         </Text>
-        {said.kind === 'refused' || said.kind === 'unjoined' ? join : null}
+        {failed && said.kind !== 'unreachable' ? join : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)

@@ -99,13 +99,13 @@ test.describe('at 200 % zoom no name, path or error is cut', () => {
 })
 
 /* The proof by hand, on the longest string the busy fixture carries. */
-test('the whole ssh error is laid out on /machines at 200 % zoom', async ({ page, size }) => {
+test('the whole ssh failure is laid out on /machines at 200 % zoom', async ({ page, size }) => {
   await scenario(page, 'busy')
   await page.goto('/machines')
   await expect(looked(page)).toBeVisible({ timeout: 15_000 })
   await halve(page, size)
 
-  const detail = page.getByText('connect to host thinkpad port 22: No route to host').first()
+  const detail = page.getByText(/Yantra can’t reach thinkpad over ssh/).first()
   await expect(detail).toBeVisible()
   const box = await detail.evaluate((el) => ({ content: el.scrollWidth, box: el.clientWidth }))
   expect(box.content).toBeLessThanOrEqual(box.box + 1)

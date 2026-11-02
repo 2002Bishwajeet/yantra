@@ -28,6 +28,9 @@ describe('/fleet on the busy fleet', () => {
     expect(needs.getByText('waiting for trust')).toBeTruthy()
     // An unreachable machine is one row and its workspaces are not listed.
     expect(needs.getByText('unreachable')).toBeTruthy()
+    // Y-585: the plain cause here, and the raw words on the machine page.
+    expect(needs.getByText(/Yantra can’t reach thinkpad over ssh/)).toBeTruthy()
+    expect(needs.queryByText(/No route to host/)).toBeNull()
     expect(needs.getByText('1 workspace')).toBeTruthy()
     expect(needs.getByRole('link', { name: 'Fix' }).getAttribute('href')).toBe('/m/thinkpad')
     expect(needs.queryByText('cargo-zig')).toBeNull()

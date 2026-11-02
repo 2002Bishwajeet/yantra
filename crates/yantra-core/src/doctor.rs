@@ -14,6 +14,11 @@
 //! [D2 §3.1]: ../../../docs/design/02-setup.md
 //! [D2 §3.2]: ../../../docs/design/02-setup.md
 
+use std::future::Future;
+use std::time::Duration;
+
+use tokio::time::Instant;
+
 use crate::agent::{self, Claude};
 use crate::github;
 use crate::identity;
@@ -63,6 +68,11 @@ const NOT_ASKED: &str = "nothing behind ssh could be asked — see the `reachabl
 /// measured absent on this fleet and nothing in Yantra reads it.
 const PROVIDERS: [&str; 2] = ["gh", "glab"];
 
+/// The longest a login may take. `ConnectTimeout` does not cover a server that
+/// holds the auth stage, so wording [`ssh::BROWSER_CHECK`] misses would otherwise
+/// cost ServerAlive's 45 s on every sweep.
+const REACH_LIMIT: Duration = Duration::from_secs(20);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
@@ -80,6 +90,11 @@ pub struct Check {
     /// What was found, or why nothing could be. Carries no credential and no
     /// account name: the provider checks discard their output on the far side.
     pub detail: String,
+    /// How long the step that answered this took. `None` where no step ran,
+    /// which zero would misreport (R-23). One command answers `reachable` and
+    /// `sshd`, so both carry its time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub took_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -190,7 +205,11 @@ pub async fn name_the_account(checks: &mut [Check], machine: &str, dir: &std::pa
 /// `term` is the terminal the caller is sitting at, which is what the terminfo
 /// check is about (I-36) — it is a property of the asker, not of the machine.
 pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
-    let (reachable, sshd) = reached(exec).await;
+    let (reachable, sshd) = timed(reached(exec)).await;
+    let sshd = Check {
+        took_ms: reachable.took_ms,
+        ..sshd
+    };
     if reachable.state != State::Present {
         // The diagnosis stays on the check that has it rather than being copied
         // onto six more rows, none of which a reader would act on twice.
@@ -200,40 +219,65 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         return checks;
     }
 
-    let (tmux, found_tmux) = tmux(exec).await;
-    let (agent_cli, found_claude) = agent_cli(exec).await;
-    let (provider_cli, providers) = provider_cli(exec).await;
+    let (tmux, found_tmux) = timed(tmux(exec)).await;
+    let (agent_cli, found_claude) = timed(agent_cli(exec)).await;
+    let (provider_cli, providers) = timed(provider_cli(exec)).await;
+    let gated = found_tmux.is_some() && found_claude.is_some();
+    let has_provider = !providers.is_empty();
 
     vec![
         reachable,
         sshd,
         tmux,
-        git(exec).await,
+        timed_if(true, git(exec)).await,
         agent_cli,
-        terminfo(exec, term).await,
+        timed_if(true, terminfo(exec, term)).await,
         provider_cli,
-        provider_auth(exec, providers).await,
-        login_session(exec, found_tmux.as_ref(), found_claude.as_ref()).await,
-        mic(exec).await,
+        timed_if(has_provider, provider_auth(exec, providers)).await,
+        timed_if(
+            gated,
+            login_session(exec, found_tmux.as_ref(), found_claude.as_ref()),
+        )
+        .await,
+        timed_if(true, mic(exec)).await,
         heartbeat(),
     ]
+}
+
+async fn timed<T>(step: impl Future<Output = (Check, T)>) -> (Check, T) {
+    let started = Instant::now();
+    let (mut check, found) = step.await;
+    check.took_ms = Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+    (check, found)
+}
+
+/// `asked` is false where a step has nothing to ask with and answers at once.
+async fn timed_if(asked: bool, step: impl Future<Output = Check>) -> Check {
+    if !asked {
+        return step.await;
+    }
+    timed(async { (step.await, ()) }).await.0
 }
 
 /// One command that does nothing, which is the whole of *can Yantra reach this
 /// machine* — and, when it fails, the only evidence about the far end's sshd.
 async fn reached<E: Exec>(exec: &E) -> (Check, Check) {
-    match exec.exec("true").await {
-        Ok(_) => (
+    match tokio::time::timeout(REACH_LIMIT, exec.exec("true")).await {
+        Ok(Ok(_)) => (
             present(REACHABLE, "a command ran there and reported its own status"),
             present(SSHD, "it answered, so one is listening"),
         ),
         // The transport failed before the command reported anything, so `ssh`'s
         // own diagnostic is all there is to go on (ADR-0006's `-E` log).
-        Err(ssh::Error::Transport { diagnosis, .. }) => diagnose(&diagnosis),
-        Err(err) => (
+        Ok(Err(ssh::Error::Transport { diagnosis, .. })) => diagnose(&diagnosis),
+        Ok(Err(err)) => (
             unknown(REACHABLE, format!("ssh could not be run from here: {err}")),
             unknown(SSHD, format!("ssh could not be run from here: {err}")),
         ),
+        Err(_) => diagnose(&format!(
+            "the login did not finish within {}s",
+            REACH_LIMIT.as_secs()
+        )),
     }
 }
 
@@ -247,6 +291,12 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
     let said = diagnosis.to_lowercase();
     let unreachable = |detail: String| absent(REACHABLE, detail);
 
+    if diagnosis.contains(ssh::BROWSER_CHECK) {
+        return (
+            unreachable(diagnosis.to_owned()),
+            present(SSHD, "Tailscale SSH answered on the ssh port"),
+        );
+    }
     if said.contains("connection refused") {
         return (
             unreachable(format!("the connection was refused: {diagnosis}")),
@@ -626,6 +676,7 @@ fn present(check: &'static str, detail: impl Into<String>) -> Check {
         check,
         state: State::Present,
         detail: detail.into(),
+        took_ms: None,
     }
 }
 
@@ -634,6 +685,7 @@ fn absent(check: &'static str, detail: impl Into<String>) -> Check {
         check,
         state: State::Absent,
         detail: detail.into(),
+        took_ms: None,
     }
 }
 
@@ -642,6 +694,7 @@ fn unknown(check: &'static str, detail: impl Into<String>) -> Check {
         check,
         state: State::Unknown,
         detail: detail.into(),
+        took_ms: None,
     }
 }
 
@@ -702,6 +755,128 @@ mod tests {
             reachable.detail
         );
         assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
+    }
+
+    /// Y-585: `ssh::exec` stops at this phrase, and the server that sent it
+    /// is running, so this is not a silence.
+    #[test]
+    fn a_browser_check_is_a_server_that_answered() {
+        let (reachable, sshd) = diagnose(ssh::BROWSER_DIAGNOSIS);
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable.detail.contains(ssh::BROWSER_CHECK),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            !reachable.detail.contains("no answer"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
+    }
+
+    /// Answers every command the same way, as a machine with nothing to say.
+    struct Answers {
+        status: i32,
+        stdout: &'static str,
+    }
+
+    impl Exec for Answers {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            Ok(ssh::Output {
+                status: self.status,
+                stdout: self.stdout.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    fn took(checks: &[Check], name: &str) -> Option<u64> {
+        checks
+            .iter()
+            .find(|check| check.check == name)
+            .expect("the list holds it")
+            .took_ms
+    }
+
+    #[tokio::test]
+    async fn every_step_that_ran_says_how_long_it_took() {
+        let machine = Answers {
+            status: 0,
+            stdout: "/usr/bin/found\n",
+        };
+        let checks = of(&machine, "alacritty").await;
+        for check in &checks {
+            assert_eq!(
+                check.took_ms.is_some(),
+                check.check != HEARTBEAT,
+                "{}: {:?}",
+                check.check,
+                check.took_ms
+            );
+        }
+    }
+
+    /// R-23: a step with nothing to ask with has no time, and zero would say
+    /// it ran.
+    #[tokio::test]
+    async fn a_step_that_had_nothing_to_ask_with_has_no_time() {
+        let machine = Answers {
+            status: 1,
+            stdout: "",
+        };
+        let checks = of(&machine, "alacritty").await;
+        assert!(took(&checks, "tmux").is_some());
+        assert_eq!(took(&checks, PROVIDER_AUTH), None);
+        assert_eq!(took(&checks, LOGIN_SESSION), None);
+        assert_eq!(took(&checks, HEARTBEAT), None);
+    }
+
+    struct Refuses;
+
+    impl Exec for Refuses {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            Err(ssh::Error::Transport {
+                host: "pi".to_owned(),
+                diagnosis: "Connection refused".to_owned(),
+            })
+        }
+    }
+
+    /// One command answers both, and nothing behind ssh was asked.
+    #[tokio::test]
+    async fn a_failed_reach_times_only_the_command_that_failed() {
+        let checks = of(&Refuses, "alacritty").await;
+        assert_eq!(took(&checks, REACHABLE), took(&checks, SSHD));
+        assert!(took(&checks, REACHABLE).is_some());
+        for check in BEHIND_SSH.into_iter().chain([HEARTBEAT]) {
+            assert_eq!(took(&checks, check), None, "{check}");
+        }
+    }
+
+    struct Hangs;
+
+    impl Exec for Hangs {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            std::future::pending().await
+        }
+    }
+
+    /// The limit behind the phrase: a server that holds the auth stage in
+    /// words Yantra does not know still ends here, and says nothing about sshd.
+    #[tokio::test(start_paused = true)]
+    async fn a_login_that_never_finishes_ends_at_the_limit() {
+        let checks = of(&Hangs, "alacritty").await;
+        let reachable = &checks[0];
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable.detail.contains("no answer"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(checks[1].state, State::Unknown);
+        assert_eq!(reachable.took_ms, Some(REACH_LIMIT.as_millis() as u64));
     }
 
     /// Only a failed `reachable` is annotated, and only when no block names

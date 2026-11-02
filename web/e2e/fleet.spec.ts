@@ -37,7 +37,8 @@ test.describe('the fleet on a busy fleet', () => {
     await expect(needs.getByRole('link', { name: 'thinkpad' })).toBeVisible()
     await expect(needs.getByText('1 workspace', { exact: true })).toBeVisible()
     // Only the desktop board keeps a detail column; the other two drop it.
-    if (size === 'desktop') await expect(needs.getByText(/No route to host/)).toBeVisible()
+    if (size === 'desktop') await expect(needs.getByText(/can’t reach thinkpad over ssh/)).toBeVisible()
+    await expect(needs.getByText(/No route to host/)).toHaveCount(0)
     await expect(needs.getByRole('link', { name: 'Fix' })).toHaveAttribute('href', '/m/thinkpad')
     // The workspace on it is the row's cause, not a row of its own.
     await expect(page.getByRole('link', { name: 'cargo-zig' })).toHaveCount(0)

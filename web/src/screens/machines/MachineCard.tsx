@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import type { Check, Machine } from '@/api'
 import { useAbout, useNotifications } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { nameOf } from '@/lib/checks'
+import { nameOf, reachableFailure, reachWords } from '@/lib/checks'
 import { joinCommand, joinUrl } from '@/lib/join'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -16,6 +16,7 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Ago } from '@/screens/fleet/age'
 import { isAge } from '@/screens/fleet/clock'
 import { answer, newestInstall, type Watch } from '@/screens/machine/install'
+import { SshSaid } from '@/screens/machine/ReachFailure'
 import { asEvents } from '@/shell/notifications'
 import { Doctor } from './Doctor'
 import { CARD_CHECKS, cardChip, cardVerdict, checkNamed, markOf, summary, tally, wordOf } from './facts'
@@ -48,8 +49,11 @@ function About(props: { machine: Machine }) {
   )
 }
 
-function CheckLine(props: { check: Check }) {
-  const { check } = props
+/** `pressable` is false on a machine that is off: D7 §3.3 gives that card
+ *  nothing to press, and its machine page holds the raw text. */
+function CheckLine(props: { check: Check; machine: string; pressable: boolean }) {
+  const { check, machine, pressable } = props
+  const failed = check.check === 'reachable' && check.state === 'absent'
   return (
     <li className="machines__check">
       <State size="small" state={markOf(check.state)}>
@@ -59,8 +63,9 @@ function CheckLine(props: { check: Check }) {
         {wordOf(check.state)}
       </Text>
       <Text className="machines__detail m3-wrap" scale="body-small" tone="variant">
-        {check.detail}
+        {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail}
       </Text>
+      {failed && pressable ? <SshSaid detail={check.detail} /> : null}
     </li>
   )
 }
@@ -186,7 +191,12 @@ export function MachineCard(props: MachineCardProps) {
         <>
           <ul className="machines__checks">
             {shown.map((check) => (
-              <CheckLine check={check} key={check.check} />
+              <CheckLine
+                check={check}
+                key={check.check}
+                machine={machine.name}
+                pressable={verdict.kind !== 'asleep' && verdict.kind !== 'expired'}
+              />
             ))}
           </ul>
           <Text className="machines__summary" scale="body-small" tone="variant">
@@ -204,7 +214,7 @@ export function MachineCard(props: MachineCardProps) {
           Open
         </Button>
         {verdict.kind === 'needs' ? <Install machine={machine.name} /> : null}
-        {verdict.kind === 'refused' || verdict.kind === 'unjoined' ? <CopyJoin /> : null}
+        {verdict.kind === 'refused' || verdict.kind === 'unjoined' || verdict.kind === 'browser' ? <CopyJoin /> : null}
         {verdict.kind === 'unchecked' ? <Doctor machine={machine.name} /> : null}
       </div>
     </Card>

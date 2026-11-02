@@ -15,6 +15,7 @@ export type Verdict =
   | { kind: 'installing'; missing: string[] }
   | { kind: 'refused'; detail: string }
   | { kind: 'unjoined'; detail: string }
+  | { kind: 'browser'; detail: string }
   | { kind: 'unreachable'; detail: string }
   | { kind: 'sudo'; missing: string[]; result: Event }
   | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
@@ -29,14 +30,19 @@ export function verdictOf(input: {
   readiness: Reading<Readiness>
   events: Event[]
   watch: Watch | null
+  /** This machine's answer in the sessions reading, if it did not answer. */
+  sessionsError?: string | null
 }): Verdict {
-  const { name, machine, readiness, events, watch } = input
+  const { name, machine, readiness, events, watch, sessionsError } = input
   // D7 §3.3: the tailnet says it is off, so nothing behind ssh can be asked.
   if (machine?.expired) return { kind: 'expired' }
   if (machine && !machine.online) return { kind: 'asleep' }
   if (readiness.looked === 'pending') return { kind: 'pending' }
   if (readiness.looked === 'failed') return { kind: 'unread', error: readiness.error }
-  if (readiness.looked === 'never' || readiness.data.checks.length === 0) return { kind: 'unasked' }
+  if (readiness.looked === 'never' || readiness.data.checks.length === 0) {
+    // The sweep skips a machine no workspace names, and Sessions asks it anyway.
+    return sessionsError ? { kind: reachableFailure(sessionsError), detail: sessionsError } : { kind: 'unasked' }
+  }
 
   const { checks } = readiness.data
   const missing = missingBasics(readiness.data).map((one) => nameOf(one.check))
@@ -72,6 +78,20 @@ export function verdictOf(input: {
   return absent.length > 0 ? { kind: 'manual', absent } : { kind: 'ready' }
 }
 
+const NOT_REACHED: ReadonlySet<Verdict['kind']> = new Set([
+  'asleep',
+  'expired',
+  'refused',
+  'unjoined',
+  'browser',
+  'unreachable',
+])
+
+/** What Sessions says for a machine that did not answer: Readiness's verdict
+ *  where that failed too, so the two cards agree, or else its own error. */
+export const sessionsFailure = (verdict: Verdict, error: string): Verdict =>
+  NOT_REACHED.has(verdict.kind) ? verdict : { kind: reachableFailure(error), detail: error }
+
 /** A session can start: tmux and claude are there and ssh gets in. A missing
  *  `gh` does not stop one, so `manual` counts (B3 names only the basics and the
  *  key). */
@@ -103,6 +123,8 @@ export function titleOf(verdict: Verdict, name: string): string {
       return 'The key was refused'
     case 'unjoined':
       return `${name} has not joined`
+    case 'browser':
+      return `${name} needs a browser sign-in`
     case 'unreachable':
       return `ssh to ${name} fails`
     case 'sudo':
@@ -127,6 +149,8 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
       return { state: 'failed', word: 'key refused', error: true }
     case 'unjoined':
       return { state: 'failed', word: 'not joined', error: true }
+    case 'browser':
+      return { state: 'failed', word: 'browser sign-in', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'installing':

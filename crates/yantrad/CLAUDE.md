@@ -146,6 +146,13 @@ any other machine that did not answer, because `doctor::machine` cannot fail (R-
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
 
+**A failed check ends fast and speaks plainly** (Y-585). A Tailscale SSH `check` rule stops at its
+banner, and `REACH_LIMIT` bounds any other held login at 20 s. Each check carries `took_ms` where a
+step ran. On the machine page the sessions error decides the verdict only where readiness holds
+nothing, because the sweep skips a machine no workspace names. Sessions shows the title Readiness
+shows, and ssh's own words sit behind *What ssh said* on every surface. Two readings taken at
+different times can still differ for one sweep.
+
 ## The one thing it sends, and the two rules that keep it useful
 
 `notify.rs` runs off the **agents** loop in `refresh.rs` and adds no poll, no ssh and no timer: two

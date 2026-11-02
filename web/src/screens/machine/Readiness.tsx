@@ -5,7 +5,7 @@ import { fromReading, type Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { fixOf, nameOf } from '@/lib/checks'
+import { fixOf, nameOf, tookOf } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -19,9 +19,10 @@ import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
 import { tally, wordOf } from '@/screens/machines/facts'
-import { joinCommand, joinUrl } from '@/lib/join'
+import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
 import { answer, LOST_MS, needsSudo, newestInstall } from './install'
+import { ReachFailure } from './ReachFailure'
 import { type Step, SudoSheet } from './SudoSheet'
 import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
@@ -43,6 +44,7 @@ function CheckLine(props: { check: Check; machine: string }) {
       </Text>
       <Text className="machine__detail" scale="body-small" tone="variant">
         {check.detail}
+        {check.took_ms === undefined ? null : <span> · {tookOf(check.took_ms)}</span>}
       </Text>
       {fix?.by === 'command' ? (
         <div className="machine__fix">
@@ -371,39 +373,19 @@ function Body(props: {
     case 'unread':
       return <ErrorSurface.Inline error={fromReading(readiness)!} reset={retry} title="The checks could not be read" />
     case 'refused':
-      return (
-        <div className="readiness__left">
-          <Mono className="readiness__detail">{verdict.detail}</Mono>
-          <Text render={<p />} scale="body-small" tone="variant">
-            {name} did not take the appliance’s key. Run the join command on {name}; it places the key.
-          </Text>
-          {join ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
-        </div>
-      )
     case 'unjoined':
+    case 'browser':
+    case 'unreachable':
       return (
-        <div className="readiness__left">
-          <Mono className="readiness__detail">{verdict.detail}</Mono>
-          <Text render={<p />} scale="body-small" tone="variant">
-            The appliance does not know which account to log in to {name} as. Run the join command on {name}; it
-            names the account and places the key. <Link to="/machines/add">Add a device</Link> shows it for each
-            platform.
-          </Text>
-          {join ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
-        </div>
+        <ReachFailure detail={verdict.detail} join={join} kind={verdict.kind} name={name}>
+          {checks.length > 0 ? <Checks checks={checks} machine={name} /> : null}
+        </ReachFailure>
       )
     case 'ready':
       return (
         <Disclosure summary={folded(checks)}>
           <Checks checks={checks} machine={name} />
         </Disclosure>
-      )
-    case 'unreachable':
-      return (
-        <>
-          <Mono className="readiness__detail">{verdict.detail}</Mono>
-          <Checks checks={checks} machine={name} />
-        </>
       )
     default:
       return <Checks checks={checks} machine={name} />

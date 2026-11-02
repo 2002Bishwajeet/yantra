@@ -112,6 +112,7 @@ export type Line =
   | { kind: 'unchecked' }
   | { kind: 'refused' }
   | { kind: 'unjoined' }
+  | { kind: 'browser' }
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 

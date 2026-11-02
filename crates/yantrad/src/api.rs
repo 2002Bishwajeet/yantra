@@ -378,6 +378,7 @@ fn heard_from(
         check: doctor::HEARTBEAT,
         state,
         detail,
+        took_ms: None,
     };
     let Some(id) = node_id(machine, snapshot) else {
         return says(
@@ -1436,11 +1437,13 @@ mod tests {
                     check: "reachable",
                     state: doctor::State::Present,
                     detail: "a command ran there and reported its own status".into(),
+                    took_ms: None,
                 },
                 doctor::Check {
                     check: doctor::HEARTBEAT,
                     state: doctor::State::Unknown,
                     detail: "only the running daemon holds the beats".into(),
+                    took_ms: None,
                 },
             ],
         }
@@ -1743,6 +1746,7 @@ mod tests {
                 check: doctor::GITHUB,
                 state: doctor::State::Absent,
                 detail: "`gh` here holds no credential".into(),
+                took_ms: None,
             }))),
             readiness: Some(Arc::new(Reading::new(Ok(vec![checked("cachyos-g14")])))),
             ..Snapshot::default()

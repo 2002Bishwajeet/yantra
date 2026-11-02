@@ -1807,13 +1807,14 @@ fn render_doctor(reports: &[Report]) -> String {
                     report.machine.clone(),
                     check.check.to_owned(),
                     state(check.state).to_owned(),
+                    took(check.took_ms),
                     check.detail.clone(),
                 ]
             })
         })
         .collect();
 
-    let mut out = table(&["MACHINE", "CHECK", "STATE", "DETAIL"], &rows);
+    let mut out = table(&["MACHINE", "CHECK", "STATE", "TOOK", "DETAIL"], &rows);
     let count = |wanted: State| {
         reports
             .iter()
@@ -1832,6 +1833,15 @@ fn render_doctor(reports: &[Report]) -> String {
         count(State::Unknown),
     ));
     out
+}
+
+/// A dash where no step ran: a zero would say it did (R-23).
+fn took(ms: Option<u64>) -> String {
+    match ms {
+        None => "-".to_owned(),
+        Some(ms) if ms < 1_000 => format!("{ms}ms"),
+        Some(ms) => format!("{}.{}s", ms / 1_000, ms % 1_000 / 100),
+    }
 }
 
 fn state(state: State) -> &'static str {
@@ -3602,6 +3612,7 @@ mod tests {
             check: name,
             state,
             detail: detail.to_owned(),
+            took_ms: None,
         }
     }
 
@@ -3664,7 +3675,7 @@ mod tests {
             ],
         }]);
 
-        assert!(rendered.contains("reachable  absent"), "{rendered}");
+        assert!(rendered.contains("reachable  absent "), "{rendered}");
         assert!(rendered.contains("tmux       unknown"), "{rendered}");
         assert!(
             rendered.ends_with("2 checks on 1 machine: 0 present, 1 absent, 1 unknown\n"),
@@ -3673,6 +3684,38 @@ mod tests {
         for line in rendered.lines() {
             assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
         }
+    }
+
+    /// Y-585: a step that ran says how long, and one that did not says so with
+    /// a dash, because a zero would read as *asked*. `--json` carries the same
+    /// number and leaves the key out where there is none.
+    #[test]
+    fn the_time_each_step_took_has_a_column_and_a_step_not_asked_has_none() {
+        let reports = [Report {
+            machine: "pi".to_owned(),
+            checks: vec![
+                doctor::Check {
+                    took_ms: Some(1_240),
+                    ..check("reachable", State::Present, "a command ran there")
+                },
+                doctor::Check {
+                    took_ms: Some(85),
+                    ..check("tmux", State::Present, "found at /usr/bin/tmux")
+                },
+                check("heartbeat", State::Unknown, "nothing to read"),
+            ],
+        }];
+
+        let rendered = render_doctor(&reports);
+        let lines: Vec<&str> = rendered.lines().collect();
+        assert!(lines[0].contains("STATE    TOOK  DETAIL"), "{rendered}");
+        assert!(lines[1].contains("present  1.2s  a command"), "{rendered}");
+        assert!(lines[2].contains("present  85ms  found"), "{rendered}");
+        assert!(lines[3].contains("unknown  -     nothing"), "{rendered}");
+
+        let json = render_doctor_json(&reports).expect("a report serialises");
+        assert!(json.contains("\"took_ms\": 1240"), "{json}");
+        assert_eq!(json.matches("took_ms").count(), 2, "{json}");
     }
 
     /// A fleet with nothing in it is not a clean one — nothing was asked, so the

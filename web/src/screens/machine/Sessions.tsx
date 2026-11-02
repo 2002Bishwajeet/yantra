@@ -9,6 +9,8 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { SshSaid } from './ReachFailure'
+import { chipOf, sessionsFailure, titleOf, type Verdict } from './verdict'
 
 type Row = { session: Session; workspace: string | null }
 
@@ -28,12 +30,14 @@ export function Sessions(props: {
   machine: string
   sessions: Reading<MachineSessions[]>
   workspaces: Reading<Workspace[]>
+  verdict: Verdict
 }) {
-  const { machine, sessions, workspaces } = props
+  const { machine, sessions, workspaces, verdict } = props
   const answer =
     sessions.looked === 'ok' ? sessions.data.find((one) => one.machine === machine) : undefined
   const rows = rowsOf(answer, workspaces.looked === 'ok' ? workspaces.data : [])
   const free = rows.filter((row) => row.workspace === null).length
+  const failure = answer?.reached === 'no' ? sessionsFailure(verdict, answer.error) : null
 
   return (
     <Card aria-labelledby="machine-sessions" className="machine__card">
@@ -54,11 +58,11 @@ export function Sessions(props: {
           <Skeleton shape="text" style={{ width: '58%' }} />
           <Skeleton shape="text" style={{ width: '44%' }} />
         </div>
-      ) : answer?.reached === 'no' ? (
+      ) : failure && answer?.reached === 'no' ? (
         // R-23: a machine that did not answer is data about the machine.
         <div className="machine__failed" role="status">
-          <State state="failed">the machine did not answer</State>
-          <Mono className="machine__detail">{answer.error}</Mono>
+          <State state={chipOf(failure, null).state}>{titleOf(failure, machine)}</State>
+          <SshSaid detail={answer.error} />
         </div>
       ) : rows.length === 0 ? (
         <EmptyState title="No session is open here">tmux lists nothing on {machine}</EmptyState>

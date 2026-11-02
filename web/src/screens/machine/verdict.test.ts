@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { chipOf, sorted, startable, titleOf, verdictOf } from './verdict'
+import { chipOf, sessionsFailure, sorted, startable, titleOf, verdictOf } from './verdict'
 
 const machine = (over: Partial<Machine> = {}) =>
   ({ name: 'pi', dns_name: 'pi.ts.net.', os: 'linux', online: true, expired: false, last_seen: null, heartbeat: null, ...over }) as Machine
@@ -40,6 +40,46 @@ describe('the machine page’s verdict', () => {
     expect(v).toEqual({ kind: 'asleep' })
     expect(titleOf(v, 'pi')).toBe('pi is asleep')
     expect(chipOf(v, '3h')).toEqual({ state: 'unknown', word: 'asleep · 3h', error: false })
+  })
+
+  it('reads a Tailscale browser check as its own failure', () => {
+    const detail = 'Tailscale SSH requires an additional check, which needs a browser sign-in'
+    const v = verdict(all({ reachable: 'absent' }, { reachable: detail }))
+    expect(v).toEqual({ kind: 'browser', detail })
+    expect(titleOf(v, 'pi')).toBe('pi needs a browser sign-in')
+    expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'browser sign-in', error: true })
+    expect(startable(v)).toBe(false)
+  })
+
+  /** Y-585: tailnet machines reach Sessions and never the sweep, and the page
+   *  must not say both *not checked* and *did not answer*. */
+  it('takes a failure from the sessions where readiness holds nothing', () => {
+    const sessionsError = 'ssh to pi failed: Permission denied (publickey).'
+    expect(verdict({ looked: 'never' }, { sessionsError })).toEqual({ kind: 'refused', detail: sessionsError })
+    expect(verdict(report([]), { sessionsError })).toEqual({ kind: 'refused', detail: sessionsError })
+    expect(verdict({ looked: 'never' }, { sessionsError: null })).toEqual({ kind: 'unasked' })
+  })
+
+  it('keeps a reachable check it holds over the sessions error', () => {
+    const v = verdict(all(), { sessionsError: 'No route to host' })
+    expect(v).toEqual({ kind: 'ready' })
+  })
+
+  it('never lets a sessions error outrank a machine the tailnet says is off', () => {
+    const v = verdict({ looked: 'never' }, { machine: machine({ online: false }), sessionsError: 'No route to host' })
+    expect(v).toEqual({ kind: 'asleep' })
+  })
+
+  it('gives Sessions the words Readiness has, or reads the error itself', () => {
+    const refused = verdict(all({ reachable: 'absent' }, { reachable: 'Permission denied' }))
+    expect(sessionsFailure(refused, 'No route to host')).toBe(refused)
+    expect(sessionsFailure({ kind: 'asleep' }, 'No route to host')).toEqual({ kind: 'asleep' })
+    expect(sessionsFailure({ kind: 'expired' }, 'No route to host')).toEqual({ kind: 'expired' })
+    expect(sessionsFailure({ kind: 'ready' }, 'No route to host')).toEqual({
+      kind: 'unreachable',
+      detail: 'No route to host',
+    })
+    expect(sessionsFailure({ kind: 'pending' }, 'Tailscale SSH requires an additional check').kind).toBe('browser')
   })
 
   it('reads a machine nobody asked as not checked, never as a failure', () => {
