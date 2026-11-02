@@ -14,8 +14,8 @@
 /* Full height on the phone (D7 §4.3). The sheet caps itself at `100% - 64px`,
    and a larger `min-height` would beat that cap and push it off the top. */
 .m3-bottom-sheet.sudo-sheet--phone {
-  height: calc(100% - 24px);
-  max-height: calc(100% - 24px);
+  height: calc(100% - 24px - var(--m3-safe-top));
+  max-height: calc(100% - 24px - var(--m3-safe-top));
 }
 
 .sudo-sheet__body {

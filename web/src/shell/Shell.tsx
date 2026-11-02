@@ -29,6 +29,7 @@ import { NotReached } from './NotReached'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
 import { useScreenTitle, useScreenTitleOverride } from './title'
+import { syncThemeColor } from './themeColor'
 import './Shell.css'
 
 // The menu, the popover and the sheet's list carry Base UI's popup machinery
@@ -408,6 +409,7 @@ export function Shell() {
     const root = document.documentElement
     if (theme === 'system') delete root.dataset.theme
     else root.dataset.theme = theme
+    syncThemeColor(theme)
     if (density === 'compact') root.dataset.density = 'compact'
     else delete root.dataset.density
   }, [theme, density])
