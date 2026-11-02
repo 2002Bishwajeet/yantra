@@ -312,3 +312,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-10-22** — **[Y-530](../tracker.md#3-task-board) is in review.** [R22 §9.7](research/22-claude-mem-shared-memory.md#97-redaction-against-the-y-430-fixtures-2026-10-22) runs the three Y-430 fixtures through claude-mem's real redaction in podman. The defaults miss `API_TOKEN=` and `DATABASE_PASSWORD=`. One custom pattern catches both and left 17 of 18 ordinary lines alone. Redaction does not run on `/api/memory/save`, `/api/import`, the sync push or the observer's output, so Y-529 and Y-531 must account for that.
 
 - **2026-10-31:** yantra-box live on the HP mini PC. `box/` and `crates/yantra-box` published, home screen built, v0.9.0 cut. The firmware logo is parked on #533.
+
+- **2026-11-02** — **[Y-588](../tracker.md#3-task-board) is in review.** The New session repository rows no longer clip at 390 px. Each row shows one short state, and the page says why Continue is disabled. A new long-name scenario holds the layout in the Playwright baselines.
