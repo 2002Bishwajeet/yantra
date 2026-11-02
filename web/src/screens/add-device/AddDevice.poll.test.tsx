@@ -11,6 +11,7 @@ vi.mock('@/api/client', async (actual) => ({ ...(await actual<typeof import('@/a
 const laptop = aMachine({ name: 'laptop', os: 'linux', online: true })
 const whole: Readiness = {
   machine: 'laptop',
+  age_seconds: 0,
   checks: ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((check) => ({
     check,
     state: 'present',

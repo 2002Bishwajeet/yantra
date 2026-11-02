@@ -25,6 +25,7 @@ const event = (kind: Event['kind'], time: number, more: Partial<Event> = {}): Ev
 
 const checks = (states: Record<string, 'present' | 'absent'>): Readiness => ({
   machine: 'laptop',
+  age_seconds: 0,
   checks: Object.entries(states).map(([check, state]) => ({ check, state, detail: `${check} ${state}` })),
 })
 

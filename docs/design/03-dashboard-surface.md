@@ -317,6 +317,11 @@ has never been given a way to say what is still missing.*
 > checklist anything to show**, and this section depends on the row §12's table calls *"re-check
 > readiness now"* — **D3.21 before D3.20**. That is an order, not a block, so §16's count of two
 > blocked units stands.
+>
+> **2026-11-02, [Y-579](../../tracker.md).** The 404 above now reads *"no check has reached a machine
+> called `x`"*. The daemon's sweep also asks each online computer on the tailnet, on its own 30 s
+> clock, and keeps the latest report per machine. So *"nothing fans out on open"* still holds, because
+> opening a page asks nothing. A fresh install no longer depends on a tap to fill the checklist.
 
 > **2026-09-13, [Y-390](../../tracker.md), the owner's ruling (b).** The 2026-09-07 note in §5 made
 > `/` the checklist only while no machine is online, so a real first install never saw it. Now

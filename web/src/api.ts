@@ -206,7 +206,9 @@ export type Check = {
   detail: string
 }
 
-export type Readiness = { machine: string; checks: Check[] }
+/** `age_seconds` is this report's own: the daemon keeps a machine's last check,
+ *  so it can be far older than the list around it (Y-579). */
+export type Readiness = { machine: string; checks: Check[]; age_seconds: number }
 
 /** `POST /api/machines/{name}/readiness` re-asks the machine now and answers
  *  `Looked<Readiness>` — the same envelope the `GET` serves, at `age_seconds: 0`.

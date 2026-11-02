@@ -310,26 +310,7 @@ export const readiness = {
   "age_seconds": 0,
   "data": [
     {
-      "checks": [
-        {
-          "check": "reachable",
-          "detail": "a command ran there and reported its own status",
-          "state": "present"
-        },
-        {
-          "check": "provider-auth",
-          "detail": "`gh` is installed there and no account is logged in",
-          "state": "absent"
-        },
-        {
-          "check": "heartbeat",
-          "detail": "a beat arrived 0s ago",
-          "state": "present"
-        }
-      ],
-      "machine": "cachyos-g14"
-    },
-    {
+      "age_seconds": 0,
       "checks": [
         {
           "check": "reachable",
@@ -348,6 +329,27 @@ export const readiness = {
         }
       ],
       "machine": "bishwajeets-macbook-pro"
+    },
+    {
+      "age_seconds": 0,
+      "checks": [
+        {
+          "check": "reachable",
+          "detail": "a command ran there and reported its own status",
+          "state": "present"
+        },
+        {
+          "check": "provider-auth",
+          "detail": "`gh` is installed there and no account is logged in",
+          "state": "absent"
+        },
+        {
+          "check": "heartbeat",
+          "detail": "a beat arrived 0s ago",
+          "state": "present"
+        }
+      ],
+      "machine": "cachyos-g14"
     }
   ],
   "looked": "ok"
@@ -356,6 +358,7 @@ export const readiness = {
 export const oneReadiness = {
   "age_seconds": 0,
   "data": {
+    "age_seconds": 0,
     "checks": [
       {
         "check": "reachable",

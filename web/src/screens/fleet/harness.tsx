@@ -15,6 +15,8 @@ export type Scenario = Record<string, Envelope> & {
   status: Record<string, Envelope>
   refuse?: { status: number; text: string }
   install?: { status: number; text: string }
+  /** What `POST …/readiness` answers for a machine the sweep has not reached. */
+  asked?: Record<string, unknown>
 }
 
 // jsdom gives `import.meta.url` an http scheme, so the path is from the cwd,
@@ -41,6 +43,12 @@ function answer(state: Scenario, method: string, path: string): [number, unknown
   const readiness = /^\/api\/machines\/([^/]+)\/readiness$/.exec(path)
   if (readiness) {
     const list = state.readiness!
+    const report = state.asked?.[readiness[1]!]
+    if (method === 'POST' && report) {
+      // The daemon keeps a check before it answers, so the next GET holds it.
+      if (list.looked === 'ok') (list.data as unknown[]).push(report)
+      return [200, ok(report)]
+    }
     if (list.looked !== 'ok') return [200, list]
     const one = (list.data as { machine: string }[]).find((r) => r.machine === readiness[1])
     return one ? [200, ok(one)] : [404, 'no']

@@ -38,9 +38,10 @@ use yantra_core::{
 };
 use yantra_core::{identity, join, update};
 
-use crate::api::Answer;
+use crate::api::{Answer, Checked};
 use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
+use crate::refresh::Model;
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -884,18 +885,25 @@ async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
-) -> Result<Json<Answer<doctor::Report>>, Refused> {
+) -> Result<Json<Answer<Checked>>, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("doctor {name} for {}", caller.node);
 
     let report = doctor::machine(&name, term()).await;
-    let snapshot = state.fleet.model.read().await.clone();
+    let snapshot = {
+        let mut model = state.fleet.model.write().await;
+        model.keep(report.clone());
+        model.clone()
+    };
     let beats = state.fleet.beats.read().await;
     Ok(Json(Answer::Ok {
         // Asked on this request, so there is no staleness to report — and the
         // envelope is the sweep's so the browser needs no second type.
         age_seconds: 0,
-        data: crate::api::answered(&report, &snapshot, &beats),
+        data: Checked {
+            report: crate::api::answered(&report, &snapshot, &beats),
+            age_seconds: 0,
+        },
     }))
 }
 
@@ -1313,7 +1321,11 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
     .await;
     // The re-check runs after the answer: the script is still on the person's
     // screen, and ssh back into that machine can take `ConnectTimeout`.
-    tokio::spawn(check_joined(state.fleet.events.clone(), machine));
+    tokio::spawn(check_joined(
+        state.fleet.model.clone(),
+        state.fleet.events.clone(),
+        machine,
+    ));
 
     Ok(Json(Joined {
         machine: joined.machine,
@@ -1326,7 +1338,7 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
 /// event: an unknown one decided nothing (R-23), and a reached one is what the
 /// `joined` event already implied.
-async fn check_joined(events: events::Events, machine: String) {
+async fn check_joined(model: Model, events: events::Events, machine: String) {
     let report = doctor::machine(&machine, term()).await;
     if let Some(check) = report
         .checks
@@ -1335,6 +1347,7 @@ async fn check_joined(events: events::Events, machine: String) {
     {
         events::remember(&events, Event::not_reached(&machine, &check.detail)).await;
     }
+    model.write().await.keep(report);
 }
 
 /// No wildcard, per Y-135. A tailnet name that cannot be one `Host` pattern is

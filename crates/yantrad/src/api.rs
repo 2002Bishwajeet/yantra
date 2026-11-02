@@ -228,15 +228,23 @@ async fn workspace_status(State(model): State<Model>, Path(name): Path<String>) 
 
 /// `yantra doctor` on the wire, plus the one check it cannot answer — which is
 /// the whole of what this route adds over the terminal (D2 §3.1).
+///
+/// It serves the kept checks. A failed sweep does not hide them, because each
+/// one carries its own age. With none kept, the sweep says why.
 async fn readiness(State(model): State<Model>, State(beats): State<Beats>) -> impl IntoResponse {
     let snapshot = model.read().await.clone();
     let beats = beats.read().await;
-    Json(Answer::of(snapshot.readiness.as_deref(), |reports| {
-        reports
-            .iter()
-            .map(|report| answered(report, &snapshot, &beats))
-            .collect::<Vec<_>>()
-    }))
+    let Some(youngest) = snapshot.checks.values().map(|kept| kept.age()).min() else {
+        return Json(Answer::of(snapshot.readiness.as_deref(), |_| Vec::new()));
+    };
+    Json(Answer::Ok {
+        age_seconds: youngest.as_secs(),
+        data: snapshot
+            .checks
+            .values()
+            .map(|kept| Checked::of(kept, &snapshot, &beats))
+            .collect::<Vec<_>>(),
+    })
 }
 
 /// `yantra ls attention` on the wire. The reading is `refresh.rs`'s, and it is
@@ -248,10 +256,9 @@ async fn attention(State(model): State<Model>) -> impl IntoResponse {
 }
 
 /// The second route naming a resource, so it has [`workspace_status`]'s fourth
-/// answer for the same reason: a machine the sweep did not cover is a **404**
-/// rather than a 200 whose absence a client has to notice. The sweep asks the
-/// machines workspaces name ([`yantra_core::doctor::fleet`]), which is not every
-/// machine on the tailnet.
+/// answer for the same reason: a machine no check has reached is a **404**
+/// rather than a 200 whose absence a client has to notice. A kept check answers
+/// whatever the last sweep did, so a poll cannot turn a result into `never`.
 async fn machine_readiness(
     State(model): State<Model>,
     State(beats): State<Beats>,
@@ -259,38 +266,34 @@ async fn machine_readiness(
 ) -> Response {
     let snapshot = model.read().await.clone();
     let beats = beats.read().await;
-    let Some(reading) = snapshot.readiness.as_deref() else {
-        return Json(Answer::<doctor::Report>::Never).into_response();
-    };
-    let age_seconds = reading.age().as_secs();
-    let reports = match reading.value() {
-        Ok(reports) => reports,
-        Err(error) => {
-            return Json(Answer::<doctor::Report>::Failed {
-                age_seconds,
-                error: because(error),
-            })
-            .into_response();
-        }
-    };
-    match reports.iter().find(|report| report.machine == name) {
-        Some(report) => Json(Answer::Ok {
-            age_seconds,
-            data: answered(report, &snapshot, &beats),
+    if let Some(kept) = snapshot.checks.get(&name) {
+        return Json(Answer::Ok {
+            age_seconds: kept.age().as_secs(),
+            data: Checked::of(kept, &snapshot, &beats),
         })
-        .into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(Missing {
-                error: format!("no workspace names a machine called `{name}`, so none was asked"),
-            }),
-        )
-            .into_response(),
+        .into_response();
     }
+    let Some(reading) = snapshot.readiness.as_deref() else {
+        return Json(Answer::<Checked>::Never).into_response();
+    };
+    if let Err(error) = reading.value() {
+        return Json(Answer::<Checked>::Failed {
+            age_seconds: reading.age().as_secs(),
+            error: because(error),
+        })
+        .into_response();
+    }
+    (
+        StatusCode::NOT_FOUND,
+        Json(Missing {
+            error: format!("no check has reached a machine called `{name}`"),
+        }),
+    )
+        .into_response()
 }
 
 /// The readiness reading about **this** machine (Y-175). The sweep above asks
-/// the machines workspaces name over ssh; the GitHub credential the work inbox
+/// the fleet's machines over ssh; the GitHub credential the work inbox
 /// reads is the one where `yantrad` runs, because
 /// [`yantra_core::attention`] spawns `gh` here. **A route rather than a tenth
 /// check on every report**: a check copied onto each machine's card would claim
@@ -358,6 +361,29 @@ pub(crate) fn answered(
                 _ => check.clone(),
             })
             .collect(),
+    }
+}
+
+/// A report and how old it is. A kept check can be much older than the sweep
+/// beside it, and every reading carries its own age. It flattens, so the wire
+/// shape is the report's with one more field.
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct Checked {
+    #[serde(flatten)]
+    pub(crate) report: doctor::Report,
+    pub(crate) age_seconds: u64,
+}
+
+impl Checked {
+    fn of(
+        kept: &Reading<doctor::Report>,
+        snapshot: &Snapshot,
+        beats: &BTreeMap<String, Reading<Heartbeat>>,
+    ) -> Self {
+        Self {
+            report: answered(kept.value(), snapshot, beats),
+            age_seconds: kept.age().as_secs(),
+        }
     }
 }
 
@@ -1453,11 +1479,12 @@ mod tests {
         machines: Vec<MachineInfo>,
         beats: &[(&str, Heartbeat)],
     ) -> Fleet {
-        let fleet = holding(Snapshot {
+        let mut snapshot = Snapshot {
             machines: Some(Arc::new(Reading::new(Ok(machines)))),
-            readiness: Some(Arc::new(Reading::new(Ok(reports)))),
             ..Snapshot::default()
-        });
+        };
+        crate::refresh::settle(&mut snapshot, Reading::new(Ok(reports)));
+        let fleet = holding(snapshot);
         let mut held = fleet.beats.write().await;
         for (id, beat) in beats {
             held.insert((*id).to_owned(), Reading::new(beat.clone()));
@@ -1509,10 +1536,10 @@ mod tests {
         .await;
 
         let body = get_json(fleet, "/readiness").await;
-        let beating = &body["data"][0]["checks"][1];
+        let beating = &body["data"][1]["checks"][1];
         assert_eq!(beating["check"], "heartbeat", "{body}");
         assert_eq!(beating["state"], "present", "{beating}");
-        let silent = &body["data"][1]["checks"][1];
+        let silent = &body["data"][0]["checks"][1];
         assert_eq!(silent["state"], "absent", "{silent}");
         assert!(
             silent["detail"]
@@ -1575,6 +1602,96 @@ mod tests {
             body["error"].as_str().is_some_and(|e| e.contains("nosuch")),
             "{body}"
         );
+    }
+
+    fn sweep_that_failed() -> yantra_core::snapshot::Readiness {
+        Reading::new(Err(doctor::Error::Interrupted {
+            machine: "pi".into(),
+            reason: "the task stopped".into(),
+        }))
+    }
+
+    /// Y-579's done condition. No workspace names `pi`, a check reached it once,
+    /// and each sweep after that says nothing about it. Every GET runs twice to
+    /// stand for a browser reload.
+    #[tokio::test]
+    async fn a_check_survives_every_later_sweep_and_a_reload_with_no_workspace() {
+        for later in [
+            None,
+            Some(Reading::new(Ok(Vec::new()))),
+            Some(sweep_that_failed()),
+        ] {
+            let mut snapshot = Snapshot {
+                machines: Some(Arc::new(Reading::new(Ok(vec![machine(
+                    "n-1", "pi", false,
+                )])))),
+                ..Snapshot::default()
+            };
+            crate::refresh::settle(&mut snapshot, Reading::new(Ok(vec![checked("pi")])));
+            if let Some(sweep) = later {
+                crate::refresh::settle(&mut snapshot, sweep);
+            }
+            let fleet = holding(snapshot);
+
+            for _ in 0..2 {
+                let one = get_json(fleet.clone(), "/machines/pi/readiness").await;
+                assert_eq!(one["looked"], "ok", "{one}");
+                assert_eq!(one["data"]["machine"], "pi", "{one}");
+
+                let list = get_json(fleet.clone(), "/readiness").await;
+                assert_eq!(list["looked"], "ok", "{list}");
+                assert_eq!(list["data"][0]["machine"], "pi", "{list}");
+            }
+        }
+    }
+
+    /// What Y-579 did not change: with nothing kept the sweep answers, and a
+    /// machine no check reached is still a 404.
+    #[tokio::test]
+    async fn with_nothing_kept_the_sweep_still_says_why() {
+        let empty = holding(Snapshot::default());
+        let list = get_json(empty.clone(), "/readiness").await;
+        assert_eq!(list["looked"], "never", "{list}");
+        let one = get_json(empty, "/machines/pi/readiness").await;
+        assert_eq!(one["looked"], "never", "{one}");
+
+        let mut snapshot = Snapshot::default();
+        crate::refresh::settle(&mut snapshot, sweep_that_failed());
+        let failed = holding(snapshot);
+        let list = get_json(failed.clone(), "/readiness").await;
+        assert_eq!(list["looked"], "failed", "{list}");
+        let one = get_json(failed, "/machines/pi/readiness").await;
+        assert_eq!(one["looked"], "failed", "{one}");
+
+        let mut snapshot = Snapshot::default();
+        crate::refresh::settle(&mut snapshot, Reading::new(Ok(Vec::new())));
+        let swept = holding(snapshot);
+        let list = get_json(swept.clone(), "/readiness").await;
+        assert_eq!(list["looked"], "ok", "{list}");
+        assert_eq!(list["data"], serde_json::json!([]), "{list}");
+        let (code, body) = get(swept, "/machines/pi/readiness").await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    /// The per-report age is what makes a kept result honest. The envelope says
+    /// how young the newest one is.
+    #[tokio::test]
+    async fn a_kept_report_carries_its_own_age() {
+        let mut snapshot = Snapshot::default();
+        snapshot.keep(checked("pi"));
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        snapshot.keep(checked("g14"));
+        let fleet = holding(snapshot);
+
+        let list = get_json(fleet.clone(), "/readiness").await;
+        assert_eq!(list["age_seconds"], 0, "{list}");
+        assert_eq!(list["data"][0]["machine"], "g14", "{list}");
+        assert_eq!(list["data"][0]["age_seconds"], 0, "{list}");
+        assert_eq!(list["data"][1]["age_seconds"], 1, "{list}");
+
+        let one = get_json(fleet, "/machines/pi/readiness").await;
+        assert_eq!(one["age_seconds"], 1, "{one}");
+        assert_eq!(one["data"]["age_seconds"], 1, "{one}");
     }
 
     fn waiting(reading: yantra_core::snapshot::Attention) -> Fleet {
@@ -1738,15 +1855,16 @@ mod tests {
     /// asked it.
     #[tokio::test]
     async fn the_daemons_own_github_credential_is_answered_apart_from_the_fleet() {
-        let fleet = holding(Snapshot {
+        let mut snapshot = Snapshot {
             github: Some(Arc::new(Reading::new(doctor::Check {
                 check: doctor::GITHUB,
                 state: doctor::State::Absent,
                 detail: "`gh` here holds no credential".into(),
             }))),
-            readiness: Some(Arc::new(Reading::new(Ok(vec![checked("cachyos-g14")])))),
             ..Snapshot::default()
-        });
+        };
+        snapshot.keep(checked("cachyos-g14"));
+        let fleet = holding(snapshot);
 
         let body = get_json(fleet.clone(), "/readiness/github").await;
         assert_eq!(body["looked"], "ok", "{body}");

@@ -244,6 +244,7 @@ fn verdicts() -> Vec<(&'static str, Verdict)> {
 }
 
 async fn fleet() -> Fleet {
+    let reports = vec![swept("cachyos-g14"), swept("bishwajeets-macbook-pro")];
     let fleet = holding(Snapshot {
         machines: Some(Arc::new(Reading::new(Ok(vec![
             machine("n-1", "cachyos-g14", true, None),
@@ -312,10 +313,11 @@ async fn fleet() -> Fleet {
                 },
             ],
         })))),
-        readiness: Some(Arc::new(Reading::new(Ok(vec![
-            swept("cachyos-g14"),
-            swept("bishwajeets-macbook-pro"),
-        ])))),
+        readiness: Some(Arc::new(Reading::new(Ok(reports.clone())))),
+        checks: reports
+            .into_iter()
+            .map(|report| (report.machine.clone(), Arc::new(Reading::new(report))))
+            .collect(),
         attention: Some(Arc::new(Reading::new(Ok(attention())))),
         // `/readiness/github` has no entry below: the type it would satisfy is
         // the card's, and the dashboard is parked (Y-174).

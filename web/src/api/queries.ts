@@ -80,9 +80,9 @@ export const sessionsQuery = () =>
   swept<MachineSessions[]>(keys.sessions(), '/api/sessions')
 export const readinessQuery = () =>
   swept<Readiness[]>(keys.readiness(), '/api/readiness')
-/** A 404 is `doctor::fleet` holding no report for a machine no workspace
- *  names: nobody has asked it yet, which is `never` and not a daemon that was
- *  not reached (D7 S4). */
+/** A 404 is a machine no check has reached yet, which is `never` and not a
+ *  daemon that was not reached (D7 S4). A machine with a kept check never 404s,
+ *  so a poll cannot turn a result into `never` (Y-579). */
 export const machineReadinessQuery = (name: string) =>
   queryOptions({
     // Widened as `swept` widens it, so `useReading` takes it.
