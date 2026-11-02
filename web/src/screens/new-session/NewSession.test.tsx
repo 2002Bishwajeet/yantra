@@ -23,7 +23,7 @@ async function toStepThree(answers: Answers = {}) {
   type('Name', 'quiet-otter')
   press('cachyos-g14')
   press('Continue')
-  await screen.findByText(/already on cachyos-g14/)
+  await screen.findByText('On this machine')
   press(/2002Bishwajeet\/yantra/)
   press('Continue')
   await screen.findByText('What opens in the session')
@@ -57,7 +57,7 @@ describe('step 1, the name and the machine', () => {
     type('Name', 'quiet-otter')
     press('cachyos-g14')
     press('Continue')
-    await screen.findByText(/already on cachyos-g14/)
+    await screen.findByText('On this machine')
     expect(steps().map((one) => one.getAttribute('data-state'))).toEqual([
       'done',
       'done',
@@ -99,9 +99,9 @@ describe('step 2, where the code comes from', () => {
     press('Continue')
 
     const rows = within(await screen.findByRole('list', { name: 'Repositories' }))
-    await waitFor(() => expect(rows.getByText(/already on cachyos-g14/)).toBeTruthy())
-    expect(rows.getByText(`already on cachyos-g14 at ~/Github/yantra`)).toBeTruthy()
-    expect(rows.getByText('not here yet · clone into ~/Github/scratch')).toBeTruthy()
+    await waitFor(() => expect(rows.getByText('On this machine')).toBeTruthy())
+    expect(rows.getByText('Will clone')).toBeTruthy()
+    expect(rows.queryByText(/~\/Github/)).toBeNull()
     // One listing of the clone home, not a probe per row.
     expect(asked.filter((one) => one.endsWith('/probe'))).toHaveLength(0)
 
@@ -122,10 +122,32 @@ describe('step 2, where the code comes from', () => {
     press('cachyos-g14')
     press('Continue')
     const rows = within(await screen.findByRole('list', { name: 'Repositories' }))
-    await waitFor(() => expect(rows.getAllByText(/could not be asked/)).toHaveLength(2))
+    await waitFor(() => expect(rows.getAllByText('Not checked')).toHaveLength(2))
     // Unchecked still goes on: only a proven absence blocks (D4 §5).
     fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ }))
+    expect(screen.getByRole('status').textContent).toBe('Not checked. Will try ~/Github/yantra')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+  })
+
+  it('says why Continue is off, and what selecting a row will do', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    const rows = within(await screen.findByRole('list', { name: 'Repositories' }))
+    await waitFor(() => expect(rows.getByText('Will clone')).toBeTruthy())
+    const hint = screen.getByRole('status')
+    expect(hint.textContent).toBe('Choose a repository to continue.')
+    const next = screen.getByRole('button', { name: 'Continue' })
+    expect(next).toHaveProperty('disabled', true)
+    expect(next.getAttribute('aria-describedby')).toBe(hint.id)
+
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/scratch/ }))
+    expect(screen.getByRole('status').textContent).toBe('Will clone into ~/Github/scratch')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+    expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('aria-describedby')).toBeNull()
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ }))
+    expect(screen.getByRole('status').textContent).toBe('On cachyos-g14 at ~/Github/yantra')
   })
 
   it('sends nobody to GitHub without a grant, and draws GitLab as later', async () => {
@@ -597,7 +619,7 @@ describe('the suggested machine (Y-517)', () => {
     await waitFor(() => expect(pressed()).toEqual(['cachyos-g14']))
     type('Name', 'quiet-otter')
     press('Continue')
-    await screen.findByText(/already on cachyos-g14/)
+    await screen.findByText('On this machine')
     press(/2002Bishwajeet\/yantra/)
     expect(await screen.findByText('pi: the repo is there and it is idle')).toBeTruthy()
     expect(sent.at(-1)).toMatchObject({ repo: '2002Bishwajeet/yantra' })
@@ -624,7 +646,7 @@ describe('the suggested machine (Y-517)', () => {
     await waitFor(() => expect(pressed()).toEqual(['cachyos-g14']))
     type('Name', 'quiet-otter')
     press('Continue')
-    await screen.findByText(/already on cachyos-g14/)
+    await screen.findByText('On this machine')
     press(/2002Bishwajeet\/yantra/)
     await waitFor(() => expect(answered).toBe(true))
     await new Promise((done) => setTimeout(done, 50))

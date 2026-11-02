@@ -14,7 +14,8 @@ import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { usePrefs } from '@/shell/prefs'
 import { readGeneral } from '@/screens/settings/general'
-import { complete, pickMachine, plan, type Plan, reachable, STEPS, type Values } from './form'
+import { useCloneFolder } from './clonePath'
+import { complete, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, type Values } from './form'
 import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
@@ -32,6 +33,18 @@ const usePresetMachine = () =>
       return typeof given === 'string' ? given : ''
     },
   })
+
+const HINT_ID = 'ns-source-hint'
+
+function SourceHint(props: { values: Values }) {
+  const { root } = useCloneFolder(props.values.machine)
+  const hint = sourceHint(props.values, root)
+  return (
+    <Text className="ns__hint" id={HINT_ID} render={<p role="status" />} scale="body-medium" tone="variant">
+      {hint}
+    </Text>
+  )
+}
 
 const CONTENTS = { display: 'contents' } as const
 
@@ -175,6 +188,7 @@ export function NewSession() {
       {step === 3 ? <StepStart form={form} values={values} /> : null}
 
       <footer className="ns__foot">
+        {step === 2 ? <SourceHint values={values} /> : null}
         {step === 1 ? (
           <Button role="link" render={<Link to="/" />} variant="text">
             Cancel
@@ -184,7 +198,11 @@ export function NewSession() {
             Back
           </Button>
         )}
-        <Button disabled={!complete(step, values)} type="submit">
+        <Button
+          aria-describedby={step === 2 && !complete(step, values) ? HINT_ID : undefined}
+          disabled={!complete(step, values)}
+          type="submit"
+        >
           {step === 3 ? 'Create and open' : 'Continue'}
         </Button>
       </footer>

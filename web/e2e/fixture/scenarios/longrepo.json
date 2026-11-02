@@ -1,0 +1,33 @@
+{
+  "extends": "busy",
+  "repos": {
+    "age_seconds": 0,
+    "looked": "ok",
+    "data": [
+      {
+        "clone_url": "https://github.com/an-organisation-with-a-very-long-name/infrastructure-deployment-configuration-for-the-staging-cluster.git",
+        "default_branch": "main",
+        "full_name": "an-organisation-with-a-very-long-name/infrastructure-deployment-configuration-for-the-staging-cluster",
+        "language": "TypeScript",
+        "private": true,
+        "pushed_at": "2026-09-05T21:14:03Z"
+      },
+      {
+        "clone_url": "https://github.com/2002Bishwajeet/yantra.git",
+        "default_branch": "main",
+        "full_name": "2002Bishwajeet/yantra",
+        "language": "Rust",
+        "private": false,
+        "pushed_at": "2026-09-05T21:14:03Z"
+      },
+      {
+        "clone_url": "https://github.com/2002Bishwajeet/scratch.git",
+        "default_branch": "main",
+        "full_name": "2002Bishwajeet/scratch",
+        "language": null,
+        "private": true,
+        "pushed_at": null
+      }
+    ]
+  }
+}

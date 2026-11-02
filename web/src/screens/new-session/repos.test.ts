@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Listing, Repo } from '@/api'
 import { crumbs, under } from './dirs'
 import { lastLine } from './progress'
-import { byOrigin, filterRepos, place } from './repos'
+import { byOrigin, filterRepos, place, stateLabel } from './repos'
 
 const repo = (full_name: string): Repo => ({
   full_name,
@@ -108,5 +108,14 @@ describe('clone progress', () => {
     expect(lastLine('', 'remote: Counting\rremote: Compressing 40%\r')).toBe('remote: Compressing 40%')
     expect(lastLine('', '[32mReceiving objects: 71%[0m\r')).toBe('Receiving objects: 71%')
     expect(lastLine('', '\r\n')).toBe('')
+  })
+})
+
+describe('the state a row shows', () => {
+  it('is one short label for each answer', () => {
+    expect(stateLabel(null)).toBe('Checking…')
+    expect(stateLabel({ path: '/a', here: 'yes' })).toBe('On this machine')
+    expect(stateLabel({ path: '/a', here: 'no' })).toBe('Will clone')
+    expect(stateLabel({ path: '/a', here: 'unknown', because: 'x' })).toBe('Not checked')
   })
 })
