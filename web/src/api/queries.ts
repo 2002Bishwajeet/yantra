@@ -260,14 +260,17 @@ export const notificationsQuery = () =>
     refetchInterval: POLL_MS,
   })
 
-/** Y-589. Who is asking does not change while a page is open, so it is read
- *  once. A failure draws nothing: the name helps and no step waits on it. */
+/** Y-589. Once the daemon names the device it does not change while a page is
+ *  open. Until then (503 before the first tailnet look, or a failed one; or a
+ *  device the list does not hold yet) it is asked again, so a phone that has
+ *  just joined is named on the next look. A failure draws nothing. */
 export const hereQuery = () =>
   queryOptions({
     queryKey: keys.here(),
     queryFn: ({ signal }) => fetchJson<Here>('/api/here', { signal }, fields('machine')),
     staleTime: Infinity,
     retry: false,
+    refetchInterval: (query) => (query.state.data?.machine ? false : POLL_MS),
   })
 
 /** Y-343. `uptime_seconds` moves, so it is not held forever. Y-367: polled

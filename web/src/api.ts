@@ -398,7 +398,8 @@ export type SshIdentity = {
 }
 
 /** `GET /api/here` (Y-589) — the tailnet machine this request came from; `null`
- *  for an address no machine holds. A help, never a step. */
+ *  for an address the last tailnet look does not hold. 503 when there is no
+ *  look to read. A help, never a step. */
 export type Here = {
   machine: string | null
 }

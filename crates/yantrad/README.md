@@ -49,7 +49,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) |
 | `GET /api/ssh-identity` | `yantra ssh-identity` (the read half — a GET makes no key) |
-| `GET /api/here` | no verb; names the tailnet machine the request came from (ADR-0017 address, no `whois`) |
+| `GET /api/here` | no verb; names the tailnet machine the request came from (ADR-0017 address); authorised like every route, and 503 when the last tailnet look is missing or failed |
 | `GET /join` | `yantra join-script` (outside `/api`; makes the key on first use) |
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
