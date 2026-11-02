@@ -108,7 +108,7 @@ export function push(about: Asked<About>): Step {
  *  is normal and never an error (D7 §3.3). */
 export type Line =
   | { kind: 'asleep'; since: string | null }
-  | { kind: ReachableFailure; detail: string }
+  | { [Kind in ReachableFailure]: { kind: Kind; detail: string } }[ReachableFailure]
   | { kind: 'unchecked' }
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
