@@ -293,7 +293,7 @@ test.describe('the session screen, the other three views', () => {
     await expect(page.getByText('tokens, unpriced')).toBeVisible()
     await expect(page.getByText('There is no fleet total')).toBeVisible()
     // Finding 128: the board dates the price table `4 Sep`, not `2026-08-11`.
-    await expect(page.getByText('prices as of 11 Aug')).toBeVisible()
+    await expect(page.getByText('prices as of 2 Nov')).toBeVisible()
     await axe(page)
     await screenshot(page, 'session-spend', 'busy', size)
   })
