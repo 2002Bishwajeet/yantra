@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { syncThemeColor } from './themeColor'
+import { paintThemeColor, syncThemeColor } from './themeColor'
 
 const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
 const css = readFileSync(resolve(process.cwd(), 'src/m3/tokens.css'), 'utf8')
@@ -39,6 +39,36 @@ describe('index.html', () => {
 
   it('rewrites the metas in the explicit-theme branch', () => {
     expect(html).toMatch(/data-scheme[\s\S]*p\.theme[\s\S]*not all/)
+  })
+})
+
+describe('paintThemeColor', () => {
+  const content = () =>
+    [...document.head.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((m) => m.content)
+
+  beforeEach(() => {
+    document.head.innerHTML =
+      '<meta name="theme-color" data-scheme="light" content="#F6F0E2">' +
+      '<meta name="theme-color" data-scheme="dark" content="#151714">'
+  })
+  afterEach(() => {
+    document.head.innerHTML = ''
+  })
+
+  it('writes the seeded surface into each meta', () => {
+    paintThemeColor({ light: '#EEF4FF', dark: '#101820' })
+    expect(content()).toEqual(['#EEF4FF', '#101820'])
+  })
+
+  it('restores brass when the seed clears', () => {
+    paintThemeColor({ light: '#EEF4FF', dark: '#101820' })
+    paintThemeColor(null)
+    expect(content()).toEqual(['#F6F0E2', '#151714'])
+  })
+
+  it('does nothing when the page has no metas', () => {
+    document.head.innerHTML = ''
+    expect(() => paintThemeColor(null)).not.toThrow()
   })
 })
 
