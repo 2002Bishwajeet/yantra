@@ -314,3 +314,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-10-31:** yantra-box live on the HP mini PC. `box/` and `crates/yantra-box` published, home screen built, v0.9.0 cut. The firmware logo is parked on #533.
 
 - **2026-11-02** — **[Y-588](../tracker.md#3-task-board) is in review.** The New session repository rows no longer clip at 390 px. Each row shows one short state, and the page says why Continue is disabled. A new long-name scenario holds the layout in the Playwright baselines.
+
+- **2026-11-02** — **[Y-593](../tracker.md#3-task-board) is in review.** `price.rs` now holds the official rates for Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1. A test proves that no new model takes an older model's rate by prefix.
