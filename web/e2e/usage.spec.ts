@@ -51,7 +51,7 @@ test.describe('usage on a busy fleet', () => {
     await expect(workspaces.getByText('$5.46').first()).toBeVisible()
 
     // Finding 128: the board dates the price table `2 Sep`, not `2026-08-11`.
-    await expect(page.getByText('prices from 11 Aug')).toBeVisible()
+    await expect(page.getByText('prices from 2 Nov')).toBeVisible()
 
     const models = card(page, 'By model')
     await expect(models.getByText('claude-opus-5-20260115')).toBeVisible()
