@@ -530,3 +530,30 @@ span.ns__crumb {
 .ns__suggest:empty {
   display: none;
 }
+
+.ns__state {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ns__repo .m3-row__headline,
+.ns__repo .m3-row__supporting {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ns__foot {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ns__hint {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+[data-shell="phone"] .ns__hint {
+  flex-basis: 100%;
+}

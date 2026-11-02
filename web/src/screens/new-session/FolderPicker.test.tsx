@@ -100,14 +100,17 @@ describe('step 2, the clone folder', () => {
 
   it('finds the provider folder in ~/Documents and says already on', async () => {
     const rows = await toGithub()
-    await waitFor(() => expect(rows.getByText('already on cachyos-g14 at ~/Documents/GitHub/yantra')).toBeTruthy())
+    await waitFor(() => expect(rows.getByText('On this machine')).toBeTruthy())
     expect(screen.getByText('~/Documents/GitHub')).toBeTruthy()
-    expect(rows.getByText('not here yet · clone into ~/Documents/GitHub/scratch')).toBeTruthy()
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ }))
+    expect(screen.getByRole('status').textContent).toBe('On cachyos-g14 at ~/Documents/GitHub/yantra')
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/scratch/ }))
+    expect(screen.getByRole('status').textContent).toBe('Will clone into ~/Documents/GitHub/scratch')
   })
 
   it('lets a person change it, and keeps the choice for this machine', async () => {
     const rows = await toGithub()
-    await waitFor(() => expect(rows.getByText(/already on/)).toBeTruthy())
+    await waitFor(() => expect(rows.getByText('On this machine')).toBeTruthy())
     press('Change')
     await screen.findByRole('list', { name: 'Clone folder choices' })
     const where = within(screen.getByRole('navigation', { name: 'Where you are' }))
@@ -115,7 +118,9 @@ describe('step 2, the clone folder', () => {
     const picker = within(await screen.findByRole('list', { name: 'Clone folder choices' }))
     fireEvent.click(await picker.findByRole('button', { name: /^Projects/ }))
     fireEvent.click(await screen.findByRole('button', { name: /^Use ~\/Projects$/ }))
-    expect((await screen.findAllByText(/not here yet · clone into ~\/Projects\//)).length).toBeGreaterThan(0)
+    await waitFor(() => expect(rows.getAllByText('Will clone')).toHaveLength(2))
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/scratch/ }))
+    expect(screen.getByRole('status').textContent).toBe('Will clone into ~/Projects/scratch')
     expect(readPrefs().general.cloneFolders).toEqual({ 'cachyos-g14': `${HOME}/Projects` })
     expect(screen.queryByRole('list', { name: 'Clone folder choices' })).toBeNull()
   })
@@ -123,8 +128,9 @@ describe('step 2, the clone folder', () => {
   it('uses the remembered folder in the next New session', async () => {
     writePrefs({ general: { cloneFolders: { 'cachyos-g14': `${HOME}/Projects` } } })
     const rows = await toGithub()
-    expect((await screen.findAllByText(/not here yet · clone into ~\/Projects\//)).length).toBeGreaterThan(0)
-    expect(rows.queryByText(/~\/Documents/)).toBeNull()
+    await waitFor(() => expect(rows.getAllByText('Will clone')).toHaveLength(2))
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/scratch/ }))
+    expect(screen.getByRole('status').textContent).toBe('Will clone into ~/Projects/scratch')
   })
 })
 

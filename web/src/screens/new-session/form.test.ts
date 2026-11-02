@@ -10,6 +10,7 @@ import {
   reachable,
   repoName,
   slug,
+  sourceHint,
   tilde,
   type Values,
 } from './form'
@@ -163,5 +164,35 @@ describe('pickMachine', () => {
 
   it.each(['down', 'old', 'theirs', 'gone', ''])('drops %j', (given) => {
     expect(pickMachine(given, list)).toBe('')
+  })
+})
+
+describe('the hint under the source step', () => {
+  const home = '/home/biswa'
+  const at = (here: 'yes' | 'no' | 'unknown') =>
+    values({ source: { kind: 'github', repo, path: '/home/biswa/Github/homelab-k8s', here } })
+  const local = (checked: 'yes' | 'no' | 'unknown') =>
+    values({ provider: 'local', source: { kind: 'local', path: '/srv/x', origin: null, checked } })
+
+  it('says what to choose when nothing is chosen', () => {
+    expect(sourceHint(values(), home)).toBe('Choose a repository to continue.')
+    expect(sourceHint(values({ provider: 'local' }), home)).toBe('Choose a folder that exists to continue.')
+  })
+
+  it('stays silent when no repository list is on screen', () => {
+    expect(sourceHint(values(), home, false)).toBeNull()
+    expect(sourceHint(values({ provider: 'local' }), home, false)).toBe('Choose a folder that exists to continue.')
+  })
+
+  it('says what a chosen repository will do', () => {
+    expect(sourceHint(at('no'), home)).toBe('Will clone into ~/Github/homelab-k8s')
+    expect(sourceHint(at('yes'), home)).toBe('On cachyos-g14 at ~/Github/homelab-k8s')
+    expect(sourceHint(at('unknown'), home)).toBe('Not checked. Will try ~/Github/homelab-k8s')
+  })
+
+  it('blocks only a folder proven absent', () => {
+    expect(sourceHint(local('no'), home)).toBe('Choose a folder that exists to continue.')
+    expect(sourceHint(local('yes'), home)).toBeNull()
+    expect(sourceHint(local('unknown'), home)).toBeNull()
   })
 })
