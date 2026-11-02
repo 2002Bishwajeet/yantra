@@ -584,7 +584,7 @@ export const broken = {
 } satisfies Broken
 
 export const spend = {
-  "as_of": "2026-08-11",
+  "as_of": "2026-11-02",
   "cost": 5.4633115,
   "fast": 0,
   "models": [
@@ -618,7 +618,7 @@ export const spend = {
 } satisfies Spend
 
 export const spendFast = {
-  "as_of": "2026-08-11",
+  "as_of": "2026-11-02",
   "cost": null,
   "fast": 3,
   "models": [

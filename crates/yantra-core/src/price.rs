@@ -12,55 +12,63 @@
 //! and read the prices off the page rather than from memory.
 //!
 //! Read from <https://platform.claude.com/docs/en/about-claude/pricing> on
-//! 2026-08-11.
+//! 2026-11-02.
 
 use crate::tokens::Counts;
 
 /// The day [`TABLE`] was read off Anthropic's published prices.
-///
-/// **Sonnet 5 is on introductory pricing until 2026-08-31**, after which its
-/// input and output rates rise by half. That date is inside the horizon of any
-/// figure this table produces, so it is the first thing to check here.
-pub const AS_OF: &str = "2026-08-11";
+pub const AS_OF: &str = "2026-11-02";
 
-/// Dollars per million tokens, for the two prices Anthropic quotes per model.
+/// The [`TABLE`] key for Haiku 5.5's higher card. The space keeps it from
+/// colliding with a name a transcript writes.
+const LONG_HAIKU: &str = "claude-haiku-5-5 over 100k";
+
+/// Dollars per million tokens, for the three prices Anthropic quotes per model.
 ///
-/// The three cache prices are not quoted independently. The pricing page gives
-/// them as multipliers of base input — 1.25x for a five-minute write, 2x for an
-/// hour, 0.1x for a read — and every row of its own table obeys them, so
-/// carrying five numbers per model would be carrying three that can drift from
-/// the two they are computed from.
+/// Cache writes are multipliers of base input on every row of the pricing
+/// page: 1.25x for a five-minute write, 2x for an hour. Cache reads are quoted
+/// per model, because the 5.x models broke the 0.1x that older rows obey.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rate {
     pub input: f64,
     pub output: f64,
+    pub cache_read: f64,
 }
 
 /// Every model Anthropic prices, keyed by the prefix a transcript writes.
 ///
 /// Retired models are here too: a transcript outlives the model that wrote it,
 /// and pricing an old session at nothing is worse than pricing it at the rate
-/// it was actually billed. Mythos 5 is left out — it is limited availability
-/// and no `claude` CLI reaches it.
+/// it was actually billed. Mythos 5 and 5.1 are left out — they are limited
+/// availability and no `claude` CLI reaches them.
 const TABLE: &[(&str, Rate)] = &[
-    ("claude-fable-5", Rate::new(10.0, 50.0)),
-    ("claude-opus-5", Rate::new(5.0, 25.0)),
-    ("claude-opus-4-8", Rate::new(5.0, 25.0)),
-    ("claude-opus-4-7", Rate::new(5.0, 25.0)),
-    ("claude-opus-4-6", Rate::new(5.0, 25.0)),
-    ("claude-opus-4-5", Rate::new(5.0, 25.0)),
-    ("claude-opus-4-1", Rate::new(15.0, 75.0)),
-    ("claude-sonnet-5", Rate::new(2.0, 10.0)),
-    ("claude-sonnet-4-6", Rate::new(3.0, 15.0)),
-    ("claude-sonnet-4-5", Rate::new(3.0, 15.0)),
-    ("claude-sonnet-4", Rate::new(3.0, 15.0)),
-    ("claude-haiku-4-5", Rate::new(1.0, 5.0)),
-    ("claude-haiku-3-5", Rate::new(0.80, 4.0)),
+    ("claude-fable-5-1", Rate::new(10.0, 50.0, 0.25)),
+    ("claude-fable-5", Rate::new(10.0, 50.0, 1.0)),
+    ("claude-opus-5-5", Rate::new(4.0, 20.0, 0.20)),
+    ("claude-opus-5", Rate::new(5.0, 25.0, 0.50)),
+    ("claude-opus-4-8", Rate::new(5.0, 25.0, 0.50)),
+    ("claude-opus-4-7", Rate::new(5.0, 25.0, 0.50)),
+    ("claude-opus-4-6", Rate::new(5.0, 25.0, 0.50)),
+    ("claude-opus-4-5", Rate::new(5.0, 25.0, 0.50)),
+    ("claude-opus-4-1", Rate::new(15.0, 75.0, 1.50)),
+    ("claude-sonnet-5-5", Rate::new(2.0, 10.0, 0.10)),
+    ("claude-sonnet-5", Rate::new(2.0, 10.0, 0.20)),
+    ("claude-sonnet-4-6", Rate::new(3.0, 15.0, 0.30)),
+    ("claude-sonnet-4-5", Rate::new(3.0, 15.0, 0.30)),
+    ("claude-sonnet-4", Rate::new(3.0, 15.0, 0.30)),
+    ("claude-haiku-5-5", Rate::new(0.10, 0.50, 0.01)),
+    (LONG_HAIKU, Rate::new(0.50, 2.50, 0.05)),
+    ("claude-haiku-4-5", Rate::new(1.0, 5.0, 0.10)),
+    ("claude-haiku-3-5", Rate::new(0.80, 4.0, 0.08)),
 ];
 
 impl Rate {
-    const fn new(input: f64, output: f64) -> Self {
-        Self { input, output }
+    const fn new(input: f64, output: f64, cache_read: f64) -> Self {
+        Self {
+            input,
+            output,
+            cache_read,
+        }
     }
 
     /// Dollars for one model's counts, at this rate.
@@ -70,7 +78,7 @@ impl Rate {
             + per_million(counts.output, self.output)
             + per_million(five_minute, self.input * 1.25)
             + per_million(counts.cache_write_1h, self.input * 2.0)
-            + per_million(counts.cache_read, self.input * 0.1)
+            + per_million(counts.cache_read, self.cache_read)
     }
 }
 
@@ -89,6 +97,19 @@ pub fn rate(model: &str) -> Option<Rate> {
         .map(|(_, rate)| *rate)
 }
 
+/// The [`TABLE`] key one response was billed under, given its prompt length:
+/// input plus cache writes plus cache reads.
+///
+/// Haiku 5.5 moves a whole request to a higher card past 100,000 tokens, and
+/// counts are summed per model, so the card has to be chosen per response.
+pub fn billed_as(model: &str, prompt: u64) -> &str {
+    if model.starts_with("claude-haiku-5-5") && prompt > 100_000 {
+        LONG_HAIKU
+    } else {
+        model
+    }
+}
+
 fn per_million(tokens: u64, dollars_per_million: f64) -> f64 {
     #[allow(clippy::cast_precision_loss)]
     let tokens = tokens as f64;
@@ -102,19 +123,19 @@ fn per_million(tokens: u64, dollars_per_million: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// The worked example on Anthropic's own pricing page, to the cent:
-    /// 10,000 uncached input and 40,000 cache-read tokens plus 15,000 output on
-    /// Opus 5 is $0.05 + $0.02 + $0.375.
+    /// The worked example on Anthropic's own pricing page, without its $0.08
+    /// session runtime line: 10,000 uncached input and 40,000 cache-read tokens
+    /// plus 15,000 output on Opus 5.5 is $0.04 + $0.008 + $0.30.
     #[test]
     fn the_published_worked_example_comes_out_at_the_published_figure() {
-        let rate = rate("claude-opus-5").expect("opus 5 is priced");
+        let rate = rate("claude-opus-5-5").expect("opus 5.5 is priced");
         let charge = rate.charge(&Counts {
             input: 10_000,
             output: 15_000,
             cache_read: 40_000,
             ..Counts::default()
         });
-        assert!((charge - 0.445).abs() < 1e-9, "{charge}");
+        assert!((charge - 0.348).abs() < 1e-9, "{charge}");
     }
 
     /// The measurement this module exists to get right. An hour-long cache
@@ -143,12 +164,12 @@ mod tests {
     fn a_dated_model_name_finds_its_family_and_the_longer_prefix_wins() {
         assert_eq!(
             rate("claude-haiku-4-5-20251001"),
-            Some(Rate::new(1.0, 5.0)),
+            Some(Rate::new(1.0, 5.0, 0.10)),
             "a dated name is the same model"
         );
         assert_eq!(
             rate("claude-sonnet-4-5"),
-            Some(Rate::new(3.0, 15.0)),
+            Some(Rate::new(3.0, 15.0, 0.30)),
             "not claude-sonnet-4, which is also a prefix"
         );
     }
@@ -162,20 +183,97 @@ mod tests {
         assert_eq!(rate(""), None);
     }
 
-    /// Every quoted cache price on the pricing page is a multiplier of base
-    /// input, and this checks the multipliers against the figures the page
-    /// prints for the three models a `claude` CLI reaches today.
+    /// The longest-prefix match gave each of these an older model's rate until
+    /// the table named them. Sonnet 5.5 differs from Sonnet 5 in `cache_read`
+    /// alone, so a table missing that row would still bill input and output right.
     #[test]
-    fn the_derived_cache_rates_match_the_published_ones() {
+    fn no_new_model_takes_an_older_rate_by_prefix() {
+        for (model, published, older) in [
+            (
+                "claude-opus-5-5",
+                Rate::new(4.0, 20.0, 0.20),
+                "claude-opus-5",
+            ),
+            (
+                "claude-opus-5-5-20261101",
+                Rate::new(4.0, 20.0, 0.20),
+                "claude-opus-5",
+            ),
+            (
+                "claude-fable-5-1",
+                Rate::new(10.0, 50.0, 0.25),
+                "claude-fable-5",
+            ),
+            (
+                "claude-sonnet-5-5",
+                Rate::new(2.0, 10.0, 0.10),
+                "claude-sonnet-5",
+            ),
+        ] {
+            assert_eq!(rate(model), Some(published), "{model}");
+            assert_ne!(rate(model), rate(older), "{model}");
+        }
+        assert_eq!(rate("claude-haiku-5-5"), Some(Rate::new(0.10, 0.50, 0.01)));
+
+        let sonnet = rate("claude-sonnet-5").expect("sonnet 5 is priced");
+        let newer = rate("claude-sonnet-5-5").expect("sonnet 5.5 is priced");
+        assert_eq!((newer.input, newer.output), (sonnet.input, sonnet.output));
+        assert!((newer.cache_read - sonnet.cache_read).abs() > 1e-9);
+    }
+
+    #[test]
+    fn a_cache_read_is_charged_at_the_figure_quoted_for_the_model() {
+        for (model, dollars) in [
+            ("claude-fable-5-1", 0.25),
+            ("claude-opus-5-5", 0.20),
+            ("claude-sonnet-5-5", 0.10),
+            ("claude-haiku-5-5", 0.01),
+        ] {
+            let charge = rate(model).expect("model is priced").charge(&Counts {
+                cache_read: 1_000_000,
+                ..Counts::default()
+            });
+            assert!((charge - dollars).abs() < 1e-9, "{model} {charge}");
+        }
+    }
+
+    /// Exactly 100,000 is the lower card: the page says *over*.
+    #[test]
+    fn haiku_5_5_moves_to_the_higher_card_past_100_000_tokens() {
+        assert_eq!(billed_as("claude-haiku-5-5", 100_000), "claude-haiku-5-5");
+        assert_eq!(billed_as("claude-haiku-5-5", 100_001), LONG_HAIKU);
+        assert_eq!(billed_as("claude-haiku-5-5-20261101", 100_001), LONG_HAIKU);
+        assert_eq!(
+            billed_as("claude-haiku-5-5-20261101", 100_000),
+            "claude-haiku-5-5-20261101"
+        );
+        assert_eq!(billed_as("claude-haiku-4-5", 100_001), "claude-haiku-4-5");
+        assert_eq!(
+            rate(LONG_HAIKU),
+            Some(Rate::new(0.50, 2.50, 0.05)),
+            "the key must find its own row, not the shorter prefix"
+        );
+    }
+
+    /// Writes are derived and reads are quoted, and this checks both against
+    /// the figures the page prints.
+    #[test]
+    fn the_cache_rates_match_the_published_ones() {
         for (model, write_5m, write_1h, read) in [
+            ("claude-fable-5-1", 12.50, 20.0, 0.25),
+            ("claude-fable-5", 12.50, 20.0, 1.0),
+            ("claude-opus-5-5", 5.0, 8.0, 0.20),
             ("claude-opus-5", 6.25, 10.0, 0.50),
+            ("claude-sonnet-5-5", 2.50, 4.0, 0.10),
             ("claude-sonnet-5", 2.50, 4.0, 0.20),
+            ("claude-haiku-5-5", 0.125, 0.20, 0.01),
+            (LONG_HAIKU, 0.625, 1.0, 0.05),
             ("claude-haiku-4-5", 1.25, 2.0, 0.10),
         ] {
             let rate = rate(model).expect("model is priced");
             assert!((rate.input * 1.25 - write_5m).abs() < 1e-9, "{model} 5m");
             assert!((rate.input * 2.0 - write_1h).abs() < 1e-9, "{model} 1h");
-            assert!((rate.input * 0.1 - read).abs() < 1e-9, "{model} read");
+            assert!((rate.cache_read - read).abs() < 1e-9, "{model} read");
         }
     }
 }

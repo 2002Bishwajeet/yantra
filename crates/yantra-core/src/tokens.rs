@@ -46,6 +46,7 @@
 //! was not measured over real transcripts — the fixtures assert it.
 
 use crate::logs::{self, Error, NO_TRANSCRIPT};
+use crate::price;
 use crate::ssh::{self, Exec, Ssh};
 use crate::workspace;
 use std::collections::{BTreeMap, HashSet};
@@ -79,7 +80,8 @@ pub struct Spend {
     pub path: String,
     /// Per model, because they do not share a rate. Keyed by the name the
     /// transcript wrote, so a caller prices what was billed rather than what a
-    /// workspace asked for.
+    /// workspace asked for. A model with two cards gets one key per card, from
+    /// [`price::billed_as`], so one model can hold two keys.
     pub by_model: BTreeMap<String, Counts>,
     /// Responses Claude Code recorded as fast mode, which is billed at a
     /// premium [`crate::price`] does not carry. A caller that sees a number
@@ -314,11 +316,16 @@ fn add(
         .model
         .take()
         .unwrap_or_else(|| UNKNOWN_MODEL.to_owned());
+    let counts = reply.counts();
+    let prompt = counts
+        .input
+        .saturating_add(counts.cache_write)
+        .saturating_add(counts.cache_read);
     spend
         .by_model
-        .entry(model)
+        .entry(price::billed_as(&model, prompt).to_owned())
         .or_default()
-        .add(&reply.counts());
+        .add(&counts);
 }
 
 #[cfg(test)]
@@ -619,6 +626,29 @@ grep: /h/x.jsonl: Permission denied\n\
         let spend = tally("/x", counts, at("2026-10-04T00:00:00Z"));
         assert_eq!(spend.by_model.len(), 1);
         assert_eq!(of(&spend, "claude-opus-5").input, 10);
+    }
+
+    /// Haiku 5.5's card is chosen per response, and cache reads count towards
+    /// the prompt, so this pair is one token apart and billed on two cards.
+    #[test]
+    fn haiku_5_5_prompts_either_side_of_the_limit_land_under_two_keys() {
+        let counts = "\
+1:\"model\":\"claude-haiku-5-5\"\n\
+1:\"input_tokens\":10\n\
+1:\"cache_creation_input_tokens\":90\n\
+1:\"cache_read_input_tokens\":99900\n\
+1:\"requestId\":\"req_A\"\n\
+2:\"model\":\"claude-haiku-5-5\"\n\
+2:\"input_tokens\":11\n\
+2:\"cache_creation_input_tokens\":90\n\
+2:\"cache_read_input_tokens\":99900\n\
+2:\"requestId\":\"req_B\"\n";
+        let spend = tally("/x", counts, None);
+        assert_eq!(spend.by_model.len(), 2, "{spend:?}");
+        assert_eq!(of(&spend, "claude-haiku-5-5").responses, 1);
+        assert_eq!(of(&spend, "claude-haiku-5-5").input, 10);
+        assert_eq!(of(&spend, "claude-haiku-5-5 over 100k").responses, 1);
+        assert_eq!(of(&spend, "claude-haiku-5-5 over 100k").input, 11);
     }
 
     /// The script has to find the same file `logs` finds, and by the same rules
