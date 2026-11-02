@@ -80,7 +80,11 @@ impl<I: Inventory> Authoriser<I> {
     ///
     /// §3: one address or refuse. An absent header is not a refusal — it means
     /// nothing proxied this, and the peer stands as it does on 7717.
-    fn caller_address(&self, peer: IpAddr, headers: &HeaderMap) -> Result<IpAddr, Refused> {
+    pub(crate) fn caller_address(
+        &self,
+        peer: IpAddr,
+        headers: &HeaderMap,
+    ) -> Result<IpAddr, Refused> {
         if !self.bound.contains(&peer) {
             return Ok(peer);
         }
@@ -143,6 +147,7 @@ where
     // `/relay` is here since Y-343 because its test send is an event (ADR-0025).
     let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
+        .route("/here", get(here::<I>))
         .route("/viewing", post(viewing::<I>))
         .route("/relay", post(relay::<I>))
         .route("/github/login", post(login::<I>))
@@ -246,6 +251,39 @@ pub(crate) async fn allowed<I: Inventory>(
         return Err(Refused::NotYours(caller.node));
     }
     Ok(caller)
+}
+
+/// `GET /api/here`: the tailnet machine the request came from, so the page can
+/// say "you are using iphone". A help and not a gate, so it asks no one: the
+/// address is ADR-0017's, and the name comes from the last tailnet look.
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct Here {
+    machine: Option<String>,
+}
+
+async fn here<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Here>, Refused> {
+    let caller = state
+        .authoriser
+        .caller_address(from.ip(), &headers)?
+        .to_canonical();
+    let looked = state.fleet.model.read().await.machines.clone();
+    let machine = looked
+        .as_deref()
+        .and_then(|reading| reading.value().as_ref().ok())
+        .and_then(|machines| {
+            machines.iter().find(|machine| {
+                machine
+                    .addresses
+                    .iter()
+                    .any(|held| held.to_canonical() == caller)
+            })
+        })
+        .map(|machine| machine.name.clone());
+    Ok(Json(Here { machine }))
 }
 
 /// `up` and `resume` open a session nobody is yet sitting at, and the readiness
@@ -2475,6 +2513,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
     }
     vec![
         (
+            "here",
+            "Here",
+            of(&Here {
+                machine: Some("iphone".to_owned()),
+            }),
+        ),
+        (
             "device",
             "Device",
             of(&Device {
@@ -2886,6 +2931,118 @@ mod tests {
             );
         }
         headers
+    }
+
+    fn on_the_tailnet(addresses: &[IpAddr]) -> Fleet {
+        let machine = yantra_core::inventory::MachineInfo {
+            id: "n-9".to_owned(),
+            name: "iphone".to_owned(),
+            dns_name: "iphone.tail.ts.net.".to_owned(),
+            os: yantra_core::inventory::Os::Ios,
+            online: true,
+            last_seen: None,
+            expired: false,
+            key_expires: None,
+            addresses: addresses.to_vec(),
+            ownership: yantra_core::inventory::Ownership::Yours,
+        };
+        let fleet = Fleet::default();
+        fleet
+            .model
+            .try_write()
+            .expect("nothing else holds it")
+            .machines = Some(Arc::new(yantra_core::snapshot::Reading::new(Ok(vec![
+            machine,
+        ]))));
+        fleet
+    }
+
+    async fn ask_here(
+        authoriser: Authoriser<Fake>,
+        fleet: Fleet,
+        peer: IpAddr,
+        headers: &[&str],
+    ) -> (StatusCode, serde_json::Value) {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let mut asked = Request::get("/here");
+        for value in headers {
+            asked = asked.header(FORWARDED_FOR, *value);
+        }
+        let mut asked = asked.body(Body::empty()).expect("a GET");
+        asked
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(peer, 61620)));
+        let answer = router::<Fake, ()>(authoriser, fleet)
+            .with_state(())
+            .oneshot(asked)
+            .await
+            .expect("the router is infallible");
+        let status = answer.status();
+        let bytes = axum::body::to_bytes(answer.into_body(), 64 * 1024)
+            .await
+            .expect("in memory");
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    #[tokio::test]
+    async fn here_names_a_direct_peer() {
+        let (status, body) = ask_here(
+            direct(tailnet(vec![])),
+            on_the_tailnet(&[address(2)]),
+            address(2),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["machine"], "iphone");
+    }
+
+    #[tokio::test]
+    async fn here_names_the_forwarded_caller_and_not_the_appliance() {
+        let fleet = on_the_tailnet(&[address(2)]);
+        let (_, body) = ask_here(
+            behind_the_proxy(tailnet(vec![])),
+            fleet,
+            address(1),
+            &["100.64.0.2"],
+        )
+        .await;
+
+        assert_eq!(body["machine"], "iphone");
+    }
+
+    #[tokio::test]
+    async fn here_is_null_for_an_address_no_machine_holds() {
+        let (status, body) = ask_here(
+            direct(tailnet(vec![])),
+            on_the_tailnet(&[address(2)]),
+            address(7),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["machine"].is_null(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn here_refuses_a_list_of_forwarded_addresses() {
+        let (status, _) = ask_here(
+            behind_the_proxy(tailnet(vec![])),
+            on_the_tailnet(&[address(2)]),
+            address(1),
+            &["100.64.0.2, 100.64.0.3"],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]

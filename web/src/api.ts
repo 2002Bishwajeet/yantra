@@ -397,6 +397,12 @@ export type SshIdentity = {
   fingerprint: string
 }
 
+/** `GET /api/here` (Y-589) — the tailnet machine this request came from; `null`
+ *  for an address no machine holds. A help, never a step. */
+export type Here = {
+  machine: string | null
+}
+
 /** `GET /api/notifications` — `Looked<Event[]>`, newest first, at most fifty,
  *  in memory ([ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)).
  *  A restart empties it, and the page says so rather than hides it (I-59).

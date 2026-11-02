@@ -32,6 +32,7 @@ import {
 } from '@/api/client'
 import { isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
+import type { Here } from '@/api'
 import type { About, Notification, SshIdentity } from '@/api/types/daemon'
 
 const workspace = (name: string, tail: string) =>
@@ -257,6 +258,16 @@ export const notificationsQuery = () =>
       fetchJson<Notification[]>('/api/notifications', { signal }, fields('looked')),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
+  })
+
+/** Y-589. Who is asking does not change while a page is open, so it is read
+ *  once. A failure draws nothing: the name helps and no step waits on it. */
+export const hereQuery = () =>
+  queryOptions({
+    queryKey: keys.here(),
+    queryFn: ({ signal }) => fetchJson<Here>('/api/here', { signal }, fields('machine')),
+    staleTime: Infinity,
+    retry: false,
   })
 
 /** Y-343. `uptime_seconds` moves, so it is not held forever. Y-367: polled

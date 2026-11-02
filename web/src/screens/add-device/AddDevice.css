@@ -83,6 +83,12 @@
   border-radius: var(--md-sys-shape-corner-extra-small);
 }
 
+[data-shell="phone"] .add-device__qr {
+  justify-self: center;
+  width: fit-content;
+  margin-inline: auto;
+}
+
 [data-shell="phone"] .add-device__join {
   grid-template-columns: minmax(0, 1fr);
 }
