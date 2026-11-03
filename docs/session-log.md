@@ -328,3 +328,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-590](../tracker.md#3-task-board) is in review.** At tablet width the rail now fills `100dvh` and stays fixed while only the content scrolls. Its controls stay reachable. A new e2e test proves the rail does not move, and the tablet baselines are updated.
 
 - **2026-11-03** — **[Y-568](../tracker.md#3-task-board) is in review.** A Claude turn now shows the plan badge. `claude.rs` reads the task tools that `claude -p` emits (TaskCreate and TaskUpdate) and turns their results into `turn.plan.updated`. A recorded 2.1.317 turn tests it.
+
+- **2026-11-03** — **[Y-494](../tracker.md#3-task-board) is in review.** The daemon now watches the PR of each thread. It polls GitHub with conditional reads and stops when the PR merges or closes. ntfy tells the owner when a check fails, when all checks pass, and when someone reviews.
