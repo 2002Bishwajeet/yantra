@@ -601,38 +601,29 @@ async fn folder_access<E: Exec>(exec: &E) -> Check {
 }
 
 fn folder_access_from(said: &str) -> Check {
-    let mut lines = said.lines().map(str::trim);
-    match lines.next() {
-        Some("other") => present(FOLDER_ACCESS, "only macOS blocks folders over ssh"),
-        Some("darwin") => {
-            let refused: Option<Vec<&str>> = lines
-                .filter(|line| !line.is_empty())
-                .map(|line| line.strip_prefix("refused "))
-                .collect();
-            match refused {
-                None => unknown(
-                    FOLDER_ACCESS,
-                    format!("the probe answered nothing Yantra reads: {said}"),
-                ),
-                Some(refused) if refused.is_empty() => present(
-                    FOLDER_ACCESS,
-                    "an ssh login can read Desktop, Documents and Downloads",
-                ),
-                Some(refused) => absent(
-                    FOLDER_ACCESS,
-                    format!(
-                        "macOS blocks an ssh login from {} — to allow it, open System Settings > \
-                         General > Sharing > Remote Login and turn on Allow full disk access for \
-                         remote users; every ssh login to this Mac, agents included, then gets \
-                         that access",
-                        refused.join(", ")
-                    ),
-                ),
-            }
-        }
-        _ => unknown(
+    let mut lines = said.lines().map(str::trim).filter(|line| !line.is_empty());
+    let refused: Option<Vec<&str>> = match lines.next() {
+        Some("other") => return present(FOLDER_ACCESS, "only macOS blocks folders over ssh"),
+        Some("darwin") => lines.map(|line| line.strip_prefix("refused ")).collect(),
+        _ => None,
+    };
+    match refused {
+        None => unknown(
             FOLDER_ACCESS,
             format!("the probe answered nothing Yantra reads: {said}"),
+        ),
+        Some(refused) if refused.is_empty() => present(
+            FOLDER_ACCESS,
+            "an ssh login can read Desktop, Documents and Downloads",
+        ),
+        Some(refused) => absent(
+            FOLDER_ACCESS,
+            format!(
+                "macOS blocks an ssh login from {} — to allow it, open System Settings > General > \
+                 Sharing > Remote Login and turn on Allow full disk access for remote users; every \
+                 ssh login to this Mac, agents included, then gets that access",
+                refused.join(", ")
+            ),
         ),
     }
 }
