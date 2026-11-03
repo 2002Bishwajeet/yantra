@@ -83,8 +83,8 @@ describe('the desktop shell', () => {
 
   it('counts unseen events and GitHub items on the bell', async () => {
     mount('desktop')
-    // Six events, none seen, plus one review and one issue.
-    expect(await screen.findByRole('button', { name: /Notifications\s*8 unread/ })).toBeTruthy()
+    // Nine events, none seen, plus one review and one issue.
+    expect(await screen.findByRole('button', { name: /Notifications\s*11 unread/ })).toBeTruthy()
   })
 
   it('offers Settings and About from the avatar', async () => {

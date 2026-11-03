@@ -27,7 +27,8 @@ pub struct Event {
     /// Unix seconds, when this daemon saw it.
     pub at: u64,
     /// A verdict as `/workspaces/{name}/status` spells it, `unreachable`,
-    /// `relay-test`, `installed` or `install_stopped`.
+    /// `relay-test`, `installed`, `install_stopped`, or a PR watch's
+    /// `check_failed`, `checks_passed` or `reviewed`.
     pub kind: &'static str,
     pub workspace: Option<String>,
     pub machine: Option<String>,
@@ -72,6 +73,22 @@ impl Event {
             workspace: Some(notification.workspace.clone()),
             machine,
             said: notification.to_string(),
+            commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
+        }
+    }
+
+    /// What the PR watch saw (Y-494). It names the workspace and no machine:
+    /// the appliance read it from GitHub.
+    pub fn pull(kind: &'static str, workspace: &str, said: String) -> Self {
+        Self {
+            at: now(),
+            kind,
+            workspace: Some(workspace.to_owned()),
+            machine: None,
+            said,
             commands: Vec::new(),
             user: None,
             kept: None,

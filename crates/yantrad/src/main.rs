@@ -39,6 +39,7 @@ mod refresh;
 mod room;
 mod tasks;
 mod terminal;
+mod watch;
 mod web;
 mod write;
 
@@ -204,7 +205,15 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             GITHUB_TOKEN
         ),
     }
-    refresh::spawn(&fleet, inventory.clone(), fleet.github.clone(), relay);
+    // Read again for the PR watch, because a `Relay` is not `Clone`.
+    let pulls_relay = yantra_core::notify::from_env();
+    refresh::spawn(
+        &fleet,
+        inventory.clone(),
+        fleet.github.clone(),
+        relay,
+        pulls_relay,
+    );
     let closing = fleet.closing.clone();
     tokio::spawn(async move {
         shutdown().await;

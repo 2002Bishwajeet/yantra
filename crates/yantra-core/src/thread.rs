@@ -354,6 +354,57 @@ async fn pr_of(github: Option<(&Github, &Token)>, url: &str, branch: &str) -> Pr
     }
 }
 
+/// An open PR from a thread's upstream, which the appliance watches (Y-494).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Watched {
+    pub workspace: String,
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+    pub url: String,
+}
+
+/// The open PR of each thread of workspace `name`. A thread with no upstream,
+/// or one off github.com, has none to watch.
+pub async fn open_pulls(
+    name: &str,
+    github: &Github,
+    token: &Token,
+) -> Result<Vec<Watched>, Failed> {
+    let workspace = workspace::load(name)?;
+    let ssh = reach(&workspace)?;
+    pulls_of(&ssh, &workspace, github, token).await
+}
+
+async fn pulls_of<E: Exec>(
+    exec: &E,
+    workspace: &Workspace,
+    github: &Github,
+    token: &Token,
+) -> Result<Vec<Watched>, Failed> {
+    let mut open = Vec::new();
+    for found in listed(exec, workspace).await? {
+        let Some((url, branch)) = &found.upstream else {
+            continue;
+        };
+        let Some((owner, repo)) = github::repo_of(url) else {
+            continue;
+        };
+        if let Some(pull) = github.pull_for_head(token, &owner, &repo, branch).await?
+            && pull.state == PullState::Open
+        {
+            open.push(Watched {
+                workspace: workspace.name.clone(),
+                owner,
+                repo,
+                number: pull.number,
+                url: pull.url,
+            });
+        }
+    }
+    Ok(open)
+}
+
 /// Opens a thread of workspace `name` from `issue`. The issue is read before
 /// any worktree is made, so an issue that cannot be read opens nothing.
 pub async fn start(
@@ -1144,6 +1195,74 @@ mod tests {
             seen[0].starts_with("GET /repos/o/r/pulls?head=o%3Ayantra%2F42-11111111"),
             "{}",
             seen[0]
+        );
+    }
+
+    /// Only the thread with an upstream is asked about, and only an open PR
+    /// is kept.
+    #[tokio::test]
+    async fn open_pulls_keep_each_threads_open_pr() {
+        use crate::github::tests::{at, listen, reply, serve, token};
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply(
+                    "200 OK",
+                    r#"[{"number":21,"html_url":"https://github.com/o/r/pull/21","state":"open","merged_at":null}]"#,
+                ),
+                reply(
+                    "200 OK",
+                    r#"[{"number":20,"html_url":"https://github.com/o/r/pull/20","state":"closed","merged_at":"2026-11-01T00:00:00Z"}]"#,
+                ),
+            ],
+        );
+        let machine = || {
+            Machine::answering(vec![
+                out(0, PORCELAIN, ""),
+                out(0, b"aaaa\nbbbb\n", ""),
+                out(0, CONFIG, ""),
+            ])
+        };
+        let github = at(address);
+
+        let open = pulls_of(&machine(), &workspace("a"), &github, &token()).await;
+        let merged = pulls_of(&machine(), &workspace("a"), &github, &token()).await;
+
+        assert_eq!(
+            open.expect("the pulls"),
+            [Watched {
+                workspace: "a".to_owned(),
+                owner: "o".to_owned(),
+                repo: "r".to_owned(),
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+            }]
+        );
+        assert_eq!(merged.expect("the pulls"), []);
+        let seen = served.join().expect("the listener thread");
+        assert_eq!(seen.len(), 2, "one read per look, for the one upstream");
+        assert!(
+            seen[0].starts_with("GET /repos/o/r/pulls?head=o%3Afix-7"),
+            "{}",
+            seen[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn open_pulls_name_a_github_that_failed() {
+        use crate::github::tests::{at, listen, reply, serve, token};
+        let (listener, address) = listen();
+        let _served = serve(listener, vec![reply("401 Unauthorized", "{}")]);
+        let machine = Machine::answering(vec![
+            out(0, PORCELAIN, ""),
+            out(0, b"aaaa\nbbbb\n", ""),
+            out(0, CONFIG, ""),
+        ]);
+        let failed = pulls_of(&machine, &workspace("a"), &at(address), &token()).await;
+        assert!(
+            matches!(failed, Err(Failed::Github(github::Error::Refused))),
+            "{failed:?}"
         );
     }
 }

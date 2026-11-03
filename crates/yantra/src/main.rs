@@ -4598,6 +4598,8 @@ mod tests {
     #[test]
     fn pr_open_prints_opened_or_already_open() {
         let mut opened = commit::Opened {
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
             number: 21,
             url: "https://github.com/o/r/pull/21".to_owned(),
             created: true,

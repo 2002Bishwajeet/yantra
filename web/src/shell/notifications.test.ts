@@ -178,6 +178,31 @@ describe('join and install rows (Y-399)', () => {
   })
 })
 
+describe('PR watch rows (Y-494)', () => {
+  const pr = (kind: Event['kind'], said: string): Event => ({ at: 300, kind, workspace: 'api', machine: null, said, commands: [] })
+
+  it('words each kind with its headline and mark, and keeps the sentence', () => {
+    const rows = merge(
+      [
+        pr('check_failed', 'api: PR #21 has a failed check'),
+        pr('checks_passed', 'api: PR #21 passed its checks'),
+        pr('reviewed', 'api: PR #21 has a new review'),
+      ],
+      null,
+    )
+    expect(rows.map(({ headline, supporting, mark, tile }) => ({ headline, supporting, mark, tile }))).toEqual([
+      { headline: 'api: Check failed', supporting: 'api: PR #21 has a failed check', mark: 'failed', tile: { kind: 'workspace', name: 'api' } },
+      { headline: 'api: Checks passed', supporting: 'api: PR #21 passed its checks', mark: 'done', tile: { kind: 'workspace', name: 'api' } },
+      { headline: 'api: PR reviewed', supporting: 'api: PR #21 has a new review', mark: 'needs', tile: { kind: 'workspace', name: 'api' } },
+    ])
+  })
+
+  it('offers no Answer, because nothing waits at a prompt', () => {
+    const [row] = merge([pr('reviewed', 'api: PR #21 has a new review')], null)
+    expect(row?.answer).toBeUndefined()
+  })
+})
+
 describe('unseen and grouped', () => {
   const entries = merge([relay, trust, gone], null)
 

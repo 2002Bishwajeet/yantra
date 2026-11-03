@@ -88,6 +88,8 @@ pub struct Fleet {
     pub chats: crate::chat::Registry,
     /// The rooms (ADR-0038), in memory only.
     pub rooms: crate::room::Rooms,
+    /// Each thread's open PR the appliance watches (Y-494), in memory only.
+    pub pulls: crate::watch::Pulls,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -131,6 +133,7 @@ impl Default for Fleet {
             closing: tokio::sync::watch::Sender::new(false),
             rooms: crate::room::Rooms::new(chats.clone(), None),
             chats,
+            pulls: crate::watch::Pulls::default(),
         }
     }
 }
