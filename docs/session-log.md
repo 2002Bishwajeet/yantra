@@ -338,3 +338,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-463](../tracker.md#3-task-board) is in review.** `yantra history extract` now reads a redacted staging or archive folder and writes candidate rows. It scans each row again with the Y-430 rules and drops a row with a finding. It fails closed when a finding cannot be located. Fixture tests cover each label source.
 
 - **2026-11-03** — **[Y-561](../tracker.md#3-task-board) is in review.** The daemon now holds a second turn sent while one runs. At the turn's end it sends the held turns as one prompt, and Cancel empties them. Every socket of the thread gets the queue. The composer shows Stop with a Queue button and lists what waits. A revert waits until no turn is running or queued. Rust and web tests cover each path.
+
+- **2026-11-03** — **[Y-577](../tracker.md#3-task-board) is in review.** Research note R23 compares the fleet dashboards that issue #518 names. It says how many products back each pattern and lists the changes for rows Y-580, Y-581, Y-582 and Y-587.
