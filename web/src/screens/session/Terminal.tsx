@@ -43,7 +43,9 @@ function attach(
   leave: () => void,
   ending: Ending,
 ): Wired {
-  const xterm = new Xterm({ cursorBlink: false, fontSize: SIZE, fontFamily: FAMILY })
+  // WCAG 1.4.3: xterm's ANSI blue is 3.5:1 on its black, and every shell prompt
+  // paints a path in it. xterm lifts each colour that falls short of 4.5:1.
+  const xterm = new Xterm({ cursorBlink: false, fontSize: SIZE, fontFamily: FAMILY, minimumContrastRatio: 4.5 })
   const fit = new FitAddon()
   xterm.loadAddon(fit)
   xterm.open(host)
