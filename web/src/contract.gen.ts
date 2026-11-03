@@ -19,6 +19,7 @@ import type {
   Connection,
   Device,
   Event,
+  Here,
   Joined,
   Listed,
   Listing,
@@ -545,6 +546,10 @@ export const sshIdentity = {
   "path": "/home/<user>/.ssh/id_yantra",
   "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra"
 } satisfies SshIdentity
+
+export const here = {
+  "machine": "iphone"
+} satisfies Here
 
 export const device = {
   "expires_in": 900,

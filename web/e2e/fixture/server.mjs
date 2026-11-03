@@ -77,6 +77,8 @@ function defaults() {
     repos: contract.repos,
     notifications: contract.notifications,
     about: contract.about,
+    // Y-589: the device in use; null names none, so no note shifts a baseline.
+    here: { machine: null },
     // Y-350: what /api/github holds, and the daemon's key. `null` is a key
     // `yantra ssh-identity` has not made, a 404.
     connection: contract.github,
@@ -324,6 +326,7 @@ const routes = [
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
   ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
   ['GET', /^\/api\/about$/, (s) => [200, s.about]],
+  ['GET', /^\/api\/here$/, (s) => [200, s.here]],
   [
     'GET',
     /^\/api\/ssh-identity$/,

@@ -27,6 +27,7 @@ export const keys = {
   repos: () => ['repos'] as const,
   notifications: () => ['notifications'] as const,
   about: () => ['about'] as const,
+  here: () => ['here'] as const,
   sshIdentity: () => ['ssh-identity'] as const,
   /** One workspace and everything under it, for a delete to drop. */
   workspace: (name: string) => ['workspaces', name] as const,

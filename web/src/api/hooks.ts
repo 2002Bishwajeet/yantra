@@ -24,6 +24,7 @@ import {
   aboutQuery,
   attentionQuery,
   githubQuery,
+  hereQuery,
   machineReadinessQuery,
   machinesQuery,
   MISSING,
@@ -372,4 +373,5 @@ export const useGithub = () => useQuery(githubQuery())
 export const useRepos = () => useReading(reposQuery())
 export const useNotifications = () => useQuery(notificationsQuery())
 export const useAbout = () => useQuery(aboutQuery())
+export const useThisDevice = () => useQuery(hereQuery()).data?.machine ?? null
 export const useSshIdentity = () => useQuery(sshIdentityQuery())

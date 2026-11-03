@@ -322,3 +322,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-573](../tracker.md#3-task-board) is in review.** `index.html` now sets `viewport-fit=cover` and one `theme-color` per scheme. The phone bars, dialogs and sheets pad the safe-area insets. A solid strip sits under the status bar. Unit and Playwright tests assert each. The owner still checks a real iPhone.
 
 - **2026-11-03** — **[Y-579](../tracker.md#3-task-board) is in review.** The daemon now keeps the latest check for every enrolled machine. A poll no longer replaces a result with `never`, and a result survives a reload with no workspace. The sweep checks only the machines the dashboard counts. Tests hold the result over poll cycles.
+
+- **2026-11-03** — **[Y-589](../tracker.md#3-task-board) is in review.** On a phone, Add a device now leads with Copy and Share. The QR code sits behind an action there and stays on wider screens. The page names the device in use through the new `GET /api/here` route. Tests cover both widths.
