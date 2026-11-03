@@ -171,6 +171,7 @@ const keyed = (state: Scenario): Scenario => Object.assign(state, { 'ssh-identit
  *  sign-in, which does not hold ready back. */
 const ready = (machine: string): Readiness => ({
   machine,
+  age_seconds: 0,
   checks: [
     ...['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'].map((check) => ({
       check,

@@ -8,7 +8,7 @@ const machine = (over: Partial<Machine> = {}) =>
 
 const check = (name: string, state: Check['state'], detail = ''): Check => ({ check: name, state, detail })
 
-const report = (checks: Check[]): Reading<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks } })
+const report = (checks: Check[]): Reading<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks, age_seconds: 0 } })
 
 const all = (over: Record<string, Check['state']> = {}, detail: Record<string, string> = {}) =>
   report(

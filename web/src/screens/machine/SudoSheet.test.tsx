@@ -40,7 +40,7 @@ vi.mock('@/screens/session/Terminal', () => ({
 const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'heartbeat']
 const checks = (absent: string[]): Check[] =>
   IDS.map((id) => ({ check: id, state: absent.includes(id) ? 'absent' : 'present', detail: 'x' }))
-const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list } })
+const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list, age_seconds: 0 } })
 const ring = (events: Event[]): Looked<Event[]> => ({ looked: 'ok', age_seconds: 0, data: events })
 const machine = { name: 'pi', dns_name: 'pi.ts.net.', os: 'linux', online: true, expired: false, last_seen: null, heartbeat: null } as unknown as Machine
 

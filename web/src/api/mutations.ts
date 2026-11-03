@@ -164,7 +164,9 @@ export function useSetRelay() {
 }
 
 /** `POST …/readiness` re-asks the machine now and answers the `GET`'s own
- *  envelope at `age_seconds: 0`, so the answer goes straight into that key.
+ *  envelope at `age_seconds: 0`, so the answer goes straight into that key and
+ *  into the list the Machines page reads. A poll already in flight is cancelled
+ *  first, because it may have left the daemon before the check was kept.
  *  A full ssh round trip: a button, never a timer (ADR-0019). */
 export function useRecheckReadiness() {
   const client = useQueryClient()
@@ -174,8 +176,24 @@ export function useRecheckReadiness() {
         `/api/machines/${encodeURIComponent(machine)}/readiness`,
         { method: 'POST' },
       ),
-    onSuccess: (answer, machine) =>
-      client.setQueryData(keys.readiness(machine), answer),
+    onSuccess: async (answer, machine) => {
+      await client.cancelQueries({ queryKey: keys.readiness() })
+      client.setQueryData(keys.readiness(machine), answer)
+
+      const list = keys.readiness()
+      const held = client.getQueryData<Looked<Readiness[]>>(list)
+      if (answer.looked !== 'ok' || held?.looked !== 'ok') {
+        await client.invalidateQueries({ queryKey: list, exact: true })
+        return
+      }
+      const others = held.data.filter((report) => report.machine !== machine)
+      const next: Looked<Readiness[]> = {
+        looked: 'ok',
+        age_seconds: answer.age_seconds,
+        data: [...others, answer.data],
+      }
+      client.setQueryData(list, next)
+    },
   })
 }
 

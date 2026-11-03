@@ -4,6 +4,7 @@ import { blocking, isReady, missingBasics, READY } from './ready'
 
 const report = (states: Record<string, string>): Readiness => ({
   machine: 'pi-5',
+  age_seconds: 0,
   checks: Object.entries(states).map(([check, state]) => ({ check, state, detail: '' })) as Readiness['checks'],
 })
 const seven = (): Record<string, string> => Object.fromEntries(READY.map((one) => [one, 'present']))

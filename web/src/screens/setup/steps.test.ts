@@ -14,7 +14,7 @@ const machine = (over: Partial<Machine> = {}): Machine => ({
   ...over,
 })
 
-const report = (checks: Readiness['checks']): Readiness => ({ machine: 'pi-5', checks })
+const report = (checks: Readiness['checks']): Readiness => ({ machine: 'pi-5', checks, age_seconds: 0 })
 const check = (name: string, state: string, detail = '') =>
   ({ check: name, state, detail }) as Readiness['checks'][number]
 

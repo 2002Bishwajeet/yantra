@@ -38,9 +38,10 @@ use yantra_core::{
 };
 use yantra_core::{identity, join, update};
 
-use crate::api::Answer;
+use crate::api::{Answer, Checked};
 use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
+use crate::refresh::Model;
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -884,18 +885,25 @@ async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
-) -> Result<Json<Answer<doctor::Report>>, Refused> {
+) -> Result<Json<Answer<Checked>>, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("doctor {name} for {}", caller.node);
 
     let report = doctor::machine(&name, term()).await;
-    let snapshot = state.fleet.model.read().await.clone();
+    let snapshot = {
+        let mut model = state.fleet.model.write().await;
+        model.keep(report.clone());
+        model.clone()
+    };
     let beats = state.fleet.beats.read().await;
     Ok(Json(Answer::Ok {
         // Asked on this request, so there is no staleness to report — and the
         // envelope is the sweep's so the browser needs no second type.
         age_seconds: 0,
-        data: crate::api::answered(&report, &snapshot, &beats),
+        data: Checked {
+            report: crate::api::answered(&report, &snapshot, &beats),
+            age_seconds: 0,
+        },
     }))
 }
 
@@ -1313,7 +1321,11 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
     .await;
     // The re-check runs after the answer: the script is still on the person's
     // screen, and ssh back into that machine can take `ConnectTimeout`.
-    tokio::spawn(check_joined(state.fleet.events.clone(), machine));
+    tokio::spawn(check_joined(
+        state.fleet.model.clone(),
+        state.fleet.events.clone(),
+        machine,
+    ));
 
     Ok(Json(Joined {
         machine: joined.machine,
@@ -1326,7 +1338,7 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
 /// event: an unknown one decided nothing (R-23), and a reached one is what the
 /// `joined` event already implied.
-async fn check_joined(events: events::Events, machine: String) {
+async fn check_joined(model: Model, events: events::Events, machine: String) {
     let report = doctor::machine(&machine, term()).await;
     if let Some(check) = report
         .checks
@@ -1335,6 +1347,7 @@ async fn check_joined(events: events::Events, machine: String) {
     {
         events::remember(&events, Event::not_reached(&machine, &check.detail)).await;
     }
+    model.write().await.keep(report);
 }
 
 /// No wildcard, per Y-135. A tailnet name that cannot be one `Host` pattern is
@@ -4149,6 +4162,86 @@ mod tests {
             StatusCode::OK,
             "the sweep's own answer still reaches the same path"
         );
+    }
+
+    async fn reads_kept(fleet: &Fleet, name: &str) {
+        use crate::api::tests::get_json;
+
+        let one = get_json(fleet.clone(), &format!("/machines/{name}/readiness")).await;
+        assert_eq!(one["looked"], "ok", "{one}");
+        assert_eq!(one["data"]["machine"], name, "{one}");
+
+        let list = get_json(fleet.clone(), "/readiness").await;
+        assert_eq!(list["looked"], "ok", "{list}");
+        let entries = list["data"].as_array().expect("a list");
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry["machine"] == name)
+                .count(),
+            1,
+            "{list}"
+        );
+    }
+
+    /// Y-579, #514: the `POST` keeps what it asked, so both reads serve it, and
+    /// later sweeps and a reload do not take it away. `nowhere.invalid` does not
+    /// resolve, so ssh fails fast and the report is honest unknowns.
+    #[tokio::test]
+    async fn an_asked_check_is_kept_for_both_reads() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app: Router<()> = router(
+            direct(tailnet(vec![(address(2), caller(ME, &[]))])),
+            fleet.clone(),
+        );
+
+        let mut asked = Request::post("/machines/nowhere.invalid/readiness")
+            .body(Body::empty())
+            .expect("a POST");
+        asked
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+        let answered = app.oneshot(asked).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::OK);
+
+        reads_kept(&fleet, "nowhere.invalid").await;
+        for sweep in [
+            yantra_core::snapshot::Reading::new(Ok(Vec::new())),
+            crate::api::tests::sweep_that_failed(),
+        ] {
+            crate::refresh::settle(&mut *fleet.model.write().await, sweep);
+            for _ in 0..2 {
+                reads_kept(&fleet, "nowhere.invalid").await;
+            }
+        }
+    }
+
+    /// Y-579, #514: the check a join runs is kept like an asked one.
+    #[tokio::test]
+    async fn a_joined_machine_check_is_kept() {
+        let fleet = Fleet::default();
+        check_joined(
+            fleet.model.clone(),
+            fleet.events.clone(),
+            "nowhere.invalid".into(),
+        )
+        .await;
+        assert!(
+            fleet
+                .model
+                .read()
+                .await
+                .checks
+                .contains_key("nowhere.invalid"),
+            "the join's report is kept"
+        );
+
+        let one = crate::api::tests::get_json(fleet, "/machines/nowhere.invalid/readiness").await;
+        assert_eq!(one["looked"], "ok", "{one}");
     }
 
     /// An authorised caller and a body the verb refuses: every refusal here is

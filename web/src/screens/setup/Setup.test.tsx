@@ -28,6 +28,7 @@ const linux2 = aMachine({ name: 'ubuntu', os: 'linux', online: true })
 
 const checks = (states: Record<string, 'present' | 'absent'>, detail = '', machine = up.name): Readiness => ({
   machine,
+  age_seconds: 0,
   checks: Object.entries(states).map(([check, state]) => ({ check, state, detail })),
 })
 /** The seven checks a session needs (`lib/ready`). */
