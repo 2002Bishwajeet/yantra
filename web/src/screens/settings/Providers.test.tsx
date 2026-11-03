@@ -36,6 +36,20 @@ describe('Providers', () => {
     expect(screen.queryByText(/for a future agent/)).toBeNull()
   })
 
+  /** Y-583: the GitHub row leads with the profile image once connected. */
+  it('leads the GitHub row with the profile image, and the icon when not connected', async () => {
+    mountSettings('desktop', '/settings/providers')
+    const row = (await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).closest('li')
+    expect(row?.querySelector('img')?.getAttribute('src')).toBe(contract.github.avatar_url)
+    cleanup()
+    unmountSettings()
+
+    mountSettings('desktop', '/settings/providers', { 'GET /api/github': [200, contract.disconnected] })
+    const bare = (await screen.findByText('Not connected')).closest('li')
+    expect(bare?.querySelector('img')).toBeNull()
+    expect(bare?.querySelector('svg')).toBeTruthy()
+  })
+
   it('draws the boundary when the daemon answers something else', async () => {
     mountSettings('desktop', '/settings/providers', { 'GET /api/github': [500, 'boom'] })
     expect(await screen.findByText('Providers could not be drawn')).toBeTruthy()

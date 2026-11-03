@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import type { Scenario } from './lib/scenario'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
@@ -388,5 +389,33 @@ test.describe('the shell on busy', () => {
     await about.hover()
     await expect.poll(() => layer(about)).toBeGreaterThan(0)
     await expect(about).toHaveCSS('cursor', 'pointer')
+  })
+})
+
+/** Y-583: the GitHub profile image fills the account button at every width,
+ *  and an image that does not load leaves the icon in the same box. */
+test.describe('the account button', () => {
+  const account = (page: Page) => page.getByRole('button', { name: 'Account' })
+  const open = async (page: Page, name: Scenario) => {
+    await scenario(page, name)
+    await page.goto('/')
+    await expect(account(page)).toBeVisible()
+  }
+
+  test('draws the profile image', async ({ page }) => {
+    await open(page, 'avatar')
+    const image = account(page).locator('img')
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  })
+
+  test('falls back to the icon in the same box when the image does not load', async ({ page }) => {
+    await open(page, 'contract')
+    const icon = await account(page).boundingBox()
+
+    await open(page, 'avatarbroken')
+    await expect(account(page).locator('svg')).toBeVisible()
+    await expect(account(page).locator('img')).toHaveCount(0)
+    expect(await account(page).boundingBox()).toEqual(icon)
   })
 })

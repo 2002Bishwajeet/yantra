@@ -5,6 +5,7 @@ import { useGithub, useReadiness } from '@/api/hooks'
 import { useClearGithubClientId, useGithubLogout, useSetGithubClientId } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
+import { Avatar } from '@/shell/Avatar'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
@@ -33,8 +34,10 @@ export function Providers() {
         <ListItem
           headline="GitHub"
           leading={
-            <Lead>
-              <GitBranch />
+            <Lead className="avatar-host">
+              <Avatar connection={connection}>
+                <GitBranch />
+              </Avatar>
             </Lead>
           }
           supporting={

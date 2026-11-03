@@ -238,7 +238,7 @@ export const githubQuery = () =>
       fetchJson<Connection>(
         '/api/github',
         { signal },
-        fields('connected', 'login', 'scopes', 'client_id', 'client_id_custom'),
+        fields('connected', 'login', 'avatar_url', 'scopes', 'client_id', 'client_id_custom'),
       ),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,

@@ -1,0 +1,11 @@
+{
+  "connection": {
+    "connected": true,
+    "login": "2002Bishwajeet",
+    "avatar_url": "data:image/png;base64,bm90IGFuIGltYWdl",
+    "scopes": ["repo", "read:org", "notifications"],
+    "pending": false,
+    "client_id": null,
+    "client_id_custom": false
+  }
+}

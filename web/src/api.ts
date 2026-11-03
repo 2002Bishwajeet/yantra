@@ -535,8 +535,9 @@ export type ThreadPrOpened = {
 // edits above it is trivial.
 
 /** `GET /api/github` — what the daemon holds, read from memory (ADR-0023 §3).
- *  Never the token: `login` is the one thing about the account that is
- *  shown, and it is `null` until the grant's first `GET /user` has answered.
+ *  Never the token: `login` and `avatar_url` are what is shown of the
+ *  account, and both are `null` until the grant's first `GET /user` has
+ *  answered.
  *  `scopes` is empty for a grant read from the environment. `pending` is a
  *  device flow waiting for its code to be typed at github.com.
  *
@@ -548,6 +549,8 @@ export type ThreadPrOpened = {
 export type Connection = {
   connected: boolean
   login: string | null
+  /** GitHub's public profile image URL; `null` draws the icon. */
+  avatar_url: string | null
   scopes: string[]
   pending: boolean
   client_id: string | null
