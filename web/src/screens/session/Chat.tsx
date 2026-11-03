@@ -5,7 +5,15 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { Workspace } from '@/api'
 import { IMAGE_TYPES, type ChatError } from '@/api/chat'
-import { LABEL, type Harness, type ItemType, type PermissionMode, type RequestOpened } from '@/api/thread'
+import {
+  LABEL,
+  type ClaudeModel,
+  type Effort,
+  type Harness,
+  type ItemType,
+  type PermissionMode,
+  type RequestOpened,
+} from '@/api/thread'
 import { Attachments } from '@/composer/Attachments'
 import * as Composer from '@/composer/Composer'
 import { Icon as ControlIcon, Control, Separator } from '@/composer/Control'
@@ -30,8 +38,10 @@ import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
 import { useEditors } from './diff/useEditors'
 import { HarnessPicker } from './HarnessPicker'
-import { keepMode, recallMode } from './mode'
+import { EffortPicker } from './EffortPicker'
+import { keepEffort, keepMode, keepModel, recallEffort, recallMode, recallModel } from './mode'
 import { ModePicker } from './ModePicker'
+import { ModelPicker } from './ModelPicker'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
@@ -228,10 +238,15 @@ export function Chat(props: ChatProps) {
   )
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
-  // A new thread is named on its first turn, and keeps the mode it was sent with.
+  const [model, setModel] = useState<ClaudeModel | null>(() => recallModel(thread))
+  const [effort, setEffort] = useState<Effort | null>(() => recallEffort(thread))
+  // A new thread is named on its first turn, and keeps the mode, model and effort it was sent with.
   useEffect(() => {
-    if (timeline.thread) keepMode(timeline.thread, mode)
-  }, [timeline.thread, mode])
+    if (!timeline.thread) return
+    keepMode(timeline.thread, mode)
+    keepModel(timeline.thread, model)
+    keepEffort(timeline.thread, effort)
+  }, [timeline.thread, mode, model, effort])
   // An attach knows its thread before the daemon says whose it is, so until
   // then it names no harness rather than the picker's default.
   const locked = timeline.thread !== null
@@ -293,7 +308,8 @@ export function Chat(props: ChatProps) {
 
   const send = () => {
     if (text === '' || uploading) return
-    if (chat.send(text, locked ? undefined : picked, mode)) {
+    const claude = harness === 'claude'
+    if (chat.send(text, locked ? undefined : picked, mode, claude ? model : null, claude ? effort : null)) {
       lastSent.current = draft.trim()
       recalled.current = null
       setDraft('')
@@ -559,6 +575,12 @@ export function Chat(props: ChatProps) {
                   />
                 ) : null}
                 <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
+                {harness === 'claude' ? (
+                  <>
+                    <ModelPicker disabled={link !== 'open'} onChange={setModel} value={model} />
+                    <EffortPicker disabled={link !== 'open'} onChange={setEffort} value={effort} />
+                  </>
+                ) : null}
               </>
             }
           />

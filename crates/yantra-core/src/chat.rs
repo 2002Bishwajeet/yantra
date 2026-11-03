@@ -286,6 +286,63 @@ impl PermissionMode {
     }
 }
 
+/// How hard Claude thinks on a turn: `claude --effort` (Y-564).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl Effort {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
+/// The model a Claude turn names: an alias such as `opus`, or a full id
+/// (Y-564). Only characters a shell does nothing with, so a frame cannot
+/// smuggle a flag or a command into `claude --model`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Model(String);
+
+impl Model {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Model {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<Self, String> {
+        let allowed = |c: char| c.is_ascii_alphanumeric() || "._[]-".contains(c);
+        if name.is_empty() || name.len() > 64 || name.starts_with('-') || !name.chars().all(allowed)
+        {
+            return Err(format!("{name:?} is not a model name"));
+        }
+        Ok(Self(name))
+    }
+}
+
+impl From<Model> for String {
+    fn from(model: Model) -> Self {
+        model.0
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -440,6 +497,55 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(mode).expect("a mode serialises"),
                 json!(name)
+            );
+        }
+    }
+
+    #[test]
+    fn effort_is_lower_case_on_the_wire() {
+        for (effort, name) in [
+            (Effort::Low, "low"),
+            (Effort::Medium, "medium"),
+            (Effort::High, "high"),
+            (Effort::Xhigh, "xhigh"),
+            (Effort::Max, "max"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(effort).expect("an effort serialises"),
+                json!(name)
+            );
+            assert_eq!(effort.name(), name);
+        }
+        assert!(serde_json::from_value::<Effort>(json!("ultra")).is_err());
+    }
+
+    #[test]
+    fn a_model_is_an_alias_or_an_id_and_nothing_a_shell_acts_on() {
+        for name in [
+            "opus",
+            "claude-opus-5-5",
+            "claude-fable-5-1[1m]",
+            "us.anthropic.claude-v2",
+        ] {
+            let model: Model = serde_json::from_value(json!(name)).expect("a model parses");
+            assert_eq!(model.as_str(), name);
+            assert_eq!(
+                serde_json::to_value(&model).expect("a model serialises"),
+                json!(name)
+            );
+        }
+        for hostile in [
+            "",
+            "opus; touch /tmp/pwned",
+            "o'pus",
+            "$(id)",
+            "a b",
+            "--dangerously-skip-permissions",
+            &"x".repeat(65),
+        ] {
+            assert!(
+                serde_json::from_value::<Model>(json!(hostile)).is_err(),
+                "{hostile}"
             );
         }
     }

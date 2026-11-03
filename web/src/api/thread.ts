@@ -50,6 +50,29 @@ export const MODES: readonly { mode: PermissionMode; label: string; description:
   { mode: 'full-access', label: 'Full access', description: 'Allows commands and edits without approval prompts.' },
 ]
 
+/** Claude's `--model` aliases (Y-564). `null` sends no flag, so Claude picks. */
+export type ClaudeModel = 'fable' | 'opus' | 'sonnet' | 'haiku'
+
+export const MODELS: readonly { model: ClaudeModel | null; label: string }[] = [
+  { model: null, label: 'Default' },
+  { model: 'fable', label: 'Fable' },
+  { model: 'opus', label: 'Opus' },
+  { model: 'sonnet', label: 'Sonnet' },
+  { model: 'haiku', label: 'Haiku' },
+]
+
+/** Claude's `--effort`; `null` sends no flag. The labels are T3 Code's. */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export const EFFORTS: readonly { effort: Effort | null; label: string }[] = [
+  { effort: null, label: 'Default' },
+  { effort: 'low', label: 'Low' },
+  { effort: 'medium', label: 'Medium' },
+  { effort: 'high', label: 'High' },
+  { effort: 'xhigh', label: 'Extra High' },
+  { effort: 'max', label: 'Max' },
+]
+
 export type StreamKind = 'assistant_text' | 'reasoning_text' | 'user_text'
 
 export type ItemType = 'command_execution' | 'file_change' | 'web_search' | 'dynamic_tool_call'
@@ -136,8 +159,9 @@ export type ChatQuery = { thread?: string; after?: string }
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =
   /** `harness` is read only on the turn that opens a thread. `mode` holds for
-   *  this turn; an absent one is supervised. */
-  | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode }
+   *  this turn; an absent one is supervised. A Claude turn reads `model` and
+   *  `effort`; an ACP one ignores them. */
+  | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode; model?: string; effort?: Effort }
   | { type: 'answer'; requestId: string; decision: Decision }
   | { type: 'cancel' }
   /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */
