@@ -346,3 +346,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-591](../tracker.md#3-task-board) is in review.** When a Mac blocks a folder with a privacy rule, the directory picker now says why, how to fix it and what the fix costs. The machine check warns of the block, and tests cover the daemon parser and the web screens.
 
 - **2026-11-03** — **[Y-583](../tracker.md#3-task-board) is in review.** `GET /api/github` now carries the profile image URL. The account button shows the image and falls back to the person icon. Tests cover both states.
+
+- **2026-11-03** — **[Y-471](../tracker.md#3-task-board) is in review.** The opencode ACP test now points opencode at a local model stub that streams slowly. The cancel half runs on every CI run, and the skip from Y-470 is gone.
