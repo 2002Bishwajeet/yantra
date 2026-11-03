@@ -237,8 +237,9 @@ appliance-embedded target=appliance_target: web-build
 
 # The feature's tests. `just test` cannot run them by accident — the module they
 # live in does not exist without the feature.
+# Only the binary's tests: no integration test touches the feature, and `test` runs them all (Y-605).
 test-embedded: web-build
-    cargo nextest run -p yantrad --features embed-dashboard
+    cargo nextest run -p yantrad --features embed-dashboard --bins
 
 # The landing site. Deliberately absent from `ci` and `check` — R-24's retire
 # condition is that the Rust gate stays green on a machine with no Node
