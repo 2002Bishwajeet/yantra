@@ -288,13 +288,16 @@ fn chats(daemon: Option<SocketAddr>) -> chat::Registry {
 
 /// The rooms, whose pauses go to the relay when there is one.
 fn rooms(chats: chat::Registry) -> room::Rooms {
+    let dir = yantra_core::room_file::rooms_dir()
+        .inspect_err(|error| tracing::warn!("no room can be defined: {error}"))
+        .ok();
     match yantra_core::notify::from_env() {
         Some(relay) => {
             let (pauses, heard) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(room::tell(relay, heard));
-            room::Rooms::new(chats, Some(pauses))
+            room::Rooms::new(chats, Some(pauses), dir)
         }
-        None => room::Rooms::new(chats, None),
+        None => room::Rooms::new(chats, None, dir),
     }
 }
 

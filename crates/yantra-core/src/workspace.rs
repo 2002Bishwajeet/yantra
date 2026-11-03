@@ -553,6 +553,15 @@ fn read_file(dir: &Path, name: &str) -> Result<(PathBuf, String), Error> {
     }
 }
 
+/// The characters a workspace name may hold, which a room's home is checked against.
+#[must_use]
+pub fn usable_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Names arrive from the command line and become both a filename and a tmux
 /// session name, so this is the intersection of I-24 (nothing that can escape a
 /// directory) and I-2 (nothing tmux cannot address). One rule, checked once, so
@@ -562,13 +571,8 @@ fn read_file(dir: &Path, name: &str) -> Result<(PathBuf, String), Error> {
 /// a stem it read off disk, and naming only the stem would leave the operator
 /// hunting for the file (R-23).
 fn validate_name(dir: &Path, name: &str) -> Result<(), Error> {
-    let usable = !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-
     let path = || dir.join(format!("{name}.toml"));
-    if !usable {
+    if !usable_name(name) {
         return Err(Error::InvalidName {
             name: name.to_owned(),
             path: path(),

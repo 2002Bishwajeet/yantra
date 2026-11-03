@@ -375,6 +375,57 @@ enum PrAction {
 
 #[derive(Debug, Subcommand)]
 enum RoomAction {
+    /// Define a room in a workspace. Its definition outlives a restart of
+    /// yantrad; its messages do not
+    New {
+        /// The room's name: 1 to 32 of a-z, 0-9 and -
+        room: String,
+        /// The workspace the room belongs to
+        #[arg(long)]
+        workspace: String,
+        /// What the room is for, at most 500 characters
+        #[arg(long)]
+        brief: Option<String>,
+        /// The branch handoffs start from; the workspace's current branch when absent
+        #[arg(long)]
+        base: Option<String>,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// List the rooms yantrad holds
+    Ls {
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// Show a room and the messages it keeps
+    Show {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// Set a defined room's brief. An empty brief clears it
+    Edit {
+        /// The room's name
+        room: String,
+        /// What the room is for, at most 500 characters
+        #[arg(long)]
+        brief: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// End a room and delete its definition. A room already gone exits 0
+    Rm {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
     /// Set a room's turn budget back to 0, so its agents may send again
     Resume {
         /// The room's name
@@ -596,6 +647,91 @@ async fn main() -> ExitCode {
         Some(Command::Room {
             action: RoomAction::Post { room, text, daemon },
         }) => room_post(room, text, daemon).await,
+        Some(Command::Room {
+            action:
+                RoomAction::New {
+                    room,
+                    workspace,
+                    brief,
+                    base,
+                    daemon,
+                },
+        }) => {
+            let said = format!("room {room} made in workspace {workspace}");
+            let name = room.clone();
+            room_verb(
+                "new",
+                Some(&name),
+                move || {
+                    mcp::create(
+                        &daemon,
+                        &room,
+                        &workspace,
+                        brief.as_deref(),
+                        base.as_deref(),
+                    )
+                },
+                |_| println!("{said}"),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Ls { daemon },
+        }) => {
+            room_verb(
+                "ls",
+                None,
+                move || mcp::list(&daemon),
+                |rooms| {
+                    print!("{}", room_table(rooms));
+                },
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Show { room, daemon },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "show",
+                Some(&name),
+                move || mcp::show(&daemon, &room),
+                |view| print!("{}", room_view(view)),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action:
+                RoomAction::Edit {
+                    room,
+                    brief,
+                    daemon,
+                },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "edit",
+                Some(&name),
+                move || mcp::edit(&daemon, &room, &brief),
+                |_| println!("room {name}: brief saved"),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Rm { room, daemon },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "rm",
+                Some(&name),
+                move || mcp::remove(&daemon, &room),
+                |answer| match answer["removed"].as_bool() {
+                    Some(false) => println!("room {name} was already gone"),
+                    _ => println!("room {name} removed"),
+                },
+            )
+            .await
+        }
         Some(Command::Why {
             workspace,
             repo,
@@ -681,6 +817,108 @@ async fn room_post(name: String, text: String, daemon: String) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `room new`, `ls`, `show`, `edit` and `rm`: refuses a bad name before the
+/// daemon is asked, as `room resume` does, and hands the answer to `done`.
+async fn room_verb(
+    verb: &str,
+    name: Option<&str>,
+    call: impl FnOnce() -> Result<String, String> + Send + 'static,
+    done: impl FnOnce(&serde_json::Value),
+) -> ExitCode {
+    if let Some(name) = name
+        && !yantra_core::room::valid_name(name)
+    {
+        eprintln!(
+            "yantra: {}",
+            yantra_core::room::Error::BadName(name.to_owned())
+        );
+        return ExitCode::FAILURE;
+    }
+    match tokio::task::spawn_blocking(call).await {
+        Ok(Ok(said)) => {
+            done(&serde_json::from_str(&said).unwrap_or_default());
+            ExitCode::SUCCESS
+        }
+        Ok(Err(said)) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra room {verb}: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// One line per room. A room with no workspace is one an agent made.
+fn room_table(rooms: &serde_json::Value) -> String {
+    let rooms = rooms.as_array().map(Vec::as_slice).unwrap_or_default();
+    if rooms.is_empty() {
+        return "no rooms\n".to_owned();
+    }
+    rooms
+        .iter()
+        .map(|room| {
+            format!(
+                "{:<32}  {:<20}  {} members  {} messages  {}/{}{}\n",
+                room["name"].as_str().unwrap_or_default(),
+                room["workspace"].as_str().unwrap_or("(made by an agent)"),
+                room["members"],
+                room["messages"],
+                room["spent"],
+                room["budget"],
+                if room["paused"] == true {
+                    "  paused"
+                } else {
+                    ""
+                },
+            )
+        })
+        .collect()
+}
+
+/// The summary, then each message as `seq from: text`.
+fn room_view(room: &serde_json::Value) -> String {
+    let field = |key: &str| room[key].as_str().map(terminal_safe);
+    let mut out = format!(
+        "room {}\nworkspace {}\n",
+        field("name").unwrap_or_default(),
+        field("workspace").unwrap_or_else(|| "(made by an agent)".to_owned()),
+    );
+    if let Some(base) = field("base") {
+        out.push_str(&format!("base {base}\n"));
+    }
+    if let Some(brief) = field("brief") {
+        out.push_str(&format!("brief {brief}\n"));
+    }
+    for message in room["log"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        out.push_str(&format!(
+            "{:>4} {}: {}\n",
+            message["seq"].as_u64().unwrap_or_default(),
+            terminal_safe(message["from"].as_str().unwrap_or_default()),
+            terminal_safe(message["text"].as_str().unwrap_or_default()),
+        ));
+    }
+    out
+}
+
+/// A message is another agent's text, so no escape sequence reaches the terminal.
+fn terminal_safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() && c != '\n' {
+                '\u{fffd}'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 async fn why(name: Option<String>, wanted: Option<placement::Wanted>, daemon: String) -> ExitCode {
@@ -2881,6 +3119,92 @@ mod tests {
         )
         .await;
         assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn the_room_definition_verbs_parse() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(["yantra", "room"].iter().chain(args).copied())
+                .map(|cli| cli.command)
+        };
+        assert!(matches!(
+            parse(&["new", "r2", "--workspace", "web", "--brief", "b", "--base", "main", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::New { room, workspace, brief, base, daemon } }))
+                if room == "r2" && workspace == "web" && brief.as_deref() == Some("b")
+                    && base.as_deref() == Some("main") && daemon == "d"
+        ));
+        assert!(matches!(
+            parse(&["new", "r2", "--workspace", "web", "--daemon", "d"]),
+            Ok(Some(Command::Room {
+                action: RoomAction::New {
+                    brief: None,
+                    base: None,
+                    ..
+                }
+            }))
+        ));
+        assert!(
+            parse(&["new", "r2", "--daemon", "d"]).is_err(),
+            "a room needs a workspace"
+        );
+        assert!(matches!(
+            parse(&["ls", "--daemon", "d"]),
+            Ok(Some(Command::Room {
+                action: RoomAction::Ls { .. }
+            }))
+        ));
+        assert!(matches!(
+            parse(&["show", "r2", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Show { room, .. } })) if room == "r2"
+        ));
+        assert!(matches!(
+            parse(&["edit", "r2", "--brief", "", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Edit { brief, .. } })) if brief.is_empty()
+        ));
+        assert!(
+            parse(&["edit", "r2", "--daemon", "d"]).is_err(),
+            "edit needs a brief"
+        );
+        assert!(matches!(
+            parse(&["rm", "r2", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Rm { room, .. } })) if room == "r2"
+        ));
+        for verb in [&["ls"][..], &["show", "r2"], &["rm", "r2"]] {
+            assert!(parse(verb).is_err(), "{verb:?} needs the daemon");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_room_definition_verb_refuses_a_bad_name_before_asking_the_daemon() {
+        let code = room_verb(
+            "rm",
+            Some("Bad Name"),
+            || unreachable!("the daemon is not asked"),
+            |_| {},
+        )
+        .await;
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn a_room_view_names_its_home_and_keeps_escapes_out_of_the_terminal() {
+        let view = room_view(&serde_json::json!({
+            "name": "r2", "workspace": "web", "brief": "Ship it.", "base": null,
+            "log": [{"seq": 1, "from": "yantrad", "text": "restarted"},
+                    {"seq": 2, "from": "alpha", "text": "\u{1b}[2Jgone\nnext"}]
+        }));
+        assert_eq!(
+            view,
+            "room r2\nworkspace web\nbrief Ship it.\n   1 yantrad: restarted\n   2 alpha: \u{fffd}[2Jgone\nnext\n"
+        );
+        assert_eq!(room_table(&serde_json::json!([])), "no rooms\n");
+        let table = room_table(&serde_json::json!([
+            {"name": "r2", "workspace": null, "members": 1, "messages": 3, "spent": 3, "budget": 20, "paused": true}
+        ]));
+        assert!(
+            table.contains("(made by an agent)") && table.ends_with("3/20  paused\n"),
+            "{table}"
+        );
     }
 
     #[test]

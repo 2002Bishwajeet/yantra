@@ -1,8 +1,8 @@
 //! `/api/mcp`: the room tools over MCP's Streamable HTTP transport
 //! ([ADR-0038](../../../docs/adr/0038-rooms-and-guest-devices.md) decision 2),
-//! and the owner's room routes (decisions 4 and 5): `GET /api/rooms`,
-//! `GET /api/rooms/{room}`, `POST /api/rooms/{room}/messages` and
-//! `POST /api/rooms/{room}/resume`.
+//! and the owner's room routes (decisions 4 and 5): `GET` and `POST
+//! /api/rooms`, `GET`, `PATCH` and `DELETE /api/rooms/{room}` (ADR-0039,
+//! Y-550), `POST /api/rooms/{room}/messages` and `POST /api/rooms/{room}/resume`.
 //!
 //! **A small subset, on purpose**: POST with one JSON-RPC message and a JSON
 //! answer. A notification or a response gets `202` and no body, a batch is
@@ -23,7 +23,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::rejection::JsonRejection;
@@ -36,7 +36,8 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory, MachineInfo};
-use yantra_core::room::{self, Call, Message, Reader, Summary, Thread};
+use yantra_core::room::{self, Call, Kind, Message, Reader, Summary, Thread};
+use yantra_core::room_file::{self, Definition};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
@@ -96,8 +97,11 @@ where
 {
     Router::new()
         .route("/mcp", post(mcp::<I>).get(stream::<I>))
-        .route("/rooms", get(list::<I>))
-        .route("/rooms/{room}", get(view::<I>))
+        .route("/rooms", get(list::<I>).post(create::<I>))
+        .route(
+            "/rooms/{room}",
+            get(view::<I>).patch(edit::<I>).delete(end::<I>),
+        )
         .route("/rooms/{room}/messages", post(post_message::<I>))
         .route("/rooms/{room}/resume", post(resume::<I>))
         .with_state(Served {
@@ -359,6 +363,11 @@ struct RoomSummary {
     members: usize,
     messages: usize,
     last_at: Option<u64>,
+    /// The home workspace; `null` for a room an agent made, which a restart loses.
+    workspace: Option<String>,
+    brief: Option<String>,
+    /// `null` is the workspace's current branch.
+    base: Option<String>,
 }
 
 impl From<Summary> for RoomSummary {
@@ -371,13 +380,24 @@ impl From<Summary> for RoomSummary {
             members: summary.members,
             messages: summary.messages,
             last_at: summary.last_at,
+            workspace: summary.workspace,
+            brief: summary.brief,
+            base: summary.base,
         }
     }
 }
 
 #[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum MessageKind {
+    Text,
+    System,
+}
+
+#[derive(Debug, serde::Serialize)]
 struct RoomMessage {
     seq: u64,
+    kind: MessageKind,
     at: u64,
     from: String,
     text: String,
@@ -388,6 +408,10 @@ impl From<Message> for RoomMessage {
     fn from(message: Message) -> Self {
         Self {
             seq: message.seq,
+            kind: match message.kind {
+                Kind::Text => MessageKind::Text,
+                Kind::System => MessageKind::System,
+            },
             at: message.at,
             from: message.from,
             text: message.text,
@@ -414,6 +438,127 @@ struct RoomPosted {
 #[derive(serde::Deserialize)]
 struct Post {
     text: String,
+}
+
+/// `POST /api/rooms`.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Create {
+    name: String,
+    workspace: String,
+    #[serde(default)]
+    brief: Option<String>,
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// `PATCH /api/rooms/{room}`. `brief` is required, and `null` clears it.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Edit {
+    #[serde(deserialize_with = "Option::deserialize")]
+    brief: Option<String>,
+}
+
+/// `DELETE /api/rooms/{room}`: `false` is a room already gone.
+#[derive(Debug, serde::Serialize)]
+struct RoomRemoved {
+    removed: bool,
+}
+
+/// Only application/json is taken: a text/plain cross-site form post needs no preflight.
+fn json_only<T>(body: Result<Json<T>, JsonRejection>, shape: &str) -> Result<T, Refused> {
+    body.map(|Json(body)| body).map_err(|error| Refused::Verb {
+        status: match error {
+            JsonRejection::MissingJsonContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            _ => StatusCode::BAD_REQUEST,
+        },
+        said: format!("the body is not {shape} as application/json: {error}"),
+    })
+}
+
+fn defined(error: &room_file::Error) -> Refused {
+    use room_file::Error as E;
+    let status = match error {
+        E::BadName(_) | E::BadWorkspace(_) | E::BadBrief | E::BadBase => StatusCode::BAD_REQUEST,
+        E::Exists(_) => StatusCode::CONFLICT,
+        E::Missing(_) => StatusCode::NOT_FOUND,
+        E::Unparsable { .. } | E::Unreadable { .. } | E::Unwritable { .. } | E::NoConfigDir => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
+    Refused::Verb {
+        status,
+        said: error.to_string(),
+    }
+}
+
+/// The owner defines a room in a workspace (ADR-0039 decision 1).
+async fn create<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Result<Json<Create>, JsonRejection>,
+) -> Result<(StatusCode, Json<RoomSummary>), Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let asked = json_only(body, "{\"name\", \"workspace\", \"brief\"?, \"base\"?}")?;
+    let definition = Definition {
+        name: asked.name,
+        workspace: asked.workspace,
+        brief: room_file::brief(asked.brief.as_deref()),
+        base: asked.base.filter(|base| !base.is_empty()),
+        made_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    };
+    definition.check().map_err(|error| defined(&error))?;
+    if (state.locate)(&definition.workspace).is_none() {
+        return Err(Refused::Verb {
+            status: StatusCode::NOT_FOUND,
+            said: format!("no workspace named `{}`", definition.workspace),
+        });
+    }
+    let summary = state
+        .rooms
+        .create(&definition)
+        .map_err(|error| defined(&error))?;
+    tracing::info!(
+        "room {}: defined in workspace {} for {}",
+        definition.name,
+        definition.workspace,
+        caller.node
+    );
+    Ok((StatusCode::CREATED, Json(summary.into())))
+}
+
+async fn edit<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    body: Result<Json<Edit>, JsonRejection>,
+) -> Result<Json<RoomSummary>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let asked = json_only(body, "{\"brief\": \"...\" | null}")?;
+    let summary = state
+        .rooms
+        .edit(&name, asked.brief.as_deref())
+        .map_err(|error| defined(&error))?;
+    tracing::info!("room {name}: brief edited for {}", caller.node);
+    Ok(Json(summary.into()))
+}
+
+async fn end<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<RoomRemoved>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let removed = state.rooms.end(&name).map_err(|error| defined(&error))?;
+    tracing::info!("room {name}: ended for {}, removed {removed}", caller.node);
+    Ok(Json(RoomRemoved { removed }))
 }
 
 async fn list<I: Inventory + Clone + Send + Sync + 'static>(
@@ -455,14 +600,7 @@ async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     post: Result<Json<Post>, JsonRejection>,
 ) -> Result<Json<RoomPosted>, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
-    // Only application/json is taken: a text/plain cross-site form post needs no preflight.
-    let Json(post) = post.map_err(|error| Refused::Verb {
-        status: match error {
-            JsonRejection::MissingJsonContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            _ => StatusCode::BAD_REQUEST,
-        },
-        said: format!("the body is not {{\"text\": \"...\"}} as application/json: {error}"),
-    })?;
+    let post = json_only(post, "{\"text\": \"...\"}")?;
     let machine = machine_of(&state.authoriser, &caller.node)
         .await
         .map_err(|said| Refused::Verb {
@@ -508,6 +646,9 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
         members: 2,
         messages: 2,
         last_at,
+        workspace: Some("web".to_owned()),
+        brief: Some("Ship the login page.".to_owned()),
+        base: Some("main".to_owned()),
     };
     vec![
         (
@@ -518,6 +659,9 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
                 of(&RoomSummary {
                     members: 0,
                     messages: 0,
+                    workspace: None,
+                    brief: None,
+                    base: None,
                     ..summary("quiet", 0, false, None)
                 }),
             ]),
@@ -526,10 +670,24 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
             "room",
             "Room",
             of(&RoomView {
-                summary: summary("design-review", room::BUDGET, true, Some(1_800_000_060)),
+                summary: RoomSummary {
+                    messages: 3,
+                    ..summary("design-review", room::BUDGET, true, Some(1_800_000_060))
+                },
                 log: vec![
                     RoomMessage {
+                        seq: 18,
+                        kind: MessageKind::System,
+                        at: 1_799_999_000,
+                        from: "yantrad".to_owned(),
+                        text: "yantrad restarted at 09:43 UTC. Earlier messages are in each \
+                               agent's own thread."
+                            .to_owned(),
+                        budget: 0,
+                    },
+                    RoomMessage {
                         seq: 19,
+                        kind: MessageKind::Text,
                         at: 1_800_000_000,
                         from: "cachyos-g14 · chat 1a2b3c4d".to_owned(),
                         text: "The API is ready for review.".to_owned(),
@@ -537,6 +695,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
                     },
                     RoomMessage {
                         seq: 20,
+                        kind: MessageKind::Text,
                         at: 1_800_000_060,
                         from: "owner on pixel".to_owned(),
                         text: "Go ahead.".to_owned(),
@@ -552,6 +711,20 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
                 seq: 21,
                 delivered: 2,
             }),
+        ),
+        (
+            "roomCreated",
+            "RoomSummary",
+            of(&RoomSummary {
+                members: 0,
+                messages: 0,
+                ..summary("design-review", 0, false, None)
+            }),
+        ),
+        (
+            "roomRemoved",
+            "RoomRemoved",
+            of(&RoomRemoved { removed: true }),
         ),
     ]
 }
@@ -821,6 +994,9 @@ mod tests {
             (Method::GET, "/rooms"),
             (Method::GET, "/rooms/r1"),
             (Method::POST, "/rooms/r1/messages"),
+            (Method::POST, "/rooms"),
+            (Method::PATCH, "/rooms/r1"),
+            (Method::DELETE, "/rooms/r1"),
         ] {
             let (status, said) = send(
                 &app,
@@ -1056,7 +1232,8 @@ mod tests {
         assert_eq!(
             listed[0],
             json!({"name": "r4", "spent": 20, "budget": 20, "paused": true, "members": 2,
-                   "messages": 20, "last_at": listed[0]["last_at"]})
+                   "messages": 20, "last_at": listed[0]["last_at"],
+                   "workspace": null, "brief": null, "base": null})
         );
         assert!(listed[0]["last_at"].is_u64(), "{listed}");
 
@@ -1066,6 +1243,7 @@ mod tests {
         assert_eq!(viewed["paused"], true);
         assert_eq!(viewed["log"][0]["text"], "m1");
         assert_eq!(viewed["log"][0]["from"], "alpha");
+        assert_eq!(viewed["log"][0]["kind"], "text");
         let (status, _) = send(&app, Method::GET, "/rooms/nope", None, ALPHA, None).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -1382,5 +1560,158 @@ mod tests {
         let answer = tool(&app, ALPHA, None, "room_read", json!({"room": "r1"})).await;
         assert_eq!(answer["isError"], true, "{answer}");
         assert!(text(&answer).contains("could not list"), "{answer}");
+    }
+
+    #[tokio::test]
+    async fn the_owner_defines_edits_and_ends_a_room() {
+        let app = app();
+        let (status, said) = send(
+            &app,
+            Method::POST,
+            "/rooms",
+            Some(json!({"name": "home", "workspace": "wa", "brief": "Ship it.", "base": "main"})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{said}");
+        let made: Value = serde_json::from_str(&said).expect("JSON");
+        assert_eq!(
+            (
+                &made["name"],
+                &made["workspace"],
+                &made["brief"],
+                &made["base"]
+            ),
+            (
+                &json!("home"),
+                &json!("wa"),
+                &json!("Ship it."),
+                &json!("main")
+            )
+        );
+        assert_eq!(made["messages"], 0);
+
+        let (status, said) = send(
+            &app,
+            Method::POST,
+            "/rooms",
+            Some(json!({"name": "home", "workspace": "wa"})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{said}");
+
+        let (status, said) = send(
+            &app,
+            Method::PATCH,
+            "/rooms/home",
+            Some(json!({"brief": "Then the tests."})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert!(said.contains("\"brief\":\"Then the tests.\""), "{said}");
+        let (status, said) = send(&app, Method::GET, "/rooms/home", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert!(said.contains("\"brief\":\"Then the tests.\""), "{said}");
+        let (status, said) = send(
+            &app,
+            Method::PATCH,
+            "/rooms/home",
+            Some(json!({"brief": null})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert!(said.contains("\"brief\":null"), "{said}");
+
+        for _ in 0..2 {
+            let (status, said) = send(&app, Method::DELETE, "/rooms/home", None, ALPHA, None).await;
+            assert_eq!(status, StatusCode::OK, "{said}");
+            if said == r#"{"removed":true}"# {
+                continue;
+            }
+            assert_eq!(
+                said, r#"{"removed":false}"#,
+                "a second delete is not a failure"
+            );
+        }
+        let (status, _) = send(&app, Method::GET, "/rooms/home", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_bad_definition_is_400_an_unknown_workspace_or_room_404_and_a_form_415() {
+        let app = app();
+        for body in [
+            json!({"name": "Bad", "workspace": "wa"}),
+            json!({"name": "r1", "workspace": "a/b"}),
+            json!({"name": "r1", "workspace": "wa", "brief": "x".repeat(501)}),
+            json!({"name": "r1", "workspace": "wa", "base": "a..b"}),
+            json!({"name": "r1"}),
+            json!({"name": "r1", "workspace": "wa", "budget": 30}),
+        ] {
+            let (status, said) = send(
+                &app,
+                Method::POST,
+                "/rooms",
+                Some(body.clone()),
+                ALPHA,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {said}");
+        }
+        let (status, said) = send(
+            &app,
+            Method::POST,
+            "/rooms",
+            Some(json!({"name": "r1", "workspace": "nowhere"})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{said}");
+        let (status, said) = send(
+            &app,
+            Method::PATCH,
+            "/rooms/nope",
+            Some(json!({"brief": "x"})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{said}");
+        let (status, said) = send(
+            &app,
+            Method::PATCH,
+            "/rooms/nope",
+            Some(json!({})),
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "brief is required: {said}");
+        let (status, _) = send(&app, Method::DELETE, "/rooms/Bad", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let mut form = Request::builder()
+            .method(Method::POST)
+            .uri("/rooms")
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::from(
+                json!({"name": "r1", "workspace": "wa"}).to_string(),
+            ))
+            .expect("a request");
+        form.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+        let response = app.router.clone().oneshot(form).await.expect("infallible");
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let (_, said) = send(&app, Method::GET, "/rooms", None, ALPHA, None).await;
+        assert_eq!(said, "[]", "nothing was defined");
     }
 }

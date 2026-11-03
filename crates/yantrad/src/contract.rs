@@ -83,6 +83,7 @@ import type {
   Resumed,
   Room,
   RoomPosted,
+  RoomRemoved,
   RoomSummary,
   Spend,
   SshIdentity,
