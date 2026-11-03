@@ -35,6 +35,7 @@ pub mod install;
 pub mod inventory;
 pub mod join;
 pub mod keep;
+pub mod layout;
 pub mod logs;
 pub mod mic;
 pub mod notify;

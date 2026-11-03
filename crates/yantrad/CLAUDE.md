@@ -322,14 +322,23 @@ directory to walk.
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
 `PATCH`/`DELETE /api/rooms/{room}`, `POST /api/rooms/{room}/resume`,
-`POST /api/rooms/{room}/messages` and
+`POST /api/rooms/{room}/messages`, `PUT /api/layout` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
 `repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
-`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550) and
+`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550), `layout set` (Y-515) and
 `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
+
+**`PUT /api/layout` replaces the dashboard layout** (Y-515,
+[ADR-0036](../../docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)), in
+`~/.config/yantra/dashboard.json` through [`layout`](../yantra-core/src/layout.rs). The body names
+the `rev` it read. A different `rev` on disk is **409** with the current layout as JSON, a bad shape
+is **400**, and a file that cannot be written is **500**. The save goes to `dashboard.json.tmp` and is
+renamed over the file, at the next `rev`. A lock makes the read, the compare and the write one step.
+`GET /api/layout` is a read and is not gated; no file is the default at `rev` 0, and a file that is
+not a layout is logged and read as the default. [`tests/layout.rs`](tests/layout.rs) is the proof.
 
 **`install` answers before its work is done too** (Y-386,
 [ADR-0028](../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) §4). It answers
