@@ -4,17 +4,16 @@ import { Button } from '@/m3/button/Button'
 import { Mono, Text } from '@/m3/text/Text'
 import './Copyable.css'
 
-const hints = {
+export const hints = {
   selected: 'this page has no clipboard, so the text is selected · copy it with Ctrl+C, ⌘C or a long press',
   manual: 'this page has no clipboard · select the text and copy it yourself',
 }
 
-/** Text a person copies. `navigator.clipboard` needs a secure context, and
- *  plain HTTP to a tailnet address is not one, so a refused copy selects the
- *  text and says so rather than failing silently. */
-export function Copyable(props: { text: string; what: string }) {
-  const { text, what } = props
-  const code = useRef<HTMLSpanElement>(null)
+/** `navigator.clipboard` needs a secure context, and plain HTTP to a tailnet
+ *  address is not one, so a refused copy selects the text and says so rather
+ *  than failing silently. */
+export function useCopy(text: string) {
+  const ref = useRef<HTMLSpanElement>(null)
   const [said, setSaid] = useState<'copied' | 'selected' | 'manual' | null>(null)
   const copy = async () => {
     try {
@@ -22,18 +21,27 @@ export function Copyable(props: { text: string; what: string }) {
       setSaid('copied')
     } catch {
       const selection = window.getSelection()
-      if (code.current && selection) {
-        selection.selectAllChildren(code.current)
+      if (ref.current && selection) {
+        selection.selectAllChildren(ref.current)
         setSaid('selected')
       } else {
         setSaid('manual')
       }
     }
   }
+  return { ref, said, copy }
+}
+
+/** Text a person copies. A caller that needs the same copy elsewhere passes
+ *  its own `useCopy` result as `copier`. */
+export function Copyable(props: { text: string; what: string; copier?: ReturnType<typeof useCopy> }) {
+  const { text, what } = props
+  const own = useCopy(text)
+  const { ref, said, copy } = props.copier ?? own
   return (
     <div className="m3-copyable">
       <div className="m3-copyable__row">
-        <Mono className="m3-copyable__text" ref={code} translate="no">
+        <Mono className="m3-copyable__text" ref={ref} translate="no">
           {text}
         </Mono>
         <Button

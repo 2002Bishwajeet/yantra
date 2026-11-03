@@ -62,9 +62,9 @@ describe('Providers', () => {
 
     fireEvent.click(sheet.getByRole('button', { name: 'Sign in with GitHub' }))
     expect(await sheet.findByText('WDJB-MJHT')).toBeTruthy()
-    expect(sheet.getByRole('link', { name: 'github.com/login/device' }).getAttribute('href')).toBe(
-      'https://github.com/login/device',
-    )
+    const open = sheet.getByRole('link', { name: 'Copy code and open GitHub' })
+    expect(open.getAttribute('href')).toBe('https://github.com/login/device')
+    expect(open.getAttribute('target')).toBe('_blank')
     expect(sheet.getByText(/the code is good for 15m/)).toBeTruthy()
     expect(sheet.getByText('repo')).toBeTruthy()
     expect(sheet.getByText('read:org')).toBeTruthy()
@@ -76,6 +76,61 @@ describe('Providers', () => {
     expect(await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeTruthy()
     // Nothing that looks like a token crossed.
     expect(document.body.textContent).not.toMatch(/gho_|ghp_/)
+  })
+
+  describe('the device code', () => {
+    const clipboard = (writeText: ((text: string) => Promise<void>) | undefined) =>
+      Object.defineProperty(navigator, 'clipboard', {
+        value: writeText ? { writeText } : undefined,
+        configurable: true,
+      })
+
+    const withCode = async () => {
+      mountSettings('desktop', '/settings/providers', {
+        'GET /api/github': [200, contract.disconnected],
+        'POST /api/github/login': [200, contract.device],
+      })
+      await screen.findByText('Not connected')
+      fireEvent.click(connect())
+      const sheet = within(await screen.findByRole('dialog', { name: 'Connect GitHub' }))
+      fireEvent.click(sheet.getByRole('button', { name: 'Sign in with GitHub' }))
+      await sheet.findByText('WDJB-MJHT')
+      return sheet
+    }
+
+    afterEach(() => {
+      clipboard(undefined)
+      window.getSelection()?.removeAllRanges()
+    })
+
+    it('copies from the Copy button', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      clipboard(writeText)
+      const sheet = await withCode()
+      fireEvent.click(sheet.getByRole('button', { name: 'Copy the code' }))
+      expect(await sheet.findByRole('button', { name: 'Copied the code' })).toBeTruthy()
+      expect(writeText).toHaveBeenCalledWith('WDJB-MJHT')
+    })
+
+    it('copies the code when the person opens GitHub', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      clipboard(writeText)
+      const sheet = await withCode()
+      fireEvent.click(sheet.getByRole('link', { name: 'Copy code and open GitHub' }))
+      expect(writeText).toHaveBeenCalledWith('WDJB-MJHT')
+      expect(await sheet.findByRole('button', { name: 'Copied the code' })).toBeTruthy()
+    })
+
+    it('keeps the link and says so when there is no clipboard', async () => {
+      clipboard(undefined)
+      const sheet = await withCode()
+      const open = sheet.getByRole('link', { name: 'Copy code and open GitHub' })
+      fireEvent.click(open)
+      expect(await sheet.findByText(/no clipboard, so the text is selected/)).toBeTruthy()
+      expect(window.getSelection()?.toString()).toBe('WDJB-MJHT')
+      expect(open.getAttribute('href')).toBe('https://github.com/login/device')
+      expect(sheet.queryByRole('button', { name: 'Copied the code' })).toBeNull()
+    })
   })
 
   it('draws a refused login in the sheet', async () => {
