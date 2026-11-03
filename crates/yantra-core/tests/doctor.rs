@@ -159,6 +159,21 @@ fn assert_state(checks: &[Check], name: &str, wanted: State) {
 }
 
 /// A port nothing is listening on, closed again before the test uses it.
+/// Y-585: a failed login has to end fast, so the tests that fail one time it.
+async fn timed_of(ssh: &Ssh) -> (Vec<Check>, Duration) {
+    let started = Instant::now();
+    let checks = doctor::of(ssh, KNOWN_REMOTELY).await;
+    (checks, started.elapsed())
+}
+
+/// Y-585: a refused login ends inside `FAILED_TARGET` and says how long it took.
+fn assert_ended_fast(checks: &[Check], took: Duration) {
+    eprintln!("Y-585 failed login ended in {took:?}");
+    assert!(took < FAILED_TARGET, "the check took {took:?}");
+    let reachable = look(checks, "reachable");
+    assert!(reachable.took_ms.is_some(), "{reachable:?}");
+}
+
 fn closed_port() -> Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
@@ -186,9 +201,10 @@ async fn a_machine_that_refuses_the_connection_is_never_reported_as_missing_anyt
         state_dir: dir.clone(),
     })?;
 
-    let checks = doctor::of(&ssh, KNOWN_REMOTELY).await;
+    let (checks, took) = timed_of(&ssh).await;
     let _ = std::fs::remove_dir_all(&dir);
 
+    assert_ended_fast(&checks, took);
     let reachable = look(&checks, "reachable");
     assert_eq!(reachable.state, State::Absent, "{}", reachable.detail);
     assert!(
@@ -354,7 +370,7 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
     // sshd re-executes on SIGHUP, so ask until the banner is in the answer.
     let unjoined = machine("unjoined", &account)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let mut checks = doctor::of(&unjoined, KNOWN_REMOTELY).await;
+    let (mut checks, mut took) = timed_of(&unjoined).await;
     while !look(&checks, "reachable").detail.contains(BANNER) {
         anyhow::ensure!(
             std::time::Instant::now() < deadline,
@@ -362,8 +378,9 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
             look(&checks, "reachable").detail
         );
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        checks = doctor::of(&unjoined, KNOWN_REMOTELY).await;
+        (checks, took) = timed_of(&unjoined).await;
     }
+    assert_ended_fast(&checks, took);
     assert_state(&checks, "reachable", State::Absent);
     assert_state(&checks, "sshd", State::Present);
 
@@ -395,7 +412,8 @@ const CHECK_MODE: &str = "# Tailscale SSH requires an additional check.\n\
 /// the fixture's times.
 const HEALTHY_TARGET: Duration = Duration::from_secs(5);
 
-/// A browser check stops at the banner, so it ends in the time a handshake takes.
+/// A refused login, or a browser check that stops at the banner, ends in the
+/// time a handshake takes.
 const FAILED_TARGET: Duration = Duration::from_secs(5);
 
 fn scratch_ssh(fixture: &SshFixture, label: &str, user: &str) -> Result<(Ssh, std::path::PathBuf)> {
@@ -451,14 +469,11 @@ async fn a_login_that_wants_a_browser_ends_fast_and_keeps_the_link_out() -> Resu
     }
 
     let (held, held_dir) = scratch_ssh(&fixture, "held", USER)?;
-    let started = Instant::now();
-    let checks = doctor::of(&held, KNOWN_REMOTELY).await;
-    let took = started.elapsed();
+    let (checks, took) = timed_of(&held).await;
     let _ = std::fs::remove_dir_all(&probe_dir);
     let _ = std::fs::remove_dir_all(&held_dir);
 
-    eprintln!("Y-585 held login ended in {took:?}");
-    assert!(took < FAILED_TARGET, "the check took {took:?}");
+    assert_ended_fast(&checks, took);
     let reachable = look(&checks, "reachable");
     assert_eq!(reachable.state, State::Absent, "{}", reachable.detail);
     assert!(

@@ -239,9 +239,9 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         reachable,
         sshd,
         tmux,
-        timed_if(true, git(exec)).await,
+        timed_one(git(exec)).await,
         agent_cli,
-        timed_if(true, terminfo(exec, term)).await,
+        timed_one(terminfo(exec, term)).await,
         provider_cli,
         timed_if(has_provider, provider_auth(exec, providers)).await,
         timed_if(
@@ -249,8 +249,8 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
             login_session(exec, found_tmux.as_ref(), found_claude.as_ref()),
         )
         .await,
-        timed_if(true, mic(exec)).await,
-        timed_if(true, folder_access(exec)).await,
+        timed_one(mic(exec)).await,
+        timed_one(folder_access(exec)).await,
         heartbeat(),
     ]
 }
@@ -262,12 +262,17 @@ async fn timed<T>(step: impl Future<Output = (Check, T)>) -> (Check, T) {
     (check, found)
 }
 
+async fn timed_one(step: impl Future<Output = Check>) -> Check {
+    timed(async { (step.await, ()) }).await.0
+}
+
 /// `asked` is false where a step has nothing to ask with and answers at once.
 async fn timed_if(asked: bool, step: impl Future<Output = Check>) -> Check {
-    if !asked {
-        return step.await;
+    if asked {
+        timed_one(step).await
+    } else {
+        step.await
     }
-    timed(async { (step.await, ()) }).await.0
 }
 
 /// One command that does nothing, which is the whole of *can Yantra reach this
