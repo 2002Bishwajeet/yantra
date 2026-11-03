@@ -25,6 +25,7 @@ pub mod dirs;
 pub mod doctor;
 pub mod down;
 pub mod edit;
+pub mod extract;
 pub mod github;
 pub mod heartbeat;
 pub mod history;

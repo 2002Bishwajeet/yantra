@@ -297,7 +297,7 @@ pub(crate) fn newest(repo: &str) -> String {
 ///
 /// It is also why [`probe`] needs no quoting around `$d`: the result cannot
 /// contain a character a shell would act on.
-fn slug(repo: &str) -> String {
+pub(crate) fn slug(repo: &str) -> String {
     // JavaScript counts UTF-16 code units, so a non-BMP character is two `-`.
     let mut slug: String = repo
         .encode_utf16()

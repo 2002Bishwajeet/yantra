@@ -292,17 +292,23 @@ fn parse_report(json: &[u8]) -> Result<Vec<String>, ScanError> {
 pub fn stage() -> Result<Report, Error> {
     use etcetera::BaseStrategy as _;
     let base = etcetera::choose_base_strategy().map_err(|_| Error::NoHome)?;
-    let data = base.data_dir().join("yantra");
-    let scratch = data.join("history.tmp");
+    let scanner = gitleaks()?;
+    stage_in(base.home_dir(), &base.data_dir().join("yantra"), &scanner)
+}
+
+/// The real scanner, with its scratch folder `$XDG_DATA_HOME/yantra/history.tmp`.
+pub fn gitleaks() -> Result<Gitleaks, Error> {
+    use etcetera::BaseStrategy as _;
+    let base = etcetera::choose_base_strategy().map_err(|_| Error::NoHome)?;
+    let scratch = base.data_dir().join("yantra/history.tmp");
     private_dir(&scratch).map_err(|source| Error::Io {
         path: scratch.clone(),
         source,
     })?;
-    let scanner = Gitleaks::new(scratch.clone()).map_err(|source| Error::Io {
+    Gitleaks::new(scratch.clone()).map_err(|source| Error::Io {
         path: scratch.join("gitleaks.toml"),
         source,
-    })?;
-    stage_in(base.home_dir(), &data, &scanner)
+    })
 }
 
 /// The testable half. `data` holds `history/`, which Syncthing sends, and

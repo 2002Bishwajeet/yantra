@@ -16,6 +16,7 @@ use yantra_core::clone;
 use yantra_core::commit;
 use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
+use yantra_core::extract;
 use yantra_core::github::{self, Github};
 use yantra_core::history;
 use yantra_core::identity;
@@ -400,6 +401,24 @@ enum HistoryAction {
     /// Write a redacted copy of every agent transcript to the folder Syncthing
     /// sends. Needs `gitleaks` on PATH
     Stage,
+    /// Cut training rows for a decision from a redacted history folder, and
+    /// check each one with `gitleaks` again. Needs `gitleaks` on PATH
+    Extract {
+        /// The decision the rows are for
+        #[arg(long, value_enum)]
+        decision: Decision,
+        /// Where `rows.jsonl`, `rows.meta.jsonl` and `questions.json` go
+        #[arg(long)]
+        out: PathBuf,
+        /// A staging folder or the archive, the one that holds `claude/`
+        folder: PathBuf,
+    },
+}
+
+/// A value enum, so the tool-permission decision is a second variant later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum Decision {
+    SessionState,
 }
 
 #[derive(Debug, Subcommand)]
@@ -549,6 +568,14 @@ async fn main() -> ExitCode {
         Some(Command::History {
             action: HistoryAction::Stage,
         }) => history_stage(),
+        Some(Command::History {
+            action:
+                HistoryAction::Extract {
+                    decision: Decision::SessionState,
+                    out,
+                    folder,
+                },
+        }) => history_extract(&folder, &out),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity {
@@ -1781,6 +1808,50 @@ fn render_history(report: &history::Report) -> String {
     )
 }
 
+/// Exit 0 once the rows are written, unless a transcript could not be read:
+/// `history stage`'s rule, so a partial answer shows.
+fn history_extract(folder: &Path, out: &Path) -> ExitCode {
+    match extract::extract(folder, out) {
+        Ok(report) => {
+            print!("{}", render_extract(&report));
+            for path in &report.dropped_by_gitleaks {
+                eprintln!(
+                    "yantra: dropped a row with a secret from {}: a bug against Y-430, \
+                     because the staging copy is old or a rule changed",
+                    path.display()
+                );
+            }
+            for (path, err) in &report.unreadable {
+                eprintln!("yantra: not read: {}: {err}", path.display());
+            }
+            if report.unreadable.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_extract(report: &extract::Report) -> String {
+    format!(
+        "rows:               {}\n  ask_user_question: {}\n  judge:             {}\n\
+         skipped (blocked):  {}\ndropped (gitleaks): {}\nunparsed lines:     {}\n\
+         unreadable files:   {}\n",
+        report.rows(),
+        report.ask_user_question,
+        report.judge,
+        report.skipped_blocked,
+        report.dropped_by_gitleaks.len(),
+        report.unparsed_lines,
+        report.unreadable.len()
+    )
+}
+
 /// The shape an installer and an agent read (D2.2), and a test pins it.
 /// `machines` is an object rather than a bare array so a later reading can be
 /// added beside it without moving what is already there.
@@ -2850,6 +2921,53 @@ mod tests {
                 action: HistoryAction::Stage
             })
         ));
+    }
+
+    #[test]
+    fn history_extract_parses() {
+        let cli = Cli::try_parse_from([
+            "yantra",
+            "history",
+            "extract",
+            "--decision",
+            "session-state",
+            "--out",
+            "d",
+            "f",
+        ])
+        .expect("parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::History {
+                action: HistoryAction::Extract {
+                    decision: Decision::SessionState,
+                    out,
+                    folder,
+                }
+            }) if out == Path::new("d") && folder == Path::new("f")
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "history", "extract", "--out", "d", "f"]).is_err(),
+            "the decision is required"
+        );
+    }
+
+    #[test]
+    fn the_extract_summary_has_one_line_per_count() {
+        let report = extract::Report {
+            ask_user_question: 2,
+            judge: 3,
+            skipped_blocked: 1,
+            dropped_by_gitleaks: vec![PathBuf::from("a")],
+            unparsed_lines: 4,
+            ..extract::Report::default()
+        };
+        assert_eq!(
+            render_extract(&report),
+            "rows:               5\n  ask_user_question: 2\n  judge:             3\n\
+             skipped (blocked):  1\ndropped (gitleaks): 1\nunparsed lines:     4\n\
+             unreadable files:   0\n"
+        );
     }
 
     #[test]

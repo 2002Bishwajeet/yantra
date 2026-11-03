@@ -334,3 +334,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-569](../tracker.md#3-task-board) is in review.** The podman mic test flaked because it read the default source before WirePlumber had kept it. The test now waits for WirePlumber first, so the cause is fixed and not retried.
 
 - **2026-11-03** — **[Y-575](../tracker.md#3-task-board) is in review.** The GitHub connect sheet now has one button that copies the device code and opens GitHub. The code also has its own copy button. Unit and e2e tests cover both.
+
+- **2026-11-03** — **[Y-463](../tracker.md#3-task-board) is in review.** `yantra history extract` now reads a redacted staging or archive folder and writes candidate rows. It scans each row again with the Y-430 rules and drops a row with a finding. It fails closed when a finding cannot be located. Fixture tests cover each label source.
