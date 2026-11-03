@@ -237,8 +237,10 @@ reaches the phone ([M16](../../docs/plans/m16-the-coding-loop.md) §3.6).
 - **It keeps nothing on disk.** `Fleet::pulls` is memory, and ADR-0034 decision 3 is why: the PR is
   derived from the thread's upstream. At start, `watch::discover` rebuilds it, on the `ATTENTION`
   clock, from `thread::open_pulls` for every workspace. `pr open` adds the PR it answered at once.
-- **The first look at a PR says nothing.** It records a baseline, as the agents notifier does, so a
-  restart does not repeat what was said before it.
+- **The first look at a PR the start-up rebuild found says nothing.** It records a baseline, as
+  the agents notifier does, so a restart does not repeat what was said before it. A PR added after
+  that pass, by `pr open` or a later discover pass, starts with nothing told, so a check that ended
+  before its first look is still said.
 - **A failed look tells nobody anything.** Discovery removes nothing when a machine is asleep. A PR
   leaves the watch when it merges, when it closes, or after eight failed looks in a row, as T3 Code's
   does; discovery adds an open one back.

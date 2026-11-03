@@ -154,12 +154,15 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     });
 
     // Also the rebuild at start: the watch keeps nothing across a restart.
+    // Only that first pass is a baseline; a PR found later is new.
     let found = fleet.pulls.clone();
     let finding = grant.clone();
     tokio::spawn(async move {
         let github = Github::default();
+        let mut rebuilt = false;
         loop {
-            watch::discover(&found, &github, finding.token().await).await;
+            let token = finding.token().await;
+            rebuilt |= watch::discover(&found, &github, token, !rebuilt).await;
             tick_or_change(&finding).await;
         }
     });

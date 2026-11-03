@@ -2,9 +2,10 @@
 //! `refresh::PULLS` and told through [`crate::notify`].
 //!
 //! **It keeps its state in memory and rebuilds it at start** (ADR-0034
-//! decision 3). Discovery finds the open PR of every thread's upstream, and the
-//! first look at a PR records a baseline and says nothing, so a restart does
-//! not repeat what was already said (I-59). Each look is three conditional
+//! decision 3). Discovery finds the open PR of every thread's upstream. The
+//! first look at a PR the start-up rebuild found records a baseline and says
+//! nothing, so a restart does not repeat what was already said (I-59). A PR
+//! added later starts with nothing told, so its first look is said. Each look is three conditional
 //! reads, so a PR that did not change costs no rate limit. A PR leaves the
 //! watch when it merges, when it closes, or after [`FAILURES`] failed looks in
 //! a row, as T3 Code's watch does; discovery adds an open one back.
@@ -47,10 +48,12 @@ pub struct Tracked {
     told_passed: bool,
     reviews: BTreeSet<u64>,
     failures: u32,
+    /// The start-up rebuild found it, so its first look says nothing.
+    baseline: bool,
 }
 
 impl Tracked {
-    pub fn new(workspace: String, url: String) -> Self {
+    pub fn new(workspace: String, url: String, baseline: bool) -> Self {
         Self {
             workspace,
             url,
@@ -62,6 +65,7 @@ impl Tracked {
             told_passed: false,
             reviews: BTreeSet::new(),
             failures: 0,
+            baseline,
         }
     }
 }
@@ -118,7 +122,6 @@ pub fn look(tracked: &mut Tracked, read: Result<Read, github::Error>) -> Look {
         };
     };
     tracked.failures = 0;
-    let baseline = tracked.head.is_none();
     if let Conditional::Fresh { etag, value } = read.pull {
         if value.state != PullState::Open {
             return Look::Stop;
@@ -166,7 +169,7 @@ pub fn look(tracked: &mut Tracked, read: Result<Read, github::Error>) -> Look {
             said.push(PrPhase::Reviewed);
         }
     }
-    if baseline {
+    if std::mem::take(&mut tracked.baseline) {
         said.clear();
     }
     Look::Keep(said)
@@ -257,33 +260,40 @@ pub async fn poll(
 }
 
 /// Adds the open PRs of every workspace's threads. It removes nothing: a
-/// machine asleep or a look that failed tells nobody anything.
-pub async fn discover(pulls: &Pulls, github: &Github, token: Option<Token>) {
+/// machine asleep or a look that failed tells nobody anything. `baseline`
+/// marks the start-up rebuild; it answers whether the pass ran.
+pub async fn discover(
+    pulls: &Pulls,
+    github: &Github,
+    token: Option<Token>,
+    baseline: bool,
+) -> bool {
     let Some(token) = token else {
-        return;
+        return false;
     };
     let Ok(listing) = workspace::list() else {
-        return;
+        return false;
     };
     for workspace in listing.workspaces {
         match thread::open_pulls(&workspace.name, github, &token).await {
             Ok(found) => {
                 for watched in found {
-                    track(pulls, watched).await;
+                    track(pulls, watched, baseline).await;
                 }
             }
             Err(error) => tracing::debug!("no PRs read for {}: {error}", workspace.name),
         }
     }
+    true
 }
 
 /// Starts watching a PR, and leaves one already watched as it is.
-pub async fn track(pulls: &Pulls, watched: Watched) {
+pub async fn track(pulls: &Pulls, watched: Watched, baseline: bool) {
     pulls
         .write()
         .await
         .entry((watched.owner, watched.repo, watched.number))
-        .or_insert_with(|| Tracked::new(watched.workspace, watched.url));
+        .or_insert_with(|| Tracked::new(watched.workspace, watched.url, baseline));
 }
 
 #[cfg(test)]
@@ -295,6 +305,7 @@ mod tests {
         Tracked::new(
             "web".to_owned(),
             "https://github.com/o/r/pull/21".to_owned(),
+            true,
         )
     }
 
@@ -364,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn the_first_look_records_a_baseline_and_says_nothing() {
+    fn the_first_look_at_a_rebuilt_pr_records_a_baseline_and_says_nothing() {
         let mut watched = tracked();
         let first = look(
             &mut watched,
@@ -385,6 +396,47 @@ mod tests {
             ),
         );
         assert_eq!(second, Look::Keep(Vec::new()));
+    }
+
+    /// A PR `pr open` or a later discover pass added: checks and a review that
+    /// ended before its first look are still said, and said once.
+    #[test]
+    fn a_pr_added_after_start_says_what_ended_before_its_first_look() {
+        let mut watched = Tracked::new(
+            "web".to_owned(),
+            "https://github.com/o/r/pull/21".to_owned(),
+            false,
+        );
+        let answer = || {
+            read(
+                head("a", PullState::Open),
+                checks(failed()),
+                reviews(vec![review(1, "friend", "APPROVED")]),
+            )
+        };
+        assert_eq!(
+            look(&mut watched, answer()),
+            Look::Keep(vec![PrPhase::CheckFailed, PrPhase::Reviewed])
+        );
+        assert_eq!(look(&mut watched, answer()), Look::Keep(Vec::new()));
+    }
+
+    /// A failed first look leaves the baseline for the first look that lands.
+    #[test]
+    fn a_baseline_waits_for_a_look_that_lands() {
+        let mut watched = tracked();
+        look(&mut watched, Err(github::Error::Refused));
+        assert_eq!(
+            look(
+                &mut watched,
+                read(
+                    head("a", PullState::Open),
+                    checks(failed()),
+                    reviews(vec![])
+                )
+            ),
+            Look::Keep(Vec::new())
+        );
     }
 
     #[test]
@@ -564,8 +616,8 @@ mod tests {
             number: 21,
             url: "https://github.com/o/r/pull/21".to_owned(),
         };
-        track(&pulls, found.clone()).await;
-        track(&pulls, found).await;
+        track(&pulls, found.clone(), false).await;
+        track(&pulls, found, true).await;
         assert_eq!(pulls.read().await.len(), 1, "tracked once");
 
         let gone = Github::at("http://127.0.0.1:9", "http://127.0.0.1:9");

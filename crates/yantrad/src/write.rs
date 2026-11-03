@@ -1694,6 +1694,7 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
             number: opened.number,
             url: opened.url.clone(),
         },
+        false,
     )
     .await;
     Ok(Json(ThreadPrOpened {
