@@ -50,18 +50,19 @@ jobs:
       - run: npm run budget -- --no-build
 
   e2e:
-    name: e2e (${{ matrix.project }})
+    name: e2e (${{ matrix.project }} ${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     # The image the screenshot baselines are rendered in (playwright.config.ts):
     # one Chromium, one set of fonts, here and on a developer's box.
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
-    # One job per form factor: three sizes triple the run (plan §7).
+    # One job per form factor: three sizes triple the run (plan §7). Two shards each halve the wait (Y-605).
     strategy:
       fail-fast: false
       matrix:
         project: [phone, tablet, desktop]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -70,13 +71,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npm run e2e -- --project ${{ matrix.project }}
+      - run: npm run e2e -- --project ${{ matrix.project }} --shard ${{ matrix.shard }}/2
       # The report is where a layout diff is legible.
       - name: Upload report on failure
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-${{ matrix.project }}
+          name: e2e-${{ matrix.project }}-${{ matrix.shard }}
           path: |
             web/e2e/report/
             web/e2e/test-results/
