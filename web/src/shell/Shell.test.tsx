@@ -26,6 +26,7 @@ const up = aMachine({ name: 'cachyos-g14', os: 'linux', online: true })
 const SEVEN = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session']
 const report = (absent: string[]): Readiness => ({
   machine: up.name,
+  age_seconds: 0,
   checks: SEVEN.map((check) => ({ check, state: absent.includes(check) ? 'absent' : 'present', detail: '' })),
 })
 /** No workspace, one Linux machine online, and the key made by its join. */

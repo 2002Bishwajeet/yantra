@@ -131,16 +131,28 @@ It runs at the same `EVERY` as the other four, and **not** because a slower loop
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
 their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
 to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
---json` on every machine every 30 s, and this adds the auth gate beside it. The one-machine `GET`
-reads that same sweep, so a machine no workspace names is a **404** — `doctor::fleet` asks the
-machines workspaces name, and asking a machine per *polled* request is the thing this shape refuses.
+--json` on every machine every 30 s, and this adds the auth gate beside it.
+
+**The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
+name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
+macOS machines. A Windows, shared or tagged peer gets no check, because `presentOn` divides by
+this list and such a peer is never counted. Each machine asked pays eleven checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
+candidates come from the last machines reading, so this adds no `tailscale` call. `Snapshot::checks`
+holds one report per machine with its own age, and `refresh::settle` is the one place a sweep
+lands. A failed sweep changes nothing there, and a machine the sweep skipped keeps its report. An
+`Ok` sweep drops a name that neither it nor a successful tailnet reading holds, because the `POST`
+below takes any name. Both `GET`s read `checks`, so a poll cannot turn a result into `never`. A
+report carries its own `age_seconds`, because a kept result for an offline machine can be old, and
+the list's envelope carries the youngest. With nothing kept the list answers from the sweep. A
+machine nothing has reached is a **404**, and asking a machine per *polled* request is the thing
+this shape refuses. It is memory, so a restart empties it and the next sweep fills it again (Y-044).
 
 **`POST /api/machines/{name}/readiness` is where a person may ask anyway** (Y-197,
 [ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): someone who has just
 installed `tmux` by hand needs the answer before the next sweep, and the `GET` beside it can only
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
-type. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
+type, and it keeps the report before it answers. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
 ssh destinations to refuse one against, and a name nothing answers to is eleven *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
@@ -368,10 +380,14 @@ blocked on the same syscall, since a task already waiting on it `await`s instead
 this file must take both: the daemon's `Mutex` for its own workers, and `rewrite`'s `flock` for the
 one it does not control.
 
-**`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
+**`POST /api/viewing` is a write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
 §13), which no CLI can say truthfully. It is authorised like the rest because it silences
 notifications.
+
+**`GET /api/here` is the second, for the same reason.** It names the tailnet machine the request came
+from (Y-589). A terminal already runs on the machine it would name, so a CLI verb would answer a
+question nobody asks.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own

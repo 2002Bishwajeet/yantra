@@ -206,7 +206,9 @@ export type Check = {
   detail: string
 }
 
-export type Readiness = { machine: string; checks: Check[] }
+/** `age_seconds` is this report's own: the daemon keeps a machine's last check,
+ *  so it can be far older than the list around it (Y-579). */
+export type Readiness = { machine: string; checks: Check[]; age_seconds: number }
 
 /** `POST /api/machines/{name}/readiness` re-asks the machine now and answers
  *  `Looked<Readiness>` — the same envelope the `GET` serves, at `age_seconds: 0`.
@@ -393,6 +395,13 @@ export type SshIdentity = {
   public_key: string
   // `SHA256:…`
   fingerprint: string
+}
+
+/** `GET /api/here` (Y-589) — the tailnet machine this request came from; `null`
+ *  for an address the last tailnet look does not hold. 503 when there is no
+ *  look to read. A help, never a step. */
+export type Here = {
+  machine: string | null
 }
 
 /** `GET /api/notifications` — `Looked<Event[]>`, newest first, at most fifty,

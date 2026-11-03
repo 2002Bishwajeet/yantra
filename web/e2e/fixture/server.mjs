@@ -77,6 +77,8 @@ function defaults() {
     repos: contract.repos,
     notifications: contract.notifications,
     about: contract.about,
+    // Y-589: the device in use; null names none, so no note shifts a baseline.
+    here: { machine: null },
     // Y-350: what /api/github holds, and the daemon's key. `null` is a key
     // `yantra ssh-identity` has not made, a 404.
     connection: contract.github,
@@ -324,6 +326,7 @@ const routes = [
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
   ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
   ['GET', /^\/api\/about$/, (s) => [200, s.about]],
+  ['GET', /^\/api\/here$/, (s) => [200, s.here]],
   [
     'GET',
     /^\/api\/ssh-identity$/,
@@ -374,12 +377,17 @@ const routes = [
     (s, [machine], _, request) => {
       if (s.readiness.looked !== 'ok') return [200, s.readiness]
       // A machine no workspace names answers a re-check (write.rs `recheck`
-      // takes any name), and `asked` is what it answers.
-      if (request.method === 'POST' && s.asked?.[machine]) return [200, ok(s.asked[machine])]
+      // takes any name), and `asked` is what it answers. The daemon keeps it,
+      // so the GETs that follow serve it too.
+      if (request.method === 'POST' && s.asked?.[machine]) {
+        const report = { ...s.asked[machine], age_seconds: 0 }
+        s.readiness.data = [...s.readiness.data.filter((r) => r.machine !== machine), report]
+        return [200, ok(report)]
+      }
       const one = s.readiness.data.find((r) => r.machine === machine)
       if (one) return [200, ok(one)]
       // The GET is api.rs's (JSON); the POST is a verb in write.rs (a string).
-      const said = `no workspace names a machine called \`${machine}\`, so none was asked`
+      const said = `no check has reached a machine called \`${machine}\``
       return [404, request.method === 'GET' ? { error: said } : said]
     },
   ],

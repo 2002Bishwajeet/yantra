@@ -9,7 +9,7 @@ no *read* ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README
 keeps working with no daemon running — that is a decision, not a gap
 ([ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)).
 
-Every route below has a CLI equivalent, and that is the rule rather than a coincidence: anything the
+Every route below has a CLI equivalent, except `POST /api/viewing` and `GET /api/here`, and that is the rule rather than a coincidence: anything the
 web UI can do must be expressible in `yantra` first, which is what stops the daemon growing a richer
 API the CLI cannot reach.
 
@@ -49,6 +49,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) |
 | `GET /api/ssh-identity` | `yantra ssh-identity` (the read half — a GET makes no key) |
+| `GET /api/here` | no verb, because a terminal already runs on the machine it would name; names the tailnet machine the request came from, found by the caller's node id from `whois` and not by address (I-5, I-52); authorised like every route, and 503 when the last tailnet look is missing or failed |
 | `GET /join` | `yantra join-script` (outside `/api`; makes the key on first use) |
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
@@ -120,8 +121,11 @@ beat is the one thing on this route that `yantra ls machines` cannot yet show.
 
 `GET /api/readiness` is [D2](../../docs/design/02-setup.md) §3.1's checks per machine, swept in the
 background like every other read, and `GET /api/machines/{name}/readiness` is one machine of it. The
-sweep asks the machines a workspace names, so a machine none of them names is a `404` here even
-though `yantra doctor <machine>` would go and ask it.
+sweep asks the machines a workspace names and each online Linux or macOS machine you own on the
+tailnet. The daemon keeps
+the latest check of each machine in memory, with its own `age_seconds`, so a later sweep that skips
+the machine or fails does not lose it. A machine no check has reached is a `404` here even though
+`yantra doctor <machine>` would go and ask it.
 
 **`heartbeat` is the one check these routes answer and the terminal cannot.** The library reports it
 *unknown* from every caller it has, because the beats are in this process and nothing persists them;

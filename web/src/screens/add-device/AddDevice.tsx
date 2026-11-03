@@ -1,11 +1,11 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useRouter, useSearch } from '@tanstack/react-router'
-import { Plus } from 'lucide-react'
+import { Plus, Share2 } from 'lucide-react'
 import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
-import { useAbout, useMachines, useNotifications, useReadiness } from '@/api/hooks'
+import { useAbout, useMachines, useNotifications, useReadiness, useThisDevice } from '@/api/hooks'
 import { keys } from '@/api/keys'
 import { useRecheckReadiness } from '@/api/mutations'
 import { machineReadinessQuery } from '@/api/queries'
@@ -21,6 +21,7 @@ import { PageHeader } from '@/m3/page/PageHeader'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Stepper, type StepItem, type StepState } from '@/m3/stepper/Stepper'
 import { Text } from '@/m3/text/Text'
+import { useFormFactor } from '@/shell/formFactor'
 import { asEvents } from '@/shell/notifications'
 import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
@@ -93,6 +94,40 @@ function Code(props: { href: string }) {
   )
 }
 
+/** A phone is the device that sends a link, not the one that scans it: Copy and
+ *  Share lead, and the code waits for a press so its encoder loads only when
+ *  asked for. `navigator.share` needs a secure context, so plain HTTP has Copy. */
+function Shareable(props: { href: string; what: string }) {
+  const { href, what } = props
+  const [shown, setShown] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const share = async () => {
+    setFailed(false)
+    try {
+      await navigator.share({ title: what, url: href })
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError')) setFailed(true)
+    }
+  }
+  return (
+    <>
+      <Copyable text={href} what={what} />
+      <div className="add-device__actions">
+        {typeof navigator.share === 'function' ? (
+          <Button icon={<Share2 />} onClick={() => void share()} variant="tonal">
+            Share
+          </Button>
+        ) : null}
+        <Button aria-controls="add-device-qr" aria-expanded={shown} onClick={() => setShown(!shown)} variant="text">
+          {shown ? 'Hide QR code' : 'Show QR code'}
+        </Button>
+      </div>
+      {failed ? <Note>Sharing failed. Copy still works.</Note> : null}
+      <div id="add-device-qr">{shown ? <Code href={href} /> : null}</div>
+    </>
+  )
+}
+
 function Tailscale(props: { platform: Exclude<Platform, 'windows'> }) {
   const { platform } = props
   if (platform === 'linux') {
@@ -128,6 +163,27 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
   const about = useAbout()
   const here = useHere(platform, name)
   const device = name ?? 'the new device'
+  if (useFormFactor() === 'phone') {
+    return (
+      <div className="add-device__join">
+        <div className="add-device__join-text">
+          <Note>Send this page to {device}, and run the command there:</Note>
+          <Shareable href={here} what="this page's address" />
+          {platform === 'macos' ? (
+            <Note>
+              First turn on Remote Login: System Settings → General → Sharing. The join command cannot turn it on for
+              you.
+            </Note>
+          ) : null}
+          <Note>
+            Run this once in a terminal on {device}. It adds this appliance's key to the account that runs it and tells
+            the appliance which account that is.
+          </Note>
+          <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="add-device__join">
       <div className="add-device__join-text">
@@ -149,8 +205,8 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
   )
 }
 
-function Candidates(props: { list: Machine[]; platform: Platform }) {
-  const { list, platform } = props
+function Candidates(props: { list: Machine[]; platform: Platform; here: string | null }) {
+  const { list, platform, here } = props
   return (
     <>
       <Note>Already on the tailnet? Pick it:</Note>
@@ -159,6 +215,7 @@ function Candidates(props: { list: Machine[]; platform: Platform }) {
           <li key={one.name}>
             <Button render={<Link search={{ platform, machine: one.name }} to="/machines/add" />} role="link" variant="outlined">
               {one.name}
+              {one.name === here ? ' · this device' : ''}
             </Button>
           </li>
         ))}
@@ -273,6 +330,8 @@ function Following(props: { first: StepItem; machine: Machine; platform: Session
 function Flow(props: { platform: Exclude<Platform, 'windows'>; named: string | undefined }) {
   const { platform, named } = props
   const machines = useMachines()
+  const here = useThisDevice()
+  const phone = useFormFactor() === 'phone'
   const client = useQueryClient()
   const navigate = useNavigate({ from: '/machines/add' })
   const [opened] = useState(() => Date.now())
@@ -311,7 +370,7 @@ function Flow(props: { platform: Exclude<Platform, 'windows'>; named: string | u
           </Button>
         </div>
       ) : null}
-      {candidates.length ? <Candidates list={candidates} platform={platform} /> : null}
+      {candidates.length ? <Candidates here={here} list={candidates} platform={platform} /> : null}
     </>,
   )
 
@@ -327,12 +386,16 @@ function Flow(props: { platform: Exclude<Platform, 'windows'>; named: string | u
             Share → Add to Home Screen on an iPhone or iPad, the browser menu → Add to Home screen on Android. It opens
             the dashboard and runs no session, so nothing here waits on it.
           </Note>
-          <div className="add-device__join">
-            <div className="add-device__join-text">
-              <Copyable text={`${location.origin}/`} what="the dashboard's address" />
+          {phone ? (
+            <Shareable href={`${location.origin}/`} what="the dashboard's address" />
+          ) : (
+            <div className="add-device__join">
+              <div className="add-device__join-text">
+                <Copyable text={`${location.origin}/`} what="the dashboard's address" />
+              </div>
+              <Code href={`${location.origin}/`} />
             </div>
-            <Code href={`${location.origin}/`} />
-          </div>
+          )}
         </Card>
       </>
     )
@@ -373,6 +436,7 @@ export function AddDevice() {
   const search = useSearch({ from: '/machines/add' })
   const navigate = useNavigate({ from: '/machines/add' })
   const platform = search.platform ?? guessPlatform(navigator)
+  const here = useThisDevice()
   return (
     <Page className="add-device" width="reading">
       <PageHeader title="Add a device" />
@@ -392,6 +456,7 @@ export function AddDevice() {
           ))}
         </Segmented>
         <Note>{search.platform ? 'chosen by you' : 'guessed from this browser · pick another if it is wrong'}</Note>
+        {here ? <Note>You are using {here}.</Note> : null}
       </div>
       {platform === 'windows' ? <Windows /> : <Flow key={platform} named={search.machine} platform={platform} />}
     </Page>

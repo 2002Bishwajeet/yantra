@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { NOT_REACHED } from '@/api/client'
 import { looked } from '@/api/fixtures'
+import * as contract from '@/contract.gen'
 import { mount, unmount } from './harness'
 import { notReached } from './reached'
 
@@ -76,6 +77,21 @@ describe('the screen a dead daemon draws', () => {
     expect(within(alert).getByRole('heading', { name: 'Yantra cannot be reached' })).toBeTruthy()
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(screen.queryByText(/Providers could not be drawn/)).toBeNull()
+  })
+
+  /** The status reads wait for the workspace list, so their first ask comes
+   *  after the tap and fails too. Try again asks them again, not the next poll. */
+  it('asks the status reads again when Try again brings the daemon back', async () => {
+    const asked = mount('desktop', '/', { flaky: true })
+    const alert = await screen.findByRole('alert')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    const statuses = contract.workspaces.data.map((one) => `GET /api/workspaces/${one.name}/status`)
+    await waitFor(() => {
+      for (const status of statuses) expect(asked.filter((one) => one === status)).toHaveLength(2)
+    })
+    await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
+    await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(0))
   })
 
   it('draws nothing of itself while the daemon answers', async () => {

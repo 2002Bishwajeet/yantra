@@ -123,7 +123,7 @@ describe('the card agrees with the machine page, on the same report', () => {
   const asReading = (checks: Check[]) => ({
     looked: 'ok' as const,
     age_seconds: 0,
-    data: { machine: 'pi-5', checks },
+    data: { machine: 'pi-5', checks, age_seconds: 0 },
   })
 
   it('counts the same basics missing, including one the report never asked about', () => {

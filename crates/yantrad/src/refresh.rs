@@ -9,9 +9,9 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use yantra_core::attention::Forge;
 use yantra_core::github::{self, Github};
-use yantra_core::inventory::Inventory;
+use yantra_core::inventory::{Inventory, MachineInfo, Os, Ownership};
 use yantra_core::notify::Relay;
-use yantra_core::snapshot::{Reading, Snapshot};
+use yantra_core::snapshot::{Readiness, Reading, Snapshot};
 use yantra_core::{doctor, sessions, status, workspace};
 
 use crate::events::{self, Event, Events};
@@ -201,9 +201,51 @@ async fn look_at_sessions(model: &Model, chats: &crate::chat::Registry) {
 /// more than a session list does, and the rule about ssh on the request path is
 /// this module's whole subject. The `term` is [`crate::write::term`]'s, because
 /// nobody is sitting at this one either (I-36). An install runs it early (Y-386).
+///
+/// It also asks each online peer the dashboard counts as a machine (Y-579). The
+/// peers come from the last machines reading, so this adds no `tailscale` call.
 pub(crate) async fn look_at_readiness(model: &Model) {
-    let reading = Reading::new(doctor::fleet(crate::write::term()).await);
-    model.write().await.readiness = Some(Arc::new(reading));
+    let peers = candidates(&*model.read().await);
+    let reading = Reading::new(doctor::fleet_with(&peers, crate::write::term()).await);
+    settle(&mut *model.write().await, reading);
+}
+
+/// `runsSessions` in `web/src/lib/platform.ts`: the checks feed the dashboard's
+/// counts, and a node it does not admit is never counted (D7 S2, Y-404).
+fn counted(machine: &MachineInfo) -> bool {
+    machine.ownership == Ownership::Yours && matches!(machine.os, Os::Linux | Os::MacOs)
+}
+
+fn candidates(snapshot: &Snapshot) -> Vec<String> {
+    let tailnet = snapshot.machines.as_deref().map(Reading::value);
+    tailnet
+        .and_then(|looked| looked.as_ref().ok())
+        .into_iter()
+        .flatten()
+        .filter(|machine| machine.online && counted(machine))
+        .map(|machine| machine.name.clone())
+        .collect()
+}
+
+/// A sweep's reading lands here. A failed sweep says nothing about any machine,
+/// so it changes no kept check. An `Ok` sweep drops only a name that neither it
+/// nor the tailnet holds: `POST …/readiness` takes any name, so the map would
+/// otherwise grow without limit. No tailnet reading means nothing is known to
+/// be gone.
+pub(crate) fn settle(snapshot: &mut Snapshot, reading: Readiness) {
+    if let Ok(reports) = reading.value() {
+        for report in reports {
+            snapshot.keep(report.clone());
+        }
+        let tailnet = snapshot.machines.as_deref().map(Reading::value);
+        if let Some(Ok(tailnet)) = tailnet {
+            snapshot.checks.retain(|name, _| {
+                reports.iter().any(|report| report.machine == *name)
+                    || tailnet.iter().any(|machine| machine.name == *name)
+            });
+        }
+    }
+    snapshot.readiness = Some(Arc::new(reading));
 }
 
 /// Three round trips to GitHub, which is why it is here and not in a handler:
@@ -276,12 +318,12 @@ mod tests {
     use super::*;
     use std::net::IpAddr;
     use yantra_core::attention::{self, Attention};
-    use yantra_core::inventory::{Fake, MachineInfo, Os};
+    use yantra_core::inventory::Fake;
     use yantra_core::sessions::MachineSessions;
 
     fn machine(name: &str) -> MachineInfo {
         MachineInfo {
-            ownership: yantra_core::inventory::Ownership::Yours,
+            ownership: Ownership::Yours,
             id: format!("n-{name}"),
             name: name.to_string(),
             dns_name: format!("{name}.example.ts.net."),
@@ -424,6 +466,144 @@ mod tests {
             .as_ref()
             .expect_err("macbook did not answer");
         assert!(unreachable.to_string().contains("connection timed out"));
+    }
+
+    fn report(name: &str, detail: &str) -> doctor::Report {
+        doctor::Report {
+            machine: name.to_string(),
+            checks: vec![doctor::Check {
+                check: "reachable",
+                state: doctor::State::Present,
+                detail: detail.to_string(),
+            }],
+        }
+    }
+
+    fn detail(snapshot: &Snapshot, name: &str) -> String {
+        snapshot.checks[name].value().checks[0].detail.clone()
+    }
+
+    fn on_the_tailnet(machines: Vec<MachineInfo>) -> Snapshot {
+        Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(machines)))),
+            ..Snapshot::default()
+        }
+    }
+
+    fn failed_sweep() -> Readiness {
+        Reading::new(Err(doctor::Error::Interrupted {
+            machine: "pi".into(),
+            reason: "the task stopped".into(),
+        }))
+    }
+
+    /// An unknown fleet is not a changed one, and the sweep beside it still
+    /// reads as failed for a client that asks.
+    #[test]
+    fn a_failed_sweep_keeps_every_result_and_is_still_recorded() {
+        let mut snapshot = on_the_tailnet(vec![machine("pi")]);
+        settle(&mut snapshot, Reading::new(Ok(vec![report("pi", "old")])));
+
+        settle(&mut snapshot, failed_sweep());
+
+        assert_eq!(detail(&snapshot, "pi"), "old");
+        let last = snapshot.readiness.expect("the sweep was recorded");
+        assert!(last.value().is_err());
+    }
+
+    #[test]
+    fn a_sweep_that_answered_replaces_the_report_the_machine_had() {
+        let mut snapshot = on_the_tailnet(vec![machine("pi")]);
+        settle(&mut snapshot, Reading::new(Ok(vec![report("pi", "old")])));
+        settle(&mut snapshot, Reading::new(Ok(vec![report("pi", "new")])));
+        assert_eq!(detail(&snapshot, "pi"), "new");
+    }
+
+    /// `POST …/readiness` takes any name, so this is what bounds the map.
+    #[test]
+    fn a_name_gone_from_the_tailnet_and_the_sweep_is_dropped() {
+        let mut snapshot = on_the_tailnet(vec![machine("pi")]);
+        snapshot.keep(report("typo", "eleven unknowns"));
+
+        settle(&mut snapshot, Reading::new(Ok(vec![report("pi", "new")])));
+
+        assert!(!snapshot.checks.contains_key("typo"));
+        assert!(snapshot.checks.contains_key("pi"));
+    }
+
+    #[test]
+    fn an_offline_machine_the_sweep_skipped_keeps_its_result() {
+        let mut snapshot = on_the_tailnet(vec![MachineInfo {
+            online: false,
+            ..machine("pi")
+        }]);
+        snapshot.keep(report("pi", "from before it slept"));
+
+        assert!(candidates(&snapshot).is_empty(), "offline is not asked");
+        settle(&mut snapshot, Reading::new(Ok(Vec::new())));
+
+        assert_eq!(detail(&snapshot, "pi"), "from before it slept");
+    }
+
+    /// With no tailnet reading nothing says a name is gone, so nothing goes.
+    #[test]
+    fn a_tailnet_that_could_not_be_read_drops_nothing() {
+        let mut snapshot = Snapshot {
+            machines: Some(Arc::new(Reading::new(Err(
+                yantra_core::inventory::Error::Command {
+                    stderr: "failed to connect to local tailscaled".into(),
+                },
+            )))),
+            ..Snapshot::default()
+        };
+        snapshot.keep(report("pi", "kept"));
+
+        assert!(candidates(&snapshot).is_empty());
+        settle(&mut snapshot, Reading::new(Ok(Vec::new())));
+
+        assert_eq!(detail(&snapshot, "pi"), "kept");
+    }
+
+    #[test]
+    fn the_sweep_asks_the_tailnet_computers_and_no_phone() {
+        let snapshot = on_the_tailnet(vec![
+            machine("g14"),
+            MachineInfo {
+                os: Os::Ios,
+                ..machine("iphone")
+            },
+        ]);
+        assert_eq!(candidates(&snapshot), ["g14"]);
+    }
+
+    /// D7 S2: a node `runsSessions` does not admit gets no check and no count,
+    /// and `GET /api/readiness` is what the Settings count divides by.
+    #[test]
+    fn the_sweep_asks_only_the_machines_the_dashboard_counts() {
+        let snapshot = on_the_tailnet(vec![
+            machine("g14"),
+            MachineInfo {
+                os: Os::MacOs,
+                ..machine("mac")
+            },
+            MachineInfo {
+                os: Os::Windows,
+                ..machine("pc")
+            },
+            MachineInfo {
+                os: Os::Other("freebsd".into()),
+                ..machine("bsd")
+            },
+            MachineInfo {
+                ownership: Ownership::Shared,
+                ..machine("friend")
+            },
+            MachineInfo {
+                ownership: Ownership::Tagged,
+                ..machine("server")
+            },
+        ]);
+        assert_eq!(candidates(&snapshot), ["g14", "mac"]);
     }
 
     /// The same shape as the port: settable nowhere, and low enough that every

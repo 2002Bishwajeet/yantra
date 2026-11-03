@@ -15,12 +15,17 @@ const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 14
 /** The shell at one of the brief's three widths, over the contract fixtures —
  *  or, with `down`, over a proxy with no daemon behind it. `overrides`
  *  replaces one path's answer, for a class that failed or read differently
- *  while the rest of the fixture still answers normally. Returns every
- *  request the page made, method and path. */
+ *  while the rest of the fixture still answers normally. `flaky` fails each
+ *  path's first ask with that 502, as the e2e fixture's `flaky` does. Returns
+ *  every request the page made, method and path. */
 export function mount(
   size: FormFactor,
   path = '/',
-  options: { down?: boolean; overrides?: Record<string, { status?: number; body?: unknown }> } = {},
+  options: {
+    down?: boolean
+    flaky?: boolean
+    overrides?: Record<string, { status?: number; body?: unknown }>
+  } = {},
 ) {
   const asked: string[] = []
   const width = WIDTH[size]
@@ -37,10 +42,11 @@ export function mount(
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
+      const first = !asked.includes(`${init?.method ?? 'GET'} ${path}`)
       asked.push(`${init?.method ?? 'GET'} ${path}`)
       // Y-358: a 502 with an empty body is what Vite's proxy answers with
       // nothing behind it, and what a dead `yantrad` looks like from here.
-      if (options.down) return Promise.resolve(responded(502, ''))
+      if (options.down || (options.flaky && first)) return Promise.resolve(responded(502, ''))
       const override = options.overrides?.[path]
       if (override) return Promise.resolve(responded(override.status ?? 200, override.body))
       const status = /^\/api\/workspaces\/([^/]+)\/status$/.exec(path)
