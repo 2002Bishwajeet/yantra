@@ -5,7 +5,7 @@ export const meta = {
   phases: [
     { title: 'Triage', detail: 'rank the rows an agent can finish alone' },
     { title: 'Build', detail: 'plan, build, verify, fix' },
-    { title: 'Review', detail: 'independent review, fix, simplify' },
+    { title: 'Review', detail: 'independent review, fix, re-check' },
     { title: 'Ship', detail: 'one row at a time: rebase, tracker, PR, checks, merge' },
     { title: 'Report' },
   ],
@@ -121,31 +121,15 @@ const REVIEW_SCHEMA = {
     },
     minor: { type: 'array', items: { type: 'string' }, description: 'every other finding, one line each' },
     doneMet: { type: 'boolean', description: "the row's done condition is met and proved by a test" },
-    diffLines: { type: 'integer', description: 'added plus removed lines against origin/main' },
+    head: { type: 'string', description: 'git rev-parse HEAD of the worktree you reviewed' },
   },
-  required: ['blocking', 'minor', 'doneMet', 'diffLines'],
-}
-
-const SETUP_SCHEMA = {
-  type: 'object',
-  properties: { commitsAhead: { type: 'integer', minimum: 0 } },
-  required: ['commitsAhead'],
-}
-
-const REBASE_SCHEMA = {
-  type: 'object',
-  properties: {
-    ok: { type: 'boolean', description: 'false when the rebase had conflicts it could not resolve' },
-    codeChanged: { type: 'boolean', description: 'origin/main changed files this branch also touches, or the rebase needed a conflict resolution' },
-    failures: { type: 'string' },
-  },
-  required: ['ok', 'codeChanged'],
+  required: ['blocking', 'minor', 'doneMet', 'head'],
 }
 
 const SHIP_SCHEMA = {
   type: 'object',
   properties: {
-    status: { type: 'string', enum: ['merged', 'open', 'checks-failed', 'behind', 'failed'] },
+    status: { type: 'string', enum: ['merged', 'open', 'checks-failed', 'behind', 'needs-verify', 'failed'] },
     pr: { type: 'string' },
     failures: { type: 'string' },
   },
@@ -165,16 +149,27 @@ Priority, from CLAUDE.md §B7: 1 = closes or unblocks an open milestone, 2 = a d
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the paths it will touch. Put every row you rejected in skipped with one line of reason.`
 }
 
-function pickBatch(rows, n) {
-  const sorted = [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
-  const overlaps = (p, q) => p.startsWith(q) || q.startsWith(p)
-  const batch = []
-  for (const r of sorted) {
-    if (batch.length === n) break
-    if (batch.some((b) => b.paths.some((p) => r.paths.some((q) => overlaps(p, q))))) continue
-    batch.push(r)
-  }
-  return batch
+const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
+// Rows that touch the same paths never run at once.
+const clash = (a, b) => a.paths.some((p) => b.paths.some((q) => p.startsWith(q) || q.startsWith(p)))
+
+// Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
+const GATE_HOW = `The gate can take longer than a 10-minute Bash call: run it in the background with its output in a log file, and read only the tail of that log. Remove leftover podman containers afterwards.`
+
+// A web or docs row is built by Sonnet, so one Sonnet agent can run the gate and fix what it finds.
+async function verifyAndFix(row, wt, plan, label, attempts) {
+  return serialVerify(() =>
+    agent(
+      `Run the gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
+Gate: ${gate(row)}
+Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
+${GATE_HOW}
+If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the full gate once. Stop after ${attempts} full gate runs.
+A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
+If a Then command fails before any test runs because the command is wrong, not the code, correct it and return the corrected list as fixedChecks.${RULES(wt)}`,
+      { label: `gate:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'medium' },
+    ),
+  )
 }
 
 async function verify(row, wt, plan, label) {
@@ -184,8 +179,7 @@ async function verify(row, wt, plan, label) {
 Gate: ${gate(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
-The gate can take longer than a 10-minute Bash call: run it in the background and wait for it to finish.
-Remove leftover podman containers afterwards.`,
+${GATE_HOW}`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
   )
@@ -193,16 +187,21 @@ Remove leftover podman containers afterwards.`,
 
 async function fix(row, wt, what) {
   const b = BUILDER[row.kind]
-  // A web fix may regenerate baselines in a podman container, so it takes the verify lock.
-  const run = gate(row).includes('web-e2e') ? serialVerify : (fn) => fn()
-  return run(() => agent(
+  // The fixer holds the verify lock, so it may rerun the failing tests itself and the next gate run is the last.
+  return serialVerify(() => agent(
     `Fix ${row.id} in ${wt}. ${what}
-Find the cause before you change code. Commit the fix.${RULES(wt)}`,
+Find the cause before you change code. Commit the fix. You hold the test lock: rerun only the failing tests (one podman test with NEXTEST_TEST_THREADS=4, or one e2e spec) until they pass. Do not run the full gate.${RULES(wt)}`,
     { label: `fix:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   ))
 }
 
 async function verifyUntilGreen(row, wt, plan, rounds) {
+  const selfFix = row.kind === 'web' || row.kind === 'docs'
+  if (selfFix) {
+    const v = await verifyAndFix(row, wt, plan, 'g', rounds)
+    if (v?.fixedChecks?.length) plan.extraChecks = v.fixedChecks
+    return !!(v && v.pass)
+  }
   for (let i = 1; i <= rounds; i++) {
     const v = await verify(row, wt, plan, String(i))
     // A wrong check is the plan's bug, and no code fix can make it pass.
@@ -219,21 +218,16 @@ async function runRow(row) {
   const wt = `${WT_ROOT}/${branch}`
   const park = (reason) => ({ id: row.id, title: row.title, status: 'parked', reason, branch })
 
-  const setup = await agent(
-    `In ${REPO}: run git fetch origin. Then make ${wt} a worktree on branch ${branch}, keeping any work already on that branch:
+  // A retried row was parked on review findings, and only the report remembers them.
+  const retried = RETRY.includes(row.id) ? `\nThe owner asked to retry this parked row. Read why it was parked in the reports in ${REPO}/.claude/build-loop/, and fix those findings first.` : ''
+
+  const plan = await agent(
+    `First set up the worktree. In ${REPO}: git fetch origin. Keep any work already on branch ${branch}, and never reset or delete its commits: they are work a parked run kept.
 - If ${wt} exists, use it as it is.
 - Else if branch ${branch} exists, run git worktree add ${wt} ${branch}.
 - Else run git worktree add -b ${branch} ${wt} origin/main.
-Never reset or delete existing commits: they are work a parked run kept. Report how many commits ${branch} has ahead of origin/main.`,
-    { label: `setup:${row.id}`, phase: 'Build', schema: SETUP_SCHEMA, model: 'sonnet', effort: 'low' },
-  )
-  if (!setup) return park('the setup agent died')
-  // A retried row was parked on review findings, and only the report remembers them.
-  const retried = RETRY.includes(row.id) ? `\nThe owner asked to retry this parked row. Read why it was parked in the reports in ${REPO}/.claude/build-loop/, and fix those findings first.` : ''
-  const prior = setup.commitsAhead > 0 ? `\nThe branch already has ${setup.commitsAhead} commits from an earlier run. Read them (git log -p origin/main..HEAD) and plan from where they stop.` : ''
-
-  const plan = await agent(
-    `Plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${prior}${retried}
+If ${branch} has commits ahead of origin/main, read them (git log -p origin/main..HEAD) and plan from where they stop.
+Then plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${retried}
 Write a short plan and the checks that prove the row's done condition. Set park=true if the row needs something CLAUDE.md §B7 excludes.${RULES(wt)}`,
     { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, model: 'opus', effort: row.kind === 'rust-transport' ? 'high' : 'medium' },
   )
@@ -243,52 +237,41 @@ Write a short plan and the checks that prove the row's done condition. Set park=
   const b = BUILDER[row.kind]
   await agent(
     `Build ${row.id} ("${row.title}") in ${wt} to this plan:\n${plan.plan}\n
-Write the tests that prove the done condition first, then the code. Run the fast checks yourself and commit.${RULES(wt)}`,
+Write the tests that prove the done condition first, then the code. Run the fast checks yourself. Before you commit, load the simplify skill and apply it to git diff origin/main...HEAD, so the reviewer reads the final code. Commit.${RULES(wt)}`,
     { label: `build:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   )
   if (!(await verifyUntilGreen(row, wt, plan, 3))) return park('the gate stayed red after 3 rounds')
 
-  // Simplify runs before the last review, so no code merges that a reviewer has not read.
-  let simplified = false
-  let fixes = 0
-  for (let round = 1; ; round++) {
-    const r = await agent(
-      `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
+  const REVIEW_RULE = `Put every finding in blocking or minor; none may be dropped. A finding is blocking when it makes the feature fail on a platform the row or the crate targets, stalls or drops the user's work, leaves state wrong after a failure, leaks a secret or private text, or breaks a crate invariant or a CLAUDE.md rule. Anything you would call "should hold the merge" is blocking. Only style, cost, cleanup and unlikely edge cases are minor. Do not change any file.`
+  let r = await agent(
+    `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
 Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
-Put every finding of the review in blocking or minor; none may be dropped. A finding is blocking when it makes the feature fail on a platform the row or the crate targets, stalls or drops the user's work, leaves state wrong after a failure, leaks a secret or private text, or breaks a crate invariant or a CLAUDE.md rule. Anything you would call "should hold the merge" is blocking. Only style, cost, cleanup and unlikely edge cases are minor. Do not change any file.`,
-      { label: `review:${row.id}:${round}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
-    )
-    if (!r) return park('the reviewer died')
-    if (r.blocking.length === 0 && r.doneMet) {
-      if (r.diffLines <= 250 || simplified) break
-      simplified = true
-      await agent(
-        `In ${wt}, load the simplify skill and apply it to git diff origin/main...HEAD. Keep behaviour and tests unchanged. Commit.${RULES(wt)}`,
-        { label: `simplify:${row.id}`, phase: 'Review', model: 'sonnet', effort: 'medium' },
-      )
-      if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after simplify')
-      continue
-    }
-    if (++fixes > 1) return park(`review still blocking: ${r.blocking.map((x) => x.issue).join('; ') || 'done condition not met'}`)
-    const issues = r.blocking.map((x) => `- ${x.file}${x.line ? ':' + x.line : ''} ${x.issue}`).join('\n')
-    await fix(row, wt, `A reviewer found:\n${issues}${r.doneMet ? '' : "\n- The row's done condition is not met or not proved by a test."}`)
+${REVIEW_RULE}`,
+    { label: `review:${row.id}:1`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
+  )
+  // The 2026-11-02 run parked four rows after one fix, so a row gets two fixes, and a re-check reads only the findings and the fix.
+  for (let fixes = 1; r && !(r.blocking.length === 0 && r.doneMet); fixes++) {
+    if (fixes > 2) return park(`review still blocking: ${r.blocking.map((x) => x.issue).join('; ') || 'done condition not met'}`)
+    const issues = r.blocking.map((x) => `- ${x.file}${x.line ? ':' + x.line : ''} ${x.issue}`).join('\n') + (r.doneMet ? '' : "\n- The row's done condition is not met or not proved by a test.")
+    const base = r.head || 'HEAD~1'
+    await fix(row, wt, `A reviewer found:\n${issues}\nFix every point. A fix that changes the approach must also update the tests and the docs it touches.`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
+    r = await agent(
+      `Re-check the change for ${row.id} in ${wt}. You did not write it. An earlier review blocked it on:\n${issues}\n
+Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.
+${REVIEW_RULE}`,
+      { label: `review:${row.id}:${fixes + 1}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'medium' },
+    )
   }
+  if (!r) return park('the reviewer died')
 
   const title = `${row.id}: ${row.title.charAt(0).toLowerCase()}${row.title.slice(1)}`
-  const ship = () =>
-    serialShip(async () => {
-      const rb = await agent(
-        `In ${wt} on branch ${branch}: git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict.`,
-        { label: `rebase:${row.id}`, phase: 'Ship', schema: REBASE_SCHEMA, model: 'sonnet', effort: 'medium' },
-      )
-      if (!rb || !rb.ok) return { status: 'failed', failures: rb ? rb.failures || 'rebase conflicts' : 'the rebase agent died' }
-      if (rb.codeChanged) {
-        const v = await verify(row, wt, plan, 'rebase')
-        if (!v || !v.pass) return { status: 'failed', failures: v ? v.failures : 'the verifier died after the rebase' }
-      }
-      return agent(
-        `Ship ${row.id} from ${wt}, branch ${branch}. The branch is rebased on origin/main and the gate passed.
+  // verified: the gate has passed on the code as it stands after the rebase, so a second rebase cannot ask for another.
+  const ship = (verified) =>
+    serialShip(() =>
+      agent(
+        `Ship ${row.id} from ${wt}, branch ${branch}. The gate passed.
+0. git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict. If a conflict in any other file cannot be resolved, abort the rebase and return failed.${verified ? '' : ` If origin/main changed a file this branch also touches, outside tracker.md and docs/session-log.md, or a conflict there needed a resolution, stop here and return needs-verify.`}
 1. In tracker.md set the ${row.id} row to 🔵 review and add "**Merged ${TODAY}** by the build loop." with one line on what shipped. A row does not close in its own PR: a later release PR marks it ✅ done. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing. Skip this step if the row already says it.
 2. Append one entry to docs/session-log.md for ${TODAY}, in the style of the entries above it. Plain prose, CLAUDE.md §A6. Skip this step if the entry exists.
 3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
@@ -298,16 +281,21 @@ Put every finding of the review in blocking or minor; none may be dropped. A fin
 6. Merge with gh pr merge --squash --delete-branch --subject "${title} (#<pr number>)". If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
 7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
-      )
-    })
+      ),
+    )
 
-  let s = await ship()
+  let s = await ship(false)
+  if (s && s.status === 'needs-verify') {
+    if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after the rebase')
+    s = await ship(true)
+  }
   if (s && s.status === 'checks-failed') {
     await fix(row, wt, `CI failed on the PR ${s.pr || ''}:\n${s.failures || ''}`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return { ...park('CI failed and the fix did not pass the gate'), pr: s.pr }
-    s = await ship()
+    s = await ship(false)
   }
-  if (s && s.status === 'behind') s = await ship()
+  if (s && s.status === 'behind') s = await ship(false)
+  if (s && s.status === 'needs-verify') return park('origin/main moved under the branch twice; rerun to verify the rebase')
   if (!s) return park('the shipper died')
   return { id: row.id, title: row.title, status: s.status, pr: s.pr || '', reason: s.failures || '', branch }
 }
@@ -317,20 +305,31 @@ const results = []
 const skipped = new Map()
 const only = A.rows || null
 
-while (results.length < MAX_ROWS) {
-  phase('Triage')
-  const t = await agent(triagePrompt([...attempted]), { label: 'triage', phase: 'Triage', schema: TRIAGE_SCHEMA, model: 'opus', effort: 'medium' })
-  if (!t) break
-  for (const s of t.skipped) skipped.set(s.id, s.reason)
-  const pool = t.rows.filter((r) => !attempted.has(r.id) && (!only || only.includes(r.id)))
-  const batch = pickBatch(pool, Math.min(PARALLEL, MAX_ROWS - results.length))
-  if (!batch.length) break
-  log(`Batch: ${batch.map((r) => `${r.id} (p${r.priority}, ${r.kind})`).join(', ')}`)
-  batch.forEach((r) => attempted.add(r.id))
-  const out = await parallel(batch.map((r) => () => runRow(r)))
-  out.forEach((o, i) => results.push(o || { id: batch[i].id, title: batch[i].title, status: 'parked', reason: 'the row agent died' }))
+// One triage serves the run: the 2026-11-02 run re-triaged before every batch and got the same ranking four times.
+phase('Triage')
+const t = await agent(triagePrompt([]), { label: 'triage', phase: 'Triage', schema: TRIAGE_SCHEMA, model: 'opus', effort: 'medium' })
+if (t) for (const s of t.skipped) skipped.set(s.id, s.reason)
+// A pool, not batches: a row starts as soon as a slot frees, so one slow row no longer holds the next two.
+const pool = t ? rank(t.rows.filter((r) => !only || only.includes(r.id))) : []
+const running = new Map()
+for (;;) {
+  while (running.size < PARALLEL && results.length + running.size < MAX_ROWS) {
+    const r = pool.find((x) => !attempted.has(x.id) && ![...running.values()].some((y) => clash(x, y.row)))
+    if (!r) break
+    attempted.add(r.id)
+    log(`Start: ${r.id} (p${r.priority}, ${r.kind})`)
+    const done = runRow(r)
+      .catch(() => null)
+      .then((o) => {
+        results.push(o || { id: r.id, title: r.title, status: 'parked', reason: 'the row agent died' })
+        running.delete(r.id)
+      })
+    running.set(r.id, { row: r, done })
+  }
+  if (!running.size) break
+  await Promise.race([...running.values()].map((x) => x.done))
 }
-if (results.length >= MAX_ROWS) log(`Stopped at maxRows=${MAX_ROWS}; more rows may be eligible.`)
+if (pool.some((r) => !attempted.has(r.id))) log(`Stopped at maxRows=${MAX_ROWS}; ${pool.filter((r) => !attempted.has(r.id)).map((r) => r.id).join(', ')} not started.`)
 
 phase('Report')
 await agent(
