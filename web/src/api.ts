@@ -432,6 +432,11 @@ export type Event = {
     | 'installed'
     | 'install_stopped'
     | 'joined'
+    // The appliance's PR watch (Y-494). `said` names the workspace and the PR
+    // number, and `machine` is null: the event came from GitHub.
+    | 'check_failed'
+    | 'checks_passed'
+    | 'reviewed'
   workspace: string | null
   machine: string | null
   // The sentence the relay was, or would have been, sent.

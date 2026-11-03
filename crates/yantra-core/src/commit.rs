@@ -107,6 +107,9 @@ pub struct Pushed {
 /// A thread's PR. `created` is `false` when one was already open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Opened {
+    /// The repository the PR is on, which the appliance's watch keys by.
+    pub owner: String,
+    pub repo: String,
     pub number: u64,
     pub url: String,
     pub created: bool,
@@ -534,6 +537,8 @@ pub async fn open_pr<E: Exec>(
         Ok(pull
             .filter(|pull| pull.state == PullState::Open)
             .map(|pull| Opened {
+                owner: owner.clone(),
+                repo: repo.clone(),
                 number: pull.number,
                 url: pull.url,
                 created: false,
@@ -573,6 +578,8 @@ pub async fn open_pr<E: Exec>(
         .await
     {
         Ok(pull) => Ok(Opened {
+            owner,
+            repo,
             number: pull.number,
             url: pull.url,
             created: true,
@@ -1256,6 +1263,8 @@ mod tests {
         assert_eq!(
             opened,
             Opened {
+                owner: "o".to_owned(),
+                repo: "r".to_owned(),
                 number: 21,
                 url: "https://github.com/o/r/pull/21".to_owned(),
                 created: true,
@@ -1459,6 +1468,8 @@ mod tests {
         assert_eq!(
             opened,
             Opened {
+                owner: "o".to_owned(),
+                repo: "r".to_owned(),
                 number: 21,
                 url: "https://github.com/o/r/pull/21".to_owned(),
                 created: false,

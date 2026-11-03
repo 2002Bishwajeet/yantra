@@ -221,6 +221,29 @@ than held, so closing the tab does not deliver a backlog of things the page alre
 memory and a restart forgets it, which is Y-044 exactly as written — that state is not the exception
 ADR-0021 carved.
 
+**The PR watch is the second caller of the relay** (Y-494, [`watch.rs`](src/watch.rs)). It runs on
+its own task in `refresh.rs` and keeps the agents notifier's rules through the shared `notify::Teller`:
+remembered first, not pushed while a dashboard is open, one 5 s budget, no retry, and the quiet
+`Log`. Its notes are *Check failed*, *Checks passed* and *PR reviewed*. The body is
+`{workspace}: PR #{n} …`, cut at 160 characters, with no repo, no check output and no review text.
+**Its reads are conditional**: each sends the last `ETag` back as `If-None-Match`, so an unchanged PR
+costs GitHub no quota, and a 304 reuses what the watch already holds.
+
+## The PR watch
+
+The appliance watches each thread's open PR, so a check that fails while the laptop sleeps still
+reaches the phone ([M16](../../docs/plans/m16-the-coding-loop.md) §3.6).
+
+- **It keeps nothing on disk.** `Fleet::pulls` is memory, and ADR-0034 decision 3 is why: the PR is
+  derived from the thread's upstream. At start, `watch::discover` rebuilds it, on the `ATTENTION`
+  clock, from `thread::open_pulls` for every workspace. `pr open` adds the PR it answered at once.
+- **The first look at a PR says nothing.** It records a baseline, as the agents notifier does, so a
+  restart does not repeat what was said before it.
+- **A failed look tells nobody anything.** Discovery removes nothing when a machine is asleep. A PR
+  leaves the watch when it merges, when it closes, or after eight failed looks in a row, as T3 Code's
+  does; discovery adds an open one back.
+- **No grant, no look.** Both tasks read the grant at each pass and do nothing without one.
+
 ## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,

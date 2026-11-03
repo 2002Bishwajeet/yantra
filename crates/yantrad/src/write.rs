@@ -1685,6 +1685,17 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
     )
     .await
     .map_err(refuse_commit)?;
+    crate::watch::track(
+        &state.fleet.pulls,
+        yantra_core::thread::Watched {
+            workspace: name,
+            owner: opened.owner,
+            repo: opened.repo,
+            number: opened.number,
+            url: opened.url.clone(),
+        },
+    )
+    .await;
     Ok(Json(ThreadPrOpened {
         number: opened.number,
         url: opened.url,

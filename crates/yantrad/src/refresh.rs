@@ -17,7 +17,8 @@ use yantra_core::{doctor, sessions, status, workspace};
 use crate::events::{self, Event, Events};
 use crate::github::Grant;
 use crate::heartbeat::Fleet;
-use crate::notify::{Notifier, Viewers};
+use crate::notify::{Notifier, Teller, Viewers};
+use crate::watch;
 
 /// `ssh.rs` sets `ControlPersist=300`, so anything under five minutes keeps
 /// every ssh master warm — the poll is what makes the fleet fast rather than a
@@ -31,6 +32,10 @@ const EVERY: Duration = Duration::from_secs(30);
 /// would poll it at twice the rate its server requests. Three classes share
 /// it since Y-342: the inbox, the repository list, and the grant check.
 const ATTENTION: Duration = Duration::from_secs(300);
+
+/// M16 §3.6, after T3 Code: each watched PR is read every two minutes. The
+/// reads are conditional, so a PR that did not change spends no quota.
+const PULLS: Duration = Duration::from_secs(120);
 
 /// ADR-0027 §2: the published version is read hourly and never on the
 /// request path. One call an hour fits even GitHub's anonymous sixty.
@@ -59,6 +64,7 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     inventory: I,
     grant: Grant,
     relay: Option<Relay>,
+    pulls_relay: Option<Relay>,
 ) {
     let model = &fleet.model;
     let viewers = fleet.viewers.clone();
@@ -131,6 +137,30 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
         loop {
             look_at_release(&release, &reader, &Github::default()).await;
             tokio::time::sleep(RELEASE).await;
+        }
+    });
+
+    let pulls = fleet.pulls.clone();
+    let reading = grant.clone();
+    let (watchers, told) = (fleet.viewers.clone(), fleet.events.clone());
+    tokio::spawn(async move {
+        let mut teller = Teller::new(pulls_relay);
+        let github = Github::default();
+        loop {
+            let token = reading.token().await;
+            watch::poll(&pulls, &github, token, &mut teller, &watchers, &told).await;
+            tokio::time::sleep(PULLS).await;
+        }
+    });
+
+    // Also the rebuild at start: the watch keeps nothing across a restart.
+    let found = fleet.pulls.clone();
+    let finding = grant.clone();
+    tokio::spawn(async move {
+        let github = Github::default();
+        loop {
+            watch::discover(&found, &github, finding.token().await).await;
+            tick_or_change(&finding).await;
         }
     });
 

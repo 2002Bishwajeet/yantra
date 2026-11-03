@@ -453,6 +453,30 @@ export const notifications = {
   "age_seconds": 0,
   "data": [
     {
+      "at": 1785523080,
+      "commands": [],
+      "kind": "reviewed",
+      "machine": null,
+      "said": "api: PR #21 has a new review",
+      "workspace": "api"
+    },
+    {
+      "at": 1785523020,
+      "commands": [],
+      "kind": "checks_passed",
+      "machine": null,
+      "said": "api: PR #21 passed its checks",
+      "workspace": "api"
+    },
+    {
+      "at": 1785522960,
+      "commands": [],
+      "kind": "check_failed",
+      "machine": null,
+      "said": "api: PR #21 has a failed check",
+      "workspace": "api"
+    },
+    {
       "at": 1785522900,
       "commands": [],
       "kept": false,
