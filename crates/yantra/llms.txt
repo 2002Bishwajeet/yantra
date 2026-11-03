@@ -3,7 +3,7 @@
 > The command-line client, and the daemon's first client. It renders and chooses exit codes; every
 > decision about what is true belongs to `yantra-core` (ADR-0005). It calls that crate in-process
 > today and becomes an HTTP client of `yantrad` later — a change of *where* the work is called from,
-> not *what* it does. `src/main.rs`, and `src/mcp.rs` and `src/why.rs` for the nine verbs that call the daemon.
+> not *what* it does. `src/main.rs`, and `src/mcp.rs`, `src/why.rs` and `src/dash.rs` for the ten verbs that call the daemon.
 
 ## Commands
 
@@ -51,6 +51,7 @@
 - `yantra room resume <room> --daemon <url>`: lifts a room's pause after its 20-message budget, through `POST /api/rooms/{room}/resume` (Y-534).
 - `yantra room post <room> <text> --daemon <url>`: writes into a room as the owner through `POST /api/rooms/{room}/messages` (Y-536). The count goes to 0, the pause lifts, and every agent thread in the room wakes. It prints how many members see it.
 - `yantra why [<workspace>] [--repo owner/name | --path <folder>] --daemon <url>`: ranks the owner's machines whose heartbeat arrived within 30 s, and says why each one won, lost or was rejected (Y-452). It reads `yantrad`'s `GET /api/machines`, because the beats live only in the daemon's memory. The table prints RAM, CPU, power, REPO and AFFIN, each term the score sums (I-10). With only a workspace, AFFIN is 20 on its machine and REPO is 0. With `--repo` or `--path`, core's `placement::ask` asks each fresh machine over ssh whether it holds the target and matches the local workspaces, the same call `POST /api/placement` makes, so the ranking is the new-session page's (Y-517); a loser's line names its largest gap with both raw readings, and a rejection gives ADR-0013 §7's reason and the beat's age. It marks the workspace's own machine. It exits 1 when no machine ranks, when the daemon cannot be reached or answers badly, and when the workspace is missing.
+- `yantra dash --daemon <url> [--view-only]`: the fleet in a Ratatui terminal dashboard (Y-592). It reads `GET /api/machines`, `/api/workspaces`, `/api/sessions`, `/api/attention` and each workspace's `/status` every 2 s. It draws three blocks: Needs you, Sessions and Machines. Each session row is marked blocked, working, done, idle, or `?` when its state was not read. A class that failed or was not read shows its reason and never draws as empty (R-23). Enter attaches to the selected session through `ssh -t` and tmux, as `attach` does, and the dashboard comes back after the detach. `--view-only` sends no key to a session. A daemon it cannot reach is drawn on the screen, and it polls again. It exits 0 on `q` or Esc, and 1 when stdin or stdout is not a terminal.
 - `yantra join-script`: print the join command's script — the bytes `GET /join` serves — for this account's key and this machine's tailnet address, making the key if there is none. Only the script goes to stdout (Y-387).
 
 ## Source
@@ -58,6 +59,7 @@
 - [src/main.rs](src/main.rs): the crate. Clap definitions at the top, one `async fn` per command, then the `render_*` and `describe` helpers, then tests.
 - [src/mcp.rs](src/mcp.rs): `yantra mcp` — the JSON-RPC loop, the seven task tools and their schemas, the two room tools it forwards, `resume`, `post_message`, `create`, `list`, `show`, `edit`, `remove`, and the HTTP calls to `yantrad` over `ureq`. Its tests answer from a loopback axum daemon.
 - [src/why.rs](src/why.rs): `yantra why` — the `GET /api/machines` call over `ureq`, a serde struct that reads only the fields the scorer needs, `placement::ask` when a target is given, and `render`, which is pure. Its tests answer from a loopback axum daemon too.
+- [src/dash.rs](src/dash.rs): `yantra dash` — the five reads over `ureq`, the pure `board`, `on_key` and `render`, and the loop that spawns `ssh` to attach. Its tests draw through ratatui's `TestBackend` and answer from a loopback axum daemon.
 
 ## Conventions that are contracts
 

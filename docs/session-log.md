@@ -354,3 +354,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-550](../tracker.md#3-task-board) is in review.** A room now belongs to a workspace. `yantra room new|ls|show|rm` and `POST`, `PATCH` and `DELETE /api/rooms` write `~/.config/yantra/rooms/<name>.toml`. A restart reloads each room with one system message. Unit tests cover bad names and the reload.
 
 - **2026-11-03** — **[Y-515](../tracker.md#3-task-board) is in review.** `GET` and `PUT /api/layout` and `yantra layout` now read and write `dashboard.json` in the daemon. A write with a stale `rev` gets 409, and the file is written atomically. A podman test proves both.
+
+- **2026-11-03** — **[Y-592](../tracker.md#3-task-board) is in review.** `yantra dash` is a terminal dashboard. It lists machines, sessions and what needs the owner from the daemon, and marks each agent's state. Enter attaches, and a view-only mode serves an appliance console. Unit tests cover the view logic.

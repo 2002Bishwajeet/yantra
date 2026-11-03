@@ -60,6 +60,7 @@ yantra room resume <room> --daemon http://<appliance>:7717  # lift a room's paus
 yantra room post <room> <text> --daemon http://<appliance>:7717  # write into a room as the owner; its count goes to 0
 yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost
 yantra why --repo owner/name --daemon http://<appliance>:7717  # the same, scoring where the repo is, as new session does
+yantra dash --daemon http://<appliance>:7717  # the fleet in the terminal; enter attaches, detach to come back
 ```
 
 Workspaces are TOML files in `~/.config/yantra/workspaces/<name>.toml`:
