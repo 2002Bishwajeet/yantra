@@ -1006,7 +1006,7 @@ impl AgentState {
 // `expect` in a test is a deliberate abort with a message; the workspace lint
 // targets the daemon, where the same call would take it down.
 #[allow(clippy::expect_used)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -1041,7 +1041,7 @@ mod tests {
         )
     }
 
-    async fn get_json(fleet: Fleet, path: &str) -> Value {
+    pub(crate) async fn get_json(fleet: Fleet, path: &str) -> Value {
         let (status, body) = get(fleet, path).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         body
@@ -1604,7 +1604,7 @@ mod tests {
         );
     }
 
-    fn sweep_that_failed() -> yantra_core::snapshot::Readiness {
+    pub(crate) fn sweep_that_failed() -> yantra_core::snapshot::Readiness {
         Reading::new(Err(doctor::Error::Interrupted {
             machine: "pi".into(),
             reason: "the task stopped".into(),
