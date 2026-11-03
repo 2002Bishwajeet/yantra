@@ -1,19 +1,22 @@
 # The only job in the repo that builds Rust from npm's output, and the reason it
-# is a workflow of its own rather than a job in ci.yml: ci.yml has no path filter,
-# so a Node step there would run on every Rust pull request — R-24 in full, on the
+# is a workflow of its own rather than a job in ci.yml: ci.yml runs on every
+# Rust input, so a Node step there would run on every Rust pull request — R-24 in full, on the
 # first day. The five jobs in ci.yml stay Node-free, and `just no-node` reds the
 # build if that ever stops being true.
 #
 # The filter names the two things that can break this build and nothing else: the
-# crate whose feature-gated code compiles the assets in, and the assets. A change
-# to yantra-core or the CLI cannot affect it, and pays nothing for it.
+# crate whose feature-gated code compiles the assets in, and the files that shape
+# the built assets. A change to a component or to yantra-core cannot affect it (Y-607).
 name: embed
 
 on:
   pull_request:
     paths:
       - 'crates/yantrad/**'
-      - 'web/**'
+      - 'web/package*.json'
+      - 'web/index.html'
+      - 'web/vite.config.*'
+      - 'web/public/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'justfile'
@@ -22,7 +25,10 @@ on:
     branches: [main]
     paths:
       - 'crates/yantrad/**'
-      - 'web/**'
+      - 'web/package*.json'
+      - 'web/index.html'
+      - 'web/vite.config.*'
+      - 'web/public/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'justfile'

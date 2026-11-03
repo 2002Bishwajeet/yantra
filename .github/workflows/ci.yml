@@ -28,8 +28,33 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  changes:
+    # A PR that touches no Rust input skips the Rust jobs; a skipped required check passes (Y-607).
+    # A push to main, or a failed read here, runs everything.
+    name: changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PR" ]; then echo rust=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
+          printf '%s\n' "$files"
+          rust='^(crates/|box/|\.cargo/|\.github/actions/|\.github/workflows/ci\.yml$|Cargo\.(toml|lock)$|rust-toolchain\.toml$|rustfmt\.toml$|deny\.toml$|justfile$|install\.sh$|web/src/contract\.gen\.ts$)'
+          if grep -qE "$rust" <<<"$files"; then echo rust=true; else echo rust=false; fi >> "$GITHUB_OUTPUT"
+
   fmt:
     name: fmt
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,6 +67,8 @@ jobs:
 
   clippy:
     name: clippy
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,6 +85,8 @@ jobs:
   test-shard:
     # The suite is CPU-bound on a 4-core runner, so two runners halve it; 8 threads on one did not (Y-605).
     name: test (${{ matrix.shard }}/2)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -96,10 +125,12 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - run: test "${{ needs.test-shard.result }}" = success
+      - run: test "${{ needs.test-shard.result }}" = success -o "${{ needs.test-shard.result }}" = skipped
 
   deny:
     name: deny
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -150,6 +181,8 @@ jobs:
     # that this file is green proves the default build works, never that no job
     # here turned the embed feature on to get there. See the recipe.
     name: no-node
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -166,6 +199,8 @@ jobs:
     # stubs that fail. The job above reads what the recipes say; this one is
     # what a `build.rs` shelling out to npm actually meets.
     name: build without node
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,6 +217,8 @@ jobs:
     # The Pi 5 appliance target. ADR-0004 chose Rust partly because this build
     # is a one-liner, so it is a first-class gate rather than a release detail.
     name: cross (aarch64-unknown-linux-musl)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
