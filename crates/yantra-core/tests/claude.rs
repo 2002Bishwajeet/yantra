@@ -1,6 +1,7 @@
 //! Y-356 against a real `claude` in the podman fixture, per §B3: a chat turn
 //! streams, resumes, asks before a tool and stops when it is cancelled, and
-//! (Y-424) reads an image pasted into the chat.
+//! (Y-424) reads an image pasted into the chat, and (Y-565) writes nothing in
+//! plan mode.
 //!
 //! It logs in with the owner's own credentials, copied in read-only
 //! (docs/development.md#testing). Without them it skips, and
@@ -15,7 +16,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use common::{SshFixture, USER};
-use yantra_core::chat::{Decision, Event, PermissionMode, StreamKind, TurnCompleted, TurnState};
+use yantra_core::chat::{
+    Decision, Event, Interaction, PermissionMode, StreamKind, TurnCompleted, TurnState,
+};
 use yantra_core::claude::{Events, Turn};
 use yantra_core::image::Images;
 use yantra_core::keep::Keeper;
@@ -65,7 +68,28 @@ async fn run(
     images: Option<&str>,
     answer: Option<Decision>,
 ) -> Result<Vec<Event>> {
-    let (turn, mut events) = Turn::start(ssh, place, text, images, PermissionMode::Supervised)?;
+    run_in(
+        ssh,
+        place,
+        text,
+        images,
+        answer,
+        PermissionMode::Supervised,
+        Interaction::Build,
+    )
+    .await
+}
+
+async fn run_in(
+    ssh: &Ssh,
+    place: &Place,
+    text: &str,
+    images: Option<&str>,
+    answer: Option<Decision>,
+    mode: PermissionMode,
+    interaction: Interaction,
+) -> Result<Vec<Event>> {
+    let (turn, mut events) = Turn::start(ssh, place, text, images, mode, interaction)?;
     let mut seen = Vec::new();
     tokio::time::timeout(PATIENCE, async {
         while let Some(next) = events.recv().await {
@@ -252,6 +276,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         "Count from 1 to 400, one number per line, with no tools.",
         None,
         PermissionMode::Supervised,
+        Interaction::Build,
     )?;
     next_delta(&mut events).await?;
     turn.cancel();
@@ -317,5 +342,53 @@ async fn a_real_claude_reads_a_pasted_image() -> Result<()> {
     );
     assert!(text(&seen).to_lowercase().contains("red"), "{seen:?}");
     images.remove(&ssh).await?;
+    Ok(())
+}
+
+/// Y-565: a plan turn writes nothing, even in Full access with every request
+/// accepted. Claude proposes the plan with `ExitPlanMode`, which the daemon
+/// denies without asking.
+#[tokio::test]
+async fn a_real_claude_in_plan_mode_writes_no_file() -> Result<()> {
+    let Some((fixture, ssh, place)) = signed_in("plan").await? else {
+        return Ok(());
+    };
+    let seen = run_in(
+        &ssh,
+        &place,
+        "Create a file named plan-proof.txt that holds the word proof. \
+         Use the Bash tool: echo proof > plan-proof.txt",
+        None,
+        Some(Decision::Accept),
+        PermissionMode::FullAccess,
+        Interaction::Plan,
+    )
+    .await?;
+    assert_eq!(
+        completed(&seen).map(|done| done.state),
+        Some(TurnState::Completed),
+        "{seen:?}"
+    );
+    // Only an `ExitPlanMode` item starts with output: the plan.
+    let plans: Vec<&str> = seen
+        .iter()
+        .filter_map(|event| match event {
+            Event::ItemStarted(item) if item.output.is_some() => Some(item.item_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !seen
+            .iter()
+            .any(|event| matches!(event, Event::RequestOpened(opened)
+            if opened.item_id.as_deref().is_some_and(|id| plans.contains(&id)))),
+        "ExitPlanMode reached the person: {seen:?}"
+    );
+    let status = fixture.run(&format!(
+        "cd '{}' && git status --porcelain",
+        place.worktree
+    ))?;
+    assert!(status.trim().is_empty(), "{status}: {seen:?}");
+    fixture.run(&format!("test ! -e '{}/plan-proof.txt'", place.worktree))?;
     Ok(())
 }

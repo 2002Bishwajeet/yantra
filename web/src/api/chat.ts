@@ -8,6 +8,7 @@ import {
   type ChatNotAttached,
   type Decision,
   type Harness,
+  type Interaction,
   type PermissionMode,
   type ThreadEvent,
 } from '@/api/thread'
@@ -143,7 +144,7 @@ export const PAUSES: readonly number[] = [1_000, 2_000, 4_000, 8_000, 8_000]
 export type ChatSocket = {
   /** `false` when the socket is not open, so nothing was sent. */
   /** `harness` opens a thread; the daemon ignores it on a later turn. */
-  send: (text: string, harness?: Harness, mode?: PermissionMode) => boolean
+  send: (text: string, harness?: Harness, mode?: PermissionMode, interaction?: Interaction) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
@@ -411,8 +412,14 @@ export function openChat(
   waiting = setTimeout(open, 0)
 
   return {
-    send: (text, harness, mode) => {
-      const sent = send({ type: 'turn', text, ...(harness ? { harness } : {}), ...(mode ? { mode } : {}) })
+    send: (text, harness, mode, interaction) => {
+      const sent = send({
+        type: 'turn',
+        text,
+        ...(harness ? { harness } : {}),
+        ...(mode ? { mode } : {}),
+        ...(interaction === 'plan' ? { interaction } : {}),
+      })
       // A turn that fails before it starts still gets its own error.
       if (sent) turn = ++sends
       return sent

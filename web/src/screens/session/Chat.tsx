@@ -5,7 +5,14 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { Workspace } from '@/api'
 import { IMAGE_TYPES, type ChatError } from '@/api/chat'
-import { LABEL, type Harness, type ItemType, type PermissionMode, type RequestOpened } from '@/api/thread'
+import {
+  LABEL,
+  type Harness,
+  type Interaction,
+  type ItemType,
+  type PermissionMode,
+  type RequestOpened,
+} from '@/api/thread'
 import { Attachments } from '@/composer/Attachments'
 import * as Composer from '@/composer/Composer'
 import { Icon as ControlIcon, Control, Separator } from '@/composer/Control'
@@ -30,8 +37,9 @@ import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
 import { useEditors } from './diff/useEditors'
 import { HarnessPicker } from './HarnessPicker'
-import { keepMode, recallMode } from './mode'
+import { keepInteraction, keepMode, recallInteraction, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
+import { PlanToggle } from './PlanToggle'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
@@ -232,11 +240,17 @@ export function Chat(props: ChatProps) {
   useEffect(() => {
     if (timeline.thread) keepMode(timeline.thread, mode)
   }, [timeline.thread, mode])
+  const [interaction, setInteraction] = useState<Interaction>(() => recallInteraction(thread))
+  useEffect(() => {
+    if (timeline.thread) keepInteraction(timeline.thread, interaction)
+  }, [timeline.thread, interaction])
   // An attach knows its thread before the daemon says whose it is, so until
   // then it names no harness rather than the picker's default.
   const locked = timeline.thread !== null
   const harness = timeline.harness ?? error?.login?.harness ?? (locked ? null : picked)
   const agent = harness ? LABEL[harness] : 'the agent'
+  // Only Claude has a plan mode, so another harness's turn is a build turn whatever was kept.
+  const planning = harness === 'claude' ? interaction : 'build'
   // A first turn refused for its login never reaches the timeline, so the
   // words it carried come back to the composer. Its images do not: the
   // daemon removes them when the client closes the socket.
@@ -293,7 +307,7 @@ export function Chat(props: ChatProps) {
 
   const send = () => {
     if (text === '' || uploading) return
-    if (chat.send(text, locked ? undefined : picked, mode)) {
+    if (chat.send(text, locked ? undefined : picked, mode, planning)) {
       lastSent.current = draft.trim()
       recalled.current = null
       setDraft('')
@@ -559,6 +573,13 @@ export function Chat(props: ChatProps) {
                   />
                 ) : null}
                 <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
+                <PlanToggle
+                  disabled={
+                    link !== 'open' ? 'The chat is not connected' : harness !== 'claude' ? 'Plan mode needs Claude' : undefined
+                  }
+                  onChange={setInteraction}
+                  value={planning}
+                />
               </>
             }
           />

@@ -39,6 +39,12 @@
 //! attached to see sends one Y-451 notification, which names only the
 //! workspace and the thread.
 //!
+//! **A `turn` may carry `interaction: plan`** (Y-565), on a Claude thread
+//! only; any other harness gets `badFrame`. Claude runs in its own plan mode,
+//! and the turn runs as `supervised` whatever its mode, so the daemon accepts
+//! nothing for it and the keeper's `mode` file says `supervised`. A room wake
+//! is never a plan turn.
+//!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
 //! `turn.diff.updated`, and `revert` puts the files back as a checkpoint kept
@@ -80,8 +86,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Event, PermissionMode, RequestOption, Scope, StopReason, StreamKind,
-    ThreadEvent, TurnDiff, TurnState,
+    ContentDelta, Decision, Event, Interaction, PermissionMode, RequestOption, Scope, StopReason,
+    StreamKind, ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Turn};
@@ -248,6 +254,10 @@ enum Frame {
         /// Holds for this turn; the browser keeps it between turns.
         #[serde(default)]
         mode: PermissionMode,
+        /// Holds for this turn, as `mode` does. Only Claude has a plan mode.
+        #[serde(default)]
+        #[cfg_attr(test, serde(skip_serializing_if = "is_build"))]
+        interaction: Interaction,
     },
     Answer {
         #[serde(rename = "requestId")]
@@ -369,22 +379,30 @@ impl QueueFrame {
     }
 }
 
+/// The browser sends no `interaction` for a build turn.
+#[cfg(test)]
+fn is_build(interaction: &Interaction) -> bool {
+    *interaction == Interaction::Build
+}
+
 /// A turn a person sent while one ran, held for that turn's end.
 struct Next {
     text: String,
     mode: PermissionMode,
+    interaction: Interaction,
     images: Option<String>,
 }
 
-/// The held turns as one: their texts joined with a blank line, with the last one's mode and
+/// The held turns as one: their texts joined with a blank line, with the last one's modes and
 /// images.
 fn joined(next: Vec<Next>) -> Option<Next> {
     let last = next.last()?;
-    let (mode, images) = (last.mode, last.images.clone());
+    let (mode, interaction, images) = (last.mode, last.interaction, last.images.clone());
     let texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
     Some(Next {
         text: texts.join("\n\n"),
         mode,
+        interaction,
         images,
     })
 }
@@ -536,6 +554,7 @@ trait Machine: Send + Sync + 'static {
         text: &str,
         images: Option<&str>,
         mode: PermissionMode,
+        interaction: Interaction,
     ) -> impl Future<Output = Result<Started<KeptTurn>, String>> + Send;
     /// Writes one image on the machine and returns its path.
     fn put(
@@ -715,6 +734,7 @@ impl Machine for Fleet {
         text: &str,
         images: Option<&str>,
         mode: PermissionMode,
+        interaction: Interaction,
     ) -> Result<Started<KeptTurn>, String> {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
@@ -723,7 +743,7 @@ impl Machine for Fleet {
             url: format!("http://{daemon}/api/mcp"),
             thread: format!("{}/{}", self.workspace.name, thread::name(place)),
         });
-        let agent = claude::command(&place.worktree, images, mode, mcp.as_ref());
+        let agent = claude::command(&place.worktree, images, mode, interaction, mcp.as_ref());
         let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
             .await
             .map_err(|error| chain(&error))?;
@@ -1794,6 +1814,7 @@ async fn heard_frame<M: Machine, P: Peer>(
             text,
             harness,
             mode,
+            interaction,
         }) => {
             let asked = harness.as_deref().map(harness_named).transpose();
             let theirs = here.as_ref().map(|here| here.harness);
@@ -1810,11 +1831,26 @@ async fn heard_frame<M: Machine, P: Peer>(
                     );
                     peer.say(&failure(Kind::BadFrame, said)).await
                 }
+                (Ok(asked), theirs)
+                    if interaction == Interaction::Plan
+                        && theirs.unwrap_or_else(|| asked.flatten()).is_some() =>
+                {
+                    peer.say(&failure(
+                        Kind::BadFrame,
+                        "plan mode needs the Claude harness",
+                    ))
+                    .await
+                }
                 (Ok(asked), _) => {
                     let images = images.and_then(Images::dir);
                     let next = Next {
                         text,
-                        mode,
+                        // A plan turn asks about all it relays, here and in an adopting daemon.
+                        mode: match interaction {
+                            Interaction::Plan => PermissionMode::Supervised,
+                            Interaction::Build => mode,
+                        },
+                        interaction,
                         images: images.map(str::to_owned),
                     };
                     let next = match &live {
@@ -2432,11 +2468,12 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: &str) -> Th
 }
 
 /// One turn the person sent: what they wrote, the directory of the images it
-/// may read, and the thread's permission mode.
+/// may read, and the thread's permission and interaction modes.
 struct Typed<'a> {
     text: String,
     images: Option<&'a str>,
     mode: PermissionMode,
+    interaction: Interaction,
 }
 
 /// Opens the thread on the first turn with the harness `pick` names, and
@@ -2606,6 +2643,7 @@ async fn start_or_hold<M: Machine>(
             text: next.text.clone(),
             images: next.images.as_deref(),
             mode: next.mode,
+            interaction: next.interaction,
         };
         let turned = match here.harness {
             None => claude_turn(machine, name, &here.place, turn)
@@ -2628,7 +2666,12 @@ async fn claude_turn<M: Machine>(
     machine: &Arc<M>,
     name: &str,
     place: &Place,
-    Typed { text, images, mode }: Typed<'_>,
+    Typed {
+        text,
+        images,
+        mode,
+        interaction,
+    }: Typed<'_>,
 ) -> Result<Turned<Option<broadcast::Receiver<Sent>>>, Failure> {
     // The last turn's keeper may still be exiting; its turn has ended.
     let deadline = tokio::time::Instant::now() + STOP_GRACE + STOP_GRACE;
@@ -2641,7 +2684,7 @@ async fn claude_turn<M: Machine>(
     let Some(mut claim) = Claim::take(machine, place) else {
         return Ok(Turned::Lost);
     };
-    let started = machine.start(place, &text, images, mode).await;
+    let started = machine.start(place, &text, images, mode, interaction).await;
     let KeptTurn { turn, events, run } = match started {
         Ok(Started::Running(kept)) => kept,
         Ok(Started::Busy) => {
@@ -3446,6 +3489,7 @@ fn wake_on<M: Machine>(
                 text: prompt.clone(),
                 images: None,
                 mode,
+                interaction: Interaction::Build,
             };
             match claude_turn(&machine, &name, &place, turn).await {
                 Ok(Turned::Started(_)) => {
@@ -3847,6 +3891,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 &[Next {
                     text: "and the docs".to_owned(),
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
                     images: None,
                 }],
             ))
@@ -3869,11 +3914,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "run the tests".to_owned(),
                     harness: Some("opencode".to_owned()),
                     mode: PermissionMode::AutoAcceptEdits,
+                    interaction: Interaction::Build,
                 }),
                 frame(Frame::Turn {
                     text: "and the docs".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Plan,
                 }),
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
@@ -4146,6 +4193,8 @@ mod tests {
         started_with: Mutex<Vec<Option<String>>>,
         /// The permission mode each Claude turn was started with.
         modes: Mutex<Vec<PermissionMode>>,
+        /// The command each Claude turn would run.
+        commands: Mutex<Vec<String>>,
         /// How long each `finish` was given, and each closed stdin.
         finished: Mutex<Vec<Duration>>,
         stdin_closed: Mutex<usize>,
@@ -4288,12 +4337,20 @@ mod tests {
             text: &str,
             images: Option<&str>,
             mode: PermissionMode,
+            interaction: Interaction,
         ) -> Result<Started<KeptTurn>, String> {
             let Some((run, reader, writer, end)) = self.begin(Some(mode)) else {
                 return Ok(Started::Busy);
             };
             lock(&self.started_with).push(images.map(str::to_owned));
             lock(&self.modes).push(mode);
+            lock(&self.commands).push(claude::command(
+                &place.worktree,
+                images,
+                mode,
+                interaction,
+                None,
+            ));
             lock(&self.turns).push(Claude(end));
             if let Some(gate) = &self.start_gate {
                 gate.notified().await;
@@ -4740,6 +4797,7 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
                 },
             ),
             (
@@ -4748,6 +4806,16 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: Some("codex".to_owned()),
                     mode: PermissionMode::FullAccess,
+                    interaction: Interaction::Build,
+                },
+            ),
+            (
+                r#"{"type":"turn","text":"hi","interaction":"plan"}"#,
+                Frame::Turn {
+                    text: "hi".to_owned(),
+                    harness: None,
+                    mode: PermissionMode::Supervised,
+                    interaction: Interaction::Plan,
                 },
             ),
             (
@@ -6115,11 +6183,16 @@ mod tests {
 
     /// The first turn of a Claude thread in `mode`, up to Claude's prompt.
     async fn a_claude_turn_in(script: &Arc<Script>, mode: Option<&str>) -> (Tab, Claude) {
-        let (mut tab, _served) = connect(Arc::clone(script), None);
         let mut turn = json!({"type": "turn", "text": "fix it"});
         if let Some(mode) = mode {
             turn["mode"] = json!(mode);
         }
+        a_claude_turn(script, turn).await
+    }
+
+    /// The first turn of a Claude thread, sent as `turn`, up to Claude's prompt.
+    async fn a_claude_turn(script: &Arc<Script>, turn: Value) -> (Tab, Claude) {
+        let (mut tab, _served) = connect(Arc::clone(script), None);
         tab.send(turn);
         assert_eq!(tab.next().await["type"], "thread.started");
         assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
@@ -6210,6 +6283,73 @@ mod tests {
             [PermissionMode::FullAccess],
             "Claude itself still runs in its own default mode"
         );
+    }
+
+    /// Y-565: a plan turn runs in Claude's plan mode.
+    #[tokio::test]
+    async fn plan_a_turn_runs_claude_in_plan_mode() {
+        let script = Arc::new(Script::default());
+        a_claude_turn(
+            &script,
+            json!({"type": "turn", "text": "fix it", "interaction": "plan"}),
+        )
+        .await;
+        let commands = lock(&script.commands);
+        assert_eq!(commands.len(), 1);
+        assert!(
+            commands[0].contains("--permission-mode plan -p"),
+            "{}",
+            commands[0]
+        );
+    }
+
+    /// Y-565: Full access does not hold in a plan turn. A command is relayed,
+    /// and the keeper keeps `supervised` for a daemon that adopts the turn.
+    #[tokio::test]
+    async fn plan_in_full_access_relays_a_command_and_keeps_supervised() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn(
+            &script,
+            json!({"type": "turn", "text": "fix it", "mode": "full-access",
+                   "interaction": "plan"}),
+        )
+        .await;
+        assert_eq!(*lock(&script.modes), [PermissionMode::Supervised]);
+        let kept = lock(&script.keep)
+            .as_ref()
+            .map(|keep| lock(&keep.journal).mode);
+        assert_eq!(kept, Some(Some(PermissionMode::Supervised)));
+
+        claude.say(a_command("r1")).await;
+        let asked = tab.next().await;
+        assert_eq!(asked["type"], "request.opened", "{asked}");
+        assert_eq!(asked["payload"]["requestId"], "r1");
+    }
+
+    /// Y-565: only Claude has a plan mode, so a plan turn for another harness
+    /// is refused, and no thread opens for it.
+    #[tokio::test]
+    async fn plan_a_turn_for_an_acp_harness_is_a_bad_frame() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _agent, _prompt) = an_opencode_thread(&script).await;
+        let said = tab
+            .next_after(json!({"type": "turn", "text": "plan it", "interaction": "plan"}))
+            .await;
+        assert_eq!(
+            said,
+            json!({"type": "error", "kind": "badFrame",
+                   "said": "plan mode needs the Claude harness"})
+        );
+
+        let (mut fresh, _served) = connect(Arc::clone(&script), None);
+        let said = fresh
+            .next_after(
+                json!({"type": "turn", "text": "plan it", "harness": "codex",
+                               "interaction": "plan"}),
+            )
+            .await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+        assert_eq!(*lock(&script.opened), 1, "only the opencode thread opened");
     }
 
     #[tokio::test]
@@ -7042,6 +7182,37 @@ mod tests {
         );
     }
 
+    /// Y-565: a queued plan turn starts as a plan turn.
+    #[tokio::test]
+    async fn queue_a_plan_turn_keeps_plan() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, Some("full-access")).await;
+        tab.send(
+            json!({"type": "turn", "text": "then plan", "mode": "full-access",
+                        "interaction": "plan"}),
+        );
+        assert_eq!(tab.next().await, queue(&["then plan"]));
+
+        claude.say(ended()).await;
+        until_prompt(&mut tab).await;
+        script.claude().await.heard().await.expect("a line");
+        let commands = lock(&script.commands);
+        assert!(
+            commands[0].contains("--permission-mode default -p"),
+            "{}",
+            commands[0]
+        );
+        assert!(
+            commands[1].contains("--permission-mode plan -p"),
+            "{}",
+            commands[1]
+        );
+        assert_eq!(
+            *lock(&script.modes),
+            [PermissionMode::FullAccess, PermissionMode::Supervised]
+        );
+    }
+
     #[tokio::test]
     async fn queue_cancel_empties_it_and_no_turn_starts() {
         let script = Arc::new(Script::default());
@@ -7518,6 +7689,7 @@ mod tests {
             text: text.to_owned(),
             images: None,
             mode: PermissionMode::default(),
+            interaction: Interaction::default(),
         }
     }
 

@@ -12,7 +12,7 @@
 //! runs or refuses the tool. The process exits once stdin closes after
 //! `result`. No prompt, output or file content is ever logged.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -82,6 +82,7 @@ impl Turn {
         text: &str,
         images: Option<&str>,
         mode: chat::PermissionMode,
+        interaction: chat::Interaction,
     ) -> Result<(Self, Events), Error> {
         let ssh::Piped {
             child,
@@ -89,7 +90,7 @@ impl Turn {
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree, images, mode, None))?;
+        } = ssh.stdio(&command(&place.worktree, images, mode, interaction, None))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let said: Said = Box::pin(async move { diagnosis.await.unwrap_or_default() });
         let (turn, events) = Self::wire(
@@ -231,13 +232,15 @@ impl Turn {
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
-/// cannot turn approval off. `mcp` adds the room server and lets a woken turn
+/// cannot turn approval off. `Plan` is Claude's own `plan` whatever the mode
+/// (Y-565). `mcp` adds the room server and lets a woken turn
 /// use its tools without a prompt (ADR-0038 decision 2). The task tools are
 /// Claude's plan, and `-p` has them only when asked for (`Tasks`).
 pub fn command(
     worktree: &str,
     images: Option<&str>,
     mode: chat::PermissionMode,
+    interaction: chat::Interaction,
     mcp: Option<&Mcp>,
 ) -> String {
     format!(
@@ -255,12 +258,22 @@ pub fn command(
             "--mcp-config {} --allowedTools {ROOM_TOOLS} ",
             sq(&mcp.config())
         )),
-        mode = flag(mode),
+        mode = flag(mode, interaction),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
     )
 }
+
+const EXIT_PLAN_MODE: &str = "ExitPlanMode";
+
+/*
+ * T3 Code's answer to `ExitPlanMode`, at commit 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+const PLAN_CAPTURED: &str = "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn.";
 
 /// Named apart from a `yantra` stdio server a person may have added by hand.
 const ROOM_SERVER: &str = "yantra-room";
@@ -287,7 +300,10 @@ impl Mcp {
 }
 
 /// T3 Code maps the same two modes to Claude's own (`ClaudeAdapter.ts`).
-fn flag(mode: chat::PermissionMode) -> &'static str {
+fn flag(mode: chat::PermissionMode, interaction: chat::Interaction) -> &'static str {
+    if interaction == chat::Interaction::Plan {
+        return "plan";
+    }
     match mode {
         chat::PermissionMode::Auto => "auto",
         chat::PermissionMode::AutoAcceptEdits => "acceptEdits",
@@ -328,6 +344,8 @@ struct State {
     /// The end of the line being read and the number of events made from it.
     line: Option<(u64, u32)>,
     tasks: Tasks,
+    /// The `ExitPlanMode` calls, whose item shows the plan.
+    plans: HashSet<String>,
 }
 
 /// A `can_use_tool` request Claude is waiting on.
@@ -475,12 +493,19 @@ impl Shared {
                         if let Some(call) = Task::call(&name, &input) {
                             self.lock().tasks.calls.insert(id.clone(), call);
                         }
+                        let plan = input["plan"]
+                            .as_str()
+                            .filter(|_| name == EXIT_PLAN_MODE)
+                            .map(str::to_owned);
+                        if plan.is_some() {
+                            self.lock().plans.insert(id.clone());
+                        }
                         self.emit(Event::ItemStarted(chat::Item {
                             item_id: id,
                             item_type: Some(item_type(&name)),
                             status: Some(chat::ItemStatus::InProgress),
                             title: logs::target_in(&input),
-                            output: None,
+                            output: plan,
                             changes: Vec::new(),
                         }));
                     }
@@ -497,23 +522,25 @@ impl Shared {
                         is_error,
                     } = block
                     {
-                        let plan =
-                            self.lock()
-                                .tasks
-                                .result(&tool_use_id, is_error, &tool_use_result);
+                        let (plan, proposed) = {
+                            let mut state = self.lock();
+                            let plan = state.tasks.result(&tool_use_id, is_error, &tool_use_result);
+                            (plan, state.plans.remove(&tool_use_id))
+                        };
                         if let Some(plan) = plan {
                             self.emit(Event::PlanUpdated { plan });
                         }
+                        // A proposed plan was denied on purpose, and its item keeps the plan.
                         self.emit(Event::ItemCompleted(chat::Item {
                             item_id: tool_use_id,
                             item_type: None,
-                            status: Some(if is_error {
+                            status: Some(if is_error && !proposed {
                                 chat::ItemStatus::Failed
                             } else {
                                 chat::ItemStatus::Completed
                             }),
                             title: None,
-                            output: Some(output(&content)),
+                            output: (!proposed).then(|| output(&content)),
                             changes: Vec::new(),
                         }));
                     }
@@ -566,6 +593,15 @@ impl Shared {
             return;
         }
         let tool = request.tool_name.unwrap_or_default();
+        // Only plan mode offers the tool. Its item already shows the plan.
+        if tool == EXIT_PLAN_MODE {
+            let _ = self.send(&json!({
+                "type": "control_response",
+                "response": {"subtype": "success", "request_id": request_id,
+                             "response": {"behavior": "deny", "message": PLAN_CAPTURED}},
+            }));
+            return;
+        }
         let request_type = request_type(&tool);
         let title = logs::target_in(&request.input);
         let answered = {
@@ -1196,7 +1232,7 @@ impl Behaviour {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, PlanStep,
+        ContentDelta, Decision, Interaction, Item, ItemStatus, ItemType, PermissionMode, PlanStep,
         PlanStepStatus, RequestOpened, RequestResolved, RequestType, Scope, StopReason, StreamKind,
         TokenUsage, TurnCompleted, TurnState,
     };
@@ -1362,6 +1398,68 @@ mod tests {
                 return opened;
             }
         }
+    }
+
+    /// Y-565: Claude proposes a plan with `ExitPlanMode`. The daemon denies it
+    /// at once with T3 Code's words, asks nobody, and the item keeps the plan.
+    #[tokio::test]
+    async fn exit_plan_mode_is_denied_at_once_and_its_item_keeps_the_plan() {
+        let (_turn, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        let plan = "# Plan\n\n1. Write plan-proof.txt";
+        let tool_use = json!({"type": "assistant", "message": {"id": "m1", "content": [
+            {"type": "tool_use", "id": "toolu_plan", "name": "ExitPlanMode", "input": {"plan": plan}}]}});
+        let request = json!({"type": "control_request", "request_id": "r-plan", "request": {
+            "subtype": "can_use_tool", "tool_name": "ExitPlanMode", "input": {"plan": plan},
+            "tool_use_id": "toolu_plan"}});
+        fake.play(&format!(
+            "{}\n{tool_use}\n{request}\n",
+            json!({"type": "system", "subtype": "init"})
+        ))
+        .await;
+        assert_eq!(
+            fake.receive().await,
+            Some(json!({"type": "control_response", "response": {
+                "subtype": "success", "request_id": "r-plan",
+                "response": {"behavior": "deny", "message": PLAN_CAPTURED}}}))
+        );
+        let result = json!({"type": "user", "message": {"content": [{"type": "tool_result",
+            "tool_use_id": "toolu_plan", "content": PLAN_CAPTURED, "is_error": true}]}});
+        let done = json!({"type": "result", "subtype": "success", "is_error": false,
+            "stop_reason": "end_turn", "modelUsage": {}});
+        fake.play(&format!("{result}\n{done}\n")).await;
+        let seen = until_completed(&mut events).await;
+
+        assert!(
+            !seen
+                .iter()
+                .any(|event| matches!(event, Event::RequestOpened(_))),
+            "{seen:?}"
+        );
+        assert!(seen.contains(&Event::ItemStarted(Item {
+            item_id: "toolu_plan".to_owned(),
+            item_type: Some(ItemType::DynamicToolCall),
+            status: Some(ItemStatus::InProgress),
+            title: None,
+            output: Some(plan.to_owned()),
+            changes: vec![],
+        })));
+        assert!(seen.contains(&Event::ItemCompleted(Item {
+            item_id: "toolu_plan".to_owned(),
+            item_type: None,
+            status: Some(ItemStatus::Completed),
+            title: None,
+            output: None,
+            changes: vec![],
+        })));
+        assert_eq!(
+            seen.last(),
+            Some(&Event::TurnCompleted(TurnCompleted {
+                state: TurnState::Completed,
+                stop_reason: Some(StopReason::EndTurn),
+                message: None,
+            }))
+        );
     }
 
     #[tokio::test]
@@ -1615,6 +1713,7 @@ mod tests {
             "/home/u/.yantra/worktrees/chat/w/11111111",
             None,
             PermissionMode::Supervised,
+            Interaction::Build,
             None,
         );
         assert!(
@@ -1636,6 +1735,7 @@ mod tests {
             "/tmp/x'; touch /tmp/pwned; '",
             None,
             PermissionMode::Supervised,
+            Interaction::Build,
             None,
         );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
@@ -1649,6 +1749,7 @@ mod tests {
             "/w",
             Some("/tmp/yantra-chat-Y01"),
             PermissionMode::Supervised,
+            Interaction::Build,
             None,
         );
         assert!(
@@ -1661,6 +1762,7 @@ mod tests {
             "/w",
             Some("/tmp/a'; touch /tmp/pwned; '"),
             PermissionMode::Supervised,
+            Interaction::Build,
             None,
         );
         assert!(
@@ -1680,11 +1782,30 @@ mod tests {
             (PermissionMode::Supervised, "default"),
             (PermissionMode::FullAccess, "default"),
         ] {
-            let script = command("/w", Some("/tmp/i"), mode, None);
+            let script = command("/w", Some("/tmp/i"), mode, Interaction::Build, None);
             assert!(
                 script.contains(&format!(
                     "exec \"$c\" --add-dir '/tmp/i' --permission-mode {flag} -p --input-format"
                 )),
+                "{script}"
+            );
+            assert_eq!(script.matches("--permission-mode").count(), 1, "{script}");
+        }
+    }
+
+    /// Y-565: a plan turn runs in Claude's own plan mode, whatever the
+    /// permission mode, so no mode lets it write.
+    #[test]
+    fn a_plan_turn_names_claudes_plan_mode_once_in_every_permission_mode() {
+        for mode in [
+            PermissionMode::Supervised,
+            PermissionMode::AutoAcceptEdits,
+            PermissionMode::Auto,
+            PermissionMode::FullAccess,
+        ] {
+            let script = command("/w", None, mode, Interaction::Plan, None);
+            assert!(
+                script.contains("exec \"$c\" --permission-mode plan -p"),
                 "{script}"
             );
             assert_eq!(script.matches("--permission-mode").count(), 1, "{script}");
@@ -1699,7 +1820,13 @@ mod tests {
             url: "http://100.64.0.1:7717/api/mcp".to_owned(),
             thread: "web/1a2b3c4d".to_owned(),
         };
-        let script = command("/w", Some("/tmp/i"), PermissionMode::FullAccess, Some(&mcp));
+        let script = command(
+            "/w",
+            Some("/tmp/i"),
+            PermissionMode::FullAccess,
+            Interaction::Build,
+            Some(&mcp),
+        );
         assert!(
             script.contains(
                 "exec \"$c\" --add-dir '/tmp/i' --mcp-config '{\"mcpServers\":{\"yantra-room\":\
@@ -1715,7 +1842,13 @@ mod tests {
             url: mcp.url.clone(),
             thread: "web/x'; touch /tmp/pwned; '\"".to_owned(),
         };
-        let script = command("/w", None, PermissionMode::Supervised, Some(&hostile));
+        let script = command(
+            "/w",
+            None,
+            PermissionMode::Supervised,
+            Interaction::Build,
+            Some(&hostile),
+        );
         assert!(
             script.contains(
                 r#"--mcp-config '{"mcpServers":{"yantra-room":{"headers":{"X-Yantra-Thread":"web/x'\''; touch /tmp/pwned; '\''\""},"#

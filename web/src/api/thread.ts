@@ -34,6 +34,10 @@ export type PermissionMode = 'supervised' | 'auto-accept-edits' | 'auto' | 'full
 /** Unlike T3 Code, a new thread starts supervised. */
 export const DEFAULT_MODE: PermissionMode = 'supervised'
 
+/** Whether a turn may change anything (Y-565): `plan` only reads and proposes
+ *  a plan. Claude alone has it; T3 Code names `build` `default`. */
+export type Interaction = 'build' | 'plan'
+
 /** T3 Code's names and words for each mode, in its order. */
 export const MODES: readonly { mode: PermissionMode; label: string; description: string }[] = [
   { mode: 'supervised', label: 'Supervised', description: 'Requests approval for commands and file changes.' },
@@ -135,9 +139,9 @@ export type ChatQuery = { thread?: string; after?: string }
 
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =
-  /** `harness` is read only on the turn that opens a thread. `mode` holds for
-   *  this turn; an absent one is supervised. */
-  | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode }
+  /** `harness` is read only on the turn that opens a thread. `mode` and
+   *  `interaction` hold for this turn; absent, they are supervised and build. */
+  | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode; interaction?: Interaction }
   | { type: 'answer'; requestId: string; decision: Decision }
   | { type: 'cancel' }
   /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */

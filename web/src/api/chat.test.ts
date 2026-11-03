@@ -266,11 +266,11 @@ describe('the chat socket', () => {
     expect(errors[0]?.retryable).toBe(false)
   })
 
-  it('sends the harness on a turn only when it is given, and the mode', async () => {
+  it('sends the harness on a turn only when it is given, the mode, and only a plan interaction', async () => {
     const { socket, opened } = connect()
     await settled(() => expect(opened).toHaveBeenCalled())
-    socket.send('run the tests', 'opencode', 'auto-accept-edits')
-    socket.send('and the docs', undefined, 'supervised')
+    socket.send('run the tests', 'opencode', 'auto-accept-edits', 'build')
+    socket.send('and the docs', undefined, 'supervised', 'plan')
     await settled(() => expect(server.heard).toHaveLength(2))
     expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual(
       chatFrames.slice(0, 2),

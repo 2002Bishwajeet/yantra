@@ -348,3 +348,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-583](../tracker.md#3-task-board) is in review.** `GET /api/github` now carries the profile image URL. The account button shows the image and falls back to the person icon. Tests cover both states.
 
 - **2026-11-03** — **[Y-471](../tracker.md#3-task-board) is in review.** The opencode ACP test now points opencode at a local model stub that streams slowly. The cancel half runs on every CI run, and the skip from Y-470 is gone.
+
+- **2026-11-03** — **[Y-565](../tracker.md#3-task-board) is in review.** The composer has a Build and Plan toggle. In Plan mode the daemon runs the turn without writing a file. Tests cover the daemon and the web toggle.

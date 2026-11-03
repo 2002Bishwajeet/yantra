@@ -1106,6 +1106,7 @@ export const chatFrames = [
     "type": "turn"
   },
   {
+    "interaction": "plan",
     "mode": "supervised",
     "text": "and the docs",
     "type": "turn"
