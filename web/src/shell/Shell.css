@@ -153,6 +153,22 @@
   flex-direction: row;
 }
 
+/* The document stays the scroller, so the rail sticks instead of scrolling
+   away. A rail taller than the screen scrolls its own items. */
+[data-shell="tablet"] .m3-rail {
+  position: sticky;
+  top: var(--m3-safe-top);
+  align-self: flex-start;
+  block-size: calc(100dvh - var(--m3-safe-top) - var(--m3-safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+[data-shell="tablet"] .m3-rail__destinations,
+[data-shell="tablet"] .m3-rail__trailing {
+  flex: none;
+}
+
 .shell__column {
   display: flex;
   flex-direction: column;
