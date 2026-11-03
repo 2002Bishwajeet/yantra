@@ -477,6 +477,11 @@ impl Shared {
                             output: None,
                             changes: Vec::new(),
                         }));
+                        if name == "TodoWrite"
+                            && let Ok(todos) = serde_json::from_value::<Todos>(input)
+                        {
+                            self.emit(Event::PlanUpdated { plan: todos.plan() });
+                        }
                     }
                 }
             }
@@ -978,6 +983,44 @@ enum Block {
     Other,
 }
 
+/// `TodoWrite`'s input, which is Claude's plan.
+#[derive(Deserialize)]
+struct Todos {
+    todos: Vec<Todo>,
+}
+
+#[derive(Deserialize)]
+struct Todo {
+    content: String,
+    status: TodoStatus,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+    #[serde(other)]
+    Other,
+}
+
+impl Todos {
+    fn plan(self) -> Vec<chat::PlanStep> {
+        self.todos
+            .into_iter()
+            .map(|todo| chat::PlanStep {
+                step: todo.content,
+                status: match todo.status {
+                    TodoStatus::InProgress => chat::PlanStepStatus::InProgress,
+                    TodoStatus::Completed => chat::PlanStepStatus::Completed,
+                    TodoStatus::Pending | TodoStatus::Other => chat::PlanStepStatus::Pending,
+                },
+            })
+            .collect()
+    }
+}
+
 #[derive(Deserialize)]
 struct Usage {
     #[serde(default)]
@@ -1079,9 +1122,9 @@ impl Behaviour {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, RequestOpened,
-        RequestResolved, RequestType, Scope, StopReason, StreamKind, TokenUsage, TurnCompleted,
-        TurnState,
+        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, PlanStep,
+        PlanStepStatus, RequestOpened, RequestResolved, RequestType, Scope, StopReason, StreamKind,
+        TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
@@ -1818,6 +1861,46 @@ mod tests {
             }
         );
         assert!(replayed.state.pending.is_empty());
+    }
+
+    fn todo_write(input: Value) -> Vec<Event> {
+        let line = json!({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "toolu_todo", "name": "TodoWrite", "input": input}]}});
+        replay(THREAD, RUN, format!("{line}\n").as_bytes(), b"")
+            .events
+            .into_iter()
+            .map(|event| event.event)
+            .collect()
+    }
+
+    #[test]
+    fn a_todo_write_updates_the_plan() {
+        let seen = todo_write(json!({"todos": [
+            {"content": "Read", "status": "completed", "activeForm": "Reading"},
+            {"content": "Write", "status": "in_progress", "activeForm": "Writing"},
+            {"content": "Test", "status": "pending", "activeForm": "Testing"},
+        ]}));
+        assert!(matches!(&seen[0], Event::ItemStarted(item) if item.item_id == "toolu_todo"));
+        let step = |step: &str, status| PlanStep {
+            step: step.to_owned(),
+            status,
+        };
+        assert_eq!(
+            seen[1],
+            Event::PlanUpdated {
+                plan: vec![
+                    step("Read", PlanStepStatus::Completed),
+                    step("Write", PlanStepStatus::InProgress),
+                    step("Test", PlanStepStatus::Pending),
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn a_todo_write_that_does_not_parse_sends_no_plan() {
+        let seen = todo_write(json!({"todos": "Read, then write"}));
+        assert!(matches!(&seen[..], [Event::ItemStarted(_)]));
     }
 
     /// A line cut off mid-way is not read, so the reader that carries on
