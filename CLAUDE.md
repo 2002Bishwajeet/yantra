@@ -288,7 +288,7 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
 - **It closes the issues its rows name.** An open GitHub issue gets a row first (§B0); the row names it as `#NNN`, and the PR body says `Closes #NNN`. Owner, 2026-10-20.
 - **It picks by priority.** 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
-- **It runs up to three rows at once.** Rows that touch the same paths do not share a batch.
+- **It runs up to three rows at once.** Rows that touch the same paths do not run at the same time.
   Verification and shipping run one row at a time, because podman runs out of memory and rebases
   must see each other's merges.
 - **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a real
