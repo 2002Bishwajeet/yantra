@@ -5,7 +5,8 @@
 //! both the staging copy and the archive. A turn starts at an owner message
 //! and ends at the last assistant response before the next one, or at a
 //! response that calls `AskUserQuestion`. Each row is re-scanned with gitleaks
-//! (§3.3 item 1), and a row with a finding is dropped. The rows hold
+//! (§3.3 item 1), and a row with a finding is dropped. A finding in no row,
+//! such as a value gitleaks decoded, drops every row of its transcript. The rows hold
 //! conversation text, so none of it reaches an error (Q5).
 //!
 //! [plan]: ../../../docs/plans/decision-model.md
@@ -118,8 +119,12 @@ pub fn extract_in<S: Scan>(folder: &Path, out: &Path, scanner: &S) -> Result<Rep
             .iter()
             .filter(|s| !s.is_empty() && *s != history::REDACTED)
             .collect();
+        // Fails closed, as `history::redact` refuses `Unfound`.
+        let unfound = secrets
+            .iter()
+            .any(|s| !candidates.iter().any(|c| c.row.contains(s.as_str())));
         for candidate in candidates {
-            if secrets.iter().any(|s| candidate.row.contains(s.as_str())) {
+            if unfound || secrets.iter().any(|s| candidate.row.contains(s.as_str())) {
                 report.dropped_by_gitleaks.push(path.clone());
                 continue;
             }
@@ -214,6 +219,10 @@ struct Record {
     sidechain: bool,
     #[serde(default, rename = "isMeta")]
     meta: bool,
+    #[serde(default, rename = "isCompactSummary")]
+    compact_summary: bool,
+    #[serde(default, rename = "isVisibleInTranscriptOnly")]
+    transcript_only: bool,
     #[serde(rename = "toolUseResult")]
     tool_use_result: Option<IgnoredAny>,
     #[serde(rename = "sessionId")]
@@ -343,9 +352,14 @@ fn turns(text: &str, stem: &str, report: &mut Report) -> Vec<Candidate> {
     out
 }
 
-/// A `user` record holding a tool result is the agent's input, not the owner's.
+/// A `user` record holding a tool result is the agent's input, not the owner's,
+/// and a compaction summary is Claude Code's own text.
 fn owner_text(record: &Record) -> Option<String> {
-    if record.meta || record.tool_use_result.is_some() {
+    if record.meta
+        || record.compact_summary
+        || record.transcript_only
+        || record.tool_use_result.is_some()
+    {
         return None;
     }
     let text = match &record.message.as_ref()?.content {
@@ -537,6 +551,8 @@ mod tests {
     struct Fake {
         missing: bool,
         fail: bool,
+        /// A finding reported whatever the text, as a decoded value is.
+        decoded: Option<&'static str>,
     }
 
     impl Scan for Fake {
@@ -548,6 +564,7 @@ mod tests {
                 _ => Ok([GHP, history::REDACTED]
                     .into_iter()
                     .filter(|s| text.contains(s))
+                    .chain(self.decoded)
                     .map(str::to_owned)
                     .collect()),
             }
@@ -842,6 +859,51 @@ mod tests {
         assert_eq!(report.dropped_by_gitleaks.len(), 1);
         assert_eq!(rows[0]["state"]["owner"], "Next with API_TOKEN=[REDACTED].");
         assert_eq!(metas.len(), 1);
+    }
+
+    #[test]
+    fn a_secret_in_no_row_drops_every_row_of_its_transcript() {
+        let folder = temp();
+        let records = [
+            user("Decode aGVsbG8=.", 0),
+            say("m1", "Done.", 1),
+            user("Next.", 2),
+            say("m2", "Done too.", 3),
+        ];
+        write(&folder, "-w/a.jsonl", &records);
+        let out = temp().join("rows");
+        let decoded = Fake {
+            decoded: Some("hello-decoded-secret"),
+            ..Fake::default()
+        };
+        let report = extract_in(&folder, &out, &decoded).unwrap();
+        assert_eq!(report.rows(), 0);
+        assert_eq!(report.dropped_by_gitleaks.len(), 2);
+        assert!(read(&out.join("rows.jsonl")).is_empty());
+        assert!(read(&out.join("rows.meta.jsonl")).is_empty());
+    }
+
+    #[test]
+    fn a_compaction_summary_starts_no_turn() {
+        let summary = json!({"type": "user", "sessionId": "s1", "cwd": "/home/o/app",
+            "timestamp": at(2), "isVisibleInTranscriptOnly": true, "isCompactSummary": true,
+            "message": {"role": "user", "content":
+                "This session is being continued from a previous conversation that ran out of context."}});
+        let (report, rows, metas) = run(&[
+            user("Port the parser.", 0),
+            say("m1", "Started.", 1),
+            summary,
+            say("m2", "Ported. Should I push?", 3),
+            user("yes", 5),
+            say("m3", "Pushed.", 6),
+        ]);
+        assert_eq!(report.rows(), 2);
+        assert_eq!(
+            rows[0]["state"],
+            json!({"owner": "Port the parser.", "agent": "Ported. Should I push?"})
+        );
+        assert_eq!(metas[0]["next_message"], "answer");
+        assert_eq!(rows[1]["state"]["owner"], "yes");
     }
 
     #[test]
