@@ -381,12 +381,18 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
     Ok(())
 }
 
+/// Set only by [`the_sweep_asks_a_machine_no_workspace_names`] on the child it starts.
+const EXTRA_CHILD: &str = "YANTRA_TEST_DOCTOR_EXTRA_CHILD";
+
 /// The half of [`the_sweep_asks_a_machine_no_workspace_names`] that runs with
 /// the fixture's `PATH` and home. `forbid(unsafe_code)` rules out `set_var`, so
 /// the test starts this binary again with its own environment.
 #[tokio::test]
-#[ignore = "started by the_sweep_asks_a_machine_no_workspace_names"]
 async fn asks_the_extra_machine_with_no_workspace() -> Result<()> {
+    // Without the marker this runs in the developer's real fleet, so it does nothing.
+    if std::env::var_os(EXTRA_CHILD).is_none() {
+        return Ok(());
+    }
     assert!(doctor::fleet(KNOWN_REMOTELY).await?.is_empty());
 
     let extra = ["fixture".to_owned()];
@@ -443,9 +449,9 @@ async fn the_sweep_asks_a_machine_no_workspace_names() -> Result<()> {
         .args([
             "--exact",
             "asks_the_extra_machine_with_no_workspace",
-            "--ignored",
             "--nocapture",
         ])
+        .env(EXTRA_CHILD, "1")
         .env("PATH", format!("{}:{path}", bin.display()))
         .env("HOME", &home)
         .env("XDG_RUNTIME_DIR", &run)
