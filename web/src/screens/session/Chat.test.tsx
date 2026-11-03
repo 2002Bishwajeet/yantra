@@ -22,6 +22,7 @@ import {
   chatNotLoggedIn,
   chatQueue,
 } from '@/contract.gen'
+import { aMentions } from '@/api/fixtures'
 import { writePrefs } from '@/shell/prefs'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
@@ -1344,5 +1345,124 @@ describe('a phone composer', () => {
     expect(turns()).toEqual([])
     fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await settled(() => expect(turns()).toHaveLength(1))
+  })
+})
+
+describe('@ and $ mentions (Y-562)', () => {
+  const asked: { url: string; body: unknown }[] = []
+
+  /** Answers `POST …/mentions` with `answer`, and every other read with a 404. */
+  function mentionsAnswer(answer: () => Response | Promise<Response>) {
+    asked.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (!url.endsWith('/mentions')) return new Response('no', { status: 404 })
+        asked.push({ url, body: JSON.parse(String(init?.body)) })
+        return answer()
+      }),
+    )
+  }
+
+  const field = () => screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
+  const key = (name: string) => fireEvent.keyDown(field(), { key: name })
+  const ok = () => Response.json(aMentions())
+
+  it('opens on @ with the files, and Enter puts the picked path in the prompt sent', async () => {
+    mentionsAnswer(ok)
+    await open()
+    type('look at @')
+    const list = await settled(() => screen.getByRole('listbox', { name: 'Files' }))
+    expect(field().getAttribute('aria-expanded')).toBe('true')
+    expect(field().getAttribute('aria-controls')).toBe(list.id)
+    const options = within(list).getAllByRole('option')
+    expect(options.map((one) => one.textContent)).toEqual(['README.md', 'src/main.rs'])
+    expect(options[0].getAttribute('aria-selected')).toBe('true')
+    key('ArrowDown')
+    expect(options[1].getAttribute('aria-selected')).toBe('true')
+    expect(field().getAttribute('aria-activedescendant')).toBe(options[1].id)
+    key('ArrowDown')
+    expect(options[0].getAttribute('aria-selected')).toBe('true')
+    key('ArrowUp')
+    key('Enter')
+    expect(field().value).toBe('look at @src/main.rs ')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(turns()).toEqual([])
+    expect(asked).toEqual([{ url: '/api/workspaces/yantra-web/mentions', body: { harness: 'claude' } }])
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('look at @src/main.rs'))
+  })
+
+  it('opens on $ with the skills, and a click inserts the mention', async () => {
+    mentionsAnswer(ok)
+    await open()
+    type('$dep')
+    const list = await settled(() => screen.getByRole('listbox', { name: 'Skills' }))
+    const options = within(list).getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(options[0].textContent).toContain('$deploy-staging')
+    expect(options[0].textContent).toContain('Project')
+    fireEvent.click(options[0])
+    expect(field().value).toBe('$deploy-staging ')
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('$deploy-staging'))
+  })
+
+  it('takes the arrows from the prompt history while it is open', async () => {
+    mentionsAnswer(ok)
+    await open()
+    type('@')
+    await settled(() => screen.getByRole('listbox'))
+    expect(key('ArrowUp')).toBe(false)
+    expect(field().value).toBe('@')
+  })
+
+  it('shuts on Escape, and Enter then sends the words as typed', async () => {
+    mentionsAnswer(ok)
+    await open()
+    type('ask @src')
+    await settled(() => screen.getByRole('listbox'))
+    key('Escape')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(field().getAttribute('aria-expanded')).toBe('false')
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('ask @src'))
+  })
+
+  it('says it is searching while the answer is on its way, and that nothing matches once it comes', async () => {
+    let answer: (response: Response) => void = () => {}
+    mentionsAnswer(() => new Promise<Response>((resolve) => (answer = resolve)))
+    await open()
+    type('@zzz')
+    await settled(() => expect(screen.getByText('Searching workspace files…')).toBeTruthy())
+    answer(ok())
+    await settled(() => expect(screen.getByText('No matching files.')).toBeTruthy())
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('draws the daemon refusal, and Enter still sends', async () => {
+    mentionsAnswer(() => new Response('`/srv` is not a git work tree on that machine', { status: 409 }))
+    await open()
+    type('@x')
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByText('Files could not be read')).toBeTruthy()
+    expect(within(alert).getByText('`/srv` is not a git work tree on that machine')).toBeTruthy()
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('@x'))
+  })
+
+  it('asks once while the menu stays open and the query changes', async () => {
+    mentionsAnswer(ok)
+    await open()
+    type('@')
+    await settled(() => screen.getByRole('listbox'))
+    type('@s')
+    type('@sr')
+    type('@src/')
+    key('Escape')
+    type('@src/ $')
+    await settled(() => screen.getByRole('listbox', { name: 'Skills' }))
+    expect(asked).toHaveLength(1)
   })
 })

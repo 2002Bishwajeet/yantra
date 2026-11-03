@@ -38,6 +38,7 @@ API the CLI cannot reach.
 | `POST /api/placement` | `yantra why --repo` / `--path`. Both call `placement::ask`; the CLI has no `folders` override, so it finds each clone folder on the machine (Y-517) |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
+| `POST /api/workspaces/{name}/mentions` | **None**: a terminal cannot mean it. The Chat composer's `@` files and `$` skills, for `{harness, thread?}` (Y-562, a `POST` for ADR-0019's reason) |
 | `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |

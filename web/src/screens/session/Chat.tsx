@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Diff, ImagePlus, RefreshCw } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
-import type { Workspace } from '@/api'
+import type { Mentions, Workspace } from '@/api'
 import { IMAGE_TYPES, type ChatError } from '@/api/chat'
+import { asApiError } from '@/api/errors'
+import { useMentions } from '@/api/queries'
 import {
   LABEL,
   type Harness,
@@ -20,9 +22,12 @@ import { ContextRing } from '@/composer/ContextRing'
 import { draftId, useDraft } from '@/composer/draft'
 import { useEnterSends } from '@/composer/enterSends'
 import { buildPromptHistoryEntries, stepPromptHistory, type PromptHistoryPosition } from '@/composer/history'
+import { MentionMenu, optionId, type MentionItem } from '@/composer/MentionMenu'
 import { placeholder } from '@/composer/placeholder'
 import { PlanBadge } from '@/composer/PlanBadge'
 import { PrimaryAction } from '@/composer/PrimaryAction'
+import { searchMentions } from '@/composer/searchMentions'
+import { detectTrigger, insertMention, type Trigger } from '@/composer/trigger'
 import { useDockHeight } from '@/composer/useDockHeight'
 import { useImages } from '@/composer/useImages'
 import { Button } from '@/m3/button/Button'
@@ -196,6 +201,20 @@ function LoggedOut(props: { error: ChatError; login: NonNullable<ChatError['logi
   )
 }
 
+/** What the menu lists for an open trigger; each id is the token a pick inserts. */
+function mentionItems(kind: Trigger['kind'], query: string, found: Mentions | undefined): MentionItem[] {
+  if (!found) return []
+  if (kind === 'path') {
+    return searchMentions(found.files, query, (file) => file).map((file) => ({ id: `@${file}`, label: file, description: '' }))
+  }
+  return searchMentions(found.skills, query, (skill) => skill.name).map((skill) => ({
+    id: skill.mention,
+    label: skill.mention,
+    description: skill.description,
+    badge: skill.scope === 'user' ? 'Personal' : 'Project',
+  }))
+}
+
 export type ChatProps = {
   workspace: Workspace
   /** `?thread=`: the chat to continue. Read when the socket opens. */
@@ -268,7 +287,20 @@ export function Chat(props: ChatProps) {
   const enterSends = useEnterSends()
   const box = useRef<HTMLTextAreaElement>(null)
   const recalled = useRef<PromptHistoryPosition | null>(null)
-  const caretToEnd = useRef(false)
+  const caretTo = useRef<number | null>(null)
+  // Y-562: `@` and `$` open a menu of the worktree's files and the harness's skills.
+  const [caret, setCaret] = useState(0)
+  // Escape shuts the trigger that starts here until the text changes.
+  const [dismissed, setDismissed] = useState<number | null>(null)
+  const [active, setActive] = useState(0)
+  const found = detectTrigger(draft, caret)
+  const trigger = found && found.start !== dismissed ? found : null
+  const menu = useId()
+  const mentions = useMentions(workspace.name, timeline.thread, harness ?? 'claude', trigger !== null)
+  const kind = trigger?.kind
+  const query = trigger?.query ?? ''
+  const items = useMemo(() => (kind ? mentionItems(kind, query, mentions.data) : []), [kind, query, mentions.data])
+  const at = Math.min(active, items.length - 1)
   const history = useMemo(
     () => buildPromptHistoryEntries(timeline.entries.filter((entry) => entry.kind === 'message')),
     [timeline.entries],
@@ -335,15 +367,48 @@ export function Chat(props: ChatProps) {
     if (!step) return
     event.preventDefault()
     recalled.current = step.position
-    caretToEnd.current = true
+    caretTo.current = step.prompt.length
     recallInto(step.prompt)
   }
 
+  const pick = (item: MentionItem) => {
+    if (!trigger) return
+    const next = insertMention(draft, trigger, item.id)
+    caretTo.current = next.caret
+    setDraft(next.text)
+  }
+
+  // While the menu is open it has the arrows, Escape, and Enter and Tab when there is a row to pick.
+  const keydown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (trigger && !event.nativeEvent.isComposing) {
+      const { key } = event
+      if (key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setDismissed(trigger.start)
+        return
+      }
+      if (key === 'ArrowDown' || key === 'ArrowUp') {
+        event.preventDefault()
+        if (items.length > 0) setActive((at + (key === 'ArrowDown' ? 1 : items.length - 1)) % items.length)
+        return
+      }
+      const item = items[at]
+      if ((key === 'Enter' || key === 'Tab') && item && !event.shiftKey) {
+        event.preventDefault()
+        pick(item)
+        return
+      }
+    }
+    recall(event)
+  }
+
   useLayoutEffect(() => {
-    if (!caretToEnd.current) return
-    caretToEnd.current = false
-    const field = box.current
-    if (field) field.setSelectionRange(field.value.length, field.value.length)
+    const to = caretTo.current
+    if (to === null) return
+    caretTo.current = null
+    box.current?.setSelectionRange(to, to)
+    setCaret(to)
   }, [draft])
 
   const answering = `${agent} is answering. A message you queue is sent when it ends.`
@@ -486,6 +551,19 @@ export function Chat(props: ChatProps) {
             </ul>
           </section>
         ) : null}
+        {trigger ? (
+          <MentionMenu
+            active={at}
+            error={mentions.isError ? asApiError(mentions.error) : null}
+            id={menu}
+            items={items}
+            kind={trigger.kind}
+            onHover={setActive}
+            onPick={pick}
+            loading={mentions.isPending}
+            onRetry={() => void mentions.refetch()}
+          />
+        ) : null}
         <Composer.Root
           above={<PlanBadge plan={timeline.plan} />}
           dropping={dropping}
@@ -511,11 +589,21 @@ export function Chat(props: ChatProps) {
         >
           <Attachments images={images} onRemove={remove} />
           <Composer.Input
+            aria-activedescendant={trigger && at >= 0 ? optionId(menu, at) : undefined}
+            aria-autocomplete="list"
+            aria-controls={trigger ? menu : undefined}
+            aria-expanded={trigger !== null}
             aria-label={`Message ${agent} in ${workspace.name}`}
             disabled={link === 'closed'}
             enterSends={enterSends}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={recall}
+            onChange={(event) => {
+              setDraft(event.target.value)
+              setCaret(event.target.selectionStart)
+              setDismissed(null)
+              setActive(0)
+            }}
+            onKeyDown={keydown}
+            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
             onPaste={(event) => {
               if (event.clipboardData.files.length === 0) return
               event.preventDefault()
@@ -524,6 +612,7 @@ export function Chat(props: ChatProps) {
             onSend={send}
             placeholder={placeholder({ link, waiting: timeline.requests.length > 0, agent, retryable: error?.retryable })}
             ref={box}
+            role="combobox"
             value={draft}
           />
           <Composer.Footer

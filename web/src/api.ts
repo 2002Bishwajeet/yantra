@@ -502,6 +502,22 @@ export type ThreadOpened = {
   draft: string
 }
 
+/** `POST /api/workspaces/{name}/mentions` with `{ harness, thread? }` (Y-562):
+ *  what the composer offers after `@` and `$`. `files` is cut at 5000. */
+export type Mentions = {
+  files: string[]
+  truncated: boolean
+  skills: MentionSkill[]
+}
+
+export type MentionSkill = {
+  name: string
+  description: string
+  scope: 'user' | 'project'
+  /** What the composer inserts: `$<name>`. */
+  mention: string
+}
+
 /** `POST /api/workspaces/{name}/threads/{thread}/message`: the commit message
  *  `claude -p` wrote on the machine (Y-492). */
 export type ThreadMessage = {

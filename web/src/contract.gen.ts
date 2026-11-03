@@ -27,6 +27,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Mentions,
   Opened,
   Placement,
   Readiness,
@@ -791,6 +792,28 @@ export const threadOpened = {
   "thread": "0a1b2c3d4e5f6a7b",
   "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
 } satisfies ThreadOpened
+
+export const mentions = {
+  "files": [
+    "README.md",
+    "src/main.rs"
+  ],
+  "skills": [
+    {
+      "description": "Reviews a diff for correctness.",
+      "mention": "$code-review",
+      "name": "code-review",
+      "scope": "user"
+    },
+    {
+      "description": "",
+      "mention": "$deploy-staging",
+      "name": "deploy-staging",
+      "scope": "project"
+    }
+  ],
+  "truncated": false
+} satisfies Mentions
 
 export const threadMessage = {
   "message": "Add the commit and push verbs\n\n- yantra commit\n- yantra push"

@@ -33,8 +33,8 @@ use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
-    agent, clone, commit, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions,
-    status, terminfo, thread, tmux, tokens, up, workspace,
+    agent, clone, commit, dirs, doctor, down, edit, logs, mention, price, probe, remove, resume,
+    sessions, status, terminfo, thread, tmux, tokens, up, workspace,
 };
 use yantra_core::{identity, join, update};
 
@@ -121,6 +121,7 @@ where
         .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/workspaces/{name}/tokens", post(spent::<I>))
         .route("/workspaces/{name}/logs", post(said::<I>))
+        .route("/workspaces/{name}/mentions", post(mentions::<I>))
         // The `GET` is here rather than in `api.rs` on purpose (ADR-0020): it
         // serves a file's bytes, which is the one thing the read model does not
         // publish, and it asks the same question the `POST` answers.
@@ -1485,6 +1486,59 @@ async fn said<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(Transcript::of(&read)))
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MentionsAsked {
+    harness: String,
+    thread: Option<String>,
+}
+
+/// What the Chat composer offers after `@` and `$` (Y-562): the files of the
+/// thread's worktree, or of the workspace's repository before a thread opens,
+/// and the skills the harness loads.
+///
+/// **A `POST` for [`spent`]'s reason** ([ADR-0019]): one ssh round trip, a
+/// person asks for it by typing a trigger, and nothing polls it.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn mentions<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(asked): Json<MentionsAsked>,
+) -> Result<Json<Mentions>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let harness = crate::chat::harness_named(&asked.harness).map_err(|said| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said,
+    })?;
+    tracing::info!("mentions {name} for {}", caller.node);
+    let found = mention::for_workspace(&name, asked.thread.as_deref(), harness)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_mention(&error),
+            said: chain(&error),
+        })?;
+    Ok(Json(Mentions::of(found)))
+}
+
+/// No wildcard, per Y-135. A directory that is not a repository and a thread
+/// git does not know are the world's state, so `409`.
+fn from_mention(error: &mention::Error) -> StatusCode {
+    match error {
+        mention::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+        mention::Error::NotARepo { .. }
+        | mention::Error::UnknownThread { .. }
+        | mention::Error::Thread(thread::Error::NotARepo { .. }) => StatusCode::CONFLICT,
+        mention::Error::Thread(thread) => crate::tasks::from_delegate(thread),
+        mention::Error::Workspace(workspace) => from_workspace(workspace),
+        mention::Error::Unreadable { .. } | mention::Error::NoStateDir => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
 /// `yantra chat ls <workspace>` on the wire (Y-488): each thread's branch,
 /// issue and PR.
 ///
@@ -2153,6 +2207,43 @@ impl ThreadOpened {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+struct Mentions {
+    files: Vec<String>,
+    truncated: bool,
+    skills: Vec<MentionSkill>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct MentionSkill {
+    name: String,
+    description: String,
+    scope: &'static str,
+    mention: String,
+}
+
+impl Mentions {
+    fn of(found: mention::Mentions) -> Self {
+        Self {
+            files: found.files,
+            truncated: found.truncated,
+            skills: found
+                .skills
+                .into_iter()
+                .map(|skill| MentionSkill {
+                    name: skill.name,
+                    description: skill.description,
+                    scope: match skill.scope {
+                        mention::Scope::User => "user",
+                        mention::Scope::Project => "project",
+                    },
+                    mention: skill.mention,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// The message is never logged (Q5).
 #[derive(Debug, serde::Serialize)]
 struct ThreadMessage {
@@ -2671,6 +2762,28 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         listing is a POST."
                     .to_owned(),
             }),
+        ),
+        (
+            "mentions",
+            "Mentions",
+            of(&Mentions::of(mention::Mentions {
+                files: vec!["README.md".to_owned(), "src/main.rs".to_owned()],
+                truncated: false,
+                skills: vec![
+                    mention::Skill {
+                        name: "code-review".to_owned(),
+                        description: "Reviews a diff for correctness.".to_owned(),
+                        scope: mention::Scope::User,
+                        mention: "$code-review".to_owned(),
+                    },
+                    mention::Skill {
+                        name: "deploy-staging".to_owned(),
+                        description: String::new(),
+                        scope: mention::Scope::Project,
+                        mention: "$deploy-staging".to_owned(),
+                    },
+                ],
+            })),
         ),
         (
             "threadMessage",
@@ -5442,5 +5555,94 @@ mod tests {
             "{events:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    async fn ask_mentions(fake: Fake, name: &str, body: &str) -> StatusCode {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let mut request = Request::post(format!("/workspaces/{name}/mentions"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+        router::<Fake, ()>(direct(fake), Fleet::default())
+            .oneshot(request)
+            .await
+            .expect("the router is infallible")
+            .status()
+    }
+
+    /// Y-562: a stranger is refused before any workspace is read, and the
+    /// owner's mistakes are refused before any machine is asked.
+    #[tokio::test]
+    async fn mentions_are_asked_only_for_the_owner_and_only_with_a_harness() {
+        let harness = r#"{"harness":"claude"}"#;
+        assert_eq!(
+            ask_mentions(tailnet(vec![]), "site", harness).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ask_mentions(mine(9), "site", r#"{"harness":"cursor"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ask_mentions(mine(9), "site", r#"{"harness":"claude","dir":"/"}"#).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            ask_mentions(mine(9), ".hidden", r#"{"harness":"codex","thread":"1a2b"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn a_mention_refusal_says_whose_it_is() {
+        let ssh = || yantra_core::ssh::Error::Transport {
+            host: "m".into(),
+            diagnosis: "no route".into(),
+        };
+        let cases = [
+            (mention::Error::Ssh(ssh()), StatusCode::SERVICE_UNAVAILABLE),
+            (
+                mention::Error::Thread(thread::Error::Ssh(ssh())),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                mention::Error::NotARepo { dir: "/r".into() },
+                StatusCode::CONFLICT,
+            ),
+            (
+                mention::Error::Thread(thread::Error::NotARepo { repo: "/r".into() }),
+                StatusCode::CONFLICT,
+            ),
+            (
+                mention::Error::UnknownThread {
+                    thread: "1a2b".into(),
+                },
+                StatusCode::CONFLICT,
+            ),
+            (
+                mention::Error::Workspace(workspace::Error::NotFound {
+                    name: "x".into(),
+                    path: PathBuf::from("/x.toml"),
+                }),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                mention::Error::Unreadable { said: "x".into() },
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                mention::Error::NoStateDir,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+        for (error, status) in cases {
+            assert_eq!(from_mention(&error), status, "{error}");
+        }
     }
 }
