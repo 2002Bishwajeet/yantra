@@ -166,7 +166,7 @@
    the 124 px that were left beside it at 200 % zoom. */
 .shell__sheet {
   position: fixed;
-  inset: calc(12px + var(--m3-safe-top)) calc(12px + var(--m3-safe-right)) 12px auto;
+  inset: calc(12px + var(--m3-safe-top)) calc(12px + var(--m3-safe-right)) calc(12px + var(--m3-safe-bottom)) auto;
   z-index: 5;
   max-width: calc(100vw - 120px);
 }

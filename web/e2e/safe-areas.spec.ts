@@ -101,6 +101,27 @@ test('the tablet sudo side sheet clears the side insets', async ({ page, size })
     .toEqual({ right: vw - 16 - 47, leftOk: true, top: 16 + 47 })
 })
 
+test('the tablet notifications sheet clears every inset', async ({ page, size }) => {
+  test.skip(size !== 'tablet', 'the floating notifications sheet is the tablet shell')
+  await scenario(page, 'busy')
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Notifications/ }).click()
+  const sheet = page.getByRole('complementary', { name: 'Notifications' })
+  await expect(sheet).toBeVisible()
+  await withInset(page)
+  await withSideInsets(page)
+  await page.evaluate(() => document.documentElement.style.setProperty('--m3-safe-bottom', '21px'))
+  const { width, height } = page.viewportSize()!
+  await expect
+    .poll(() =>
+      sheet.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        return { right: r.right, top: r.top, bottom: r.bottom }
+      }),
+    )
+    .toEqual({ right: width - 12 - 47, top: 12 + 47, bottom: height - 12 - 21 })
+})
+
 test('the dialog viewport pads its sides by the insets', async ({ page, size }) => {
   test.skip(size === 'phone', 'the phone uses a bottom sheet')
   await scenario(page, 'busy')
