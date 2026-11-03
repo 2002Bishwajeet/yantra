@@ -380,10 +380,14 @@ blocked on the same syscall, since a task already waiting on it `await`s instead
 this file must take both: the daemon's `Mutex` for its own workers, and `rewrite`'s `flock` for the
 one it does not control.
 
-**`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
+**`POST /api/viewing` is a write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
 §13), which no CLI can say truthfully. It is authorised like the rest because it silences
 notifications.
+
+**`GET /api/here` is the second, for the same reason.** It names the tailnet machine the request came
+from (Y-589). A terminal already runs on the machine it would name, so a CLI verb would answer a
+question nobody asks.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own

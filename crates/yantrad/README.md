@@ -9,7 +9,7 @@ no *read* ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README
 keeps working with no daemon running — that is a decision, not a gap
 ([ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)).
 
-Every route below has a CLI equivalent, and that is the rule rather than a coincidence: anything the
+Every route below has a CLI equivalent, except `POST /api/viewing` and `GET /api/here`, and that is the rule rather than a coincidence: anything the
 web UI can do must be expressible in `yantra` first, which is what stops the daemon growing a richer
 API the CLI cannot reach.
 
@@ -49,7 +49,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) |
 | `GET /api/ssh-identity` | `yantra ssh-identity` (the read half — a GET makes no key) |
-| `GET /api/here` | no verb; names the tailnet machine the request came from, found by the caller's node id from `whois` and not by address (I-5, I-52); authorised like every route, and 503 when the last tailnet look is missing or failed |
+| `GET /api/here` | no verb, because a terminal already runs on the machine it would name; names the tailnet machine the request came from, found by the caller's node id from `whois` and not by address (I-5, I-52); authorised like every route, and 503 when the last tailnet look is missing or failed |
 | `GET /join` | `yantra join-script` (outside `/api`; makes the key on first use) |
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
