@@ -326,3 +326,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-589](../tracker.md#3-task-board) is in review.** On a phone, Add a device now leads with Copy and Share. The QR code sits behind an action there and stays on wider screens. The page names the device in use through the new `GET /api/here` route. Tests cover both widths.
 
 - **2026-11-03** — **[Y-590](../tracker.md#3-task-board) is in review.** At tablet width the rail now fills `100dvh` and stays fixed while only the content scrolls. Its controls stay reachable. A new e2e test proves the rail does not move, and the tablet baselines are updated.
+
+- **2026-11-03** — **[Y-568](../tracker.md#3-task-board) is in review.** A Claude turn now shows the plan badge. `claude.rs` reads the task tools that `claude -p` emits (TaskCreate and TaskUpdate) and turns their results into `turn.plan.updated`. A recorded 2.1.317 turn tests it.
