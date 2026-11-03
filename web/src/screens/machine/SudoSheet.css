@@ -3,10 +3,11 @@
    right edge as the shell's does. */
 .m3-side-sheet.sudo-sheet--side {
   position: fixed;
-  inset-block: 16px;
-  right: 16px;
+  top: calc(16px + var(--m3-safe-top));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  right: calc(16px + var(--m3-safe-right));
   z-index: 30;
-  inline-size: min(var(--m3-page-max-reading), calc(100vw - 32px));
+  inline-size: min(var(--m3-page-max-reading), calc(100vw - 32px - var(--m3-safe-left) - var(--m3-safe-right)));
   overflow-y: auto;
   overscroll-behavior: contain;
 }

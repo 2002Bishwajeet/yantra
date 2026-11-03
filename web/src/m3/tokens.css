@@ -343,6 +343,8 @@
   --m3-turn-you-max: 640px;
   --m3-rail-width: 320px;
   --m3-safe-top: env(safe-area-inset-top, 0px);
+  --m3-safe-right: env(safe-area-inset-right, 0px);
+  --m3-safe-left: env(safe-area-inset-left, 0px);
   --m3-nav-width: 280px;
   --m3-recent-width: 452px;
   --m3-tip-max: 260px;

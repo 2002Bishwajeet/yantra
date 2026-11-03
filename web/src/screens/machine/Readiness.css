@@ -112,7 +112,7 @@
 
 .readiness__snackbar {
   position: fixed;
-  inset-inline: 16px;
+  inset-inline: calc(16px + var(--m3-safe-left)) calc(16px + var(--m3-safe-right));
   bottom: calc(96px + env(safe-area-inset-bottom));
   z-index: 20;
   max-width: var(--m3-measure);

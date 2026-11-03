@@ -21,8 +21,8 @@
 
 [data-shell="tablet"],
 [data-shell="desktop"] {
-  padding: var(--m3-safe-top) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
-    env(safe-area-inset-left, 0px);
+  padding: var(--m3-safe-top) var(--m3-safe-right) env(safe-area-inset-bottom, 0px)
+    var(--m3-safe-left);
 }
 
 .shell__main {
@@ -166,7 +166,7 @@
    the 124 px that were left beside it at 200 % zoom. */
 .shell__sheet {
   position: fixed;
-  inset: calc(12px + var(--m3-safe-top)) calc(12px + env(safe-area-inset-right, 0px)) 12px auto;
+  inset: calc(12px + var(--m3-safe-top)) calc(12px + var(--m3-safe-right)) 12px auto;
   z-index: 5;
   max-width: calc(100vw - 120px);
 }

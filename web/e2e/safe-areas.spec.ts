@@ -72,6 +72,64 @@ test('the tablet and desktop shells pad their top by the inset', async ({ page, 
   await expect.poll(() => shell.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('47px')
 })
 
+const withSideInsets = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => {
+    document.documentElement.style.setProperty('--m3-safe-left', '47px')
+    document.documentElement.style.setProperty('--m3-safe-right', '47px')
+  })
+
+test('the tablet sudo side sheet clears the side insets', async ({ page, size }) => {
+  test.skip(size !== 'tablet', 'the side sheet is the tablet shell')
+  await scenario(page, 'install')
+  await page.goto('/m/nas')
+  const ready = page.getByRole('region', { name: 'Readiness' })
+  await ready.getByRole('button', { name: 'Install' }).click()
+  await ready.getByRole('button', { name: 'Open a terminal' }).click({ timeout: 15_000 })
+  const sheet = page.getByRole('complementary', { name: 'Run it on nas' })
+  await expect(sheet).toBeVisible()
+  await withInset(page)
+  await withSideInsets(page)
+  const vw = page.viewportSize()!.width
+  await expect
+    .poll(() =>
+      sheet.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        return { right: r.right, leftOk: r.left >= 16 + 47, top: r.top }
+      }),
+    )
+    .toEqual({ right: vw - 16 - 47, leftOk: true, top: 16 + 47 })
+})
+
+test('the dialog viewport pads its sides by the insets', async ({ page, size }) => {
+  test.skip(size === 'phone', 'the phone uses a bottom sheet')
+  await scenario(page, 'busy')
+  await page.goto('/')
+  await expect(page.locator('.shell')).toBeVisible()
+  await withSideInsets(page)
+  const pad = await page.evaluate(() => {
+    const v = document.createElement('div')
+    v.className = 'm3-dialog__viewport'
+    document.body.append(v)
+    const s = getComputedStyle(v)
+    const out = { left: s.paddingLeft, right: s.paddingRight }
+    v.remove()
+    return out
+  })
+  expect(pad).toEqual({ left: '47px', right: '47px' })
+})
+
+test('the phone top bar pads its sides by the insets', async ({ page, size }) => {
+  test.skip(size !== 'phone', 'the top app bar is the phone shell')
+  await scenario(page, 'busy')
+  await page.goto('/')
+  const bar = page.locator('header.m3-top-app-bar').first()
+  await expect(bar).toBeVisible()
+  await withSideInsets(page)
+  await expect
+    .poll(() => bar.evaluate((el) => ({ left: getComputedStyle(el).paddingLeft, right: getComputedStyle(el).paddingRight })))
+    .toEqual({ left: '63px', right: '59px' })
+})
+
 const effective = (page: import('@playwright/test').Page) =>
   page.evaluate(() => {
     const m = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].find((x) =>
