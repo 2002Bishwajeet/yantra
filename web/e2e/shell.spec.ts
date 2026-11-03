@@ -51,6 +51,66 @@ test.describe('the FAB on the first run', () => {
   })
 })
 
+/** Y-590: the tablet rail is sticky, so only the content scrolls. */
+test.describe('the tablet rail on a scrolling page', () => {
+  test.beforeEach(async ({ page, size }) => {
+    test.skip(size !== 'tablet', 'the rail is the tablet shell')
+    await scenario(page, 'busy')
+  })
+
+  const rail = (page: Page) => page.locator('.m3-rail')
+  const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
+
+  test('stays put and fills the screen while the page scrolls', async ({ page }) => {
+    await page.setViewportSize({ width: 820, height: 500 })
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    const tall = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)
+    expect(tall).toBe(true)
+
+    const before = (await rail(page).boundingBox())!
+    const mainBefore = (await page.getByRole('main').boundingBox())!
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+
+    const after = (await rail(page).boundingBox())!
+    expect(after.x).toBe(before.x)
+    expect(after.y).toBe(before.y)
+    expect(after.height).toBe(await page.evaluate(() => window.innerHeight))
+    expect((await page.getByRole('main').boundingBox())!.y).toBeLessThan(mainBefore.y)
+
+    await expect(page.locator('.shell__rail-fab')).toBeInViewport()
+    await expect(rail(page).getByRole('button', { name: /Notifications/ })).toBeInViewport()
+    await expect(rail(page).getByRole('button', { name: 'Account' })).toBeInViewport()
+
+    await page.evaluate(() => document.documentElement.style.setProperty('--m3-safe-top', '47px'))
+    const inset = (await rail(page).boundingBox())!
+    expect(inset.y).toBe(47)
+    expect(inset.y + inset.height).toBe(await page.evaluate(() => window.innerHeight))
+  })
+
+  test('scrolls its own items on a short landscape screen', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 400 })
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+
+    const box = (await rail(page).boundingBox())!
+    expect(box.height).toBe(await page.evaluate(() => window.innerHeight))
+    const overflow = await rail(page).evaluate((el) => [el.scrollHeight, el.clientHeight])
+    expect(overflow[0]).toBeGreaterThan(overflow[1])
+
+    const account = rail(page).getByRole('button', { name: 'Account' })
+    await account.scrollIntoViewIfNeeded()
+    await expect(account).toBeInViewport()
+    await account.click({ trial: true })
+
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+    expect((await rail(page).boundingBox())!.y).toBe(box.y)
+  })
+})
+
 test('draws no FAB while yantrad cannot be reached', async ({ page }) => {
   await scenario(page, 'down')
   await page.goto('/')
