@@ -72,7 +72,7 @@ test.describe('the first run', () => {
     await sheet.getByRole('button', { name: 'Save and send a test' }).click()
     await expect(sheet.getByText('The test message arrived at the relay.')).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Restart now' })).toBeVisible()
-    await sheet.getByRole('button', { name: 'No' }).click()
+    await sheet.getByRole('button', { name: 'No', exact: true }).click()
     await expect(sheet.getByText(/Subscribe to this topic in the ntfy app/)).toBeVisible()
     await sheet.getByRole('button', { name: 'Send another test' }).click()
     await sheet.getByRole('button', { name: 'Yes' }).click()
