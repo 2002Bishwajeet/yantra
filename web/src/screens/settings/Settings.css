@@ -420,7 +420,7 @@
 .push-setup {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--m3-card-gap);
   margin: 0;
   padding-inline-start: 20px;
 }
