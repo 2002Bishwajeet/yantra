@@ -3,20 +3,24 @@
 //! 3 and 4). [`yantra_core::room`] decides; this holds the store, wakes the
 //! member threads off the request path, and waits in memory for `room_read`.
 //!
-//! **Nothing here is persisted**, so a restart loses every room, member,
-//! cursor, count and pause. The log names a room, a seq and counts, and never a
-//! message's text (Q5).
+//! **Only a room's definition is persisted** ([ADR-0039](../../../docs/adr/0039-a-room-is-a-shared-project.md)
+//! decision 2), through [`yantra_core::room_file`]. A restart reloads each
+//! defined room with one system message, and loses every message, member,
+//! cursor, count and pause, and every room an agent made. The log names a
+//! room, a seq and counts, and never a message's text or a brief (Q5).
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use tokio::sync::{mpsc, watch};
 use yantra_core::notify::{self, Relay};
-use yantra_core::room::{self, BUDGET, Message, Reader, Sent, Summary, Thread};
+use yantra_core::room::{self, BUDGET, Home, Message, Reader, Sent, Summary, Thread};
+use yantra_core::room_file::{self, Definition};
 
 use crate::chat::{self, Woke};
 
@@ -33,6 +37,9 @@ pub struct Rooms {
     wake: Wake,
     waking: Arc<Mutex<Waking>>,
     pauses: Option<mpsc::UnboundedSender<notify::Message>>,
+    /// Where the definitions are. `None` is no config directory, and then a
+    /// room cannot be defined.
+    dir: Option<PathBuf>,
 }
 
 /// One delivery to a member thread, kept until its wake resolves so a wake
@@ -61,11 +68,12 @@ impl std::fmt::Debug for Rooms {
 }
 
 impl Rooms {
-    /// Rooms that wake threads through `chats`, and tell `pauses` when a room
-    /// waits for the owner.
+    /// Rooms that wake threads through `chats`, tell `pauses` when a room
+    /// waits for the owner, and keep their definitions in `dir`.
     pub fn new(
         chats: chat::Registry,
         pauses: Option<mpsc::UnboundedSender<notify::Message>>,
+        dir: Option<PathBuf>,
     ) -> Self {
         let wake: Wake = Arc::new(move |thread: Thread, prompt: String| {
             Box::pin(chat::wake(
@@ -75,19 +83,48 @@ impl Rooms {
                 prompt,
             ))
         });
-        Self::waking(wake, pauses)
+        Self::loading(dir, wake, pauses)
     }
 
+    #[cfg(test)]
     pub(crate) fn waking(
         wake: Wake,
         pauses: Option<mpsc::UnboundedSender<notify::Message>>,
     ) -> Self {
+        Self::loading(None, wake, pauses)
+    }
+
+    /// Opens each definition in `dir`, each with the restart's system message.
+    pub(crate) fn loading(
+        dir: Option<PathBuf>,
+        wake: Wake,
+        pauses: Option<mpsc::UnboundedSender<notify::Message>>,
+    ) -> Self {
+        let mut store = room::Rooms::default();
+        let listing = match dir.as_deref().map(room_file::list_in) {
+            Some(Ok(listing)) => listing,
+            Some(Err(error)) => {
+                tracing::warn!("the room definitions were not read: {error}");
+                room_file::Listing::default()
+            }
+            None => room_file::Listing::default(),
+        };
+        let now = SystemTime::now();
+        for definition in listing.rooms {
+            if let Err(error) = store.open(&definition.name, home(&definition), now, true) {
+                tracing::warn!("room {}: not reloaded: {error}", definition.name);
+            }
+        }
+        for (name, error) in &listing.unusable {
+            tracing::warn!("room file {name}.toml was skipped: {error}");
+        }
         Self {
-            store: Arc::default(),
+            store: Arc::new(Mutex::new(store)),
             said: watch::Sender::new(0),
             wake,
             waking: Arc::default(),
             pauses,
+            dir,
         }
     }
 
@@ -296,6 +333,55 @@ impl Rooms {
     pub fn resume(&self, name: &str) -> Result<(), room::Error> {
         self.lock().resume(name)
     }
+
+    /// Writes a new definition, then opens the room. Both happen under the
+    /// store's lock, so two creates of one name cannot both write.
+    pub fn create(&self, definition: &Definition) -> Result<Summary, room_file::Error> {
+        let mut store = self.lock();
+        room_file::create_in(self.dir()?, definition)?;
+        open(&mut store, definition)
+    }
+
+    /// Sets the brief of a defined room, on disk first.
+    pub fn edit(&self, name: &str, brief: Option<&str>) -> Result<Summary, room_file::Error> {
+        let mut store = self.lock();
+        let definition = room_file::update_in(self.dir()?, name, brief)?;
+        open(&mut store, &definition)
+    }
+
+    /// Deletes the definition, then the room. `false` is a room that was in
+    /// neither place.
+    pub fn end(&self, name: &str) -> Result<bool, room_file::Error> {
+        if !room::valid_name(name) {
+            return Err(room_file::Error::BadName(name.to_owned()));
+        }
+        let mut store = self.lock();
+        let removed = match &self.dir {
+            Some(dir) => room_file::remove_in(dir, name)?,
+            None => false,
+        };
+        Ok(store.close(name) || removed)
+    }
+
+    fn dir(&self) -> Result<&std::path::Path, room_file::Error> {
+        self.dir.as_deref().ok_or(room_file::Error::NoConfigDir)
+    }
+}
+
+fn home(definition: &Definition) -> Home {
+    Home {
+        workspace: definition.workspace.clone(),
+        brief: definition.brief.clone(),
+        base: definition.base.clone(),
+        made_at: definition.made_at,
+    }
+}
+
+/// The name passed `room_file`'s check, which is the same predicate.
+fn open(store: &mut room::Rooms, definition: &Definition) -> Result<Summary, room_file::Error> {
+    store
+        .open(&definition.name, home(definition), SystemTime::now(), false)
+        .map_err(|_| room_file::Error::BadName(definition.name.clone()))
 }
 
 /// One prompt for every message a thread has not seen, each wrapped.
@@ -335,10 +421,28 @@ pub(crate) mod tests {
     pub(crate) type Woken = Arc<Mutex<Vec<(Thread, String)>>>;
     type Answer = Arc<Mutex<Woke>>;
 
-    /// Rooms whose wakes land in a list, and whose pauses land in a channel.
+    /// Rooms whose wakes land in a list, whose pauses land in a channel, and
+    /// whose definitions go to a new scratch directory.
     pub(crate) fn rooms() -> (Rooms, Woken, mpsc::UnboundedReceiver<notify::Message>) {
         let (rooms, woken, heard, _) = answering();
         (rooms, woken, heard)
+    }
+
+    /// An empty directory of its own, made on the first write.
+    pub(crate) fn scratch() -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "yantrad-rooms-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn no_wake() -> Wake {
+        Arc::new(|_, _| Box::pin(async { Woke::Started }))
     }
 
     /// [`rooms`], with what each later wake comes to.
@@ -360,7 +464,12 @@ pub(crate) mod tests {
             let woke = *answers.lock().unwrap_or_else(PoisonError::into_inner);
             Box::pin(async move { woke })
         });
-        (Rooms::waking(wake, Some(pauses)), woken, heard, answer)
+        (
+            Rooms::loading(Some(scratch()), wake, Some(pauses)),
+            woken,
+            heard,
+            answer,
+        )
     }
 
     fn answer(answer: &Answer, woke: Woke) {
@@ -659,5 +768,78 @@ pub(crate) mod tests {
         .expect("the shutdown ends the wait")
         .expect("no refusal");
         assert_eq!(read, None);
+    }
+
+    fn definition(name: &str) -> Definition {
+        Definition {
+            name: name.to_owned(),
+            workspace: "web".to_owned(),
+            brief: None,
+            base: None,
+            made_at: 1_800_000_000,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restart_reloads_each_definition_with_one_system_message_and_skips_a_bad_file() {
+        let dir = scratch();
+        for name in ["alpha", "beta"] {
+            room_file::create_in(&dir, &definition(name)).expect("written");
+        }
+        std::fs::write(dir.join("broken.toml"), "workspace = [").expect("written");
+
+        let rooms = Rooms::loading(Some(dir.clone()), no_wake(), None);
+        let listed = rooms.list();
+        let names: Vec<&str> = listed.iter().map(|room| room.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "beta"], "the bad file is skipped");
+        for name in names {
+            let (summary, log) = rooms.view(name).expect("reloaded");
+            assert_eq!(summary.workspace.as_deref(), Some("web"));
+            assert_eq!(log.len(), 1, "{log:?}");
+            assert_eq!(log[0].kind, room::Kind::System);
+            assert!(
+                log[0].text.starts_with("yantrad restarted at "),
+                "{}",
+                log[0].text
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn create_writes_first_refuses_an_existing_name_and_end_removes_both() {
+        let dir = scratch();
+        let rooms = Rooms::loading(Some(dir.clone()), no_wake(), None);
+        let summary = rooms.create(&definition("home")).expect("made");
+        assert_eq!(
+            (summary.messages, summary.workspace.as_deref()),
+            (0, Some("web"))
+        );
+        assert!(dir.join("home.toml").exists());
+        assert!(matches!(
+            rooms.create(&definition("home")),
+            Err(room_file::Error::Exists(_))
+        ));
+
+        let edited = rooms.edit("home", Some("Ship it.")).expect("edited");
+        assert_eq!(edited.brief.as_deref(), Some("Ship it."));
+        assert!(matches!(
+            rooms.edit("nope", Some("x")),
+            Err(room_file::Error::Missing(_))
+        ));
+
+        assert!(rooms.end("home").expect("ended"));
+        assert!(!dir.join("home.toml").exists());
+        assert!(rooms.view("home").is_err());
+        assert!(!rooms.end("home").expect("absence is success"));
+        assert!(matches!(
+            rooms.end("Bad"),
+            Err(room_file::Error::BadName(_))
+        ));
+
+        let nowhere = Rooms::waking(no_wake(), None);
+        assert!(matches!(
+            nowhere.create(&definition("home")),
+            Err(room_file::Error::NoConfigDir)
+        ));
     }
 }

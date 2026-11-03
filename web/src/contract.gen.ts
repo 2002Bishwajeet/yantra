@@ -34,6 +34,7 @@ import type {
   Resumed,
   Room,
   RoomPosted,
+  RoomRemoved,
   RoomSummary,
   Spend,
   SshIdentity,
@@ -1135,33 +1136,50 @@ export const chatQuery = {
 
 export const rooms = [
   {
+    "base": "main",
+    "brief": "Ship the login page.",
     "budget": 20,
     "last_at": 1800000000,
     "members": 2,
     "messages": 2,
     "name": "design-review",
     "paused": false,
-    "spent": 3
+    "spent": 3,
+    "workspace": "web"
   },
   {
+    "base": null,
+    "brief": null,
     "budget": 20,
     "last_at": null,
     "members": 0,
     "messages": 0,
     "name": "quiet",
     "paused": false,
-    "spent": 0
+    "spent": 0,
+    "workspace": null
   }
 ] satisfies RoomSummary[]
 
 export const room = {
+  "base": "main",
+  "brief": "Ship the login page.",
   "budget": 20,
   "last_at": 1800000060,
   "log": [
     {
+      "at": 1799999000,
+      "budget": 0,
+      "from": "yantrad",
+      "kind": "system",
+      "seq": 18,
+      "text": "yantrad restarted at 09:43 UTC. Earlier messages are in each agent's own thread."
+    },
+    {
       "at": 1800000000,
       "budget": 19,
       "from": "cachyos-g14 · chat 1a2b3c4d",
+      "kind": "text",
       "seq": 19,
       "text": "The API is ready for review."
     },
@@ -1169,18 +1187,37 @@ export const room = {
       "at": 1800000060,
       "budget": 0,
       "from": "owner on pixel",
+      "kind": "text",
       "seq": 20,
       "text": "Go ahead."
     }
   ],
   "members": 2,
-  "messages": 2,
+  "messages": 3,
   "name": "design-review",
   "paused": true,
-  "spent": 20
+  "spent": 20,
+  "workspace": "web"
 } satisfies Room
 
 export const roomPosted = {
   "delivered": 2,
   "seq": 21
 } satisfies RoomPosted
+
+export const roomCreated = {
+  "base": "main",
+  "brief": "Ship the login page.",
+  "budget": 20,
+  "last_at": null,
+  "members": 0,
+  "messages": 0,
+  "name": "design-review",
+  "paused": false,
+  "spent": 0,
+  "workspace": "web"
+} satisfies RoomSummary
+
+export const roomRemoved = {
+  "removed": true
+} satisfies RoomRemoved

@@ -320,12 +320,14 @@ directory to walk.
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
-`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms/{room}/resume`,
+`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
+`PATCH`/`DELETE /api/rooms/{room}`, `POST /api/rooms/{room}/resume`,
 `POST /api/rooms/{room}/messages` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
 `repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
-`room resume` (Y-534), `room post` (Y-536) and `update` (Y-368). The daemon may do
+`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550) and
+`update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
 
@@ -805,9 +807,23 @@ the wait and the wakes.
   dashboard never joins one, so every member counts as delivered and every member thread wakes. An
   unknown room is `404`, and an empty text or one over 16 KiB is `400`.
 - **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
-  are behind `allowed()`, both read memory, and both drop expired members first.
-- **A restart loses every room**, with its members, cursors, count, pause and queued wakes. The
-  threads and keepers stay on their machines.
+  are behind `allowed()`, both read memory, and both drop expired members first. Each summary
+  carries the room's `workspace`, `brief` and `base`, `null` for a room an agent made, and each
+  message a `kind`, `text` or `system`.
+- **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
+  decision 2): `~/.config/yantra/rooms/<name>.toml`, through
+  [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes
+  `{name, workspace, brief?, base?}` as application/json only, and answers **201** with the summary.
+  A bad field is **400**, a workspace that does not load **404**, an existing file **409**, and a
+  file that cannot be written **500**. `PATCH /api/rooms/{room}` takes `{brief}`, where `null`
+  clears it, and an undefined room is **404**. `DELETE /api/rooms/{room}` answers
+  `200 {"removed": bool}`, as the workspace delete does. Each writes the file first and then
+  changes memory, under the store's lock. A defined room never expires. A room an agent makes with
+  `room_send` stays in memory only.
+- **A restart reloads each definition with one system message** that says when yantrad restarted.
+  It spends no budget and wakes no thread. Every message, member, cursor, count, pause and queued
+  wake is lost, and so is every room with no definition. A file that does not load is logged by
+  name and skipped. The threads and keepers stay on their machines.
 - **Q5.** The log names a room, a seq, a node and counts. It never names a message's text, and the
   pause notification carries none.
 - [`tests/rooms.rs`](tests/rooms.rs) is the done test: two fixture machines, a wake in

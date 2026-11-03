@@ -131,7 +131,7 @@ impl Default for Fleet {
             env: Arc::default(),
             left: Arc::default(),
             closing: tokio::sync::watch::Sender::new(false),
-            rooms: crate::room::Rooms::new(chats.clone(), None),
+            rooms: crate::room::Rooms::new(chats.clone(), None, None),
             chats,
             pulls: crate::watch::Pulls::default(),
         }

@@ -49,6 +49,11 @@ yantra about                     # version, target and build date of this binary
 yantra update --check            # running and published version, and whether a newer one exists
 sudo yantra update               # install the current release and restart what runs
 yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks and talks in rooms
+yantra room new <room> --workspace <ws> --daemon http://<appliance>:7717  # define a room; it outlives a restart
+yantra room ls --daemon http://<appliance>:7717  # list the rooms
+yantra room show <room> --daemon http://<appliance>:7717  # a room and its messages
+yantra room edit <room> --brief <text> --daemon http://<appliance>:7717  # set a room's brief
+yantra room rm <room> --daemon http://<appliance>:7717  # end a room and delete its definition
 yantra room resume <room> --daemon http://<appliance>:7717  # lift a room's pause after its 20 agent messages
 yantra room post <room> <text> --daemon http://<appliance>:7717  # write into a room as the owner; its count goes to 0
 yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost

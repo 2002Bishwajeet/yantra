@@ -240,11 +240,47 @@ pub fn post_message(daemon: &str, name: &str, text: &str) -> Result<String, Stri
     )
 }
 
+/// `yantra room new`: defines a room in a workspace (ADR-0039 decision 1).
+pub fn create(
+    daemon: &str,
+    name: &str,
+    workspace: &str,
+    brief: Option<&str>,
+    base: Option<&str>,
+) -> Result<String, String> {
+    let body = json!({"name": name, "workspace": workspace, "brief": brief, "base": base});
+    Daemon::new(daemon).send(Method::Post(Some(body)), "/api/rooms")
+}
+
+/// `yantra room ls`.
+pub fn list(daemon: &str) -> Result<String, String> {
+    Daemon::new(daemon).send(Method::Get, "/api/rooms")
+}
+
+/// `yantra room show`.
+pub fn show(daemon: &str, name: &str) -> Result<String, String> {
+    Daemon::new(daemon).send(Method::Get, &format!("/api/rooms/{name}"))
+}
+
+/// `yantra room edit`. An empty brief clears it.
+pub fn edit(daemon: &str, name: &str, brief: &str) -> Result<String, String> {
+    Daemon::new(daemon).send(
+        Method::Patch(json!({"brief": brief})),
+        &format!("/api/rooms/{name}"),
+    )
+}
+
+/// `yantra room rm`. The daemon answers `{"removed": bool}`.
+pub fn remove(daemon: &str, name: &str) -> Result<String, String> {
+    Daemon::new(daemon).send(Method::Delete, &format!("/api/rooms/{name}"))
+}
+
 enum Method {
     Get,
     /// A `GET` that may last as long as the daemon's longest wait.
     Wait,
     Post(Option<Value>),
+    Patch(Value),
     /// A `POST` to `/api/mcp`, carrying this process's session id.
     Mcp(Value),
     Delete,
@@ -304,6 +340,11 @@ impl Daemon {
             Method::Post(Some(body)) => self
                 .agent
                 .post(&url)
+                .header("content-type", "application/json")
+                .send(body.to_string()),
+            Method::Patch(body) => self
+                .agent
+                .patch(&url)
                 .header("content-type", "application/json")
                 .send(body.to_string()),
             Method::Mcp(body) => self
@@ -407,6 +448,40 @@ mod tests {
                     let said = json!({"heard": body, "session": session}).to_string();
                     axum::Json(json!({"jsonrpc": "2.0", "id": body["id"], "result":
                         {"content": [{"type": "text", "text": said}], "isError": false}}))
+                }),
+            )
+            .route(
+                "/api/rooms",
+                get(|| async { r#"[{"name":"r2","workspace":"web"}]"# }).post(
+                    |axum::Json(body): axum::Json<Value>| async move {
+                        if body["name"] == "r2" {
+                            (StatusCode::CREATED, json!({"heard": body}).to_string())
+                        } else {
+                            (StatusCode::CONFLICT, "room r9 already exists".to_owned())
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/api/rooms/{room}",
+                get(|Path(room): Path<String>| async move {
+                    if room == "r2" {
+                        (StatusCode::OK, json!({"name": room, "log": []}).to_string())
+                    } else {
+                        (StatusCode::NOT_FOUND, format!("no room {room}"))
+                    }
+                })
+                .patch(
+                    |Path(room): Path<String>, axum::Json(body): axum::Json<Value>| async move {
+                        if room == "r2" {
+                            (StatusCode::OK, json!({"heard": body}).to_string())
+                        } else {
+                            (StatusCode::NOT_FOUND, format!("no room {room} is defined"))
+                        }
+                    },
+                )
+                .delete(|Path(room): Path<String>| async move {
+                    json!({"removed": room == "r2"}).to_string()
                 }),
             )
             .route(
@@ -842,5 +917,46 @@ mod tests {
             json!({"seq": 1, "heard": {"text": "carry on"}})
         );
         assert_eq!(posted.1, Err("yantrad answered 404: no room r9".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn the_room_definition_verbs_reach_their_routes_and_name_a_refusal() {
+        let daemon = fake_daemon().await;
+        let said = tokio::task::spawn_blocking(move || {
+            [
+                create(&daemon, "r2", "web", Some("Ship it."), None),
+                create(&daemon, "r9", "web", None, None),
+                list(&daemon),
+                show(&daemon, "r2"),
+                show(&daemon, "r9"),
+                edit(&daemon, "r2", ""),
+                edit(&daemon, "r9", "x"),
+                remove(&daemon, "r2"),
+                remove(&daemon, "r9"),
+            ]
+        })
+        .await
+        .expect("the thread");
+        let json = |said: &Result<String, String>| -> Value {
+            serde_json::from_str(said.as_ref().expect("answered")).expect("JSON")
+        };
+        assert_eq!(
+            json(&said[0]),
+            json!({"heard": {"name": "r2", "workspace": "web", "brief": "Ship it.", "base": null}})
+        );
+        assert_eq!(
+            said[1],
+            Err("yantrad answered 409: room r9 already exists".to_owned())
+        );
+        assert_eq!(json(&said[2])[0]["workspace"], "web");
+        assert_eq!(json(&said[3])["name"], "r2");
+        assert_eq!(said[4], Err("yantrad answered 404: no room r9".to_owned()));
+        assert_eq!(json(&said[5]), json!({"heard": {"brief": ""}}));
+        assert_eq!(
+            said[6],
+            Err("yantrad answered 404: no room r9 is defined".to_owned())
+        );
+        assert_eq!(json(&said[7]), json!({"removed": true}));
+        assert_eq!(json(&said[8]), json!({"removed": false}));
     }
 }
