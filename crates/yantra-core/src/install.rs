@@ -661,10 +661,37 @@ exit 1"#,
 
 /// ADR-0031 §3 as amended 2026-10-05: only where there is no card. With no
 /// card WirePlumber already picks `yantra-mic` itself, so the test is the
-/// configured choice, which `get-default-source` does not show.
+/// configured choice, which `get-default-source` does not show. WirePlumber
+/// saves the choice only after a timeout, and a restart before then loses it,
+/// so the script waits for WirePlumber first and for the saved line after (Y-569).
 const DEFAULT_SOURCE: &str = r#"export XDG_RUNTIME_DIR=/run/user/$(id -u)
 pw-metadata -n default 0 default.configured.audio.source 2>/dev/null | grep -q '"yantra-mic"' && { echo unchanged; exit 0; }
-pactl set-default-source yantra-mic && echo changed"#;
+i=0
+until systemctl --user is-active -q wireplumber.service && pw-metadata -n default 2>/dev/null | grep -q 'Found "default" metadata'; do
+  [ "$i" -ge 50 ] && {
+    echo "WirePlumber was not ready within 10 seconds."
+    systemctl --user status wireplumber.service --no-pager 2>&1 | tail -n 20
+    exit 1
+  }
+  sleep 0.2
+  i=$((i + 1))
+done
+pactl set-default-source yantra-mic || exit 1
+s="${XDG_STATE_HOME:-$HOME/.local/state}/wireplumber/default-nodes"
+i=0
+until grep -qx 'default.configured.audio.source=yantra-mic' "$s" 2>/dev/null; do
+  [ "$i" -ge 50 ] && {
+    echo "WirePlumber did not keep yantra-mic as the default source within 10 seconds. The metadata, $s and the service say:"
+    pw-metadata -n default 0 default.configured.audio.source 2>&1
+    cat "$s" 2>&1
+    systemctl --user show wireplumber.service -p NRestarts 2>&1
+    systemctl --user status wireplumber.service --no-pager 2>&1 | tail -n 20
+    exit 1
+  }
+  sleep 0.2
+  i=$((i + 1))
+done
+echo changed"#;
 
 /// The account, then whether systemd keeps its services with nobody logged in.
 const LINGER: &str = r#"u=$(id -un)
@@ -866,6 +893,37 @@ mod tests {
         let restart = script.find("systemctl --user");
         assert!(wait.is_some() && wait < restart, "{script}");
         assert!(script.contains("made no bus"), "{script}");
+    }
+
+    /// Y-569: a choice made while WirePlumber starts can be lost, so the
+    /// script waits for it before the choice and for its save after.
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn the_default_source_is_changed_only_once_wireplumber_keeps_it() {
+        let at = |needle: &str| {
+            DEFAULT_SOURCE
+                .find(needle)
+                .expect("every step is in DEFAULT_SOURCE")
+        };
+        let set = at("pactl set-default-source yantra-mic");
+        assert!(at("is-active -q wireplumber.service") < set);
+        assert!(at(r#"Found "default" metadata"#) < set);
+        assert!(
+            at("echo unchanged") < at("is-active"),
+            "§B4 short path first"
+        );
+        let kept = at("default.configured.audio.source=yantra-mic");
+        assert!(set < kept && kept < at("echo changed"));
+        assert!(DEFAULT_SOURCE.contains("${XDG_STATE_HOME:-$HOME/.local/state}"));
+        assert_eq!(DEFAULT_SOURCE.matches("set-default-source").count(), 1);
+        assert!(DEFAULT_SOURCE.contains("set-default-source yantra-mic || exit 1"));
+        let ready = &DEFAULT_SOURCE[at("was not ready")..set];
+        assert!(ready.contains("systemctl --user status") && ready.contains("exit 1"));
+        let lost = &DEFAULT_SOURCE[at("did not keep yantra-mic")..at("echo changed")];
+        assert!(
+            lost.contains("NRestarts") && lost.contains("exit 1"),
+            "{lost}"
+        );
     }
 
     #[test]
