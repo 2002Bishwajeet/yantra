@@ -6,7 +6,6 @@ const refused = (status: number, said = 'the daemon said') => new ApiError('refu
 
 describe('gitFailure', () => {
   it.each<[GitAction, number, GitFailureKind]>([
-    ['draft', 409, 'draftRunning'],
     ['draft', 502, 'draftClaude'],
     ['draft', 504, 'draftTimeout'],
     ['commit', 400, 'commitEmpty'],
@@ -20,6 +19,15 @@ describe('gitFailure', () => {
     expect(failure.said).toBe('daemon words')
     expect(failure.title).not.toBe('')
     expect(failure.describe()).not.toBe('')
+  })
+
+  it.each<[string, GitFailureKind]>([
+    ['a turn or a revert is running in this thread; wait for it to end', 'draftRunning'],
+    ['the thread has nothing to commit', 'draftNothing'],
+    ['the Mac has no tmux server from a login session, so git', 'draftNoLogin'],
+    ['something else', 'other'],
+  ])('a draft 409 saying "%s" is %s', (said, kind) => {
+    expect(gitFailure('draft', refused(409, said)).kind).toBe(kind)
   })
 
   it.each<GitAction>(['draft', 'commit', 'push', 'pr'])('%s with 404 is no thread, and asking again cannot help', (action) => {
@@ -60,7 +68,9 @@ describe('gitFailure', () => {
     const kinds = new Set<GitFailureKind>()
     const seen = new Set<string>()
     const probes: [GitAction, ApiError][] = [
-      ['draft', refused(409)],
+      ['draft', refused(409, 'a turn is running')],
+      ['draft', refused(409, 'nothing to commit')],
+      ['draft', refused(409, 'no tmux server')],
       ['draft', refused(502)],
       ['draft', refused(504)],
       ['commit', refused(400)],
@@ -78,8 +88,8 @@ describe('gitFailure', () => {
       kinds.add(failure.kind)
       seen.add(failure.title)
     }
-    expect(kinds.size).toBe(12)
-    expect(seen.size).toBe(12)
+    expect(kinds.size).toBe(14)
+    expect(seen.size).toBe(14)
   })
 })
 

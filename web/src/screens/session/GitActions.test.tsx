@@ -136,6 +136,18 @@ describe('commit', () => {
     expect(log.filter((one) => one.path.endsWith('/message'))).toHaveLength(2)
   })
 
+  it.each([
+    ['the thread has nothing to commit', 'Nothing to commit'],
+    ['the Mac has no tmux server from a login session', 'The Mac has no login tmux server'],
+  ])('draws a 409 draft saying "%s" as %s, not as a running turn', async (said, title) => {
+    daemon({ threads: [200, threads], message: [409, said] })
+    open()
+    fireEvent.click(screen.getByRole('button', { name: 'Commit' }))
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByRole('heading', { name: title })).toBeTruthy()
+    expect(within(alert).queryByText(/Wait for the turn/)).toBeNull()
+  })
+
   it('draws a refused commit and keeps the dialog open', async () => {
     daemon({
       threads: [200, threads],

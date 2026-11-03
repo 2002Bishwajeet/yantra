@@ -11,6 +11,8 @@ export type GitAction = 'draft' | 'commit' | 'push' | 'pr'
 /** One kind per action and status the daemon sends (Y-492, Y-449), then the three any action meets. */
 export type GitFailureKind =
   | 'draftRunning'
+  | 'draftNothing'
+  | 'draftNoLogin'
   | 'draftClaude'
   | 'draftTimeout'
   | 'commitEmpty'
@@ -28,6 +30,14 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
   draftRunning: {
     title: 'A turn is running',
     next: 'The agent is writing to the branch. Wait for the turn to end, then draft again.',
+  },
+  draftNothing: {
+    title: 'Nothing to commit',
+    next: 'The thread has no changes. Ask the agent for a change, then draft again.',
+  },
+  draftNoLogin: {
+    title: 'The Mac has no login tmux server',
+    next: 'Start one on the Mac with `tmux new-session -d`, then draft again.',
   },
   draftClaude: {
     title: 'The draft failed',
@@ -64,7 +74,7 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
 }
 
 const byStatus: Record<GitAction, Partial<Record<number, GitFailureKind>>> = {
-  draft: { 409: 'draftRunning', 502: 'draftClaude', 504: 'draftTimeout' },
+  draft: { 502: 'draftClaude', 504: 'draftTimeout' },
   commit: { 400: 'commitEmpty', 409: 'commitRefused' },
   push: { 409: 'pushRefused' },
   pr: { 409: 'prRefused', 502: 'prGithub' },
@@ -92,6 +102,14 @@ export class GitFailure {
   }
 }
 
+// The daemon sends one 409 for three causes (write.rs idle, commit::Error); only its words tell them apart.
+function draftConflict(said: string): GitFailureKind {
+  if (/running/i.test(said)) return 'draftRunning'
+  if (/nothing to commit/i.test(said)) return 'draftNothing'
+  if (/tmux server/i.test(said)) return 'draftNoLogin'
+  return 'other'
+}
+
 export function gitFailure(action: GitAction, cause: unknown): GitFailure {
   const error = asApiError(cause)
   const kind: GitFailureKind =
@@ -101,7 +119,9 @@ export function gitFailure(action: GitAction, cause: unknown): GitFailure {
         ? 'noThread'
         : error.status === 503
           ? 'unreachable'
-          : ((error.status !== undefined && byStatus[action][error.status]) || 'other')
+          : action === 'draft' && error.status === 409
+            ? draftConflict(error.said)
+            : ((error.status !== undefined && byStatus[action][error.status]) || 'other')
   return new GitFailure(kind, error.said)
 }
 
