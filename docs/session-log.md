@@ -340,3 +340,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-561](../tracker.md#3-task-board) is in review.** The daemon now holds a second turn sent while one runs. At the turn's end it sends the held turns as one prompt, and Cancel empties them. Every socket of the thread gets the queue. The composer shows Stop with a Queue button and lists what waits. A revert waits until no turn is running or queued. Rust and web tests cover each path.
 
 - **2026-11-03** — **[Y-577](../tracker.md#3-task-board) is in review.** Research note R23 compares the fleet dashboards that issue #518 names. It says how many products back each pattern and lists the changes for rows Y-580, Y-581, Y-582 and Y-587.
+
+- **2026-11-03** — **[Y-576](../tracker.md#3-task-board) is in review.** Settings and the setup walkthrough now share one push setup flow. It shows the ntfy app link, the topic as a QR code with link and copy, a save that restarts the relay, and a test alert with "Did it arrive?". A test walks the flow and `docs/appliance.md` matches.
