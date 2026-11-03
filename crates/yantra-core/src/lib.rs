@@ -19,6 +19,7 @@ pub mod chat;
 pub mod checkpoint;
 pub mod claude;
 pub mod clone;
+pub mod command;
 pub mod commit;
 pub mod delegate;
 pub mod dirs;

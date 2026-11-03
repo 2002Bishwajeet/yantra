@@ -46,7 +46,7 @@ const NOT_PUSHED: i32 = 7;
 const AHEAD: i32 = 8;
 const BEHIND: i32 = 9;
 const DIVERGED: i32 = 10;
-const TIMED_OUT: i32 = 124;
+pub(crate) const TIMED_OUT: i32 = 124;
 const NO_CLAUDE: i32 = 127;
 /// How long a draft, a commit with its hooks, or a push may run.
 const TIME_LIMIT_SECS: u64 = 5 * 60;
@@ -142,7 +142,7 @@ async fn run<E: Exec>(exec: &E, script: &str, tmux: Option<&str>) -> Result<ssh:
 
 /// Stops `script` and every process under it after `secs`: a dropped ssh
 /// leaves it running (I-27). `STOP` first, so no child escapes the walk.
-fn bounded(script: &str, secs: u64) -> String {
+pub(crate) fn bounded(script: &str, secs: u64) -> String {
     format!(
         "k() {{ kill -STOP \"$1\" 2>/dev/null; for c in $(pgrep -P \"$1\"); do k \"$c\"; done; \
          kill -TERM \"$1\" 2>/dev/null; kill -CONT \"$1\" 2>/dev/null; }}\n\

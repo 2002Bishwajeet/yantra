@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ThreadEvent } from '@/api/thread'
+import type { SlashCommand, ThreadEvent } from '@/api/thread'
 import { chatCheckpoints, chatEvents, chatQueue } from '@/contract.gen'
 import { empty, reduce, type Action, type Timeline } from './timeline'
 
@@ -163,6 +163,14 @@ describe('the timeline', () => {
     expect(fold([plan(steps)]).plan).toEqual(steps)
     expect(fold([plan(steps), plan([steps[0]!])]).plan).toEqual([steps[0]])
     expect(fold([plan(steps), { type: 'reset' }]).plan).toEqual([])
+  })
+
+  it('keeps the newest command list across turns (Y-563)', () => {
+    const list: SlashCommand[] = [{ name: 'review', description: 'review changes', hint: '<branch>' }]
+    const commands = (one: SlashCommand[]) => event({ threadId: 't', type: 'thread.commands.updated', payload: { commands: one } })
+    const held = fold([commands([{ name: 'init', description: '' }]), commands(list), event({ threadId: 't', type: 'turn.started' })])
+    expect(held.commands).toEqual(list)
+    expect(reduce(held, { type: 'sent' }).commands).toEqual(list)
   })
 
   it("drops the last turn's plan when a new turn starts", () => {

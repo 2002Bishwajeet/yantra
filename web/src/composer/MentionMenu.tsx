@@ -10,7 +10,8 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import type { TriggerKind } from './trigger'
 import './MentionMenu.css'
 
-export type MentionItem = { id: string; label: string; description: string; badge?: string }
+/** `hint` is a slash command's argument: a pick of a command with none sends it at once. */
+export type MentionItem = { id: string; label: string; description: string; badge?: string; hint?: string }
 
 export type MentionMenuProps = {
   id: string
@@ -18,22 +19,32 @@ export type MentionMenuProps = {
   loading: boolean
   error: ApiError | null
   items: readonly MentionItem[]
+  /** What an empty list says in place of the kind's own words. */
+  empty?: string
   active: number
   onHover: (index: number) => void
   onPick: (item: MentionItem) => void
   onRetry: () => void
 }
 
-const LABEL: Record<TriggerKind, string> = { path: 'Files', skill: 'Skills' }
-const LOADING: Record<TriggerKind, string> = { path: 'Searching workspace files…', skill: 'Searching skills…' }
-const EMPTY: Record<TriggerKind, string> = { path: 'No matching files.', skill: 'No matching skills.' }
+const LABEL: Record<TriggerKind, string> = { path: 'Files', skill: 'Skills', command: 'Commands' }
+const LOADING: Record<TriggerKind, string> = {
+  path: 'Searching workspace files…',
+  skill: 'Searching skills…',
+  command: 'Loading commands…',
+}
+const EMPTY: Record<TriggerKind, string> = {
+  path: 'No matching files.',
+  skill: 'No matching skills.',
+  command: 'No matching commands.',
+}
 
 /** The `id` the textarea names in `aria-activedescendant`. */
 export const optionId = (menu: string, index: number) => `${menu}-${index}`
 
 /** The suggestions above the composer. Focus stays in the field, which drives the list as a combobox. */
 export function MentionMenu(props: MentionMenuProps) {
-  const { id, kind, loading, error, items, active, onHover, onPick, onRetry } = props
+  const { id, kind, loading, error, items, empty, active, onHover, onPick, onRetry } = props
   const list = useRef<HTMLUListElement>(null)
 
   useLayoutEffect(() => {
@@ -67,13 +78,14 @@ export function MentionMenu(props: MentionMenuProps) {
             >
               <span className="mention-menu__label m3-clip">{item.label}</span>
               <span className="mention-menu__description m3-clip">{item.description}</span>
+              {item.hint ? <span className="mention-menu__hint m3-clip">{item.hint}</span> : null}
               {item.badge ? <span className="mention-menu__badge">{item.badge}</span> : null}
             </li>
           ))}
         </ul>
       ) : (
         <p className="mention-menu__empty" id={id} role="status">
-          {loading ? LOADING[kind] : EMPTY[kind]}
+          {loading ? LOADING[kind] : (empty ?? EMPTY[kind])}
         </p>
       )}
     </div>

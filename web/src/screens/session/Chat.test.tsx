@@ -22,7 +22,7 @@ import {
   chatNotLoggedIn,
   chatQueue,
 } from '@/contract.gen'
-import { aMentions } from '@/api/fixtures'
+import { aMentions, commands as claudeCommands } from '@/api/fixtures'
 import { writePrefs } from '@/shell/prefs'
 import { Chat } from './Chat'
 import { browser, daemon } from './harness'
@@ -1464,5 +1464,123 @@ describe('@ and $ mentions (Y-562)', () => {
     type('@src/ $')
     await settled(() => screen.getByRole('listbox', { name: 'Skills' }))
     expect(asked).toHaveLength(1)
+  })
+})
+
+describe('/ slash commands (Y-563)', () => {
+  const asked: { url: string; body: unknown }[] = []
+
+  /** Answers `POST …/commands` with `answer`, and every other read with a 404. */
+  function commandsAnswer(answer: () => Response | Promise<Response>) {
+    asked.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (!url.endsWith('/commands')) return new Response('no', { status: 404 })
+        asked.push({ url, body: JSON.parse(String(init?.body)) })
+        return answer()
+      }),
+    )
+  }
+
+  const field = (agent = 'Claude') => screen.getByLabelText<HTMLTextAreaElement>(`Message ${agent} in yantra-web`)
+  const key = (name: string, agent?: string) => fireEvent.keyDown(field(agent), { key: name })
+  const ok = () => Response.json(claudeCommands)
+  const commandsList = () => screen.getByRole('listbox', { name: 'Commands' })
+
+  it("opens on / with Claude's commands, the description and the hint", async () => {
+    commandsAnswer(ok)
+    await open()
+    type('/')
+    const options = await settled(() => within(commandsList()).getAllByRole('option'))
+    expect(field().getAttribute('aria-expanded')).toBe('true')
+    expect(field().getAttribute('aria-controls')).toBe(commandsList().id)
+    expect(options.map((one) => one.textContent)).toEqual([
+      '/compactFree up context by summarizing the conversation so far',
+      '/reviewReview a pull request<pr>',
+    ])
+    expect(asked).toEqual([{ url: '/api/workspaces/yantra-web/commands', body: { harness: 'claude' } }])
+  })
+
+  it('does not open after the start of the prompt', async () => {
+    commandsAnswer(ok)
+    await open()
+    type('see /rev')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(asked).toEqual([])
+  })
+
+  it('sends a command with no argument as it is picked', async () => {
+    commandsAnswer(ok)
+    await open()
+    type('/com')
+    await settled(() => commandsList())
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('/compact'))
+    expect(field().value).toBe('')
+  })
+
+  it('puts a command with an argument in the prompt and waits for the argument', async () => {
+    commandsAnswer(ok)
+    await open()
+    type('/rev')
+    const options = await settled(() => within(commandsList()).getAllByRole('option'))
+    fireEvent.click(options[0]!)
+    expect(field().value).toBe('/review ')
+    expect(turns()).toEqual([])
+    expect(screen.queryByRole('listbox')).toBeNull()
+    type('/review 42')
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('/review 42'))
+  })
+
+  it('says it is loading while the answer is on its way', async () => {
+    let answer: (response: Response) => void = () => {}
+    commandsAnswer(() => new Promise<Response>((resolve) => (answer = resolve)))
+    await open()
+    type('/zzz')
+    await settled(() => expect(screen.getByText('Loading commands…')).toBeTruthy())
+    answer(ok())
+    await settled(() => expect(screen.getByText('No matching commands.')).toBeTruthy())
+  })
+
+  it.each([
+    [409, 'claude is not on that machine: claude was not found on PATH'],
+    [503, 'ssh: connect to host cachyos-g14: No route to host'],
+  ])('draws a %i refusal, and Enter still sends the words', async (status, said) => {
+    commandsAnswer(() => new Response(said, { status }))
+    await open()
+    type('/x')
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByText('Commands could not be read')).toBeTruthy()
+    expect(within(alert).getByText(said)).toBeTruthy()
+    key('Enter')
+    await settled(() => expect(turns()[0]?.text).toBe('/x'))
+  })
+
+  it('draws an answer it cannot read', async () => {
+    commandsAnswer(() => new Response('not json', { status: 200 }))
+    await open()
+    type('/')
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByText('Commands could not be read')).toBeTruthy()
+  })
+
+  it("lists an ACP agent's commands from the socket and asks the daemon nothing", async () => {
+    commandsAnswer(ok)
+    await open()
+    say(started('opencode'))
+    await settled(() => field('opencode'))
+    fireEvent.change(field('opencode'), { target: { value: '/' } })
+    await settled(() =>
+      expect(screen.getByText('The commands appear after the agent’s first reply.')).toBeTruthy(),
+    )
+    say(of('thread.commands.updated'))
+    const options = await settled(() => within(commandsList()).getAllByRole('option'))
+    expect(options.map((one) => one.textContent)).toEqual(['/reviewreview changes<branch>'])
+    key('Enter', 'opencode')
+    expect(field('opencode').value).toBe('/review ')
+    expect(asked).toEqual([])
   })
 })
