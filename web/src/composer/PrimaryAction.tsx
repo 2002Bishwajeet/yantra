@@ -1,13 +1,13 @@
 /*
  * Adapted from T3 Code at 810e8f6, apps/web/src/components/chat/ComposerPrimaryActions.tsx
- * (the send and stop buttons only; the daemon has no steer, queue, resume or implement):
+ * (send, stop and queue; the daemon has no steer, resume or implement):
  * https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerPrimaryActions.tsx
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 import { useId } from 'react'
 import { Tooltip } from '@base-ui/react/tooltip'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, ListPlus } from 'lucide-react'
 
 export type PrimaryActionProps = {
   /** The name of the send button: Send in the chat, Post in a room. */
@@ -16,8 +16,9 @@ export type PrimaryActionProps = {
   reason: string | null
   /** A request is in flight, and the button shows a spinner. */
   pending?: boolean
-  /** A turn is running: the button is a Stop. */
-  running?: { agent: string; stopping: boolean; onStop: () => void; reason: string } | null
+  /** A turn is running: the button is a Stop. With `queues`, a message ready to send gets a
+   *  Queue beside it, and the daemon sends it when the turn ends (Y-561). */
+  running?: { agent: string; stopping: boolean; onStop: () => void; reason: string; queues?: boolean } | null
 }
 
 function Spinner() {
@@ -54,6 +55,17 @@ export function PrimaryAction(props: PrimaryActionProps) {
             )}
           </span>
         </button>
+        {running.queues && reason === null ? (
+          <button
+            aria-busy={pending || undefined}
+            aria-label="Queue"
+            className="composer-action"
+            data-kind="queue"
+            type="submit"
+          >
+            <span className="composer-action__disc">{pending ? <Spinner /> : <ListPlus aria-hidden="true" />}</span>
+          </button>
+        ) : null}
       </>
     )
   }

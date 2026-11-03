@@ -337,9 +337,9 @@ tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
 one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
 Attach, harness and permission controls, a context ring that turns red above 90%,
-the agent's plan on the card's top edge, one Send or Stop button, a draft kept
+the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
-Settings → General. Seven things about the code:
+Settings → General. Eight things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -347,6 +347,12 @@ Settings → General. Seven things about the code:
 - **A pure reducer draws it.** [`timeline.ts`](src/screens/session/timeline.ts)
   folds events into messages, tool cards, open requests, usage and the turn's
   state; `useChat` owns the socket and the URL's `?thread=`.
+- **Send stays on while a turn runs** (Y-561). With text typed, a Queue button
+  stands beside Stop, as in T3 Code. The daemon holds the message and answers
+  `queue`, the list as it is now. The timeline keeps that list, the composer
+  shows it above the card, and the status line says how many wait. The daemon
+  sends them as one prompt when the turn ends. Stop empties the list, and its
+  text comes back to an empty field.
 - **Every failure is a `ChatError` of its own kind**: refused, unreachable,
   not logged in, unknown thread, busy, bad frame, checkpoint, turn failed and
   closed.

@@ -20,6 +20,7 @@ import {
   chatEvents,
   chatNotAttached,
   chatNotLoggedIn,
+  chatQueue,
 } from '@/contract.gen'
 import { writePrefs } from '@/shell/prefs'
 import { Chat } from './Chat'
@@ -1067,7 +1068,52 @@ describe('the composer', () => {
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('aria-describedby')).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await settled(() => expect(reasonOf('Stop Claude')).toBe('Claude is answering. Stop it to send something else.'))
+    await settled(() => expect(reasonOf('Stop Claude')).toBe('Claude is answering. A message you queue is sent when it ends.'))
+  })
+
+  it('queues a message while a turn runs, with Stop and Queue together, and lists what waits', async () => {
+    await open()
+    type('run the tests')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(of('turn.started'))
+    await settled(() => screen.getByRole('button', { name: 'Stop Claude' }))
+    // Nothing typed: Stop alone.
+    expect(screen.queryByRole('button', { name: 'Queue' })).toBeNull()
+    // The harness stays as it was while the turn runs.
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web').disabled).toBe(false)
+
+    type('and the docs')
+    expect(screen.getByRole('button', { name: 'Stop Claude' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Queue' }))
+    await settled(() => expect(frames()).toHaveLength(2))
+    expect(frames()[1]).toEqual({ type: 'turn', text: 'and the docs', harness: 'claude', mode: 'supervised' })
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web').value).toBe('')
+    // The running turn keeps its state: a queued send is no new turn.
+    expect(screen.getByRole('button', { name: 'Stop Claude' })).toBeTruthy()
+
+    say(chatQueue)
+    const queued = await settled(() => screen.getByRole('region', { name: 'Queued messages' }))
+    expect(within(queued).getByText('Queued, sends when Claude ends')).toBeTruthy()
+    expect(within(queued).getByText('and the docs')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering. 1 message is queued.')
+
+    say({ ...chatQueue, texts: [] })
+    await settled(() => expect(screen.queryByRole('region', { name: 'Queued messages' })).toBeNull())
+    expect(screen.getByRole('status').textContent).toBe('Claude is answering.')
+  })
+
+  it('puts the queued text back in an empty field when Stop drops the queue', async () => {
+    await open()
+    type('run the tests')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(of('turn.started'))
+    say({ ...chatQueue, texts: ['one', 'two'] })
+    await settled(() => screen.getByRole('region', { name: 'Queued messages' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Claude' }))
+    await settled(() => expect(frames()).toContainEqual({ type: 'cancel' }))
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web').value).toBe('one\n\ntwo')
+    say({ ...chatQueue, texts: [] })
+    await settled(() => expect(screen.queryByRole('region', { name: 'Queued messages' })).toBeNull())
   })
 
   it('words the empty field for each state', async () => {

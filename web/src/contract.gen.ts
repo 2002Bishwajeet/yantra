@@ -15,6 +15,7 @@ import type {
   ChatFrame,
   ChatNotAttached,
   ChatQuery,
+  ChatQueue,
   Cloning,
   Connection,
   Device,
@@ -1080,6 +1081,14 @@ export const chatBranchDiff = {
   "type": "branchDiff",
   "unifiedDiff": "diff --git a/src/old.rs b/src/new.rs\n"
 } satisfies ChatBranchDiff
+
+export const chatQueue = {
+  "texts": [
+    "and the docs"
+  ],
+  "threadId": "1a2b3c4d",
+  "type": "queue"
+} satisfies ChatQueue
 
 export const chatNotAttached = {
   "kind": "notAnImage",

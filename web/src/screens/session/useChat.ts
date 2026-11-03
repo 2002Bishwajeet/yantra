@@ -52,6 +52,7 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         }
         dispatch({ type: 'event', event })
       },
+      onQueue: (queue) => dispatch({ type: 'queue', texts: queue.texts }),
       onBranchDiff: (diff) => {
         asking.current = false
         setBranch({ state: 'ready', diff })

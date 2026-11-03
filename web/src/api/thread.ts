@@ -157,6 +157,10 @@ export type ChatAttached = { type: 'attached'; path: string }
 
 export type ChatNotAttached = { type: 'notAttached'; kind: 'notAnImage' | 'unreachable'; said: string }
 
+/** The turns a person sent while one runs (Y-561), as they are now. The daemon
+ *  sends them as one prompt when the turn ends, and `cancel` empties the list. */
+export type ChatQueue = { type: 'queue'; threadId: string; texts: string[] }
+
 /** One file of a branch diff. No counts is a binary file; `from` is a rename's
  *  old path. */
 export type ChangedFile = { path: string; from?: string; added?: number; deleted?: number }

@@ -669,8 +669,17 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   An attach also makes the last turn's `turn.diff.updated` again, until the next turn or a
   revert, and the timeline draws one card for each turn.
 - **One turn at a time in a thread, across every tab and every restart.** A second `turn` while
-  one runs is `busy`, and the socket stays open. A keeper that already runs on the machine is
-  adopted, not started again.
+  one runs is queued (Y-561), and every socket of the thread gets
+  `{"type":"queue","threadId","texts"}`, the list as it is now. A tab that attaches gets it too,
+  an empty list included, so a tab that was away while the queue drained clears it. A Claude
+  keeper holds a turn from its turn's start until it is forgotten, its checkpoint and close
+  included. When the turn ends, the queue goes as one prompt, the texts joined with a blank line,
+  in the last one's mode. A Claude thread starts a new keeper for it before any room prompt. An
+  ACP thread prompts the same agent, or the next keeper when this one closes. `cancel` empties
+  the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
+  turn. A turn that loses a start race is queued behind the winner; it tries again for up to
+  60 s and only then is `busy`. A keeper that already runs on the machine is adopted, not
+  started again.
 - **One task reads a keeper.** A task claims the thread before it starts or adopts a keeper. The
   claim goes however the task ends, and a keeper started under a claim that no task took is
   killed. A tab that attaches during a start waits for it. A keeper that a failed start left is
@@ -693,7 +702,7 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 The rules from before the keeper still hold:
 
 - **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`
-  and `diff`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
+  and `diff`; the daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint` and `diff`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.
@@ -702,8 +711,9 @@ The rules from before the keeper still hold:
   does not start. When a turn ends, the keeper's task keeps the tree and sends
   `turn.diff.updated{turn, unifiedDiff, truncated}`, whether a socket is attached or not.
   `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
-  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn runs or its
-  checkpoint is kept (Y-542). The conversation is not rewound. A git that refused, or did not
+  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn starts, runs,
+  keeps its checkpoint or waits in the queue (Y-542, Y-561). While a revert runs, no keeper
+  starts, no turn queues and no ACP turn is sent: one registry lock decides both. The conversation is not rewound. A git that refused, or did not
   answer in 60 s, is a `checkpoint` failure, except after a turn that failed: the turn's own
   error stays, and the log has the checkpoint's. No diff is logged.
 - **`diff` asks for the thread's whole-branch diff** (Y-490,

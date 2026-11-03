@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ThreadEvent } from '@/api/thread'
-import { chatCheckpoints, chatEvents } from '@/contract.gen'
+import { chatCheckpoints, chatEvents, chatQueue } from '@/contract.gen'
 import { empty, reduce, type Action, type Timeline } from './timeline'
 
 const event = (e: ThreadEvent): Action => ({ type: 'event', event: e })
@@ -83,6 +83,15 @@ describe('the timeline', () => {
     expect(fold([event({ threadId: 't', type: 'turn.started' })], stopping).turn).toBe('stopping')
     expect(reduce(empty, { type: 'stopping' })).toBe(empty)
     expect(reduce(started, { type: 'refused' }).turn).toBe('idle')
+  })
+
+  it('keeps the queued turns the daemon names, and clears them with an empty list', () => {
+    const started = fold([{ type: 'sent' }, event({ threadId: 't', type: 'turn.started' })])
+    const queued = fold([{ type: 'queue', texts: chatQueue.texts }, { type: 'sent' }], started)
+    expect(queued.queued).toEqual(['and the docs'])
+    expect(queued.turn).toBe('running')
+    expect(reduce(queued, { type: 'queue', texts: [] }).queued).toEqual([])
+    expect(reduce(queued, { type: 'reset' }).queued).toEqual([])
   })
 
   it('starts over on a reset and keeps the thread and its harness', () => {
