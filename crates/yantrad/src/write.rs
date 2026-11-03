@@ -80,11 +80,7 @@ impl<I: Inventory> Authoriser<I> {
     ///
     /// §3: one address or refuse. An absent header is not a refusal — it means
     /// nothing proxied this, and the peer stands as it does on 7717.
-    pub(crate) fn caller_address(
-        &self,
-        peer: IpAddr,
-        headers: &HeaderMap,
-    ) -> Result<IpAddr, Refused> {
+    fn caller_address(&self, peer: IpAddr, headers: &HeaderMap) -> Result<IpAddr, Refused> {
         if !self.bound.contains(&peer) {
             return Ok(peer);
         }
@@ -255,7 +251,8 @@ pub(crate) async fn allowed<I: Inventory>(
 
 /// `GET /api/here`: the tailnet machine the request came from, so the page can
 /// say "you are using iphone". The caller is checked like every route
-/// (ADR-0038 decision 6); the name comes from the last tailnet look, and a look
+/// (ADR-0038 decision 6) and the machine is found by that caller's node id,
+/// never by address (I-5, I-52); the name comes from the last tailnet look, and a look
 /// that has not run or has failed is a 503, never a `null` (R-23).
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct Here {
@@ -267,11 +264,7 @@ async fn here<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Json<Here>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
-    let caller = state
-        .authoriser
-        .caller_address(from.ip(), &headers)?
-        .to_canonical();
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let looked = state.fleet.model.read().await.machines.clone();
     let machines = match looked.as_deref().map(|reading| reading.value()) {
         None => {
@@ -284,12 +277,7 @@ async fn here<I: Inventory + Clone + Send + Sync + 'static>(
     };
     let machine = machines
         .iter()
-        .find(|machine| {
-            machine
-                .addresses
-                .iter()
-                .any(|held| held.to_canonical() == caller)
-        })
+        .find(|machine| machine.id == caller.node)
         .map(|machine| machine.name.clone());
     Ok(Json(Here { machine }))
 }
@@ -2952,27 +2940,32 @@ mod tests {
         headers
     }
 
-    fn on_the_tailnet(addresses: &[IpAddr]) -> Fleet {
-        let machine = yantra_core::inventory::MachineInfo {
-            id: "n-9".to_owned(),
-            name: "iphone".to_owned(),
-            dns_name: "iphone.tail.ts.net.".to_owned(),
-            os: yantra_core::inventory::Os::Ios,
-            online: true,
-            last_seen: None,
-            expired: false,
-            key_expires: None,
-            addresses: addresses.to_vec(),
-            ownership: yantra_core::inventory::Ownership::Yours,
-        };
+    const CALLER_NODE: &str = "nSOME000000011CNTRL";
+
+    fn on_the_tailnet(machines: &[(&str, &str, &[IpAddr])]) -> Fleet {
+        let machines = machines
+            .iter()
+            .map(
+                |(id, name, addresses)| yantra_core::inventory::MachineInfo {
+                    id: (*id).to_owned(),
+                    name: (*name).to_owned(),
+                    dns_name: format!("{name}.tail.ts.net."),
+                    os: yantra_core::inventory::Os::Ios,
+                    online: true,
+                    last_seen: None,
+                    expired: false,
+                    key_expires: None,
+                    addresses: addresses.to_vec(),
+                    ownership: yantra_core::inventory::Ownership::Yours,
+                },
+            )
+            .collect();
         let fleet = Fleet::default();
         fleet
             .model
             .try_write()
             .expect("nothing else holds it")
-            .machines = Some(Arc::new(yantra_core::snapshot::Reading::new(Ok(vec![
-            machine,
-        ]))));
+            .machines = Some(Arc::new(yantra_core::snapshot::Reading::new(Ok(machines))));
         fleet
     }
 
@@ -3013,7 +3006,7 @@ mod tests {
     async fn here_names_a_direct_peer() {
         let (status, body) = ask_here(
             direct(mine(2)),
-            on_the_tailnet(&[address(2)]),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
             address(2),
             &[],
         )
@@ -3025,7 +3018,7 @@ mod tests {
 
     #[tokio::test]
     async fn here_names_the_forwarded_caller_and_not_the_appliance() {
-        let fleet = on_the_tailnet(&[address(2)]);
+        let fleet = on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]);
         let (_, body) = ask_here(
             behind_the_proxy(mine(2)),
             fleet,
@@ -3038,11 +3031,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn here_is_null_for_an_address_no_machine_holds() {
+    async fn here_names_the_caller_node_and_not_a_machine_that_holds_its_address() {
+        let fleet = on_the_tailnet(&[
+            ("n-impostor", "impostor", &[address(2)]),
+            (CALLER_NODE, "iphone", &[address(9)]),
+        ]);
+        let (_, body) = ask_here(direct(mine(2)), fleet, address(2), &[]).await;
+
+        assert_eq!(body["machine"], "iphone");
+    }
+
+    #[tokio::test]
+    async fn here_is_null_for_a_node_the_look_does_not_list() {
         let (status, body) = ask_here(
-            direct(mine(7)),
-            on_the_tailnet(&[address(2)]),
-            address(7),
+            direct(mine(2)),
+            on_the_tailnet(&[("n-other", "laptop", &[address(2)])]),
+            address(2),
             &[],
         )
         .await;
@@ -3055,7 +3059,7 @@ mod tests {
     async fn here_refuses_a_list_of_forwarded_addresses() {
         let (status, _) = ask_here(
             behind_the_proxy(mine(2)),
-            on_the_tailnet(&[address(2)]),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
             address(1),
             &["100.64.0.2, 100.64.0.3"],
         )
@@ -3067,8 +3071,13 @@ mod tests {
     #[tokio::test]
     async fn here_refuses_a_node_that_is_not_yours() {
         let fake = tailnet(vec![(address(3), caller(ME + 1, &[]))]);
-        let (status, _) =
-            ask_here(direct(fake), on_the_tailnet(&[address(3)]), address(3), &[]).await;
+        let (status, _) = ask_here(
+            direct(fake),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(3)])]),
+            address(3),
+            &[],
+        )
+        .await;
 
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
@@ -3077,7 +3086,7 @@ mod tests {
     async fn here_refuses_an_address_that_is_no_peer() {
         let (status, _) = ask_here(
             direct(tailnet(vec![])),
-            on_the_tailnet(&[address(2)]),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
             address(2),
             &[],
         )
