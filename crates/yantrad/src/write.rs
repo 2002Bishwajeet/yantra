@@ -135,6 +135,10 @@ where
         .route("/machines/{machine}/probe", post(ask::<I>))
         .route("/machines/{machine}/dirs", post(walk::<I>))
         .route("/machines/{machine}/clone", post(fetch::<I>))
+        .route(
+            "/workspaces/{name}/threads/{thread}/terminal",
+            post(thread_terminal::<I>),
+        )
         .with_state(authoriser.clone());
 
     // `{name}` rather than `{machine}`, which the routes above prefer: the `GET`
@@ -1792,6 +1796,30 @@ async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(ThreadOpened::of(opened)))
 }
 
+/// `yantra chat terminal <workspace> <thread>` on the wire (Y-498): opens or
+/// attaches the thread's tmux session in its worktree, and answers the
+/// session socket's address. A running turn does not refuse it: the owner's
+/// shell shares the worktree with the agent, and the Chat says so.
+async fn thread_terminal<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+) -> Result<Json<ThreadTerminal>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    tracing::info!("chat terminal {name} {id} for {}", caller.node);
+    let opened = thread::terminal_for(&name, &id)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_thread(&error),
+            said: chain(&error),
+        })?;
+    Ok(Json(ThreadTerminal {
+        machine: opened.machine,
+        session: opened.session,
+    }))
+}
+
 /// No wildcard, per Y-135. A machine that could not be asked is `503`, as in
 /// [`from_logs`]; a GitHub that refused or could not be reached is `502`.
 fn from_thread(error: &thread::Failed) -> StatusCode {
@@ -1799,6 +1827,9 @@ fn from_thread(error: &thread::Failed) -> StatusCode {
         thread::Failed::Workspace(workspace) => from_workspace(workspace),
         thread::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
         thread::Failed::Github(github) => from_github(github),
+        thread::Failed::NoThread { .. } => StatusCode::NOT_FOUND,
+        thread::Failed::Tmux(_) => StatusCode::SERVICE_UNAVAILABLE,
+        thread::Failed::Up(up) => from_up(up),
         thread::Failed::NoStateDir => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -2552,6 +2583,14 @@ struct ThreadPushed {
     branch: String,
 }
 
+/// The session socket's address:
+/// `GET /api/machines/{machine}/sessions/{session}/terminal`.
+#[derive(Debug, serde::Serialize)]
+struct ThreadTerminal {
+    machine: String,
+    session: String,
+}
+
 #[derive(Debug, serde::Serialize)]
 struct ThreadPrOpened {
     number: u64,
@@ -3162,6 +3201,14 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 number: 497,
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 branch_deleted: true,
+            }),
+        ),
+        (
+            "threadTerminal",
+            "ThreadTerminal",
+            of(&ThreadTerminal {
+                machine: "cachyos-g14".to_owned(),
+                session: "yantra-term-site-0a1b2c3d4e5f6a7b".to_owned(),
             }),
         ),
         (
@@ -4484,6 +4531,7 @@ mod tests {
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"number":21}"#)),
             Request::delete("/workspaces/site/threads/0a1b").body(Body::empty()),
+            Request::post("/workspaces/site/threads/0a1b/terminal").body(Body::empty()),
         ] {
             let mut request = request.expect("a request");
             request
@@ -4533,6 +4581,43 @@ mod tests {
                 .body(Body::from(empty));
             assert_eq!(send(request).await, StatusCode::BAD_REQUEST, "{empty}");
         }
+    }
+
+    /// Y-498: a tagged node is refused the terminal before any workspace is
+    /// read. A running turn does not refuse the owner, so a reserved name is
+    /// what answers, and no disk or machine is asked.
+    #[tokio::test]
+    async fn a_thread_terminal_refuses_a_tagged_caller_and_not_a_busy_thread() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        fleet.chats.mark_reverting("chat/yantra-term-x/0a1b");
+        let app = router::<Fake, ()>(
+            direct(tailnet(vec![
+                (address(9), caller(ME, &["tag:ci"])),
+                (address(8), caller(ME, &[])),
+            ])),
+            fleet,
+        );
+        let send = |at: u8| {
+            let app = app.clone();
+            async move {
+                let mut request = Request::post("/workspaces/yantra-term-x/threads/0a1b/terminal")
+                    .body(Body::empty())
+                    .expect("a request");
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, at], 61620))));
+                app.oneshot(request)
+                    .await
+                    .expect("the router is infallible")
+                    .status()
+            }
+        };
+        assert_eq!(send(9).await, StatusCode::FORBIDDEN);
+        assert_eq!(send(8).await, StatusCode::BAD_REQUEST);
     }
 
     /// Q5: hook output can hold code, so a commit verb's refusal is answered
@@ -4820,6 +4905,28 @@ mod tests {
                 }
             ))),
             StatusCode::SERVICE_UNAVAILABLE
+        );
+        // Y-498's terminal: no thread, a tmux that failed, and a Mac with no
+        // tmux server.
+        assert_eq!(
+            from_thread(&thread::Failed::NoThread { id: "x".into() }),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            from_thread(&thread::Failed::Tmux(tmux::Error::NotFound {
+                searched: "/usr/bin".into()
+            })),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            from_thread(&thread::Failed::Up(up::Error::NoLoginServer {
+                machine: "mac".into()
+            })),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            from_thread(&thread::Failed::NoStateDir),
+            StatusCode::INTERNAL_SERVER_ERROR
         );
     }
 

@@ -59,6 +59,7 @@ import { ModelPicker } from './ModelPicker'
 import { PendingApproval } from './PendingApproval'
 import { PendingQuestion } from './PendingQuestion'
 import { PlanToggle } from './PlanToggle'
+import { TerminalDrawer } from './TerminalDrawer'
 import type { Message, Timeline } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
@@ -180,6 +181,9 @@ export function Chat(props: ChatProps) {
   const { timeline, error, link } = chat
   const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
   const [showDiff, setShowDiff] = useState(false)
+  const [showTerminal, setShowTerminal] = useState(false)
+  const terminalButton = useRef<HTMLButtonElement>(null)
+  const noTerminal = useId()
   const [added, setAdded] = useState(false)
   const diffButton = useRef<HTMLButtonElement>(null)
   const { branch } = chat
@@ -420,6 +424,11 @@ export function Chat(props: ChatProps) {
     }
     setShowDiff(true)
     chat.requestDiff()
+  }
+
+  const closeTerminal = () => {
+    setShowTerminal(false)
+    terminalButton.current?.focus()
   }
 
   return (

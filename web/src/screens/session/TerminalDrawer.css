@@ -1,0 +1,25 @@
+/* Y-498: T3 Code's drawer is an aside docked under a top border, with its actions top right. */
+
+.terminal-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.terminal-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.terminal-drawer__head > h2 {
+  margin: 0;
+}
+
+.terminal-drawer__note {
+  margin: 0;
+}

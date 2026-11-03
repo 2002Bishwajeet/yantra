@@ -50,6 +50,17 @@ vi.mock('./diff/DiffViewer', () => ({
   },
 }))
 
+// The drawer's own behaviour is TerminalDrawer.test.tsx's.
+vi.mock('./TerminalDrawer', () => ({
+  TerminalDrawer: (props: { thread: string; onClose: () => void }) => (
+    <aside aria-label="Terminal in the thread's worktree" data-thread={props.thread}>
+      <button onClick={props.onClose} type="button">
+        Close
+      </button>
+    </aside>
+  ),
+}))
+
 const web: Workspace = {
   name: 'yantra-web',
   machine: 'cachyos-g14',
@@ -825,6 +836,33 @@ describe('the chat', () => {
 
     say({ type: 'error', kind: 'busy', said: 'a turn is running' })
     await settled(() => expect(screen.getByRole('alert').textContent).toContain('The agent is still answering'))
+  })
+})
+
+describe('the terminal toggle', () => {
+  it('holds the toggle until a thread exists, and says why', async () => {
+    await open()
+    const toggle = screen.getByRole('button', { name: 'Terminal' })
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
+    const why = document.getElementById(toggle.getAttribute('aria-describedby') ?? '')
+    expect(why?.textContent).toBe("The terminal opens in the thread's worktree, which the first turn makes.")
+    fireEvent.click(toggle)
+    expect(screen.queryByRole('complementary', { name: "Terminal in the thread's worktree" })).toBeNull()
+  })
+
+  it("opens the drawer on the thread's worktree, and Close puts focus back on the toggle", async () => {
+    await open('1a2b3c4d')
+    say(started())
+    const toggle = screen.getByRole('button', { name: 'Terminal' })
+    await settled(() => expect(toggle.getAttribute('aria-disabled')).not.toBe('true'))
+    expect(toggle.getAttribute('aria-describedby')).toBeNull()
+    fireEvent.click(toggle)
+    const drawer = screen.getByRole('complementary', { name: "Terminal in the thread's worktree" })
+    expect(drawer.getAttribute('data-thread')).toBe('1a2b3c4d')
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('complementary', { name: "Terminal in the thread's worktree" })).toBeNull()
+    expect(document.activeElement).toBe(toggle)
   })
 })
 

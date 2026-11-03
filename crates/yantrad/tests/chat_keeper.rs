@@ -600,31 +600,70 @@ impl Socket {
         self.write(0x1, frame.to_string().as_bytes()).await
     }
 
+    /// The next data or close frame's opcode and payload, answering pings on
+    /// the way, or `None` once the stream ended.
+    async fn frame(&mut self) -> Result<Option<(u8, Vec<u8>)>> {
+        loop {
+            let mut head = [0u8; 2];
+            if self.stream.read_exact(&mut head).await.is_err() {
+                return Ok(None);
+            }
+            let len = match head[1] & 0x7f {
+                126 => u64::from(self.stream.read_u16().await?),
+                127 => self.stream.read_u64().await?,
+                len => u64::from(len),
+            };
+            let mut payload = vec![0u8; usize::try_from(len)?];
+            self.stream.read_exact(&mut payload).await?;
+            match head[0] & 0x0f {
+                0x9 => self.write(0xa, &payload).await?,
+                opcode @ (0x1 | 0x2 | 0x8) => return Ok(Some((opcode, payload))),
+                _ => {}
+            }
+        }
+    }
+
     /// The next JSON frame, or `None` once the daemon closed the socket.
     async fn next(&mut self, within: Duration) -> Result<Option<Value>> {
         tokio::time::timeout(within, async {
             loop {
-                let mut head = [0u8; 2];
-                if self.stream.read_exact(&mut head).await.is_err() {
-                    return Ok(None);
-                }
-                let len = match head[1] & 0x7f {
-                    126 => u64::from(self.stream.read_u16().await?),
-                    127 => self.stream.read_u64().await?,
-                    len => u64::from(len),
-                };
-                let mut payload = vec![0u8; usize::try_from(len)?];
-                self.stream.read_exact(&mut payload).await?;
-                match head[0] & 0x0f {
-                    0x1 => return Ok(Some(serde_json::from_slice(&payload)?)),
-                    0x8 => return Ok(None),
-                    0x9 => self.write(0xa, &payload).await?,
-                    _ => {}
+                match self.frame().await? {
+                    Some((0x1, payload)) => return Ok(Some(serde_json::from_slice(&payload)?)),
+                    None | Some((0x8, _)) => return Ok(None),
+                    Some(_) => {}
                 }
             }
         })
         .await
         .context("no frame arrived in time")?
+    }
+
+    /// Terminal bytes up to and including the first frame after which they hold
+    /// `needle`. A text frame is the daemon's refusal.
+    async fn bytes_until(&mut self, within: Duration, needle: &str) -> Result<String> {
+        let mut seen = Vec::new();
+        tokio::time::timeout(within, async {
+            loop {
+                match self.frame().await? {
+                    Some((0x2, payload)) => seen.extend_from_slice(&payload),
+                    Some((0x1, payload)) => {
+                        bail!("the daemon refused: {}", String::from_utf8_lossy(&payload))
+                    }
+                    _ => bail!("the socket closed before `{needle}` showed"),
+                }
+                let text = String::from_utf8_lossy(&seen);
+                if text.contains(needle) {
+                    return Ok(text.into_owned());
+                }
+            }
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "`{needle}` did not show in time: {}",
+                String::from_utf8_lossy(&seen)
+            )
+        })?
     }
 
     /// Frames up to and including the first that `stop` holds of.
@@ -860,6 +899,88 @@ async fn outlives(agent: Agent) -> Result<()> {
     assert_eq!(machine.agent_pid(agent, &thread)?, pid, "the agent stays");
     assert!(machine.session_exists(&thread), "and so does its keeper");
     assert_eq!(host.files()?, files, "yantrad B wrote no file on the host");
+    b.kill()?;
+    Ok(())
+}
+
+/// A `POST` with no body, answered as JSON.
+async fn post(path: &str) -> Result<Value> {
+    let mut stream = TcpStream::connect(DAEMON).await?;
+    stream
+        .write_all(
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: yantra\r\nContent-Length: 0\r\n\
+                 Connection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await?;
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).await?;
+    let (head, body) = answer
+        .split_once("\r\n\r\n")
+        .context("an answer with a body")?;
+    if !head.starts_with("HTTP/1.1 200") {
+        bail!("{path} was refused: {answer}");
+    }
+    Ok(serde_json::from_str(body)?)
+}
+
+/// Y-498: the thread's terminal is a tmux session, so the shell and what it
+/// printed outlive the daemon that opened it.
+#[tokio::test]
+async fn a_thread_terminal_survives_a_daemon_restart() -> Result<()> {
+    let Some(machine) = Machine::start(Agent::StandIn)? else {
+        return Ok(());
+    };
+    let thread = "0a1b2c3d4e5f6a7b";
+    let worktree = format!("/home/{USER}/.yantra/worktrees/chat/{WORKSPACE}/{thread}");
+    machine.sh(&format!(
+        "git -C {REPO} worktree add -q -b yantra/chat/{WORKSPACE}/{thread} {worktree} HEAD"
+    ))?;
+    let host = Host::new(&machine.fixture)?;
+    let a = host.daemon("a").await?;
+
+    let opened = post(&format!(
+        "/api/workspaces/{WORKSPACE}/threads/{thread}/terminal"
+    ))
+    .await?;
+    let session = format!("yantra-term-{WORKSPACE}-{thread}");
+    assert_eq!(
+        opened,
+        json!({"machine": "fixture", "session": session}),
+        "{}",
+        host.log("a")
+    );
+    let id = || {
+        machine.sh(&format!(
+            "tmux display-message -p -t '={session}:' '#{{session_id}} #{{pane_current_path}}'"
+        ))
+    };
+    let before = id()?;
+    assert!(before.ends_with(&worktree), "{before}");
+
+    let socket = format!("/api/machines/fixture/sessions/{session}/terminal");
+    let size = json!({"rows": 24, "cols": 80, "term": "xterm-256color"});
+    let mut first = Socket::open(&socket).await?;
+    first.send(size.clone()).await?;
+    // Quoted apart, so only the shell's output holds the marker whole.
+    first.write(0x2, b"echo yantra''-498\r").await?;
+    first
+        .bytes_until(PATIENCE, "yantra-498")
+        .await
+        .with_context(|| host.log("a"))?;
+    drop(first);
+    a.kill()?;
+
+    let b = host.daemon("b").await?;
+    let mut second = Socket::open(&socket).await?;
+    second.send(size).await?;
+    second
+        .bytes_until(PATIENCE, "yantra-498")
+        .await
+        .with_context(|| host.log("b"))?;
+    assert_eq!(id()?, before, "the same session, in the worktree");
     b.kill()?;
     Ok(())
 }

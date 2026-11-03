@@ -24,6 +24,7 @@ import type {
   ThreadPrMerged,
   ThreadPrOpened,
   ThreadPushed,
+  ThreadTerminal,
   Workspace,
 } from '@/api'
 import { fetchJson, json } from '@/api/client'
@@ -403,6 +404,15 @@ export function useRemoveThread(name: string) {
   return useMutation<void, ApiError, string>({
     mutationFn: (id) => fetchJson<void>(workspace(name, `/threads/${encodeURIComponent(id)}`), { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.threadStates(name) }),
+  })
+}
+
+/** Y-498, `yantra chat terminal`: the thread's tmux session in its worktree,
+ *  opened or attached. 404 is no thread, 409 a Mac with no tmux server, 503 a
+ *  machine or a tmux that failed. */
+export function useThreadTerminal(name: string) {
+  return useMutation<ThreadTerminal, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadTerminal>(thread(name, id, 'terminal'), { method: 'POST' }),
   })
 }
 

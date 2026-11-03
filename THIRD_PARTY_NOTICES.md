@@ -130,6 +130,12 @@ and [`workLog.logic.ts`](web/src/screens/session/workLog.logic.ts) adapts the gr
 [`MessagesTimeline.logic.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/MessagesTimeline.logic.ts)
 and its working timer. Its name, wordmark and icon are not used.
 
+[`web/src/screens/session/TerminalDrawer.tsx`](web/src/screens/session/TerminalDrawer.tsx) adapts, at
+commit `1451e7c`, the drawer layout of
+[`apps/web/src/components/ThreadTerminalDrawer.tsx`](https://github.com/pingdotgg/t3code/blob/1451e7cb23034d29774338608368a15d8845df36/apps/web/src/components/ThreadTerminalDrawer.tsx):
+a docked aside under a top border, its actions at the top right, and the terminal under them. Yantra
+keeps its own xterm and socket, and tmux keeps the shell. Its name, wordmark and icon are not used.
+
 The composer in [`web/src/composer/`](web/src/composer/) adapts, at commit `810e8f6`, these files of T3 Code,
 each with its upstream path in the block comment at its top:
 [`ComposerSurface.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerSurface.tsx)

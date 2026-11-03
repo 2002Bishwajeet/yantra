@@ -642,6 +642,14 @@ export type ThreadPrMerged = {
   url: string
   branchDeleted: boolean
 }
+
+/** `POST /api/workspaces/{name}/threads/{thread}/terminal` (Y-498): the
+ *  thread's tmux session in its worktree, opened or attached. Its socket is
+ *  `GET /api/machines/{machine}/sessions/{session}/terminal`. */
+export type ThreadTerminal = {
+  machine: string
+  session: string
+}
 // ---------------------------------------------------------------------------
 // Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
 // edits above it is trivial.
