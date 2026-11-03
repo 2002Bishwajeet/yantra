@@ -15,6 +15,12 @@ export const hints = {
 export function useCopy(text: string) {
   const ref = useRef<HTMLSpanElement>(null)
   const [said, setSaid] = useState<'copied' | 'selected' | 'manual' | null>(null)
+  const [seen, setSeen] = useState(text)
+  // A new text is not the one that was copied; a stale 'Copied' would mislead.
+  if (seen !== text) {
+    setSeen(text)
+    setSaid(null)
+  }
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text)
