@@ -3,7 +3,7 @@
 > The command-line client, and the daemon's first client. It renders and chooses exit codes; every
 > decision about what is true belongs to `yantra-core` (ADR-0005). It calls that crate in-process
 > today and becomes an HTTP client of `yantrad` later — a change of *where* the work is called from,
-> not *what* it does. `src/main.rs`, and `src/mcp.rs` and `src/why.rs` for the four verbs that call the daemon.
+> not *what* it does. `src/main.rs`, and `src/mcp.rs` and `src/why.rs` for the nine verbs that call the daemon.
 
 ## Commands
 
