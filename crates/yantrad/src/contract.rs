@@ -64,6 +64,7 @@ import type {
   ChatFrame,
   ChatNotAttached,
   ChatQuery,
+  ChatQueue,
   Cloning,
   Connection,
   Device,

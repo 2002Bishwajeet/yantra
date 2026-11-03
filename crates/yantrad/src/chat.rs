@@ -23,6 +23,10 @@
 //! `diff`, and one turn runs at a time in a thread, across every tab and every
 //! restart. The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
 //!
+//! **A `turn` sent while one runs is queued** (Y-561): every socket of the
+//! thread gets a [`QueueFrame`], and the turn's end sends the queue as one
+//! prompt. `cancel` empties it. A socket follows the next keeper of its thread.
+//!
 //! **Each `turn` carries the thread's [`PermissionMode`]** (Y-453), and the
 //! keeper's `mode` file keeps it for a daemon that adopts the turn. A request
 //! the mode answers is answered here and never relayed, so the browser shows
@@ -339,6 +343,48 @@ impl BranchDiffReply {
             truncated: diff.diff.truncated,
         }
     }
+}
+
+/// The turns a person sent while one runs, as they are now. Like
+/// [`BranchDiffReply`], it is no journalled event.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QueueFrame {
+    #[serde(rename = "type")]
+    tag: &'static str,
+    thread_id: String,
+    texts: Vec<String>,
+}
+
+impl QueueFrame {
+    /// The queue of the thread whose keeper is `id`.
+    fn of(id: &str, next: &[Next]) -> Self {
+        Self {
+            tag: "queue",
+            thread_id: id.rsplit('/').next().unwrap_or(id).to_owned(),
+            texts: next.iter().map(|next| next.text.clone()).collect(),
+        }
+    }
+}
+
+/// A turn a person sent while one ran, held for that turn's end.
+struct Next {
+    text: String,
+    mode: PermissionMode,
+    images: Option<String>,
+}
+
+/// The held turns as one: their texts joined with a blank line, with the last one's mode and
+/// images.
+fn joined(next: Vec<Next>) -> Option<Next> {
+    let last = next.last()?;
+    let (mode, images) = (last.mode, last.images.clone());
+    let texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
+    Some(Next {
+        text: texts.join("\n\n"),
+        mode,
+        images,
+    })
 }
 
 /// What a `notLoggedIn` failure names: whose login, where, and how to make it.
@@ -1011,6 +1057,10 @@ struct Held {
     /// Room prompts that wait for a thread's turn to end, each with the
     /// sender that tells its wake what came of it.
     queued: HashMap<String, Vec<Queued>>,
+    /// Turns a person sent while one ran, for that turn's end (Y-561).
+    next: HashMap<String, Vec<Next>>,
+    /// Sockets that follow each thread's next keeper.
+    waiters: HashMap<String, Vec<Waiter>>,
     /// Keeper sessions whose workspace or thread is gone, already warned
     /// about. A refresh pass still looks at each.
     gone: HashSet<String>,
@@ -1018,6 +1068,11 @@ struct Held {
 
 /// A room prompt held for a thread's next turn.
 type Queued = (String, oneshot::Sender<Woke>);
+
+/// A socket's wait for its thread's next keeper: a subscription taken before
+/// that keeper's first frame, or why the turn queued for it did not start.
+type Waiter = oneshot::Sender<Following>;
+type Following = Result<broadcast::Receiver<Sent>, Failure>;
 
 /// What a room's wake of a thread came to (ADR-0038 decision 3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1028,6 +1083,17 @@ pub enum Woke {
     Failed,
     /// No wake reaches this thread: it is an ACP thread, or it is gone.
     Never,
+}
+
+impl Held {
+    /// Takes the turns held for `live`'s thread, and tells every socket the queue is empty.
+    fn drain_next(&mut self, live: &Live) -> Vec<Next> {
+        let next = self.next.remove(&live.id).unwrap_or_default();
+        if !next.is_empty() {
+            live.publish(&QueueFrame::of(&live.id, &[]), None);
+        }
+        next
+    }
 }
 
 impl std::fmt::Debug for Registry {
@@ -1091,7 +1157,73 @@ impl Registry {
             return false;
         }
         held.lives.insert(live.id.clone(), Arc::clone(live));
+        for waiter in held.waiters.remove(&live.id).unwrap_or_default() {
+            if let Some((_, _, receiver)) = live.subscribe() {
+                let _ = waiter.send(Ok(receiver));
+            }
+        }
         true
+    }
+
+    /// A wait for thread `id`'s next keeper.
+    fn follow(&self, id: &str) -> oneshot::Receiver<Following> {
+        let (waiter, waiting) = oneshot::channel();
+        let mut held = self.lock();
+        let waiters = held.waiters.entry(id.to_owned()).or_default();
+        waiters.retain(|waiter| !waiter.is_closed());
+        waiters.push(waiter);
+        waiting
+    }
+
+    /// Tells every socket that waits for thread `id`'s next keeper that none starts.
+    fn refuse(&self, id: &str, refusal: &Failure) {
+        for waiter in self.lock().waiters.remove(id).unwrap_or_default() {
+            let _ = waiter.send(Err(refusal.clone()));
+        }
+    }
+
+    /// Holds `next` for the end of the turn `live` runs, and tells every socket. A `live` that
+    /// runs no turn, or has left the registry, gives `next` back.
+    fn hold(&self, live: &Live, next: Next) -> Result<(), Next> {
+        let mut held = self.lock();
+        let current = held
+            .lives
+            .get(&live.id)
+            .is_some_and(|held| std::ptr::eq(held.as_ref(), live));
+        if !current || !live.busy() {
+            return Err(next);
+        }
+        let queue = held.next.entry(live.id.clone()).or_default();
+        queue.push(next);
+        live.publish(&QueueFrame::of(&live.id, queue), None);
+        Ok(())
+    }
+
+    /// Takes the turns held for `live`'s thread and marks it busy with them, unless a turn runs
+    /// or the keeper is closing.
+    fn take_next(&self, live: &Live) -> Vec<Next> {
+        let mut held = self.lock();
+        {
+            let mut state = live.lock();
+            if state.busy || state.closing || !held.next.contains_key(&live.id) {
+                return Vec::new();
+            }
+            state.busy = true;
+        }
+        held.drain_next(live)
+    }
+
+    /// Drops the turns held for `live`'s thread.
+    fn clear_next(&self, live: &Live) {
+        self.lock().drain_next(live);
+    }
+
+    /// The queue of thread `id`, for a socket that attaches.
+    fn queue_of(&self, id: &str) -> Option<QueueFrame> {
+        self.lock()
+            .next
+            .get(id)
+            .map(|next| QueueFrame::of(id, next))
     }
 
     /// Marks a thread's keeper as being started or read back. `false` is a
@@ -1129,19 +1261,21 @@ impl Registry {
         Some(heard)
     }
 
-    /// Lets `live`'s thread go, and returns the prompts queued for it. Both
-    /// happen under one lock, so no prompt queues behind a keeper that is gone.
-    fn forget(&self, live: &Live) -> Vec<Queued> {
+    /// Lets `live`'s thread go, and returns the room prompts and the person's
+    /// turns queued for it. Both happen under one lock, so nothing queues
+    /// behind a keeper that is gone.
+    fn forget(&self, live: &Live) -> (Vec<Queued>, Vec<Next>) {
         let mut held = self.lock();
-        if held
+        if !held
             .lives
             .get(&live.id)
             .is_some_and(|held| std::ptr::eq(held.as_ref(), live))
         {
-            held.lives.remove(&live.id);
-            return held.queued.remove(&live.id).unwrap_or_default();
+            return (Vec::new(), Vec::new());
         }
-        Vec::new()
+        held.lives.remove(&live.id);
+        let next = held.drain_next(live);
+        (held.queued.remove(&live.id).unwrap_or_default(), next)
     }
 
     fn wait(&self, workspace: &str, thread: &str) {
@@ -1410,6 +1544,17 @@ async fn next_sent(sub: &mut Option<Sub>) -> News {
     }
 }
 
+async fn next_keeper(waiter: &mut Option<oneshot::Receiver<Following>>) -> Following {
+    if let Some(waiting) = waiter
+        && let Ok(followed) = waiting.await
+    {
+        return followed;
+    }
+    // A wait the registry dropped is not polled again.
+    *waiter = None;
+    std::future::pending().await
+}
+
 /// Whether a replay already sent `sent`.
 fn repeated(sent: &Sent, seen: Option<&Cursor>) -> bool {
     match (&sent.cursor, seen) {
@@ -1526,7 +1671,14 @@ async fn converse<M: Machine, P: Peer>(
     let mut images: Option<Images> = None;
     // A branch diff runs beside the loop and sends its frame back here.
     let (diffs, mut diffed) = mpsc::unbounded_channel::<String>();
+    // The thread's next keeper, such as one a queued turn or a room starts.
+    let mut waiter = None;
     loop {
+        if waiter.is_none()
+            && let Some(here) = &here
+        {
+            waiter = Some(machine.registry().follow(&here.place.id));
+        }
         let open = tokio::select! {
             heard = peer.hear() => match heard {
                 None => false,
@@ -1539,6 +1691,19 @@ async fn converse<M: Machine, P: Peer>(
                 }
             },
             Some(text) = diffed.recv() => peer.say_text(text).await,
+            followed = next_keeper(&mut waiter) => {
+                waiter = None;
+                match followed {
+                    // A socket that started the keeper itself already follows it.
+                    Ok(receiver) if sub.as_ref().is_none_or(|open| open.receiver.is_closed()) => {
+                        let flushed = flush(&mut sub, peer).await;
+                        sub = Some(Sub { receiver, seen: None });
+                        flushed
+                    }
+                    Ok(_) => true,
+                    Err(refusal) => peer.say(&refusal).await,
+                }
+            }
             sent = next_sent(&mut sub) => match sent {
                 News::Frame(text) => peer.say_text(text.to_string()).await,
                 News::Ended => {
@@ -1592,7 +1757,6 @@ async fn heard_frame<M: Machine, P: Peer>(
             let asked = harness.as_deref().map(harness_named).transpose();
             let theirs = here.as_ref().map(|here| here.harness);
             match (asked, theirs) {
-                _ if live.as_ref().is_some_and(|live| live.busy()) => peer.say(&busy()).await,
                 _ if text.trim().is_empty() => {
                     peer.say(&failure(Kind::BadFrame, "a turn needs some text"))
                         .await
@@ -1606,9 +1770,25 @@ async fn heard_frame<M: Machine, P: Peer>(
                     peer.say(&failure(Kind::BadFrame, said)).await
                 }
                 (Ok(asked), _) => {
-                    let turn = Typed {
+                    let images = images.and_then(Images::dir);
+                    let next = Next {
                         text,
-                        images: images.and_then(Images::dir),
+                        mode,
+                        images: images.map(str::to_owned),
+                    };
+                    let next = match &live {
+                        Some(live) => match machine.registry().hold(live, next) {
+                            Ok(()) => {
+                                tracing::info!("chat {name}: a turn waits for the running one");
+                                return true;
+                            }
+                            Err(next) => next,
+                        },
+                        None => next,
+                    };
+                    let turn = Typed {
+                        text: next.text,
+                        images,
                         mode,
                     };
                     begin(machine, name, here, sub, early, asked.flatten(), turn, peer).await
@@ -1641,6 +1821,7 @@ async fn heard_frame<M: Machine, P: Peer>(
         Ok(Frame::Cancel) => {
             if let Some(live) = live {
                 tracing::info!("chat {name}: the turn was cancelled");
+                machine.registry().clear_next(&live);
                 live.command(Command::Cancel);
             }
             true
@@ -2146,6 +2327,11 @@ async fn replay_subscribed<M: Machine, P: Peer>(
     if !say_all(peer, &remade).await {
         return None;
     }
+    if let Some(queue) = machine.registry().queue_of(&here.place.id)
+        && !peer.say(&queue).await
+    {
+        return None;
+    }
     Some(Sub {
         receiver,
         seen: last,
@@ -2464,9 +2650,6 @@ async fn acp_turn<M: Machine>(
         }
         state.busy = true;
     }
-    if let Err(said) = machine.write_mode(&here.place, mode).await {
-        tracing::warn!("chat {name}: the mode was not written: {said}");
-    }
     tracing::info!("chat {name}: a turn started");
     live.command(Command::Turn { text, mode });
     Ok(subscribed)
@@ -2715,10 +2898,25 @@ async fn keep_claude<M: Machine>(
         &live,
     )
     .await;
-    let queued = finish(machine.as_ref(), &name, &place, &live).await;
+    let (queued, next) = finish(machine.as_ref(), &name, &place, &live).await;
     drop(turn);
-    if !queued.is_empty() {
+    let next = joined(next);
+    if next.is_some() || !queued.is_empty() {
         tokio::spawn(async move {
+            // The person's turn first, so the room's prompts queue behind it.
+            if let Some(next) = next {
+                send_queued(
+                    Arc::clone(&machine),
+                    name.clone(),
+                    place.clone(),
+                    None,
+                    next,
+                )
+                .await;
+            }
+            if queued.is_empty() {
+                return;
+            }
             let (prompts, told): (Vec<String>, Vec<_>) = queued.into_iter().unzip();
             let woke = wake_on(machine, name, place, prompts.join("\n\n")).await;
             for tell in told {
@@ -2736,8 +2934,14 @@ async fn until(at: Option<tokio::time::Instant>) {
 }
 
 /// Removes an ended keeper's session (I-30) and lets its thread go. It returns
-/// the room prompts queued for the thread; one dropped tells its wake it failed.
-async fn finish<M: Machine>(machine: &M, name: &str, place: &Place, live: &Live) -> Vec<Queued> {
+/// the room prompts and the person's turns queued for the thread; a room
+/// prompt dropped tells its wake it failed.
+async fn finish<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+) -> (Vec<Queued>, Vec<Next>) {
     live.lock().closing = true;
     match machine.finish(place, STOP_GRACE).await {
         Ok(Some(ended)) => tracing::info!("chat {name}: the keeper ended {ended}"),
@@ -2747,6 +2951,48 @@ async fn finish<M: Machine>(machine: &M, name: &str, place: &Place, live: &Live)
     let queued = machine.registry().forget(live);
     live.close();
     queued
+}
+
+/// Starts the turns a person queued behind a keeper that ended in a new
+/// keeper: Claude's, or `acp`'s harness loading its session. Boxed like
+/// [`wake_on`], because that keeper's end may start another.
+fn send_queued<M: Machine>(
+    machine: Arc<M>,
+    name: String,
+    place: Place,
+    acp: Option<(Harness, String)>,
+    Next { text, mode, images }: Next,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let turn = Typed {
+            text,
+            images: images.as_deref(),
+            mode,
+        };
+        let started = match acp {
+            None => {
+                machine.registry().remember_mode(&place.id, mode);
+                claude_turn(&machine, &name, &place, turn).await.map(drop)
+            }
+            Some((harness, session)) => {
+                let here = Here {
+                    place: place.clone(),
+                    harness: Some(harness),
+                    session: Some(session),
+                };
+                acp_turn(&machine, &name, &here, harness, turn, false)
+                    .await
+                    .map(drop)
+            }
+        };
+        if let Err(refusal) = started {
+            tracing::warn!(
+                "chat {name}: the queued turn did not start: {}",
+                refusal.said
+            );
+            machine.registry().refuse(&place.id, &refusal);
+        }
+    })
 }
 
 type Prompt = Pin<Box<dyn Future<Output = Result<StopReason, acp::Error>> + Send>>;
@@ -2816,20 +3062,7 @@ async fn keep_acp<M: Machine>(
         };
         match step {
             Step::Command(Some(Command::Turn { text, mode })) => {
-                acp.mode = mode;
-                let n = {
-                    let mut state = live.lock();
-                    state.prompts += 1;
-                    state.prompts
-                };
-                let item = format!("{}:{n}", live.run);
-                live.publish(
-                    &delta(&place, StreamKind::UserText, text.clone(), &item),
-                    None,
-                );
-                let agent = Arc::clone(&acp.agent);
-                let session = acp.session.clone();
-                acp.prompt = Some(Box::pin(async move { agent.prompt(&session, &text).await }));
+                prompt(machine.as_ref(), &name, &place, &live, &mut acp, text, mode).await;
             }
             Step::Command(Some(Command::Answer {
                 request,
@@ -2883,6 +3116,7 @@ async fn keep_acp<M: Machine>(
                 // A turn an earlier daemon sent has no prompt here to end it.
                 if ended && acp.prompt.is_none() {
                     turn_ended(machine.as_ref(), &name, &place, &live, failed, &mut kill_at).await;
+                    prompt_next(machine.as_ref(), &name, &place, &live, &mut acp).await;
                 }
             }
             Step::Prompted(result) => {
@@ -2900,6 +3134,7 @@ async fn keep_acp<M: Machine>(
                     }
                 }
                 turn_ended(machine.as_ref(), &name, &place, &live, failed, &mut kill_at).await;
+                prompt_next(machine.as_ref(), &name, &place, &live, &mut acp).await;
                 quiet_since = tokio::time::Instant::now();
             }
             Step::Kill => {
@@ -2924,7 +3159,55 @@ async fn keep_acp<M: Machine>(
         }
     }
     tracing::info!("chat {name}: the agent ended");
-    finish(machine.as_ref(), &name, &place, &live).await;
+    let (_, next) = finish(machine.as_ref(), &name, &place, &live).await;
+    // A keeper that closed with turns queued hands them to the next one.
+    if let Some(next) = joined(next) {
+        let acp = Some((acp.harness, acp.session));
+        tokio::spawn(send_queued(machine, name, place, acp, next));
+    }
+}
+
+/// Sends the turns queued behind the one that ended, unless the keeper closes.
+async fn prompt_next<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+    acp: &mut AcpAgent,
+) {
+    if let Some(Next { text, mode, .. }) = joined(machine.registry().take_next(live)) {
+        prompt(machine, name, place, live, acp, text, mode).await;
+    }
+}
+
+/// Sends a turn the thread is marked busy with to the agent: its mode, the prompt the browser
+/// draws, and the prompt.
+async fn prompt<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+    acp: &mut AcpAgent,
+    text: String,
+    mode: PermissionMode,
+) {
+    if let Err(said) = machine.write_mode(place, mode).await {
+        tracing::warn!("chat {name}: the mode was not written: {said}");
+    }
+    acp.mode = mode;
+    let n = {
+        let mut state = live.lock();
+        state.prompts += 1;
+        state.prompts
+    };
+    let item = format!("{}:{n}", live.run);
+    live.publish(
+        &delta(place, StreamKind::UserText, text.clone(), &item),
+        None,
+    );
+    let agent = Arc::clone(&acp.agent);
+    let session = acp.session.clone();
+    acp.prompt = Some(Box::pin(async move { agent.prompt(&session, &text).await }));
 }
 
 /// An ACP turn ended: the thread is free, the tree is kept, and a keeper whose
@@ -3476,6 +3759,19 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 },
             ))
             .expect("a branch diff serialises"),
+        ),
+        (
+            "chatQueue",
+            "ChatQueue",
+            serde_json::to_value(QueueFrame::of(
+                "chat/web/1a2b3c4d",
+                &[Next {
+                    text: "and the docs".to_owned(),
+                    mode: PermissionMode::Supervised,
+                    images: None,
+                }],
+            ))
+            .expect("a queue serialises"),
         ),
         (
             "chatNotAttached",
@@ -4316,11 +4612,12 @@ mod tests {
             .await;
         assert_eq!(tab.next().await["type"], "turn.started");
 
-        // One turn at a time.
-        tab.send(json!({"type": "turn", "text": "and the docs"}));
-        let busy = tab.next().await;
-        assert_eq!(busy["type"], "error");
-        assert_eq!(busy["kind"], "busy");
+        // One turn at a time: a second waits for the first.
+        assert_eq!(
+            tab.next_after(json!({"type": "turn", "text": "and the docs"}))
+                .await,
+            queue(&["and the docs"])
+        );
 
         claude
             .say(
@@ -5509,10 +5806,13 @@ mod tests {
             .next_after(json!({"type": "revert", "turn": 0}))
             .await;
         assert_eq!(said["kind"], "busy", "{said}");
-        let said = second
-            .next_after(json!({"type": "turn", "text": "and the docs"}))
-            .await;
-        assert_eq!(said["kind"], "busy", "{said}");
+        assert_eq!(
+            second
+                .next_after(json!({"type": "turn", "text": "and the docs"}))
+                .await,
+            queue(&["and the docs"]),
+            "a turn waits for the running one"
+        );
         assert!(script.reverted.lock().expect("a lock").is_empty());
 
         claude
@@ -5521,8 +5821,15 @@ mod tests {
                         "stop_reason": "end_turn"}),
             )
             .await;
+        assert_eq!(first.next().await, queue(&["and the docs"]), "every tab");
         assert_eq!(first.next().await["type"], "turn.completed");
         assert_eq!(first.next().await["type"], "turn.diff.updated");
+        through(&mut second, "turn.diff.updated").await;
+        let mut queued = script.claude().await;
+        queued.heard().await;
+        queued
+            .say(json!({"type": "result", "subtype": "success", "is_error": false}))
+            .await;
         through(&mut second, "turn.diff.updated").await;
         assert_eq!(
             second
@@ -6543,6 +6850,205 @@ mod tests {
         );
     }
 
+    /// The `queue` frame a thread's sockets get.
+    fn queue(texts: &[&str]) -> Value {
+        json!({"type": "queue", "threadId": THREAD, "texts": texts})
+    }
+
+    fn ended() -> Value {
+        json!({"type": "result", "subtype": "success", "is_error": false})
+    }
+
+    /// The frames a tab gets up to the next turn's prompt, which it returns.
+    async fn until_prompt(tab: &mut Tab) -> Value {
+        let frames = through(tab, "content.delta").await;
+        assert_eq!(frames[frames.len() - 2], queue(&[]), "{frames:?}");
+        frames[frames.len() - 1]["payload"].clone()
+    }
+
+    /// Y-561: a second turn is queued, and the turn's end starts it in a new
+    /// keeper that the tab which sent it and a second tab both follow.
+    #[tokio::test]
+    async fn queue_a_second_claude_turn_starts_when_the_turn_ends() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        let (mut first, _a) = connect(Arc::clone(&script), None);
+        first.send(json!({"type": "turn", "text": "fix the test"}));
+        first.next().await;
+        first.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        let (mut second, _b) = connect(Arc::clone(&script), Some(THREAD));
+        assert_eq!(second.next().await["type"], "thread.started");
+        second.next().await;
+
+        first.send(json!({"type": "turn", "text": "and the docs"}));
+        assert_eq!(first.next().await, queue(&["and the docs"]));
+        assert_eq!(second.next().await, queue(&["and the docs"]));
+        assert_eq!(
+            lock(&script.modes).len(),
+            1,
+            "no second turn beside the first"
+        );
+        let (mut late, _c) = connect(Arc::clone(&script), Some(THREAD));
+        let replayed = through(&mut late, "queue").await;
+        assert_eq!(
+            replayed.last(),
+            Some(&queue(&["and the docs"])),
+            "a late tab"
+        );
+
+        claude.say(ended()).await;
+        let prompt =
+            json!({"streamKind": "user_text", "delta": "and the docs", "itemId": "user:2"});
+        assert_eq!(until_prompt(&mut first).await, prompt);
+        assert_eq!(until_prompt(&mut second).await, prompt);
+        let mut next = script.claude().await;
+        assert_eq!(
+            prompt_of(&next.heard().await.expect("a line")),
+            "and the docs"
+        );
+        next.say(json!({"type": "system", "subtype": "init"})).await;
+        assert_eq!(first.next().await["type"], "turn.started");
+        assert_eq!(second.next().await["type"], "turn.started");
+    }
+
+    #[tokio::test]
+    async fn queue_two_turns_become_one_prompt_in_the_last_mode() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "turn", "text": "one"}));
+        assert_eq!(tab.next().await, queue(&["one"]));
+        tab.send(json!({"type": "turn", "text": "two", "mode": "full-access"}));
+        assert_eq!(tab.next().await, queue(&["one", "two"]));
+
+        claude.say(ended()).await;
+        assert_eq!(until_prompt(&mut tab).await["delta"], "one\n\ntwo");
+        let mut next = script.claude().await;
+        assert_eq!(
+            prompt_of(&next.heard().await.expect("a line")),
+            "one\n\ntwo"
+        );
+        assert_eq!(
+            *lock(&script.modes),
+            [PermissionMode::Supervised, PermissionMode::FullAccess]
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_cancel_empties_it_and_no_turn_starts() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "turn", "text": "and the docs"}));
+        assert_eq!(tab.next().await, queue(&["and the docs"]));
+
+        assert_eq!(tab.next_after(json!({"type": "cancel"})).await, queue(&[]));
+        claude.say(ended()).await;
+        until_script(&script, |script| {
+            script.registry.live(&place().id).is_none()
+        })
+        .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), script.claude())
+                .await
+                .is_err(),
+            "no turn started"
+        );
+        assert_eq!(lock(&script.modes).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn queue_an_acp_turn_is_prompted_on_the_same_agent() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        tab.send(json!({"type": "turn", "text": "and the docs"}));
+        assert_eq!(tab.next().await, queue(&["and the docs"]));
+
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        assert_eq!(until_prompt(&mut tab).await["itemId"], "user:1:2");
+        let again = agent.heard().await;
+        assert_eq!(again["method"], "session/prompt");
+        assert_eq!(again["params"]["prompt"][0]["text"], "and the docs");
+        assert!(lock(&script.finished).is_empty(), "the same agent");
+    }
+
+    /// A keeper that closes past half its cap hands its queue to the next one.
+    #[tokio::test]
+    async fn queue_an_acp_turn_reaches_the_agent_after_a_half_cap_close() {
+        let script = Arc::new(Script {
+            out_bytes: Some(Limits::default().cap / 2 + 1),
+            ..Script::default()
+        });
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        tab.send(json!({"type": "turn", "text": "again"}));
+        assert_eq!(tab.next().await, queue(&["again"]));
+        agent
+            .reply(&prompt, json!({"stopReason": "end_turn"}))
+            .await;
+        until_script(&script, |script| *lock(&script.stdin_closed) == 1).await;
+        assert!(agent.closed().await, "its stdin closed");
+        drop(agent);
+
+        let mut next = script.agent().await;
+        next.initialized().await;
+        let load = next.heard().await;
+        assert_eq!(load["method"], "session/load");
+        assert_eq!(load["params"]["sessionId"], SESSION);
+        next.reply(&load, json!({})).await;
+        assert_eq!(until_prompt(&mut tab).await["itemId"], "user:2:1");
+        let again = next.heard().await;
+        assert_eq!(again["method"], "session/prompt");
+        assert_eq!(again["params"]["prompt"][0]["text"], "again");
+    }
+
+    /// ADR-0038 §3 still holds behind a person's queued turn.
+    #[tokio::test]
+    async fn queue_a_room_prompt_wakes_after_the_persons_queued_turn() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "work"}));
+        tab.next().await;
+        tab.next().await;
+        let mut first = script.claude().await;
+        first.heard().await;
+        tab.send(json!({"type": "turn", "text": "mine"}));
+        assert_eq!(tab.next().await, queue(&["mine"]));
+        let wake = tokio::spawn(wake_on(
+            Arc::clone(&script),
+            "web".to_owned(),
+            place(),
+            ROOM_PROMPT.to_owned(),
+        ));
+        until_script(&script, |script| queued(script) == 1).await;
+
+        first.say(ended()).await;
+        let mut second = script.claude().await;
+        assert_eq!(prompt_of(&second.heard().await.expect("a line")), "mine");
+        until_script(&script, |script| queued(script) == 1).await;
+        assert!(!wake.is_finished(), "the room waits behind the person");
+        second.say(ended()).await;
+        let mut third = script.claude().await;
+        assert_eq!(
+            prompt_of(&third.heard().await.expect("a line")),
+            ROOM_PROMPT
+        );
+        assert_eq!(wake.await.expect("no panic"), Woke::Started);
+    }
+
     /// The review's finding: a queued prompt whose turn never started was
     /// counted as delivered, so the room never gave its messages back.
     #[tokio::test]
@@ -6759,6 +7265,9 @@ mod tests {
         let prompt = next.heard().await;
         next.reply(&prompt, json!({"stopReason": "end_turn"})).await;
         through(&mut second, "turn.diff.updated").await;
+        // Y-561: the first tab follows the next keeper too.
+        let seen = through(&mut first, "turn.diff.updated").await;
+        assert_eq!(seen[0]["payload"]["itemId"], "user:2:1", "{seen:?}");
 
         first.send(json!({"type": "turn", "text": "from the first tab"}));
         assert_eq!(first.next().await["payload"]["itemId"], "user:2:2");

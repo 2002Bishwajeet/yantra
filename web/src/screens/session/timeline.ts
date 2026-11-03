@@ -57,6 +57,8 @@ export type Timeline = {
   turn: 'idle' | 'sent' | 'running' | 'stopping'
   /** How the last turn ended, until the next one starts. */
   ended: TurnCompleted | null
+  /** What the person sent while a turn ran, which the daemon sends when it ends (Y-561). */
+  queued: string[]
 }
 
 export const empty: Timeline = {
@@ -68,6 +70,7 @@ export const empty: Timeline = {
   plan: [],
   turn: 'idle',
   ended: null,
+  queued: [],
 }
 
 export type Action =
@@ -78,19 +81,24 @@ export type Action =
   | { type: 'refused' }
   /** A reopened socket replays the thread from the start. */
   | { type: 'reset' }
+  /** The daemon's list of queued turns, as it is now. */
+  | { type: 'queue'; texts: string[] }
 
 const WHO = { user_text: 'you', assistant_text: 'agent', reasoning_text: 'thinking' } as const
 
 export function reduce(timeline: Timeline, action: Action): Timeline {
   switch (action.type) {
     case 'sent':
-      return { ...timeline, turn: 'sent', ended: null, plan: [] }
+      // A turn sent while one runs is queued, and the running one keeps its state.
+      return timeline.turn === 'idle' ? { ...timeline, turn: 'sent', ended: null, plan: [] } : timeline
     case 'stopping':
       return timeline.turn === 'idle' ? timeline : { ...timeline, turn: 'stopping' }
     case 'refused':
       return { ...timeline, turn: 'idle' }
     case 'reset':
       return { ...empty, thread: timeline.thread, harness: timeline.harness }
+    case 'queue':
+      return { ...timeline, queued: action.texts }
     case 'event':
       return fold(timeline, action.event)
   }

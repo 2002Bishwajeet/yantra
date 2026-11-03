@@ -606,6 +606,7 @@ export type {
   ChatFrame,
   ChatNotAttached,
   ChatQuery,
+  ChatQueue,
   ThreadEvent,
 } from './api/thread'
 

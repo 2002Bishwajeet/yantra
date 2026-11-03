@@ -2,6 +2,7 @@ import {
   HARNESSES,
   type ChatAttached,
   type ChatBranchDiff,
+  type ChatQueue,
   type ChatFailure,
   type ChatFrame,
   type ChatNotAttached,
@@ -194,10 +195,19 @@ function branchDiffOf(said: object): ChatBranchDiff | null {
   return said as ChatBranchDiff
 }
 
+function queueOf(said: object): ChatQueue | null {
+  const q = said as Partial<Record<keyof ChatQueue, unknown>>
+  return typeof q.threadId === 'string' &&
+    Array.isArray(q.texts) &&
+    q.texts.every((text) => typeof text === 'string')
+    ? (said as ChatQueue)
+    : null
+}
+
 /** A daemon frame, or `null` for one this dashboard cannot read. */
 export function frameOf(
   text: string,
-): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | null {
+): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | ChatQueue | null {
   let said: unknown
   try {
     said = JSON.parse(text)
@@ -215,6 +225,7 @@ export function frameOf(
       : null
   }
   if (said.type === 'branchDiff') return branchDiffOf(said)
+  if (said.type === 'queue') return queueOf(said)
   if (said.type === 'error') {
     const failure = said as Partial<ChatFailure> & Partial<Record<keyof Login, unknown>>
     if (typeof failure.kind !== 'string' || !KINDS.has(failure.kind) || typeof failure.said !== 'string') return null
@@ -240,11 +251,14 @@ export function openChat(
     onDropped,
     onRestart,
     onBranchDiff,
+    onQueue,
     pauses = PAUSES,
   }: {
     onEvent: (event: ThreadEvent) => void
     /** The reply to `diff`, which is no event of the timeline. */
     onBranchDiff?: (diff: ChatBranchDiff) => void
+    /** The turns waiting for the running one, which is no event of the timeline either. */
+    onQueue?: (queue: ChatQueue) => void
     onError: (error: ChatError) => void
     onOpen?: () => void
     /** The socket dropped and a reopen is waiting. */
@@ -331,6 +345,10 @@ export function openChat(
       }
       if (frame.type === 'branchDiff') {
         onBranchDiff?.(frame)
+        return
+      }
+      if (frame.type === 'queue') {
+        onQueue?.(frame)
         return
       }
       if (frame.type === 'error') {

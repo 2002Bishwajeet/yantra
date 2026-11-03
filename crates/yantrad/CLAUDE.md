@@ -669,7 +669,13 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   An attach also makes the last turn's `turn.diff.updated` again, until the next turn or a
   revert, and the timeline draws one card for each turn.
 - **One turn at a time in a thread, across every tab and every restart.** A second `turn` while
-  one runs is `busy`, and the socket stays open. A keeper that already runs on the machine is
+  one runs is queued (Y-561), and every socket of the thread gets
+  `{"type":"queue","threadId","texts"}`, the list as it is now. A tab that attaches gets it too.
+  When the turn ends, the queue goes as one prompt, the texts joined with a blank line, in the
+  last one's mode. A Claude thread starts a new keeper for it before any room prompt. An ACP
+  thread prompts the same agent, or the next keeper when this one closes. `cancel` empties the
+  queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken turn. A
+  turn that loses a start race is still `busy`. A keeper that already runs on the machine is
   adopted, not started again.
 - **One task reads a keeper.** A task claims the thread before it starts or adopts a keeper. The
   claim goes however the task ends, and a keeper started under a claim that no task took is
@@ -693,7 +699,7 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 The rules from before the keeper still hold:
 
 - **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`
-  and `diff`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
+  and `diff`; the daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint` and `diff`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.

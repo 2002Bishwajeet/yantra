@@ -157,6 +157,10 @@ function status(timeline: Timeline, harness: Harness | null): string {
   const agent = harness ? LABEL[harness] : 'The agent'
   if (timeline.requests.length > 0) return `${agent} is waiting for your answer.`
   if (timeline.turn === 'stopping') return `Stopping ${agent}…`
+  if (timeline.turn !== 'idle' && timeline.queued.length > 0) {
+    const n = timeline.queued.length
+    return `${agent} is answering. ${n} ${n === 1 ? 'message is' : 'messages are'} queued.`
+  }
   if (timeline.turn !== 'idle') return `${agent} is answering.`
   if (timeline.ended?.state === 'cancelled') return `${agent} stopped.`
   if (timeline.ended?.state === 'completed') return `${agent} finished.`
@@ -288,7 +292,7 @@ export function Chat(props: ChatProps) {
     .join('\n')
 
   const send = () => {
-    if (text === '' || busy || uploading) return
+    if (text === '' || uploading) return
     if (chat.send(text, locked ? undefined : picked, mode)) {
       lastSent.current = draft.trim()
       recalled.current = null
@@ -328,17 +332,21 @@ export function Chat(props: ChatProps) {
     if (field) field.setSelectionRange(field.value.length, field.value.length)
   }, [draft])
 
-  const answering = `${agent} is answering. Stop it to send something else.`
+  const answering = `${agent} is answering. A message you queue is sent when it ends.`
   const cannotSend =
     link !== 'open'
       ? 'The chat is not connected, so nothing can be sent.'
-      : busy
-        ? answering
-        : uploading
-          ? 'An image is still uploading. Send once it is attached.'
-          : text === ''
-            ? 'Type a message to send it.'
-            : null
+      : uploading
+        ? 'An image is still uploading. Send once it is attached.'
+        : text === ''
+          ? 'Type a message to send it.'
+          : null
+
+  // Stop drops the queue too, so its text comes back to an empty field.
+  const stop = () => {
+    if (timeline.queued.length > 0) setDraft((now) => now || timeline.queued.join('\n\n'))
+    chat.stop()
+  }
 
   const addComment = (block: string) => {
     setDraft((now) => appendToDraft(now, block))
@@ -454,6 +462,16 @@ export function Chat(props: ChatProps) {
             }
           />
         ) : null}
+        {timeline.queued.length > 0 ? (
+          <section aria-label="Queued messages" className="chat__queued">
+            <p className="chat__queued-title">Queued, sends when {agent} ends</p>
+            <ul>
+              {timeline.queued.map((queued, n) => (
+                <li key={`${n}:${queued}`}>{queued}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <Composer.Root
           above={<PlanBadge plan={timeline.plan} />}
           dropping={dropping}
@@ -504,7 +522,7 @@ export function Chat(props: ChatProps) {
                   reason={cannotSend}
                   running={
                     busy
-                      ? { agent, stopping: timeline.turn === 'stopping', onStop: chat.stop, reason: answering }
+                      ? { agent, stopping: timeline.turn === 'stopping', onStop: stop, reason: answering, queues: true }
                       : null
                   }
                 />
