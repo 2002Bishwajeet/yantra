@@ -193,19 +193,21 @@ pub fn replace(sent: &Layout) -> Result<Layout, Error> {
     replace_in(&dir()?, sent)
 }
 
-/// Saves `sent` at the next rev when `sent.rev` is the rev on disk. A corrupt
-/// file counts as rev 0, so a save repairs it. The caller serialises calls.
+/// Saves `sent` one rev past `sent.rev` unless the file on disk has a newer
+/// rev (ADR-0036 decision 3). A missing or corrupt file counts as rev 0, so a
+/// device's local copy at a higher rev repairs it and stays newer than every
+/// other device's copy. The caller serialises calls.
 pub fn replace_in(dir: &Path, sent: &Layout) -> Result<Layout, Error> {
     sent.check()?;
     let current = match read_in(dir) {
         Err(Error::Corrupt(_)) => Layout::default(),
         read => read?,
     };
-    if sent.rev != current.rev {
+    if current.rev > sent.rev {
         return Err(Error::Stale(Box::new(current)));
     }
     let saved = Layout {
-        rev: current.rev + 1,
+        rev: sent.rev + 1,
         ..sent.clone()
     };
     let text = serde_json::to_vec_pretty(&saved)
@@ -279,8 +281,16 @@ mod tests {
             Err(Error::Stale(current)) => assert_eq!(*current, mine(1)),
             other => panic!("expected Stale, got {other:?}"),
         }
-        assert!(matches!(replace_in(&dir, &mine(7)), Err(Error::Stale(_))));
         assert_eq!(std::fs::read(dir.join(FILE)).expect("a file"), before);
+    }
+
+    #[test]
+    fn a_rev_above_the_file_saves_past_it() {
+        let dir = scratch("ahead");
+        replace_in(&dir, &mine(0)).expect("saved");
+        assert_eq!(replace_in(&dir, &mine(7)).expect("saved"), mine(8));
+        assert_eq!(read_in(&dir).expect("read"), mine(8));
+        assert!(matches!(replace_in(&dir, &mine(7)), Err(Error::Stale(_))));
     }
 
     #[test]
@@ -335,6 +345,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("a dir");
         std::fs::write(dir.join(FILE), "{\"v\":1,").expect("written");
         assert!(matches!(read_in(&dir), Err(Error::Corrupt(_))));
-        assert_eq!(replace_in(&dir, &mine(0)).expect("saved"), mine(1));
+        assert_eq!(replace_in(&dir, &mine(5)).expect("saved"), mine(6));
+        assert_eq!(read_in(&dir).expect("read"), mine(6));
     }
 }

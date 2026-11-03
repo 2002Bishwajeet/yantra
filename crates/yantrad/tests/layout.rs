@@ -4,7 +4,8 @@
 //!
 //! It proves the 409 and the atomic write: a stale `rev` changes no byte on
 //! disk, a save replaces the file by rename, and a save that cannot write its
-//! temporary file leaves the old file whole.
+//! temporary file leaves the old file whole. A `rev` above the file's saves
+//! past it, also after the file is lost.
 
 mod common;
 
@@ -235,5 +236,17 @@ fn a_stale_rev_is_409_and_every_save_is_a_rename() -> Result<()> {
 
     let (_, body) = daemon.get()?;
     assert_eq!(parsed(&body)?["rev"], 2, "the daemon reads what is on disk");
+
+    // A device whose local copy is ahead of the file saves past it, so a lost
+    // file is repaired at a rev every other device reads as newer.
+    let (status, body) = daemon.put(&edited(&default, 5, 2))?;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(parsed(&body)?, edited(&default, 6, 2));
+    daemon.as_deploy(&format!("rm {FILE}"))?;
+    assert!(!daemon.exists(FILE)?, "the file is lost");
+    assert_eq!(parsed(&daemon.get()?.1)?["rev"], 0);
+    let (status, body) = daemon.put(&edited(&default, 6, 1))?;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(parsed(&daemon.file()?)?, edited(&default, 7, 1));
     Ok(())
 }
