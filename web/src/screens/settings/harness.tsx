@@ -34,6 +34,7 @@ const fleet: Answers = {
   'GET /api/notifications': [200, contract.notifications],
   'GET /api/readiness': [200, contract.readiness],
   'GET /api/about': [200, contract.about],
+  'GET /api/here': [200, { machine: null }],
   'GET /api/ssh-identity': [200, contract.sshIdentity],
   'GET /api/github': [200, contract.github],
   'POST /api/viewing': [204],

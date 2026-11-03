@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query'
+import { type QueryClient, queryOptions } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
@@ -32,6 +32,7 @@ import {
 } from '@/api/client'
 import { isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
+import type { Here } from '@/api'
 import type { About, Notification, SshIdentity } from '@/api/types/daemon'
 
 const workspace = (name: string, tail: string) =>
@@ -80,9 +81,9 @@ export const sessionsQuery = () =>
   swept<MachineSessions[]>(keys.sessions(), '/api/sessions')
 export const readinessQuery = () =>
   swept<Readiness[]>(keys.readiness(), '/api/readiness')
-/** A 404 is `doctor::fleet` holding no report for a machine no workspace
- *  names: nobody has asked it yet, which is `never` and not a daemon that was
- *  not reached (D7 S4). */
+/** A 404 is a machine no check has reached yet, which is `never` and not a
+ *  daemon that was not reached (D7 S4). A machine with a kept check never 404s,
+ *  so a poll cannot turn a result into `never` (Y-579). */
 export const machineReadinessQuery = (name: string) =>
   queryOptions({
     // Widened as `swept` widens it, so `useReading` takes it.
@@ -134,6 +135,22 @@ export const statusQuery = (name: string) =>
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
+
+/** Try again, from any surface: every read is asked again, and so is a status
+ *  read the workspace list unlocks — the person tapped once, and the second
+ *  wave of reads is theirs too. */
+export async function readAgain(client: QueryClient) {
+  await client.invalidateQueries()
+  const listed = client.getQueryData(workspacesQuery().queryKey)
+  if (listed?.looked !== 'ok') return
+  const names = listed.data.map((one) => one.name)
+  await Promise.all(names.map((name) => client.fetchQuery(statusQuery(name))))
+  const failed = names.filter((name) => {
+    const answer = client.getQueryData(statusQuery(name).queryKey)
+    return answer !== undefined && answer !== MISSING && answer.looked === 'failed'
+  })
+  await Promise.all(failed.map((name) => client.refetchQueries({ queryKey: statusQuery(name).queryKey })))
+}
 
 /** `POST …/tokens` reads a whole transcript over ssh, and the page stamps its
  *  own arrival (D3 §11.4). Never fresh: every ask is a new read. `since` is an
@@ -241,6 +258,19 @@ export const notificationsQuery = () =>
       fetchJson<Notification[]>('/api/notifications', { signal }, fields('looked')),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
+  })
+
+/** Y-589. Once the daemon names the device it does not change while a page is
+ *  open. Until then (503 before the first tailnet look, or a failed one; or a
+ *  device the list does not hold yet) it is asked again, so a phone that has
+ *  just joined is named on the next look. A failure draws nothing. */
+export const hereQuery = () =>
+  queryOptions({
+    queryKey: keys.here(),
+    queryFn: ({ signal }) => fetchJson<Here>('/api/here', { signal }, fields('machine')),
+    staleTime: Infinity,
+    retry: false,
+    refetchInterval: (query) => (query.state.data?.machine ? false : POLL_MS),
   })
 
 /** Y-343. `uptime_seconds` moves, so it is not held forever. Y-367: polled

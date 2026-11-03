@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { POLL_MS } from '@/api/client'
 import { ApiError } from '@/api/errors'
+import { readAgain } from '@/api/queries'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -12,7 +13,8 @@ const SENTENCE =
 /** The one screen a daemon that cannot be reached draws, in place of whichever
  *  route is open. The reads are swept and keep their own cadence (ADR-0019
  *  bans a timer on a read a person asked for, not on these), so it clears
- *  itself when the daemon comes back. */
+ *  itself when the daemon comes back. Try again is the dashboard's, so the status
+ *  reads the workspace list unlocks are asked again too. */
 export function NotReached(props: { why: string; since: number | null }) {
   const { why, since } = props
   const client = useQueryClient()
@@ -36,7 +38,7 @@ export function NotReached(props: { why: string; since: number | null }) {
           ? every
           : `${every} · last good look ${ago((now - since) / 1000, now).text} ago`
       }
-      reset={() => void client.invalidateQueries()}
+      reset={() => void readAgain(client)}
       title="Yantra cannot be reached"
       unknowns={['off the tailnet', 'yantrad down']}
     />

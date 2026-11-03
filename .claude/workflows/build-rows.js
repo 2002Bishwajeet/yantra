@@ -30,15 +30,12 @@ const BUILDER = {
   docs: { model: 'sonnet', effort: 'low' },
 }
 
-const RUST_GATE = 'YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 just check'
+// Owner, 2026-11-03: the gate tests only what the branch changed. CI runs every suite on the PR, and ship waits for it.
 // e2e runs in the image the screenshot baselines are rendered in; on the host, fonts differ. A missing baseline fails, not written.
-const WEB_GATE = '(cd web && npm ci --prefer-offline && npm run lint && npm test && npm run build && npm run budget) && just web-e2e --update-snapshots=none'
-// A row's gate follows the paths it touches, not only its kind: a web row that changes the daemon runs both.
-const gate = (row) => {
-  const rust = row.kind.startsWith('rust') || row.paths.some((p) => p.startsWith('crates') || p.startsWith('Cargo'))
-  const web = row.kind === 'web' || row.paths.some((p) => p.startsWith('web'))
-  return [rust && RUST_GATE, web && WEB_GATE].filter(Boolean).join(' && ') || 'just fmt-check'
-}
+const GATE = `Test only what this branch changed. List the files with \`git diff --name-only origin/main...HEAD\`. CI runs the full suites on the PR.
+- A changed file under crates/ or a Cargo file: run \`just fmt-check && just lint\`, then \`YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 cargo nextest run -p <crate>\` for each changed crate.
+- A changed file under web/: run \`cd web && npm ci --prefer-offline && npm run lint && npx tsc --noEmit -p tsconfig.app.json && npx vitest run --changed origin/main\`. Then run \`just web-e2e --update-snapshots=none <specs>\` with only the e2e specs that changed or that cover the changed screens. If no spec covers them, skip e2e.
+- Nothing else changed: run \`just fmt-check\`.`
 
 const RULES = (wt) => `
 Rules for this run (CLAUDE.md §B7, the build loop):
@@ -72,7 +69,7 @@ const TRIAGE_SCHEMA = {
           id: { type: 'string' },
           title: { type: 'string' },
           kind: { type: 'string', enum: Object.keys(BUILDER) },
-          paths: { type: 'array', items: { type: 'string' }, description: 'top-level paths the change will touch, e.g. web/src/m3' },
+          paths: { type: 'array', items: { type: 'string' }, description: 'the files the change will edit, e.g. web/src/m3/Card.tsx; a folder only for new files in it' },
           priority: { type: 'integer', minimum: 1, maximum: 4 },
           reason: { type: 'string' },
         },
@@ -146,11 +143,11 @@ Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}.` : ''}
 
 Priority, from CLAUDE.md §B7: 1 = closes or unblocks an open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
-For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the paths it will touch. Put every row you rejected in skipped with one line of reason.`
+For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
 
 const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
-// Rows that touch the same paths never run at once.
+// Rows that edit the same file never run at once; ship rebases one row at a time, so other overlaps resolve there.
 const clash = (a, b) => a.paths.some((p) => b.paths.some((q) => p.startsWith(q) || q.startsWith(p)))
 
 // The owner's own services run in podman on this box: a blanket `podman rm -f` took the chat agent down three times on 2026-11-03.
@@ -164,10 +161,10 @@ async function verifyAndFix(row, wt, plan, label, attempts) {
   return serialVerify(() =>
     agent(
       `Run the gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
-Gate: ${gate(row)}
+Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 ${GATE_HOW}
-If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the full gate once. Stop after ${attempts} full gate runs.
+If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the gate once. Stop after ${attempts} gate runs.
 A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
 If a Then command fails before any test runs because the command is wrong, not the code, correct it and return the corrected list as fixedChecks.${RULES(wt)}`,
       { label: `gate:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'medium' },
@@ -179,7 +176,7 @@ async function verify(row, wt, plan, label) {
   return serialVerify(() =>
     agent(
       `Run the gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
-Gate: ${gate(row)}
+Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
 ${GATE_HOW}`,
@@ -193,7 +190,7 @@ async function fix(row, wt, what) {
   // The fixer holds the verify lock, so it may rerun the failing tests itself and the next gate run is the last.
   return serialVerify(() => agent(
     `Fix ${row.id} in ${wt}. ${what}
-Find the cause before you change code. Commit the fix. You hold the test lock: rerun only the failing tests (one podman test with NEXTEST_TEST_THREADS=4, or one e2e spec) until they pass. Do not run the full gate. ${CLEANUP}${RULES(wt)}`,
+Find the cause before you change code. Commit the fix. You hold the test lock: rerun only the failing tests (one podman test with NEXTEST_TEST_THREADS=4, or one e2e spec) until they pass. Do not run the gate. ${CLEANUP}${RULES(wt)}`,
     { label: `fix:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   ))
 }

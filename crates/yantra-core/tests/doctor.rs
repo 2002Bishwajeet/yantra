@@ -380,3 +380,84 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
     let _ = std::fs::remove_dir_all(&config);
     Ok(())
 }
+
+/// Set only by [`the_sweep_asks_a_machine_no_workspace_names`] on the child it starts.
+const EXTRA_CHILD: &str = "YANTRA_TEST_DOCTOR_EXTRA_CHILD";
+
+/// The half of [`the_sweep_asks_a_machine_no_workspace_names`] that runs with
+/// the fixture's `PATH` and home. `forbid(unsafe_code)` rules out `set_var`, so
+/// the test starts this binary again with its own environment.
+#[tokio::test]
+async fn asks_the_extra_machine_with_no_workspace() -> Result<()> {
+    // Without the marker this runs in the developer's real fleet, so it does nothing.
+    if std::env::var_os(EXTRA_CHILD).is_none() {
+        return Ok(());
+    }
+    assert!(doctor::fleet(KNOWN_REMOTELY).await?.is_empty());
+
+    let extra = ["fixture".to_owned()];
+    let reports = doctor::fleet_with(&extra, KNOWN_REMOTELY).await?;
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!(reports[0].machine, "fixture");
+    assert_state(&reports[0].checks, "reachable", State::Present);
+    Ok(())
+}
+
+/// Y-579: the daemon's sweep names tailnet peers no workspace names.
+#[tokio::test]
+async fn the_sweep_asks_a_machine_no_workspace_names() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    let root = std::path::PathBuf::from("/tmp").join("yd-extra");
+    let _ = std::fs::remove_dir_all(&root);
+    let (bin, home, run) = (root.join("bin"), root.join("home"), root.join("run"));
+    for dir in [&bin, &home, &run] {
+        std::fs::create_dir_all(dir)?;
+    }
+
+    let config = root.join("ssh_config");
+    std::fs::write(
+        &config,
+        format!(
+            "Host fixture\n  HostName {}\n  Port {}\n  User {USER}\n  IdentityFile {}\n  \
+             IdentitiesOnly yes\n  IdentityAgent none\n  LogLevel ERROR\n",
+            fixture.host(),
+            fixture.port(),
+            fixture.key_path().display()
+        ),
+    )?;
+    let path = std::env::var("PATH")?;
+    let ssh = std::env::split_paths(&path)
+        .map(|dir| dir.join("ssh"))
+        .find(|candidate| candidate.is_file())
+        .expect("ssh is on PATH");
+    let shim = bin.join("ssh");
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\nexec {} -F {} \"$@\"\n",
+            ssh.display(),
+            config.display()
+        ),
+    )?;
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))?;
+
+    let status = std::process::Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "asks_the_extra_machine_with_no_workspace",
+            "--nocapture",
+        ])
+        .env(EXTRA_CHILD, "1")
+        .env("PATH", format!("{}:{path}", bin.display()))
+        .env("HOME", &home)
+        .env("XDG_RUNTIME_DIR", &run)
+        .env_remove("XDG_CONFIG_HOME")
+        .status()?;
+    let _ = std::fs::remove_dir_all(&root);
+    anyhow::ensure!(status.success(), "the sweep did not ask the machine");
+    Ok(())
+}

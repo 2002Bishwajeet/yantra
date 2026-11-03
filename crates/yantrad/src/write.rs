@@ -38,9 +38,10 @@ use yantra_core::{
 };
 use yantra_core::{identity, join, update};
 
-use crate::api::Answer;
+use crate::api::{Answer, Checked};
 use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
+use crate::refresh::Model;
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -142,6 +143,7 @@ where
     // `/relay` is here since Y-343 because its test send is an event (ADR-0025).
     let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
+        .route("/here", get(here::<I>))
         .route("/viewing", post(viewing::<I>))
         .route("/relay", post(relay::<I>))
         .route("/github/login", post(login::<I>))
@@ -245,6 +247,39 @@ pub(crate) async fn allowed<I: Inventory>(
         return Err(Refused::NotYours(caller.node));
     }
     Ok(caller)
+}
+
+/// `GET /api/here`: the tailnet machine the request came from, so the page can
+/// say "you are using iphone". The caller is checked like every route
+/// (ADR-0038 decision 6) and the machine is found by that caller's node id,
+/// never by address (I-5, I-52); the name comes from the last tailnet look, and a look
+/// that has not run or has failed is a 503, never a `null` (R-23).
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct Here {
+    machine: Option<String>,
+}
+
+async fn here<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Here>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let looked = state.fleet.model.read().await.machines.clone();
+    let machines = match looked.as_deref().map(|reading| reading.value()) {
+        None => {
+            return Err(Refused::Unlooked(
+                "the tailnet has not been looked at yet".to_owned(),
+            ));
+        }
+        Some(Err(error)) => return Err(Refused::Unlooked(chain(error))),
+        Some(Ok(machines)) => machines,
+    };
+    let machine = machines
+        .iter()
+        .find(|machine| machine.id == caller.node)
+        .map(|machine| machine.name.clone());
+    Ok(Json(Here { machine }))
 }
 
 /// `up` and `resume` open a session nobody is yet sitting at, and the readiness
@@ -884,18 +919,25 @@ async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
-) -> Result<Json<Answer<doctor::Report>>, Refused> {
+) -> Result<Json<Answer<Checked>>, Refused> {
     let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("doctor {name} for {}", caller.node);
 
     let report = doctor::machine(&name, term()).await;
-    let snapshot = state.fleet.model.read().await.clone();
+    let snapshot = {
+        let mut model = state.fleet.model.write().await;
+        model.keep(report.clone());
+        model.clone()
+    };
     let beats = state.fleet.beats.read().await;
     Ok(Json(Answer::Ok {
         // Asked on this request, so there is no staleness to report — and the
         // envelope is the sweep's so the browser needs no second type.
         age_seconds: 0,
-        data: crate::api::answered(&report, &snapshot, &beats),
+        data: Checked {
+            report: crate::api::answered(&report, &snapshot, &beats),
+            age_seconds: 0,
+        },
     }))
 }
 
@@ -1313,7 +1355,11 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
     .await;
     // The re-check runs after the answer: the script is still on the person's
     // screen, and ssh back into that machine can take `ConnectTimeout`.
-    tokio::spawn(check_joined(state.fleet.events.clone(), machine));
+    tokio::spawn(check_joined(
+        state.fleet.model.clone(),
+        state.fleet.events.clone(),
+        machine,
+    ));
 
     Ok(Json(Joined {
         machine: joined.machine,
@@ -1326,7 +1372,7 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
 /// event: an unknown one decided nothing (R-23), and a reached one is what the
 /// `joined` event already implied.
-async fn check_joined(events: events::Events, machine: String) {
+async fn check_joined(model: Model, events: events::Events, machine: String) {
     let report = doctor::machine(&machine, term()).await;
     if let Some(check) = report
         .checks
@@ -1335,6 +1381,7 @@ async fn check_joined(events: events::Events, machine: String) {
     {
         events::remember(&events, Event::not_reached(&machine, &check.detail)).await;
     }
+    model.write().await.keep(report);
 }
 
 /// No wildcard, per Y-135. A tailnet name that cannot be one `Host` pattern is
@@ -2462,6 +2509,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
     }
     vec![
         (
+            "here",
+            "Here",
+            of(&Here {
+                machine: Some("iphone".to_owned()),
+            }),
+        ),
+        (
             "device",
             "Device",
             of(&Device {
@@ -2767,6 +2821,9 @@ pub(crate) enum Refused {
     /// something unmeasured is in the local path, and a guess repaired out of
     /// it would be the confident lie R-23 is about.
     Forwarded(&'static str),
+    /// The last tailnet look is missing or failed, so "which machine" has no
+    /// answer yet; 503, because `null` would read as "no machine holds it".
+    Unlooked(String),
     Verb {
         status: StatusCode,
         said: String,
@@ -2815,6 +2872,10 @@ impl IntoResponse for Refused {
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("could not establish who is calling: {said}"),
             ),
+            Self::Unlooked(said) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("could not name the machine: {said}"),
+            ),
             Self::Verb { status, said } | Self::Unlogged { status, said } => (status, said),
         };
         tracing::warn!("refused: {said}");
@@ -2852,6 +2913,10 @@ mod tests {
         }
     }
 
+    fn mine(last: u8) -> Fake {
+        tailnet(vec![(address(last), caller(ME, &[]))])
+    }
+
     /// Bound to nothing, so no peer is ever ours and every test below reads the
     /// address exactly as ADR-0016 wrote it.
     fn direct(fake: Fake) -> Authoriser<Fake> {
@@ -2873,6 +2938,185 @@ mod tests {
             );
         }
         headers
+    }
+
+    const CALLER_NODE: &str = "nSOME000000011CNTRL";
+
+    fn on_the_tailnet(machines: &[(&str, &str, &[IpAddr])]) -> Fleet {
+        let machines = machines
+            .iter()
+            .map(
+                |(id, name, addresses)| yantra_core::inventory::MachineInfo {
+                    id: (*id).to_owned(),
+                    name: (*name).to_owned(),
+                    dns_name: format!("{name}.tail.ts.net."),
+                    os: yantra_core::inventory::Os::Ios,
+                    online: true,
+                    last_seen: None,
+                    expired: false,
+                    key_expires: None,
+                    addresses: addresses.to_vec(),
+                    ownership: yantra_core::inventory::Ownership::Yours,
+                },
+            )
+            .collect();
+        let fleet = Fleet::default();
+        fleet
+            .model
+            .try_write()
+            .expect("nothing else holds it")
+            .machines = Some(Arc::new(yantra_core::snapshot::Reading::new(Ok(machines))));
+        fleet
+    }
+
+    async fn ask_here(
+        authoriser: Authoriser<Fake>,
+        fleet: Fleet,
+        peer: IpAddr,
+        headers: &[&str],
+    ) -> (StatusCode, serde_json::Value) {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let mut asked = Request::get("/here");
+        for value in headers {
+            asked = asked.header(FORWARDED_FOR, *value);
+        }
+        let mut asked = asked.body(Body::empty()).expect("a GET");
+        asked
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(peer, 61620)));
+        let answer = router::<Fake, ()>(authoriser, fleet)
+            .with_state(())
+            .oneshot(asked)
+            .await
+            .expect("the router is infallible");
+        let status = answer.status();
+        let bytes = axum::body::to_bytes(answer.into_body(), 64 * 1024)
+            .await
+            .expect("in memory");
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    #[tokio::test]
+    async fn here_names_a_direct_peer() {
+        let (status, body) = ask_here(
+            direct(mine(2)),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
+            address(2),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["machine"], "iphone");
+    }
+
+    #[tokio::test]
+    async fn here_names_the_forwarded_caller_and_not_the_appliance() {
+        let fleet = on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]);
+        let (_, body) = ask_here(
+            behind_the_proxy(mine(2)),
+            fleet,
+            address(1),
+            &["100.64.0.2"],
+        )
+        .await;
+
+        assert_eq!(body["machine"], "iphone");
+    }
+
+    #[tokio::test]
+    async fn here_names_the_caller_node_and_not_a_machine_that_holds_its_address() {
+        let fleet = on_the_tailnet(&[
+            ("n-impostor", "impostor", &[address(2)]),
+            (CALLER_NODE, "iphone", &[address(9)]),
+        ]);
+        let (_, body) = ask_here(direct(mine(2)), fleet, address(2), &[]).await;
+
+        assert_eq!(body["machine"], "iphone");
+    }
+
+    #[tokio::test]
+    async fn here_is_null_for_a_node_the_look_does_not_list() {
+        let (status, body) = ask_here(
+            direct(mine(2)),
+            on_the_tailnet(&[("n-other", "laptop", &[address(2)])]),
+            address(2),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["machine"].is_null(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn here_refuses_a_list_of_forwarded_addresses() {
+        let (status, _) = ask_here(
+            behind_the_proxy(mine(2)),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
+            address(1),
+            &["100.64.0.2, 100.64.0.3"],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn here_refuses_a_node_that_is_not_yours() {
+        let fake = tailnet(vec![(address(3), caller(ME + 1, &[]))]);
+        let (status, _) = ask_here(
+            direct(fake),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(3)])]),
+            address(3),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn here_refuses_an_address_that_is_no_peer() {
+        let (status, _) = ask_here(
+            direct(tailnet(vec![])),
+            on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
+            address(2),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn here_is_503_before_the_first_tailnet_look() {
+        let (status, _) = ask_here(direct(mine(2)), Fleet::default(), address(2), &[]).await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn here_is_503_when_the_tailnet_look_failed() {
+        let fleet = Fleet::default();
+        fleet
+            .model
+            .try_write()
+            .expect("nothing else holds it")
+            .machines = Some(Arc::new(yantra_core::snapshot::Reading::new(Err(
+            inventory::Error::Command {
+                stderr: "failed to connect to local tailscaled".to_owned(),
+            },
+        ))));
+        let (status, _) = ask_here(direct(mine(2)), fleet, address(2), &[]).await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
@@ -4149,6 +4393,86 @@ mod tests {
             StatusCode::OK,
             "the sweep's own answer still reaches the same path"
         );
+    }
+
+    async fn reads_kept(fleet: &Fleet, name: &str) {
+        use crate::api::tests::get_json;
+
+        let one = get_json(fleet.clone(), &format!("/machines/{name}/readiness")).await;
+        assert_eq!(one["looked"], "ok", "{one}");
+        assert_eq!(one["data"]["machine"], name, "{one}");
+
+        let list = get_json(fleet.clone(), "/readiness").await;
+        assert_eq!(list["looked"], "ok", "{list}");
+        let entries = list["data"].as_array().expect("a list");
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry["machine"] == name)
+                .count(),
+            1,
+            "{list}"
+        );
+    }
+
+    /// Y-579, #514: the `POST` keeps what it asked, so both reads serve it, and
+    /// later sweeps and a reload do not take it away. `nowhere.invalid` does not
+    /// resolve, so ssh fails fast and the report is honest unknowns.
+    #[tokio::test]
+    async fn an_asked_check_is_kept_for_both_reads() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        let app: Router<()> = router(
+            direct(tailnet(vec![(address(2), caller(ME, &[]))])),
+            fleet.clone(),
+        );
+
+        let mut asked = Request::post("/machines/nowhere.invalid/readiness")
+            .body(Body::empty())
+            .expect("a POST");
+        asked
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+        let answered = app.oneshot(asked).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::OK);
+
+        reads_kept(&fleet, "nowhere.invalid").await;
+        for sweep in [
+            yantra_core::snapshot::Reading::new(Ok(Vec::new())),
+            crate::api::tests::sweep_that_failed(),
+        ] {
+            crate::refresh::settle(&mut *fleet.model.write().await, sweep);
+            for _ in 0..2 {
+                reads_kept(&fleet, "nowhere.invalid").await;
+            }
+        }
+    }
+
+    /// Y-579, #514: the check a join runs is kept like an asked one.
+    #[tokio::test]
+    async fn a_joined_machine_check_is_kept() {
+        let fleet = Fleet::default();
+        check_joined(
+            fleet.model.clone(),
+            fleet.events.clone(),
+            "nowhere.invalid".into(),
+        )
+        .await;
+        assert!(
+            fleet
+                .model
+                .read()
+                .await
+                .checks
+                .contains_key("nowhere.invalid"),
+            "the join's report is kept"
+        );
+
+        let one = crate::api::tests::get_json(fleet, "/machines/nowhere.invalid/readiness").await;
+        assert_eq!(one["looked"], "ok", "{one}");
     }
 
     /// An authorised caller and a body the verb refuses: every refusal here is
