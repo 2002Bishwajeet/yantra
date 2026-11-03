@@ -106,16 +106,17 @@ test('the dialog viewport pads its sides by the insets', async ({ page, size }) 
   await page.goto('/')
   await expect(page.locator('.shell')).toBeVisible()
   await withSideInsets(page)
-  const pad = await page.evaluate(() => {
-    const v = document.createElement('div')
-    v.className = 'm3-dialog__viewport'
-    document.body.append(v)
-    const s = getComputedStyle(v)
-    const out = { left: s.paddingLeft, right: s.paddingRight }
-    v.remove()
-    return out
-  })
-  expect(pad).toEqual({ left: '47px', right: '47px' })
+  // Dialog.css loads with the dialog chunk, so open a real dialog first.
+  await page.keyboard.press('ControlOrMeta+k')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const s = getComputedStyle(document.querySelector('.m3-dialog__viewport')!)
+        return { left: s.paddingLeft, right: s.paddingRight }
+      }),
+    )
+    .toEqual({ left: '47px', right: '47px' })
 })
 
 test('the phone top bar pads its sides by the insets', async ({ page, size }) => {
