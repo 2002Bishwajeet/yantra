@@ -83,6 +83,11 @@ test.describe('the tablet rail on a scrolling page', () => {
     await expect(page.locator('.shell__rail-fab')).toBeInViewport()
     await expect(rail(page).getByRole('button', { name: /Notifications/ })).toBeInViewport()
     await expect(rail(page).getByRole('button', { name: 'Account' })).toBeInViewport()
+
+    await page.evaluate(() => document.documentElement.style.setProperty('--m3-safe-top', '47px'))
+    const inset = (await rail(page).boundingBox())!
+    expect(inset.y).toBe(47)
+    expect(inset.y + inset.height).toBe(await page.evaluate(() => window.innerHeight))
   })
 
   test('scrolls its own items on a short landscape screen', async ({ page }) => {
