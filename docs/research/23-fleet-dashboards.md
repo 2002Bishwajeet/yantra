@@ -28,7 +28,7 @@ services, with T3 Code as the coding reference, and it ends with changes for ope
 
 ## Result
 
-**Two products back each of four patterns, and Yantra's dashboard breaks each of them.** No pattern has more than two sources, so read them as patterns and not as an industry consensus.
+**One or two products back each of four patterns, and Yantra's dashboard breaks each of them.** No pattern has more than two sources, and pattern 3 has one, so read them as patterns and not as an industry consensus.
 
 1. **The first run asks for one thing and shows the result.** Two products: Coolify and Home Assistant. Coolify asks for an admin account, then
    walks the owner through a server, a project and a first resource. Home Assistant asks for an owner
