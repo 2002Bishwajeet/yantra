@@ -37,6 +37,15 @@ describe('Copyable', () => {
     expect(hint().childNodes).toHaveLength(0)
   })
 
+  it('forgets a copy when the text changes, so a new code never reads Copied', async () => {
+    clipboard(vi.fn(() => Promise.resolve()))
+    const { rerender } = render(<Copyable text="AAAA-1111" what="the code" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the code' }))
+    expect(await screen.findByRole('button', { name: 'Copied the code' })).toBeTruthy()
+    rerender(<Copyable text="BBBB-2222" what="the code" />)
+    expect(screen.getByRole('button', { name: 'Copy the code' })).toBeTruthy()
+  })
+
   it('selects the text and says how to copy it where there is no clipboard', async () => {
     clipboard(undefined)
     render(<Copyable text={TEXT} what="the join command" />)
