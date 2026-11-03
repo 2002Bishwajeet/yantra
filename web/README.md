@@ -331,12 +331,15 @@ in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
 from T3 Code's provider picker, and the thread keeps it (Y-434).
 [`ModePicker.tsx`](src/screens/session/ModePicker.tsx) picks T3 Code's
 permission mode, Supervised by default (Y-453). Each turn frame carries it, and
-this browser keeps it per thread. Each turn runs
+this browser keeps it per thread. On a Claude thread,
+[`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
+[`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
+and effort, and each is kept per thread the same way (Y-564). Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
 one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
-Attach, harness and permission controls, a context ring that turns red above 90%,
+Attach, harness, permission, model and effort controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
 Settings → General. Eight things about the code:

@@ -89,7 +89,7 @@ impl Turn {
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree, images, mode, None))?;
+        } = ssh.stdio(&command(&place.worktree, images, mode, None, None, None))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let said: Said = Box::pin(async move { diagnosis.await.unwrap_or_default() });
         let (turn, events) = Self::wire(
@@ -231,13 +231,16 @@ impl Turn {
 /// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
-/// cannot turn approval off. `mcp` adds the room server and lets a woken turn
+/// cannot turn approval off. `model` and `effort` reach Claude only when the
+/// person picked them (Y-564). `mcp` adds the room server and lets a woken turn
 /// use its tools without a prompt (ADR-0038 decision 2). The task tools are
 /// Claude's plan, and `-p` has them only when asked for (`Tasks`).
 pub fn command(
     worktree: &str,
     images: Option<&str>,
     mode: chat::PermissionMode,
+    model: Option<&chat::Model>,
+    effort: Option<chat::Effort>,
     mcp: Option<&Mcp>,
 ) -> String {
     format!(
@@ -247,7 +250,7 @@ pub fn command(
          export CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}{rooms}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" {add}{rooms}--permission-mode {mode} {model}{effort}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
@@ -256,6 +259,11 @@ pub fn command(
             sq(&mcp.config())
         )),
         mode = flag(mode),
+        model = model.map_or_else(String::new, |model| format!(
+            "--model {} ",
+            sq(model.as_str())
+        )),
+        effort = effort.map_or_else(String::new, |effort| format!("--effort {} ", effort.name())),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
         newest = logs::newest(worktree),
@@ -1196,9 +1204,9 @@ impl Behaviour {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, PlanStep,
-        PlanStepStatus, RequestOpened, RequestResolved, RequestType, Scope, StopReason, StreamKind,
-        TokenUsage, TurnCompleted, TurnState,
+        ContentDelta, Decision, Effort, Item, ItemStatus, ItemType, Model, PermissionMode,
+        PlanStep, PlanStepStatus, RequestOpened, RequestResolved, RequestType, Scope, StopReason,
+        StreamKind, TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
@@ -1616,6 +1624,8 @@ mod tests {
             None,
             PermissionMode::Supervised,
             None,
+            None,
+            None,
         );
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
@@ -1637,6 +1647,8 @@ mod tests {
             None,
             PermissionMode::Supervised,
             None,
+            None,
+            None,
         );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
@@ -1650,6 +1662,8 @@ mod tests {
             Some("/tmp/yantra-chat-Y01"),
             PermissionMode::Supervised,
             None,
+            None,
+            None,
         );
         assert!(
             script.contains(
@@ -1661,6 +1675,8 @@ mod tests {
             "/w",
             Some("/tmp/a'; touch /tmp/pwned; '"),
             PermissionMode::Supervised,
+            None,
+            None,
             None,
         );
         assert!(
@@ -1680,7 +1696,7 @@ mod tests {
             (PermissionMode::Supervised, "default"),
             (PermissionMode::FullAccess, "default"),
         ] {
-            let script = command("/w", Some("/tmp/i"), mode, None);
+            let script = command("/w", Some("/tmp/i"), mode, None, None, None);
             assert!(
                 script.contains(&format!(
                     "exec \"$c\" --add-dir '/tmp/i' --permission-mode {flag} -p --input-format"
@@ -1691,6 +1707,58 @@ mod tests {
         }
     }
 
+    /// Y-564: the model and the effort follow the mode, each only when picked.
+    #[test]
+    fn a_picked_model_and_effort_follow_the_mode() {
+        let model = Model::try_from("claude-opus-5-5[1m]".to_owned()).expect("a model");
+        let both = command(
+            "/w",
+            None,
+            PermissionMode::Supervised,
+            Some(&model),
+            Some(Effort::Xhigh),
+            None,
+        );
+        assert!(
+            both.contains(
+                "--permission-mode default --model 'claude-opus-5-5[1m]' --effort xhigh -p --input-format"
+            ),
+            "{both}"
+        );
+        let model_only = command(
+            "/w",
+            None,
+            PermissionMode::Supervised,
+            Some(&model),
+            None,
+            None,
+        );
+        assert!(
+            model_only.contains("--model 'claude-opus-5-5[1m]' -p "),
+            "{model_only}"
+        );
+        assert!(!model_only.contains("--effort"), "{model_only}");
+        let effort_only = command(
+            "/w",
+            None,
+            PermissionMode::Auto,
+            None,
+            Some(Effort::Low),
+            None,
+        );
+        assert!(
+            effort_only.contains("--permission-mode auto --effort low -p "),
+            "{effort_only}"
+        );
+        assert!(!effort_only.contains("--model"), "{effort_only}");
+        let neither = command("/w", None, PermissionMode::Auto, None, None, None);
+        assert!(neither.contains("--permission-mode auto -p "), "{neither}");
+        assert!(
+            !neither.contains("--model") && !neither.contains("--effort"),
+            "{neither}"
+        );
+    }
+
     /// ADR-0038 decision 2: a Chat turn reaches the room tools over HTTP,
     /// names its thread in a header, and may use them without a prompt.
     #[test]
@@ -1699,7 +1767,14 @@ mod tests {
             url: "http://100.64.0.1:7717/api/mcp".to_owned(),
             thread: "web/1a2b3c4d".to_owned(),
         };
-        let script = command("/w", Some("/tmp/i"), PermissionMode::FullAccess, Some(&mcp));
+        let script = command(
+            "/w",
+            Some("/tmp/i"),
+            PermissionMode::FullAccess,
+            None,
+            None,
+            Some(&mcp),
+        );
         assert!(
             script.contains(
                 "exec \"$c\" --add-dir '/tmp/i' --mcp-config '{\"mcpServers\":{\"yantra-room\":\
@@ -1715,7 +1790,14 @@ mod tests {
             url: mcp.url.clone(),
             thread: "web/x'; touch /tmp/pwned; '\"".to_owned(),
         };
-        let script = command("/w", None, PermissionMode::Supervised, Some(&hostile));
+        let script = command(
+            "/w",
+            None,
+            PermissionMode::Supervised,
+            None,
+            None,
+            Some(&hostile),
+        );
         assert!(
             script.contains(
                 r#"--mcp-config '{"mcpServers":{"yantra-room":{"headers":{"X-Yantra-Thread":"web/x'\''; touch /tmp/pwned; '\''\""},"#
