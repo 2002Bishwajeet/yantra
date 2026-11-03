@@ -299,4 +299,42 @@ mod tests {
             true
         )));
     }
+
+    /// yantrad's `because`: each error in the chain, joined by `: `.
+    fn chained(error: &dyn std::error::Error) -> String {
+        let mut out = error.to_string();
+        let mut source = error.source();
+        while let Some(cause) = source {
+            out.push_str(&format!(": {cause}"));
+            source = cause.source();
+        }
+        out
+    }
+
+    /// Y-585: the web calls a sessions error an ssh failure only when it starts
+    /// with this prefix (`lib/checks.ts` `answerFailure`).
+    #[test]
+    fn only_an_ssh_transport_error_starts_with_the_prefix_the_web_reads() {
+        const PREFIX: &str = "ssh to pi failed before the command reported a status";
+        let transport = Error::Tmux(tmux::Error::Ssh(ssh::Error::Transport {
+            host: "pi".to_string(),
+            diagnosis: "Permission denied (publickey).".to_string(),
+        }));
+        assert!(
+            chained(&transport).starts_with(PREFIX),
+            "{}",
+            chained(&transport)
+        );
+
+        let listing = Error::Tmux(tmux::Error::Command {
+            command: "list-sessions".to_string(),
+            status: 1,
+            stderr: "error connecting to /tmp/tmux-1000/default (Permission denied)".to_string(),
+        });
+        assert!(
+            !chained(&listing).starts_with("ssh to"),
+            "{}",
+            chained(&listing)
+        );
+    }
 }

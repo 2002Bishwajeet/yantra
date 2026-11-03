@@ -31,6 +31,10 @@ const stopped = (at: number, commands: string[]): Event => ({
   commands,
 })
 
+/** yantrad's words for `ssh::Error::Transport` and a tmux error (Y-585). */
+const SSH = 'ssh to pi failed before the command reported a status:'
+const TMUX = 'tmux `list-sessions` failed with status 1: error connecting to /tmp/tmux-1000/default (Permission denied)'
+
 const verdict = (readiness: Reading<Readiness>, over: Partial<Parameters<typeof verdictOf>[0]> = {}) =>
   verdictOf({ name: 'pi', machine: machine(), readiness, events: [], watch: null, ...over })
 
@@ -54,10 +58,15 @@ describe('the machine page’s verdict', () => {
   /** Y-585: tailnet machines reach Sessions and never the sweep, and the page
    *  must not say both *not checked* and *did not answer*. */
   it('takes a failure from the sessions where readiness holds nothing', () => {
-    const sessionsError = 'ssh to pi failed: Permission denied (publickey).'
+    const sessionsError = `${SSH} Permission denied (publickey).`
     expect(verdict({ looked: 'never' }, { sessionsError })).toEqual({ kind: 'refused', detail: sessionsError })
     expect(verdict(report([]), { sessionsError })).toEqual({ kind: 'refused', detail: sessionsError })
     expect(verdict({ looked: 'never' }, { sessionsError: null })).toEqual({ kind: 'unasked' })
+  })
+
+  it('never takes an ssh failure from a tmux error', () => {
+    expect(verdict({ looked: 'never' }, { sessionsError: TMUX })).toEqual({ kind: 'unasked' })
+    expect(verdict(report([]), { sessionsError: TMUX })).toEqual({ kind: 'unasked' })
   })
 
   it('keeps a reachable check it holds over the sessions error', () => {
@@ -72,14 +81,18 @@ describe('the machine page’s verdict', () => {
 
   it('gives Sessions the words Readiness has, or reads the error itself', () => {
     const refused = verdict(all({ reachable: 'absent' }, { reachable: 'Permission denied' }))
-    expect(sessionsFailure(refused, 'No route to host')).toBe(refused)
-    expect(sessionsFailure({ kind: 'asleep' }, 'No route to host')).toEqual({ kind: 'asleep' })
-    expect(sessionsFailure({ kind: 'expired' }, 'No route to host')).toEqual({ kind: 'expired' })
-    expect(sessionsFailure({ kind: 'ready' }, 'No route to host')).toEqual({
-      kind: 'unreachable',
-      detail: 'No route to host',
-    })
-    expect(sessionsFailure({ kind: 'pending' }, 'Tailscale SSH requires an additional check').kind).toBe('browser')
+    const noRoute = `${SSH} No route to host`
+    expect(sessionsFailure(refused, noRoute)).toBe(refused)
+    expect(sessionsFailure(refused, TMUX)).toBe(refused)
+    expect(sessionsFailure({ kind: 'asleep' }, noRoute)).toEqual({ kind: 'asleep' })
+    expect(sessionsFailure({ kind: 'expired' }, noRoute)).toEqual({ kind: 'expired' })
+    expect(sessionsFailure({ kind: 'ready' }, noRoute)).toEqual({ kind: 'unreachable', detail: noRoute })
+    expect(sessionsFailure({ kind: 'pending' }, `${SSH} Tailscale SSH requires an additional check`).kind).toBe('browser')
+  })
+
+  it('reads a tmux error on a reached machine as a listing, not an ssh failure', () => {
+    expect(sessionsFailure({ kind: 'ready' }, TMUX)).toEqual({ kind: 'listing', detail: TMUX })
+    expect(sessionsFailure({ kind: 'unasked' }, TMUX)).toEqual({ kind: 'listing', detail: TMUX })
   })
 
   it('reads a machine nobody asked as not checked, never as a failure', () => {

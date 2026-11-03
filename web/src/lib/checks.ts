@@ -83,10 +83,20 @@ export function reachableFailure(detail: string): ReachableFailure {
   return /permission denied/i.test(detail) ? 'refused' : 'unreachable'
 }
 
-export const joinFixes = (kind: ReachableFailure) => kind !== 'unreachable'
+/** `ssh::Error::Transport` after yantrad's `because` (sessions.rs pins it). */
+const TRANSPORT = /^ssh to \S+ failed before the command reported a status/
+
+/** `sessions.rs` and `status.rs` send every error as `reached: 'no'`. Only a
+ *  `Transport` one is ssh's; a tmux or local error is `listing` (Y-585). */
+export type AnswerFailure = ReachableFailure | 'listing'
+
+export const answerFailure = (error: string): AnswerFailure =>
+  TRANSPORT.test(error) ? reachableFailure(error) : 'listing'
+
+export const joinFixes = (kind: AnswerFailure) => kind !== 'unreachable' && kind !== 'listing'
 
 /** The plain cause and the next step, which no title repeats. */
-export function reachWords(kind: ReachableFailure, name: string): { cause: string; next: string } {
+export function reachWords(kind: AnswerFailure, name: string): { cause: string; next: string } {
   switch (kind) {
     case 'refused':
       return {
@@ -107,6 +117,11 @@ export function reachWords(kind: ReachableFailure, name: string): { cause: strin
       return {
         cause: `Yantra can’t reach ${name} over ssh. A firewall, a changed host key or a machine that is off can do this.`,
         next: 'The join command does not fix this. What ssh said names the reason.',
+      }
+    case 'listing':
+      return {
+        cause: `Yantra could not list the sessions on ${name}.`,
+        next: 'This is not an ssh failure, so the join command does not fix it. The full error names the reason.',
       }
   }
 }

@@ -132,7 +132,7 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
 
   it('classifies the sessions error itself when Readiness has not failed', async () => {
     const busy = scenario('busy')
-    const error = 'Tailscale SSH requires an additional check'
+    const error = 'ssh to cachyos-g14 failed before the command reported a status: Tailscale SSH requires an additional check'
     const state = {
       ...busy,
       sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'no', error }] },
@@ -141,6 +141,29 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
     expect(await ready.findByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
     expect(await card('Sessions').findByText('cachyos-g14 needs a browser sign-in')).toBeTruthy()
+  })
+
+  /** Y-585 review: tmux's own `Permission denied` is not the appliance's key. */
+  it('never calls a tmux error an ssh failure, and keeps its text behind a disclosure', async () => {
+    const busy = scenario('busy')
+    const error = 'tmux `list-sessions` failed with status 1: error connecting to /tmp/tmux-1000/default (Permission denied)'
+    const state = {
+      ...busy,
+      readiness: { looked: 'never' },
+      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'no', error }] },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: 'Not checked yet' })).toBeTruthy()
+
+    const sessions = card('Sessions')
+    expect(await sessions.findByText('The sessions could not be listed')).toBeTruthy()
+    expect(sessions.getByText(/not an ssh failure/)).toBeTruthy()
+    for (const words of [/ssh to/, /key was refused/, /What ssh said/, /Permission denied/]) {
+      expect(screen.queryByText(words)).toBeNull()
+    }
+    fireEvent.click(sessions.getByRole('button', { name: /The full error/ }))
+    expect(sessions.getByText(error)).toBeTruthy()
   })
 })
 

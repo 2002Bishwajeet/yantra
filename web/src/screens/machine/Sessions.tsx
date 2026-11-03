@@ -9,6 +9,7 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { reachWords } from '@/lib/checks'
 import { SshSaid } from './ReachFailure'
 import { chipOf, noRows, sessionsFailure, titleOf, type Verdict } from './verdict'
 
@@ -58,6 +59,15 @@ export function Sessions(props: {
         <div aria-busy="true" className="machine__pending">
           <Skeleton shape="text" style={{ width: '58%' }} />
           <Skeleton shape="text" style={{ width: '44%' }} />
+        </div>
+      ) : failure?.kind === 'listing' ? (
+        // Y-585: ssh got in or never ran, so this is not Readiness's failure.
+        <div className="machine__failed" role="status">
+          <State state="unknown">The sessions could not be listed</State>
+          <Text render={<p />} scale="body-small" tone="variant">
+            {reachWords('listing', machine).next}
+          </Text>
+          <SshSaid detail={failure.detail} kind="listing" />
         </div>
       ) : failure && answer?.reached === 'no' ? (
         // R-23: a machine that did not answer is data about the machine.

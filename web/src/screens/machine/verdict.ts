@@ -1,6 +1,6 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
+import { answerFailure, INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
 import { missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
@@ -41,7 +41,10 @@ export function verdictOf(input: {
   if (readiness.looked === 'failed') return { kind: 'unread', error: readiness.error }
   if (readiness.looked === 'never' || readiness.data.checks.length === 0) {
     // The sweep skips a machine no workspace names, and Sessions asks it anyway.
-    return sessionsError ? { kind: reachableFailure(sessionsError), detail: sessionsError } : { kind: 'unasked' }
+    // A tmux error says nothing about ssh, so it leaves the machine unasked.
+    if (!sessionsError) return { kind: 'unasked' }
+    const kind = answerFailure(sessionsError)
+    return kind === 'listing' ? { kind: 'unasked' } : { kind, detail: sessionsError }
   }
 
   const { checks } = readiness.data
@@ -87,10 +90,13 @@ const NOT_REACHED: ReadonlySet<Verdict['kind']> = new Set([
   'unreachable',
 ])
 
+/** Sessions' answer when ssh got in and the listing failed (Y-585). */
+export type SessionsFailure = Verdict | { kind: 'listing'; detail: string }
+
 /** What Sessions says for a machine that did not answer: Readiness's verdict
  *  where that failed too, so the two cards agree, or else its own error. */
-export const sessionsFailure = (verdict: Verdict, error: string): Verdict =>
-  NOT_REACHED.has(verdict.kind) ? verdict : { kind: reachableFailure(error), detail: error }
+export const sessionsFailure = (verdict: Verdict, error: string): SessionsFailure =>
+  NOT_REACHED.has(verdict.kind) ? verdict : { kind: answerFailure(error), detail: error }
 
 /** Sessions with no row. `sessions.rs` answers an empty list for a machine with
  *  no tmux, so only a verdict that read the tmux check can speak for tmux. */

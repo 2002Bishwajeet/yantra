@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { joinFixes, reachWords, type ReachableFailure } from '@/lib/checks'
+import { joinFixes, reachWords, type AnswerFailure, type ReachableFailure } from '@/lib/checks'
 import { joinCommand } from '@/lib/join'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Text } from '@/m3/text/Text'
 
-/** ssh's own words, one press away from every surface that fails on them. */
-export function SshSaid(props: { detail: string; children?: ReactNode }) {
+/** The raw error, one press away from every surface that fails on it. Only
+ *  ssh's own words are called ssh's (Y-585). */
+export function SshSaid(props: { detail: string; kind?: AnswerFailure; children?: ReactNode }) {
   return (
-    <Disclosure summary="What ssh said">
+    <Disclosure summary={props.kind === 'listing' ? 'The full error' : 'What ssh said'}>
       <div className="m3-mono m3-wrap">{props.detail}</div>
       {props.children}
     </Disclosure>

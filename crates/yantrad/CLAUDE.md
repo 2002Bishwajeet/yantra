@@ -160,11 +160,15 @@ of itself, and debounce belongs in the browser.
 
 **A failed check ends fast and speaks plainly** (Y-585). A Tailscale SSH `check` rule stops at its
 banner, and `REACH_LIMIT` bounds any other held login at 20 s. Each check carries `took_ms` where a
-step ran. On the machine page the sessions error decides the verdict only where readiness holds
-nothing, because the sweep skips a machine no workspace names. Sessions shows the title Readiness
-shows, and an empty list claims a tmux listing only where the verdict read tmux, because `sessions.rs`
-answers an empty list for a machine with no tmux. Setup and Add a device give the same plain cause and
-next step as the machine page. ssh's own words sit behind *What ssh said* on every surface. Two readings
+step ran. `sessions.rs` and `status.rs` send every error as `reached: no`, and only an error that
+starts with `ssh::Error::Transport`'s words is an ssh failure. The web reads that prefix in one place
+(`answerFailure`), and a `sessions.rs` test pins it. A tmux or local failure is never called an ssh or
+key failure: it reads *could not list the sessions*, with its text behind *The full error*. On the
+machine page an ssh sessions error decides the verdict only where readiness holds nothing, because the
+sweep skips a machine no workspace names. Sessions then shows the title Readiness shows. An empty list
+claims a tmux listing only where the verdict read tmux, because `sessions.rs` answers an empty list for
+a machine with no tmux. Readiness, Sessions, the session page, Fleet, Machines, Setup and Add a device
+each give a plain cause and next step, and ssh's own words sit behind *What ssh said*. Two readings
 taken at different times can still differ for one sweep.
 
 ## The one thing it sends, and the two rules that keep it useful

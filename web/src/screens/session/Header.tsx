@@ -1,8 +1,9 @@
 import { useId, type ReactElement } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import type { MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
+import { answerFailure, joinFixes, reachWords } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -12,6 +13,7 @@ import { Row, RowText } from '@/m3/row/Row'
 import { Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { DeleteWorkspace } from '@/screens/fleet/Confirm'
+import { SshSaid } from '@/screens/machine/ReachFailure'
 import { phrase } from '@/shell/phrase'
 import { home } from './format'
 import { Talk } from './Talk'
@@ -43,6 +45,29 @@ export function Delete(props: { workspace: Workspace; status: WorkspaceStatus | 
       }
       trigger={trigger}
     />
+  )
+}
+
+/** Y-585: the plain cause and the next step, and the raw text one press away.
+ *  The machine page holds the join command and the checks. */
+function Unanswered(props: { machine: string; error: string }) {
+  const { machine, error } = props
+  const kind = answerFailure(error)
+  const { cause, next } = reachWords(kind, machine)
+  return (
+    <>
+      <Text render={<p />} scale="body-medium">
+        {cause}
+      </Text>
+      <Text render={<p />} scale="body-small" tone="variant">
+        {next}{' '}
+        <Link params={{ machine }} to="/m/$machine">
+          {machine}’s page
+        </Link>{' '}
+        has {joinFixes(kind) ? 'the join command and the checks' : 'the checks'}.
+      </Text>
+      <SshSaid detail={error} kind={kind} />
+    </>
   )
 }
 
@@ -135,9 +160,7 @@ export function Header(props: HeaderProps) {
             </>
           ) : null}
         </Text>
-        {status?.reached === 'no' ? (
-          <Mono className="session__unreachable">{status.error}</Mono>
-        ) : null}
+        {status?.reached === 'no' ? <Unanswered error={status.error} machine={workspace.machine} /> : null}
         <Talk machine={workspace.machine} />
         {failed ? (
           <ErrorSurface.Inline

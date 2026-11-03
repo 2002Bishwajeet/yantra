@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { CHECK_IDS, fixOf, joinFixes, nameOf, reachableFailure, reachWords, sessionNeeds, tookOf } from './checks'
+import {
+  answerFailure,
+  CHECK_IDS,
+  fixOf,
+  joinFixes,
+  nameOf,
+  reachableFailure,
+  reachWords,
+  sessionNeeds,
+  tookOf,
+} from './checks'
 
 describe('the check name table', () => {
   it('names each of doctor’s eleven checks the way a person says it', () => {
@@ -92,6 +102,38 @@ describe('a failed reach', () => {
     expect(joinFixes('unjoined')).toBe(true)
     expect(joinFixes('browser')).toBe(true)
     expect(joinFixes('unreachable')).toBe(false)
+    expect(joinFixes('listing')).toBe(false)
+  })
+})
+
+/** Y-585: what `sessions.rs` and `status.rs` send as `reached: 'no'`, after
+ *  yantrad's `because`. Only ssh's `Transport` starts with the prefix. */
+describe('a failed sessions or status answer', () => {
+  const ssh = (diagnosis: string) => `ssh to pi failed before the command reported a status: ${diagnosis}`
+
+  it('reads an ssh failure as reachableFailure does', () => {
+    expect(answerFailure(ssh('yantra@pi: Permission denied (publickey).'))).toBe('refused')
+    expect(answerFailure(ssh('the ssh config here names no account for pi'))).toBe('unjoined')
+    expect(answerFailure(ssh('# Tailscale SSH requires an additional check.'))).toBe('browser')
+    expect(answerFailure(ssh('connect to host pi port 22: No route to host'))).toBe('unreachable')
+  })
+
+  it('never calls a tmux or local failure an ssh one', () => {
+    expect(answerFailure('tmux `list-sessions` failed with status 1: protocol version mismatch (client 8, server 7)')).toBe(
+      'listing',
+    )
+    expect(
+      answerFailure('tmux `list-sessions` failed with status 1: error connecting to /tmp/tmux-1000/default (Permission denied)'),
+    ).toBe('listing')
+    expect(answerFailure('could not spawn `ssh` — is OpenSSH installed and on PATH?: No such file or directory')).toBe('listing')
+    expect(answerFailure('Permission denied (publickey).')).toBe('listing')
+  })
+
+  it('gives a listing failure its own words, which send no one to the join command', () => {
+    const { cause, next } = reachWords('listing', 'pi')
+    expect(cause).toBe('Yantra could not list the sessions on pi.')
+    expect(next).toContain('not an ssh failure')
+    expect(`${cause} ${next}`).not.toMatch(/key|refused|ssh to/i)
   })
 })
 
