@@ -22,6 +22,7 @@ use yantra_core::history;
 use yantra_core::identity;
 use yantra_core::install::{self, Outcome};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
+use yantra_core::layout;
 use yantra_core::logs;
 use yantra_core::mic;
 use yantra_core::notify;
@@ -289,6 +290,11 @@ enum Command {
         #[arg(long)]
         daemon: String,
     },
+    /// The dashboard layout yantrad serves, in ~/.config/yantra/dashboard.json
+    Layout {
+        #[command(subcommand)]
+        action: LayoutAction,
+    },
     /// Steer the rooms live agents talk in (ADR-0038)
     Room {
         #[command(subcommand)]
@@ -370,6 +376,18 @@ enum PrAction {
         /// The PR's body; the tip commit's body when absent
         #[arg(long)]
         body: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum LayoutAction {
+    /// Print the layout as JSON
+    Show,
+    /// Replace the layout. The file names the rev it was read at, and a
+    /// newer rev on disk refuses it
+    Set {
+        /// A layout as `show` prints it, or `-` for stdin
+        file: PathBuf,
     },
 }
 
@@ -732,6 +750,12 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Some(Command::Layout {
+            action: LayoutAction::Show,
+        }) => layout_show(),
+        Some(Command::Layout {
+            action: LayoutAction::Set { file },
+        }) => layout_set(&file),
         Some(Command::Why {
             workspace,
             repo,
@@ -747,6 +771,60 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+    }
+}
+
+/// A file that is not a layout prints the default, as yantrad serves it.
+fn layout_show() -> ExitCode {
+    let shown = match layout::read() {
+        Err(layout::Error::Corrupt(reason)) => {
+            eprintln!("yantra: dashboard.json is not a layout ({reason}), so this is the default");
+            Ok(layout::Layout::default())
+        }
+        read => read,
+    };
+    match shown {
+        Ok(shown) => {
+            // A plain struct always serialises.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&shown).unwrap_or_default()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn layout_set(file: &Path) -> ExitCode {
+    let bytes = if file == Path::new("-") {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes).map(|_| bytes)
+    } else {
+        std::fs::read(file)
+    };
+    let saved = match bytes {
+        Ok(bytes) => layout::Layout::parse(&bytes).and_then(|sent| layout::replace(&sent)),
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    match saved {
+        Ok(saved) => {
+            println!("saved the layout at rev {}", saved.rev);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, layout::Error::Stale(_)) {
+                eprintln!("\x20 note: `yantra layout show` prints the current layout to edit.");
+            }
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -3172,6 +3250,42 @@ mod tests {
         for verb in [&["ls"][..], &["show", "r2"], &["rm", "r2"]] {
             assert!(parse(verb).is_err(), "{verb:?} needs the daemon");
         }
+    }
+
+    #[test]
+    fn the_layout_verbs_parse() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(["yantra", "layout"].iter().chain(args).copied())
+                .map(|cli| cli.command)
+        };
+        assert!(matches!(
+            parse(&["show"]),
+            Ok(Some(Command::Layout {
+                action: LayoutAction::Show
+            }))
+        ));
+        assert!(matches!(
+            parse(&["set", "-"]),
+            Ok(Some(Command::Layout { action: LayoutAction::Set { file } })) if file == Path::new("-")
+        ));
+        assert!(matches!(
+            parse(&["set", "mine.json"]),
+            Ok(Some(Command::Layout { action: LayoutAction::Set { file } })) if file == Path::new("mine.json")
+        ));
+        assert!(parse(&["set"]).is_err(), "set needs a file");
+        assert!(parse(&["show", "x"]).is_err());
+        assert!(parse(&[]).is_err());
+    }
+
+    #[test]
+    fn layout_set_refuses_a_file_that_is_not_a_layout_before_writing() {
+        let file = std::env::temp_dir().join(format!("yantra-layout-set-{}", std::process::id()));
+        std::fs::write(&file, r#"{"v":2}"#).expect("written");
+        assert_eq!(layout_set(&file), ExitCode::FAILURE);
+        assert_eq!(
+            layout_set(&file.with_extension("absent")),
+            ExitCode::FAILURE
+        );
     }
 
     #[tokio::test]

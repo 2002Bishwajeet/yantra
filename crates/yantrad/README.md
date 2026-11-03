@@ -63,6 +63,7 @@ API the CLI cannot reach.
 | `POST /api/rooms` | `yantra room new` (201 with the summary; writes the room's definition, ADR-0039, Y-550) |
 | `PATCH /api/rooms/{room}` | `yantra room edit` (`{brief}`, where `null` clears it; an undefined room is `404`) |
 | `DELETE /api/rooms/{room}` | `yantra room rm` (`{"removed": bool}`, as the workspace delete answers) |
+| `GET /api/layout`, `PUT /api/layout` | `yantra layout show` and `yantra layout set` (the dashboard layout in `~/.config/yantra/dashboard.json`; a `PUT` at a stale `rev` is `409` with the current layout, ADR-0036, Y-515). The `GET` is not gated |
 | `GET /api/workspaces/{name}/chat` | **None yet for a turn**, which breaks the rule above: an open gap, not a decision. `yantra chat new` and `chat ls` open and list threads (Y-488). A WebSocket for the dashboard's Chat tab; each turn runs the thread's harness in its own worktree: `claude -p`, or an ACP agent (ADR-0026, ADR-0033, Y-356, Y-434). A keeper on the machine holds the turn, so it outlives the socket and the daemon (ADR-0035, Y-447) |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |
 | `GET /api/machines/{machine}/mic` | — (a WebSocket that carries push-to-talk audio into `pw-cat`, ADR-0031 §5) |

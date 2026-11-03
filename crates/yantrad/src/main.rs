@@ -31,6 +31,7 @@ mod contract;
 mod events;
 mod github;
 mod heartbeat;
+mod layout;
 mod mcp;
 mod mic;
 mod notify;
@@ -157,6 +158,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
                     fleet.closing.clone(),
                 ))
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
+                .merge(layout::router(authoriser.clone()))
                 .merge(mic::router(authoriser)),
         )
         .merge(heartbeat::router())
