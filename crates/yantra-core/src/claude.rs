@@ -232,7 +232,8 @@ impl Turn {
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
 /// cannot turn approval off. `mcp` adds the room server and lets a woken turn
-/// use its tools without a prompt (ADR-0038 decision 2).
+/// use its tools without a prompt (ADR-0038 decision 2). The task tools are
+/// Claude's plan, and `-p` has them only when asked for (`Tasks`).
 pub fn command(
     worktree: &str,
     images: Option<&str>,
@@ -243,6 +244,7 @@ pub fn command(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
+         export CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n\
          {newest}\
          [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
          exec \"$c\" {add}{rooms}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
@@ -325,6 +327,7 @@ struct State {
     answered: HashMap<String, chat::Decision>,
     /// The end of the line being read and the number of events made from it.
     line: Option<(u64, u32)>,
+    tasks: Tasks,
 }
 
 /// A `can_use_tool` request Claude is waiting on.
@@ -469,6 +472,9 @@ impl Shared {
                 }
                 for block in message.content.blocks() {
                     if let Block::ToolUse { id, name, input } = block {
+                        if let Some(call) = Task::call(&name, &input) {
+                            self.lock().tasks.calls.insert(id.clone(), call);
+                        }
                         self.emit(Event::ItemStarted(chat::Item {
                             item_id: id,
                             item_type: Some(item_type(&name)),
@@ -480,7 +486,10 @@ impl Shared {
                     }
                 }
             }
-            Line::User { message } => {
+            Line::User {
+                message,
+                tool_use_result,
+            } => {
                 for block in message.content.blocks() {
                     if let Block::ToolResult {
                         tool_use_id,
@@ -488,6 +497,13 @@ impl Shared {
                         is_error,
                     } = block
                     {
+                        let plan =
+                            self.lock()
+                                .tasks
+                                .result(&tool_use_id, is_error, &tool_use_result);
+                        if let Some(plan) = plan {
+                            self.emit(Event::PlanUpdated { plan });
+                        }
                         self.emit(Event::ItemCompleted(chat::Item {
                             item_id: tool_use_id,
                             item_type: None,
@@ -874,6 +890,9 @@ enum Line {
     },
     User {
         message: Message,
+        /// Claude's own record of a tool's result; read for a `TaskCreate`'s id.
+        #[serde(default)]
+        tool_use_result: Value,
     },
     ControlRequest {
         request_id: String,
@@ -978,6 +997,104 @@ enum Block {
     Other,
 }
 
+/// Claude's plan is its task list. `-p` offers `TaskCreate` and `TaskUpdate`
+/// only under `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`, and never `TodoWrite` (Y-568).
+/// A task is planned once its result says it was made, so a refused call is not.
+#[derive(Debug, Default)]
+struct Tasks {
+    /// The task calls whose results have not arrived, by tool use id.
+    calls: HashMap<String, Task>,
+    /// The tasks this turn made, by Claude's task id, in the order made.
+    steps: Vec<(String, chat::PlanStep)>,
+}
+
+#[derive(Debug)]
+enum Task {
+    Create,
+    Update(TaskUpdate),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskUpdate {
+    task_id: String,
+    subject: Option<String>,
+    status: Option<TaskStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+struct Created {
+    task: CreatedTask,
+}
+
+#[derive(Deserialize)]
+struct CreatedTask {
+    id: String,
+    subject: String,
+}
+
+impl Task {
+    fn call(name: &str, input: &Value) -> Option<Self> {
+        match name {
+            "TaskCreate" => Some(Self::Create),
+            "TaskUpdate" => TaskUpdate::deserialize(input).ok().map(Self::Update),
+            _ => None,
+        }
+    }
+}
+
+impl Tasks {
+    /// The plan after a tool's result, when that result changed it.
+    fn result(&mut self, id: &str, failed: bool, record: &Value) -> Option<Vec<chat::PlanStep>> {
+        let call = self.calls.remove(id)?;
+        if failed {
+            return None;
+        }
+        match call {
+            Task::Create => {
+                let Created { task } = Created::deserialize(record).ok()?;
+                let step = chat::PlanStep {
+                    step: task.subject,
+                    status: chat::PlanStepStatus::Pending,
+                };
+                self.steps.push((task.id, step));
+            }
+            // A task made in an earlier turn has no subject here, so it is not shown.
+            Task::Update(update) => {
+                let at = self
+                    .steps
+                    .iter()
+                    .position(|(id, _)| *id == update.task_id)?;
+                let step = &mut self.steps[at].1;
+                if let Some(subject) = update.subject {
+                    step.step = subject;
+                }
+                match update.status {
+                    Some(TaskStatus::Pending) => step.status = chat::PlanStepStatus::Pending,
+                    Some(TaskStatus::InProgress) => step.status = chat::PlanStepStatus::InProgress,
+                    Some(TaskStatus::Completed) => step.status = chat::PlanStepStatus::Completed,
+                    Some(TaskStatus::Deleted) => {
+                        self.steps.remove(at);
+                    }
+                    Some(TaskStatus::Other) | None => {}
+                }
+            }
+        }
+        Some(self.steps.iter().map(|(_, step)| step.clone()).collect())
+    }
+}
+
 #[derive(Deserialize)]
 struct Usage {
     #[serde(default)]
@@ -1079,9 +1196,9 @@ impl Behaviour {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, RequestOpened,
-        RequestResolved, RequestType, Scope, StopReason, StreamKind, TokenUsage, TurnCompleted,
-        TurnState,
+        ContentDelta, Decision, Item, ItemStatus, ItemType, PermissionMode, PlanStep,
+        PlanStepStatus, RequestOpened, RequestResolved, RequestType, Scope, StopReason, StreamKind,
+        TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
@@ -1090,6 +1207,7 @@ mod tests {
     const INTERRUPT: &str = include_str!("../tests/recordings/claude-2.1.291-interrupt.jsonl");
     const NOT_LOGGED_IN: &str =
         include_str!("../tests/recordings/claude-2.1.291-not-logged-in.jsonl");
+    const TASKS: &str = include_str!("../tests/recordings/claude-2.1.317-tasks.jsonl");
 
     const THREAD: &str = "11111111";
     const TOOL: &str = "toolu_01Q6EvdCE9kmjKPWys5J1s9S";
@@ -1508,6 +1626,7 @@ mod tests {
              f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -n 1)\n\
              [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n"
         ));
+        assert!(script.contains("\nexport CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n"));
         assert!(script.ends_with(
             "exec \"$c\" --permission-mode default -p --input-format stream-json \
              --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
@@ -1818,6 +1937,79 @@ mod tests {
             }
         );
         assert!(replayed.state.pending.is_empty());
+    }
+
+    fn plans(recording: &str) -> Vec<Vec<PlanStep>> {
+        replay(THREAD, RUN, recording.as_bytes(), b"")
+            .events
+            .into_iter()
+            .filter_map(|event| match event.event {
+                Event::PlanUpdated { plan } => Some(plan),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn step(step: &str, status: PlanStepStatus) -> PlanStep {
+        PlanStep {
+            step: step.to_owned(),
+            status,
+        }
+    }
+
+    /// A real 2.1.317 turn: three `TaskCreate`s, then two `TaskUpdate`s.
+    #[test]
+    fn the_task_tools_update_the_plan() {
+        use PlanStepStatus::{Completed, InProgress, Pending};
+        let seen = plans(TASKS);
+        assert_eq!(seen.len(), 5);
+        assert_eq!(seen[0], vec![step("Read", Pending)]);
+        assert_eq!(
+            seen[4],
+            vec![
+                step("Read", Completed),
+                step("Write", InProgress),
+                step("Test", Pending),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_or_unknown_task_call_sends_no_plan() {
+        let lines = [
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "a", "name": "TaskCreate", "input": {"subject": "Read"}},
+                {"type": "tool_use", "id": "b", "name": "TaskUpdate",
+                 "input": {"taskId": "9", "status": "completed"}}]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "a", "content": "denied", "is_error": true}]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "b", "content": "Updated task #9 status"}]},
+                "tool_use_result": {"success": true, "taskId": "9"}}),
+        ];
+        let out: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        assert!(plans(&out).is_empty());
+    }
+
+    #[test]
+    fn a_deleted_task_leaves_the_plan() {
+        let lines = [
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "a", "name": "TaskCreate", "input": {"subject": "Read"}}]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "a", "content": "Task #1 created successfully: Read"}]},
+                "tool_use_result": {"task": {"id": "1", "subject": "Read"}}}),
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "b", "name": "TaskUpdate",
+                 "input": {"taskId": "1", "status": "deleted"}}]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "b", "content": "Updated task #1 deleted"}]}}),
+        ];
+        let out: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        assert_eq!(
+            plans(&out),
+            vec![vec![step("Read", PlanStepStatus::Pending)], Vec::new()]
+        );
     }
 
     /// A line cut off mid-way is not read, so the reader that carries on
