@@ -159,6 +159,14 @@ pub enum Polled {
     Granted(Grant),
 }
 
+/// The two public fields of `GET /user` that are shown (ADR-0023 §2).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Account {
+    pub login: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct Repo {
     pub full_name: String,
@@ -467,16 +475,15 @@ impl Github {
         }
     }
 
-    /// `GET /user`'s `login`, which is the one thing about the account that is
-    /// shown (ADR-0023 §2). A 401 is [`Error::Refused`]: the grant is gone.
-    pub async fn login_name(&self, token: &Token) -> Result<String, Error> {
+    /// `GET /user`'s login and profile image URL, both public. A 401 is
+    /// [`Error::Refused`]: the grant is gone.
+    pub async fn account(&self, token: &Token) -> Result<Account, Error> {
         let url = format!("{}/user", self.api);
         let token = token.clone();
         blocking(move || {
             let mut response = get(&url, &token, &[]).map_err(unreachable)?;
             ok(&response, "/user")?;
-            let user: User = read_json(&mut response, "the account")?;
-            Ok(user.login)
+            read_json(&mut response, "the account")
         })
         .await
     }
@@ -1416,21 +1423,27 @@ pub(crate) mod tests {
     }
 
     /// The token goes out as a bearer, the API version is pinned, and `login`
-    /// is the one field read.
+    /// and `avatar_url` are the fields read.
     #[tokio::test]
-    async fn the_login_name_is_read_with_a_bearer_and_a_pinned_api_version() {
+    async fn the_account_is_read_with_a_bearer_and_a_pinned_api_version() {
         let (listener, address) = listen();
         let served = serve(
             listener,
             vec![reply(
                 "200 OK",
-                r#"{"login":"octocat","id":1,"email":"octocat@github.com"}"#,
+                r#"{"login":"octocat","id":1,"email":"octocat@github.com","avatar_url":"https://avatars.githubusercontent.com/u/1?v=4"}"#,
             )],
         );
 
-        let login = at(address).login_name(&token()).await.expect("the login");
+        let account = at(address).account(&token()).await.expect("the account");
 
-        assert_eq!(login, "octocat");
+        assert_eq!(
+            account,
+            Account {
+                login: "octocat".to_owned(),
+                avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".to_owned()),
+            }
+        );
         let request = served.join().expect("the listener thread").remove(0);
         assert!(request.starts_with("GET /user HTTP/1.1\r\n"), "{request}");
         let headers = request.to_lowercase();
@@ -1442,6 +1455,18 @@ pub(crate) mod tests {
             headers.contains("x-github-api-version: 2022-11-28"),
             "{headers}"
         );
+    }
+
+    /// An account with no `avatar_url` still reads, with no image.
+    #[tokio::test]
+    async fn an_account_without_an_avatar_url_has_none() {
+        let (listener, address) = listen();
+        let _served = serve(listener, vec![reply("200 OK", r#"{"login":"octocat"}"#)]);
+
+        let account = at(address).account(&token()).await.expect("the account");
+
+        assert_eq!(account.login, "octocat");
+        assert_eq!(account.avatar_url, None);
     }
 
     /// A 401 is GitHub saying the grant is gone, which is a different remedy
@@ -1456,7 +1481,7 @@ pub(crate) mod tests {
                 r#"{"message":"Bad credentials"}"#,
             )],
         );
-        let refused = at(address).login_name(&token()).await.expect_err("401");
+        let refused = at(address).account(&token()).await.expect_err("401");
         assert!(matches!(refused, Error::Refused), "{refused}");
         assert!(
             refused.to_string().contains("yantra github login"),
@@ -1466,7 +1491,7 @@ pub(crate) mod tests {
         let (listener, gone) = listen();
         drop(listener);
         let unreachable = at(gone)
-            .login_name(&token())
+            .account(&token())
             .await
             .expect_err("nothing listens");
         assert!(

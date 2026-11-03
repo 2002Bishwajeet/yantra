@@ -433,6 +433,7 @@ export const repos = {
 } satisfies Looked<Repo[]>
 
 export const github = {
+  "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4",
   "client_id": null,
   "client_id_custom": false,
   "connected": true,
@@ -442,6 +443,7 @@ export const github = {
 } satisfies Connection
 
 export const disconnected = {
+  "avatar_url": null,
   "client_id": null,
   "client_id_custom": false,
   "connected": false,

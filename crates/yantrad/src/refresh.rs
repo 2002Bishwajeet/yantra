@@ -294,15 +294,16 @@ async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
 /// daemon holds is still accepted, which the readiness sweep beside it cannot
 /// ask. Its own task because a local answer must not queue behind a
 /// `ConnectTimeout` per asleep machine. A grant from the environment learns
-/// its login here; one the daemon made already knows it.
+/// its account here; one the daemon made already knows it.
 async fn look_at_github(model: &Model, grant: &Grant) {
     let asked = match grant.token().await {
         None => None,
-        Some(token) => Some(Github::default().login_name(&token).await),
+        Some(token) => Some(Github::default().account(&token).await),
     };
-    if let Some(Ok(login)) = &asked {
-        grant.learned(login.clone()).await;
+    if let Some(Ok(account)) = &asked {
+        grant.learned(account.clone()).await;
     }
+    let asked = asked.map(|asked| asked.map(|account| account.login));
     let reading = Reading::new(doctor::github(asked.as_ref()));
     model.write().await.github = Some(Arc::new(reading));
 }

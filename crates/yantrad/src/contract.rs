@@ -348,7 +348,13 @@ async fn fleet() -> Fleet {
         ])))),
     });
     // A grant whose login the sweep has learned; the token is in no answer.
-    fleet.github.learned("2002Bishwajeet".into()).await;
+    fleet
+        .github
+        .learned(yantra_core::github::Account {
+            login: "2002Bishwajeet".into(),
+            avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".into()),
+        })
+        .await;
 
     let mut beats = fleet.beats.write().await;
     beats.insert("n-1".to_owned(), Reading::new(beat(Power::Ac)));

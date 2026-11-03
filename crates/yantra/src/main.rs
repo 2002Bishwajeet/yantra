@@ -2350,8 +2350,8 @@ async fn github_login() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let login = match api.login_name(&grant.token).await {
-        Ok(login) => login,
+    let login = match api.account(&grant.token).await {
+        Ok(account) => account.login,
         Err(err) => {
             report_error(&err);
             return ExitCode::FAILURE;
@@ -2403,9 +2403,9 @@ async fn github_status() -> ExitCode {
     let Some(token) = grant() else {
         return ExitCode::FAILURE;
     };
-    match Github::default().login_name(&token).await {
-        Ok(login) => {
-            println!("signed in as {login}");
+    match Github::default().account(&token).await {
+        Ok(account) => {
+            println!("signed in as {}", account.login);
             ExitCode::SUCCESS
         }
         Err(err) => {
