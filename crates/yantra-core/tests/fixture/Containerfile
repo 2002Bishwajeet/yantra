@@ -16,8 +16,9 @@ FROM docker.io/library/alpine:3.22
 # `libgcc` are what opencode's musl build links against (Y-433).
 # `ripgrep` is the one claude's musl build searches with, because the one it
 # bundles does not run there, and `bash` is because its Bash tool refuses
-# busybox's sh as "no suitable shell" (Y-356).
-RUN apk add --no-cache openssh-server tmux ncurses git sudo libstdc++ libgcc ripgrep bash \
+# busybox's sh as "no suitable shell" (Y-356). `python3` runs the model
+# stub that tests/acp.rs gives opencode (Y-471).
+RUN apk add --no-cache openssh-server tmux ncurses git sudo libstdc++ libgcc ripgrep bash python3 \
  && ssh-keygen -A \
  && adduser -D -s /bin/sh yantra \
  && passwd -u yantra \

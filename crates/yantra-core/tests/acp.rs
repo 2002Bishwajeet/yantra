@@ -1,5 +1,7 @@
 //! Y-433 against a real ACP agent, per §B3: `opencode acp` in the fixture,
-//! reached over the same `ssh` that `Agent::start` uses in production.
+//! reached over the same `ssh` that `Agent::start` uses in production. Its model
+//! is `tests/fixture/model-stub.py`, which counts slowly, so the turn is still
+//! running when the cancel arrives (Y-471).
 
 // `expect` in a test is a deliberate abort with a message.
 #![allow(clippy::expect_used)]
@@ -18,6 +20,8 @@ use yantra_core::ssh::{Exec, Machine, Ssh};
 /// opencode's first start fetches its plugins.
 const PATIENCE: Duration = Duration::from_secs(120);
 const CWD: &str = "/home/yantra/acp";
+/// `small_model` too, so a title request never reaches opencode's hosted model.
+const CONFIG: &str = r#"{"autoupdate":false,"model":"stub/slow","small_model":"stub/slow","provider":{"stub":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:8471/v1","apiKey":"stub"},"models":{"slow":{}}}}}"#;
 
 fn ssh_to(fixture: &SshFixture, state_dir: &std::path::Path) -> Result<Ssh> {
     Ok(Ssh::new(Machine {
@@ -68,6 +72,22 @@ async fn until(what: &str, limit: Duration, mut done: impl FnMut() -> Result<boo
     Ok(())
 }
 
+async fn start_model_stub(fixture: &SshFixture) -> Result<()> {
+    let stub = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/model-stub.py");
+    fixture.copy_in(&stub, "/tmp/model-stub.py")?;
+    fixture.run("nohup python3 /tmp/model-stub.py >/tmp/stub.log 2>&1 </dev/null &")?;
+    until("the model stub answering", Duration::from_secs(10), || {
+        Ok(fixture
+            .run("wget -q -O- http://127.0.0.1:8471/health")
+            .is_ok())
+    })
+    .await?;
+    fixture.run(&format!(
+        "mkdir -p ~/.config/opencode && printf '%s' '{CONFIG}' > ~/.config/opencode/opencode.json"
+    ))?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn opencode_initializes_reloads_and_cancels_over_ssh() -> Result<()> {
     let Some(fixture) = SshFixture::start()? else {
@@ -79,6 +99,7 @@ async fn opencode_initializes_reloads_and_cancels_over_ssh() -> Result<()> {
         .exec(&format!("mkdir -p {CWD} && git init -q {CWD}"))
         .await?;
     assert!(made.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    start_model_stub(&fixture).await?;
 
     let (agent, _events) = Agent::start(&ssh, Harness::Opencode)?;
     let capabilities = within("initialize", agent.initialize()).await?;
@@ -125,32 +146,6 @@ async fn opencode_initializes_reloads_and_cancels_over_ssh() -> Result<()> {
         Ok::<_, anyhow::Error>(agent.cancel(&session)?)
     };
     let (stopped, cancelled) = tokio::join!(within("a cancelled prompt", turn), cancel);
-    // Y-470: opencode's free hosted model refuses CI's prompts; Y-471 replaces it with a local stub.
-    if let Err(refused) = &stopped
-        && ["Upstream request failed", "free models aren't available"]
-            .iter()
-            .any(|why| format!("{refused:#}").contains(why))
-    {
-        eprintln!(
-            "SKIPPED: opencode's hosted model refused the prompt ({refused:#}), \
-             so the cancel half of this test did not run (Y-470)"
-        );
-        drop(agent);
-        std::fs::remove_dir_all(&dir)?;
-        return Ok(());
-    }
-    // Y-470: with no network the hosted model never answers, so no update arrives.
-    if let Err(silent) = &cancelled
-        && format!("{silent:#}").contains("first update took too long")
-    {
-        eprintln!(
-            "SKIPPED: opencode's hosted model sent no update within {PATIENCE:?}, \
-             so the cancel half of this test did not run (Y-470)"
-        );
-        drop(agent);
-        std::fs::remove_dir_all(&dir)?;
-        return Ok(());
-    }
     cancelled?;
     assert_eq!(stopped?, StopReason::Cancelled);
 
