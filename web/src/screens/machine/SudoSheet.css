@@ -4,7 +4,7 @@
 .m3-side-sheet.sudo-sheet--side {
   position: fixed;
   top: calc(16px + var(--m3-safe-top));
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(16px + var(--m3-safe-bottom));
   right: calc(16px + var(--m3-safe-right));
   z-index: 30;
   inline-size: min(var(--m3-page-max-reading), calc(100vw - 32px - var(--m3-safe-left) - var(--m3-safe-right)));

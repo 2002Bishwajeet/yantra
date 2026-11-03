@@ -21,7 +21,7 @@
 
 [data-shell="tablet"],
 [data-shell="desktop"] {
-  padding: var(--m3-safe-top) var(--m3-safe-right) env(safe-area-inset-bottom, 0px)
+  padding: var(--m3-safe-top) var(--m3-safe-right) var(--m3-safe-bottom)
     var(--m3-safe-left);
 }
 
