@@ -451,6 +451,7 @@ deleted everywhere else.
 | Y-600 | Make the box home screen fill any window | 🔵 review | claude | Y-594 | **Owner, 2026-10-31.** **Done** when the cards fill a wide terminal and no tab disappears when its tool exits. |
 | Y-601 | Start the box home screen after a reboot | 🔵 review | claude | Y-594 | **Owner, 2026-11-02.** **Done** when a reboot shows the menu at once, with no `Waiting to run` pane. |
 | Y-602 | Spend fewer agents per row in the build loop | 🔵 review | claude | — | **Owner, 2026-11-03.** The 2026-11-02 run used 8.45M tokens on 95 agents for 3 merges. **Done** when one triage serves the run, setup, rebase and simplify have no agent of their own, a web gate fixes its own failures, and a second review checks only the earlier findings. |
+| Y-603 | Test only what a row changed in the build loop | 🔵 review | claude | Y-602 | **Owner, 2026-11-03.** The full gate took 73 of 115 minutes. **Done** when the gate runs only the tests for the changed files, and rows that edit different files run at the same time. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
