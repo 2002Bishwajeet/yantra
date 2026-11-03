@@ -4,18 +4,26 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Safari takes its home-screen icon from here and not from the manifest. -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Yantra</title>
+    <!-- --md-sys-color-surface's two values (tokens.css); themeColor.test.ts holds them equal. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" data-scheme="light" content="#F6F0E2" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" data-scheme="dark" content="#151714" />
     <!-- shell/prefs.ts's key, read here so the theme and density land before
          the first paint rather than a frame after it. -->
     <script>
       try {
         var p = JSON.parse(localStorage.getItem('yantra.prefs'))
         if (p && p.v === 1) {
-          if (p.theme === 'light' || p.theme === 'dark') document.documentElement.dataset.theme = p.theme
+          if (p.theme === 'light' || p.theme === 'dark') {
+            document.documentElement.dataset.theme = p.theme
+            document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) {
+              m.media = m.dataset.scheme === p.theme ? 'all' : 'not all'
+            })
+          }
           if (p.density === 'compact') document.documentElement.dataset.density = 'compact'
         }
       } catch (e) {}

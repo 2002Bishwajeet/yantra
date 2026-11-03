@@ -318,3 +318,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-02** — **[Y-593](../tracker.md#3-task-board) is in review.** `price.rs` now holds the official rates for Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1. A test proves that no new model takes an older model's rate by prefix.
 
 - **2026-11-02** — **[Y-598](../tracker.md#3-task-board) is in review.** `install.sh` now gives `yantrad` a key and a Host block for its own box, authorises that key, and tries one real login. `yantra-box` no longer answers `Permission denied` to itself. A podman test in `own_box.rs` covers it.
+
+- **2026-11-03** — **[Y-573](../tracker.md#3-task-board) is in review.** `index.html` now sets `viewport-fit=cover` and one `theme-color` per scheme. The phone bars, dialogs and sheets pad the safe-area insets. A solid strip sits under the status bar. Unit and Playwright tests assert each. The owner still checks a real iPhone.

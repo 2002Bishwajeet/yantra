@@ -1,11 +1,29 @@
 .shell {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   min-height: 100dvh;
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface);
   font: var(--md-sys-typescale-body-medium);
   letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+}
+
+/* Phone: the status bar's strip. viewport-fit=cover lets the page draw under
+   it, so an opaque band stops content scrolling behind the clock. */
+.shell::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 5;
+  height: var(--m3-safe-top);
+  background: var(--md-sys-color-surface);
+}
+
+[data-shell="tablet"],
+[data-shell="desktop"] {
+  padding: var(--m3-safe-top) var(--m3-safe-right) var(--m3-safe-bottom)
+    var(--m3-safe-left);
 }
 
 .shell__main {
@@ -149,7 +167,7 @@
    the 124 px that were left beside it at 200 % zoom. */
 .shell__sheet {
   position: fixed;
-  inset: 12px 12px 12px auto;
+  inset: calc(12px + var(--m3-safe-top)) calc(12px + var(--m3-safe-right)) calc(12px + var(--m3-safe-bottom)) auto;
   z-index: 5;
   max-width: calc(100vw - 120px);
 }
@@ -166,6 +184,7 @@
    both leaves room under its last control and scrolls one clear of them —
    which New session's sticky footer, shorter than the pair, gets as well. */
 :root:has([data-shell="phone"]) {
+  scroll-padding-top: var(--m3-safe-top);
   scroll-padding-bottom: calc(136px + env(safe-area-inset-bottom, 0px));
 }
 
