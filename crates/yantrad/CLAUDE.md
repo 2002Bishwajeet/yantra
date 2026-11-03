@@ -317,7 +317,7 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new,mentions}`,
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new,mentions,commands}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
@@ -512,6 +512,13 @@ it, so it has no CLI verb. The body is `{harness, thread?}`, with no other field
 `{name, description, scope, mention}`. The skill roots per harness are in
 [`mention.rs`](../yantra-core/src/mention.rs). An unknown harness is `400`. A directory that is not a
 repository and an unknown thread are `409`. A machine that could not be asked is `503`.
+
+**`commands` is what the Chat composer offers after `/`** (Y-563). It takes the same body as
+`mentions` and answers `{commands}`, each `{name, description, hint?}`. For Claude it asks the machine
+([`command.rs`](../yantra-core/src/command.rs)). An ACP harness is answered `{commands: []}` at once,
+because its agent sends its list on the chat socket as `thread.commands.updated`. An unknown harness
+is `400`. A directory that is not a repository, an unknown thread and a machine with no claude are
+`409`. A machine that could not be asked is `503`.
 
 **`message`, `commit` and `push` are `yantra commit --draft`, `commit` and `push`** (Y-492,
 [ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md) decisions 2 and 5). They sit in
@@ -915,7 +922,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Twelve things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Thirteen things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -973,11 +980,15 @@ workspace's repository before a thread opens. It lists git's files and the harne
 composer asks once when a person types `@` or `$`, and holds the answer for five minutes. Nothing
 polls it.
 
+**Y-563 is the thirteenth, on the same licence.** `POST /api/workspaces/{name}/commands` runs one
+bounded `claude -p` that answers `initialize` and exits. The composer asks once when a person types
+`/` at the start of a prompt, and holds the answer for five minutes.
+
 **`room_read` waits beside the tasks licence, and holds no ssh at all** (Y-534). Its wait is in
 memory, it ends at 50 s or when the daemon shuts down, and a `room_send` spawns its wakes as tasks
 rather than awaiting them.
 
-None of the twelve licenses a **read handler** that awaits ssh, which is still the bug this module
+None of the thirteen licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.

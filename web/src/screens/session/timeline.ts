@@ -4,6 +4,7 @@ import type {
   ItemStatus,
   ItemType,
   RequestOpened,
+  SlashCommand,
   ThreadEvent,
   TurnCompleted,
 } from '@/api/thread'
@@ -53,6 +54,8 @@ export type Timeline = {
   usage: { used: number; max: number } | null
   /** The newest plan the agent sent in this turn; a new turn starts with none. */
   plan: Plan
+  /** An ACP agent's slash commands, the newest list it sent (Y-563). Claude's are asked for instead. */
+  commands: SlashCommand[]
   /** `sent` is the frame on its way, before the agent says it started. */
   turn: 'idle' | 'sent' | 'running' | 'stopping'
   /** How the last turn ended, until the next one starts. */
@@ -68,6 +71,7 @@ export const empty: Timeline = {
   requests: [],
   usage: null,
   plan: [],
+  commands: [],
   turn: 'idle',
   ended: null,
   queued: [],
@@ -158,6 +162,8 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
       }
     case 'turn.plan.updated':
       return { ...timeline, plan: event.payload.plan }
+    case 'thread.commands.updated':
+      return { ...timeline, commands: event.payload.commands }
     case 'thread.metadata.updated':
       return timeline
   }

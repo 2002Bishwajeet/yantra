@@ -6,9 +6,9 @@
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 
-export type TriggerKind = 'path' | 'skill'
+export type TriggerKind = 'path' | 'skill' | 'command'
 
-/** `@` or `$` at the start of the token that ends at the caret. */
+/** `@` or `$` at the start of the token that ends at the caret, or `/` at the start of the prompt. */
 export type Trigger = { kind: TriggerKind; query: string; start: number; end: number }
 
 const isWhitespace = (char: string) => char === ' ' || char === '\n' || char === '\t' || char === '\r'
@@ -19,7 +19,14 @@ export function detectTrigger(text: string, caret: number): Trigger | null {
   let start = end
   while (start > 0 && !isWhitespace(text[start - 1] ?? '')) start -= 1
   const token = text.slice(start, end)
-  const kind = token.startsWith('@') ? 'path' : token.startsWith('$') ? 'skill' : null
+  // An agent expands a slash command only when it opens the message (T3 Code's rule), so `/` opens nothing later.
+  const kind = token.startsWith('@')
+    ? 'path'
+    : token.startsWith('$')
+      ? 'skill'
+      : token.startsWith('/') && start === 0
+        ? 'command'
+        : null
   return kind ? { kind, query: token.slice(1), start, end } : null
 }
 

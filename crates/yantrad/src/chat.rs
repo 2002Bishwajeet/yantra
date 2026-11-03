@@ -3775,6 +3775,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     output: Some("test result: ok".to_owned()),
                     changes: vec![],
                 })),
+                event(Event::CommandsUpdated {
+                    commands: vec![yantra_core::chat::Command {
+                        name: "review".to_owned(),
+                        description: "review changes".to_owned(),
+                        hint: Some("<branch>".to_owned()),
+                    }],
+                }),
                 event(Event::TokenUsageUpdated(TokenUsage {
                     used_tokens: 29_149,
                     max_tokens: 200_000,

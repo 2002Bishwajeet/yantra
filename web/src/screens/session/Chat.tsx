@@ -3,10 +3,10 @@ import { Diff, ImagePlus, RefreshCw } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
-import type { Mentions, Workspace } from '@/api'
+import type { Mentions, SlashCommand, Workspace } from '@/api'
 import { IMAGE_TYPES, type ChatError } from '@/api/chat'
 import { asApiError } from '@/api/errors'
-import { useMentions } from '@/api/queries'
+import { useCommands, useMentions } from '@/api/queries'
 import {
   LABEL,
   type Harness,
@@ -26,6 +26,7 @@ import { MentionMenu, optionId, type MentionItem } from '@/composer/MentionMenu'
 import { placeholder } from '@/composer/placeholder'
 import { PlanBadge } from '@/composer/PlanBadge'
 import { PrimaryAction } from '@/composer/PrimaryAction'
+import { searchCommands } from '@/composer/searchCommands'
 import { searchMentions } from '@/composer/searchMentions'
 import { detectTrigger, insertMention, type Trigger } from '@/composer/trigger'
 import { useDockHeight } from '@/composer/useDockHeight'
@@ -202,7 +203,20 @@ function LoggedOut(props: { error: ChatError; login: NonNullable<ChatError['logi
 }
 
 /** What the menu lists for an open trigger; each id is the token a pick inserts. */
-function mentionItems(kind: Trigger['kind'], query: string, found: Mentions | undefined): MentionItem[] {
+function mentionItems(
+  kind: Trigger['kind'],
+  query: string,
+  found: Mentions | undefined,
+  commands: readonly SlashCommand[] | undefined,
+): MentionItem[] {
+  if (kind === 'command') {
+    return searchCommands(commands ?? [], query).map((command) => ({
+      id: `/${command.name}`,
+      label: `/${command.name}`,
+      description: command.description,
+      hint: command.hint,
+    }))
+  }
   if (!found) return []
   if (kind === 'path') {
     return searchMentions(found.files, query, (file) => file).map((file) => ({ id: `@${file}`, label: file, description: '' }))
@@ -214,6 +228,9 @@ function mentionItems(kind: Trigger['kind'], query: string, found: Mentions | un
     badge: skill.scope === 'user' ? 'Personal' : 'Project',
   }))
 }
+
+/** An ACP agent sends its commands once its session opens, which is on the first turn. */
+const NO_COMMANDS_YET = 'The commands appear after the agent’s first reply.'
 
 export type ChatProps = {
   workspace: Workspace
@@ -296,10 +313,18 @@ export function Chat(props: ChatProps) {
   const found = detectTrigger(draft, caret)
   const trigger = found && found.start !== dismissed ? found : null
   const menu = useId()
-  const mentions = useMentions(workspace.name, timeline.thread, harness ?? 'claude', trigger !== null)
   const kind = trigger?.kind
+  const mentions = useMentions(workspace.name, timeline.thread, harness ?? 'claude', kind === 'path' || kind === 'skill')
+  // Y-563: Claude is asked for its commands; an ACP agent sent its own on the socket.
+  const asksClaude = (harness ?? 'claude') === 'claude'
+  const claudeCommands = useCommands(workspace.name, timeline.thread, 'claude', kind === 'command' && asksClaude)
+  const commands = asksClaude ? claudeCommands.data?.commands : timeline.commands
+  const asked = kind === 'command' ? (asksClaude ? claudeCommands : null) : mentions
   const query = trigger?.query ?? ''
-  const items = useMemo(() => (kind ? mentionItems(kind, query, mentions.data) : []), [kind, query, mentions.data])
+  const items = useMemo(
+    () => (kind ? mentionItems(kind, query, mentions.data, commands) : []),
+    [kind, query, mentions.data, commands],
+  )
   const at = Math.min(active, items.length - 1)
   const history = useMemo(
     () => buildPromptHistoryEntries(timeline.entries.filter((entry) => entry.kind === 'message')),
@@ -333,19 +358,23 @@ export function Chat(props: ChatProps) {
 
   const uploading = images.some((one) => one.state === 'uploading')
   // The agent reads an image by its path, so each goes on a line of its own.
-  const text = [draft.trim(), ...images.flatMap((one) => (one.state === 'attached' ? [one.path] : []))]
-    .filter((line) => line !== '')
-    .join('\n')
+  const compose = (words: string) =>
+    [words.trim(), ...images.flatMap((one) => (one.state === 'attached' ? [one.path] : []))]
+      .filter((line) => line !== '')
+      .join('\n')
+  const text = compose(draft)
 
-  const send = () => {
-    if (text === '' || uploading) return
-    if (chat.send(text, locked ? undefined : picked, mode, planning)) {
-      lastSent.current = draft.trim()
+  const sendWords = (words: string) => {
+    const out = compose(words)
+    if (out === '' || uploading) return
+    if (chat.send(out, locked ? undefined : picked, mode, planning)) {
+      lastSent.current = words.trim()
       recalled.current = null
       setDraft('')
       clear()
     }
   }
+  const send = () => sendWords(draft)
 
   // ArrowUp on the first line brings back the thread's earlier prompts, ArrowDown walks forward.
   const recall = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -373,6 +402,11 @@ export function Chat(props: ChatProps) {
 
   const pick = (item: MentionItem) => {
     if (!trigger) return
+    // A command with no argument is sent as it is picked; one with an argument waits for it.
+    if (trigger.kind === 'command' && !item.hint) {
+      sendWords(`${item.id}${draft.slice(trigger.end)}`)
+      return
+    }
     const next = insertMention(draft, trigger, item.id)
     caretTo.current = next.caret
     setDraft(next.text)
@@ -554,14 +588,15 @@ export function Chat(props: ChatProps) {
         {trigger ? (
           <MentionMenu
             active={at}
-            error={mentions.isError ? asApiError(mentions.error) : null}
+            empty={kind === 'command' && !asksClaude && timeline.commands.length === 0 ? NO_COMMANDS_YET : undefined}
+            error={asked?.isError ? asApiError(asked.error) : null}
             id={menu}
             items={items}
             kind={trigger.kind}
             onHover={setActive}
             onPick={pick}
-            loading={mentions.isPending}
-            onRetry={() => void mentions.refetch()}
+            loading={asked?.isPending ?? false}
+            onRetry={() => void asked?.refetch()}
           />
         ) : null}
         <Composer.Root

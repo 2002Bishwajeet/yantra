@@ -16,6 +16,15 @@ describe('detectTrigger', () => {
     expect(detectTrigger('', 0)).toBeNull()
   })
 
+  it('opens on / only at the start of the prompt', () => {
+    expect(detectTrigger('/', 1)).toEqual({ kind: 'command', query: '', start: 0, end: 1 })
+    expect(detectTrigger('/rev', 4)).toEqual({ kind: 'command', query: 'rev', start: 0, end: 4 })
+    expect(detectTrigger('fix /rev', 8)).toBeNull()
+    expect(detectTrigger(' /rev', 5)).toBeNull()
+    expect(detectTrigger('a\n/rev', 6)).toBeNull()
+    expect(detectTrigger('/review 12', 10)).toBeNull()
+  })
+
   it('reads only up to the caret', () => {
     expect(detectTrigger('@src/main.rs', 4)).toEqual({ kind: 'path', query: 'src', start: 0, end: 4 })
     expect(detectTrigger('@a', 99)?.query).toBe('a')

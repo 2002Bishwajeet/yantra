@@ -42,7 +42,8 @@ commits a thread's work with the machine's own git identity, with a message `cla
 there, and pushes its branch and sets the upstream (Y-492). It also opens a PR from the pushed
 branch to the default branch with the daemon's GitHub grant, or answers the one already open (Y-449). `mention`
 lists a thread's files from git and the skills its harness loads, for the Chat composer's `@` and `$`
-(Y-562).
+(Y-562). `command` asks Claude for its slash commands in a thread's worktree, for the composer's `/`
+(Y-563).
 
 Each of those loads `~/.config/yantra/workspaces/<name>.toml`, opens an SSH connection, and does one
 thing. Each also has a generic half that takes any `Exec`, which is what the tests drive.

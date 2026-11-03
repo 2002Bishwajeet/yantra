@@ -66,6 +66,7 @@ import type {
   ChatQuery,
   ChatQueue,
   Cloning,
+  Commands,
   Connection,
   Device,
   Event,

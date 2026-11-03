@@ -1,6 +1,8 @@
 // Unions rather than optional properties: a `sessions?: Session[]` compiles
 // and lets an unreachable machine render as "0 sessions".
 
+import type { SlashCommand } from './api/thread'
+
 export type Looked<T> =
   | { looked: 'ok'; age_seconds: number; data: T }
   | { looked: 'failed'; age_seconds: number; error: string }
@@ -518,6 +520,11 @@ export type MentionSkill = {
   mention: string
 }
 
+/** `POST /api/workspaces/{name}/commands` with `{ harness, thread? }` (Y-563):
+ *  Claude's slash commands, for the composer's `/` menu. An ACP harness is
+ *  answered with none, because its list comes on the chat socket. */
+export type Commands = { commands: SlashCommand[] }
+
 /** `POST /api/workspaces/{name}/threads/{thread}/message`: the commit message
  *  `claude -p` wrote on the machine (Y-492). */
 export type ThreadMessage = {
@@ -626,6 +633,7 @@ export type {
   ChatNotAttached,
   ChatQuery,
   ChatQueue,
+  SlashCommand,
   ThreadEvent,
 } from './api/thread'
 

@@ -17,6 +17,7 @@ import type {
   ChatQuery,
   ChatQueue,
   Cloning,
+  Commands,
   Connection,
   Device,
   Event,
@@ -815,6 +816,20 @@ export const mentions = {
   "truncated": false
 } satisfies Mentions
 
+export const commands = {
+  "commands": [
+    {
+      "description": "Free up context by summarizing the conversation so far",
+      "name": "compact"
+    },
+    {
+      "description": "Review a pull request",
+      "hint": "<pr>",
+      "name": "review"
+    }
+  ]
+} satisfies Commands
+
 export const threadMessage = {
   "message": "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
 } satisfies ThreadMessage
@@ -1010,6 +1025,19 @@ export const chatEvents = [
     },
     "threadId": "1a2b3c4d",
     "type": "item.completed"
+  },
+  {
+    "payload": {
+      "commands": [
+        {
+          "description": "review changes",
+          "hint": "<branch>",
+          "name": "review"
+        }
+      ]
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.commands.updated"
   },
   {
     "payload": {

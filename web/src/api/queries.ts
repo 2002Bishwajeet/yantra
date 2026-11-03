@@ -2,6 +2,7 @@ import { type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
+  Commands,
   Connection,
   Listed,
   Listing,
@@ -248,6 +249,26 @@ export const mentionsQuery = (name: string, thread: string | null, harness: stri
 
 export const useMentions = (name: string, thread: string | null, harness: string, enabled: boolean) =>
   useQuery({ ...mentionsQuery(name, thread, harness), enabled })
+
+/** Y-563. Claude's slash commands for the composer's `/` menu, asked as
+ *  {@link mentionsQuery} is: once when the trigger opens, held for a few minutes. */
+export const commandsQuery = (name: string, thread: string | null, harness: string) =>
+  queryOptions({
+    queryKey: keys.commands(name, thread, harness),
+    queryFn: ({ signal }) =>
+      fetchJson<Commands>(
+        workspace(name, 'commands'),
+        { method: 'POST', signal, ...json(thread === null ? { harness } : { harness, thread }) },
+        fields('commands'),
+      ),
+    staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+
+export const useCommands = (name: string, thread: string | null, harness: string, enabled: boolean) =>
+  useQuery({ ...commandsQuery(name, thread, harness), enabled })
 
 // The reads below are Y-342's and Y-343's. Their envelopes are read from
 // docs/plans/m14-rust-inventory.md §2, and the Rust rows settle them.
