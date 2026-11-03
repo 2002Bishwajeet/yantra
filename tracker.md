@@ -457,6 +457,7 @@ deleted everywhere else.
 | Y-606 | Say everywhere when the GitHub grant stops working | ⬜ todo | claude | Y-583 | **Owner, 2026-11-03.** The box's grant was revoked, and only Settings → About said so. **Done** when a failed grant marks the account button and links to `yantra github login`, and a test covers a revoked grant. |
 | Y-607 | Run only the CI that a change needs | 🟡 wip | claude | Y-605 | **Owner, 2026-11-03.** **Done** when a docs or tracker PR runs no Rust or web job, a web PR runs the web jobs only, a Rust PR runs the Rust jobs, and every required check still reports. |
 | Y-608 | Make `main`'s web suite green again | 🟡 wip | claude | — | **Found 2026-11-03.** #568 left a literal gap in `Settings.css`, and the phone Zed e2e races a closing menu. **Done** when `web` and every e2e shard pass on `main`. |
+| Y-609 | Make the build loop's merge guard a command | 🟡 wip | claude | — | **Found 2026-11-03.** #568 merged with `web` red: the ship agent ran its check with `;` before `gh pr merge`. **Done** when ship merges only through `merge-guard.sh N && gh pr merge`, and the guard refuses #568's checks. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only

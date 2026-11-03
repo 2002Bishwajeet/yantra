@@ -277,8 +277,8 @@ ${REVIEW_RULE}`,
 3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
 4. Dry run: do not push. Return status open.` : `
 4. Push with git push --force-with-lease -u origin ${branch}. If gh pr view ${branch} finds a PR, reuse it. Else run gh pr create --base main --title "${title}" with a body that says what changed and how it was verified. If the row names GitHub issues as #NNN, end the body with one "Closes #NNN" line for each, so the merge closes them. The title becomes the squash commit on main, so it must keep the form "Y-NNN: <what changed>". No AI attribution anywhere.
-5. Wait for the checks (gh pr checks --watch). The merge guard: the five required checks clippy, deny, fmt, test and "cross (aarch64-unknown-linux-musl)" are present by name, and every check in gh pr view --json statusCheckRollup is SUCCESS, SKIPPED or NEUTRAL. If any is not, return checks-failed with the failing check's log tail.
-6. Merge with gh pr merge --squash --delete-branch --subject "${title} (#<pr number>)". If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
+5. Run exactly one command: bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The guard waits for every check and exits non-zero unless all are green. Never merge outside this command, and never call a red check unrelated. If the guard fails, return checks-failed with the failing check's log tail.
+6. If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
 7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
       ),
