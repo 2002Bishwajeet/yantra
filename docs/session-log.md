@@ -350,3 +350,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-471](../tracker.md#3-task-board) is in review.** The opencode ACP test now points opencode at a local model stub that streams slowly. The cancel half runs on every CI run, and the skip from Y-470 is gone.
 
 - **2026-11-03** — **[Y-565](../tracker.md#3-task-board) is in review.** The composer has a Build and Plan toggle. In Plan mode the daemon runs the turn without writing a file. Tests cover the daemon and the web toggle.
+
+- **2026-11-03** — **[Y-550](../tracker.md#3-task-board) is in review.** A room now belongs to a workspace. `yantra room new|ls|show|rm` and `POST`, `PATCH` and `DELETE /api/rooms` write `~/.config/yantra/rooms/<name>.toml`. A restart reloads each room with one system message. Unit tests cover bad names and the reload.
