@@ -145,6 +145,10 @@ test.describe('the composer', () => {
   test('shows the keyboard focus on the card, since the field draws no outline', async ({ page }) => {
     const edge = () =>
       page.locator('.composer__card').evaluate((card) => getComputedStyle(card, '::after').borderTopColor)
+    // Chromium 1.64 starts a Tab from the page body at the first link, so reach the field from its neighbour.
+    await composer(page).focus()
+    await page.keyboard.press('Shift+Tab')
+    await expect(composer(page)).not.toBeFocused()
     const resting = await edge()
     await page.keyboard.press('Tab')
     await expect(composer(page)).toBeFocused()

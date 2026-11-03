@@ -55,7 +55,7 @@ jobs:
     # The image the screenshot baselines are rendered in (playwright.config.ts):
     # one Chromium, one set of fonts, here and on a developer's box.
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
     # One job per form factor: three sizes triple the run (plan §7). Two shards each halve the wait (Y-605).
     strategy:
