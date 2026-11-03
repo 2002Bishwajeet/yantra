@@ -1,4 +1,5 @@
 import { expect, scenario, test } from './lib/test'
+import { route } from './lib/routes'
 
 /** Y-573 (#510). Chromium cannot emulate insets, so the tests set `--m3-safe-top`
  *  on <html> by hand and prove the arithmetic the stylesheets do with it. */
@@ -103,11 +104,11 @@ test('the tablet sudo side sheet clears the side insets', async ({ page, size })
 test('the dialog viewport pads its sides by the insets', async ({ page, size }) => {
   test.skip(size === 'phone', 'the phone uses a bottom sheet')
   await scenario(page, 'busy')
-  await page.goto('/')
-  await expect(page.locator('.shell')).toBeVisible()
+  await page.goto(route('session-terminal').path)
+  await expect(page.getByRole('heading', { level: 1, name: 'scratch' }).first()).toBeVisible()
   await withSideInsets(page)
   // Dialog.css loads with the dialog chunk, so open a real dialog first.
-  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('button', { name: 'Kill', exact: true }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect
     .poll(() =>
