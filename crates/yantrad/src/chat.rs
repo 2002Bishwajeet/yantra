@@ -39,6 +39,9 @@
 //! attached to see sends one Y-451 notification, which names only the
 //! workspace and the thread.
 //!
+//! **A `turn` may name a [`Model`] and an [`Effort`]** (Y-564). A Claude turn
+//! starts with them as `--model` and `--effort`; an ACP turn ignores them.
+//!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
 //! `turn.diff.updated`, and `revert` puts the files back as a checkpoint kept
@@ -80,8 +83,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Event, PermissionMode, RequestOption, Scope, StopReason, StreamKind,
-    ThreadEvent, TurnDiff, TurnState,
+    ContentDelta, Decision, Effort, Event, Model, PermissionMode, RequestOption, Scope, StopReason,
+    StreamKind, ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Turn};
@@ -248,6 +251,13 @@ enum Frame {
         /// Holds for this turn; the browser keeps it between turns.
         #[serde(default)]
         mode: PermissionMode,
+        /// Claude's `--model` and `--effort`, each only when picked.
+        #[serde(default)]
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
+        model: Option<Model>,
+        #[serde(default)]
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
+        effort: Option<Effort>,
     },
     Answer {
         #[serde(rename = "requestId")]
@@ -374,18 +384,19 @@ struct Next {
     text: String,
     mode: PermissionMode,
     images: Option<String>,
+    model: Option<Model>,
+    effort: Option<Effort>,
 }
 
-/// The held turns as one: their texts joined with a blank line, with the last one's mode and
-/// images.
-fn joined(next: Vec<Next>) -> Option<Next> {
-    let last = next.last()?;
-    let (mode, images) = (last.mode, last.images.clone());
-    let texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
+/// The held turns as one: their texts joined with a blank line, with the last one's mode, images,
+/// model and effort.
+fn joined(mut next: Vec<Next>) -> Option<Next> {
+    let last = next.pop()?;
+    let mut texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
+    texts.push(last.text);
     Some(Next {
         text: texts.join("\n\n"),
-        mode,
-        images,
+        ..last
     })
 }
 
@@ -536,6 +547,8 @@ trait Machine: Send + Sync + 'static {
         text: &str,
         images: Option<&str>,
         mode: PermissionMode,
+        model: Option<&Model>,
+        effort: Option<Effort>,
     ) -> impl Future<Output = Result<Started<KeptTurn>, String>> + Send;
     /// Writes one image on the machine and returns its path.
     fn put(
@@ -715,6 +728,8 @@ impl Machine for Fleet {
         text: &str,
         images: Option<&str>,
         mode: PermissionMode,
+        model: Option<&Model>,
+        effort: Option<Effort>,
     ) -> Result<Started<KeptTurn>, String> {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
@@ -723,7 +738,7 @@ impl Machine for Fleet {
             url: format!("http://{daemon}/api/mcp"),
             thread: format!("{}/{}", self.workspace.name, thread::name(place)),
         });
-        let agent = claude::command(&place.worktree, images, mode, mcp.as_ref());
+        let agent = claude::command(&place.worktree, images, mode, model, effort, mcp.as_ref());
         let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
             .await
             .map_err(|error| chain(&error))?;
@@ -1794,6 +1809,8 @@ async fn heard_frame<M: Machine, P: Peer>(
             text,
             harness,
             mode,
+            model,
+            effort,
         }) => {
             let asked = harness.as_deref().map(harness_named).transpose();
             let theirs = here.as_ref().map(|here| here.harness);
@@ -1816,6 +1833,8 @@ async fn heard_frame<M: Machine, P: Peer>(
                         text,
                         mode,
                         images: images.map(str::to_owned),
+                        model,
+                        effort,
                     };
                     let next = match &live {
                         Some(live) => match machine.registry().hold(live, next) {
@@ -2432,11 +2451,13 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: &str) -> Th
 }
 
 /// One turn the person sent: what they wrote, the directory of the images it
-/// may read, and the thread's permission mode.
+/// may read, the thread's permission mode, and Claude's model and effort.
 struct Typed<'a> {
     text: String,
     images: Option<&'a str>,
     mode: PermissionMode,
+    model: Option<&'a Model>,
+    effort: Option<Effort>,
 }
 
 /// Opens the thread on the first turn with the harness `pick` names, and
@@ -2606,6 +2627,8 @@ async fn start_or_hold<M: Machine>(
             text: next.text.clone(),
             images: next.images.as_deref(),
             mode: next.mode,
+            model: next.model.as_ref(),
+            effort: next.effort,
         };
         let turned = match here.harness {
             None => claude_turn(machine, name, &here.place, turn)
@@ -2628,7 +2651,13 @@ async fn claude_turn<M: Machine>(
     machine: &Arc<M>,
     name: &str,
     place: &Place,
-    Typed { text, images, mode }: Typed<'_>,
+    Typed {
+        text,
+        images,
+        mode,
+        model,
+        effort,
+    }: Typed<'_>,
 ) -> Result<Turned<Option<broadcast::Receiver<Sent>>>, Failure> {
     // The last turn's keeper may still be exiting; its turn has ended.
     let deadline = tokio::time::Instant::now() + STOP_GRACE + STOP_GRACE;
@@ -2641,7 +2670,9 @@ async fn claude_turn<M: Machine>(
     let Some(mut claim) = Claim::take(machine, place) else {
         return Ok(Turned::Lost);
     };
-    let started = machine.start(place, &text, images, mode).await;
+    let started = machine
+        .start(place, &text, images, mode, model, effort)
+        .await;
     let KeptTurn { turn, events, run } = match started {
         Ok(Started::Running(kept)) => kept,
         Ok(Started::Busy) => {
@@ -3446,6 +3477,8 @@ fn wake_on<M: Machine>(
                 text: prompt.clone(),
                 images: None,
                 mode,
+                model: None,
+                effort: None,
             };
             match claude_turn(&machine, &name, &place, turn).await {
                 Ok(Turned::Started(_)) => {
@@ -3848,6 +3881,8 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "and the docs".to_owned(),
                     mode: PermissionMode::Supervised,
                     images: None,
+                    model: None,
+                    effort: None,
                 }],
             ))
             .expect("a queue serialises"),
@@ -3869,11 +3904,22 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "run the tests".to_owned(),
                     harness: Some("opencode".to_owned()),
                     mode: PermissionMode::AutoAcceptEdits,
+                    model: None,
+                    effort: None,
                 }),
                 frame(Frame::Turn {
                     text: "and the docs".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    model: None,
+                    effort: None,
+                }),
+                frame(Frame::Turn {
+                    text: "think it through".to_owned(),
+                    harness: None,
+                    mode: PermissionMode::Supervised,
+                    model: Model::try_from("opus".to_owned()).ok(),
+                    effort: Some(Effort::High),
                 }),
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
@@ -4146,6 +4192,8 @@ mod tests {
         started_with: Mutex<Vec<Option<String>>>,
         /// The permission mode each Claude turn was started with.
         modes: Mutex<Vec<PermissionMode>>,
+        /// The model and the effort each Claude turn was started with.
+        picks: Mutex<Vec<(Option<Model>, Option<Effort>)>>,
         /// How long each `finish` was given, and each closed stdin.
         finished: Mutex<Vec<Duration>>,
         stdin_closed: Mutex<usize>,
@@ -4288,12 +4336,15 @@ mod tests {
             text: &str,
             images: Option<&str>,
             mode: PermissionMode,
+            model: Option<&Model>,
+            effort: Option<Effort>,
         ) -> Result<Started<KeptTurn>, String> {
             let Some((run, reader, writer, end)) = self.begin(Some(mode)) else {
                 return Ok(Started::Busy);
             };
             lock(&self.started_with).push(images.map(str::to_owned));
             lock(&self.modes).push(mode);
+            lock(&self.picks).push((model.cloned(), effort));
             lock(&self.turns).push(Claude(end));
             if let Some(gate) = &self.start_gate {
                 gate.notified().await;
@@ -4720,6 +4771,8 @@ mod tests {
             json!({"type": "turn", "text": "   "}),
             json!({"type": "answer", "requestId": "r1", "decision": "maybe"}),
             json!({"type": "answer", "requestId": "r1", "decision": "accept"}),
+            json!({"type": "turn", "text": "hi", "model": "opus; touch /tmp/pwned"}),
+            json!({"type": "turn", "text": "hi", "effort": "ultra"}),
         ] {
             let said = tab.next_after(frame).await;
             assert_eq!(said["type"], "error", "{said}");
@@ -4740,6 +4793,8 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    model: None,
+                    effort: None,
                 },
             ),
             (
@@ -4748,6 +4803,8 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: Some("codex".to_owned()),
                     mode: PermissionMode::FullAccess,
+                    model: None,
+                    effort: None,
                 },
             ),
             (
@@ -4755,6 +4812,16 @@ mod tests {
                 Frame::Answer {
                     request_id: "r".to_owned(),
                     decision: Decision::AcceptAlways,
+                },
+            ),
+            (
+                r#"{"type":"turn","text":"hi","model":"claude-opus-5-5","effort":"xhigh"}"#,
+                Frame::Turn {
+                    text: "hi".to_owned(),
+                    harness: None,
+                    mode: PermissionMode::Supervised,
+                    model: Model::try_from("claude-opus-5-5".to_owned()).ok(),
+                    effort: Some(Effort::Xhigh),
                 },
             ),
             (r#"{"type":"cancel"}"#, Frame::Cancel),
@@ -7042,6 +7109,77 @@ mod tests {
         );
     }
 
+    fn pick(model: &str, effort: Effort) -> (Option<Model>, Option<Effort>) {
+        (Model::try_from(model.to_owned()).ok(), Some(effort))
+    }
+
+    /// Y-564: a Claude turn starts with the model and effort its frame names,
+    /// and a frame that names neither starts Claude with neither.
+    #[tokio::test]
+    async fn a_claude_turn_starts_with_the_model_and_effort_it_names() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test",
+                        "model": "opus", "effort": "max"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        claude.say(ended()).await;
+        until_script(&script, |script| lock(&script.finished).len() == 1).await;
+        tab.send(json!({"type": "turn", "text": "and the docs"}));
+        script.claude().await.heard().await;
+        assert_eq!(
+            *lock(&script.picks),
+            [pick("opus", Effort::Max), (None, None)]
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_two_turns_start_in_the_last_ones_model_and_effort() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "turn", "text": "one", "model": "haiku", "effort": "low"}));
+        assert_eq!(tab.next().await, queue(&["one"]));
+        tab.send(json!({"type": "turn", "text": "two", "model": "sonnet", "effort": "high"}));
+        assert_eq!(tab.next().await, queue(&["one", "two"]));
+
+        claude.say(ended()).await;
+        assert_eq!(until_prompt(&mut tab).await["delta"], "one\n\ntwo");
+        script.claude().await.heard().await;
+        assert_eq!(
+            *lock(&script.picks),
+            [(None, None), pick("sonnet", Effort::High)]
+        );
+    }
+
+    /// An ACP agent takes no `--model`, so a frame that names one still runs.
+    #[tokio::test]
+    async fn an_acp_turn_with_a_model_and_effort_still_runs() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(
+            json!({"type": "turn", "text": "list the files", "harness": "opencode",
+                        "model": "opus", "effort": "max"}),
+        );
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        agent
+            .reply(&new, json!({"sessionId": SESSION, "configOptions": []}))
+            .await;
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1:1");
+        assert_eq!(agent.heard().await["method"], "session/prompt");
+        assert_eq!(tab.next().await["type"], "turn.started");
+        assert!(lock(&script.picks).is_empty(), "no Claude turn started");
+    }
+
     #[tokio::test]
     async fn queue_cancel_empties_it_and_no_turn_starts() {
         let script = Arc::new(Script::default());
@@ -7518,6 +7656,8 @@ mod tests {
             text: text.to_owned(),
             images: None,
             mode: PermissionMode::default(),
+            model: None,
+            effort: None,
         }
     }
 

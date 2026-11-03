@@ -674,7 +674,7 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   an empty list included, so a tab that was away while the queue drained clears it. A Claude
   keeper holds a turn from its turn's start until it is forgotten, its checkpoint and close
   included. When the turn ends, the queue goes as one prompt, the texts joined with a blank line,
-  in the last one's mode. A Claude thread starts a new keeper for it before any room prompt. An
+  in the last one's mode, model and effort. A Claude thread starts a new keeper for it before any room prompt. An
   ACP thread prompts the same agent, or the next keeper when this one closes. `cancel` empties
   the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
   turn. A turn that loses a start race is queued behind the winner; it tries again for up to
@@ -737,6 +737,9 @@ The rules from before the keeper still hold:
   `notAnImage` and `unreachable`. Every Claude turn after the first image gets `--add-dir` on the
   directory. A new keeper keeps `images/`, and `thread::remove` deletes it with the thread. The log
   says `image attached` and never a byte or a size.
+- **A `turn` may carry `model` and `effort`** (Y-564). A Claude turn passes them as `--model`
+  and `--effort`; an ACP turn ignores them. A model outside `[A-Za-z0-9._[]-]`, over 64
+  characters or starting with `-`, and an effort outside `low` to `max`, are `badFrame`.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
   `thread.started` is dropped. A browser's decision is answered with the option the agent offered.
