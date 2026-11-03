@@ -454,6 +454,7 @@ deleted everywhere else.
 | Y-603 | Test only what a row changed in the build loop | 🔵 review | claude | Y-602 | **Owner, 2026-11-03.** The full gate took 73 of 115 minutes. **Done** when the gate runs only the tests for the changed files, and rows that edit different files run at the same time. |
 | Y-604 | Update Playwright to 1.64.1 | 🔵 review | claude | — | **Owner, 2026-11-03:** 1.63.0 bundles a Chromium with known CVEs. **Done** when `@playwright/test` and the e2e image are both 1.64.1 and the e2e suite passes in CI. |
 | Y-605 | Shorten the CI wait for a pull request | 🔵 review | claude | Y-603 | **Owner, 2026-11-03.** A PR waited about 8 minutes for CI. **Done** when the `test`, `embed` and e2e jobs each finish in under 5 minutes and stay green. |
+| Y-606 | Say everywhere when the GitHub grant stops working | ⬜ todo | claude | Y-583 | **Owner, 2026-11-03.** The box's grant was revoked, and only Settings → About said so. **Done** when a failed grant marks the account button and links to `yantra github login`, and a test covers a revoked grant. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
