@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query'
+import { type QueryClient, queryOptions } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
@@ -134,6 +134,22 @@ export const statusQuery = (name: string) =>
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
+
+/** Try again, from any surface: every read is asked again, and so is a status
+ *  read the workspace list unlocks — the person tapped once, and the second
+ *  wave of reads is theirs too. */
+export async function readAgain(client: QueryClient) {
+  await client.invalidateQueries()
+  const listed = client.getQueryData(workspacesQuery().queryKey)
+  if (listed?.looked !== 'ok') return
+  const names = listed.data.map((one) => one.name)
+  await Promise.all(names.map((name) => client.fetchQuery(statusQuery(name))))
+  const failed = names.filter((name) => {
+    const answer = client.getQueryData(statusQuery(name).queryKey)
+    return answer !== undefined && answer !== MISSING && answer.looked === 'failed'
+  })
+  await Promise.all(failed.map((name) => client.refetchQueries({ queryKey: statusQuery(name).queryKey })))
+}
 
 /** `POST …/tokens` reads a whole transcript over ssh, and the page stamps its
  *  own arrival (D3 §11.4). Never fresh: every ask is a new read. `since` is an
