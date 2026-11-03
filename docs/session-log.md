@@ -342,3 +342,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-577](../tracker.md#3-task-board) is in review.** Research note R23 compares the fleet dashboards that issue #518 names. It says how many products back each pattern and lists the changes for rows Y-580, Y-581, Y-582 and Y-587.
 
 - **2026-11-03** — **[Y-576](../tracker.md#3-task-board) is in review.** Settings and the setup walkthrough now share one push setup flow. It shows the ntfy app link, the topic as a QR code with link and copy, a save that restarts the relay, and a test alert with "Did it arrive?". A test walks the flow and `docs/appliance.md` matches.
+
+- **2026-11-03** — **[Y-591](../tracker.md#3-task-board) is in review.** When a Mac blocks a folder with a privacy rule, the directory picker now says why, how to fix it and what the fix costs. The machine check warns of the block, and tests cover the daemon parser and the web screens.
