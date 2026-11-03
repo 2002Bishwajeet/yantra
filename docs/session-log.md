@@ -354,3 +354,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-550](../tracker.md#3-task-board) is in review.** A room now belongs to a workspace. `yantra room new|ls|show|rm` and `POST`, `PATCH` and `DELETE /api/rooms` write `~/.config/yantra/rooms/<name>.toml`. A restart reloads each room with one system message. Unit tests cover bad names and the reload.
 
 - **2026-11-03** — **[Y-515](../tracker.md#3-task-board) is in review.** `GET` and `PUT /api/layout` and `yantra layout` now read and write `dashboard.json` in the daemon. A write with a stale `rev` gets 409, and the file is written atomically. A podman test proves both.
+
+- **2026-11-03** — **[Y-585](../tracker.md#3-task-board) is in review.** A refused ssh login now ends fast. The machine check times each step, and Readiness and Sessions show one plain cause and next step with the raw ssh text behind a disclosure. A real sshd test times the refused login.
