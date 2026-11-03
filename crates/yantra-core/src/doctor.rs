@@ -125,11 +125,19 @@ pub enum Error {
 /// reason are [`crate::sessions::list`]'s: an unreachable machine costs the full
 /// `ConnectTimeout`, and sequentially those add up.
 pub async fn fleet(term: &str) -> Result<Vec<Report>, Error> {
+    fleet_with(&[], term).await
+}
+
+/// [`fleet`], and the `extra` machines as well. A name in both is asked once.
+/// The daemon passes its tailnet candidates here (Y-579), which are candidates
+/// for the reason [`crate::sessions`] gives.
+pub async fn fleet_with(extra: &[String], term: &str) -> Result<Vec<Report>, Error> {
     let mut machines: Vec<String> = workspace::list()?
         .workspaces
         .into_iter()
         .map(|workspace| workspace.machine)
         .collect();
+    machines.extend_from_slice(extra);
     machines.sort();
     machines.dedup();
 

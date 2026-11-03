@@ -33,7 +33,7 @@ const checks = (absent: string[] = [], detail: Record<string, string> = {}): Che
     detail: detail[id] ?? (absent.includes(id) ? `no \`${id}\` there` : 'found'),
   }))
 
-const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list } })
+const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list, age_seconds: 0 } })
 
 const machine = (over: Partial<Machine> = {}) =>
   ({ name: 'pi', dns_name: 'pi.ts.net.', os: 'linux', online: true, expired: false, last_seen: null, heartbeat: null, ...over }) as Machine

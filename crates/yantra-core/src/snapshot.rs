@@ -24,6 +24,7 @@
 //! How often to look is the caller's: this crate hands out no clock and runs no
 //! loop of its own.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -99,11 +100,24 @@ pub struct Snapshot {
     pub workspaces: Option<Arc<Workspaces>>,
     pub sessions: Option<Arc<Sessions>>,
     pub agents: Option<Arc<Agents>>,
+    /// The last sweep, which is what says `never` and `failed`.
     pub readiness: Option<Arc<Readiness>>,
+    /// The latest check of each machine, by name and with its own age. A sweep
+    /// that skips a machine leaves its entry here, and so does a sweep that
+    /// failed (Y-579). In memory only, so a restart empties it (Y-044).
+    pub checks: BTreeMap<String, Arc<Reading<doctor::Report>>>,
     pub attention: Option<Arc<Attention>>,
     pub github: Option<Arc<Github>>,
     pub repos: Option<Arc<Repos>>,
     pub release: Option<Arc<Release>>,
+}
+
+impl Snapshot {
+    /// Puts this report in place of the machine's last one.
+    pub fn keep(&mut self, report: doctor::Report) {
+        self.checks
+            .insert(report.machine.clone(), Arc::new(Reading::new(report)));
+    }
 }
 
 #[cfg(test)]
@@ -129,10 +143,30 @@ mod tests {
         assert!(snapshot.sessions.is_none());
         assert!(snapshot.agents.is_none());
         assert!(snapshot.readiness.is_none());
+        assert!(snapshot.checks.is_empty());
         assert!(snapshot.attention.is_none());
         assert!(snapshot.github.is_none());
         assert!(snapshot.repos.is_none());
         assert!(snapshot.release.is_none());
+    }
+
+    #[test]
+    fn keeping_a_report_replaces_the_one_that_machine_had() {
+        let report = |detail: &str| doctor::Report {
+            machine: "pi".into(),
+            checks: vec![doctor::Check {
+                check: "reachable",
+                state: doctor::State::Unknown,
+                detail: detail.into(),
+                took_ms: None,
+            }],
+        };
+        let mut snapshot = Snapshot::default();
+        snapshot.keep(report("first"));
+        snapshot.keep(report("second"));
+
+        assert_eq!(snapshot.checks.len(), 1);
+        assert_eq!(snapshot.checks["pi"].value(), &report("second"));
     }
 
     /// The clone a handler serves is the same reading, not a re-taken one.

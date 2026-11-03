@@ -29,6 +29,7 @@ import { NotReached } from './NotReached'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
 import { useScreenTitle, useScreenTitleOverride } from './title'
+import { paintThemeColor, syncThemeColor } from './themeColor'
 import './Shell.css'
 
 // The menu, the popover and the sheet's list carry Base UI's popup machinery
@@ -377,8 +378,15 @@ function reseed(seed: string | null) {
   let stale = false
   void import('@/m3/theme/scheme').then(({ applyScheme, clearScheme, schemeFor }) => {
     if (stale) return
-    if (seed) applyScheme(schemeFor(seed, false), schemeFor(seed, true))
-    else clearScheme()
+    if (seed) {
+      const light = schemeFor(seed, false)
+      const dark = schemeFor(seed, true)
+      applyScheme(light, dark)
+      paintThemeColor({ light: light.surface, dark: dark.surface })
+    } else {
+      clearScheme()
+      paintThemeColor(null)
+    }
     seeded = seed !== null
   })
   return () => {
@@ -408,6 +416,7 @@ export function Shell() {
     const root = document.documentElement
     if (theme === 'system') delete root.dataset.theme
     else root.dataset.theme = theme
+    syncThemeColor(theme)
     if (density === 'compact') root.dataset.density = 'compact'
     else delete root.dataset.density
   }, [theme, density])

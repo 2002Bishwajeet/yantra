@@ -1,7 +1,7 @@
 import { useDeferredValue, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { GitBranch, Search } from 'lucide-react'
+import { Check, GitBranch, Search } from 'lucide-react'
 import type { Repo } from '@/api'
 import { asApiError } from '@/api/errors'
 import { useGithub, useRepos } from '@/api/hooks'
@@ -12,14 +12,14 @@ import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { IconTile } from '@/m3/tile/Tile'
 import { useTick } from '@/useTick'
 import { CloneFolder } from './CloneFolder'
 import { rememberCloneFolder, useCloneFolder } from './clonePath'
-import { tilde, type Values } from './form'
-import { byOrigin, filterRepos, place, SHOWN } from './repos'
+import type { Values } from './form'
+import { byOrigin, filterRepos, place, SHOWN, stateLabel } from './repos'
 import type { SessionForm } from './useSessionForm'
 
 function pushed(repo: Repo, now: number): string {
@@ -101,18 +101,11 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
         {shown.map((repo) => {
           const where = folder === null || clones.isFetching ? null : place(repo, folder, held, because)
           const selected = values.source?.kind === 'github' && values.source.repo.full_name === repo.full_name
-          const said =
-            where === null
-              ? 'checking…'
-              : where.here === 'yes'
-                ? `already on ${machine} at ${tilde(where.path, root)}`
-                : where.here === 'no'
-                  ? `not here yet · clone into ${tilde(where.path, root)}`
-                  : `${machine} could not be asked · clone into ${tilde(where.path, root)}`
           return (
             <li key={repo.full_name}>
               <Row
                 aria-pressed={selected}
+                className="ns__repo"
                 render={<button disabled={where === null} type="button" />}
                 onClick={() => {
                   if (where === null) return
@@ -128,7 +121,10 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
                   headline={repo.full_name}
                   supporting={`${repo.private ? 'private' : 'public'}${repo.language ? ` · ${repo.language}` : ''} · ${pushed(repo, now)}`}
                 />
-                <Mono className="ns__place">{said}</Mono>
+                <Text className="ns__state" scale="label-medium" tone="variant">
+                  {stateLabel(where)}
+                </Text>
+                {selected ? <Check aria-hidden="true" /> : null}
               </Row>
             </li>
           )

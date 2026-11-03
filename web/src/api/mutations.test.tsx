@@ -276,7 +276,7 @@ describe('a readiness recheck', () => {
   /** The POST answers the GET's own envelope at age 0, so it goes straight into
    *  that key rather than waiting for the sweep to notice. */
   it('writes the fresh report under the machine’s readiness key', async () => {
-    const report = looked.ok({ machine: 'pi', checks: [] })
+    const report = looked.ok({ machine: 'pi', checks: [], age_seconds: 0 })
     const asked = daemon(200, report)
     const { result } = renderHookQueried(() => ({
       recheck: useRecheckReadiness(),
@@ -293,6 +293,83 @@ describe('a readiness recheck', () => {
     expect(result.current.client.getQueryData(keys.readiness('pi'))).toEqual(
       report,
     )
+  })
+
+  /** The Machines page reads the list key, so a write to the one-machine key
+   *  alone never reaches the card (Y-579). */
+  it('puts the fresh report in the list, in place of the old one', async () => {
+    const fresh = { machine: 'pi', checks: [], age_seconds: 0 }
+    const other = { machine: 'g14', checks: [], age_seconds: 20 }
+    const stale = { machine: 'pi', checks: [], age_seconds: 40 }
+    daemon(200, looked.ok(fresh))
+    const { result } = renderHookQueried(() => ({
+      recheck: useRecheckReadiness(),
+      client: useQueryClient(),
+    }))
+    result.current.client.setQueryData(keys.readiness(), {
+      looked: 'ok',
+      age_seconds: 20,
+      data: [other, stale],
+    })
+
+    await act(() => result.current.recheck.mutateAsync('pi'))
+
+    expect(result.current.client.getQueryData(keys.readiness())).toEqual({
+      looked: 'ok',
+      age_seconds: 0,
+      data: [other, fresh],
+    })
+  })
+
+  it('adds a machine the list does not hold', async () => {
+    const fresh = { machine: 'pi', checks: [], age_seconds: 0 }
+    daemon(200, looked.ok(fresh))
+    const { result } = renderHookQueried(() => ({
+      recheck: useRecheckReadiness(),
+      client: useQueryClient(),
+    }))
+    result.current.client.setQueryData(keys.readiness(), looked.ok([]))
+
+    await act(() => result.current.recheck.mutateAsync('pi'))
+
+    expect(result.current.client.getQueryData(keys.readiness())).toMatchObject({
+      data: [fresh],
+    })
+  })
+
+  /** Only the daemon can say what a list it has not answered holds. */
+  it('asks for a list that is not ok again, and writes nothing into it', async () => {
+    daemon(200, looked.ok({ machine: 'pi', checks: [], age_seconds: 0 }))
+    const { result } = renderHookQueried(() => ({
+      recheck: useRecheckReadiness(),
+      client: useQueryClient(),
+    }))
+    const never = { looked: 'never' }
+    result.current.client.setQueryData(keys.readiness(), never)
+
+    await act(() => result.current.recheck.mutateAsync('pi'))
+
+    const list = result.current.client.getQueryState(keys.readiness())
+    expect(list?.data).toEqual(never)
+    expect(list?.isInvalidated).toBe(true)
+  })
+
+  it('is an error and changes neither key when the daemon refuses', async () => {
+    daemon(403, 'not yours')
+    const { result } = renderHookQueried(() => ({
+      recheck: useRecheckReadiness(),
+      client: useQueryClient(),
+    }))
+    const held = looked.ok([{ machine: 'pi', checks: [], age_seconds: 40 }])
+    result.current.client.setQueryData(keys.readiness(), held)
+
+    const refused = await act(() =>
+      result.current.recheck.mutateAsync('pi').catch((error: unknown) => error),
+    )
+
+    expect(refused).toMatchObject({ kind: 'refused', status: 403 })
+    expect(result.current.client.getQueryData(keys.readiness())).toEqual(held)
+    expect(result.current.client.getQueryData(keys.readiness('pi'))).toBeUndefined()
   })
 })
 

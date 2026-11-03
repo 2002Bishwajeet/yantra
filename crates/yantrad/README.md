@@ -120,8 +120,11 @@ beat is the one thing on this route that `yantra ls machines` cannot yet show.
 
 `GET /api/readiness` is [D2](../../docs/design/02-setup.md) §3.1's checks per machine, swept in the
 background like every other read, and `GET /api/machines/{name}/readiness` is one machine of it. The
-sweep asks the machines a workspace names, so a machine none of them names is a `404` here even
-though `yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
+sweep asks the machines a workspace names and each online Linux or macOS machine you own on the
+tailnet. The daemon keeps
+the latest check of each machine in memory, with its own `age_seconds`, so a later sweep that skips
+the machine or fails does not lose it. A machine no check has reached is a `404` here even though
+`yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
 and a check with no step leaves the key out.
 
 **`heartbeat` is the one check these routes answer and the terminal cannot.** The library reports it

@@ -312,3 +312,13 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-10-22** — **[Y-530](../tracker.md#3-task-board) is in review.** [R22 §9.7](research/22-claude-mem-shared-memory.md#97-redaction-against-the-y-430-fixtures-2026-10-22) runs the three Y-430 fixtures through claude-mem's real redaction in podman. The defaults miss `API_TOKEN=` and `DATABASE_PASSWORD=`. One custom pattern catches both and left 17 of 18 ordinary lines alone. Redaction does not run on `/api/memory/save`, `/api/import`, the sync push or the observer's output, so Y-529 and Y-531 must account for that.
 
 - **2026-10-31:** yantra-box live on the HP mini PC. `box/` and `crates/yantra-box` published, home screen built, v0.9.0 cut. The firmware logo is parked on #533.
+
+- **2026-11-02** — **[Y-588](../tracker.md#3-task-board) is in review.** The New session repository rows no longer clip at 390 px. Each row shows one short state, and the page says why Continue is disabled. A new long-name scenario holds the layout in the Playwright baselines.
+
+- **2026-11-02** — **[Y-593](../tracker.md#3-task-board) is in review.** `price.rs` now holds the official rates for Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1. A test proves that no new model takes an older model's rate by prefix.
+
+- **2026-11-02** — **[Y-598](../tracker.md#3-task-board) is in review.** `install.sh` now gives `yantrad` a key and a Host block for its own box, authorises that key, and tries one real login. `yantra-box` no longer answers `Permission denied` to itself. A podman test in `own_box.rs` covers it.
+
+- **2026-11-03** — **[Y-573](../tracker.md#3-task-board) is in review.** `index.html` now sets `viewport-fit=cover` and one `theme-color` per scheme. The phone bars, dialogs and sheets pad the safe-area insets. A solid strip sits under the status bar. Unit and Playwright tests assert each. The owner still checks a real iPhone.
+
+- **2026-11-03** — **[Y-579](../tracker.md#3-task-board) is in review.** The daemon now keeps the latest check for every enrolled machine. A poll no longer replaces a result with `never`, and a result survives a reload with no workspace. The sweep checks only the machines the dashboard counts. Tests hold the result over poll cycles.

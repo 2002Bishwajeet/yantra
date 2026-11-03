@@ -4,8 +4,8 @@
   gap: 4px;
   flex: none;
   box-sizing: border-box;
-  height: 64px;
-  padding: 0 12px 0 16px;
+  height: calc(64px + var(--m3-safe-top));
+  padding: var(--m3-safe-top) calc(12px + var(--m3-safe-right)) 0 calc(16px + var(--m3-safe-left));
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface);
 }

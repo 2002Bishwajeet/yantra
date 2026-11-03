@@ -108,6 +108,29 @@ describe('/machines on the busy fleet', () => {
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/readiness'))
   })
 
+  /** Y-579: no workspace names the machine, and the daemon now keeps the
+   *  check. The card moves at once and a later list poll holds it there. */
+  it('moves the card off not checked, and a poll does not move it back', async () => {
+    const state = scenario('busy')
+    state.workspaces!.data = []
+    const list = state.readiness!.data as { machine: string; checks: unknown[]; age_seconds: number }[]
+    const [held] = list.filter((one) => one.machine === 'cachyos-g14')
+    state.readiness!.data = list.filter((one) => one.machine !== 'pi-5')
+    const report = { ...held!, machine: 'pi-5', age_seconds: 0 }
+    state.asked = { 'pi-5': report }
+    const asked = mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(card('pi-5').getByText('not checked')).toBeTruthy()
+
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(card('pi-5').queryByText('not checked')).toBeNull())
+
+    const polls = () => asked.filter((one) => one === 'GET /api/readiness').length
+    const before = polls()
+    await waitFor(() => expect(polls()).toBeGreaterThan(before), { timeout: 7_000 })
+    expect(card('pi-5').queryByText('not checked')).toBeNull()
+  }, 15_000)
+
   it('offers an unclaimed session Attach and Kill, and never Adopt', async () => {
     mount('desktop', '/machines')
     await screen.findByText('scratch')

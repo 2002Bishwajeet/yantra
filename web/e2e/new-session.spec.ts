@@ -39,7 +39,7 @@ test.describe('the four steps', () => {
   test('the source step offers the machine that holds the repo', async ({ page }) => {
     await page.getByLabel('Name').fill('brisk-heron')
     await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
+    await expect(page.getByText('Will clone')).toBeVisible()
     await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
 
     await expect(page.getByText('hetzner-1: the repo is there and it is on AC power')).toBeVisible()
@@ -56,7 +56,7 @@ test.describe('the four steps', () => {
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
+    await expect(page.getByText('On this machine')).toBeVisible()
     await axe(page)
     await page.getByRole('button', { name: /2002Bishwajeet\/yantra/ }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
@@ -78,7 +78,7 @@ test.describe('the four steps', () => {
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
+    await expect(page.getByText('On this machine')).toBeVisible()
     await expect(steps.nth(1)).toHaveAttribute('data-state', 'done')
     await expect(steps.nth(2)).toHaveAttribute('aria-current', 'step')
   })
@@ -98,8 +98,8 @@ test.describe('the four steps', () => {
 
     await expect(page.getByText('github.com · 2002Bishwajeet · signed in to Yantra', { exact: false })).toBeVisible()
     const rows = page.getByRole('list', { name: 'Repositories' })
-    await expect(rows.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
-    await expect(rows.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
+    await expect(rows.getByText('On this machine')).toBeVisible()
+    await expect(rows.getByText('Will clone')).toBeVisible()
     await expect(page.getByRole('button', { name: /GitLab/ })).toBeDisabled()
     await screenshot(page, 'new-session-source', 'busy', size, { overlay: size !== 'phone' })
 
@@ -251,7 +251,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await expect(page.getByText('already on cachyos-g14 at ~/Github/yantra')).toBeVisible()
+    await expect(page.getByText('On this machine')).toBeVisible()
     await page.getByRole('button', { name: /2002Bishwajeet\/yantra/ }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
 
@@ -276,7 +276,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await expect(page.getByText('not here yet · clone into ~/Github/scratch')).toBeVisible()
+    await expect(page.getByText('Will clone')).toBeVisible()
     await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
 
@@ -290,5 +290,43 @@ test.describe('all four steps, to a workspace that is running', () => {
     await expect(stages.getByText(/Receiving objects/)).toBeVisible()
     await screenshot(page, 'new-session-cloning', 'busy', size, { overlay: size !== 'phone' })
     await expect(page).toHaveURL('/w/brisk-heron?view=chat', { timeout: 15_000 })
+  })
+})
+
+test.describe('a long repository name on a phone', () => {
+  test('wraps, shows one state, and keeps the hint in view', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the clipping was seen at 390 px')
+    await scenario(page, 'longrepo')
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+
+    const rows = page.getByRole('list', { name: 'Repositories' })
+    const long = rows.getByRole('button', { name: /infrastructure-deployment-configuration/ })
+    await expect(long.getByText('Will clone')).toBeVisible()
+    await expect(long.locator('.ns__state')).toHaveCount(1)
+    await expect(page.getByRole('status')).toHaveText('Choose a repository to continue.')
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+
+    const clipped = await rows.locator('.ns__repo .m3-row__headline, .ns__repo .m3-row__supporting').evaluateAll(
+      (nodes) => nodes.filter((node) => node.scrollWidth > node.clientWidth).length,
+    )
+    expect(clipped).toBe(0)
+    const box = await long.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390)
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+    expect(overflow).toBe(false)
+
+    await long.click()
+    await expect(long).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('status')).toHaveText(
+      /^Will clone into ~\/Github\/infrastructure-deployment-configuration-for-the-staging-cluster$/,
+    )
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+    await screenshot(page, 'new-session-source', 'longrepo', 'phone')
+    await axe(page)
   })
 })

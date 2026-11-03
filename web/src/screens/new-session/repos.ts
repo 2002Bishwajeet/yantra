@@ -38,3 +38,9 @@ export function place(
   const path = cloneInto(folder, repo)
   return because === undefined ? { path, here: 'no' } : { path, here: 'unknown', because }
 }
+
+/** The one short state a row shows; the path is in the clone folder above and the hint below. */
+export function stateLabel(where: Placement | null): string {
+  if (where === null) return 'Checking…'
+  return where.here === 'yes' ? 'On this machine' : where.here === 'no' ? 'Will clone' : 'Not checked'
+}

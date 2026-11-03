@@ -15,6 +15,11 @@
 #
 #     curl -fsSL <url>/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
 #
+# A run that answers also lets yantrad log in to this box, as the account that ran
+# it (Y-598). YANTRA_ACCOUNT names the account for a run as root:
+#
+#     curl -fsSL <url>/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
+#
 # `--uninstall` reverses it (Y-407):
 #
 #     curl -fsSL <url>/install.sh | bash -s -- --uninstall
@@ -300,6 +305,62 @@ else
     updates=no
 fi
 
+# yantrad reaches this box over ssh too (ADR-0009). It logs in to the person's account,
+# where the sessions are; `yantra` holds the fleet's key and must never get a shell.
+authorise_self() {
+    local account machine=${name%%.*} said key
+    local join="curl -fsSL $url/join | sh"
+    account=${YANTRA_ACCOUNT:-${SUDO_USER:-$(id -un)}}
+
+    if [ -z "$machine" ] || [ "$account" = root ] || [ "$account" = yantra ] ||
+        ! id -- "$account" >/dev/null 2>&1; then
+        echo "install: yantrad needs an account to log in to here, and this run has none to name."
+        echo "install: run this here, as that account: $join"
+        return 0
+    fi
+
+    # The full path, because sudo's secure_path omits it.
+    if ! said=$(as_root sudo -Hu yantra "$BIN_DIR/yantra" ssh-identity \
+        --machine "$machine" --user "$account" 2>&1 >/dev/null </dev/null); then
+        echo "install: no key was placed for $account. $said"
+        echo "install: once that is settled, run this here, as that account: $join"
+        return 0
+    fi
+
+    if ! key=$(as_root cat /home/yantra/.ssh/id_yantra.pub) ||
+        ! as_root sudo -Hu "$account" sh -s -- "$key" <<'PLACE'; then
+set -e
+umask 077
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+keys=$HOME/.ssh/authorized_keys
+if [ ! -f "$keys" ] || ! grep -qxF -- "$1" "$keys"; then
+    # A file that ends mid-line would join the key onto its last entry.
+    if [ -s "$keys" ] && [ -n "$(tail -c 1 "$keys")" ]; then
+        printf '\n' >>"$keys"
+    fi
+    printf '%s\n' "$1" >>"$keys"
+    chmod 600 "$keys"
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -R "$HOME/.ssh" 2>/dev/null || true
+    fi
+fi
+PLACE
+        echo "install: could not place the key for $account. Run this here, as that account: $join"
+        return 0
+    fi
+
+    # `timeout`, because a Tailscale SSH check policy holds a login open for a browser.
+    if as_root timeout 30 sudo -Hu yantra ssh -o BatchMode=yes -o ConnectTimeout=5 \
+        -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+        -- "$machine" true </dev/null >/dev/null 2>&1; then
+        echo "install: yantrad logs in here as $account."
+    else
+        echo "install: the key is in place, but yantrad could not log in here as $account."
+        echo "install: sshd must run here. The dashboard's Check says why the login failed."
+    fi
+}
+
 up() { command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; }
 serving() { as_root tailscale serve status --json 2>/dev/null | grep -q "\"$HTTPS_PORT\""; }
 
@@ -472,6 +533,8 @@ if [ -n "$address" ]; then
     else
         url="http://$address"
     fi
+    # Only here, because the updater never answers and touches no configuration (D2 §1).
+    authorise_self
     if [ "$interactive" = yes ] && command -v qrencode >/dev/null; then
         qrencode -t ansiutf8 "$url" </dev/null || true
     fi

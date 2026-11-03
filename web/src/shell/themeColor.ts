@@ -1,0 +1,22 @@
+import type { Prefs } from './prefs'
+
+const METAS = 'meta[name="theme-color"][data-scheme]'
+
+/** index.html draws both metas; this keeps the one that matches the chosen
+ *  theme, because `media` alone follows the OS and not the Appearance choice. */
+export function syncThemeColor(theme: Prefs['theme']) {
+  for (const meta of document.querySelectorAll<HTMLMetaElement>(METAS)) {
+    const scheme = meta.dataset.scheme
+    meta.media = theme === 'system' ? `(prefers-color-scheme: ${scheme})` : scheme === theme ? 'all' : 'not all'
+  }
+}
+
+/** The metas start as brass surface (index.html). A seed repaints them; null
+ *  restores brass, which `data-base` remembers from the first repaint. */
+export function paintThemeColor(colors: { light: string; dark: string } | null) {
+  for (const meta of document.querySelectorAll<HTMLMetaElement>(METAS)) {
+    const scheme = meta.dataset.scheme as 'light' | 'dark'
+    meta.dataset.base ??= meta.content
+    meta.content = colors ? colors[scheme] : meta.dataset.base
+  }
+}

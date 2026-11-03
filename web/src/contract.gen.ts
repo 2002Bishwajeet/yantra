@@ -310,27 +310,7 @@ export const readiness = {
   "age_seconds": 0,
   "data": [
     {
-      "checks": [
-        {
-          "check": "reachable",
-          "detail": "a command ran there and reported its own status",
-          "state": "present",
-          "took_ms": 120
-        },
-        {
-          "check": "provider-auth",
-          "detail": "`gh` is installed there and no account is logged in",
-          "state": "absent"
-        },
-        {
-          "check": "heartbeat",
-          "detail": "a beat arrived 0s ago",
-          "state": "present"
-        }
-      ],
-      "machine": "cachyos-g14"
-    },
-    {
+      "age_seconds": 0,
       "checks": [
         {
           "check": "reachable",
@@ -350,6 +330,28 @@ export const readiness = {
         }
       ],
       "machine": "bishwajeets-macbook-pro"
+    },
+    {
+      "age_seconds": 0,
+      "checks": [
+        {
+          "check": "reachable",
+          "detail": "a command ran there and reported its own status",
+          "state": "present",
+          "took_ms": 120
+        },
+        {
+          "check": "provider-auth",
+          "detail": "`gh` is installed there and no account is logged in",
+          "state": "absent"
+        },
+        {
+          "check": "heartbeat",
+          "detail": "a beat arrived 0s ago",
+          "state": "present"
+        }
+      ],
+      "machine": "cachyos-g14"
     }
   ],
   "looked": "ok"
@@ -358,6 +360,7 @@ export const readiness = {
 export const oneReadiness = {
   "age_seconds": 0,
   "data": {
+    "age_seconds": 0,
     "checks": [
       {
         "check": "reachable",
@@ -587,7 +590,7 @@ export const broken = {
 } satisfies Broken
 
 export const spend = {
-  "as_of": "2026-08-11",
+  "as_of": "2026-11-02",
   "cost": 5.4633115,
   "fast": 0,
   "models": [
@@ -621,7 +624,7 @@ export const spend = {
 } satisfies Spend
 
 export const spendFast = {
-  "as_of": "2026-08-11",
+  "as_of": "2026-11-02",
   "cost": null,
   "fast": 3,
   "models": [

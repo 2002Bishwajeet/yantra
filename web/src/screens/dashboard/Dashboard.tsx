@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, type ReactNode } from 'react'
-import { type QueryClient, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { CircleDot, GitPullRequest, Plus, RotateCw } from 'lucide-react'
 import type {
@@ -23,7 +23,7 @@ import {
   useWorkspaces,
   type Reading,
 } from '@/api/hooks'
-import { MISSING, statusQuery, workspacesQuery } from '@/api/queries'
+import { readAgain } from '@/api/queries'
 import { ago, at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -59,22 +59,6 @@ import './Dashboard.css'
 const UNREACHABLE =
   'Every read failed the same way, so this is the connection to yantrad rather than the fleet. ' +
   'Whether you are off the tailnet or the daemon is down is not something this page can tell.'
-
-/** Try again, from any surface here: every read is asked again, and so is a
- *  status read the workspace list unlocks — the person tapped once, and the
- *  second wave of reads is theirs too. */
-async function readAgain(client: QueryClient) {
-  await client.invalidateQueries()
-  const listed = client.getQueryData(workspacesQuery().queryKey)
-  if (listed?.looked !== 'ok') return
-  const names = listed.data.map((one) => one.name)
-  await Promise.all(names.map((name) => client.fetchQuery(statusQuery(name))))
-  const failed = names.filter((name) => {
-    const answer = client.getQueryData(statusQuery(name).queryKey)
-    return answer !== undefined && answer !== MISSING && answer.looked === 'failed'
-  })
-  await Promise.all(failed.map((name) => client.refetchQueries({ queryKey: statusQuery(name).queryKey })))
-}
 
 /** The confirm carries Base UI's dialog and bottom sheet, 30 KiB the first
  *  paint never draws (Y-352's budget). It loads beside the page rather than

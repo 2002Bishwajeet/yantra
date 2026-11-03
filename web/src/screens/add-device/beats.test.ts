@@ -24,6 +24,7 @@ const reply = (more: Partial<Event> = {}): Partial<Event> => ({ user: 'biswa', k
 
 const report = (checks: [string, Check['state'], string?][]): Readiness => ({
   machine: NAME,
+  age_seconds: 0,
   checks: checks.map(([check, state, detail]) => ({ check, state, detail: detail ?? '' })),
 })
 
