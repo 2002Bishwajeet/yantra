@@ -292,6 +292,75 @@ describe('permission modes', () => {
   })
 })
 
+describe('plan mode', () => {
+  const toggle = () => screen.getByRole('button', { name: /^(Plan|Build)$/ })
+
+  it('starts in Build, toggles to Plan, and sends the plan turn', async () => {
+    await open()
+    expect(toggle().getAttribute('aria-label')).toBe('Build')
+    expect(toggle().getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(toggle())
+    expect(toggle().getAttribute('aria-label')).toBe('Plan')
+    expect(toggle().getAttribute('aria-pressed')).toBe('true')
+    type('plan the fix')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'turn', text: 'plan the fix', harness: 'claude', mode: 'supervised', interaction: 'plan' },
+      ]),
+    )
+  })
+
+  it('keeps each thread its own interaction', async () => {
+    await open()
+    fireEvent.click(toggle())
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    // Until the daemon says whose the thread is, no harness can plan.
+    await settled(() => expect(server.asked).toHaveLength(2))
+    await settled(() => expect(toggle().getAttribute('title')).toBe('Plan mode needs Claude'))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Plan' })).toBeTruthy())
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    await settled(() => expect(screen.getByRole('button', { name: 'Build' })).toBeTruthy())
+  })
+
+  it('cannot be pressed for another harness, and its turn is a build turn', async () => {
+    await open()
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole('button', { name: 'Harness: Claude' }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    fireEvent.click(options[4])
+    await settled(() => expect(screen.getByRole('button', { name: 'Harness: opencode' })).toBeTruthy())
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(toggle()).toHaveProperty('disabled', true)
+    expect(toggle().getAttribute('title')).toBe('Plan mode needs Claude')
+    expect(toggle().getAttribute('aria-label')).toBe('Build')
+    fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([{ type: 'turn', text: 'list', harness: 'opencode', mode: 'supervised' }]),
+    )
+  })
+
+  it('draws the bad frame a daemon sends for a plan turn it refuses', async () => {
+    await open()
+    fireEvent.click(toggle())
+    type('plan it')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say({ type: 'error', kind: 'badFrame', said: 'plan mode needs the Claude harness' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
+    expect(alert.textContent).toContain('plan mode needs the Claude harness')
+    expect(toggle()).toHaveProperty('disabled', false)
+  })
+})
+
 describe('the chat', () => {
   it('opens on an empty conversation, and says why Send is off', async () => {
     await open()

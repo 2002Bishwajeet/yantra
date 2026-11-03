@@ -50,6 +50,15 @@ permission modes, their names and their descriptions from
 [`docs/user/permission-modes.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/user/permission-modes.md)
 at commit `72d5c32`. Yantra's default is Supervised, where T3 Code's is Full access.
 
+`Interaction` in [`crates/yantra-core/src/chat.rs`](crates/yantra-core/src/chat.rs) and
+[`web/src/screens/session/PlanToggle.tsx`](web/src/screens/session/PlanToggle.tsx) copy the composer's
+interaction-mode toggle, its glyphs and its words from
+[`apps/web/src/components/chat/ChatComposer.tsx`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/web/src/components/chat/ChatComposer.tsx)
+at commit `72d5c32`, and [`crates/yantra-core/src/claude.rs`](crates/yantra-core/src/claude.rs) copies
+the answer to `ExitPlanMode` from
+[`apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts)
+at the same commit.
+
 [`crates/yantra/src/mcp.rs`](crates/yantra/src/mcp.rs) copies the shapes of `steer_task`, `wait_task`
 and `cancel_task` from
 [`docs/orchestration-v2/orchestrator-mcp-server.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/orchestration-v2/orchestrator-mcp-server.md)
