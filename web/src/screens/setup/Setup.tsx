@@ -22,6 +22,7 @@ import { Track } from '@/m3/track/Track'
 import { useFab } from '@/shell/primary'
 import { PrimaryAction } from '@/shell/PrimaryAction'
 import { useScreenTitle } from '@/shell/title'
+import { PushSetup } from '@/screens/settings/PushSetup'
 import { useTick } from '@/useTick'
 import { password } from '@/screens/add-device/beats'
 import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
@@ -214,6 +215,7 @@ export function Setup() {
     else presses.current.delete(name)
   }, [])
   const [installing, setInstalling] = useState<ReadonlySet<string>>(new Set())
+  const [pushing, setPushing] = useState(false)
   const running = useCallback<Running>((name, on) => {
     setInstalling((now) => {
       if (now.has(name) === on) return now
@@ -439,7 +441,7 @@ export function Setup() {
                 title="Push to your phone"
                 trailing={
                   optional.push.status === 'done' ? undefined : (
-                    <Button render={<Link params={{ category: 'notifications' }} to="/settings/$category" />} role="link" variant="tonal">
+                    <Button onClick={() => setPushing(true)} variant="tonal">
                       Set up
                     </Button>
                   )
@@ -459,6 +461,7 @@ export function Setup() {
               />
             </List>
           </div>
+          <PushSetup onOpenChange={setPushing} open={pushing} />
         </>
       )}
 

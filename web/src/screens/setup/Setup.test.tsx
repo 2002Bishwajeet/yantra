@@ -54,6 +54,13 @@ const base = (machines: Machine[] = [linux, mac, phone, tablet, windows]): Route
 
 async function draw(routes: Routes) {
   const asked: string[] = []
+  // The push sheet asks the form factor; a desktop answers every query.
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: true,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
@@ -178,6 +185,32 @@ describe('the steps', () => {
     cleanup()
     await draw({ ...base(), 'GET /api/about': [503, 'tailscale did not answer'] })
     expect(screen.getAllByText(/tailscale did not answer/).length).toBeGreaterThan(0)
+  })
+
+  /** Y-576: the walkthrough opens the same guided flow as Settings, in place. */
+  it('opens the push setup in place from Push to your phone', async () => {
+    await draw(base())
+    const later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
+    expect(later.queryByRole('link', { name: 'Set up' })).toBeNull()
+    fireEvent.click(later.getByRole('button', { name: 'Set up' }))
+    expect(await screen.findByRole('dialog', { name: 'Push relay' })).toBeTruthy()
+  })
+
+  it('walks the push setup from Generate to a test that arrived', async () => {
+    const asked = await draw({ ...base(), 'POST /api/relay': [204, undefined] })
+    fireEvent.click(screen.getByRole('button', { name: 'Set up' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Push relay' }))
+    fireEvent.click(sheet.getByRole('button', { name: 'Generate' }))
+    const url = (sheet.getByLabelText('Topic URL') as HTMLInputElement).value
+    expect(await sheet.findByRole('img', { name: /QR/ })).toBeTruthy()
+    expect(sheet.getByRole('link', { name: 'Open the topic' }).getAttribute('href')).toBe(url)
+    expect(sheet.getByRole('button', { name: 'Copy the topic URL' })).toBeTruthy()
+    fireEvent.click(sheet.getByRole('button', { name: 'Save and send a test' }))
+    expect(await sheet.findByText('The test message arrived at the relay.')).toBeTruthy()
+    expect(sheet.getByRole('button', { name: 'Restart now' })).toBeTruthy()
+    expect(asked.filter((one) => one === 'POST /api/relay')).toHaveLength(1)
+    fireEvent.click(sheet.getByRole('button', { name: 'Yes' }))
+    expect(sheet.getByText(/Push works/)).toBeTruthy()
   })
 
   it('is done at the first session once a workspace exists', async () => {
