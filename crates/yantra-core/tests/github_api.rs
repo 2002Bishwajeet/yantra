@@ -24,8 +24,8 @@ async fn the_real_api_answers_in_the_shapes_this_crate_reads() {
     let token = github::from_env().expect("YANTRA_GITHUB_TOKEN names a grant");
     let api = Github::default();
 
-    let login = api.login_name(&token).await.expect("GET /user");
-    assert!(!login.is_empty(), "a login is never empty");
+    let account = api.account(&token).await.expect("GET /user");
+    assert!(!account.login.is_empty(), "a login is never empty");
 
     let repos = api.repos(&token).await.expect("GET /user/repos");
     for repo in &repos {

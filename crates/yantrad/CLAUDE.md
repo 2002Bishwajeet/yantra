@@ -115,7 +115,7 @@ already *unknown* inside the check. `doctor::github` is a pure mapper over `GET 
 `refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
 
 **The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
-the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
+the profile image URL, the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
 /api/github/login` and `DELETE /api/github` are in `write.rs` on the gate; `GET /api/repos` is the
 repository list, a class on the same slow clock, and **the search box filters it in the browser** —
 a typed box polls, and a read handler never awaits the network.
