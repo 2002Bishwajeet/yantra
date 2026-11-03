@@ -24,8 +24,10 @@
 //! restart. The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
 //!
 //! **A `turn` sent while one runs is queued** (Y-561): every socket of the
-//! thread gets a [`QueueFrame`], and the turn's end sends the queue as one
-//! prompt. `cancel` empties it. A socket follows the next keeper of its thread.
+//! thread gets a [`QueueFrame`], an attaching one too, empty or not, and the
+//! turn's end sends the queue as one prompt. `cancel` empties it. A socket
+//! follows the next keeper of its thread. A revert starts only with no turn
+//! started, running or queued, and none starts or queues while it runs.
 //!
 //! **Each `turn` carries the thread's [`PermissionMode`]** (Y-453), and the
 //! keeper's `mode` file keeps it for a daemon that adopts the turn. A request
@@ -1150,6 +1152,42 @@ impl Registry {
         self.lock().reverting.insert(id.to_owned());
     }
 
+    /// Marks thread `id` as reverting, unless a turn runs, starts, keeps its checkpoint or waits
+    /// there. One lock with [`Self::claim`], [`Self::hold`] and [`Self::mark_busy`], so no turn
+    /// starts beside a revert (Y-542).
+    fn begin_revert(&self, id: &str) -> Result<(), Failure> {
+        let mut held = self.lock();
+        if held.reverting.contains(id) {
+            return Err(elsewhere());
+        }
+        if held.claimed.contains(id)
+            || held.next.contains_key(id)
+            || held.lives.get(id).is_some_and(|live| live.unsettled())
+        {
+            return Err(busy());
+        }
+        held.reverting.insert(id.to_owned());
+        Ok(())
+    }
+
+    fn end_revert(&self, id: &str) {
+        self.lock().reverting.remove(id);
+    }
+
+    /// Marks `live` busy with a turn. `Ok(false)` is a keeper that runs a turn or is closing.
+    fn mark_busy(&self, live: &Live) -> Result<bool, Failure> {
+        let held = self.lock();
+        if held.reverting.contains(&live.id) {
+            return Err(elsewhere());
+        }
+        let mut state = live.lock();
+        if state.busy || state.closing {
+            return Ok(false);
+        }
+        state.busy = true;
+        Ok(true)
+    }
+
     /// Adds `live` unless the thread already has one.
     fn insert(&self, live: &Arc<Live>) -> bool {
         let mut held = self.lock();
@@ -1183,14 +1221,18 @@ impl Registry {
     }
 
     /// Holds `next` for the end of the turn `live` runs, and tells every socket. A `live` that
-    /// runs no turn, or has left the registry, gives `next` back.
+    /// runs no turn and is not closing, has left the registry, or reverts gives `next` back.
     fn hold(&self, live: &Live, next: Next) -> Result<(), Next> {
         let mut held = self.lock();
         let current = held
             .lives
             .get(&live.id)
             .is_some_and(|held| std::ptr::eq(held.as_ref(), live));
-        if !current || !live.busy() {
+        let ending = {
+            let state = live.lock();
+            state.busy || state.checkpointing || state.closing
+        };
+        if !current || !ending || held.reverting.contains(&live.id) {
             return Err(next);
         }
         let queue = held.next.entry(live.id.clone()).or_default();
@@ -1218,19 +1260,18 @@ impl Registry {
         self.lock().drain_next(live);
     }
 
-    /// The queue of thread `id`, for a socket that attaches.
-    fn queue_of(&self, id: &str) -> Option<QueueFrame> {
-        self.lock()
-            .next
-            .get(id)
-            .map(|next| QueueFrame::of(id, next))
+    /// The queue of thread `id`, empty included, for a socket that attaches.
+    fn queue_of(&self, id: &str) -> QueueFrame {
+        QueueFrame::of(id, self.lock().next.get(id).map_or(&[], Vec::as_slice))
     }
 
     /// Marks a thread's keeper as being started or read back. `false` is a
-    /// thread another task already holds.
+    /// thread another task already holds, or one that reverts.
     fn claim(&self, id: &str) -> bool {
         let mut held = self.lock();
-        !held.lives.contains_key(id) && held.claimed.insert(id.to_owned())
+        !held.lives.contains_key(id)
+            && !held.reverting.contains(id)
+            && held.claimed.insert(id.to_owned())
     }
 
     fn release(&self, id: &str) {
@@ -1786,12 +1827,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                         },
                         None => next,
                     };
-                    let turn = Typed {
-                        text: next.text,
-                        images,
-                        mode,
-                    };
-                    begin(machine, name, here, sub, early, asked.flatten(), turn, peer).await
+                    begin(machine, name, here, sub, early, asked.flatten(), next, peer).await
                 }
             }
         }
@@ -1831,17 +1867,14 @@ async fn heard_frame<M: Machine, P: Peer>(
                 let said = "no thread is open, so there is nothing to revert";
                 peer.say(&failure(Kind::BadFrame, said)).await
             }
-            Some(_) if live.as_ref().is_some_and(|live| live.unsettled()) => {
-                peer.say(&busy()).await
-            }
             Some(here) => {
                 let place = here.place.clone();
-                if !machine.registry().lock().reverting.insert(place.id.clone()) {
-                    return peer.say(&elsewhere()).await;
+                if let Err(refusal) = machine.registry().begin_revert(&place.id) {
+                    return peer.say(&refusal).await;
                 }
                 let said =
                     revert(machine.as_ref(), name, &place, turn, live.as_deref(), peer).await;
-                machine.registry().lock().reverting.remove(&place.id);
+                machine.registry().end_revert(&place.id);
                 said
             }
         },
@@ -2213,17 +2246,22 @@ async fn attach<M: Machine, P: Peer>(
                 }
                 _ => replay(machine.as_ref(), &here.place, None, peer).await,
             };
-            if !sent {
+            if !sent || !peer.say(&machine.registry().queue_of(&here.place.id)).await {
                 return None;
             }
             None
         }
         (None, Some(harness)) => {
             match connect(machine, name, &here.place, harness, here.session.clone()).await {
-                Ok((_, Some(receiver))) => Some(Sub {
-                    receiver,
-                    seen: None,
-                }),
+                Ok((_, Some(receiver))) => {
+                    if !peer.say(&machine.registry().queue_of(&here.place.id)).await {
+                        return None;
+                    }
+                    Some(Sub {
+                        receiver,
+                        seen: None,
+                    })
+                }
                 // Another task started it meanwhile, and has sent events already.
                 Ok((_, None)) => {
                     let Some(live) = machine.registry().live(&here.place.id) else {
@@ -2327,9 +2365,8 @@ async fn replay_subscribed<M: Machine, P: Peer>(
     if !say_all(peer, &remade).await {
         return None;
     }
-    if let Some(queue) = machine.registry().queue_of(&here.place.id)
-        && !peer.say(&queue).await
-    {
+    // Always, so a tab that missed the queue's end draws it empty.
+    if !peer.say(&machine.registry().queue_of(&here.place.id)).await {
         return None;
     }
     Some(Sub {
@@ -2412,7 +2449,7 @@ async fn begin<M: Machine, P: Peer>(
     sub: &mut Option<Sub>,
     early: &mut Option<String>,
     pick: Option<Harness>,
-    said: Typed<'_>,
+    next: Next,
     peer: &mut P,
 ) -> bool {
     let here = match here {
@@ -2443,17 +2480,11 @@ async fn begin<M: Machine, P: Peer>(
         }
     }
     if here.harness.is_none() {
-        machine.registry().remember_mode(&here.place.id, said.mode);
+        machine.registry().remember_mode(&here.place.id, next.mode);
     }
     // A keeper that ended closes the subscription before the loop sees it.
     let unsubscribed = sub.as_ref().is_none_or(|open| open.receiver.is_closed());
-    let started = match here.harness {
-        None => claude_turn(machine, name, &here.place, said)
-            .await
-            .map(|receiver| receiver.map(Follow::New)),
-        Some(harness) => acp_turn(machine, name, here, harness, said, unsubscribed).await,
-    };
-    match started {
+    match start_or_hold(machine, name, here, next, unsubscribed).await {
         Ok(Some(follow)) => {
             if !flush(sub, peer).await {
                 return false;
@@ -2535,13 +2566,70 @@ async fn open<M: Machine>(
     }
 }
 
+/// What came of an attempt to start a turn.
+enum Turned<T> {
+    Started(T),
+    /// Another task started or holds the thread first, or a revert runs there.
+    Lost,
+}
+
+impl<T> Turned<T> {
+    fn map<U>(self, f: impl FnOnce(T) -> U) -> Turned<U> {
+        match self {
+            Self::Started(started) => Turned::Started(f(started)),
+            Self::Lost => Turned::Lost,
+        }
+    }
+}
+
+/// Starts `next`, or holds it behind the turn that another task started first, until
+/// [`CONNECT_WITHIN`]. `Ok(None)` is a held turn; the socket follows the next keeper.
+async fn start_or_hold<M: Machine>(
+    machine: &Arc<M>,
+    name: &str,
+    here: &Here,
+    mut next: Next,
+    unsubscribed: bool,
+) -> Result<Option<Follow>, Failure> {
+    let deadline = tokio::time::Instant::now() + CONNECT_WITHIN;
+    loop {
+        if let Some(live) = machine.registry().live(&here.place.id) {
+            match machine.registry().hold(&live, next) {
+                Ok(()) => {
+                    tracing::info!("chat {name}: a turn waits for the running one");
+                    return Ok(None);
+                }
+                Err(back) => next = back,
+            }
+        }
+        let turn = Typed {
+            text: next.text.clone(),
+            images: next.images.as_deref(),
+            mode: next.mode,
+        };
+        let turned = match here.harness {
+            None => claude_turn(machine, name, &here.place, turn)
+                .await?
+                .map(|receiver| receiver.map(Follow::New)),
+            Some(harness) => acp_turn(machine, name, here, harness, turn, unsubscribed).await?,
+        };
+        match turned {
+            Turned::Started(follow) => return Ok(follow),
+            Turned::Lost if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Turned::Lost => return Err(busy()),
+        }
+    }
+}
+
 /// Starts a Claude turn in a new keeper and subscribes the socket to it.
 async fn claude_turn<M: Machine>(
     machine: &Arc<M>,
     name: &str,
     place: &Place,
     Typed { text, images, mode }: Typed<'_>,
-) -> Result<Option<broadcast::Receiver<Sent>>, Failure> {
+) -> Result<Turned<Option<broadcast::Receiver<Sent>>>, Failure> {
     // The last turn's keeper may still be exiting; its turn has ended.
     let deadline = tokio::time::Instant::now() + STOP_GRACE + STOP_GRACE;
     while let Some(live) = machine.registry().live(&place.id)
@@ -2551,7 +2639,7 @@ async fn claude_turn<M: Machine>(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let Some(mut claim) = Claim::take(machine, place) else {
-        return Err(busy());
+        return Ok(Turned::Lost);
     };
     let started = machine.start(place, &text, images, mode).await;
     let KeptTurn { turn, events, run } = match started {
@@ -2572,7 +2660,7 @@ async fn claude_turn<M: Machine>(
     let (live, commands) = Live::new(place, run, true);
     let receiver = live.subscribe().map(|(_, _, receiver)| receiver);
     if !machine.registry().insert(&live) {
-        return Err(busy());
+        return Ok(Turned::Lost);
     }
     claim.started = false;
     drop(claim);
@@ -2591,7 +2679,7 @@ async fn claude_turn<M: Machine>(
             completed: false,
         },
     ));
-    Ok(receiver)
+    Ok(Turned::Started(receiver))
 }
 
 /// How a socket follows the keeper that takes its turn.
@@ -2611,7 +2699,7 @@ async fn acp_turn<M: Machine>(
     harness: Harness,
     Typed { text, mode, .. }: Typed<'_>,
     unsubscribed: bool,
-) -> Result<Option<Follow>, Failure> {
+) -> Result<Turned<Option<Follow>>, Failure> {
     let mut subscribed = None;
     // A keeper that is stopping takes no turn; the next one loads the session.
     let deadline = tokio::time::Instant::now() + STOP_GRACE + STOP_GRACE;
@@ -2643,16 +2731,12 @@ async fn acp_turn<M: Machine>(
             live
         }
     };
-    {
-        let mut state = live.lock();
-        if state.busy || state.closing {
-            return Err(busy());
-        }
-        state.busy = true;
+    if !machine.registry().mark_busy(&live)? {
+        return Ok(Turned::Lost);
     }
     tracing::info!("chat {name}: a turn started");
     live.command(Command::Turn { text, mode });
-    Ok(subscribed)
+    Ok(Turned::Started(subscribed))
 }
 
 /// Starts `harness` in a keeper and loads `session` or makes one, or reads back a keeper already
@@ -2890,6 +2974,8 @@ async fn keep_claude<M: Machine>(
             },
         }
     }
+    // A Claude keeper ends with its turn, so a turn sent from here on is held for the next one.
+    live.lock().closing = true;
     checkpointed(
         machine.as_ref(),
         &name,
@@ -2961,31 +3047,20 @@ fn send_queued<M: Machine>(
     name: String,
     place: Place,
     acp: Option<(Harness, String)>,
-    Next { text, mode, images }: Next,
+    next: Next,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
-        let turn = Typed {
-            text,
-            images: images.as_deref(),
-            mode,
+        if acp.is_none() {
+            machine.registry().remember_mode(&place.id, next.mode);
+        }
+        let (harness, session) = acp.unzip();
+        let here = Here {
+            place,
+            harness,
+            session,
         };
-        let started = match acp {
-            None => {
-                machine.registry().remember_mode(&place.id, mode);
-                claude_turn(&machine, &name, &place, turn).await.map(drop)
-            }
-            Some((harness, session)) => {
-                let here = Here {
-                    place: place.clone(),
-                    harness: Some(harness),
-                    session: Some(session),
-                };
-                acp_turn(&machine, &name, &here, harness, turn, false)
-                    .await
-                    .map(drop)
-            }
-        };
-        if let Err(refusal) = started {
+        let place = &here.place;
+        if let Err(refusal) = start_or_hold(&machine, &name, &here, next, false).await {
             tracing::warn!(
                 "chat {name}: the queued turn did not start: {}",
                 refusal.said
@@ -3144,8 +3219,9 @@ async fn keep_acp<M: Machine>(
                     tracing::info!("chat {name}: the agent did not stop, so its keeper is killed");
                     if let Err(said) = machine.finish(&place, Duration::ZERO).await {
                         tracing::warn!("chat {name}: {said}");
-                        // The keeper stays, so it takes turns again.
+                        // The keeper stays, so it takes turns again, the held ones first.
                         live.lock().closing = false;
+                        prompt_next(machine.as_ref(), &name, &place, &live, &mut acp).await;
                     }
                 }
             }
@@ -3153,6 +3229,8 @@ async fn keep_acp<M: Machine>(
                 if !live.busy() && !live.watched() && quiet_since.elapsed() >= IDLE {
                     tracing::info!("chat {name}: the thread is idle, so its agent stops");
                     close_agent(machine.as_ref(), &name, &place, &live, &mut kill_at).await;
+                    // A close that failed takes the turns held while it ran.
+                    prompt_next(machine.as_ref(), &name, &place, &live, &mut acp).await;
                     quiet_since = tokio::time::Instant::now();
                 }
             }
@@ -3370,10 +3448,11 @@ fn wake_on<M: Machine>(
                 mode,
             };
             match claude_turn(&machine, &name, &place, turn).await {
-                Ok(_) => {
+                Ok(Turned::Started(_)) => {
                     tracing::info!("chat {name}: a room message woke thread {thread}");
                     return Woke::Started;
                 }
+                Ok(Turned::Lost) => {}
                 Err(refusal) if refusal.kind != Kind::Busy => {
                     tracing::warn!(
                         "chat {name}: thread {thread} was not woken: {}",
@@ -4768,6 +4847,7 @@ mod tests {
             tab.next().await["payload"],
             json!({"streamKind": "assistant_text", "delta": "hi there", "itemId": "history:2"})
         );
+        no_queue(&mut tab).await;
         tab.send(json!({"type": "turn", "text": "again"}));
         assert_eq!(tab.next().await["payload"]["streamKind"], "user_text");
         assert_eq!(*script.opened.lock().expect("a lock"), 0, "no new thread");
@@ -4971,6 +5051,7 @@ mod tests {
             tab.next().await["payload"],
             json!({"thread": THREAD, "harness": "opencode"})
         );
+        no_queue(&mut tab).await;
         let replayed = tab.next().await;
         assert_eq!(replayed["threadId"], THREAD);
         assert_eq!(
@@ -5002,6 +5083,7 @@ mod tests {
         });
         let (mut tab, _served) = connect(Arc::clone(&claudes), Some(THREAD));
         assert_eq!(tab.next().await["payload"]["harness"], "claude");
+        no_queue(&mut tab).await;
         let said = tab
             .next_after(json!({"type": "turn", "text": "hi", "harness": "codex"}))
             .await;
@@ -5708,6 +5790,7 @@ mod tests {
         let (mut back, _b) = connect_after(Arc::clone(&script), Some(THREAD), Some(&cursor));
         assert_eq!(back.next().await["type"], "thread.started");
         assert_eq!(Some(&back.next().await), ended.last(), "the diff");
+        no_queue(&mut back).await;
         assert!(back.quiet().await, "once");
         back.send(json!({"type": "revert", "turn": 0}));
         assert_eq!(back.next().await["type"], "thread.reverted");
@@ -5715,6 +5798,7 @@ mod tests {
 
         let (mut again, _c) = connect_after(Arc::clone(&script), Some(THREAD), Some(&cursor));
         assert_eq!(again.next().await["type"], "thread.started");
+        no_queue(&mut again).await;
         assert!(again.quiet().await, "a reverted turn's diff is not sent");
     }
 
@@ -5802,6 +5886,7 @@ mod tests {
             json!({"streamKind": "user_text", "delta": "fix the test", "itemId": "user:1"}),
             "the running turn's prompt"
         );
+        no_queue(&mut second).await;
         let said = second
             .next_after(json!({"type": "revert", "turn": 0}))
             .await;
@@ -5892,6 +5977,7 @@ mod tests {
         });
         let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
         assert_eq!(tab.next().await["type"], "thread.started");
+        no_queue(&mut tab).await;
         assert_eq!(
             tab.next_after(json!({"type": "revert", "turn": 2})).await,
             json!({"threadId": THREAD, "type": "thread.reverted", "payload": {"turn": 2}})
@@ -5908,6 +5994,7 @@ mod tests {
         });
         let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
         tab.next().await;
+        no_queue(&mut tab).await;
         assert_eq!(
             tab.next_after(json!({"type": "revert", "turn": 4})).await,
             json!({"type": "error", "kind": "checkpoint",
@@ -5931,6 +6018,7 @@ mod tests {
         });
         let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
         assert_eq!(tab.next().await["type"], "thread.started");
+        no_queue(&mut tab).await;
         assert_eq!(
             tab.next_after(json!({"type": "diff"})).await,
             json!({"type": "branchDiff", "threadId": THREAD, "base": "0123abcd",
@@ -5950,6 +6038,7 @@ mod tests {
         });
         let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
         tab.next().await;
+        no_queue(&mut tab).await;
         assert_eq!(
             tab.next_after(json!({"type": "diff"})).await,
             json!({"type": "error", "kind": "diff",
@@ -5965,6 +6054,7 @@ mod tests {
         });
         let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
         tab.next().await;
+        no_queue(&mut tab).await;
         script.registry.lock().reverting.insert(place().id);
         let said = tab.next_after(json!({"type": "diff"})).await;
         assert_eq!(said["kind"], "busy", "{said}");
@@ -6289,6 +6379,7 @@ mod tests {
             replayed.push(second.next().await);
         }
         assert_eq!(replayed, drawn[at + 1..], "each later event once");
+        no_queue(&mut second).await;
         assert!(second.quiet().await, "and nothing twice");
 
         let request = drawn[drawn.len() - 1]["payload"]["requestId"].clone();
@@ -6331,6 +6422,7 @@ mod tests {
         for frame in &drawn {
             assert_eq!(&second.next().await, frame);
         }
+        no_queue(&mut second).await;
         assert!(second.quiet().await);
     }
 
@@ -6394,6 +6486,7 @@ mod tests {
             ended.last(),
             "and the turn's diff (ADR-0035 decision 8)"
         );
+        no_queue(&mut back).await;
         assert!(back.quiet().await, "and no transcript");
     }
 
@@ -6459,6 +6552,7 @@ mod tests {
             second.next().await["payload"]["delta"],
             "Run touch made.txt"
         );
+        no_queue(&mut second).await;
 
         let mut claude = script.claude().await;
         claude.heard().await;
@@ -6855,6 +6949,11 @@ mod tests {
         json!({"type": "queue", "threadId": THREAD, "texts": texts})
     }
 
+    /// An attach sends the queue, an empty one too.
+    async fn no_queue(tab: &mut Tab) {
+        assert_eq!(tab.next().await, queue(&[]), "the queue as it is");
+    }
+
     fn ended() -> Value {
         json!({"type": "result", "subtype": "success", "is_error": false})
     }
@@ -6883,6 +6982,7 @@ mod tests {
         let (mut second, _b) = connect(Arc::clone(&script), Some(THREAD));
         assert_eq!(second.next().await["type"], "thread.started");
         second.next().await;
+        no_queue(&mut second).await;
 
         first.send(json!({"type": "turn", "text": "and the docs"}));
         assert_eq!(first.next().await, queue(&["and the docs"]));
@@ -7174,8 +7274,8 @@ mod tests {
         );
     }
 
-    /// Y-542: a turn's end checkpoint does not refuse the next turn, and the
-    /// turn it waits behind still sends its diff to the tab first.
+    /// Y-542, Y-561: a turn sent while the last turn's checkpoint is kept is
+    /// queued, and the turn it waits behind still sends its diff first.
     #[tokio::test]
     async fn a_turn_sent_while_the_last_is_kept_gets_the_last_diff_first() {
         let gate = Arc::new(tokio::sync::Notify::new());
@@ -7185,13 +7285,16 @@ mod tests {
         });
         let (mut tab, _claude) = a_claude_turn_that_ends(&script).await;
         until_turn_over(&script).await;
-        tab.send(json!({"type": "turn", "text": "and the docs"}));
-        // The socket waits in the turn for the last keeper to go.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            tab.next_after(json!({"type": "turn", "text": "and the docs"}))
+                .await,
+            queue(&["and the docs"])
+        );
         gate.notify_one();
         let diff = tab.next().await;
         assert_eq!(diff["type"], "turn.diff.updated", "{diff}");
         assert_eq!(diff["payload"]["turn"], 1);
+        assert_eq!(tab.next().await, queue(&[]));
         assert_eq!(tab.next().await["payload"]["itemId"], "user:2");
         assert_eq!(
             prompt_of(&script.claude().await.heard().await.expect("a line")),
@@ -7216,9 +7319,12 @@ mod tests {
         until_script(&script, |script| *lock(&script.stdin_closed) == 1).await;
         assert!(agent.closed().await, "its stdin closed");
 
-        tab.send(json!({"type": "turn", "text": "again"}));
-        // The turn waits while the old agent ends.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Y-561: the turn is queued while the old agent ends.
+        assert_eq!(
+            tab.next_after(json!({"type": "turn", "text": "again"}))
+                .await,
+            queue(&["again"])
+        );
         drop(agent);
         let mut next = script.agent().await;
         next.initialized().await;
@@ -7226,6 +7332,7 @@ mod tests {
         assert_eq!(load["method"], "session/load");
         assert_eq!(load["params"]["sessionId"], SESSION);
         next.reply(&load, json!({})).await;
+        assert_eq!(tab.next().await, queue(&[]));
         let said = tab.next().await;
         assert_eq!(said["payload"]["itemId"], "user:2:1", "{said}");
         assert_eq!(next.heard().await["method"], "session/prompt");
@@ -7249,6 +7356,7 @@ mod tests {
         let (mut second, _b) = connect(Arc::clone(&script), Some(THREAD));
         assert_eq!(second.next().await["type"], "thread.started");
         through(&mut second, "turn.diff.updated").await;
+        no_queue(&mut second).await;
         drop(agent);
         until_script(&script, |script| {
             script.registry.live(&place().id).is_none()
@@ -7312,6 +7420,7 @@ mod tests {
             .await;
         agent.reply(&load, json!({})).await;
         assert_eq!(first.next().await["type"], "thread.started");
+        no_queue(&mut first).await;
         let history = first.next().await;
         assert_eq!(history["payload"]["delta"], "list the files", "{history}");
 
@@ -7404,8 +7513,8 @@ mod tests {
         (browser, heard)
     }
 
-    fn typed(text: &str) -> Typed<'static> {
-        Typed {
+    fn typed(text: &str) -> Next {
+        Next {
             text: text.to_owned(),
             images: None,
             mode: PermissionMode::default(),
@@ -7492,6 +7601,7 @@ mod tests {
             .await;
         agent.reply(&load, json!({})).await;
         assert_eq!(first.next().await["type"], "thread.started");
+        no_queue(&mut first).await;
         let history = first.next().await;
         assert_eq!(history["payload"]["delta"], "list the files", "{history}");
 
@@ -7501,5 +7611,103 @@ mod tests {
             serde_json::from_str(&heard.recv().await.expect("a frame")).expect("JSON");
         assert_eq!(said, history, "the session/load history");
         assert_eq!(agent.heard().await["method"], "session/prompt");
+    }
+
+    /// Y-561, Y-542: a revert does not start while a turn waits, and no turn
+    /// starts, waits or is marked busy while a revert runs.
+    #[tokio::test]
+    async fn a_revert_and_a_held_or_started_turn_exclude_each_other() {
+        let registry = Registry::default();
+        let id = place().id;
+        let kind = |reverted: Result<(), Failure>| reverted.err().map(|refusal| refusal.kind);
+        let (ending, _commands) = Live::new(&place(), "1".to_owned(), false);
+        ending.lock().closing = true;
+        assert!(registry.insert(&ending));
+        assert!(
+            registry.hold(&ending, typed("and the docs")).is_ok(),
+            "a keeper that closes holds the turn"
+        );
+        assert_eq!(kind(registry.begin_revert(&id)), Some(Kind::Busy));
+        let (_, held) = registry.forget(&ending);
+        assert_eq!(held.len(), 1);
+
+        assert_eq!(kind(registry.begin_revert(&id)), None);
+        assert_eq!(
+            kind(registry.begin_revert(&id)),
+            Some(Kind::Busy),
+            "one revert"
+        );
+        assert!(!registry.claim(&id), "no keeper starts");
+        let (idle, _commands) = Live::new(&place(), "2".to_owned(), false);
+        assert!(registry.insert(&idle));
+        assert!(
+            registry.hold(&idle, typed("later")).is_err(),
+            "no turn waits"
+        );
+        idle.lock().closing = true;
+        assert!(registry.hold(&idle, typed("later")).is_err());
+        idle.lock().closing = false;
+        assert_eq!(
+            registry.mark_busy(&idle).err().map(|refusal| refusal.kind),
+            Some(Kind::Busy),
+            "no ACP turn is sent"
+        );
+        assert!(!idle.busy());
+
+        registry.end_revert(&id);
+        assert_eq!(registry.mark_busy(&idle).ok(), Some(true));
+    }
+
+    /// Y-561: a turn that loses the start to another task's waits behind it,
+    /// and is never refused as busy.
+    #[tokio::test]
+    async fn a_turn_that_loses_the_start_is_held_behind_the_winner() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        assert!(
+            script.registry.claim(&place().id),
+            "another task starts a turn"
+        );
+        let claudes = Here {
+            harness: None,
+            session: None,
+            ..here()
+        };
+        let starting = {
+            let script = Arc::clone(&script);
+            tokio::spawn(async move {
+                start_or_hold(&script, "web", &claudes, typed("and the docs"), false)
+                    .await
+                    .map(|follow| follow.is_none())
+                    .map_err(|refusal| refusal.said)
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let (won, _commands) = Live::new(&place(), "1".to_owned(), true);
+        assert!(script.registry.insert(&won));
+        script.registry.release(&place().id);
+
+        assert_eq!(starting.await.expect("it ends"), Ok(true), "held");
+        assert_eq!(
+            script.registry.queue_of(&place().id).texts,
+            ["and the docs"]
+        );
+        assert!(lock(&script.modes).is_empty(), "no second turn");
+    }
+
+    /// Y-561: a tab that attaches, with a cursor or without, gets the queue
+    /// even when it is empty, so one that was away while it drained clears it.
+    #[tokio::test]
+    async fn an_attach_with_no_keeper_sends_the_empty_queue() {
+        let script = Arc::new(Script {
+            threads: vec![place()],
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect_after(Arc::clone(&script), Some(THREAD), Some("1:9:0"));
+        assert_eq!(tab.next().await["type"], "thread.started");
+        no_queue(&mut tab).await;
+        assert!(tab.quiet().await);
     }
 }
