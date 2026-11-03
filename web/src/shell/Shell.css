@@ -1,6 +1,7 @@
 .shell {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   min-height: 100dvh;
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface);

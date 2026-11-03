@@ -71,6 +71,8 @@ test('the tablet and desktop shells pad their top by the inset', async ({ page, 
   await expect(shell).toBeVisible()
   await withInset(page)
   await expect.poll(() => shell.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('47px')
+  // content-box would add the insets to min-height: 100dvh and scroll a short page
+  expect(await shell.evaluate((el) => getComputedStyle(el).boxSizing)).toBe('border-box')
 })
 
 const withSideInsets = (page: import('@playwright/test').Page) =>
