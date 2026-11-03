@@ -85,6 +85,8 @@ test.describe('the branch diff', () => {
     )
     await expect(page.getByRole('menuitem', { name: 'Zed' })).toHaveAttribute('href', `zed://ssh/${ssh}${WORKTREE}/src/new.rs`)
     await page.keyboard.press('Escape')
+    // Under CI load the closing menu still answers for "Zed" when the next one opens.
+    await expect(page.getByRole('menu')).toHaveCount(0)
 
     await file(page, 'docs/guide/intro.md').getByRole('button', { name: 'Open in editor: docs/guide/intro.md' }).click()
     await expect(page.getByRole('menuitem', { name: 'Zed' })).toHaveAttribute(
