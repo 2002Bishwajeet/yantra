@@ -10,16 +10,18 @@ use std::sync::Arc;
 
 use tokio::sync::{Notify, RwLock};
 use yantra_core::attention::{Attention, Forge};
-use yantra_core::github::{self, Device, Error, Github, Token};
+use yantra_core::github::{self, Account, Device, Error, Github, Token};
 use yantra_core::notify;
 
-/// What is known about the grant. `login` is learned from `GET /user` — by
-/// the sign-in that made the grant, or by the readiness look for one that
-/// came from the environment — so it can lag the token by one look.
+/// What is known about the grant. `login` and `avatar_url` are learned from
+/// `GET /user` — by the sign-in that made the grant, or by the readiness look
+/// for one that came from the environment — so they can lag the token by one
+/// look.
 #[derive(Debug, Clone, Default)]
 pub struct Held {
     pub token: Option<Token>,
     pub login: Option<String>,
+    pub avatar_url: Option<String>,
     pub scopes: Vec<String>,
     /// A device flow is waiting for a code to be entered at github.com.
     pub pending: bool,
@@ -66,10 +68,12 @@ impl Grant {
         self.changed.notified().await;
     }
 
-    /// The readiness look learned the login of a grant that came from the
+    /// The readiness look learned the account of a grant that came from the
     /// environment.
-    pub async fn learned(&self, login: String) {
-        self.held.write().await.login = Some(login);
+    pub async fn learned(&self, account: Account) {
+        let mut held = self.held.write().await;
+        held.login = Some(account.login);
+        held.avatar_url = account.avatar_url;
     }
 
     /// `false` when a flow is already waiting — a second code would race the
@@ -83,10 +87,11 @@ impl Grant {
         true
     }
 
-    async fn set(&self, grant: github::Grant, login: String) {
+    async fn set(&self, grant: github::Grant, account: Account) {
         *self.held.write().await = Held {
             token: Some(grant.token),
-            login: Some(login),
+            login: Some(account.login),
+            avatar_url: account.avatar_url,
             scopes: grant.scopes,
             pending: false,
         };
@@ -131,12 +136,13 @@ pub async fn sign_in(
     let api = Github::default();
     let outcome = async {
         let got = api.wait(&client_id, &device).await?;
-        let login = api.login_name(&got.token).await?;
-        Ok::<_, Error>((got, login))
+        let account = api.account(&got.token).await?;
+        Ok::<_, Error>((got, account))
     }
     .await;
     match outcome {
-        Ok((got, login)) => {
+        Ok((got, account)) => {
+            let login = &account.login;
             let file = std::path::Path::new(notify::RELAY_FILE);
             let written = {
                 let _write = env.lock().await;
@@ -149,7 +155,7 @@ pub async fn sign_in(
                     file.display()
                 ),
             }
-            grant.set(got, login).await;
+            grant.set(got, account).await;
         }
         Err(error) => {
             tracing::warn!("github sign-in did not complete: {error}");
@@ -200,7 +206,10 @@ mod tests {
                     token: token(),
                     scopes: vec!["repo".to_owned()],
                 },
-                "octocat".to_owned(),
+                Account {
+                    login: "octocat".to_owned(),
+                    avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".to_owned()),
+                },
             )
             .await;
 
@@ -210,6 +219,10 @@ mod tests {
             .expect("the waiter did not panic");
         let held = grant.read().await;
         assert_eq!(held.login.as_deref(), Some("octocat"));
+        assert_eq!(
+            held.avatar_url.as_deref(),
+            Some("https://avatars.githubusercontent.com/u/1?v=4")
+        );
         assert_eq!(held.scopes, ["repo"]);
         assert!(!held.pending);
 

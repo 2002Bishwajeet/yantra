@@ -83,8 +83,8 @@ describe('the desktop shell', () => {
 
   it('counts unseen events and GitHub items on the bell', async () => {
     mount('desktop')
-    // Six events, none seen, plus one review and one issue.
-    expect(await screen.findByRole('button', { name: /Notifications\s*8 unread/ })).toBeTruthy()
+    // Nine events, none seen, plus one review and one issue.
+    expect(await screen.findByRole('button', { name: /Notifications\s*11 unread/ })).toBeTruthy()
   })
 
   it('offers Settings and About from the avatar', async () => {
@@ -312,5 +312,51 @@ describe('the FAB', () => {
       await screen.findByRole('dialog', { name: 'New session' })
       expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
     })
+  })
+})
+
+/** Y-583: the GitHub profile image on the account button, and the icon
+ *  whenever there is no image to draw. */
+describe('the account button', () => {
+  const AVATAR = 'https://avatars.githubusercontent.com/u/1?v=4'
+  const account = () => screen.findByRole('button', { name: 'Account' })
+  const image = (button: HTMLElement) => button.querySelector('img')
+  const icon = (button: HTMLElement) => button.querySelector('svg')
+
+  it('draws the profile image of the grant the daemon holds', async () => {
+    mount('desktop', '/', { overrides: { '/api/github': { body: { ...contract.github, avatar_url: AVATAR } } } })
+    const button = await account()
+    await waitFor(() => expect(image(button)?.getAttribute('src')).toBe(AVATAR))
+    // Decorative: the button keeps its name, and the image adds none.
+    expect(image(button)?.getAttribute('alt')).toBe('')
+  })
+
+  it.each([
+    ['no grant is held', { status: 200, body: { ...contract.disconnected, avatar_url: AVATAR } }],
+    ['GitHub has no image', { status: 200, body: { ...contract.github, avatar_url: null } }],
+    ['the daemon refuses', { status: 500, body: 'boom' }],
+  ])('draws the icon when %s', async (_, answer) => {
+    const asked = mount('desktop', '/', { overrides: { '/api/github': answer } })
+    const button = await account()
+    await waitFor(() => expect(asked).toContain('GET /api/github'))
+    expect(icon(button)).toBeTruthy()
+    expect(image(button)).toBeNull()
+  })
+
+  it('goes back to the icon, in the same box, when the image does not load', async () => {
+    mount('desktop', '/', { overrides: { '/api/github': { body: { ...contract.github, avatar_url: AVATAR } } } })
+    const button = await account()
+    const loaded = await waitFor(() => {
+      const one = image(button)
+      expect(one).toBeTruthy()
+      return one as HTMLImageElement
+    })
+    // The icon is drawn under the image the whole time, so losing the image
+    // moves nothing; the box itself is the e2e's to measure.
+    const under = icon(button)
+    expect(under).toBeTruthy()
+    fireEvent.error(loaded)
+    await waitFor(() => expect(image(button)).toBeNull())
+    expect(icon(button)).toBe(under)
   })
 })

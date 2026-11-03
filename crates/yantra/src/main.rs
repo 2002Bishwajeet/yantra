@@ -16,11 +16,13 @@ use yantra_core::clone;
 use yantra_core::commit;
 use yantra_core::dirs;
 use yantra_core::doctor::{self, Report, State};
+use yantra_core::extract;
 use yantra_core::github::{self, Github};
 use yantra_core::history;
 use yantra_core::identity;
 use yantra_core::install::{self, Outcome};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
+use yantra_core::layout;
 use yantra_core::logs;
 use yantra_core::mic;
 use yantra_core::notify;
@@ -288,6 +290,11 @@ enum Command {
         #[arg(long)]
         daemon: String,
     },
+    /// The dashboard layout yantrad serves, in ~/.config/yantra/dashboard.json
+    Layout {
+        #[command(subcommand)]
+        action: LayoutAction,
+    },
     /// Steer the rooms live agents talk in (ADR-0038)
     Room {
         #[command(subcommand)]
@@ -373,7 +380,70 @@ enum PrAction {
 }
 
 #[derive(Debug, Subcommand)]
+enum LayoutAction {
+    /// Print the layout as JSON
+    Show,
+    /// Replace the layout. The file names the rev it was read at, and a
+    /// newer rev on disk refuses it
+    Set {
+        /// A layout as `show` prints it, or `-` for stdin
+        file: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum RoomAction {
+    /// Define a room in a workspace. Its definition outlives a restart of
+    /// yantrad; its messages do not
+    New {
+        /// The room's name: 1 to 32 of a-z, 0-9 and -
+        room: String,
+        /// The workspace the room belongs to
+        #[arg(long)]
+        workspace: String,
+        /// What the room is for, at most 500 characters
+        #[arg(long)]
+        brief: Option<String>,
+        /// The branch handoffs start from; the workspace's current branch when absent
+        #[arg(long)]
+        base: Option<String>,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// List the rooms yantrad holds
+    Ls {
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// Show a room and the messages it keeps
+    Show {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// Set a defined room's brief. An empty brief clears it
+    Edit {
+        /// The room's name
+        room: String,
+        /// What the room is for, at most 500 characters
+        #[arg(long)]
+        brief: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// End a room and delete its definition. A room already gone exits 0
+    Rm {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
     /// Set a room's turn budget back to 0, so its agents may send again
     Resume {
         /// The room's name
@@ -400,6 +470,24 @@ enum HistoryAction {
     /// Write a redacted copy of every agent transcript to the folder Syncthing
     /// sends. Needs `gitleaks` on PATH
     Stage,
+    /// Cut training rows for a decision from a redacted history folder, and
+    /// check each one with `gitleaks` again. Needs `gitleaks` on PATH
+    Extract {
+        /// The decision the rows are for
+        #[arg(long, value_enum)]
+        decision: Decision,
+        /// Where `rows.jsonl`, `rows.meta.jsonl` and `questions.json` go
+        #[arg(long)]
+        out: PathBuf,
+        /// A staging folder or the archive, the one that holds `claude/`
+        folder: PathBuf,
+    },
+}
+
+/// A value enum, so the tool-permission decision is a second variant later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum Decision {
+    SessionState,
 }
 
 #[derive(Debug, Subcommand)]
@@ -549,6 +637,14 @@ async fn main() -> ExitCode {
         Some(Command::History {
             action: HistoryAction::Stage,
         }) => history_stage(),
+        Some(Command::History {
+            action:
+                HistoryAction::Extract {
+                    decision: Decision::SessionState,
+                    out,
+                    folder,
+                },
+        }) => history_extract(&folder, &out),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::SshIdentity {
@@ -569,6 +665,97 @@ async fn main() -> ExitCode {
         Some(Command::Room {
             action: RoomAction::Post { room, text, daemon },
         }) => room_post(room, text, daemon).await,
+        Some(Command::Room {
+            action:
+                RoomAction::New {
+                    room,
+                    workspace,
+                    brief,
+                    base,
+                    daemon,
+                },
+        }) => {
+            let said = format!("room {room} made in workspace {workspace}");
+            let name = room.clone();
+            room_verb(
+                "new",
+                Some(&name),
+                move || {
+                    mcp::create(
+                        &daemon,
+                        &room,
+                        &workspace,
+                        brief.as_deref(),
+                        base.as_deref(),
+                    )
+                },
+                |_| println!("{said}"),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Ls { daemon },
+        }) => {
+            room_verb(
+                "ls",
+                None,
+                move || mcp::list(&daemon),
+                |rooms| {
+                    print!("{}", room_table(rooms));
+                },
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Show { room, daemon },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "show",
+                Some(&name),
+                move || mcp::show(&daemon, &room),
+                |view| print!("{}", room_view(view)),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action:
+                RoomAction::Edit {
+                    room,
+                    brief,
+                    daemon,
+                },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "edit",
+                Some(&name),
+                move || mcp::edit(&daemon, &room, &brief),
+                |_| println!("room {name}: brief saved"),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Rm { room, daemon },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "rm",
+                Some(&name),
+                move || mcp::remove(&daemon, &room),
+                |answer| match answer["removed"].as_bool() {
+                    Some(false) => println!("room {name} was already gone"),
+                    _ => println!("room {name} removed"),
+                },
+            )
+            .await
+        }
+        Some(Command::Layout {
+            action: LayoutAction::Show,
+        }) => layout_show(),
+        Some(Command::Layout {
+            action: LayoutAction::Set { file },
+        }) => layout_set(&file),
         Some(Command::Why {
             workspace,
             repo,
@@ -584,6 +771,60 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+    }
+}
+
+/// A file that is not a layout prints the default, as yantrad serves it.
+fn layout_show() -> ExitCode {
+    let shown = match layout::read() {
+        Err(layout::Error::Corrupt(reason)) => {
+            eprintln!("yantra: dashboard.json is not a layout ({reason}), so this is the default");
+            Ok(layout::Layout::default())
+        }
+        read => read,
+    };
+    match shown {
+        Ok(shown) => {
+            // A plain struct always serialises.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&shown).unwrap_or_default()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn layout_set(file: &Path) -> ExitCode {
+    let bytes = if file == Path::new("-") {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes).map(|_| bytes)
+    } else {
+        std::fs::read(file)
+    };
+    let saved = match bytes {
+        Ok(bytes) => layout::Layout::parse(&bytes).and_then(|sent| layout::replace(&sent)),
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    match saved {
+        Ok(saved) => {
+            println!("saved the layout at rev {}", saved.rev);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, layout::Error::Stale(_)) {
+                eprintln!("\x20 note: `yantra layout show` prints the current layout to edit.");
+            }
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -654,6 +895,108 @@ async fn room_post(name: String, text: String, daemon: String) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `room new`, `ls`, `show`, `edit` and `rm`: refuses a bad name before the
+/// daemon is asked, as `room resume` does, and hands the answer to `done`.
+async fn room_verb(
+    verb: &str,
+    name: Option<&str>,
+    call: impl FnOnce() -> Result<String, String> + Send + 'static,
+    done: impl FnOnce(&serde_json::Value),
+) -> ExitCode {
+    if let Some(name) = name
+        && !yantra_core::room::valid_name(name)
+    {
+        eprintln!(
+            "yantra: {}",
+            yantra_core::room::Error::BadName(name.to_owned())
+        );
+        return ExitCode::FAILURE;
+    }
+    match tokio::task::spawn_blocking(call).await {
+        Ok(Ok(said)) => {
+            done(&serde_json::from_str(&said).unwrap_or_default());
+            ExitCode::SUCCESS
+        }
+        Ok(Err(said)) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra room {verb}: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// One line per room. A room with no workspace is one an agent made.
+fn room_table(rooms: &serde_json::Value) -> String {
+    let rooms = rooms.as_array().map(Vec::as_slice).unwrap_or_default();
+    if rooms.is_empty() {
+        return "no rooms\n".to_owned();
+    }
+    rooms
+        .iter()
+        .map(|room| {
+            format!(
+                "{:<32}  {:<20}  {} members  {} messages  {}/{}{}\n",
+                room["name"].as_str().unwrap_or_default(),
+                room["workspace"].as_str().unwrap_or("(made by an agent)"),
+                room["members"],
+                room["messages"],
+                room["spent"],
+                room["budget"],
+                if room["paused"] == true {
+                    "  paused"
+                } else {
+                    ""
+                },
+            )
+        })
+        .collect()
+}
+
+/// The summary, then each message as `seq from: text`.
+fn room_view(room: &serde_json::Value) -> String {
+    let field = |key: &str| room[key].as_str().map(terminal_safe);
+    let mut out = format!(
+        "room {}\nworkspace {}\n",
+        field("name").unwrap_or_default(),
+        field("workspace").unwrap_or_else(|| "(made by an agent)".to_owned()),
+    );
+    if let Some(base) = field("base") {
+        out.push_str(&format!("base {base}\n"));
+    }
+    if let Some(brief) = field("brief") {
+        out.push_str(&format!("brief {brief}\n"));
+    }
+    for message in room["log"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        out.push_str(&format!(
+            "{:>4} {}: {}\n",
+            message["seq"].as_u64().unwrap_or_default(),
+            terminal_safe(message["from"].as_str().unwrap_or_default()),
+            terminal_safe(message["text"].as_str().unwrap_or_default()),
+        ));
+    }
+    out
+}
+
+/// A message is another agent's text, so no escape sequence reaches the terminal.
+fn terminal_safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() && c != '\n' {
+                '\u{fffd}'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 async fn why(name: Option<String>, wanted: Option<placement::Wanted>, daemon: String) -> ExitCode {
@@ -1781,6 +2124,50 @@ fn render_history(report: &history::Report) -> String {
     )
 }
 
+/// Exit 0 once the rows are written, unless a transcript could not be read:
+/// `history stage`'s rule, so a partial answer shows.
+fn history_extract(folder: &Path, out: &Path) -> ExitCode {
+    match extract::extract(folder, out) {
+        Ok(report) => {
+            print!("{}", render_extract(&report));
+            for path in &report.dropped_by_gitleaks {
+                eprintln!(
+                    "yantra: dropped a row with a secret from {}: a bug against Y-430, \
+                     because the staging copy is old or a rule changed",
+                    path.display()
+                );
+            }
+            for (path, err) in &report.unreadable {
+                eprintln!("yantra: not read: {}: {err}", path.display());
+            }
+            if report.unreadable.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_extract(report: &extract::Report) -> String {
+    format!(
+        "rows:               {}\n  ask_user_question: {}\n  judge:             {}\n\
+         skipped (blocked):  {}\ndropped (gitleaks): {}\nunparsed lines:     {}\n\
+         unreadable files:   {}\n",
+        report.rows(),
+        report.ask_user_question,
+        report.judge,
+        report.skipped_blocked,
+        report.dropped_by_gitleaks.len(),
+        report.unparsed_lines,
+        report.unreadable.len()
+    )
+}
+
 /// The shape an installer and an agent read (D2.2), and a test pins it.
 /// `machines` is an object rather than a bare array so a later reading can be
 /// added beside it without moving what is already there.
@@ -2289,8 +2676,8 @@ async fn github_login() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let login = match api.login_name(&grant.token).await {
-        Ok(login) => login,
+    let login = match api.account(&grant.token).await {
+        Ok(account) => account.login,
         Err(err) => {
             report_error(&err);
             return ExitCode::FAILURE;
@@ -2342,9 +2729,9 @@ async fn github_status() -> ExitCode {
     let Some(token) = grant() else {
         return ExitCode::FAILURE;
     };
-    match Github::default().login_name(&token).await {
-        Ok(login) => {
-            println!("signed in as {login}");
+    match Github::default().account(&token).await {
+        Ok(account) => {
+            println!("signed in as {}", account.login);
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -2823,6 +3210,128 @@ mod tests {
     }
 
     #[test]
+    fn the_room_definition_verbs_parse() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(["yantra", "room"].iter().chain(args).copied())
+                .map(|cli| cli.command)
+        };
+        assert!(matches!(
+            parse(&["new", "r2", "--workspace", "web", "--brief", "b", "--base", "main", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::New { room, workspace, brief, base, daemon } }))
+                if room == "r2" && workspace == "web" && brief.as_deref() == Some("b")
+                    && base.as_deref() == Some("main") && daemon == "d"
+        ));
+        assert!(matches!(
+            parse(&["new", "r2", "--workspace", "web", "--daemon", "d"]),
+            Ok(Some(Command::Room {
+                action: RoomAction::New {
+                    brief: None,
+                    base: None,
+                    ..
+                }
+            }))
+        ));
+        assert!(
+            parse(&["new", "r2", "--daemon", "d"]).is_err(),
+            "a room needs a workspace"
+        );
+        assert!(matches!(
+            parse(&["ls", "--daemon", "d"]),
+            Ok(Some(Command::Room {
+                action: RoomAction::Ls { .. }
+            }))
+        ));
+        assert!(matches!(
+            parse(&["show", "r2", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Show { room, .. } })) if room == "r2"
+        ));
+        assert!(matches!(
+            parse(&["edit", "r2", "--brief", "", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Edit { brief, .. } })) if brief.is_empty()
+        ));
+        assert!(
+            parse(&["edit", "r2", "--daemon", "d"]).is_err(),
+            "edit needs a brief"
+        );
+        assert!(matches!(
+            parse(&["rm", "r2", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Rm { room, .. } })) if room == "r2"
+        ));
+        for verb in [&["ls"][..], &["show", "r2"], &["rm", "r2"]] {
+            assert!(parse(verb).is_err(), "{verb:?} needs the daemon");
+        }
+    }
+
+    #[test]
+    fn the_layout_verbs_parse() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(["yantra", "layout"].iter().chain(args).copied())
+                .map(|cli| cli.command)
+        };
+        assert!(matches!(
+            parse(&["show"]),
+            Ok(Some(Command::Layout {
+                action: LayoutAction::Show
+            }))
+        ));
+        assert!(matches!(
+            parse(&["set", "-"]),
+            Ok(Some(Command::Layout { action: LayoutAction::Set { file } })) if file == Path::new("-")
+        ));
+        assert!(matches!(
+            parse(&["set", "mine.json"]),
+            Ok(Some(Command::Layout { action: LayoutAction::Set { file } })) if file == Path::new("mine.json")
+        ));
+        assert!(parse(&["set"]).is_err(), "set needs a file");
+        assert!(parse(&["show", "x"]).is_err());
+        assert!(parse(&[]).is_err());
+    }
+
+    #[test]
+    fn layout_set_refuses_a_file_that_is_not_a_layout_before_writing() {
+        let file = std::env::temp_dir().join(format!("yantra-layout-set-{}", std::process::id()));
+        std::fs::write(&file, r#"{"v":2}"#).expect("written");
+        assert_eq!(layout_set(&file), ExitCode::FAILURE);
+        assert_eq!(
+            layout_set(&file.with_extension("absent")),
+            ExitCode::FAILURE
+        );
+    }
+
+    #[tokio::test]
+    async fn a_room_definition_verb_refuses_a_bad_name_before_asking_the_daemon() {
+        let code = room_verb(
+            "rm",
+            Some("Bad Name"),
+            || unreachable!("the daemon is not asked"),
+            |_| {},
+        )
+        .await;
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn a_room_view_names_its_home_and_keeps_escapes_out_of_the_terminal() {
+        let view = room_view(&serde_json::json!({
+            "name": "r2", "workspace": "web", "brief": "Ship it.", "base": null,
+            "log": [{"seq": 1, "from": "yantrad", "text": "restarted"},
+                    {"seq": 2, "from": "alpha", "text": "\u{1b}[2Jgone\nnext"}]
+        }));
+        assert_eq!(
+            view,
+            "room r2\nworkspace web\nbrief Ship it.\n   1 yantrad: restarted\n   2 alpha: \u{fffd}[2Jgone\nnext\n"
+        );
+        assert_eq!(room_table(&serde_json::json!([])), "no rooms\n");
+        let table = room_table(&serde_json::json!([
+            {"name": "r2", "workspace": null, "members": 1, "messages": 3, "spent": 3, "budget": 20, "paused": true}
+        ]));
+        assert!(
+            table.contains("(made by an agent)") && table.ends_with("3/20  paused\n"),
+            "{table}"
+        );
+    }
+
+    #[test]
     fn why_needs_a_workspace_or_a_target_and_the_daemons_address() {
         let parsed = Cli::try_parse_from(["yantra", "why", "demo", "--daemon", "http://x:7717"])
             .expect("`why <workspace> --daemon <url>` parses");
@@ -2860,6 +3369,53 @@ mod tests {
                 action: HistoryAction::Stage
             })
         ));
+    }
+
+    #[test]
+    fn history_extract_parses() {
+        let cli = Cli::try_parse_from([
+            "yantra",
+            "history",
+            "extract",
+            "--decision",
+            "session-state",
+            "--out",
+            "d",
+            "f",
+        ])
+        .expect("parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::History {
+                action: HistoryAction::Extract {
+                    decision: Decision::SessionState,
+                    out,
+                    folder,
+                }
+            }) if out == Path::new("d") && folder == Path::new("f")
+        ));
+        assert!(
+            Cli::try_parse_from(["yantra", "history", "extract", "--out", "d", "f"]).is_err(),
+            "the decision is required"
+        );
+    }
+
+    #[test]
+    fn the_extract_summary_has_one_line_per_count() {
+        let report = extract::Report {
+            ask_user_question: 2,
+            judge: 3,
+            skipped_blocked: 1,
+            dropped_by_gitleaks: vec![PathBuf::from("a")],
+            unparsed_lines: 4,
+            ..extract::Report::default()
+        };
+        assert_eq!(
+            render_extract(&report),
+            "rows:               5\n  ask_user_question: 2\n  judge:             3\n\
+             skipped (blocked):  1\ndropped (gitleaks): 1\nunparsed lines:     4\n\
+             unreadable files:   0\n"
+        );
     }
 
     #[test]
@@ -4641,6 +5197,8 @@ mod tests {
     #[test]
     fn pr_open_prints_opened_or_already_open() {
         let mut opened = commit::Opened {
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
             number: 21,
             url: "https://github.com/o/r/pull/21".to_owned(),
             created: true,

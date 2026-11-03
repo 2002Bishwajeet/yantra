@@ -95,13 +95,13 @@ export function github(connection: Asked<Grant>): Step {
   return { status: 'todo', words: 'not connected · reviews, issues and repositories come through it' }
 }
 
-/** ADR-0021: a relay saved in Settings reaches the daemon at its next start,
+/** ADR-0021: a saved relay reaches the daemon at its next start,
  *  so `relay` is what a push uses now and not what was last saved. */
 export function push(about: Asked<About>): Step {
   if (about.error) return failed(about.error)
   if (about.isPending || !about.data) return reading()
   if (about.data.relay) return { status: 'done', words: 'the daemon holds a relay and pushes to it' }
-  return { status: 'todo', words: 'no relay yet · one saved in Settings is used after yantrad restarts' }
+  return { status: 'todo', words: 'no relay yet · Set up walks it from the phone app to a test alert' }
 }
 
 /** What a machine's checks say, in the board's words. Off is `asleep`, which

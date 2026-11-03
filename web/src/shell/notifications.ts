@@ -34,6 +34,13 @@ export function asEvents(data: unknown): Event[] {
   return []
 }
 
+/** The PR watch's kinds (Y-494), worded as the relay's `Title` is. */
+const PULL_EVENTS: Partial<Record<Event['kind'], { headline: string; mark: MarkState }>> = {
+  check_failed: { headline: 'Check failed', mark: 'failed' },
+  checks_passed: { headline: 'Checks passed', mark: 'done' },
+  reviewed: { headline: 'PR reviewed', mark: 'needs' },
+}
+
 function ofEvent(event: Event, index: number): Entry {
   const who = event.workspace ?? event.machine ?? 'the daemon'
   const tile: Entry['tile'] = event.workspace
@@ -90,6 +97,11 @@ function ofEvent(event: Event, index: number): Entry {
           open: event.machine,
           wrap: true,
         }
+  }
+
+  const watched = PULL_EVENTS[event.kind]
+  if (watched) {
+    return { ...base, headline: `${who}: ${watched.headline}`, supporting: event.said, mark: watched.mark }
   }
 
   const headline =

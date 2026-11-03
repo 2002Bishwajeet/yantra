@@ -145,6 +145,10 @@ test.describe('the composer', () => {
   test('shows the keyboard focus on the card, since the field draws no outline', async ({ page }) => {
     const edge = () =>
       page.locator('.composer__card').evaluate((card) => getComputedStyle(card, '::after').borderTopColor)
+    // Chromium 1.64 starts a Tab from the page body at the first link, so reach the field from its neighbour.
+    await composer(page).focus()
+    await page.keyboard.press('Shift+Tab')
+    await expect(composer(page)).not.toBeFocused()
     const resting = await edge()
     await page.keyboard.press('Tab')
     await expect(composer(page)).toBeFocused()
@@ -336,16 +340,17 @@ test.describe('the composer', () => {
       .poll(() =>
         page.evaluate(() => {
           const all = [...document.querySelectorAll<HTMLElement>('.composer__controls button')]
+          if (all.length === 0) return ['no controls']
           return all.flatMap((control) => {
             const box = control.getBoundingClientRect()
-            return [-20, 20].map((dx) => {
+            return [-20, 20].flatMap((dx) => {
               const hit = document.elementFromPoint(box.x + box.width / 2 + dx, box.y + box.height / 2)?.closest('button')
-              return !hit || hit === control || !all.includes(hit)
+              return !hit || hit === control || !all.includes(hit) ? [] : [`${control.ariaLabel ?? control.textContent} ${dx}`]
             })
           })
         }),
       )
-      .toEqual([true, true, true, true, true, true])
+      .toEqual([])
   })
 
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {

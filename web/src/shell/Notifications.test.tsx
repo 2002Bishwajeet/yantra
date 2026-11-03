@@ -59,8 +59,8 @@ describe('notifications on the desktop', () => {
     // The GitHub items still count: they have no read state of their own.
     await waitFor(() => expect(screen.getByRole('button', { name: /Notifications\s*2 unread/ })).toBeTruthy())
     fireEvent.click(popover.getByRole('radio', { name: 'All' }))
-    // Y-399's fixture `joined` event is the eighth (contract.gen.ts).
-    expect((await popover.findAllByRole('listitem')).length).toBe(8)
+    // Nine fixture events (contract.gen.ts) and the two GitHub items.
+    expect((await popover.findAllByRole('listitem')).length).toBe(11)
   })
 })
 

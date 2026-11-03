@@ -47,14 +47,17 @@ const design: RoomSummary = {
   members: 2,
   messages: 1,
   last_at: NOW - 60,
+  workspace: 'web',
+  brief: null,
+  base: null,
 }
 const review: RoomSummary = { ...design, name: 'review', spent: 20, paused: true, messages: 2 }
 
 const reviewRoom: RoomData = {
   ...review,
   log: [
-    { seq: 19, at: NOW - 120, from: 'alpha · chat A1', text: 'The API is ready.', budget: 19 },
-    { seq: 20, at: NOW - 60, from: 'beta', text: '<b>bold?</b>\nline two', budget: 20 },
+    { seq: 19, kind: 'text', at: NOW - 120, from: 'alpha · chat A1', text: 'The API is ready.', budget: 19 },
+    { seq: 20, kind: 'text', at: NOW - 60, from: 'beta', text: '<b>bold?</b>\nline two', budget: 20 },
   ],
 }
 
@@ -201,7 +204,7 @@ describe('one room', () => {
       ...reviewRoom,
       paused: false,
       spent: 0,
-      log: [...reviewRoom.log, { seq: 21, at: NOW, from: 'owner on pixel', text: 'Go ahead.', budget: 0 }],
+      log: [...reviewRoom.log, { seq: 21, kind: 'text', at: NOW, from: 'owner on pixel', text: 'Go ahead.', budget: 0 }],
     }
     const calls = daemon({
       'GET /api/rooms/review': () => ({ status: 200, body: posted ? after : reviewRoom }),

@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import type { Scenario } from './lib/scenario'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
@@ -48,6 +49,66 @@ test.describe('the FAB on the first run', () => {
     test.skip(size !== 'desktop', 'the rail is the desktop shell')
     await expect(page.getByRole('link', { name: 'Add a device' })).toBeVisible()
     await expect(page.getByRole('complementary', { name: 'Sessions' })).toHaveCount(0)
+  })
+})
+
+/** Y-590: the tablet rail is sticky, so only the content scrolls. */
+test.describe('the tablet rail on a scrolling page', () => {
+  test.beforeEach(async ({ page, size }) => {
+    test.skip(size !== 'tablet', 'the rail is the tablet shell')
+    await scenario(page, 'busy')
+  })
+
+  const rail = (page: Page) => page.locator('.m3-rail')
+  const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
+
+  test('stays put and fills the screen while the page scrolls', async ({ page }) => {
+    await page.setViewportSize({ width: 820, height: 500 })
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    const tall = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)
+    expect(tall).toBe(true)
+
+    const before = (await rail(page).boundingBox())!
+    const mainBefore = (await page.getByRole('main').boundingBox())!
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+
+    const after = (await rail(page).boundingBox())!
+    expect(after.x).toBe(before.x)
+    expect(after.y).toBe(before.y)
+    expect(after.height).toBe(await page.evaluate(() => window.innerHeight))
+    expect((await page.getByRole('main').boundingBox())!.y).toBeLessThan(mainBefore.y)
+
+    await expect(page.locator('.shell__rail-fab')).toBeInViewport()
+    await expect(rail(page).getByRole('button', { name: /Notifications/ })).toBeInViewport()
+    await expect(rail(page).getByRole('button', { name: 'Account' })).toBeInViewport()
+
+    await page.evaluate(() => document.documentElement.style.setProperty('--m3-safe-top', '47px'))
+    const inset = (await rail(page).boundingBox())!
+    expect(inset.y).toBe(47)
+    expect(inset.y + inset.height).toBe(await page.evaluate(() => window.innerHeight))
+  })
+
+  test('scrolls its own items on a short landscape screen', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 400 })
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+
+    const box = (await rail(page).boundingBox())!
+    expect(box.height).toBe(await page.evaluate(() => window.innerHeight))
+    const overflow = await rail(page).evaluate((el) => [el.scrollHeight, el.clientHeight])
+    expect(overflow[0]).toBeGreaterThan(overflow[1])
+
+    const account = rail(page).getByRole('button', { name: 'Account' })
+    await account.scrollIntoViewIfNeeded()
+    await expect(account).toBeInViewport()
+    await account.click({ trial: true })
+
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+    expect((await rail(page).boundingBox())!.y).toBe(box.y)
   })
 })
 
@@ -328,5 +389,33 @@ test.describe('the shell on busy', () => {
     await about.hover()
     await expect.poll(() => layer(about)).toBeGreaterThan(0)
     await expect(about).toHaveCSS('cursor', 'pointer')
+  })
+})
+
+/** Y-583: the GitHub profile image fills the account button at every width,
+ *  and an image that does not load leaves the icon in the same box. */
+test.describe('the account button', () => {
+  const account = (page: Page) => page.getByRole('button', { name: 'Account' })
+  const open = async (page: Page, name: Scenario) => {
+    await scenario(page, name)
+    await page.goto('/')
+    await expect(account(page)).toBeVisible()
+  }
+
+  test('draws the profile image', async ({ page }) => {
+    await open(page, 'avatar')
+    const image = account(page).locator('img')
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  })
+
+  test('falls back to the icon in the same box when the image does not load', async ({ page }) => {
+    await open(page, 'contract')
+    const icon = await account(page).boundingBox()
+
+    await open(page, 'avatarbroken')
+    await expect(account(page).locator('svg')).toBeVisible()
+    await expect(account(page).locator('img')).toHaveCount(0)
+    expect(await account(page).boundingBox()).toEqual(icon)
   })
 })

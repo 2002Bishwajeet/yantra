@@ -500,12 +500,21 @@ Not provisioning. Yantra never creates, images or destroys a machine — copying
 box the owner already has is the same act as installing the agent, which R-12 accepted as permanent
 scope.
 
-The ntfy relay is written by `/settings` or by `sudo yantra relay <url> [--token T]` into
-`/etc/yantra/daemon.env`, which the unit reads with `EnvironmentFile=`
-([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). The installer creates that
-file empty, `0600` and owned by `yantra`; **leave the owner alone** — the daemon rewrites the file
-in place, so one created by hand as root leaves `/settings` refusing with a 500. `yantrad` reads it
-when systemd starts the unit, so a relay set from the browser needs a restart. The sheet offers
-"Restart now", which asks for the update trigger ([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md))
-and so also installs a newer release if one is published. Without the updater, run
-`sudo systemctl restart yantrad` ([`development.md`](development.md)).
+The ntfy relay is written by the push setup in the browser or by
+`sudo yantra relay <url> [--token T]` into `/etc/yantra/daemon.env`, which the unit reads with
+`EnvironmentFile=` ([ADR-0021](adr/0021-the-relay-is-written-to-an-environment-file.md)). Two
+places open the push setup: **Set up** on "Push to your phone" in the setup walkthrough, and the
+relay row in Settings > Notifications. It walks four steps in one sheet. First, it links the ntfy
+app in the App Store and in Google Play. Second, it makes a topic and shows it as a QR code, a link
+and a URL to copy; a self-hosted topic gets no QR. Third, **Save and send a test** writes the file
+and sends one test message. Fourth, it asks "Did it arrive?". **No** lists what to check on the
+phone and offers **Send another test**, which posts the same topic and token again. A 502 means the
+file is written and the test did not arrive, so the sheet shows the daemon's words and does not ask.
+
+The installer creates that file empty, `0600` and owned by `yantra`; **leave the owner alone** — the
+daemon rewrites the file in place, so one created by hand as root leaves `/settings` refusing with a
+500. `yantrad` reads it when systemd starts the unit, so a relay set from the browser needs a
+restart. The sheet offers "Restart now" beside the save, which asks for the update trigger
+([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md)) and so also installs a newer release if
+one is published. Without the updater, run `sudo systemctl restart yantrad`
+([`development.md`](development.md)).

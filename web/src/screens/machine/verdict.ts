@@ -119,6 +119,7 @@ export const startable = (verdict: Verdict) => verdict.kind === 'ready' || verdi
 function missingTitle(check: Check): string {
   if (check.check === 'provider-auth') return 'gh is not signed in'
   if (check.check === 'login-session') return 'claude is not signed in'
+  if (check.check === 'folder-access') return 'macOS blocks Desktop, Documents and Downloads'
   return `${nameOf(check.check)} is missing`
 }
 

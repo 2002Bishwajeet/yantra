@@ -17,6 +17,7 @@
   "connection": {
     "connected": false,
     "login": null,
+    "avatar_url": null,
     "scopes": [],
     "pending": false,
     "client_id": null,

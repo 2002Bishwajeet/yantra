@@ -315,7 +315,8 @@ async fn github(State(model): State<Model>) -> impl IntoResponse {
 /// `yantra github status` on the wire (ADR-0023). A read of what the daemon
 /// holds, so it awaits no network: whether `GET /user` still accepts the grant
 /// is `/readiness/github`'s, on the sweep. **The token is not in it** — the
-/// login is the one thing about the account that is shown.
+/// login and the profile image URL, both public, are what is shown of the
+/// account.
 ///
 /// `client_id` and `client_id_custom` are read fresh here rather than held:
 /// they answer *which app is in use*, and a client id is not a secret
@@ -344,7 +345,7 @@ async fn repos(State(model): State<Model>) -> impl IntoResponse {
 /// is the daemon filling in its own check.
 ///
 /// [`crate::write`]'s re-check calls it too, so a report a person asked for
-/// carries the same eleven answers as the swept one and not ten plus an
+/// carries the same twelve answers as the swept one and not eleven plus an
 /// *unknown* the daemon could have filled in.
 pub(crate) fn answered(
     report: &doctor::Report,
@@ -836,6 +837,8 @@ impl Item {
 struct Connection {
     connected: bool,
     login: Option<String>,
+    /// GitHub's public profile image URL, learned with the login.
+    avatar_url: Option<String>,
     scopes: Vec<String>,
     pending: bool,
     client_id: Option<String>,
@@ -847,6 +850,7 @@ impl Connection {
         Self {
             connected: held.token.is_some(),
             login: held.login.clone(),
+            avatar_url: held.avatar_url.clone(),
             scopes: held.scopes.clone(),
             pending: held.pending,
             client_id: client_id.as_ref().map(|(id, _)| id.clone()),
@@ -1827,6 +1831,7 @@ pub(crate) mod tests {
         let none = get_json(holding(Snapshot::default()), "/github").await;
         assert_eq!(none["connected"], false, "{none}");
         assert_eq!(none["login"], Value::Null, "{none}");
+        assert_eq!(none["avatar_url"], Value::Null, "{none}");
         assert_eq!(none["scopes"], json!([]), "{none}");
         assert_eq!(none["pending"], false, "{none}");
         // `client_id` mirrors this process's own environment (Y-393), which a
@@ -1844,11 +1849,21 @@ pub(crate) mod tests {
             ))),
             ..holding(Snapshot::default())
         };
-        fleet.github.learned("octocat".into()).await;
+        fleet
+            .github
+            .learned(yantra_core::github::Account {
+                login: "octocat".into(),
+                avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".into()),
+            })
+            .await;
 
         let held = get_json(fleet, "/github").await;
         assert_eq!(held["connected"], true, "{held}");
         assert_eq!(held["login"], "octocat", "{held}");
+        assert_eq!(
+            held["avatar_url"], "https://avatars.githubusercontent.com/u/1?v=4",
+            "{held}"
+        );
         assert_eq!(held["pending"], false, "{held}");
         assert!(!held.to_string().contains("gho_"), "{held}");
     }

@@ -13,7 +13,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { usePrefs } from '@/shell/prefs'
-import { noAccess, under } from './dirs'
+import { under, useNoAccess } from './dirs'
 import { FolderTree } from './FolderTree'
 import { slug, tilde, type Values } from './form'
 import { FOLDER_KEYS, folderKeys, typing } from './keys'
@@ -56,8 +56,8 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
 
 /** Why a listing draws no rows: four different answers, never one sentence
  *  true of all of them (R-23). */
-function nothing(listing: Listing, machine: string, filter: string, folder: string): string {
-  if (!listing.access) return noAccess(machine)
+function nothing(listing: Listing, refused: string, filter: string, folder: string): string {
+  if (!listing.access) return refused
   if (listing.entries.length === 0) return 'this folder is empty'
   if (filter.trim() !== '') return `nothing in ${folder} matches ${filter.trim()}`
   return 'nothing here but hidden entries'
@@ -72,6 +72,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   const machine = values.machine
   const client = useQueryClient()
   const prefs = usePrefs()
+  const refused = useNoAccess(machine)
   // A source kept across a machine switch opens where it is (Y-517); else the folder this
   // machine opened at last time. If it is gone: `$HOME` and a note.
   const [remembered] = useState(() => (values.source?.kind === 'local' ? values.source.path : lastFolder(prefs, machine)))
@@ -260,7 +261,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
             {shown.length === 0 ? (
               <li>
                 <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                  {nothing(listing.data, machine, filter, tilde(here ?? '', root))}
+                  {nothing(listing.data, refused, filter, tilde(here ?? '', root))}
                 </Text>
               </li>
             ) : null}

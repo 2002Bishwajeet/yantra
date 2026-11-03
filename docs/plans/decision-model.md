@@ -117,6 +117,10 @@ subcommand beside `yantra history stage` in the `yantra` CLI. It reuses the `Sca
 `GITLEAKS_CONFIG` from `crates/yantra-core/src/history.rs`. Claude Code transcripts only at first;
 the other harnesses in `HARNESSES` follow when a decision needs them.
 
+> 2026-11-03, Y-463: only `--decision session-state` and Claude Code transcripts are built.
+> Tool-permission waits on Q23, and the other harnesses wait on a decision that needs them.
+> `source` is `ask_user_question` or `judge`; the weak label is always in `next_message`.
+
 Each line of `<dir>/rows.jsonl` is one row in Laya's training format (§4.1). It also writes
 `rows.meta.jsonl`, one line for each row in the same order, with what the split and the audit need.
 Laya's docs do not say that the trainer ignores an unknown key, so the metadata stays out of the

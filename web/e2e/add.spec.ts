@@ -19,7 +19,12 @@ test.describe('Add a device', () => {
     const joined = beat(page, 'Joined')
     await expect(joined.getByText('waiting · run this in a terminal on new-box')).toBeVisible()
     await expect(joined.getByText(COMMAND)).toBeVisible()
-    await expect(joined.getByRole('img', { name: /QR code for .*\/machines\/add\?platform=linux&machine=new-box/ })).toBeVisible()
+    const code = joined.getByRole('img', { name: /QR code for .*\/machines\/add\?platform=linux&machine=new-box/ })
+    if (size === 'phone') {
+      await expect(code).toBeHidden()
+      await joined.getByRole('button', { name: 'Show QR code' }).click()
+    }
+    await expect(code).toBeVisible()
     await axe(page)
     await screenshot(page, 'add-device', 'adding', size)
   })

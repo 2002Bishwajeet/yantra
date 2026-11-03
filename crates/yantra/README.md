@@ -38,6 +38,8 @@ yantra github status             # whom GitHub says the grant in this shell belo
 yantra notify 'needs you'        # publish to the relay YANTRA_NTFY_URL names
 yantra relay <url> [--token T]   # write that relay down for yantrad, and test it
 yantra history stage             # redact this machine's agent transcripts into the folder Syncthing sends
+yantra history extract --decision session-state --out rows ~/.local/share/yantra/history
+                                 # cut training rows from that folder, checked by gitleaks again
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
@@ -47,6 +49,13 @@ yantra about                     # version, target and build date of this binary
 yantra update --check            # running and published version, and whether a newer one exists
 sudo yantra update               # install the current release and restart what runs
 yantra mcp --daemon http://<appliance>:7717  # MCP server: the main agent delegates tasks and talks in rooms
+yantra layout show               # the dashboard layout yantrad serves, as JSON
+yantra layout set <file|->        # replace it; a stale rev exits 1
+yantra room new <room> --workspace <ws> --daemon http://<appliance>:7717  # define a room; it outlives a restart
+yantra room ls --daemon http://<appliance>:7717  # list the rooms
+yantra room show <room> --daemon http://<appliance>:7717  # a room and its messages
+yantra room edit <room> --brief <text> --daemon http://<appliance>:7717  # set a room's brief
+yantra room rm <room> --daemon http://<appliance>:7717  # end a room and delete its definition
 yantra room resume <room> --daemon http://<appliance>:7717  # lift a room's pause after its 20 agent messages
 yantra room post <room> <text> --daemon http://<appliance>:7717  # write into a room as the owner; its count goes to 0
 yantra why <workspace> --daemon http://<appliance>:7717  # rank the machines, and say why each won or lost

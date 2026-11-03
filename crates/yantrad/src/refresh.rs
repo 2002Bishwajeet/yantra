@@ -17,7 +17,8 @@ use yantra_core::{doctor, sessions, status, workspace};
 use crate::events::{self, Event, Events};
 use crate::github::Grant;
 use crate::heartbeat::Fleet;
-use crate::notify::{Notifier, Viewers};
+use crate::notify::{Notifier, Teller, Viewers};
+use crate::watch;
 
 /// `ssh.rs` sets `ControlPersist=300`, so anything under five minutes keeps
 /// every ssh master warm — the poll is what makes the fleet fast rather than a
@@ -31,6 +32,10 @@ const EVERY: Duration = Duration::from_secs(30);
 /// would poll it at twice the rate its server requests. Three classes share
 /// it since Y-342: the inbox, the repository list, and the grant check.
 const ATTENTION: Duration = Duration::from_secs(300);
+
+/// M16 §3.6, after T3 Code: each watched PR is read every two minutes. The
+/// reads are conditional, so a PR that did not change spends no quota.
+const PULLS: Duration = Duration::from_secs(120);
 
 /// ADR-0027 §2: the published version is read hourly and never on the
 /// request path. One call an hour fits even GitHub's anonymous sixty.
@@ -59,6 +64,7 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     inventory: I,
     grant: Grant,
     relay: Option<Relay>,
+    pulls_relay: Option<Relay>,
 ) {
     let model = &fleet.model;
     let viewers = fleet.viewers.clone();
@@ -134,6 +140,33 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
         }
     });
 
+    let pulls = fleet.pulls.clone();
+    let reading = grant.clone();
+    let (watchers, told) = (fleet.viewers.clone(), fleet.events.clone());
+    tokio::spawn(async move {
+        let mut teller = Teller::new(pulls_relay);
+        let github = Github::default();
+        loop {
+            let token = reading.token().await;
+            watch::poll(&pulls, &github, token, &mut teller, &watchers, &told).await;
+            tokio::time::sleep(PULLS).await;
+        }
+    });
+
+    // Also the rebuild at start: the watch keeps nothing across a restart.
+    // Only that first pass is a baseline; a PR found later is new.
+    let found = fleet.pulls.clone();
+    let finding = grant.clone();
+    tokio::spawn(async move {
+        let github = Github::default();
+        let mut rebuilt = false;
+        loop {
+            let token = finding.token().await;
+            rebuilt |= watch::discover(&found, &github, token, !rebuilt).await;
+            tick_or_change(&finding).await;
+        }
+    });
+
     let repos = model.clone();
     tokio::spawn(async move {
         loop {
@@ -196,7 +229,7 @@ async fn look_at_sessions(model: &Model, chats: &crate::chat::Registry) {
     model.write().await.sessions = Some(Arc::new(reading));
 }
 
-/// The dearest look of the five — eleven checks over ssh per machine — and the
+/// The dearest look of the five — twelve checks over ssh per machine — and the
 /// reason it is a look rather than a handler: `doctor` costs a browser poll far
 /// more than a session list does, and the rule about ssh on the request path is
 /// this module's whole subject. The `term` is [`crate::write::term`]'s, because
@@ -261,15 +294,16 @@ async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
 /// daemon holds is still accepted, which the readiness sweep beside it cannot
 /// ask. Its own task because a local answer must not queue behind a
 /// `ConnectTimeout` per asleep machine. A grant from the environment learns
-/// its login here; one the daemon made already knows it.
+/// its account here; one the daemon made already knows it.
 async fn look_at_github(model: &Model, grant: &Grant) {
     let asked = match grant.token().await {
         None => None,
-        Some(token) => Some(Github::default().login_name(&token).await),
+        Some(token) => Some(Github::default().account(&token).await),
     };
-    if let Some(Ok(login)) = &asked {
-        grant.learned(login.clone()).await;
+    if let Some(Ok(account)) = &asked {
+        grant.learned(account.clone()).await;
     }
+    let asked = asked.map(|asked| asked.map(|account| account.login));
     let reading = Reading::new(doctor::github(asked.as_ref()));
     model.write().await.github = Some(Arc::new(reading));
 }

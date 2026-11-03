@@ -12,7 +12,7 @@ import {
 } from './checks'
 
 describe('the check name table', () => {
-  it('names each of doctor’s eleven checks the way a person says it', () => {
+  it('names each of doctor’s twelve checks the way a person says it', () => {
     expect(
       [
         'reachable',
@@ -25,6 +25,7 @@ describe('the check name table', () => {
         'provider-auth',
         'login-session',
         'mic',
+        'folder-access',
         'heartbeat',
       ].map(nameOf),
     ).toEqual([
@@ -38,6 +39,7 @@ describe('the check name table', () => {
       'gh signed in',
       'claude signed in',
       'microphone',
+      'folder access',
       'heartbeat',
     ])
   })
@@ -53,11 +55,16 @@ describe('the check name table', () => {
     expect(fixOf('terminfo', 'pi')).toEqual({ by: 'command', command: 'yantra fix-terminfo pi', where: 'appliance' })
     expect(fixOf('provider-auth', 'pi')).toEqual({ by: 'command', command: 'gh auth login', where: 'machine' })
     expect(fixOf('mic', 'pi')).toEqual({ by: 'hand', words: 'Run Install with Microphone ticked.' })
+    expect(fixOf('folder-access', 'mbp')).toEqual({
+      by: 'hand',
+      words:
+        'To allow it, open System Settings > General > Sharing > Remote Login, and turn on Allow full disk access for remote users. Every ssh login to mbp, agents included, then gets that access.',
+    })
   })
 
   /** Y-390 review: GitHub and `yantra-agent` are optional for a session. */
   it('lists doctor’s ids in order, and says which of them a session needs', () => {
-    expect(CHECK_IDS).toHaveLength(11)
+    expect(CHECK_IDS).toHaveLength(12)
     expect(CHECK_IDS.filter(sessionNeeds)).toEqual(['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'])
     expect(sessionNeeds('docker')).toBe(false)
   })

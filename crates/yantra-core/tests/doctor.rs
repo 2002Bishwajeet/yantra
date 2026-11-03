@@ -123,10 +123,10 @@ impl Drop for Lab {
     }
 }
 
-/// The eleven checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
+/// The twelve checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
 /// on every path below, because the list *and its order* are the contract an
 /// installer and an agent read (D2.2).
-const EXPECTED: [&str; 11] = [
+const EXPECTED: [&str; 12] = [
     "reachable",
     "sshd",
     "tmux",
@@ -137,6 +137,7 @@ const EXPECTED: [&str; 11] = [
     "provider-auth",
     "login-session",
     "mic",
+    "folder-access",
     "heartbeat",
 ];
 
@@ -234,6 +235,8 @@ async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
     // The same rule one row down: the gate runs `claude`, and there is none.
     assert_state(&checks, "login-session", State::Unknown);
     assert_state(&checks, "heartbeat", State::Unknown);
+    // Y-591: only macOS blocks folders over ssh.
+    assert_state(&checks, "folder-access", State::Present);
     // ADR-0031 §9: optional, and the detail says so.
     assert_state(&checks, "mic", State::Absent);
     assert!(

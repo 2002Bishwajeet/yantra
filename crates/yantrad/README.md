@@ -9,7 +9,7 @@ no *read* ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README
 keeps working with no daemon running — that is a decision, not a gap
 ([ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)).
 
-Every route below has a CLI equivalent, and that is the rule rather than a coincidence: anything the
+Every route below has a CLI equivalent, except `POST /api/viewing` and `GET /api/here`, and that is the rule rather than a coincidence: anything the
 web UI can do must be expressible in `yantra` first, which is what stops the daemon growing a richer
 API the CLI cannot reach.
 
@@ -49,6 +49,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
 | `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) |
 | `GET /api/ssh-identity` | `yantra ssh-identity` (the read half — a GET makes no key) |
+| `GET /api/here` | no verb, because a terminal already runs on the machine it would name; names the tailnet machine the request came from, found by the caller's node id from `whois` and not by address (I-5, I-52); authorised like every route, and 503 when the last tailnet look is missing or failed |
 | `GET /join` | `yantra join-script` (outside `/api`; makes the key on first use) |
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
@@ -58,7 +59,11 @@ API the CLI cannot reach.
 | `POST /api/mcp` | `yantra mcp`'s `room_send` and `room_read`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). `GET` is `405` |
 | `POST /api/rooms/{room}/resume` | `yantra room resume` (204; a room this daemon does not hold is `404`) |
 | `POST /api/rooms/{room}/messages` | `yantra room post` (`{seq, delivered}`; the owner writes into a room, labelled `owner on <machine>`, and its count goes to 0; `404` for a room it does not hold, `400` for an empty text or one over 16 KiB; Y-536) |
-| `GET /api/rooms`, `GET /api/rooms/{room}` | **None**: the dashboard's Rooms screens read them (Y-536). The rooms with their budget, pause and members, and one room's messages. Memory, owner-only |
+| `GET /api/rooms`, `GET /api/rooms/{room}` | `yantra room ls` and `yantra room show`, and the dashboard's Rooms screens (Y-536, Y-550). The rooms with their budget, pause and members, and one room's messages. Memory, owner-only |
+| `POST /api/rooms` | `yantra room new` (201 with the summary; writes the room's definition, ADR-0039, Y-550) |
+| `PATCH /api/rooms/{room}` | `yantra room edit` (`{brief}`, where `null` clears it; an undefined room is `404`) |
+| `DELETE /api/rooms/{room}` | `yantra room rm` (`{"removed": bool}`, as the workspace delete answers) |
+| `GET /api/layout`, `PUT /api/layout` | `yantra layout show` and `yantra layout set` (the dashboard layout in `~/.config/yantra/dashboard.json`; a `PUT` at a stale `rev` is `409` with the current layout, ADR-0036, Y-515). The `GET` is not gated |
 | `GET /api/workspaces/{name}/chat` | **None yet for a turn**, which breaks the rule above: an open gap, not a decision. `yantra chat new` and `chat ls` open and list threads (Y-488). A WebSocket for the dashboard's Chat tab; each turn runs the thread's harness in its own worktree: `claude -p`, or an ACP agent (ADR-0026, ADR-0033, Y-356, Y-434). A keeper on the machine holds the turn, so it outlives the socket and the daemon (ADR-0035, Y-447) |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |
 | `GET /api/machines/{machine}/mic` | — (a WebSocket that carries push-to-talk audio into `pw-cat`, ADR-0031 §5) |
@@ -142,8 +147,8 @@ the relay in `/etc/yantra/daemon.env`
 acts on, and the two must not read alike.
 
 `POST /api/github/login` starts that device flow and answers the code to type at github.com; the
-daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the scopes
-and whether a sign-in is pending, never the token. `DELETE /api/github` removes it. `GET /api/repos`
+daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the profile
+image URL, the scopes and whether a sign-in is pending, never the token. `DELETE /api/github` removes it. `GET /api/repos`
 is every repository the grant can see, swept every five minutes and filtered in the browser.
 
 **It is polled every five minutes rather than every thirty seconds**, which is the one read that

@@ -159,6 +159,14 @@ pub enum Polled {
     Granted(Grant),
 }
 
+/// The two public fields of `GET /user` that are shown (ADR-0023 §2).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Account {
+    pub login: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct Repo {
     pub full_name: String,
@@ -272,6 +280,43 @@ pub struct Pull {
     pub number: u64,
     pub url: String,
     pub state: PullState,
+}
+
+/// A read sent with `If-None-Match` when an etag is given. A 304 does not
+/// count against the rate limit, which is what lets a watch poll a PR often.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Conditional<T> {
+    NotModified,
+    Fresh { etag: Option<String>, value: T },
+}
+
+/// `GET /pulls/{n}`, cut to what the PR watch acts on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullHead {
+    pub state: PullState,
+    pub head_sha: String,
+    /// The PR author's login; empty for a deleted account.
+    pub author: String,
+}
+
+/// One check run. `output` holds a summary and text a check wrote, so it is
+/// not named and never read (Q5).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Check {
+    pub name: String,
+    /// `queued`, `in_progress` or `completed`, and a few rarer states.
+    pub status: String,
+    /// Set once `status` is `completed`.
+    pub conclusion: Option<String>,
+}
+
+/// One review, without its body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Review {
+    pub id: u64,
+    pub author: String,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or `PENDING`.
+    pub state: String,
 }
 
 /// `(owner, repo)` of a github.com remote, in its https, `ssh://` or scp form.
@@ -430,16 +475,15 @@ impl Github {
         }
     }
 
-    /// `GET /user`'s `login`, which is the one thing about the account that is
-    /// shown (ADR-0023 §2). A 401 is [`Error::Refused`]: the grant is gone.
-    pub async fn login_name(&self, token: &Token) -> Result<String, Error> {
+    /// `GET /user`'s login and profile image URL, both public. A 401 is
+    /// [`Error::Refused`]: the grant is gone.
+    pub async fn account(&self, token: &Token) -> Result<Account, Error> {
         let url = format!("{}/user", self.api);
         let token = token.clone();
         blocking(move || {
             let mut response = get(&url, &token, &[]).map_err(unreachable)?;
             ok(&response, "/user")?;
-            let user: User = read_json(&mut response, "the account")?;
-            Ok(user.login)
+            read_json(&mut response, "the account")
         })
         .await
     }
@@ -542,15 +586,87 @@ impl Github {
             ok(&response, "the pull request list")?;
             let found: Vec<PullAnswer> = read_json(&mut response, "the pull request list")?;
             Ok(found.into_iter().next().map(|pull| Pull {
+                state: state_of(pull.merged_at.as_deref(), &pull.state),
                 number: pull.number,
                 url: pull.html_url,
-                state: match (pull.merged_at, pull.state.as_str()) {
-                    (Some(_), _) => PullState::Merged,
-                    (None, "open") => PullState::Open,
-                    (None, _) => PullState::Closed,
-                },
             }))
         })
+        .await
+    }
+
+    /// `GET /repos/{o}/{r}/pulls/{n}`: its state, head and author.
+    pub async fn pull(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        etag: Option<&str>,
+    ) -> Result<Conditional<PullHead>, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", self.api);
+        conditional(
+            url,
+            token,
+            &[],
+            etag,
+            "the pull request",
+            |found: HeadAnswer| PullHead {
+                state: state_of(found.merged_at.as_deref(), &found.state),
+                head_sha: found.head.sha,
+                author: found.user.map(|user| user.login).unwrap_or_default(),
+            },
+        )
+        .await
+    }
+
+    /// The check runs on commit `sha`, the first hundred.
+    pub async fn check_runs(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        etag: Option<&str>,
+    ) -> Result<Conditional<Vec<Check>>, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/commits/{sha}/check-runs", self.api);
+        conditional(
+            url,
+            token,
+            &[("per_page", "100")],
+            etag,
+            "the check runs",
+            |found: Runs| found.check_runs,
+        )
+        .await
+    }
+
+    /// The reviews of PR `number`, the first hundred.
+    pub async fn reviews(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        etag: Option<&str>,
+    ) -> Result<Conditional<Vec<Review>>, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", self.api);
+        conditional(
+            url,
+            token,
+            &[("per_page", "100")],
+            etag,
+            "the reviews",
+            |found: Vec<ReviewAnswer>| {
+                found
+                    .into_iter()
+                    .map(|review| Review {
+                        id: review.id,
+                        author: review.user.map(|user| user.login).unwrap_or_default(),
+                        state: review.state,
+                    })
+                    .collect()
+            },
+        )
         .await
     }
 
@@ -744,6 +860,41 @@ struct PullAnswer {
     merged_at: Option<String>,
 }
 
+fn state_of(merged_at: Option<&str>, state: &str) -> PullState {
+    match (merged_at, state) {
+        (Some(_), _) => PullState::Merged,
+        (None, "open") => PullState::Open,
+        (None, _) => PullState::Closed,
+    }
+}
+
+/// `title` and `body` are in the same answer and not named.
+#[derive(serde::Deserialize)]
+struct HeadAnswer {
+    state: String,
+    merged_at: Option<String>,
+    head: Sha,
+    user: Option<User>,
+}
+
+#[derive(serde::Deserialize)]
+struct Sha {
+    sha: String,
+}
+
+#[derive(serde::Deserialize)]
+struct Runs {
+    check_runs: Vec<Check>,
+}
+
+/// `body` is not named, so a review's text never reaches a log.
+#[derive(serde::Deserialize)]
+struct ReviewAnswer {
+    id: u64,
+    user: Option<User>,
+    state: String,
+}
+
 #[derive(serde::Deserialize)]
 struct RepoAnswer {
     default_branch: String,
@@ -851,11 +1002,59 @@ fn request(
     token: Option<&Token>,
     query: &[(&str, &str)],
 ) -> Result<Response, ureq::Error> {
+    built(url, token, query).call()
+}
+
+fn built(
+    url: &str,
+    token: Option<&Token>,
+    query: &[(&str, &str)],
+) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
     let mut request = headed(agent().get(url), token);
     for (key, value) in query {
         request = request.query(key, value);
     }
-    request.call()
+    request
+}
+
+/// A GET that sends `etag` back as `If-None-Match` and reads a 304 as
+/// [`Conditional::NotModified`].
+async fn conditional<A, T>(
+    url: String,
+    token: &Token,
+    query: &'static [(&'static str, &'static str)],
+    etag: Option<&str>,
+    what: &'static str,
+    value: fn(A) -> T,
+) -> Result<Conditional<T>, Error>
+where
+    A: serde::de::DeserializeOwned + 'static,
+    T: Send + 'static,
+{
+    let token = token.clone();
+    let etag = etag.map(str::to_owned);
+    blocking(move || {
+        let mut request = built(&url, Some(&token), query);
+        if let Some(etag) = &etag {
+            request = request.header("If-None-Match", etag);
+        }
+        let mut response = request.call().map_err(unreachable)?;
+        if response.status().as_u16() == 304 {
+            return Ok(Conditional::NotModified);
+        }
+        ok(&response, what)?;
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|etag| etag.to_str().ok())
+            .map(str::to_owned);
+        let found: A = read_json(&mut response, what)?;
+        Ok(Conditional::Fresh {
+            etag,
+            value: value(found),
+        })
+    })
+    .await
 }
 
 fn post(url: &str, token: &Token, body: &serde_json::Value) -> Result<Response, ureq::Error> {
@@ -1224,21 +1423,27 @@ pub(crate) mod tests {
     }
 
     /// The token goes out as a bearer, the API version is pinned, and `login`
-    /// is the one field read.
+    /// and `avatar_url` are the fields read.
     #[tokio::test]
-    async fn the_login_name_is_read_with_a_bearer_and_a_pinned_api_version() {
+    async fn the_account_is_read_with_a_bearer_and_a_pinned_api_version() {
         let (listener, address) = listen();
         let served = serve(
             listener,
             vec![reply(
                 "200 OK",
-                r#"{"login":"octocat","id":1,"email":"octocat@github.com"}"#,
+                r#"{"login":"octocat","id":1,"email":"octocat@github.com","avatar_url":"https://avatars.githubusercontent.com/u/1?v=4"}"#,
             )],
         );
 
-        let login = at(address).login_name(&token()).await.expect("the login");
+        let account = at(address).account(&token()).await.expect("the account");
 
-        assert_eq!(login, "octocat");
+        assert_eq!(
+            account,
+            Account {
+                login: "octocat".to_owned(),
+                avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".to_owned()),
+            }
+        );
         let request = served.join().expect("the listener thread").remove(0);
         assert!(request.starts_with("GET /user HTTP/1.1\r\n"), "{request}");
         let headers = request.to_lowercase();
@@ -1250,6 +1455,18 @@ pub(crate) mod tests {
             headers.contains("x-github-api-version: 2022-11-28"),
             "{headers}"
         );
+    }
+
+    /// An account with no `avatar_url` still reads, with no image.
+    #[tokio::test]
+    async fn an_account_without_an_avatar_url_has_none() {
+        let (listener, address) = listen();
+        let _served = serve(listener, vec![reply("200 OK", r#"{"login":"octocat"}"#)]);
+
+        let account = at(address).account(&token()).await.expect("the account");
+
+        assert_eq!(account.login, "octocat");
+        assert_eq!(account.avatar_url, None);
     }
 
     /// A 401 is GitHub saying the grant is gone, which is a different remedy
@@ -1264,7 +1481,7 @@ pub(crate) mod tests {
                 r#"{"message":"Bad credentials"}"#,
             )],
         );
-        let refused = at(address).login_name(&token()).await.expect_err("401");
+        let refused = at(address).account(&token()).await.expect_err("401");
         assert!(matches!(refused, Error::Refused), "{refused}");
         assert!(
             refused.to_string().contains("yantra github login"),
@@ -1274,7 +1491,7 @@ pub(crate) mod tests {
         let (listener, gone) = listen();
         drop(listener);
         let unreachable = at(gone)
-            .login_name(&token())
+            .account(&token())
             .await
             .expect_err("nothing listens");
         assert!(
@@ -1856,5 +2073,193 @@ pub(crate) mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    const HEAD: &str = r#"{"number":21,"state":"open","merged_at":null,"title":"Secret plan","body":"Do not log","head":{"sha":"aaa111","ref":"fix-7"},"user":{"login":"owner"}}"#;
+
+    /// The watch's three reads send the etag they were given back, and a 304
+    /// is no answer to parse.
+    #[tokio::test]
+    async fn a_pull_read_returns_its_etag_and_a_304_is_not_modified() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                ("200 OK", "ETag: \"e1\"\r\n".to_owned(), HEAD.to_owned()),
+                reply("304 Not Modified", ""),
+            ],
+        );
+        let github = at(address);
+
+        let fresh = github.pull(&token(), "o", "r", 21, None).await;
+        let again = github.pull(&token(), "o", "r", 21, Some("\"e1\"")).await;
+
+        assert_eq!(
+            fresh.expect("a pull"),
+            Conditional::Fresh {
+                etag: Some("\"e1\"".to_owned()),
+                value: PullHead {
+                    state: PullState::Open,
+                    head_sha: "aaa111".to_owned(),
+                    author: "owner".to_owned(),
+                },
+            }
+        );
+        assert_eq!(again.expect("a 304"), Conditional::NotModified);
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[0].starts_with("GET /repos/o/r/pulls/21 HTTP/1.1"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            !seen[0].to_lowercase().contains("if-none-match"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            seen[1].to_lowercase().contains("if-none-match: \"e1\"\r\n"),
+            "{}",
+            seen[1]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_merged_pull_reads_as_merged_and_a_ghost_author_as_empty() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"{"state":"closed","merged_at":"2026-11-01T00:00:00Z","head":{"sha":"b"},"user":null}"#,
+            )],
+        );
+        let read = at(address).pull(&token(), "o", "r", 1, None).await;
+        assert_eq!(
+            read.expect("a pull"),
+            Conditional::Fresh {
+                etag: None,
+                value: PullHead {
+                    state: PullState::Merged,
+                    head_sha: "b".to_owned(),
+                    author: String::new(),
+                },
+            }
+        );
+    }
+
+    /// `output` carries what a check printed, and it never reaches the value.
+    #[tokio::test]
+    async fn check_runs_keep_the_name_status_and_conclusion_only() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![(
+                "200 OK",
+                "ETag: W/\"c1\"\r\n".to_owned(),
+                r#"{"total_count":2,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","output":{"title":"Leak","summary":"API_KEY=hunter2"}},{"name":"lint","status":"in_progress","conclusion":null}]}"#.to_owned(),
+            )],
+        );
+
+        let read = at(address)
+            .check_runs(&token(), "o", "r", "aaa111", None)
+            .await
+            .expect("the runs");
+
+        let Conditional::Fresh { etag, value } = read else {
+            panic!("a 200 is fresh");
+        };
+        assert_eq!(etag.as_deref(), Some("W/\"c1\""));
+        assert_eq!(
+            value,
+            [
+                Check {
+                    name: "test".to_owned(),
+                    status: "completed".to_owned(),
+                    conclusion: Some("failure".to_owned()),
+                },
+                Check {
+                    name: "lint".to_owned(),
+                    status: "in_progress".to_owned(),
+                    conclusion: None,
+                },
+            ]
+        );
+        assert!(!format!("{value:?}").contains("hunter2"));
+        let seen = served.join().expect("the listener thread").remove(0);
+        assert!(
+            seen.starts_with("GET /repos/o/r/commits/aaa111/check-runs?per_page=100 HTTP/1.1"),
+            "{seen}"
+        );
+    }
+
+    #[tokio::test]
+    async fn reviews_keep_no_body() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"[{"id":7,"user":{"login":"friend"},"state":"CHANGES_REQUESTED","body":"Your password is in line 3"},{"id":8,"user":null,"state":"PENDING","body":""}]"#,
+            )],
+        );
+
+        let read = at(address)
+            .reviews(&token(), "o", "r", 21, None)
+            .await
+            .expect("the reviews");
+
+        let Conditional::Fresh { value, .. } = read else {
+            panic!("a 200 is fresh");
+        };
+        assert_eq!(
+            value,
+            [
+                Review {
+                    id: 7,
+                    author: "friend".to_owned(),
+                    state: "CHANGES_REQUESTED".to_owned(),
+                },
+                Review {
+                    id: 8,
+                    author: String::new(),
+                    state: "PENDING".to_owned(),
+                },
+            ]
+        );
+        assert!(!format!("{value:?}").contains("password"));
+        let seen = served.join().expect("the listener thread").remove(0);
+        assert!(
+            seen.starts_with("GET /repos/o/r/pulls/21/reviews?per_page=100 HTTP/1.1"),
+            "{seen}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_conditional_read_names_a_revoked_grant_and_an_answer_it_cannot_read() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("401 Unauthorized", r#"{"message":"Bad credentials"}"#),
+                reply("200 OK", r#"{"check_runs":"not a list"}"#),
+            ],
+        );
+        let github = at(address);
+
+        let refused = github.reviews(&token(), "o", "r", 1, Some("\"e\"")).await;
+        let garbled = github.check_runs(&token(), "o", "r", "a", None).await;
+
+        assert!(matches!(refused, Err(Error::Refused)), "{refused:?}");
+        assert!(
+            matches!(
+                garbled,
+                Err(Error::Parse {
+                    what: "the check runs",
+                    ..
+                })
+            ),
+            "{garbled:?}"
+        );
     }
 }

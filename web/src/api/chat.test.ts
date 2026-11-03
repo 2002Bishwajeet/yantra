@@ -14,10 +14,11 @@ import {
   chatFrames,
   chatNotAttached,
   chatNotLoggedIn,
+  chatQueue,
 } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
 import { AttachError, ChatError, IMAGE_LIMIT, PAUSES, chatAddress, frameOf, openChat, type ChatSocket } from './chat'
-import type { ChatBranchDiff, ThreadEvent } from './thread'
+import type { ChatBranchDiff, ChatQueue, ThreadEvent } from './thread'
 
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 5_000 })
 
@@ -34,6 +35,7 @@ function connect(url: string | ((after?: string) => string) = chatAddress('yantr
   const dropped = vi.fn()
   const restarted = vi.fn()
   const diffs: ChatBranchDiff[] = []
+  const queues: ChatQueue[] = []
   const socket = openChat(typeof url === 'string' ? () => url : url, {
     onEvent: (event) => events.push(event),
     onError: (error) => errors.push(error),
@@ -41,10 +43,11 @@ function connect(url: string | ((after?: string) => string) = chatAddress('yantr
     onDropped: dropped,
     onRestart: restarted,
     onBranchDiff: (diff) => diffs.push(diff),
+    onQueue: (queue) => queues.push(queue),
     pauses,
   })
   sockets.push(socket)
-  return { socket, events, errors, opened, dropped, restarted, diffs }
+  return { socket, events, errors, opened, dropped, restarted, diffs, queues }
 }
 
 beforeEach(async () => {
@@ -263,11 +266,11 @@ describe('the chat socket', () => {
     expect(errors[0]?.retryable).toBe(false)
   })
 
-  it('sends the harness on a turn only when it is given, and the mode', async () => {
+  it('sends the harness on a turn only when it is given, the mode, and only a plan interaction', async () => {
     const { socket, opened } = connect()
     await settled(() => expect(opened).toHaveBeenCalled())
-    socket.send('run the tests', 'opencode', 'auto-accept-edits')
-    socket.send('and the docs', undefined, 'supervised')
+    socket.send('run the tests', 'opencode', 'auto-accept-edits', 'build')
+    socket.send('and the docs', undefined, 'supervised', 'plan')
     await settled(() => expect(server.heard).toHaveLength(2))
     expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual(
       chatFrames.slice(0, 2),
@@ -593,6 +596,29 @@ describe('the branch diff', () => {
     await settled(() => expect(errors).toHaveLength(1))
     expect(errors[0]?.kind).toBe('badFrame')
     expect(diffs).toEqual([])
+  })
+
+  it('hands the queue over, and draws no event from it', async () => {
+    const { queues, events, errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    server.say(JSON.stringify(chatQueue))
+    server.say(JSON.stringify({ ...chatQueue, texts: [] }))
+    await settled(() => expect(queues).toEqual([chatQueue, { ...chatQueue, texts: [] }]))
+    expect(events).toEqual([])
+    expect(errors).toEqual([])
+  })
+
+  it('refuses a malformed queue as badFrame', async () => {
+    const bad = (change: object) => frameOf(JSON.stringify({ ...chatQueue, ...change }))
+    expect(bad({ threadId: 7 })).toBeNull()
+    expect(bad({ texts: 'and the docs' })).toBeNull()
+    expect(bad({ texts: [3] })).toBeNull()
+    const { queues, errors, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    server.say(JSON.stringify({ ...chatQueue, texts: null }))
+    await settled(() => expect(errors).toHaveLength(1))
+    expect(errors[0]?.kind).toBe('badFrame')
+    expect(queues).toEqual([])
   })
 
   it('reads a reply field by field', () => {

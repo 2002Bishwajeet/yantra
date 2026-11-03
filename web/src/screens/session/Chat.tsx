@@ -5,7 +5,14 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { Workspace } from '@/api'
 import { IMAGE_TYPES, type ChatError } from '@/api/chat'
-import { LABEL, type Harness, type ItemType, type PermissionMode, type RequestOpened } from '@/api/thread'
+import {
+  LABEL,
+  type Harness,
+  type Interaction,
+  type ItemType,
+  type PermissionMode,
+  type RequestOpened,
+} from '@/api/thread'
 import { Attachments } from '@/composer/Attachments'
 import * as Composer from '@/composer/Composer'
 import { Icon as ControlIcon, Control, Separator } from '@/composer/Control'
@@ -30,8 +37,9 @@ import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
 import { useEditors } from './diff/useEditors'
 import { HarnessPicker } from './HarnessPicker'
-import { keepMode, recallMode } from './mode'
+import { keepInteraction, keepMode, recallInteraction, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
+import { PlanToggle } from './PlanToggle'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
@@ -157,6 +165,10 @@ function status(timeline: Timeline, harness: Harness | null): string {
   const agent = harness ? LABEL[harness] : 'The agent'
   if (timeline.requests.length > 0) return `${agent} is waiting for your answer.`
   if (timeline.turn === 'stopping') return `Stopping ${agent}…`
+  if (timeline.turn !== 'idle' && timeline.queued.length > 0) {
+    const n = timeline.queued.length
+    return `${agent} is answering. ${n} ${n === 1 ? 'message is' : 'messages are'} queued.`
+  }
   if (timeline.turn !== 'idle') return `${agent} is answering.`
   if (timeline.ended?.state === 'cancelled') return `${agent} stopped.`
   if (timeline.ended?.state === 'completed') return `${agent} finished.`
@@ -228,11 +240,17 @@ export function Chat(props: ChatProps) {
   useEffect(() => {
     if (timeline.thread) keepMode(timeline.thread, mode)
   }, [timeline.thread, mode])
+  const [interaction, setInteraction] = useState<Interaction>(() => recallInteraction(thread))
+  useEffect(() => {
+    if (timeline.thread) keepInteraction(timeline.thread, interaction)
+  }, [timeline.thread, interaction])
   // An attach knows its thread before the daemon says whose it is, so until
   // then it names no harness rather than the picker's default.
   const locked = timeline.thread !== null
   const harness = timeline.harness ?? error?.login?.harness ?? (locked ? null : picked)
   const agent = harness ? LABEL[harness] : 'the agent'
+  // Only Claude has a plan mode, so another harness's turn is a build turn whatever was kept.
+  const planning = harness === 'claude' ? interaction : 'build'
   // A first turn refused for its login never reaches the timeline, so the
   // words it carried come back to the composer. Its images do not: the
   // daemon removes them when the client closes the socket.
@@ -288,8 +306,8 @@ export function Chat(props: ChatProps) {
     .join('\n')
 
   const send = () => {
-    if (text === '' || busy || uploading) return
-    if (chat.send(text, locked ? undefined : picked, mode)) {
+    if (text === '' || uploading) return
+    if (chat.send(text, locked ? undefined : picked, mode, planning)) {
       lastSent.current = draft.trim()
       recalled.current = null
       setDraft('')
@@ -328,17 +346,21 @@ export function Chat(props: ChatProps) {
     if (field) field.setSelectionRange(field.value.length, field.value.length)
   }, [draft])
 
-  const answering = `${agent} is answering. Stop it to send something else.`
+  const answering = `${agent} is answering. A message you queue is sent when it ends.`
   const cannotSend =
     link !== 'open'
       ? 'The chat is not connected, so nothing can be sent.'
-      : busy
-        ? answering
-        : uploading
-          ? 'An image is still uploading. Send once it is attached.'
-          : text === ''
-            ? 'Type a message to send it.'
-            : null
+      : uploading
+        ? 'An image is still uploading. Send once it is attached.'
+        : text === ''
+          ? 'Type a message to send it.'
+          : null
+
+  // Stop drops the queue too, so its text comes back to an empty field.
+  const stop = () => {
+    if (timeline.queued.length > 0) setDraft((now) => now || timeline.queued.join('\n\n'))
+    chat.stop()
+  }
 
   const addComment = (block: string) => {
     setDraft((now) => appendToDraft(now, block))
@@ -454,6 +476,16 @@ export function Chat(props: ChatProps) {
             }
           />
         ) : null}
+        {timeline.queued.length > 0 ? (
+          <section aria-label="Queued messages" className="chat__queued">
+            <p className="chat__queued-title">Queued, sends when {agent} ends</p>
+            <ul>
+              {timeline.queued.map((queued, n) => (
+                <li key={`${n}:${queued}`}>{queued}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <Composer.Root
           above={<PlanBadge plan={timeline.plan} />}
           dropping={dropping}
@@ -504,7 +536,7 @@ export function Chat(props: ChatProps) {
                   reason={cannotSend}
                   running={
                     busy
-                      ? { agent, stopping: timeline.turn === 'stopping', onStop: chat.stop, reason: answering }
+                      ? { agent, stopping: timeline.turn === 'stopping', onStop: stop, reason: answering, queues: true }
                       : null
                   }
                 />
@@ -541,6 +573,13 @@ export function Chat(props: ChatProps) {
                   />
                 ) : null}
                 <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
+                <PlanToggle
+                  disabled={
+                    link !== 'open' ? 'The chat is not connected' : harness !== 'claude' ? 'Plan mode needs Claude' : undefined
+                  }
+                  onChange={setInteraction}
+                  value={planning}
+                />
               </>
             }
           />

@@ -31,6 +31,7 @@ mod contract;
 mod events;
 mod github;
 mod heartbeat;
+mod layout;
 mod mcp;
 mod mic;
 mod notify;
@@ -39,6 +40,7 @@ mod refresh;
 mod room;
 mod tasks;
 mod terminal;
+mod watch;
 mod web;
 mod write;
 
@@ -156,6 +158,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
                     fleet.closing.clone(),
                 ))
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
+                .merge(layout::router(authoriser.clone()))
                 .merge(mic::router(authoriser)),
         )
         .merge(heartbeat::router())
@@ -204,7 +207,15 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             GITHUB_TOKEN
         ),
     }
-    refresh::spawn(&fleet, inventory.clone(), fleet.github.clone(), relay);
+    // Read again for the PR watch, because a `Relay` is not `Clone`.
+    let pulls_relay = yantra_core::notify::from_env();
+    refresh::spawn(
+        &fleet,
+        inventory.clone(),
+        fleet.github.clone(),
+        relay,
+        pulls_relay,
+    );
     let closing = fleet.closing.clone();
     tokio::spawn(async move {
         shutdown().await;
@@ -279,13 +290,16 @@ fn chats(daemon: Option<SocketAddr>) -> chat::Registry {
 
 /// The rooms, whose pauses go to the relay when there is one.
 fn rooms(chats: chat::Registry) -> room::Rooms {
+    let dir = yantra_core::room_file::rooms_dir()
+        .inspect_err(|error| tracing::warn!("no room can be defined: {error}"))
+        .ok();
     match yantra_core::notify::from_env() {
         Some(relay) => {
             let (pauses, heard) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(room::tell(relay, heard));
-            room::Rooms::new(chats, Some(pauses))
+            room::Rooms::new(chats, Some(pauses), dir)
         }
-        None => room::Rooms::new(chats, None),
+        None => room::Rooms::new(chats, None, dir),
     }
 }
 

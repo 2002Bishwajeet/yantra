@@ -1,8 +1,9 @@
-import { LogIn } from 'lucide-react'
+import { ExternalLink, LogIn } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useGithubLogin } from '@/api/mutations'
 import { githubQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
+import { Copyable, useCopy } from '@/m3/copyable/Copyable'
 import { List, ListItem } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
@@ -23,6 +24,7 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
   const { open, onOpenChange } = props
   const login = useGithubLogin()
   const device = login.data
+  const copier = useCopy(device?.user_code ?? '')
   const connection = useQuery({
     ...githubQuery(),
     enabled: open && device !== undefined,
@@ -73,13 +75,17 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
           </>
         ) : (
           <>
-            <Mono className="settings__code">{device.user_code}</Mono>
-            <Text render={<p />} scale="body-medium">
-              open{' '}
-              <a href={device.verification_uri} rel="noreferrer" target="_blank">
-                {device.verification_uri.replace(/^https?:\/\//, '')}
-              </a>{' '}
-              and enter the code
+            <Copyable copier={copier} text={device.user_code} what="the code" />
+            <Button
+              icon={<ExternalLink />}
+              onClick={() => void copier.copy()}
+              render={<a href={device.verification_uri} rel="noreferrer" target="_blank" />}
+              size="m"
+            >
+              Copy code and open GitHub
+            </Button>
+            <Text render={<p />} scale="body-small" tone="variant">
+              Paste the code on GitHub and approve · this sheet continues by itself
             </Text>
             <Text render={<p />} aria-live="polite" scale="body-small" tone="variant">
               waiting · the code is good for {Math.ceil(left / 60)}m

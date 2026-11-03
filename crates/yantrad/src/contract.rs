@@ -64,10 +64,12 @@ import type {
   ChatFrame,
   ChatNotAttached,
   ChatQuery,
+  ChatQueue,
   Cloning,
   Connection,
   Device,
   Event,
+  Here,
   Joined,
   Listed,
   Listing,
@@ -81,6 +83,7 @@ import type {
   Resumed,
   Room,
   RoomPosted,
+  RoomRemoved,
   RoomSummary,
   Spend,
   SshIdentity,
@@ -346,7 +349,13 @@ async fn fleet() -> Fleet {
         ])))),
     });
     // A grant whose login the sweep has learned; the token is in no answer.
-    fleet.github.learned("2002Bishwajeet".into()).await;
+    fleet
+        .github
+        .learned(yantra_core::github::Account {
+            login: "2002Bishwajeet".into(),
+            avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".into()),
+        })
+        .await;
 
     let mut beats = fleet.beats.write().await;
     beats.insert("n-1".to_owned(), Reading::new(beat(Power::Ac)));
@@ -430,6 +439,39 @@ async fn fleet() -> Fleet {
             kept: Some(false),
             logs_in_as: Some("biswa".to_owned()),
         },
+        Event {
+            at: 1_785_522_960,
+            kind: "check_failed",
+            workspace: Some("api".to_owned()),
+            machine: None,
+            said: "api: PR #21 has a failed check".to_owned(),
+            commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
+        },
+        Event {
+            at: 1_785_523_020,
+            kind: "checks_passed",
+            workspace: Some("api".to_owned()),
+            machine: None,
+            said: "api: PR #21 passed its checks".to_owned(),
+            commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
+        },
+        Event {
+            at: 1_785_523_080,
+            kind: "reviewed",
+            workspace: Some("api".to_owned()),
+            machine: None,
+            said: "api: PR #21 has a new review".to_owned(),
+            commands: Vec::new(),
+            user: None,
+            kept: None,
+            logs_in_as: None,
+        },
     ]);
     drop(events);
     fleet
@@ -483,7 +525,7 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
 /// A file the listing refused. It is in the fixture rather than only in a
 /// hand-written stub for this file's own reason: a state nothing generated is a
 /// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
-/// Three checks rather than the eleven `doctor` runs: what a page has to render
+/// Three checks rather than the twelve `doctor` runs: what a page has to render
 /// is one of three states beside a name and a sentence, and the tenth of those
 /// tells it nothing the third did not.
 fn swept(machine: &str) -> doctor::Report {

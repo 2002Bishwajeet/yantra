@@ -672,6 +672,41 @@
   margin-left: auto;
 }
 
+/* Y-561: what the person queued behind the running turn, above the composer card. */
+
+.chat__queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 8px 14px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-small);
+}
+
+.chat__queued-title {
+  margin: 0;
+  font: var(--md-sys-typescale-label-medium);
+}
+
+.chat__queued ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat__queued li {
+  overflow: hidden;
+  color: var(--md-sys-color-on-surface);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat__asks {
   display: flex;
   flex-direction: column;

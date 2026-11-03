@@ -115,7 +115,7 @@ already *unknown* inside the check. `doctor::github` is a pure mapper over `GET 
 `refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
 
 **The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
-the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
+the profile image URL, the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
 /api/github/login` and `DELETE /api/github` are in `write.rs` on the gate; `GET /api/repos` is the
 repository list, a class on the same slow clock, and **the search box filters it in the browser** —
 a typed box polls, and a read handler never awaits the network.
@@ -136,7 +136,7 @@ to tune and because the load is already this daemon's shape: the agents sweep ru
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
 name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
 macOS machines. A Windows, shared or tagged peer gets no check, because `presentOn` divides by
-this list and such a peer is never counted. Each machine asked pays eleven checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
+this list and such a peer is never counted. Each machine asked pays twelve checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
 candidates come from the last machines reading, so this adds no `tailscale` call. `Snapshot::checks`
 holds one report per machine with its own age, and `refresh::settle` is the one place a sweep
 lands. A failed sweep changes nothing there, and a machine the sweep skipped keeps its report. An
@@ -153,7 +153,7 @@ installed `tmux` by hand needs the answer before the next sweep, and the `GET` b
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
 type, and it keeps the report before it answers. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
-ssh destinations to refuse one against, and a name nothing answers to is eleven *unknown* checks like
+ssh destinations to refuse one against, and a name nothing answers to is twelve *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
@@ -234,6 +234,31 @@ than held, so closing the tab does not deliver a backlog of things the page alre
 memory and a restart forgets it, which is Y-044 exactly as written — that state is not the exception
 ADR-0021 carved.
 
+**The PR watch is the second caller of the relay** (Y-494, [`watch.rs`](src/watch.rs)). It runs on
+its own task in `refresh.rs` and keeps the agents notifier's rules through the shared `notify::Teller`:
+remembered first, not pushed while a dashboard is open, one 5 s budget, no retry, and the quiet
+`Log`. Its notes are *Check failed*, *Checks passed* and *PR reviewed*. The body is
+`{workspace}: PR #{n} …`, cut at 160 characters, with no repo, no check output and no review text.
+**Its reads are conditional**: each sends the last `ETag` back as `If-None-Match`, so an unchanged PR
+costs GitHub no quota, and a 304 reuses what the watch already holds.
+
+## The PR watch
+
+The appliance watches each thread's open PR, so a check that fails while the laptop sleeps still
+reaches the phone ([M16](../../docs/plans/m16-the-coding-loop.md) §3.6).
+
+- **It keeps nothing on disk.** `Fleet::pulls` is memory, and ADR-0034 decision 3 is why: the PR is
+  derived from the thread's upstream. At start, `watch::discover` rebuilds it, on the `ATTENTION`
+  clock, from `thread::open_pulls` for every workspace. `pr open` adds the PR it answered at once.
+- **The first look at a PR the start-up rebuild found says nothing.** It records a baseline, as
+  the agents notifier does, so a restart does not repeat what was said before it. A PR added after
+  that pass, by `pr open` or a later discover pass, starts with nothing told, so a check that ended
+  before its first look is still said.
+- **A failed look tells nobody anything.** Discovery removes nothing when a machine is asleep. A PR
+  leaves the watch when it merges, when it closes, or after eight failed looks in a row, as T3 Code's
+  does; discovery adds an open one back.
+- **No grant, no look.** Both tasks read the grant at each pass and do nothing without one.
+
 ## It serves the dashboard, from a directory — and, for M7 only, from inside itself
 
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,
@@ -308,14 +333,25 @@ directory to walk.
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
-`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms/{room}/resume`,
-`POST /api/rooms/{room}/messages` and
+`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
+`PATCH`/`DELETE /api/rooms/{room}`, `POST /api/rooms/{room}/resume`,
+`POST /api/rooms/{room}/messages`, `PUT /api/layout` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
 `repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
-`room resume` (Y-534), `room post` (Y-536) and `update` (Y-368). The daemon may do
+`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550), `layout set` (Y-515) and
+`update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
+
+**`PUT /api/layout` replaces the dashboard layout** (Y-515,
+[ADR-0036](../../docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)), in
+`~/.config/yantra/dashboard.json` through [`layout`](../yantra-core/src/layout.rs). The body names
+the `rev` it read. A different `rev` on disk is **409** with the current layout as JSON, a bad shape
+is **400**, and a file that cannot be written is **500**. The save goes to `dashboard.json.tmp` and is
+renamed over the file, at the next `rev`. A lock makes the read, the compare and the write one step.
+`GET /api/layout` is a read and is not gated; no file is the default at `rev` 0, and a file that is
+not a layout is logged and read as the default. [`tests/layout.rs`](tests/layout.rs) is the proof.
 
 **`install` answers before its work is done too** (Y-386,
 [ADR-0028](../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) §4). It answers
@@ -393,10 +429,14 @@ blocked on the same syscall, since a task already waiting on it `await`s instead
 this file must take both: the daemon's `Mutex` for its own workers, and `rewrite`'s `flock` for the
 one it does not control.
 
-**`POST /api/viewing` is the one write with no verb behind it**, and it is not an exception to that
+**`POST /api/viewing` is a write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
 §13), which no CLI can say truthfully. It is authorised like the rest because it silences
 notifications.
+
+**`GET /api/here` is the second, for the same reason.** It names the tailnet machine the request came
+from (Y-589). A terminal already runs on the machine it would name, so a CLI verb would answer a
+question nobody asks.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
@@ -653,8 +693,17 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   An attach also makes the last turn's `turn.diff.updated` again, until the next turn or a
   revert, and the timeline draws one card for each turn.
 - **One turn at a time in a thread, across every tab and every restart.** A second `turn` while
-  one runs is `busy`, and the socket stays open. A keeper that already runs on the machine is
-  adopted, not started again.
+  one runs is queued (Y-561), and every socket of the thread gets
+  `{"type":"queue","threadId","texts"}`, the list as it is now. A tab that attaches gets it too,
+  an empty list included, so a tab that was away while the queue drained clears it. A Claude
+  keeper holds a turn from its turn's start until it is forgotten, its checkpoint and close
+  included. When the turn ends, the queue goes as one prompt, the texts joined with a blank line,
+  in the last one's mode. A Claude thread starts a new keeper for it before any room prompt. An
+  ACP thread prompts the same agent, or the next keeper when this one closes. `cancel` empties
+  the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
+  turn. A turn that loses a start race is queued behind the winner; it tries again for up to
+  60 s and only then is `busy`. A keeper that already runs on the machine is adopted, not
+  started again.
 - **One task reads a keeper.** A task claims the thread before it starts or adopts a keeper. The
   claim goes however the task ends, and a keeper started under a claim that no task took is
   killed. A tab that attaches during a start waits for it. A keeper that a failed start left is
@@ -677,7 +726,7 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 The rules from before the keeper still hold:
 
 - **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`
-  and `diff`; the daemon sends `ThreadEvent`s and one `{"type":"error","kind","said"}`, whose kinds are
+  and `diff`; the daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint` and `diff`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.
@@ -686,8 +735,9 @@ The rules from before the keeper still hold:
   does not start. When a turn ends, the keeper's task keeps the tree and sends
   `turn.diff.updated{turn, unifiedDiff, truncated}`, whether a socket is attached or not.
   `revert{turn}` puts the files back as checkpoint `turn` kept them and answers
-  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn runs or its
-  checkpoint is kept (Y-542). The conversation is not rewound. A git that refused, or did not
+  `thread.reverted{turn}`; it is `badFrame` with no thread, and `busy` while a turn starts, runs,
+  keeps its checkpoint or waits in the queue (Y-542, Y-561). While a revert runs, no keeper
+  starts, no turn queues and no ACP turn is sent: one registry lock decides both. The conversation is not rewound. A git that refused, or did not
   answer in 60 s, is a `checkpoint` failure, except after a turn that failed: the turn's own
   error stays, and the log has the checkpoint's. No diff is logged.
 - **`diff` asks for the thread's whole-branch diff** (Y-490,
@@ -779,9 +829,23 @@ the wait and the wakes.
   dashboard never joins one, so every member counts as delivered and every member thread wakes. An
   unknown room is `404`, and an empty text or one over 16 KiB is `400`.
 - **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
-  are behind `allowed()`, both read memory, and both drop expired members first.
-- **A restart loses every room**, with its members, cursors, count, pause and queued wakes. The
-  threads and keepers stay on their machines.
+  are behind `allowed()`, both read memory, and both drop expired members first. Each summary
+  carries the room's `workspace`, `brief` and `base`, `null` for a room an agent made, and each
+  message a `kind`, `text` or `system`.
+- **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
+  decision 2): `~/.config/yantra/rooms/<name>.toml`, through
+  [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes
+  `{name, workspace, brief?, base?}` as application/json only, and answers **201** with the summary.
+  A bad field is **400**, a workspace that does not load **404**, an existing file **409**, and a
+  file that cannot be written **500**. `PATCH /api/rooms/{room}` takes `{brief}`, where `null`
+  clears it, and an undefined room is **404**. `DELETE /api/rooms/{room}` answers
+  `200 {"removed": bool}`, as the workspace delete does. Each writes the file first and then
+  changes memory, under the store's lock. A defined room never expires. A room an agent makes with
+  `room_send` stays in memory only.
+- **A restart reloads each definition with one system message** that says when yantrad restarted.
+  It spends no budget and wakes no thread. Every message, member, cursor, count, pause and queued
+  wake is lost, and so is every room with no definition. A file that does not load is logged by
+  name and skipped. The threads and keepers stay on their machines.
 - **Q5.** The log names a room, a seq, a node and counts. It never names a message's text, and the
   pause notification carries none.
 - [`tests/rooms.rs`](tests/rooms.rs) is the done test: two fixture machines, a wake in

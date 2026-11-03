@@ -91,7 +91,8 @@ describe('/usage on the busy fleet', () => {
     await screen.findByRole('region', { name: 'By workspace' })
 
     fireEvent.click(screen.getAllByRole('link', { name: 'Fleet' })[0]!)
-    await screen.findByRole('heading', { level: 1, name: 'Fleet' }, { timeout: 2000 })
+    // The Fleet route chunk loads on first visit; a full-suite run needs more than 2 s.
+    await screen.findByRole('heading', { level: 1, name: 'Fleet' }, { timeout: 8_000 })
     fireEvent.click(screen.getAllByRole('link', { name: 'Usage' })[0]!)
 
     expect(await screen.findByRole('button', { name: 'Read again' }, { timeout: 2000 })).toBeTruthy()

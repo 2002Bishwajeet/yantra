@@ -1,3 +1,6 @@
+import { useMachines } from '@/api/hooks'
+import { fullDisk } from '@/lib/checks'
+
 /** `/ home ~ Github yantra`: every segment is a way back up, to `/` itself
  *  (Y-414). The segment that is `$HOME` reads `~`. */
 export function crumbs(here: string, home: string | null): { label: string; path: string }[] {
@@ -14,6 +17,15 @@ export function crumbs(here: string, home: string | null): { label: string; path
 export const under = (dir: string, name: string): string => (dir === '/' ? `/${name}` : `${dir}/${name}`)
 
 /** macOS refuses an ssh login ~/Documents, ~/Desktop and ~/Downloads until
- *  Remote Login allows full disk access (Y-458). */
-export const noAccess = (machine: string) =>
-  `${machine} does not let this account read this folder. On a Mac, turn on Allow full disk access for remote users in System Settings → General → Sharing → Remote Login.`
+ *  Remote Login allows full disk access (Y-458). Elsewhere it is the
+ *  folder's own permissions, and `os` unread says no more than that (Y-591). */
+export const noAccess = (machine: string, os: string | undefined) =>
+  os === 'macOS'
+    ? `macOS blocks remote access to this folder. ${fullDisk(machine)}`
+    : `${machine} does not let this account read this folder.`
+
+export function useNoAccess(machine: string): string {
+  const machines = useMachines()
+  const os = machines.looked === 'ok' ? machines.data.find((one) => one.name === machine)?.os : undefined
+  return noAccess(machine, os)
+}

@@ -1,6 +1,11 @@
 /** D7 §3.5: one name per check on every screen, and what fixes it. `doctor`
  *  keeps the ids; a person reads the names. */
 
+/** Apple's words for the one switch that lets an ssh login read the folders
+ *  macOS guards (support.apple.com/guide/mac-help/mchlp1066, 2026-11-03), and its cost. */
+export const fullDisk = (machine: string) =>
+  `To allow it, open System Settings > General > Sharing > Remote Login, and turn on Allow full disk access for remote users. Every ssh login to ${machine}, agents included, then gets that access.`
+
 /** Who fixes a check that is missing. */
 export type Fix =
   | { by: 'join' }
@@ -43,6 +48,12 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     fix: () => ({ by: 'hand', words: 'Run Install with Microphone ticked.' }),
     session: false,
   },
+  // Y-591: only a warning, because a session outside those folders works.
+  'folder-access': {
+    name: 'folder access',
+    fix: (machine) => ({ by: 'hand', words: fullDisk(machine) }),
+    session: false,
+  },
   heartbeat: {
     name: 'heartbeat',
     fix: () => ({ by: 'hand', words: 'The join command offers yantra-agent, which sends it.' }),
@@ -50,7 +61,7 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
   },
 }
 
-/** `doctor`'s eleven ids, in its order. */
+/** `doctor`'s twelve ids, in its order. */
 export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check

@@ -119,6 +119,26 @@ describe('the primary action', () => {
     expect(why?.textContent).toBe('Claude is answering. Stop it to send something else.')
   })
 
+  it('puts a Queue beside the Stop once a message is ready, and the Queue submits it', () => {
+    const onSubmit = vi.fn((event: { preventDefault: () => void }) => event.preventDefault())
+    const running = { agent: 'Claude', stopping: false, onStop: () => {}, reason: 'Claude is answering.', queues: true }
+    const { rerender } = render(
+      <Composer.Root empty={false} onSubmit={onSubmit}>
+        <Composer.Footer actions={<PrimaryAction label="Send" reason={null} running={running} />} />
+      </Composer.Root>,
+    )
+    expect(screen.getByRole('button', { name: 'Stop Claude' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Queue' }))
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    rerender(
+      <Composer.Root empty onSubmit={onSubmit}>
+        <Composer.Footer actions={<PrimaryAction label="Send" reason="Type a message to send it." running={running} />} />
+      </Composer.Root>,
+    )
+    expect(screen.queryByRole('button', { name: 'Queue' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Stop Claude' })).toBeTruthy()
+  })
+
   it('holds the Stop while it stops, with a spinner, and keeps the focus on it', () => {
     const onStop = vi.fn()
     render(<Harness action={{ running: { agent: 'Claude', stopping: true, onStop, reason: 'Claude is answering.' } }} />)

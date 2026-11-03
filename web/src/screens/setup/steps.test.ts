@@ -65,8 +65,8 @@ describe('the step each read makes', () => {
     })
   })
 
-  /** ADR-0021: a relay saved in Settings is the next start's, so the step
-   *  reads what the running daemon holds. */
+  /** ADR-0021: a saved relay is the next start's, so the step reads what the
+   *  running daemon holds. */
   it('reads the relay the daemon holds, and fails with the daemon words', () => {
     expect(push(got({ ...contract.about, relay: true }))).toEqual({
       status: 'done',
@@ -74,7 +74,7 @@ describe('the step each read makes', () => {
     })
     const none = push(got({ ...contract.about, relay: false }))
     expect(none.status).toBe('todo')
-    expect(none.words).toContain('after yantrad restarts')
+    expect(none.words).toBe('no relay yet · Set up walks it from the phone app to a test alert')
     expect(push(reading)).toEqual({ status: 'todo', words: 'reading…' })
     const failed = push(broke(new ApiError('network', 'down')))
     expect(failed.status).toBe('failed')

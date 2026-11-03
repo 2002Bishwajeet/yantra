@@ -55,6 +55,9 @@ and their argument checks, so `yantrad` and `yantra mcp` list the same tools
 `history::stage()` is the exception: it reaches no machine. It writes a redacted copy of this
 account's agent transcripts for Syncthing to send to the appliance
 ([ADR-0032](../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md)).
+`extract::extract()` reaches no machine either. It cuts training rows for the session-state
+decision from that redacted copy, and checks each row with gitleaks again
+([plan §3.1](../../docs/plans/decision-model.md#31-extract)).
 
 ## Why it looks the way it does
 

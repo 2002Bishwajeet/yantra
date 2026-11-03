@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
-use yantra_core::notify::{Notification, Relay, Watch, post};
+use yantra_core::notify::{BODY_MAX, Message, Notification, Relay, Watch, post};
 use yantra_core::status::Fleet;
 
 use crate::events::{self, Event, Events};
@@ -55,18 +55,15 @@ pub async fn watched(viewers: &Viewers) -> bool {
 
 #[derive(Debug)]
 pub struct Notifier {
-    /// `None` is a daemon with no relay, which still remembers.
-    relay: Option<Relay>,
     watch: Watch,
-    log: Log,
+    teller: Teller,
 }
 
 impl Notifier {
     pub fn new(relay: Option<Relay>) -> Self {
         Self {
-            relay,
             watch: Watch::default(),
-            log: Log::default(),
+            teller: Teller::new(relay),
         }
     }
 
@@ -79,23 +76,59 @@ impl Notifier {
     /// things the page already showed.
     pub async fn tell(&mut self, fleet: &Fleet, watched: bool, events: &Events) {
         let notifications = self.watch.look(fleet);
-        if notifications.is_empty() {
-            return;
-        }
         for notification in &notifications {
             events::remember(events, Event::of(notification, fleet)).await;
         }
+        let messages = notifications.iter().map(Notification::message).collect();
+        self.teller.deliver(messages, watched).await;
+    }
+}
+
+/// The relay and its quiet log: the rules every send from a refresh task
+/// keeps. `None` is a daemon with no relay, which still remembers.
+#[derive(Debug)]
+pub struct Teller {
+    relay: Option<Relay>,
+    log: Log,
+}
+
+impl Teller {
+    pub fn new(relay: Option<Relay>) -> Self {
+        Self {
+            relay,
+            log: Log::default(),
+        }
+    }
+
+    /// What the PR watch saw (Y-494): remembered, then sent as the agents'
+    /// notifications are.
+    pub async fn tell_pulls(&mut self, notes: &[PrNote], watched: bool, events: &Events) {
+        for note in notes {
+            events::remember(
+                events,
+                Event::pull(note.phase.kind(), &note.workspace, note.said()),
+            )
+            .await;
+        }
+        self.deliver(notes.iter().map(PrNote::message).collect(), watched)
+            .await;
+    }
+
+    async fn deliver(&mut self, messages: Vec<Message>, watched: bool) {
         let Some(relay) = &self.relay else {
             return;
         };
+        if messages.is_empty() {
+            return;
+        }
         if watched {
             tracing::debug!(
                 "{} notification(s) not pushed: the dashboard is open",
-                notifications.len()
+                messages.len()
             );
             return;
         }
-        let outcome = tokio::time::timeout(BUDGET, send(relay, &notifications))
+        let outcome = tokio::time::timeout(BUDGET, send(relay, messages))
             .await
             .unwrap_or(Err("the budget for this look ran out".to_owned()));
         if let Some(line) = self.log.line(outcome) {
@@ -104,11 +137,68 @@ impl Notifier {
     }
 }
 
+/// What the PR watch tells, with [`yantra_core::notify::Phase`]'s fixed
+/// headlines beside the agents' own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrPhase {
+    CheckFailed,
+    ChecksPassed,
+    Reviewed,
+}
+
+impl PrPhase {
+    pub fn headline(self) -> &'static str {
+        match self {
+            PrPhase::CheckFailed => "Check failed",
+            PrPhase::ChecksPassed => "Checks passed",
+            PrPhase::Reviewed => "PR reviewed",
+        }
+    }
+
+    /// The event's `kind`, as `web/src/api.ts` spells it.
+    pub fn kind(self) -> &'static str {
+        match self {
+            PrPhase::CheckFailed => "check_failed",
+            PrPhase::ChecksPassed => "checks_passed",
+            PrPhase::Reviewed => "reviewed",
+        }
+    }
+}
+
+/// A workspace and a PR number, and no repo, check output or review text:
+/// a public relay is told no more than the agents notifier tells it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrNote {
+    pub phase: PrPhase,
+    pub workspace: String,
+    pub number: u64,
+}
+
+impl PrNote {
+    pub fn said(&self) -> String {
+        let what = match self.phase {
+            PrPhase::CheckFailed => "has a failed check",
+            PrPhase::ChecksPassed => "passed its checks",
+            PrPhase::Reviewed => "has a new review",
+        };
+        let said = format!("{}: PR #{} {what}", self.workspace, self.number);
+        said.chars().take(BODY_MAX).collect()
+    }
+
+    pub fn message(&self) -> Message {
+        Message {
+            body: self.said(),
+            title: Some(self.phase.headline().to_owned()),
+            priority: None,
+        }
+    }
+}
+
 /// The first failure ends the pass: the rest of this look's notifications are
 /// dropped rather than retried against a relay that has just said no.
-async fn send(relay: &Relay, notifications: &[Notification]) -> Result<(), String> {
-    for notification in notifications {
-        post(relay, notification.message())
+async fn send(relay: &Relay, messages: Vec<Message>) -> Result<(), String> {
+    for message in messages {
+        post(relay, message)
             .await
             .map_err(|error| error.to_string())?;
     }
@@ -356,6 +446,133 @@ mod tests {
 
         *viewers.write().await = Instant::now().checked_sub(WATCHED);
         assert!(!watched(&viewers).await);
+    }
+
+    fn note(phase: PrPhase) -> PrNote {
+        PrNote {
+            phase,
+            workspace: "web".to_owned(),
+            number: 21,
+        }
+    }
+
+    /// Y-494: a PR note is remembered under its kind and sent with its fixed
+    /// headline and a body that names the workspace and the number only.
+    #[tokio::test]
+    async fn a_pr_note_is_remembered_then_sent_with_its_headline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let served = thread::spawn(move || request(&listener, "200 OK"));
+        let mut teller = Teller::new(Some(relay(address)));
+        let events = Events::default();
+
+        teller
+            .tell_pulls(&[note(PrPhase::CheckFailed)], false, &events)
+            .await;
+
+        let seen = served.join().expect("the listener thread");
+        assert_eq!(
+            body(&seen).as_deref(),
+            Some("web: PR #21 has a failed check")
+        );
+        assert!(
+            seen.to_lowercase().contains("title: check failed\r\n"),
+            "{seen}"
+        );
+        let remembered = events::newest_first(&events).await;
+        assert_eq!(remembered[0].kind, "check_failed");
+        assert_eq!(remembered[0].workspace.as_deref(), Some("web"));
+        assert_eq!(remembered[0].machine, None);
+    }
+
+    #[test]
+    fn each_pr_phase_has_its_headline_kind_and_a_body_cut_at_160() {
+        let worded: Vec<_> = [
+            PrPhase::CheckFailed,
+            PrPhase::ChecksPassed,
+            PrPhase::Reviewed,
+        ]
+        .map(|phase| (phase.headline(), phase.kind(), note(phase).said()))
+        .to_vec();
+        assert_eq!(
+            worded,
+            [
+                (
+                    "Check failed",
+                    "check_failed",
+                    "web: PR #21 has a failed check".to_owned()
+                ),
+                (
+                    "Checks passed",
+                    "checks_passed",
+                    "web: PR #21 passed its checks".to_owned()
+                ),
+                (
+                    "PR reviewed",
+                    "reviewed",
+                    "web: PR #21 has a new review".to_owned()
+                ),
+            ]
+        );
+        let long = PrNote {
+            workspace: "w".repeat(300),
+            ..note(PrPhase::Reviewed)
+        };
+        assert_eq!(long.message().body.chars().count(), 160);
+    }
+
+    /// D3 §13 for the PR watch: watched means not pushed, and still remembered.
+    #[tokio::test]
+    async fn a_pr_note_while_the_page_is_open_is_remembered_and_not_pushed() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let mut teller = Teller::new(Some(relay(address)));
+        let events = Events::default();
+
+        teller
+            .tell_pulls(&[note(PrPhase::ChecksPassed)], true, &events)
+            .await;
+
+        listener.set_nonblocking(true).expect("a nonblocking check");
+        assert!(listener.accept().is_err(), "nothing reached the relay");
+        assert_eq!(events::newest_first(&events).await[0].kind, "checks_passed");
+    }
+
+    /// A refused send drops the note and is said once, as the agents' are.
+    #[tokio::test]
+    async fn a_refused_pr_note_is_dropped_and_not_retried() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let served = thread::spawn(move || {
+            ["503 Service Unavailable", "200 OK"]
+                .map(|status| request(&listener, status))
+                .to_vec()
+        });
+        let mut teller = Teller::new(Some(relay(address)));
+        let events = Events::default();
+
+        teller
+            .tell_pulls(
+                &[note(PrPhase::CheckFailed), note(PrPhase::Reviewed)],
+                false,
+                &events,
+            )
+            .await;
+        assert!(teller.log.quiet, "the drop was said");
+        teller
+            .tell_pulls(&[note(PrPhase::ChecksPassed)], false, &events)
+            .await;
+
+        let seen = served.join().expect("the listener thread");
+        assert_eq!(
+            seen.iter().map(|request| body(request)).collect::<Vec<_>>(),
+            [
+                Some("web: PR #21 has a failed check".to_owned()),
+                Some("web: PR #21 passed its checks".to_owned()),
+            ],
+            "the review behind the refused send is gone"
+        );
+        assert_eq!(events.read().await.len(), 3);
     }
 
     #[test]

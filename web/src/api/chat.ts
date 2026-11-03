@@ -2,11 +2,13 @@ import {
   HARNESSES,
   type ChatAttached,
   type ChatBranchDiff,
+  type ChatQueue,
   type ChatFailure,
   type ChatFrame,
   type ChatNotAttached,
   type Decision,
   type Harness,
+  type Interaction,
   type PermissionMode,
   type ThreadEvent,
 } from '@/api/thread'
@@ -142,7 +144,7 @@ export const PAUSES: readonly number[] = [1_000, 2_000, 4_000, 8_000, 8_000]
 export type ChatSocket = {
   /** `false` when the socket is not open, so nothing was sent. */
   /** `harness` opens a thread; the daemon ignores it on a later turn. */
-  send: (text: string, harness?: Harness, mode?: PermissionMode) => boolean
+  send: (text: string, harness?: Harness, mode?: PermissionMode, interaction?: Interaction) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
@@ -194,10 +196,19 @@ function branchDiffOf(said: object): ChatBranchDiff | null {
   return said as ChatBranchDiff
 }
 
+function queueOf(said: object): ChatQueue | null {
+  const q = said as Partial<Record<keyof ChatQueue, unknown>>
+  return typeof q.threadId === 'string' &&
+    Array.isArray(q.texts) &&
+    q.texts.every((text) => typeof text === 'string')
+    ? (said as ChatQueue)
+    : null
+}
+
 /** A daemon frame, or `null` for one this dashboard cannot read. */
 export function frameOf(
   text: string,
-): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | null {
+): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | ChatQueue | null {
   let said: unknown
   try {
     said = JSON.parse(text)
@@ -215,6 +226,7 @@ export function frameOf(
       : null
   }
   if (said.type === 'branchDiff') return branchDiffOf(said)
+  if (said.type === 'queue') return queueOf(said)
   if (said.type === 'error') {
     const failure = said as Partial<ChatFailure> & Partial<Record<keyof Login, unknown>>
     if (typeof failure.kind !== 'string' || !KINDS.has(failure.kind) || typeof failure.said !== 'string') return null
@@ -240,11 +252,14 @@ export function openChat(
     onDropped,
     onRestart,
     onBranchDiff,
+    onQueue,
     pauses = PAUSES,
   }: {
     onEvent: (event: ThreadEvent) => void
     /** The reply to `diff`, which is no event of the timeline. */
     onBranchDiff?: (diff: ChatBranchDiff) => void
+    /** The turns waiting for the running one, which is no event of the timeline either. */
+    onQueue?: (queue: ChatQueue) => void
     onError: (error: ChatError) => void
     onOpen?: () => void
     /** The socket dropped and a reopen is waiting. */
@@ -333,6 +348,10 @@ export function openChat(
         onBranchDiff?.(frame)
         return
       }
+      if (frame.type === 'queue') {
+        onQueue?.(frame)
+        return
+      }
       if (frame.type === 'error') {
         said = frame.kind === 'unknownThread' || frame.kind === 'notLoggedIn'
         // The `thread.started` before it refilled the budget, which this takes back.
@@ -393,8 +412,14 @@ export function openChat(
   waiting = setTimeout(open, 0)
 
   return {
-    send: (text, harness, mode) => {
-      const sent = send({ type: 'turn', text, ...(harness ? { harness } : {}), ...(mode ? { mode } : {}) })
+    send: (text, harness, mode, interaction) => {
+      const sent = send({
+        type: 'turn',
+        text,
+        ...(harness ? { harness } : {}),
+        ...(mode ? { mode } : {}),
+        ...(interaction === 'plan' ? { interaction } : {}),
+      })
       // A turn that fails before it starts still gets its own error.
       if (sent) turn = ++sends
       return sent

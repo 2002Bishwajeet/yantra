@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { HeadContent, Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
 import { ArrowLeft, Download, Plus, User } from 'lucide-react'
-import { useResetOnRouteChange, useViewing } from '@/api/hooks'
+import { useGithub, useResetOnRouteChange, useViewing } from '@/api/hooks'
 import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ExtendedFab, Fab } from '@/m3/fab/Fab'
@@ -21,6 +21,7 @@ import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination, isRailed } from './destinations'
 import { useFabFocus, type FabFocus } from './fabFocus'
 import { useFormFactor } from './formFactor'
+import { Avatar } from './Avatar'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
 import { usePrefs } from './prefs'
@@ -153,6 +154,7 @@ function Guarded(props: { title: string; children: ReactNode }) {
 /** The avatar. The button lives as long as the shell; only the menu is lazy,
  *  and it anchors to the button, so a press never swaps the element or drops focus. */
 function AccountButton() {
+  const github = useGithub()
   const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
@@ -171,7 +173,9 @@ function AccountButton() {
         ref={ref}
         variant="tonal"
       >
-        <User />
+        <Avatar connection={github.data}>
+          <User />
+        </Avatar>
       </IconButton>
       {armed ? (
         <Guarded title="Account could not be drawn">

@@ -74,8 +74,82 @@ describe('the platform', () => {
     expect(await screen.findByText(/done · iphone is on the tailnet/)).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Open the dashboard on it and add it to your home screen' })).toBeTruthy()
     expect(screen.getByText(/Add to Home Screen/)).toBeTruthy()
+    expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR code' }))
     expect(await screen.findByRole('img', { name: /QR code/ })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Reachable over ssh' })).toBeNull()
+  })
+})
+
+const onPhone = (share?: () => Promise<void>) =>
+  vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText: vi.fn() }, ...(share ? { share } : {}) })
+const joinAt = at('platform=linux&machine=laptop')
+
+describe('a phone sends the link', () => {
+  it('leads with Copy and Share, above the command, and draws the code only when asked', async () => {
+    onPhone(vi.fn(() => Promise.resolve()))
+    mountSettings('phone', joinAt, fleet([laptop], []))
+    const copy = await screen.findByRole('button', { name: "Copy this page's address" })
+    expect(screen.getByRole('button', { name: 'Share' })).toBeTruthy()
+    const command = await screen.findByText(COMMAND)
+    expect(copy.compareDocumentPosition(command) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull()
+    const toggle = screen.getByRole('button', { name: 'Show QR code' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(await screen.findByRole('img', { name: `A QR code for ${HERE}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Hide QR code' }).getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide QR code' }))
+    expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull()
+  })
+
+  it('has no Share where the browser cannot share, and Copy stays', async () => {
+    onPhone()
+    mountSettings('phone', joinAt, fleet([laptop], []))
+    expect(await screen.findByRole('button', { name: "Copy this page's address" })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Share' })).toBeNull()
+  })
+
+  it('stays silent when the person closes the share sheet', async () => {
+    const share = vi.fn(() => Promise.reject(new DOMException('closed', 'AbortError')))
+    onPhone(share)
+    mountSettings('phone', joinAt, fleet([laptop], []))
+    fireEvent.click(await screen.findByRole('button', { name: 'Share' }))
+    await waitFor(() => expect(share).toHaveBeenCalledWith({ title: "this page's address", url: HERE }))
+    expect(screen.queryByText(/Sharing failed/)).toBeNull()
+  })
+
+  it('says sharing failed on any other rejection, and Copy still works', async () => {
+    const share = vi.fn(() => Promise.reject(new DOMException('no', 'NotAllowedError')))
+    onPhone(share)
+    mountSettings('phone', joinAt, fleet([laptop], []))
+    fireEvent.click(await screen.findByRole('button', { name: 'Share' }))
+    expect(await screen.findByText('Sharing failed. Copy still works.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: "Copy this page's address" })).toBeTruthy()
+  })
+})
+
+describe('the device in use', () => {
+  it('is named under the platform pick and marked among the candidates', async () => {
+    mountSettings('desktop', at('platform=linux'), fleet([laptop], [], [], { 'GET /api/here': [200, { machine: 'laptop' }] }))
+    expect(await screen.findByText('You are using laptop.')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'laptop · this device' })).toBeTruthy()
+  })
+
+  it('draws nothing, and the flow still works, when it could not be read', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], [], [], { 'GET /api/here': [503, 'tailscale did not answer'] }))
+    expect(await screen.findByText(COMMAND)).toBeTruthy()
+    expect(screen.queryByText(/You are using/)).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('a desktop draws the code at once', () => {
+  it('has no Show QR code action and no Share', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], []))
+    expect(await screen.findByRole('img', { name: `A QR code for ${HERE}` })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /QR code/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Share' })).toBeNull()
   })
 })
 

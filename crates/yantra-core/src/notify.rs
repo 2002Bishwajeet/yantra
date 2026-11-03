@@ -65,7 +65,8 @@ impl fmt::Display for Notification {
 /// What a relay is told in place of a failed run's verdict, because an exit code
 /// or a signal says more about the machine than a public topic needs to.
 const FAILED: &str = "The agent run failed.";
-const BODY_MAX: usize = 160;
+/// Where every relay body is cut, the PR watch's too.
+pub const BODY_MAX: usize = 160;
 
 /// Where an agent is in its run, which names the notification's `Title`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

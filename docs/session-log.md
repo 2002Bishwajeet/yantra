@@ -322,3 +322,35 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-573](../tracker.md#3-task-board) is in review.** `index.html` now sets `viewport-fit=cover` and one `theme-color` per scheme. The phone bars, dialogs and sheets pad the safe-area insets. A solid strip sits under the status bar. Unit and Playwright tests assert each. The owner still checks a real iPhone.
 
 - **2026-11-03** — **[Y-579](../tracker.md#3-task-board) is in review.** The daemon now keeps the latest check for every enrolled machine. A poll no longer replaces a result with `never`, and a result survives a reload with no workspace. The sweep checks only the machines the dashboard counts. Tests hold the result over poll cycles.
+
+- **2026-11-03** — **[Y-589](../tracker.md#3-task-board) is in review.** On a phone, Add a device now leads with Copy and Share. The QR code sits behind an action there and stays on wider screens. The page names the device in use through the new `GET /api/here` route. Tests cover both widths.
+
+- **2026-11-03** — **[Y-590](../tracker.md#3-task-board) is in review.** At tablet width the rail now fills `100dvh` and stays fixed while only the content scrolls. Its controls stay reachable. A new e2e test proves the rail does not move, and the tablet baselines are updated.
+
+- **2026-11-03** — **[Y-568](../tracker.md#3-task-board) is in review.** A Claude turn now shows the plan badge. `claude.rs` reads the task tools that `claude -p` emits (TaskCreate and TaskUpdate) and turns their results into `turn.plan.updated`. A recorded 2.1.317 turn tests it.
+
+- **2026-11-03** — **[Y-494](../tracker.md#3-task-board) is in review.** The daemon now watches the PR of each thread. It polls GitHub with conditional reads and stops when the PR merges or closes. ntfy tells the owner when a check fails, when all checks pass, and when someone reviews.
+
+- **2026-11-03** — **[Y-569](../tracker.md#3-task-board) is in review.** The podman mic test flaked because it read the default source before WirePlumber had kept it. The test now waits for WirePlumber first, so the cause is fixed and not retried.
+
+- **2026-11-03** — **[Y-575](../tracker.md#3-task-board) is in review.** The GitHub connect sheet now has one button that copies the device code and opens GitHub. The code also has its own copy button. Unit and e2e tests cover both.
+
+- **2026-11-03** — **[Y-463](../tracker.md#3-task-board) is in review.** `yantra history extract` now reads a redacted staging or archive folder and writes candidate rows. It scans each row again with the Y-430 rules and drops a row with a finding. It fails closed when a finding cannot be located. Fixture tests cover each label source.
+
+- **2026-11-03** — **[Y-561](../tracker.md#3-task-board) is in review.** The daemon now holds a second turn sent while one runs. At the turn's end it sends the held turns as one prompt, and Cancel empties them. Every socket of the thread gets the queue. The composer shows Stop with a Queue button and lists what waits. A revert waits until no turn is running or queued. Rust and web tests cover each path.
+
+- **2026-11-03** — **[Y-577](../tracker.md#3-task-board) is in review.** Research note R23 compares the fleet dashboards that issue #518 names. It says how many products back each pattern and lists the changes for rows Y-580, Y-581, Y-582 and Y-587.
+
+- **2026-11-03** — **[Y-576](../tracker.md#3-task-board) is in review.** Settings and the setup walkthrough now share one push setup flow. It shows the ntfy app link, the topic as a QR code with link and copy, a save that restarts the relay, and a test alert with "Did it arrive?". A test walks the flow and `docs/appliance.md` matches.
+
+- **2026-11-03** — **[Y-591](../tracker.md#3-task-board) is in review.** When a Mac blocks a folder with a privacy rule, the directory picker now says why, how to fix it and what the fix costs. The machine check warns of the block, and tests cover the daemon parser and the web screens.
+
+- **2026-11-03** — **[Y-583](../tracker.md#3-task-board) is in review.** `GET /api/github` now carries the profile image URL. The account button shows the image and falls back to the person icon. Tests cover both states.
+
+- **2026-11-03** — **[Y-471](../tracker.md#3-task-board) is in review.** The opencode ACP test now points opencode at a local model stub that streams slowly. The cancel half runs on every CI run, and the skip from Y-470 is gone.
+
+- **2026-11-03** — **[Y-565](../tracker.md#3-task-board) is in review.** The composer has a Build and Plan toggle. In Plan mode the daemon runs the turn without writing a file. Tests cover the daemon and the web toggle.
+
+- **2026-11-03** — **[Y-550](../tracker.md#3-task-board) is in review.** A room now belongs to a workspace. `yantra room new|ls|show|rm` and `POST`, `PATCH` and `DELETE /api/rooms` write `~/.config/yantra/rooms/<name>.toml`. A restart reloads each room with one system message. Unit tests cover bad names and the reload.
+
+- **2026-11-03** — **[Y-515](../tracker.md#3-task-board) is in review.** `GET` and `PUT /api/layout` and `yantra layout` now read and write `dashboard.json` in the daemon. A write with a stale `rev` gets 409, and the file is written atomically. A podman test proves both.

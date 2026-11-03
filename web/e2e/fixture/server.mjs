@@ -64,6 +64,9 @@ const CLONE_PROGRESS = [
 
 const scenarios = new URL('./scenarios/', import.meta.url)
 
+// Y-583: no avatar by default, so no baseline fetches from the network.
+const SIGNED_IN = { ...contract.github, avatar_url: null }
+
 /** The raw fixtures, which is also what the `contract` scenario serves. */
 function defaults() {
   return {
@@ -77,9 +80,11 @@ function defaults() {
     repos: contract.repos,
     notifications: contract.notifications,
     about: contract.about,
+    // Y-589: the device in use; null names none, so no note shifts a baseline.
+    here: { machine: null },
     // Y-350: what /api/github holds, and the daemon's key. `null` is a key
     // `yantra ssh-identity` has not made, a 404.
-    connection: contract.github,
+    connection: SIGNED_IN,
     sshIdentity: contract.sshIdentity,
     // Y-536: the rooms yantrad holds in memory, by name. The `rooms` scenario fills it.
     rooms: {},
@@ -324,6 +329,7 @@ const routes = [
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
   ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
   ['GET', /^\/api\/about$/, (s) => [200, s.about]],
+  ['GET', /^\/api\/here$/, (s) => [200, s.here]],
   [
     'GET',
     /^\/api\/ssh-identity$/,
@@ -336,7 +342,7 @@ const routes = [
     'GET',
     /^\/api\/github$/,
     (s) => {
-      if (s.connection.pending && Date.now() >= s.grantAt) s.connection = contract.github
+      if (s.connection.pending && Date.now() >= s.grantAt) s.connection = SIGNED_IN
       return [200, s.connection]
     },
   ],

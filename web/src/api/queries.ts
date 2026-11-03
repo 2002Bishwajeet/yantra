@@ -32,6 +32,7 @@ import {
 } from '@/api/client'
 import { isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
+import type { Here } from '@/api'
 import type { About, Notification, SshIdentity } from '@/api/types/daemon'
 
 const workspace = (name: string, tail: string) =>
@@ -237,7 +238,7 @@ export const githubQuery = () =>
       fetchJson<Connection>(
         '/api/github',
         { signal },
-        fields('connected', 'login', 'scopes', 'client_id', 'client_id_custom'),
+        fields('connected', 'login', 'avatar_url', 'scopes', 'client_id', 'client_id_custom'),
       ),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
@@ -257,6 +258,19 @@ export const notificationsQuery = () =>
       fetchJson<Notification[]>('/api/notifications', { signal }, fields('looked')),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
+  })
+
+/** Y-589. Once the daemon names the device it does not change while a page is
+ *  open. Until then (503 before the first tailnet look, or a failed one; or a
+ *  device the list does not hold yet) it is asked again, so a phone that has
+ *  just joined is named on the next look. A failure draws nothing. */
+export const hereQuery = () =>
+  queryOptions({
+    queryKey: keys.here(),
+    queryFn: ({ signal }) => fetchJson<Here>('/api/here', { signal }, fields('machine')),
+    staleTime: Infinity,
+    retry: false,
+    refetchInterval: (query) => (query.state.data?.machine ? false : POLL_MS),
   })
 
 /** Y-343. `uptime_seconds` moves, so it is not held forever. Y-367: polled

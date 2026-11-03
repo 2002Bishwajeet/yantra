@@ -302,6 +302,18 @@ fn a_redacted_transcript_is_staged_for_every_harness_and_still_resumes() -> Resu
         "a live transcript changed"
     );
 
+    // c2. The staged copy gives rows, re-checked by the real gitleaks (Y-463).
+    let extracted = machine.ok(&format!(
+        "yantra history extract --decision session-state --out /tmp/rows {STAGING} && \
+         wc -l < /tmp/rows/rows.jsonl && wc -l < /tmp/rows/rows.meta.jsonl"
+    ))?;
+    let counts: Vec<&str> = extracted.lines().rev().take(2).collect();
+    ensure!(
+        matches!(counts.as_slice(), [meta, rows] if meta == rows && *rows != "0"),
+        "{extracted}"
+    );
+    ensure!(extracted.contains("dropped (gitleaks): 0"), "{extracted}");
+
     // d. The staged copy resumes, alone, in a fresh HOME.
     machine.ok(&format!(
         "mkdir -p ~/fresh/.claude/projects/\"$(dirname -- '{claude_rel}')\" && \

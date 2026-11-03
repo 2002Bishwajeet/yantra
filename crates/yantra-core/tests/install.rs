@@ -26,8 +26,9 @@ const STAND_IN: &str = "mkdir -p \"$HOME/.local/bin\" \
 
 /// Strips the fixture to a bare machine. The image carries `libgcc` and
 /// `libstdc++` for opencode (Y-433) and `ripgrep` and `bash` for claude
-/// (Y-356), so they go too; `ripgrep` alone keeps `libgcc` installed.
-const STRIP: &str = "apk del -q tmux git libstdc++ libgcc ripgrep bash";
+/// (Y-356), so they go too; `ripgrep` alone keeps `libgcc` installed, and
+/// `python3` for the model stub (Y-471) keeps both through `mpdecimal`.
+const STRIP: &str = "apk del -q tmux git libstdc++ libgcc ripgrep bash python3";
 
 /// Everything a stripped fixture lacks: the two basics, then the vendor
 /// installer's prerequisites and musl's runtime ones.

@@ -286,6 +286,22 @@ impl PermissionMode {
     }
 }
 
+/*
+ * The two interaction modes are T3 Code's `interactionMode` (`default` and `plan`), at commit 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/web/src/components/chat/ChatComposer.tsx
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+/// Whether a turn may change anything (Y-565). `Plan` only reads and proposes a
+/// plan; T3 Code names `Build` `default`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Interaction {
+    #[default]
+    Build,
+    Plan,
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -440,6 +456,21 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(mode).expect("a mode serialises"),
                 json!(name)
+            );
+        }
+    }
+
+    #[test]
+    fn interaction_is_build_by_default_and_kebab_case_on_the_wire() {
+        assert_eq!(Interaction::default(), Interaction::Build);
+        for (interaction, name) in [(Interaction::Build, "build"), (Interaction::Plan, "plan")] {
+            assert_eq!(
+                serde_json::to_value(interaction).expect("an interaction serialises"),
+                json!(name)
+            );
+            assert_eq!(
+                serde_json::from_value::<Interaction>(json!(name)).expect("it parses"),
+                interaction
             );
         }
     }

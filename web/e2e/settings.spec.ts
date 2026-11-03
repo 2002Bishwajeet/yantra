@@ -214,6 +214,7 @@ test.describe('settings · General', () => {
 
 test.describe('settings · Providers', () => {
   test('walks the device flow and never draws a token', async ({ page, size }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await scenario(page, 'nogrant')
     await page.goto('/settings/providers')
     await opened(page, 'Providers', size)
@@ -225,12 +226,22 @@ test.describe('settings · Providers', () => {
     await sheet.getByRole('button', { name: 'Sign in with GitHub' }).click()
 
     await expect(sheet.getByText('WDJB-MJHT')).toBeVisible()
-    await expect(sheet.getByRole('link', { name: 'github.com/login/device' })).toHaveAttribute(
-      'href',
-      'https://github.com/login/device',
-    )
     await expect(sheet.getByText('repo', { exact: true })).toBeVisible()
     await screenshot(page, 'settings-connect', 'nogrant', size)
+
+    await sheet.getByRole('button', { name: 'Copy the code' }).click()
+    await expect(sheet.getByRole('button', { name: 'Copied the code' })).toBeVisible()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('WDJB-MJHT')
+    await page.evaluate(() => navigator.clipboard.writeText(''))
+
+    // One tap copies the code and opens GitHub in a new tab; the route keeps the test off the network.
+    await page.context().route('https://github.com/login/device', (route) => route.fulfill({ body: 'github' }))
+    const popup = page.waitForEvent('popup')
+    await sheet.getByRole('link', { name: 'Copy code and open GitHub' }).click()
+    const tab = await popup
+    await tab.waitForLoadState()
+    expect(tab.url()).toBe('https://github.com/login/device')
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('WDJB-MJHT')
 
     // The fixture's daemon completes the flow itself, as the real one polls.
     await expect(sheet.getByText('Signed in as 2002Bishwajeet.')).toBeVisible({ timeout: 15_000 })
@@ -302,6 +313,10 @@ test.describe('settings · Notifications', () => {
 
     await sheet.getByRole('button', { name: 'Save and send a test' }).click()
     await expect(sheet.getByText('The test message arrived at the relay.')).toBeVisible()
+    // Y-576: only the phone knows whether the test arrived, so the sheet asks.
+    await expect(sheet.getByRole('heading', { name: 'Did it arrive?' })).toBeVisible()
+    await sheet.getByRole('button', { name: 'Yes' }).click()
+    await expect(sheet.getByText(/^Push works\./)).toBeVisible()
     await sheet.getByRole('button', { name: 'Done' }).click()
     await expect(
       page.getByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),

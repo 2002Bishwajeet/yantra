@@ -202,9 +202,16 @@ python3 -c 'import struct; d=open("/tmp/heard.raw","rb").read(); n=len(d)//2; pr
     // (e) no card, so the default source is the microphone, and it was chosen.
     let source = said(&ssh, &format!("{RUNTIME}pactl get-default-source")).await?;
     assert_eq!(source, "yantra-mic");
+    let configured = configured_source(&ssh).await?;
     assert!(
-        configured_source(&ssh).await?.contains("yantra-mic"),
-        "set-default-source ran"
+        configured.contains("yantra-mic"),
+        "set-default-source ran: {configured:?}, {:?}",
+        said(
+            &ssh,
+            "cat \"${XDG_STATE_HOME:-$HOME/.local/state}/wireplumber/default-nodes\" 2>&1; \
+             systemctl --user show wireplumber -p NRestarts 2>&1"
+        )
+        .await?
     );
     assert_eq!(
         said(&ssh, "loginctl show-user \"$(id -un)\" -p Linger --value").await?,
