@@ -55,9 +55,14 @@ jobs:
           tool: just
       - run: just lint
 
-  test:
-    name: test
+  test-shard:
+    # The suite is CPU-bound on a 4-core runner, so two runners halve it; 8 threads on one did not (Y-605).
+    name: test (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold
@@ -82,10 +87,16 @@ jobs:
         run: |
           mkdir -p ~/.config/containers
           printf '[engine]\nruntime = "runc"\n' > ~/.config/containers/containers.conf
-      # Most tests wait on a container, not the CPU: 4 threads left the 4-core runner idle (Y-605).
-      - run: just test-ci
-        env:
-          NEXTEST_TEST_THREADS: 8
+      - run: just test-ci --partition count:${{ matrix.shard }}/2
+
+  test:
+    # The ruleset requires a check named `test`; this one passes only when every shard does.
+    name: test
+    needs: test-shard
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: test "${{ needs.test-shard.result }}" = success
 
   deny:
     name: deny

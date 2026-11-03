@@ -45,8 +45,8 @@ test:
 
 # CI-only: the sshd fixture (Y-031) must run, not skip. `just test` stays
 # skip-friendly for machines without podman (docs/development.md).
-test-ci:
-    YANTRA_REQUIRE_PODMAN=1 cargo nextest run --workspace --no-tests=pass
+test-ci *args:
+    YANTRA_REQUIRE_PODMAN=1 cargo nextest run --workspace --no-tests=pass {{args}}
 
 # The checks no container can make (I-34, ADR-0009). Needs the machine to be
 # reachable and named in ~/.ssh/config; CI cannot run these and does not try.
