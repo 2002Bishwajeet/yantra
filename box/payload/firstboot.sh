@@ -20,6 +20,8 @@ bash "$state/ui/install.sh" "$user" || echo 'yantra-box: FAILED: the login scree
 
 # Last, because with no auth key this step waits for a person to open the login link.
 [ ! -s /etc/yantra-box.tskey ] || export TS_AUTHKEY=$(cat /etc/yantra-box.tskey)
+# This script is root, so install.sh cannot tell which account yantrad logs in to.
+export YANTRA_ACCOUNT=$user
 curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --yes
 tailscale set --auto-update || echo 'yantra-box: tailscale auto-update is not on'
 

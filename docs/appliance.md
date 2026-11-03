@@ -97,7 +97,13 @@ account. The script says so first, because the dashboard cannot exist before the
    client-id <id>`, or sets it from Settings → Providers, and restarts `yantrad` (Y-393).
 8. It runs `systemctl enable --now` for both units and for `yantra-update.path`, and waits up to 30 s for `yantrad` to answer
    `/healthz`.
-9. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
+9. **It lets `yantrad` log in to this box** ([Y-598](../tracker.md)). `yantrad` reaches this box over
+   ssh, as it reaches any machine ([ADR-0009](adr/0009-machine-names-are-ssh-destinations.md)). The
+   script makes the `yantra` account's key and a `Host` block for this box, and places the public key
+   in the `authorized_keys` of the account that ran the script. It then tries one real login and says
+   how that went. It asks nothing, and a failure here does not stop the install.
+   [The ssh identity section](#the-appliances-ssh-identity) says more.
+10. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
    `http://<tailnet address>:7717` if HTTPS is not on. If `qrencode` is installed, the URL also
    prints above that line as a QR code, so a phone can open it.
 
@@ -115,7 +121,9 @@ not install `gh`, and `provision.sh` is gone: its fleet half belongs to the dash
 **A second run is the updater.** It asks nothing it already has an answer to, except whether to
 restart. It touches no configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon.env` stays as it
 is, and it does not run `tailscale up` or `tailscale serve` again. It replaces the binaries and the
-units, and it ends on the same URL.
+units, and it ends on the same URL. **A run at a terminal or with `--yes` also repeats step 9**, which
+adds a key or a `Host` block only if it is missing. `yantra-update` runs with neither, so an update
+never runs step 9.
 
 **A run at a terminal asks before it restarts what is running.** If either unit runs, it asks
 *"Restart yantrad and yantra-agent now? [Y/n]"*. A yes runs this command, and `--yes` answers yes:
@@ -214,6 +222,15 @@ curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.
   above says.
 - **With no terminal, `tailscale serve` gets 120 seconds.** On a tailnet that never had HTTPS it
   waits on its link, and no one is there to press Ctrl-C. The install then ends on plain HTTP.
+- **A run as root names the account.** Root is not an account to log in to, so step 9 reads
+  `YANTRA_ACCOUNT`. Without it, the account is `SUDO_USER`, then the account that runs the script.
+  If that is `root`, or if `yantra` or an unknown account is named, the run places no key and prints
+  the join command. The box's `firstboot.sh` sets it:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
+  ```
+
 - **`--uninstall` ignores `--yes`.** Its questions are default no, and `--yes` never deletes
   `/etc/yantra` or the account.
 
@@ -236,6 +253,13 @@ a Ctrl-C while `serve` waits on its link, both end on the `http://` URL. **With 
 terminal**: the run asks nothing, hands `TS_AUTHKEY` to `tailscale up`, turns on `serve`, writes the
 address, enables both units and ends on the `https://` URL; the key is in no file and no journal
 line afterwards, and `YANTRA_YES=1` ends on the same URL. An unknown option installs nothing.
+
+[`own_box.rs`](../crates/yantrad/tests/own_box.rs) proves step 9 with a real `sshd`, `tmux`, `yantrad`
+and `yantra`: a session on the person's account appears in `GET /api/sessions` under the box's name,
+with `--yes` as that account and as root with `YANTRA_ACCOUNT`. A second run adds no key line and no
+`Host` block. Root with no account, and a kept block for another account, place no key and still
+finish. The real update unit writes no file under either `.ssh`. `tailscaled` is a stub and
+`/etc/hosts` stands in for MagicDNS, so the test does not prove that the name resolves on a tailnet.
 
 **The terminal tests talk to a stub `tailscale`** that records its calls. A login, a tailnet address
 and a certificate are what no container can hold, so the tests prove which commands the script ran,
@@ -288,6 +312,9 @@ an item that is already gone, so a second run succeeds.
 - Turn off the Tailscale serve on the dashboard's HTTPS port? Only that port comes off —
   `tailscale serve --https=8443 off` — never `tailscale serve reset`, which would drop every other
   serve on the tailnet too.
+
+**It leaves the public key in `authorized_keys`**, on this box and on every machine that joined. A
+script run on this box cannot know which lines a person wants to keep, so remove that line by hand.
 
 With no terminal it keeps all three and says so. **Tailscale itself, tmux, git and claude are never
 touched, and nothing on any other machine changes.** The closing message names what was removed and
@@ -379,6 +406,20 @@ from the caller's tailnet address and appends its `Host` block, with `User`, to 
 account's config. **If a block already names the machine, it is kept**, and the script warns when
 that block logs in as a different account. The agent's unit is `DynamicUser=yes`, so a joined
 machine gains no account for it.
+
+**The box itself needs no join command** (Y-598). `yantrad` lists this box's sessions over ssh, so
+[step 9](#what-it-does-at-a-terminal) of the install does here what the join command does elsewhere,
+for the account that ran the install. `yantra` itself has the shell `/usr/sbin/nologin` and stays
+that way: it holds the key to the whole fleet, and the sessions are not on that account.
+
+- **A run with no answers skips it.** With no terminal and no `--yes`, and in an update, nothing
+  writes under either `.ssh`.
+- **A box installed before this step does not get it from an update.** Run `install.sh` again at a
+  terminal on that box, or run the join command there.
+- **A kept block for another account places no key.** The run prints why and the join command, and
+  the install still finishes.
+- **A failed login does not stop the install.** `sshd` must run on the box, and the dashboard's Check
+  says why a login failed. This step does not turn `sshd` on; the join command offers that.
 
 **By hand**, for the account the units run as ([Y-144](../tracker.md#3-task-board)):
 
