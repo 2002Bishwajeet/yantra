@@ -35,6 +35,7 @@ const PROVIDER_CLI: &str = "provider-cli";
 const PROVIDER_AUTH: &str = "provider-auth";
 const LOGIN_SESSION: &str = "login-session";
 const MIC: &str = "mic";
+const FOLDER_ACCESS: &str = "folder-access";
 /// Public because the one caller that can answer this check finds it by name —
 /// see [`heartbeat`].
 pub const HEARTBEAT: &str = "heartbeat";
@@ -44,7 +45,7 @@ pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
-const BEHIND_SSH: [&str; 8] = [
+const BEHIND_SSH: [&str; 9] = [
     TMUX,
     GIT,
     AGENT_CLI,
@@ -53,6 +54,7 @@ const BEHIND_SSH: [&str; 8] = [
     PROVIDER_AUTH,
     LOGIN_SESSION,
     MIC,
+    FOLDER_ACCESS,
 ];
 
 /// What every check behind ssh says when ssh itself did not answer. The reason
@@ -152,7 +154,7 @@ pub async fn fleet_with(extra: &[String], term: &str) -> Result<Vec<Report>, Err
 ///
 /// Never fails: a connection that cannot even be built is a report of unknowns
 /// with the reason in it, because a caller asking *what is wrong with this box*
-/// is answered better by eleven states than by one error.
+/// is answered better by twelve states than by one error.
 pub async fn machine(name: &str, term: &str) -> Report {
     let ssh = ssh::machine_at(name)
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
@@ -223,6 +225,7 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         provider_auth(exec, providers).await,
         login_session(exec, found_tmux.as_ref(), found_claude.as_ref()).await,
         mic(exec).await,
+        folder_access(exec).await,
         heartbeat(),
     ]
 }
@@ -575,6 +578,65 @@ fn mic_from(said: &str) -> Check {
     }
 }
 
+/// The folders macOS keeps from an ssh login until Remote Login allows full
+/// disk access (Y-458).
+const GUARDED: [&str; 3] = ["Desktop", "Documents", "Downloads"];
+
+/// One round trip: `other` off macOS, else `darwin` and one `refused <folder>`
+/// line for each guarded folder `ls -A` cannot read. `dirs.rs` uses the same signal.
+fn folder_access_probe() -> String {
+    format!(
+        r#"[ "$(uname -s)" = Darwin ] || {{ echo other; exit 0; }}
+echo darwin
+for f in {folders}; do [ -d "$HOME/$f" ] && ! ls -A "$HOME/$f" >/dev/null 2>&1 && echo "refused $f"; done; true"#,
+        folders = GUARDED.join(" "),
+    )
+}
+
+async fn folder_access<E: Exec>(exec: &E) -> Check {
+    match exec.exec(&folder_access_probe()).await {
+        Ok(out) => folder_access_from(&String::from_utf8_lossy(&out.stdout)),
+        Err(err) => unknown(FOLDER_ACCESS, format!("could not be asked: {err}")),
+    }
+}
+
+fn folder_access_from(said: &str) -> Check {
+    let mut lines = said.lines().map(str::trim);
+    match lines.next() {
+        Some("other") => present(FOLDER_ACCESS, "only macOS blocks folders over ssh"),
+        Some("darwin") => {
+            let refused: Option<Vec<&str>> = lines
+                .filter(|line| !line.is_empty())
+                .map(|line| line.strip_prefix("refused "))
+                .collect();
+            match refused {
+                None => unknown(
+                    FOLDER_ACCESS,
+                    format!("the probe answered nothing Yantra reads: {said}"),
+                ),
+                Some(refused) if refused.is_empty() => present(
+                    FOLDER_ACCESS,
+                    "an ssh login can read Desktop, Documents and Downloads",
+                ),
+                Some(refused) => absent(
+                    FOLDER_ACCESS,
+                    format!(
+                        "macOS blocks an ssh login from {} — to allow it, open System Settings > \
+                         General > Sharing > Remote Login and turn on Allow full disk access for \
+                         remote users; every ssh login to this Mac, agents included, then gets \
+                         that access",
+                        refused.join(", ")
+                    ),
+                ),
+            }
+        }
+        _ => unknown(
+            FOLDER_ACCESS,
+            format!("the probe answered nothing Yantra reads: {said}"),
+        ),
+    }
+}
+
 /// **Unknown from every caller there is today**, and it is the architecture
 /// rather than an omission: the beats live in the running daemon's memory and
 /// nothing persists them (Y-044), while the CLI calls the library in-process and
@@ -766,7 +828,7 @@ mod tests {
     #[test]
     fn a_machine_that_cannot_be_asked_is_never_reported_as_missing_anything() {
         let checks = nothing_asked("ssh could not be set up here");
-        assert_eq!(checks.len(), 11);
+        assert_eq!(checks.len(), 12);
         assert!(
             checks.iter().all(|c| c.state == State::Unknown),
             "{checks:?}"
@@ -839,6 +901,50 @@ mod tests {
         let listed = mic_from("linger=no biswa\n42\tyantra-mic\tPipeWire\n");
         assert_eq!(listed.state, State::Absent);
         assert!(listed.detail.contains("linger"), "{}", listed.detail);
+    }
+
+    /// Y-591: only macOS refuses a folder to an ssh login, so a Linux answer is
+    /// present; a refused folder is named with the fix and its cost.
+    #[test]
+    fn the_folder_access_check_names_what_macos_blocks() {
+        assert_eq!(folder_access_from("other\n").state, State::Present);
+        assert_eq!(folder_access_from("darwin\n").state, State::Present);
+
+        let blocked = folder_access_from("darwin\nrefused Desktop\nrefused Documents\n");
+        assert_eq!(blocked.state, State::Absent);
+        for word in [
+            "Desktop, Documents",
+            "Allow full disk access for remote users",
+            "agents included",
+        ] {
+            assert!(blocked.detail.contains(word), "{word}: {}", blocked.detail);
+        }
+        assert!(!blocked.detail.contains("Downloads"), "{}", blocked.detail);
+
+        assert_eq!(folder_access_from("").state, State::Unknown);
+        assert_eq!(
+            folder_access_from("bash: uname: not found\n").state,
+            State::Unknown
+        );
+        assert_eq!(
+            folder_access_from("darwin\nls: Desktop\n").state,
+            State::Unknown
+        );
+    }
+
+    /// R-23: an exec that failed is not a blocked folder.
+    #[tokio::test]
+    async fn a_folder_access_check_that_could_not_ask_is_unknown() {
+        struct Broken;
+        impl Exec for Broken {
+            async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+                Err(ssh::Error::Transport {
+                    host: "mac".to_owned(),
+                    diagnosis: "Connection reset".to_owned(),
+                })
+            }
+        }
+        assert_eq!(folder_access(&Broken).await.state, State::Unknown);
     }
 
     /// R-23 on the one check that is about this host: no grant and a refused

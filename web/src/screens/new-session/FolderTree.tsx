@@ -8,7 +8,7 @@ import { Lead } from '@/m3/lead/Lead'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
-import { noAccess } from './dirs'
+import { useNoAccess } from './dirs'
 import { slug } from './form'
 import { arrange } from './picker'
 
@@ -37,6 +37,7 @@ type Walk = {
 function Children(props: Walk & { entry: Entry }) {
   const { entry, ...walk } = props
   const listing = useQuery({ ...dirsQuery(walk.machine, entry.path), enabled: true })
+  const refused = useNoAccess(walk.machine)
   const { onDrop } = walk
   useEffect(() => () => onDrop?.(entry.path), [onDrop, entry.path])
   if (listing.isPending) {
@@ -50,7 +51,7 @@ function Children(props: Walk & { entry: Entry }) {
     const said = asApiError(listing.error).status === 409 ? 'not a directory' : `${walk.machine} could not be asked`
     return <div className="ns__sub">{note(said)}</div>
   }
-  if (!listing.data.access) return <div className="ns__sub">{note(noAccess(walk.machine))}</div>
+  if (!listing.data.access) return <div className="ns__sub">{note(refused)}</div>
   const shown = arrange(
     listing.data.entries.filter((one) => one.kind === 'dir'),
     { hidden: walk.hidden, filter: '' },

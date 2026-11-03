@@ -906,7 +906,7 @@ fn from_install(error: &install::Error) -> &'static str {
 /// person taps it and nothing polls it, which is both halves of the ADR's test.
 ///
 /// **It costs an ssh round trip, and an asleep machine costs all ten seconds of
-/// `ConnectTimeout` before it answers.** What it answers then is eleven
+/// `ConnectTimeout` before it answers.** What it answers then is twelve
 /// *unknown* checks and never a 500: [`doctor::machine`] cannot fail, because a
 /// machine that could not be asked is not a machine that failed (R-23). A name
 /// nothing answers to reads the same way, and deliberately — ADR-0009 leaves

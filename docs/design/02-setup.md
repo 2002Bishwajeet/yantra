@@ -161,6 +161,13 @@ machine that never installed the microphone is *absent* with *not installed*, an
 not count it against readiness. A drop-in with no source and linger off names linger as the cause.
 The list is now eleven names.
 
+**2026-11-03, [Y-591](../../tracker.md#3-task-board): `folder-access` is a check, after `mic`.**
+macOS refuses an ssh login `~/Desktop`, `~/Documents` and `~/Downloads` until Remote Login allows
+full disk access. One round trip asks `uname -s` and, on macOS, runs `ls -A` on each of the three
+that exists. Off macOS the check is *present*. A refused folder makes it *absent*, and the detail
+names the folders, the fix and its cost: every ssh login to that Mac gets the access, agents
+included. The dashboard warns and does not block a session. The list is now twelve names.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor
