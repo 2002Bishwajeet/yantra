@@ -1,4 +1,4 @@
-import { type QueryClient, queryOptions } from '@tanstack/react-query'
+import { type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
@@ -8,6 +8,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Mentions,
   Probed,
   Readiness,
   Repo,
@@ -226,6 +227,27 @@ export const probeQuery = (name: string, path: string) =>
     staleTime: 0,
     ...onRequest,
   })
+
+/** Y-562. What the composer offers after `@` and `$`: one ssh round trip, asked
+ *  when a trigger opens (ADR-0019). Held for a few minutes, so typing more of a
+ *  name or opening the menu again asks nothing. */
+export const mentionsQuery = (name: string, thread: string | null, harness: string) =>
+  queryOptions({
+    queryKey: keys.mentions(name, thread, harness),
+    queryFn: ({ signal }) =>
+      fetchJson<Mentions>(
+        workspace(name, 'mentions'),
+        { method: 'POST', signal, ...json(thread === null ? { harness } : { harness, thread }) },
+        fields('files', 'truncated', 'skills'),
+      ),
+    staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+
+export const useMentions = (name: string, thread: string | null, harness: string, enabled: boolean) =>
+  useQuery({ ...mentionsQuery(name, thread, harness), enabled })
 
 // The reads below are Y-342's and Y-343's. Their envelopes are read from
 // docs/plans/m14-rust-inventory.md §2, and the Rust rows settle them.

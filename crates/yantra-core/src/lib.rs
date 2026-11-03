@@ -37,6 +37,7 @@ pub mod join;
 pub mod keep;
 pub mod layout;
 pub mod logs;
+pub mod mention;
 pub mod mic;
 pub mod notify;
 pub mod placement;

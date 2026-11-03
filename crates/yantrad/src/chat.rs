@@ -468,7 +468,7 @@ fn name_of(harness: Option<Harness>) -> &'static str {
     harness.map_or("claude", Harness::name)
 }
 
-fn harness_named(name: &str) -> Result<Option<Harness>, String> {
+pub(crate) fn harness_named(name: &str) -> Result<Option<Harness>, String> {
     if name == "claude" {
         return Ok(None);
     }

@@ -342,7 +342,7 @@ one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
 Attach, harness and permission controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
-Settings → General. Eight things about the code:
+Settings → General. Nine things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -362,6 +362,17 @@ Settings → General. Eight things about the code:
   Not logged in shows the command to run on the machine and a Retry that
   reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
   back, because the daemon cancels a turn whose socket closed.
+- **`@` and `$` open a menu in the Chat composer** (Y-562). `@` lists the
+  thread's files and `$` the harness's skills, from one `POST …/mentions`
+  (`useMentions`). It asks once when a trigger opens and keeps the answer for
+  five minutes, so nothing polls. [`trigger.ts`](src/composer/trigger.ts)
+  finds the trigger at the caret, [`searchMentions.ts`](src/composer/searchMentions.ts)
+  ranks a name prefix, then a substring, then the letters in order, and
+  [`MentionMenu.tsx`](src/composer/MentionMenu.tsx) draws the list, its
+  loading and empty words, and an `ErrorSurface`. The field is a combobox:
+  the arrows move, Enter or Tab picks, and Escape shuts the menu. A pick
+  inserts `@path ` or `$name `, and the prompt goes out as typed. The Room
+  composer has no menu, because a room spans several workspaces.
 - **An image goes on the same socket** (Y-424). The composer takes one by
   paste, drag and drop, or the Attach button. `ChatSocket.attach` sends it as a
   binary frame and resolves to its path on the machine; the daemon answers
@@ -831,7 +842,8 @@ src/
                      Playwright. Dev builds only
   composer/          the card the Chat and the Room both write in (Y-560): its
                      input, footer controls, send and stop button, context ring,
-                     plan badge, image strip, draft and prompt history. Copied
+                     plan badge, image strip, draft, prompt history and the
+                     `@`/`$` mention menu (Y-562). Copied
                      from T3 Code's composer, credited at the top of each file
   shell/
     Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
