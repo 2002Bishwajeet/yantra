@@ -28,24 +28,24 @@ services, with T3 Code as the coding reference, and it ends with changes for ope
 
 ## Result
 
-**The products agree on four things, and Yantra's dashboard breaks each of them.**
+**Two products back each of four patterns, and Yantra's dashboard breaks each of them.** No pattern has more than two sources, so read them as patterns and not as an industry consensus.
 
-1. **The first run asks for one thing and shows the result.** Coolify asks for an admin account, then
+1. **The first run asks for one thing and shows the result.** Two products: Coolify and Home Assistant. Coolify asks for an admin account, then
    walks the owner through a server, a project and a first resource. Home Assistant asks for an owner
    account, a location, an analytics choice, and then lists what it found. Yantra's setup asks the
    owner to add the appliance as a machine (#517).
-2. **The host is shown once, first, and apart.** Coolify names the server that runs it "localhost"
+2. **The host is shown once, first, and apart.** Two products: Coolify and Portainer. Proxmox does not set the host apart. Tailscale and Home Assistant gave no answer. Coolify names the server that runs it "localhost"
    and says in the docs that it cannot be removed. Portainer detects "the local environment it's
    running on" without being asked. Yantra lists the appliance beside every other machine (#517).
-3. **A page for a thing leads with its state and its numbers.** Proxmox leads a node with resource
+3. **A page for a thing leads with its state and its numbers.** One product shows a machine page: Proxmox. Tailscale shows only a list filter. Vercel leads with deployments. Home Assistant was not found. Proxmox leads a node with resource
    usage and the actions Reboot, Shutdown and Shell. Tailscale searches machines by name, address,
    user, system and client version. Yantra's card leads with "no beat has arrived" (#514).
-4. **Words stay close to the owner's task.** Home Assistant says "Integration" and "Dashboard".
+4. **Words stay close to the owner's task.** Two products: Home Assistant and Vercel. Home Assistant says "Integration" and "Dashboard".
    Vercel says "project" and "deployment". Yantra's pages show "I-" and `ADR` references and words
    such as "beat" (#514).
 
-**Nothing found says what to do with a section that has nothing to show.** Coolify is the only
-product where the source answers: it hides a control when it has no option to offer (no projects, no
+**Nothing found says what to do with a section that has nothing to show.** Two products answer: Coolify and Home Assistant ("All set!").
+Coolify's source hides a control when it has no option to offer (no projects, no
 SSH keys). That agrees with the rule in #514, and Yantra can adopt it without any product copying it.
 
 The comparison does **not** show that Yantra should look like any of these products. Yantra has no
