@@ -362,10 +362,12 @@ pub fn board(reads: &Reads) -> Board {
                     .iter()
                     .find(|(name, machine)| *name == session.name && *machine == answer.machine)
                     .map(|(name, _)| (*name).to_owned());
+                // A session no workspace claims has no status to read (R-23).
                 rows.push(SessionRow {
-                    mark: workspace.as_deref().map_or(Mark::Idle, |name| {
-                        state(name).map_or(Mark::Unread, Mark::of)
-                    }),
+                    mark: workspace
+                        .as_deref()
+                        .and_then(state)
+                        .map_or(Mark::Unread, Mark::of),
                     machine: answer.machine.clone(),
                     session: session.name.clone(),
                     workspace,
@@ -851,7 +853,7 @@ mod tests {
                     machine: "m".to_owned(),
                     session: "scratch".to_owned(),
                     workspace: None,
-                    mark: Mark::Idle,
+                    mark: Mark::Unread,
                     live: true,
                 },
                 SessionRow {
@@ -866,6 +868,19 @@ mod tests {
         let mut reads = one("running");
         reads.statuses = BTreeMap::from([("w".to_owned(), json(r#"{"looked":"never"}"#))]);
         assert_eq!(rows(&super::board(&reads))[0].mark, Mark::Unread);
+    }
+
+    #[test]
+    fn failed_workspaces_leave_every_live_session_unread() {
+        let mut reads = one("awaiting_trust");
+        reads.workspaces = json(r#"{"looked":"failed","age_seconds":1,"error":"bad toml"}"#);
+        let board = board(&reads);
+        assert_eq!(rows(&board).len(), 1);
+        assert_eq!(rows(&board)[0].mark, Mark::Unread);
+        assert_eq!(
+            board.needs,
+            Ok(vec!["workspaces failed: bad toml".to_owned()])
+        );
     }
 
     #[test]
