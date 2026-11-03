@@ -349,7 +349,8 @@ test.describe('the composer', () => {
           })
         }),
       )
-      .toEqual([true, true, true, true, true, true])
+      // Attach, harness, mode, model and effort, each tapped on both sides.
+      .toEqual(Array(10).fill(true))
   })
 
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {
