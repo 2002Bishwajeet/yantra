@@ -153,8 +153,11 @@ const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Numbe
 // Rows that touch the same paths never run at once.
 const clash = (a, b) => a.paths.some((p) => b.paths.some((q) => p.startsWith(q) || q.startsWith(p)))
 
+// The owner's own services run in podman on this box: a blanket `podman rm -f` took the chat agent down three times on 2026-11-03.
+const CLEANUP = `Afterwards remove only the test containers: those with label yantra-fixture (podman ps -aq --filter label=yantra-fixture) and those named yantra-e2e-*. Never stop or remove any other container.`
+
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
-const GATE_HOW = `The gate can take longer than a 10-minute Bash call: run it in the background with its output in a log file, and read only the tail of that log. Remove leftover podman containers afterwards.`
+const GATE_HOW = `The gate can take longer than a 10-minute Bash call: run it in the background with its output in a log file, and read only the tail of that log. ${CLEANUP}`
 
 // A web or docs row is built by Sonnet, so one Sonnet agent can run the gate and fix what it finds.
 async function verifyAndFix(row, wt, plan, label, attempts) {
@@ -190,7 +193,7 @@ async function fix(row, wt, what) {
   // The fixer holds the verify lock, so it may rerun the failing tests itself and the next gate run is the last.
   return serialVerify(() => agent(
     `Fix ${row.id} in ${wt}. ${what}
-Find the cause before you change code. Commit the fix. You hold the test lock: rerun only the failing tests (one podman test with NEXTEST_TEST_THREADS=4, or one e2e spec) until they pass. Do not run the full gate.${RULES(wt)}`,
+Find the cause before you change code. Commit the fix. You hold the test lock: rerun only the failing tests (one podman test with NEXTEST_TEST_THREADS=4, or one e2e spec) until they pass. Do not run the full gate. ${CLEANUP}${RULES(wt)}`,
     { label: `fix:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   ))
 }
