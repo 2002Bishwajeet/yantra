@@ -332,3 +332,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-494](../tracker.md#3-task-board) is in review.** The daemon now watches the PR of each thread. It polls GitHub with conditional reads and stops when the PR merges or closes. ntfy tells the owner when a check fails, when all checks pass, and when someone reviews.
 
 - **2026-11-03** — **[Y-569](../tracker.md#3-task-board) is in review.** The podman mic test flaked because it read the default source before WirePlumber had kept it. The test now waits for WirePlumber first, so the cause is fixed and not retried.
+
+- **2026-11-03** — **[Y-575](../tracker.md#3-task-board) is in review.** The GitHub connect sheet now has one button that copies the device code and opens GitHub. The code also has its own copy button. Unit and e2e tests cover both.
