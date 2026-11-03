@@ -950,6 +950,22 @@ describe('images in the composer', () => {
   })
 })
 
+describe('the git actions', () => {
+  const bar = () => within(document.querySelector('.chat__bar') as HTMLElement)
+
+  it('draws commit, push and open PR in the bar, off until the chat has a thread', async () => {
+    await open()
+    for (const name of ['Commit', 'Push', 'Open PR']) {
+      expect((bar().getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
+    }
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalled())
+    for (const name of ['Commit', 'Push', 'Open PR']) {
+      await settled(() => expect((bar().getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false))
+    }
+  })
+})
+
 describe('the branch diff', () => {
   const diffButton = () => screen.getByRole('button', { name: 'Diff' })
 

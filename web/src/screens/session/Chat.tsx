@@ -42,6 +42,7 @@ import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
 import { useEditors } from './diff/useEditors'
+import { GitActions } from './GitActions'
 import { HarnessPicker } from './HarnessPicker'
 import { keepInteraction, keepMode, recallInteraction, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
@@ -498,6 +499,7 @@ export function Chat(props: ChatProps) {
         >
           Diff
         </Button>
+        <GitActions busy={busy} key={timeline.thread ?? ''} thread={timeline.thread} workspace={workspace.name} />
         {showDiff ? (
           <Button
             aria-label="Refresh the diff"
