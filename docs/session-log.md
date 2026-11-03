@@ -336,3 +336,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-575](../tracker.md#3-task-board) is in review.** The GitHub connect sheet now has one button that copies the device code and opens GitHub. The code also has its own copy button. Unit and e2e tests cover both.
 
 - **2026-11-03** — **[Y-463](../tracker.md#3-task-board) is in review.** `yantra history extract` now reads a redacted staging or archive folder and writes candidate rows. It scans each row again with the Y-430 rules and drops a row with a finding. It fails closed when a finding cannot be located. Fixture tests cover each label source.
+
+- **2026-11-03** — **[Y-561](../tracker.md#3-task-board) is in review.** The daemon now holds a second turn sent while one runs. At the turn's end it sends the held turns as one prompt, and Cancel empties them. Every socket of the thread gets the queue. The composer shows Stop with a Queue button and lists what waits. A revert waits until no turn is running or queued. Rust and web tests cover each path.
