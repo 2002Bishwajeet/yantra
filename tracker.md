@@ -455,6 +455,7 @@ deleted everywhere else.
 | Y-604 | Update Playwright to 1.64.1 | 🔵 review | claude | — | **Owner, 2026-11-03:** 1.63.0 bundles a Chromium with known CVEs. **Done** when `@playwright/test` and the e2e image are both 1.64.1 and the e2e suite passes in CI. |
 | Y-605 | Shorten the CI wait for a pull request | 🔵 review | claude | Y-603 | **Owner, 2026-11-03.** A PR waited about 8 minutes for CI. **Done** when the `test`, `embed` and e2e jobs each finish in under 5 minutes and stay green. |
 | Y-606 | Say everywhere when the GitHub grant stops working | ⬜ todo | claude | Y-583 | **Owner, 2026-11-03.** The box's grant was revoked, and only Settings → About said so. **Done** when a failed grant marks the account button and links to `yantra github login`, and a test covers a revoked grant. |
+| Y-607 | Run only the CI that a change needs | 🟡 wip | claude | Y-605 | **Owner, 2026-11-03.** **Done** when a docs or tracker PR runs no Rust or web job, a web PR runs the web jobs only, a Rust PR runs the Rust jobs, and every required check still reports. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
