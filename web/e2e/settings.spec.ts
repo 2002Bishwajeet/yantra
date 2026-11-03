@@ -313,6 +313,10 @@ test.describe('settings · Notifications', () => {
 
     await sheet.getByRole('button', { name: 'Save and send a test' }).click()
     await expect(sheet.getByText('The test message arrived at the relay.')).toBeVisible()
+    // Y-576: only the phone knows whether the test arrived, so the sheet asks.
+    await expect(sheet.getByRole('heading', { name: 'Did it arrive?' })).toBeVisible()
+    await sheet.getByRole('button', { name: 'Yes' }).click()
+    await expect(sheet.getByText(/^Push works\./)).toBeVisible()
     await sheet.getByRole('button', { name: 'Done' }).click()
     await expect(
       page.getByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),

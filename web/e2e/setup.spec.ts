@@ -56,6 +56,31 @@ test.describe('the first run', () => {
     await expect(page.getByText(/One step runs in a terminal: the join command/)).toBeVisible()
   })
 
+  /** Y-576: the walkthrough opens the push setup in place, not in Settings. */
+  test('walks push setup from the app links to a test that arrived', async ({ page }) => {
+    const later = page.getByRole('list', { name: 'Later, when you want them' })
+    await later.getByRole('button', { name: 'Set up' }).click()
+    const sheet = page.getByRole('dialog', { name: 'Push relay' })
+    await expect(sheet).toBeVisible()
+    await expect(page).toHaveURL(/\/$/)
+    await expect(sheet.getByRole('link', { name: /iPhone/ })).toHaveAttribute('href', /apps\.apple\.com/)
+    await expect(sheet.getByRole('link', { name: /Android/ })).toHaveAttribute('href', /play\.google\.com/)
+    await sheet.getByRole('button', { name: 'Generate' }).click()
+    await expect(sheet.getByRole('img', { name: /QR code/ })).toBeVisible()
+    await expect(sheet.getByRole('link', { name: 'Open the topic' })).toHaveAttribute('href', /^https:\/\/ntfy\.sh\/yantra-/)
+    await expect(sheet.getByRole('button', { name: 'Copy the topic URL' })).toBeVisible()
+    await sheet.getByRole('button', { name: 'Save and send a test' }).click()
+    await expect(sheet.getByText('The test message arrived at the relay.')).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Restart now' })).toBeVisible()
+    await sheet.getByRole('button', { name: 'No' }).click()
+    await expect(sheet.getByText(/Subscribe to this topic in the ntfy app/)).toBeVisible()
+    await sheet.getByRole('button', { name: 'Send another test' }).click()
+    await sheet.getByRole('button', { name: 'Yes' }).click()
+    await expect(sheet.getByText(/^Push works\./)).toBeVisible()
+    await sheet.getByRole('button', { name: 'Done' }).click()
+    await expect(sheet).toBeHidden()
+  })
+
   test('passes axe', async ({ page }) => {
     await axe(page)
   })

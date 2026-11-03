@@ -34,6 +34,8 @@ describe('the relay row', () => {
       'GET /api/about': [200, { ...contract.about, relay: false }],
     })
     expect(await screen.findByText('Off · nothing is pushed')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Set up' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })
 
   it('draws the boundary when the daemon answers something else', async () => {
@@ -64,6 +66,132 @@ describe('the topic generator', () => {
     fireEvent.click(sheet.getByRole('button', { name: 'Save and send a test' }))
     expect(await sheet.findByText('The test message arrived at the relay.')).toBeTruthy()
     expect(asked.filter((one) => one === 'POST /api/relay')).toHaveLength(1)
+  })
+})
+
+describe('the guided flow (Y-576)', () => {
+  it('links the ntfy app in both stores', async () => {
+    mountSettings('desktop', '/settings/notifications')
+    const sheet = await open()
+    expect(sheet.getByRole('link', { name: /iPhone/ }).getAttribute('href')).toBe(
+      'https://apps.apple.com/us/app/ntfy/id1625396347',
+    )
+    expect(sheet.getByRole('link', { name: /Android/ }).getAttribute('href')).toBe(
+      'https://play.google.com/store/apps/details?id=io.heckel.ntfy',
+    )
+  })
+
+  it('copies the generated topic URL', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    mountSettings('desktop', '/settings/notifications')
+    const sheet = await open()
+    fireEvent.click(sheet.getByRole('button', { name: 'Generate' }))
+    const url = (sheet.getByLabelText('Topic URL') as HTMLInputElement).value
+    fireEvent.click(sheet.getByRole('button', { name: 'Copy the topic URL' }))
+    expect(await sheet.findByRole('button', { name: 'Copied the topic URL' })).toBeTruthy()
+    expect(writeText).toHaveBeenCalledWith(url)
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+  })
+
+  it('draws no QR and no copy for a self-hosted topic', async () => {
+    mountSettings('desktop', '/settings/notifications')
+    const sheet = await open()
+    fireEvent.change(sheet.getByLabelText('Topic URL'), { target: { value: 'https://ntfy.example.com/mine' } })
+    expect(sheet.queryByRole('img', { name: /QR/ })).toBeNull()
+    expect(sheet.queryByRole('button', { name: 'Copy the topic URL' })).toBeNull()
+  })
+
+  it('asks whether the test arrived after a 2xx', async () => {
+    mountSettings('desktop', '/settings/notifications', relay(204))
+    const sheet = await open()
+    expect(sheet.queryByText('Did it arrive?')).toBeNull()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    expect(await sheet.findByText('Did it arrive?')).toBeTruthy()
+  })
+
+  it.each([
+    [502, 'the test message did not arrive'],
+    [400, 'not a topic url'],
+    [403, 'not yours'],
+    [500, 'cannot write'],
+    [503, 'no whois'],
+  ])('does not ask after a %i', async (status, said) => {
+    mountSettings('desktop', '/settings/notifications', relay(status, said))
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    expect(await sheet.findByText(said)).toBeTruthy()
+    expect(sheet.queryByText('Did it arrive?')).toBeNull()
+  })
+
+  it('does not ask when the daemon does not answer', async () => {
+    mountSettings('desktop', '/settings/notifications', {
+      'POST /api/relay': () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    expect(await sheet.findByText('The daemon did not answer.')).toBeTruthy()
+    expect(sheet.queryByText('Did it arrive?')).toBeNull()
+  })
+
+  it('says push works on Yes, and offers Done', async () => {
+    mountSettings('desktop', '/settings/notifications', relay(204))
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    fireEvent.click(await sheet.findByRole('button', { name: 'Yes' }))
+    expect(sheet.getByText(/Push works/)).toBeTruthy()
+    expect(sheet.queryByText('Did it arrive?')).toBeNull()
+    expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy()
+  })
+
+  it('gives the next steps on No', async () => {
+    mountSettings('desktop', '/settings/notifications', relay(204))
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    fireEvent.click(await sheet.findByRole('button', { name: 'No' }))
+    expect(sheet.getByText(/Subscribe to this topic in the ntfy app/)).toBeTruthy()
+    expect(sheet.getByText(/Allow notifications for ntfy/)).toBeTruthy()
+    expect(sheet.getByText(/Check the topic URL/)).toBeTruthy()
+    expect(sheet.getByRole('button', { name: 'Send another test' })).toBeTruthy()
+  })
+
+  it('sends another test with the same body, and asks again', async () => {
+    const bodies: unknown[] = []
+    const asked = mountSettings('desktop', '/settings/notifications', {
+      'POST /api/relay': (init) => {
+        bodies.push(sent(init))
+        return [204]
+      },
+    })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic', 'tk_notarealtoken')
+    fireEvent.click(await sheet.findByRole('button', { name: 'No' }))
+    // A changed field is not what was saved; the resend repeats the save.
+    fireEvent.change(sheet.getByLabelText('Topic URL'), { target: { value: 'https://ntfy.sh/other' } })
+    fireEvent.click(sheet.getByRole('button', { name: 'Send another test' }))
+    await waitFor(() => expect(asked.filter((one) => one === 'POST /api/relay')).toHaveLength(2))
+    expect(bodies).toEqual([
+      { url: 'https://ntfy.sh/a-topic', token: 'tk_notarealtoken' },
+      { url: 'https://ntfy.sh/a-topic', token: 'tk_notarealtoken' },
+    ])
+    expect(await sheet.findByText('Did it arrive?')).toBeTruthy()
+  })
+
+  it('draws a refusal of the second test', async () => {
+    let second = false
+    mountSettings('desktop', '/settings/notifications', {
+      'POST /api/relay': () => (second ? [502, 'the relay answered 429'] : [204]),
+    })
+    const sheet = await open()
+    fill(sheet, 'https://ntfy.sh/a-topic')
+    fireEvent.click(await sheet.findByRole('button', { name: 'No' }))
+    second = true
+    fireEvent.click(sheet.getByRole('button', { name: 'Send another test' }))
+    expect(await sheet.findByText('The relay is written down, and the test message did not arrive.')).toBeTruthy()
+    expect(sheet.getByText('the relay answered 429')).toBeTruthy()
+    expect(sheet.queryByText('Did it arrive?')).toBeNull()
   })
 })
 

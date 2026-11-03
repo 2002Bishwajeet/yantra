@@ -28,3 +28,7 @@ export function publicTopic(url: string): string | null {
   const match = new RegExp(`^https://${HOST.replace('.', '\\.')}/([-_A-Za-z0-9]{1,64})$`).exec(url.trim())
   return match ? match[1] : null
 }
+
+// The store links docs.ntfy.sh/subscribe/phone gives (read 2026-11-03).
+export const APP_STORE = 'https://apps.apple.com/us/app/ntfy/id1625396347'
+export const GOOGLE_PLAY = 'https://play.google.com/store/apps/details?id=io.heckel.ntfy'
