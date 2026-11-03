@@ -344,7 +344,7 @@ async fn repos(State(model): State<Model>) -> impl IntoResponse {
 /// is the daemon filling in its own check.
 ///
 /// [`crate::write`]'s re-check calls it too, so a report a person asked for
-/// carries the same eleven answers as the swept one and not ten plus an
+/// carries the same twelve answers as the swept one and not eleven plus an
 /// *unknown* the daemon could have filled in.
 pub(crate) fn answered(
     report: &doctor::Report,

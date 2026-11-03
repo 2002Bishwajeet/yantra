@@ -41,6 +41,10 @@ const mac = (path: string) => {
 }
 
 const onMac: Answers = {
+  'GET /api/machines': [
+    200,
+    { ...contract.machines, data: contract.machines.data.map((one) => (one.name === 'cachyos-g14' ? { ...one, os: 'macOS' } : one)) },
+  ],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, mac(String(sent.path ?? HOME))],
 }
 
@@ -75,8 +79,17 @@ describe('step 2, subfolders in the local browser', () => {
   it('a folder the machine refuses to read says why, and does not read as empty', async () => {
     const folders = await toLocal()
     fireEvent.click(await folders.findByRole('button', { name: 'Show folders in Desktop' }))
-    expect(await folders.findByText(/Allow full disk access for remote users/)).toBeTruthy()
+    const said = await folders.findByText(/^macOS blocks remote access to this folder\./)
+    expect(said.textContent).toContain('System Settings > General > Sharing > Remote Login')
+    expect(said.textContent).toContain('agents included')
     expect(folders.queryByText('no folders here')).toBeNull()
+  })
+
+  it('a refused folder walked into on a Mac says why, and does not read as empty', async () => {
+    const folders = await toLocal()
+    fireEvent.click(await folders.findByRole('button', { name: /^Desktop/ }))
+    expect(await folders.findByText(/^macOS blocks remote access to this folder\..*agents included/)).toBeTruthy()
+    expect(folders.queryByText('this folder is empty')).toBeNull()
   })
 
   it('opens a subfolder inside a subfolder, and pressing its name walks into it', async () => {

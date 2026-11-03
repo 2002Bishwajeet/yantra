@@ -136,7 +136,7 @@ to tune and because the load is already this daemon's shape: the agents sweep ru
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
 name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
 macOS machines. A Windows, shared or tagged peer gets no check, because `presentOn` divides by
-this list and such a peer is never counted. Each machine asked pays eleven checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
+this list and such a peer is never counted. Each machine asked pays twelve checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
 candidates come from the last machines reading, so this adds no `tailscale` call. `Snapshot::checks`
 holds one report per machine with its own age, and `refresh::settle` is the one place a sweep
 lands. A failed sweep changes nothing there, and a machine the sweep skipped keeps its report. An
@@ -153,7 +153,7 @@ installed `tmux` by hand needs the answer before the next sweep, and the `GET` b
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
 type, and it keeps the report before it answers. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
-ssh destinations to refuse one against, and a name nothing answers to is eleven *unknown* checks like
+ssh destinations to refuse one against, and a name nothing answers to is twelve *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
