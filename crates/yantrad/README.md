@@ -54,6 +54,7 @@ API the CLI cannot reach.
 | `GET /api/here` | no verb, because a terminal already runs on the machine it would name; names the tailnet machine the request came from, found by the caller's node id from `whois` and not by address (I-5, I-52); authorised like every route, and 503 when the last tailnet look is missing or failed |
 | `GET /join` | `yantra join-script` (outside `/api`; makes the key on first use) |
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
+| `POST /api/join/forget-host-key` | `yantra forget-host-key <machine>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |

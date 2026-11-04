@@ -368,6 +368,7 @@ async fn fleet() -> Fleet {
             started: std::time::Instant::now(),
             listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
             ssh_dir: PathBuf::new(),
+            ssh_state: PathBuf::new(),
             relay: false,
             trigger: PathBuf::new(),
             updater: PathBuf::new(),

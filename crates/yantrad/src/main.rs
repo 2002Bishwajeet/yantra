@@ -176,6 +176,10 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
     });
+    let ssh_state = yantra_core::ssh::state_dir().unwrap_or_else(|| {
+        tracing::warn!("no directory for ssh state, so no host key can be forgotten");
+        PathBuf::new()
+    });
     let relay = yantra_core::notify::from_env();
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
     let chats = chats(yantra_core::join::daemon_address(&ips).ok());
@@ -184,6 +188,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             started: std::time::Instant::now(),
             listening_on: addresses.clone(),
             ssh_dir,
+            ssh_state,
             relay: relay.is_some(),
             trigger: PathBuf::from(yantra_core::update::TRIGGER),
             updater: PathBuf::from(yantra_core::update::UPDATER),

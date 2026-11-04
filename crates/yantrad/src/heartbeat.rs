@@ -101,6 +101,9 @@ pub struct Facts {
     pub listening_on: Vec<SocketAddr>,
     /// This account's `~/.ssh`, a parameter so a test names a scratch one.
     pub ssh_dir: PathBuf,
+    /// [`yantra_core::ssh::state_dir`], which holds Yantra's `known_hosts`, a
+    /// parameter for the same reason.
+    pub ssh_state: PathBuf,
     /// Whether this process started with a relay (Y-388). ADR-0021: a relay
     /// saved since reaches the next start, so this is what a push uses now.
     pub relay: bool,
@@ -124,6 +127,7 @@ impl Default for Fleet {
                 started: Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: PathBuf::new(),
+                ssh_state: PathBuf::new(),
                 relay: false,
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),

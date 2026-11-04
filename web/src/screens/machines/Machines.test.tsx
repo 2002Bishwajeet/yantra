@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { mount, scenario, unmount } from '@/screens/fleet/harness'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 
 // The route is lazy, so the first mount pays for its chunk; warming it here
 // keeps that cost out of the first test's own timeout.
@@ -311,10 +312,43 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
     expect(await box.findByText('browser sign-in')).toBeTruthy()
     expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
-    expect(box.getByText(/Tailscale asks for a browser sign-in on each connection/)).toBeTruthy()
+    expect(box.getByText(/waits for a browser sign-in, and the appliance has no browser/)).toBeTruthy()
     expect(box.queryByText(said)).toBeNull()
     fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
     expect(box.getByText(said)).toBeTruthy()
+  })
+
+  /** Y-621: the two lines a daemon before v0.10.1 sends. The sign-in link is
+   *  dead once ssh ends, so it is nowhere on the page, open or closed. */
+  it('reads Tailscale’s real check text with the new cause and no link', async () => {
+    const state = scenario('busy')
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const one = data.find((report) => report.machine === 'cachyos-g14')!
+    one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: CHECK_RULE } : check))
+    mount('desktop', '/machines', state)
+    const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
+    expect(await box.findByText('browser sign-in')).toBeTruthy()
+    expect(box.getByText('Tailscale SSH on cachyos-g14 waits for a browser sign-in, and the appliance has no browser.')).toBeTruthy()
+    expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
+    fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
+    expect(box.getByText(/Tailscale SSH requires an additional check\./)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('login.tailscale.com')
+  })
+
+  /** Y-621: only a person can tell a reinstall from an attack, so a changed key
+   *  offers no join command, and the machine page names the forget command. */
+  it('reads a changed host key on its own chip, with no join command', async () => {
+    const state = scenario('busy')
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const one = data.find((report) => report.machine === 'cachyos-g14')!
+    one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: CHANGED_KEY } : check))
+    mount('desktop', '/machines', state)
+    const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
+    expect(await box.findByText('host key changed')).toBeTruthy()
+    expect(box.getByText(/cachyos-g14 answered with a different host key than the one the appliance recorded/)).toBeTruthy()
+    expect(box.queryByRole('button', { name: 'Copy join command' })).toBeNull()
+    fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
+    expect(box.getByText(/REMOTE HOST IDENTIFICATION HAS CHANGED/)).toBeTruthy()
   })
 
   /** A changed host key reads as `unreachable`, never `refused` — the join

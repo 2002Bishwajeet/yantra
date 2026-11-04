@@ -36,7 +36,7 @@ use yantra_core::{
     agent, chat, clone, command, commit, dirs, doctor, down, edit, logs, mention, price, probe,
     remove, resume, sessions, status, terminfo, thread, tmux, tokens, up, workspace,
 };
-use yantra_core::{identity, join, update};
+use yantra_core::{identity, join, ssh, update};
 
 use crate::api::{Answer, Checked};
 use crate::events::{self, Event};
@@ -155,6 +155,7 @@ where
             post(set_client_id::<I>).delete(clear_client_id::<I>),
         )
         .route("/join", post(join_as::<I>))
+        .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
         .route("/workspaces/{name}/threads", post(threads::<I>))
@@ -1313,24 +1314,7 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
             said: identity::Error::UnusableUser { user: join.user }.to_string(),
         });
     }
-    // I-5 and I-52: `whois` spells the stable id `StableID`, which is what
-    // `status` calls `ID`, so the two join on it.
-    let machine = state
-        .authoriser
-        .inventory
-        .machines()
-        .await
-        .map_err(Refused::CannotAsk)?
-        .into_iter()
-        .find(|machine| machine.id == caller.node)
-        .map(|machine| machine.name)
-        .ok_or_else(|| Refused::Verb {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            said: format!(
-                "tailscale knows the caller as {} but does not list it, so there is no machine name to write",
-                caller.node
-            ),
-        })?;
+    let machine = caller_machine(&state.authoriser, &caller).await?;
 
     let dir = state.fleet.facts.ssh_dir.clone();
     let (named, user) = (machine.clone(), join.user.clone());
@@ -1372,6 +1356,67 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
         kept: joined.kept,
         logs_in_as: joined.logs_in_as,
     }))
+}
+
+/// The tailnet's name for the caller, so a machine acts only on itself.
+/// I-5 and I-52: `whois` spells the stable id `StableID`, which is what
+/// `status` calls `ID`, so the two join on it and never on an address.
+async fn caller_machine<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    caller: &Caller,
+) -> Result<String, Refused> {
+    authoriser
+        .inventory
+        .machines()
+        .await
+        .map_err(Refused::CannotAsk)?
+        .into_iter()
+        .find(|machine| machine.id == caller.node)
+        .map(|machine| machine.name)
+        .ok_or_else(|| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said: format!(
+                "tailscale knows the caller as {} but does not list it, so there is no machine name to act on",
+                caller.node
+            ),
+        })
+}
+
+/// What `forget_host_key` answers: the caller's name, and whether a line was there.
+#[derive(Debug, serde::Serialize)]
+struct Forgotten {
+    machine: String,
+    removed: bool,
+}
+
+/// `yantra forget-host-key <machine>` on the wire, with the machine taken from
+/// the caller as [`join_as`] takes it (Y-621). Tailscale SSH has a host key of
+/// its own, so the join's switch to sshd changes the key this daemon recorded.
+async fn forget_host_key<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Forgotten>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let machine = caller_machine(&state.authoriser, &caller).await?;
+    let target = ssh::Machine {
+        host: machine.clone(),
+        user: None,
+        port: None,
+        identity: None,
+        state_dir: state.fleet.facts.ssh_state.clone(),
+    };
+    let one_at_a_time = state.fleet.joins.lock().await;
+    let removed = target
+        .forget_host_key()
+        .await
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    drop(one_at_a_time);
+    tracing::info!("forgot {machine}'s host key for {}: {removed}", caller.node);
+    Ok(Json(Forgotten { machine, removed }))
 }
 
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
@@ -5227,6 +5272,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: PathBuf::new(),
+                ssh_state: PathBuf::new(),
                 relay: false,
                 trigger: trigger.clone(),
                 updater,
@@ -5335,6 +5381,7 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: vec![SocketAddr::new(address(1), 7717)],
                 ssh_dir: dir.to_owned(),
+                ssh_state: dir.join("state"),
                 relay: false,
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
@@ -5590,6 +5637,82 @@ mod tests {
         assert!(body.contains(r#""machine":"joining-box""#), "{body}");
         let config = std::fs::read_to_string(dir.join("config")).expect("written");
         assert!(!config.contains("impostor-box"), "{config}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const RECORDED: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK3nWKie+BAYQ/y9zgv6dgW8g5EE71n5muPqQ3gjdbrp";
+
+    /// Y-621: the join's switch to sshd changes the host key, and the caller
+    /// forgets its own line and no other.
+    #[tokio::test]
+    async fn a_machine_forgets_only_its_own_host_key() {
+        let dir = join_scratch("forget");
+        let fleet = join_fleet(&dir);
+        let state = dir.join("state");
+        std::fs::create_dir_all(&state).expect("scratch");
+        std::fs::write(
+            state.join("known_hosts"),
+            format!("joining-box {RECORDED}\nimpostor-box {RECORDED}\n"),
+        )
+        .expect("known_hosts");
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join/forget-host-key",
+            address(7),
+            "",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).expect("JSON"),
+            serde_json::json!({ "machine": "joining-box", "removed": true })
+        );
+        assert_eq!(
+            std::fs::read_to_string(state.join("known_hosts")).expect("still there"),
+            format!("impostor-box {RECORDED}\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A caller the tailnet does not list has no name, so nothing is touched.
+    #[tokio::test]
+    async fn a_caller_tailscale_does_not_list_forgets_nothing() {
+        let dir = join_scratch("forget-unlisted");
+        let fleet = join_fleet(&dir);
+        let state = dir.join("state");
+        std::fs::create_dir_all(&state).expect("scratch");
+        let lines = format!("joining-box {RECORDED}\n");
+        std::fs::write(state.join("known_hosts"), &lines).expect("known_hosts");
+        let mut tailnet = joining_tailnet();
+        tailnet.machines.clear();
+
+        let (status, _, body) = join_send(
+            router::<Fake, ()>(direct(tailnet), fleet.clone()),
+            "POST",
+            "/join/forget-host-key",
+            address(7),
+            "",
+        )
+        .await;
+        let (stranger, _, _) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join/forget-host-key",
+            address(8),
+            "",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert_eq!(stranger, StatusCode::FORBIDDEN);
+        assert_eq!(
+            std::fs::read_to_string(state.join("known_hosts")).expect("still there"),
+            lines
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 import { chipOf, noRows, sessionsFailure, sorted, startable, titleOf, verdictOf } from './verdict'
 
 const machine = (over: Partial<Machine> = {}) =>
@@ -53,6 +54,23 @@ describe('the machine page’s verdict', () => {
     expect(titleOf(v, 'pi')).toBe('pi needs a browser sign-in')
     expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'browser sign-in', error: true })
     expect(startable(v)).toBe(false)
+  })
+
+  /** Y-621: the two lines a daemon before v0.10.1 sends, link and all. */
+  it('reads Tailscale’s real check text as the browser failure', () => {
+    const v = verdict(all({ reachable: 'absent' }, { reachable: CHECK_RULE }))
+    expect(v).toEqual({ kind: 'browser', detail: CHECK_RULE })
+    expect(titleOf(v, 'pi')).toBe('pi needs a browser sign-in')
+  })
+
+  it('reads a changed host key as its own failure', () => {
+    const v = verdict(all({ reachable: 'absent' }, { reachable: CHANGED_KEY }))
+    expect(v).toEqual({ kind: 'changed', detail: CHANGED_KEY })
+    expect(titleOf(v, 'pi')).toBe('pi’s host key changed')
+    expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'host key changed', error: true })
+    expect(startable(v)).toBe(false)
+    expect(sessionsFailure(v, `${SSH} No route to host`)).toBe(v)
+    expect(sessionsFailure({ kind: 'pending' }, `${SSH} Host key verification failed.`).kind).toBe('changed')
   })
 
   /** Y-585: tailnet machines reach Sessions and never the sweep, and the page

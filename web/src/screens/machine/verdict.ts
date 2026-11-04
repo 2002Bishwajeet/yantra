@@ -16,6 +16,7 @@ export type Verdict =
   | { kind: 'refused'; detail: string }
   | { kind: 'unjoined'; detail: string }
   | { kind: 'browser'; detail: string }
+  | { kind: 'changed'; detail: string }
   | { kind: 'unreachable'; detail: string }
   | { kind: 'sudo'; missing: string[]; result: Event }
   | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
@@ -87,6 +88,7 @@ const NOT_REACHED: ReadonlySet<Verdict['kind']> = new Set([
   'refused',
   'unjoined',
   'browser',
+  'changed',
   'unreachable',
 ])
 
@@ -145,6 +147,8 @@ export function titleOf(verdict: Verdict, name: string): string {
       return `${name} has not joined`
     case 'browser':
       return `${name} needs a browser sign-in`
+    case 'changed':
+      return `${name}’s host key changed`
     case 'unreachable':
       return `ssh to ${name} fails`
     case 'sudo':
@@ -171,6 +175,8 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
       return { state: 'failed', word: 'not joined', error: true }
     case 'browser':
       return { state: 'failed', word: 'browser sign-in', error: true }
+    case 'changed':
+      return { state: 'failed', word: 'host key changed', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'installing':
