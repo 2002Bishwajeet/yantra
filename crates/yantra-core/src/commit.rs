@@ -460,7 +460,7 @@ async fn tip<E: Exec>(exec: &E, place: &Place, branch: &str) -> Result<Tip, Fail
 }
 
 /// `branch` is the upstream's branch, as [`thread::Listed`] read it.
-fn tip_command(place: &Place, branch: &str) -> String {
+pub(crate) fn tip_command(place: &Place, branch: &str) -> String {
     format!(
         "cd {worktree} || exit {GIT_FAILED}\n\
          r=$(git config --get {remote}) || exit {NOT_PUSHED}\n\

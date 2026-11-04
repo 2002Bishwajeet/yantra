@@ -47,9 +47,15 @@ done
 
 const REPO: &str = "/home/u/repo";
 const WORKTREE: &str = "/home/u/.yantra/worktrees/repo/11111111";
+const INSTALLER: &str = "curl -fsSL https://example.invalid/install.sh | bash";
 
 struct Recorder {
     darwin: bool,
+    /// A Linux machine with no claude until [`INSTALLER`] runs, missing a
+    /// prerequisite, with root and with no linger, so `install::of` runs
+    /// every step.
+    bare: bool,
+    installed: Mutex<bool>,
     label: Mutex<&'static str>,
     seen: Mutex<Vec<(String, String)>>,
 }
@@ -58,6 +64,8 @@ impl Recorder {
     fn new(darwin: bool) -> Self {
         Self {
             darwin,
+            bare: false,
+            installed: Mutex::new(false),
             label: Mutex::new(""),
             seen: Mutex::new(Vec::new()),
         }
@@ -85,9 +93,21 @@ impl Exec for Recorder {
     async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
         let label = *self.label.lock().unwrap_or_else(PoisonError::into_inner);
         self.keep(label, ssh::payload(command, "0123456789abcdef"));
+        let mut installed = self
+            .installed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        *installed |= command == INSTALLER;
+        let stdout = if self.bare {
+            bare(command, *installed)
+        } else {
+            None
+        };
         Ok(ssh::Output {
             status: 0,
-            stdout: answer(self.darwin, command).into_bytes(),
+            stdout: stdout
+                .unwrap_or_else(|| answer(self.darwin, command))
+                .into_bytes(),
             stderr: Vec::new(),
         })
     }
@@ -109,6 +129,20 @@ fn answer(darwin: bool, command: &str) -> String {
         return format!("{REPO}\n0123456789abcdef0123456789abcdef01234567\n");
     }
     String::new()
+}
+
+/// What a [`Recorder::bare`] machine says where it differs from [`answer`].
+fn bare(command: &str, installed: bool) -> Option<String> {
+    if command.contains("|| echo curl") {
+        return Some("curl\n".to_owned());
+    }
+    if command.contains("sudo -n true") {
+        return Some("root\n".to_owned());
+    }
+    if command.contains("Linger --value") {
+        return Some("u\nno\n".to_owned());
+    }
+    (!installed && command.contains("command -v claude ")).then(String::new)
 }
 
 /// `script`, then every script nested inside it, each under its own label.
@@ -199,8 +233,8 @@ macro_rules! drive {
     }};
 }
 
-/// Every module that sends a script, driven once, then the builders the
-/// `Exec` seam never sees.
+/// Every module that sends a script, driven once, `install::of` again on a
+/// bare machine, then the builders the `Exec` seam never sees.
 async fn every_script() -> Vec<(String, String)> {
     let r = Recorder::new(false);
     let ws = workspace();
@@ -297,6 +331,11 @@ async fn every_script() -> Vec<(String, String)> {
     drive!(r, "delegate", delegate::prepare(&r, REPO, "22222222"));
     drive!(r, "delegate", delegate::summarise(&r, WORKTREE, "0123abcd"));
     r.keep("delegate", delegate::removal(&place));
+    // `open_pr` reaches the machine only after GitHub answers.
+    r.keep(
+        "commit",
+        commit::tip_command(&place, "yantra/chat/web/11111111"),
+    );
     drive!(r, "command", command::commands(&r, WORKTREE));
     drive!(
         r,
@@ -323,15 +362,13 @@ async fn every_script() -> Vec<(String, String)> {
         "clone",
         clone::clone_on(&r, &tmux, Os::Other, "m", &plan)
     );
+    drive!(r, "install", install::of(&r, "m", INSTALLER, Some("0")));
+    let mut bare = Recorder::new(false);
+    bare.bare = true;
     drive!(
-        r,
+        bare,
         "install",
-        install::of(
-            &r,
-            "m",
-            "curl -fsSL https://example.invalid/install.sh | bash",
-            Some("0")
-        )
+        install::of(&bare, "m", INSTALLER, Some("0"))
     );
     drive!(r, "doctor", doctor::of(&r, "xterm-ghostty"));
     drive!(
@@ -393,7 +430,7 @@ async fn every_script() -> Vec<(String, String)> {
     );
 
     let mut all = Vec::new();
-    for (label, script) in r.seen().into_iter().chain(mac.seen()) {
+    for (label, script) in r.seen().into_iter().chain(mac.seen()).chain(bare.seen()) {
         opened(&label, &script, &mut all);
     }
     all
@@ -432,6 +469,17 @@ const MODULES: &[&str] = &[
     "tmux",
     "tokens",
     "up",
+];
+
+/// Scripts sent only past a branch the default [`Recorder`] does not take.
+/// A pass that stops reaching one fails the test.
+const REACHED: &[&str] = &[
+    "|| echo curl",
+    "env DEBIAN_FRONTEND=noninteractive sh -c",
+    "loginctl enable-linger u",
+    INSTALLER,
+    "/usr/bin/claude' --version",
+    "--format=%s%x00%b",
 ];
 
 /// The checker's failures for `scripts`, or `None` when podman is missing.
@@ -518,6 +566,11 @@ async fn every_module_sends_a_script_the_check_sees() {
         .collect();
     let missing: Vec<_> = MODULES.iter().filter(|m| !labels.contains(*m)).collect();
     assert!(missing.is_empty(), "no script from {missing:?}");
+    let unreached: Vec<_> = REACHED
+        .iter()
+        .filter(|part| !scripts.iter().any(|(_, script)| script.contains(*part)))
+        .collect();
+    assert!(unreached.is_empty(), "no script contains {unreached:?}");
 }
 
 #[tokio::test]

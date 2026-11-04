@@ -61,7 +61,7 @@ bind where:
 
 **Every script sent to a machine must parse under bash 3.2 and dash, alone and inside `c=$(…)`.**
 macOS's bash 3.2 ends a `$(…)` at an unpaired `)`, so a case pattern opens with `(` (Y-634).
-`shells.rs` checks every script in one container (Y-635). A new script must reach its `Recorder` or its builder list.
+`shells.rs` checks every script in one container (Y-635). A new script must reach its `Recorder` or its builder list. A script behind a branch also goes in `REACHED`, so the test fails when no pass takes that branch.
 
 ## What `yantra-agent` may call
 
