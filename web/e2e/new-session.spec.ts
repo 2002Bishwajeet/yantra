@@ -281,7 +281,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await expect(
-      page.getByText('clone 2002Bishwajeet/scratch into ~/Github/scratch on cachyos-g14'),
+      page.getByText('It clones 2002Bishwajeet/scratch into ~/Github/scratch on cachyos-g14', { exact: false }),
     ).toBeVisible()
     await page.getByRole('button', { name: 'Create and open' }).click()
 
