@@ -360,3 +360,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-03** — **[Y-562](../tracker.md#3-task-board) is in review.** A read-only daemon route, `POST /api/workspaces/{name}/mentions`, lists a workspace's files and an agent's skills. The Chat composer opens a menu on `@` and `$`, and the chosen mention reaches the agent as text. Tests cover the route, the trigger parser and the composer.
 
 - **2026-11-03** — **[Y-563](../tracker.md#3-task-board) is in review.** The daemon now names the slash commands each harness takes. The Chat composer lists them when the owner types `/`, and picking one sends it. Tests cover the daemon route, the trigger parser and the composer.
+
+- **2026-11-04:** v0.10.0 cut ([Y-610](../tracker.md#3-task-board)). It ships the 16 merges of the 2026-11-03 build-loop run: the composer's queue, mentions, slash commands and Build/Plan toggle, the watched PRs, the terminal dashboard in the CLI, and the faster CI.
