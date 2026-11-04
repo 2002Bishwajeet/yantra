@@ -64,7 +64,7 @@ finish() {
         # tee must write the last line before the status names the failure.
         exec 2>&-
         wait "$teed" 2>/dev/null || true
-        if [ "$status" -eq 0 ]; then step done; else step failed; fi
+        if [ "$status" -eq 0 ]; then step "done"; else step failed; fi
     fi
 }
 trap finish EXIT
