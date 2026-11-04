@@ -59,6 +59,10 @@ bind where:
 | `placement.rs` | **I-10** — every term that moves the rank is in `Terms`, and the score is their sum. ADR-0013 §2: power is a score term and never a filter. ADR-0013 §7: the only filter is a beat that *arrived* within 30 s, and a rejection names which of its three reasons applies. The block comment and [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) credit T3 Code ([ADR-0026](../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md) decision 5) |
 | `notify.rs` | **I-49** through `status.rs` — the trust dialog is the notification that matters — and I-47's lesson one layer up: a machine that could not be asked keeps what it had, because unknown is not changed. **I-59** is the hole this leaves ([`yantrad/tracker.md`](../yantrad/tracker.md)). §B4 binds the other half (Y-147): the relay's URL and token are read from the environment and from nowhere else, and the body is the caller's — nothing here composes a workspace's resolved secret into one. Each notification has one of six phases with a fixed `Title`, a failed run sends a fixed string, and the block comment and [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) credit T3 Code (Y-451) |
 
+**Every script sent to a machine must parse under bash 3.2 and dash, alone and inside `c=$(…)`.**
+macOS's bash 3.2 ends a `$(…)` at an unpaired `)`, so a case pattern opens with `(` (Y-634).
+`shells.rs` checks every script in one container (Y-635). A new script must reach its `Recorder` or its builder list. A script behind a branch also goes in `REACHED`, so the test fails when no pass takes that branch.
+
 ## What `yantra-agent` may call
 
 `heartbeat.rs` and `agent::CANDIDATES` — a type and a `const`, neither of which links any code.

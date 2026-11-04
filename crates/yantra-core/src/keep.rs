@@ -29,7 +29,7 @@ use crate::tmux::{self, Opened, Tmux, sq};
 /// Every keeper session's name starts with this, and no workspace's may.
 pub const PREFIX: &str = "yantra-keep-";
 
-const SCRIPT: &str = include_str!("keep.sh");
+pub(crate) const SCRIPT: &str = include_str!("keep.sh");
 
 /// What the far reader says on stderr once the keeper's pane is dead.
 const ENDED: &str = "yantra-keeper-ended";
@@ -341,7 +341,7 @@ fn prepare(dir: &str, run: &str) -> String {
 }
 
 /// The pane's command: the script with its arguments, inside the envelope.
-fn command(dir: &str, agent: &str, limits: Limits) -> String {
+pub(crate) fn command(dir: &str, agent: &str, limits: Limits) -> String {
     use base64::Engine as _;
     let agent = base64::engine::general_purpose::STANDARD.encode(agent);
     ssh::stdio_payload(&format!(
@@ -516,7 +516,7 @@ pub async fn append(
     }
 }
 
-fn appending(keeper: &Keeper, run: &str, at: u64, len: u64) -> String {
+pub(crate) fn appending(keeper: &Keeper, run: &str, at: u64, len: u64) -> String {
     let end = at + len;
     format!(
         "cd {} || exit 1\n\
@@ -782,7 +782,8 @@ async fn read_once(
 
 /// The far loop ends the `tail` only on a dead pane or one tmux cannot find;
 /// any other answer, such as a tmux that failed to fork, is asked again.
-fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
+/// The pattern opens with `(`, as `agent::probe`'s does (Y-634, Y-635).
+pub(crate) fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
     format!(
         "cd {dir} || {{ echo {ENDED} >&2; exit 1; }}\n\
          tail -c +{from} -f out &\n\
@@ -790,7 +791,7 @@ fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
          while sleep 2; do\n\
          \x20 kill -0 \"$t\" 2>/dev/null || exit 1\n\
          \x20 case \"$({tmux} display-message -p -t {pane} '#{{pane_dead}}' 2>&1)\" in\n\
-         \x20 1|*\"can't find\"*|*\"no server running\"*|*\"error connecting to\"*\"No such file\"*) break ;;\n\
+         \x20 (1|*\"can't find\"*|*\"no server running\"*|*\"error connecting to\"*\"No such file\"*) break ;;\n\
          \x20 esac\n\
          done\n\
          kill \"$t\" 2>/dev/null\n\

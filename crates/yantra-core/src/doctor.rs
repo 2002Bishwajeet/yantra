@@ -407,9 +407,10 @@ async fn tmux<E: Exec>(exec: &E) -> (Check, Option<Tmux>) {
 /// Command Line Tools, and it is git once `xcode-select -p` answers.
 /// [`crate::install`] asks this too, so the two never disagree.
 pub(crate) async fn find_git<E: Exec>(exec: &E) -> Result<Option<String>, agent::Error> {
+    // `(/*)`, as in `agent::probe` (Y-634, Y-635).
     let probe = format!(
         "p=$(command -v git 2>/dev/null)\n\
-         case \"$p\" in /*) ;; *) p=\n\
+         case \"$p\" in (/*) ;; (*) p=\n\
          \x20 for d in {dirs}; do [ -x \"$d/git\" ] && {{ p=\"$d/git\"; break; }}; done ;;\n\
          esac\n\
          [ -n \"$p\" ] || exit 1\n\
