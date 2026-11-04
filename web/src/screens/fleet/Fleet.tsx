@@ -72,7 +72,7 @@ export function Fleet() {
   const failed = [listed, agents].find((read) => read.looked === 'failed')
   const live = sessionsOf(sessions)
   const rows = (band: Band) => placed.filter((row) => row.band === band)
-  const allSet = ready && placed.length === 0 && !speaks(attention)
+  const allSet = ready && placed.length > 0 && placed.every((row) => row.band === 'idle') && !speaks(attention)
 
   if (nothing) {
     return (
@@ -161,7 +161,7 @@ export function Fleet() {
           empty={
             listed.looked === 'ok' && listed.data.length === 0 ? (
               <EmptyState title="No workspaces yet">
-                <Link to="/new">New</Link> makes one
+                <Link to="/new">New session</Link> makes one.
               </EmptyState>
             ) : null
           }

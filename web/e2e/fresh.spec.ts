@@ -97,7 +97,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     'Admin console': url('https://login.tailscale.com/admin/machines'),
     'Skip for now': url('/fleet'),
   },
-  fleet: { Reorder: disabled, New: url('/new'), 'Sign in': url('/settings/providers') },
+  fleet: { Reorder: disabled, 'New session': url('/new'), 'Sign in': url('/settings/providers') },
   machines: {
     Open: url('/m/yantra-box'),
     Check: text('ready'),
@@ -126,8 +126,6 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   'settings-about': {
     ...SETTINGS_NAV,
     Source: url('https://github.com/2002Bishwajeet/yantra'),
-    'v0.4.0 is out': url('https://github.com/2002Bishwajeet/yantra/releases/tag/v0.4.0'),
-    'Update to v': dialog,
   },
   notifications: { Settings: url('/settings/notifications'), 'Mark all read': disabled },
   rooms: {},

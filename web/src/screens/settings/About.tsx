@@ -102,7 +102,7 @@ export function About() {
               <FileKey />
             </Lead>
           }
-          supporting="0600 · the one file the daemon writes · the relay and the GitHub grant"
+          supporting="0600 · the relay and the GitHub grant"
         />
       </Group>
       <Group label="Project">

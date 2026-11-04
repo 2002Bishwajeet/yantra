@@ -364,7 +364,7 @@ export const roomsQuery = () =>
     refetchInterval: ROOM_POLL_MS,
   })
 
-/** A 404 is a room the daemon lost to a restart, or one never made. */
+/** A 404 is a room never made, one that was ended, or an agent-made room that a restart lost. */
 export const roomQuery = (name: string) =>
   queryOptions({
     queryKey: keys.room(name),
