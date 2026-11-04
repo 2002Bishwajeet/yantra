@@ -100,6 +100,7 @@ import type {
   ThreadPrOpened,
   ThreadPushed,
   Transcript,
+  UpdateProgress,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -359,6 +360,7 @@ async fn fleet() -> Fleet {
             relay: false,
             trigger: PathBuf::new(),
             updater: PathBuf::new(),
+            progress: PathBuf::new(),
         }),
         ..fleet
     };

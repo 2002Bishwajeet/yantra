@@ -1814,9 +1814,28 @@ async fn update_check_with(github: &Github, token: Option<&github::Token>) -> Ex
     }
 }
 
-/// ADR-0027 §3: the same unit the daemon's trigger starts, waited for.
+/// ADR-0027 §3: the same unit the daemon's trigger starts, waited for. While
+/// it runs, the unit's own progress file says how far it got (Y-612).
 async fn update_apply() -> ExitCode {
-    match update::apply().await {
+    let dir = Path::new(update::PROGRESS);
+    let applying = update::apply();
+    tokio::pin!(applying);
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut shown = None;
+    let applied = loop {
+        tokio::select! {
+            applied = &mut applying => break applied,
+            _ = tick.tick() => {
+                // A progress file this build cannot read only costs the progress lines.
+                let Ok(Some(now)) = update::progress(dir) else { continue };
+                if let Some(line) = progress_line(shown.as_ref(), &now) {
+                    eprintln!("{line}");
+                }
+                shown = Some(now);
+            }
+        }
+    };
+    match applied {
         Ok(()) => {
             println!(
                 "installed the current release; yantrad and yantra-agent restarted if they were running"
@@ -1825,10 +1844,53 @@ async fn update_apply() -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
+            if let (update::Error::Failed { .. }, Ok(Some(update::Progress::Failed { said }))) =
+                (&err, update::progress(dir))
+            {
+                eprint!("{}", render_said(&said));
+            }
             eprint!("{}", update_next(&err));
             ExitCode::FAILURE
         }
     }
+}
+
+/// A line when the step changed or more bytes arrived, and none for a failure:
+/// that is printed once the unit has ended.
+fn progress_line(before: Option<&update::Progress>, now: &update::Progress) -> Option<String> {
+    use update::Progress;
+    if before == Some(now) {
+        return None;
+    }
+    let mb = |bytes: u64| format!("{:.1}", bytes as f64 / 1_000_000.0);
+    Some(match now {
+        Progress::Resolving => "resolving the current release".to_owned(),
+        Progress::Downloading {
+            version,
+            received,
+            total,
+        } => match total {
+            Some(total) => format!(
+                "downloading v{version}: {} of {} MB",
+                mb(*received),
+                mb(*total)
+            ),
+            None => format!("downloading v{version}: {} MB", mb(*received)),
+        },
+        Progress::Verifying => "checking the archive against SHA256SUMS".to_owned(),
+        Progress::Installing => "installing".to_owned(),
+        Progress::Failed { .. } => return None,
+    })
+}
+
+fn render_said(said: &str) -> String {
+    if said.is_empty() {
+        return String::new();
+    }
+    said.lines()
+        .fold("  the unit said:\n".to_owned(), |out, line| {
+            out + "    " + line + "\n"
+        })
 }
 
 /// The next command, where there is one. `NotInstalled` names `install.sh`
@@ -1839,7 +1901,11 @@ fn update_next(err: &update::Error) -> &'static str {
             "  run it as root: sudo systemctl start yantra-update.service\n"
         }
         update::Error::Failed { .. } => "  read why: journalctl -u yantra-update --no-pager\n",
-        update::Error::NotInstalled { .. } | update::Error::Io(_) => "",
+        update::Error::NotInstalled { .. }
+        | update::Error::Io(_)
+        | update::Error::Unreadable { .. }
+        | update::Error::UnknownStep { .. }
+        | update::Error::ArchivePath { .. } => "",
     }
 }
 
@@ -4745,6 +4811,62 @@ mod tests {
             said: "the control process exited with error code".to_owned(),
         });
         assert!(failed.contains("journalctl -u yantra-update"), "{failed}");
+    }
+
+    /// Y-612: a line per step and per change in bytes, and none twice.
+    #[test]
+    fn update_progress_prints_each_step_and_the_bytes() {
+        use update::Progress;
+        let downloading = |received, total| Progress::Downloading {
+            version: "0.10.0".into(),
+            received,
+            total,
+        };
+        assert_eq!(
+            progress_line(None, &Progress::Resolving).as_deref(),
+            Some("resolving the current release")
+        );
+        assert_eq!(
+            progress_line(Some(&Progress::Resolving), &Progress::Resolving),
+            None
+        );
+        let first = downloading(3_100_000, Some(9_800_000));
+        assert_eq!(
+            progress_line(Some(&Progress::Resolving), &first).as_deref(),
+            Some("downloading v0.10.0: 3.1 of 9.8 MB")
+        );
+        assert_eq!(progress_line(Some(&first), &first), None);
+        assert_eq!(
+            progress_line(Some(&first), &downloading(4_000_000, None)).as_deref(),
+            Some("downloading v0.10.0: 4.0 MB")
+        );
+        assert_eq!(
+            progress_line(Some(&first), &Progress::Verifying).as_deref(),
+            Some("checking the archive against SHA256SUMS")
+        );
+        assert_eq!(
+            progress_line(Some(&Progress::Verifying), &Progress::Installing).as_deref(),
+            Some("installing")
+        );
+        assert_eq!(
+            progress_line(
+                Some(&Progress::Installing),
+                &Progress::Failed { said: "x".into() }
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_failed_update_prints_what_the_unit_said_above_the_journal_hint() {
+        let said = render_said(
+            "install: yantra-0.10.0.tar.gz does not match SHA256SUMS — nothing was installed",
+        );
+        assert_eq!(
+            said,
+            "  the unit said:\n    install: yantra-0.10.0.tar.gz does not match SHA256SUMS — nothing was installed\n"
+        );
+        assert_eq!(render_said(""), "");
     }
 
     #[test]

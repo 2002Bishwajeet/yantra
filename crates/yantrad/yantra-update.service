@@ -12,6 +12,12 @@ ExecStart=/usr/local/bin/yantra-update
 # while this one ran asked for the same release, so it goes first.
 ExecStartPost=rm -f /home/yantra/yantra-update.requested
 ExecStartPost=systemctl try-restart yantrad.service yantra-agent.service
+# Y-612: install.sh writes how far it got to /run/yantra-update, because the
+# daemon's account cannot read the journal. Kept after a run, so a failure
+# stays readable once the oneshot has exited.
+RuntimeDirectory=yantra-update
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 # A oneshot waits forever by default, and a stalled download would hold every
 # later request.
 TimeoutStartSec=15min

@@ -226,6 +226,32 @@
   margin: 0;
 }
 
+.settings__progress,
+.settings__failed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.settings__progress > p,
+.settings__failed > p {
+  margin: 0;
+}
+
+.settings__said {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--m3-card-radius);
+  background: var(--md-sys-color-surface-container-highest);
+  font-family: var(--md-ref-typeface-mono);
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line-height);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Appearance. */
 
 .settings__choices {

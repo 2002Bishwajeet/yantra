@@ -187,6 +187,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             relay: relay.is_some(),
             trigger: PathBuf::from(yantra_core::update::TRIGGER),
             updater: PathBuf::from(yantra_core::update::UPDATER),
+            progress: PathBuf::from(yantra_core::update::PROGRESS),
         }),
         github: github::Grant::from_env(),
         rooms: rooms(chats.clone()),

@@ -45,6 +45,37 @@ fail() {
     exit 1
 }
 
+# Y-612: run by yantra-update.service, this has RUNTIME_DIRECTORY. yantrad cannot
+# read the journal, so the run writes how far it got there, and its stderr too.
+# The journal still gets every line. A run at a terminal writes nothing here.
+state=${RUNTIME_DIRECTORY:-}
+work=
+step() {
+    [ -n "$state" ] || return 0
+    printf 'step=%s\nversion=%s\narchive=%s\ntotal=%s\n' \
+        "$1" "${VERSION:-}" "${archive:-}" "${total:-}" >"$state/status.new"
+    mv -f "$state/status.new" "$state/status"
+}
+finish() {
+    local status=$?
+    if [ -n "$work" ]; then rm -rf "$work"; fi
+    if [ -n "$state" ]; then
+        if [ -n "${archive:-}" ]; then rm -f "$state/$archive" "$state/SHA256SUMS"; fi
+        # tee must write the last line before the status names the failure.
+        exec 2>&-
+        wait "$teed" 2>/dev/null || true
+        if [ "$status" -eq 0 ]; then step done; else step failed; fi
+    fi
+}
+trap finish EXIT
+if [ -n "$state" ]; then
+    rm -f -- "$state"/*
+    exec 2> >(tee -a "$state/said" >&2)
+    teed=$!
+    trap 'exit 143' TERM
+    step resolving
+fi
+
 if [ "$(id -u)" -eq 0 ]; then
     as_root() { "$@"; }
 else
@@ -272,23 +303,33 @@ VERSION="${YANTRA_VERSION:-$(latest_version)}"
 
 archive="yantra-$VERSION-$target.tar.gz"
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# The unit downloads where yantrad can count the bytes received.
+here=${state:-$work}
 
 echo "install: yantra v$VERSION, $target"
 
 fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
 
 download="https://github.com/$REPO/releases/download/v$VERSION"
-fetch "$work/$archive" "$download/$archive"
-fetch "$work/SHA256SUMS" "$download/SHA256SUMS"
+total=
+if [ -n "$state" ]; then
+    # Only for the progress, so a host that names no length costs nothing.
+    total=$(curl -fsIL --proto '=https' --tlsv1.2 --max-time 30 "$download/$archive" |
+        tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n }') || total=
+fi
+step downloading
+fetch "$here/$archive" "$download/$archive"
+fetch "$here/SHA256SUMS" "$download/SHA256SUMS"
 
 # A mismatch stops here rather than retrying or re-fetching: what produces one is
 # a corrupted download or a substituted archive, and neither is repaired by
 # trying again.
-(cd "$work" && sha256sum -c --ignore-missing SHA256SUMS) ||
+step verifying
+(cd "$here" && sha256sum -c --ignore-missing SHA256SUMS) ||
     fail "$archive does not match SHA256SUMS — nothing was installed"
 
-tar -C "$work" -xzf "$work/$archive"
+step installing
+tar -C "$work" -xzf "$here/$archive"
 staged="$work/yantra-$VERSION-$target"
 
 # The units ride in the archive, so SHA256SUMS covers the files that decide
