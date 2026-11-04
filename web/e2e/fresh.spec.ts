@@ -76,20 +76,21 @@ const SHELL: Record<string, Expect> = {
   'New session': url('/new'),
 }
 
-const READY = 'ready · 7 of 7'
-const NOT_CHECKED = 'not checked yet · a check costs one ssh round trip'
+// One ready machine ends the checklist, so a check on `/` lands on the dashboard.
+const CHECKED: Rule = text('Nothing is running', 'Set up Yantra')
 const SETTINGS_NAV = Object.fromEntries(CATEGORIES.map(([id, label]) => [label, url(`/settings/${id}`)]))
 const MACHINE_PAGE: Record<string, Expect> = {
   'Check again': text('Ready for sessions', 'Not checked yet'),
   'New session': url('/new'),
+  Show: expanded,
 }
 
 const PRESSES: Record<string, Record<string, Expect>> = {
   setup: {
     Open: url('/settings/about'),
     'Add a device': url('/machines/add'),
-    'Check all': text(READY, NOT_CHECKED),
-    Check: text(READY),
+    'Check all': CHECKED,
+    Check: CHECKED,
     'New session': url('/new'),
     Connect: url('/settings/providers'),
     'Set up': dialog,

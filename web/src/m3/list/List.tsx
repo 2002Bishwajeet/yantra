@@ -35,8 +35,14 @@ export function ListItem(props: ListItemProps) {
         <>
           {leading ? <span className="m3-list-item__leading">{leading}</span> : null}
           <span className="m3-list-item__text">
-            <span className="m3-list-item__headline m3-clip">{headline}</span>
-            {supporting ? <span className="m3-list-item__supporting m3-clip">{supporting}</span> : null}
+            <span className="m3-list-item__headline m3-clip" title={typeof headline === 'string' ? headline : undefined}>
+              {headline}
+            </span>
+            {supporting ? (
+              <span className="m3-list-item__supporting m3-clip" title={typeof supporting === 'string' ? supporting : undefined}>
+                {supporting}
+              </span>
+            ) : null}
           </span>
         </>
       ),
