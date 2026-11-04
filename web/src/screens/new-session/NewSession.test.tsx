@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
+import { aMachine, looked } from '@/api/fixtures'
+import type { Readiness } from '@/api'
 import { writePrefs } from '@/shell/prefs'
 import { READY } from '@/lib/ready'
 import { type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
@@ -818,5 +820,91 @@ describe('the suggested machine (Y-517)', () => {
     await waitFor(() => expect(answered).toBe(true))
     await new Promise((done) => setTimeout(done, 50))
     expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
+  })
+})
+
+/** Y-627: the hub is the daemon's own host, so it is offered once an account on it has joined. */
+describe('the hub (Y-627)', () => {
+  const box = aMachine({ name: 'yantra-box', hub: true, address: '100.64.0.9' })
+  const machines = () => looked.ok([...contract.machines.data.map((one) => ({ ...one, hub: false })), box])
+  const said = (state: 'present' | 'absent', detail: string): Readiness => ({
+    machine: box.name,
+    age_seconds: 0,
+    checks: [{ check: 'reachable', state, detail }],
+  })
+  const swept = (report: Readiness | null) =>
+    looked.ok<Readiness[]>([...contract.readiness.data, ...(report ? [report] : [])] as Readiness[])
+  const mount = (readiness: unknown, path = '/new', more: Answers = {}) =>
+    mountNew('desktop', path, {
+      'GET /api/machines': [200, machines()],
+      'GET /api/readiness': [200, readiness],
+      'GET /api/about': [200, contract.about],
+      'POST /api/placement': [200, { ranked: [], rejected: [] }],
+      ...more,
+    })
+  const group = async () => within(await screen.findByRole('group', { name: 'Machine' }))
+  const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+
+  it('gives a hub that ssh gets into a pressable chip, and no note', async () => {
+    mount(swept(said('present', 'a command ran there')))
+    const chips = await group()
+    await waitFor(() => expect(chips.getByRole('button', { name: 'yantra-box' })).toBeTruthy())
+    expect(chips.getByRole('button', { name: 'yantra-box' })).toHaveProperty('disabled', false)
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it.each([
+    ['Permission denied (publickey)'],
+    ['the ssh config here names no account for yantra-box, so ssh tried `yantra`'],
+  ])('draws no chip for a hub that said %j, and names the join step', async (detail) => {
+    mount(swept(said('absent', detail)))
+    const chips = await group()
+    const note = await screen.findByRole('note')
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+    expect(note.textContent).toMatch(/after an account on it joins/)
+    expect(note.textContent).toMatch(/separate account without sudo/)
+    expect(await within(note).findByText(COMMAND)).toBeTruthy()
+    expect(within(note).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+  })
+
+  it('draws no chip and a note for a hub no report speaks of', async () => {
+    mount(swept(null))
+    const chips = await group()
+    expect((await screen.findByRole('note')).textContent).toMatch(/without sudo/)
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+  })
+
+  it('does not preselect a ?machine= hub that has not joined', async () => {
+    mount(swept(said('absent', 'Permission denied (publickey)')), '/new?machine=yantra-box')
+    await screen.findByRole('note')
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('preselects a ?machine= hub that has joined', async () => {
+    mount(swept(said('present', '')), '/new?machine=yantra-box')
+    const chips = await group()
+    await waitFor(() => expect(chips.getByRole('button', { name: 'yantra-box' }).getAttribute('aria-pressed')).toBe('true'))
+  })
+
+  it('draws no hub chip when the readiness read failed, and says so in the note', async () => {
+    mount(looked.failed('the sweep did not run'))
+    const chips = await group()
+    expect(await screen.findByRole('note')).toBeTruthy()
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+  })
+
+  it('draws a skeleton, no chip and no note while readiness is still pending', async () => {
+    mount(null, '/new', { 'GET /api/readiness': () => new Promise<never>(() => {}) })
+    await screen.findByRole('dialog', { name: 'New session' })
+    expect(screen.queryByRole('group', { name: 'Machine' })).toBeNull()
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it('gives the note without the command when /api/about is missing', async () => {
+    mount(swept(said('absent', 'Permission denied (publickey)')), '/new', { 'GET /api/about': [404, 'gone'] })
+    const note = await screen.findByRole('note')
+    expect(note.textContent).toMatch(/without sudo/)
+    expect(within(note).queryByText(/curl -fsSL/)).toBeNull()
   })
 })

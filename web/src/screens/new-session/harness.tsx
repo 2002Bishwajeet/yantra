@@ -69,7 +69,8 @@ export const listing = (path: string) => {
  *  2 is about. */
 const fleet: Answers = {
   'GET /api/workspaces': [200, contract.workspaces],
-  'GET /api/machines': [200, contract.machines],
+  // The contract marks cachyos-g14 as the hub; these walks are not about the hub (Y-627).
+  'GET /api/machines': [200, { ...contract.machines, data: contract.machines.data.map((one) => ({ ...one, hub: false })) }],
   'GET /api/sessions': [200, contract.sessions],
   'GET /api/attention': [200, contract.attention],
   'GET /api/notifications': [200, contract.notifications],

@@ -22,6 +22,7 @@ import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
 import { StepStart } from './StepStart'
+import { useOffered } from './useOffered'
 import { useSessionForm } from './useSessionForm'
 import { generateName } from './words'
 import './NewSession.css'
@@ -86,13 +87,15 @@ export function NewSession() {
   // The list can arrive after mount, so the preset is resolved once it reads
   // ok; a pick made meanwhile is never overwritten.
   const machines = useMachines()
+  const { shown, waiting } = useOffered()
   const seeded = useRef(false)
   useEffect(() => {
-    if (seeded.current || machines.looked !== 'ok') return
+    // A hub is offered only once readiness shows an account on it joined (Y-627).
+    if (seeded.current || machines.looked !== 'ok' || waiting) return
     seeded.current = true
-    const picked = pickMachine(preset, machines.data)
+    const picked = pickMachine(preset, shown)
     if (picked !== '' && form.getFieldValue('machine') === '') form.setFieldValue('machine', picked)
-  }, [machines, preset, form])
+  }, [machines.looked, waiting, shown, preset, form])
 
   // A step the values do not reach yet draws the first one that is unfinished.
   const step = Math.min(requested, starting ? 4 : Math.min(3, reachable(values))) as Step
