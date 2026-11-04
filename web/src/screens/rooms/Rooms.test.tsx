@@ -123,7 +123,7 @@ describe('the rooms list', () => {
     daemon({ 'GET /api/rooms': { status: 200, body: [] } })
     open('/rooms')
     expect(await screen.findByText('No rooms')).toBeTruthy()
-    expect(screen.getByText(/A restart keeps each room and clears its messages/)).toBeTruthy()
+    expect(screen.getByText(/A room an agent made ends on a restart/)).toBeTruthy()
     expect(screen.queryByRole('link')).toBeNull()
   })
 
@@ -161,7 +161,7 @@ describe('one room', () => {
     open('/rooms/gone')
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByText('No room is called gone')).toBeTruthy()
-    expect(alert.textContent).toContain('no one made this room or its owner ended it')
+    expect(alert.textContent).toContain('a restart ended it')
     expect(within(alert).getByRole('link', { name: 'All rooms' }).getAttribute('href')).toBe('/rooms')
   })
 

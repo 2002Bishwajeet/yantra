@@ -161,7 +161,7 @@ function Unread({ name, error, reset }: { name: string; error: unknown; reset: (
           kind: said.kind,
           said: said.said,
           retryable: false,
-          describe: () => 'A restart keeps rooms, so no one made this room or its owner ended it.',
+          describe: () => 'No one made this room, the owner ended it, or it was made by an agent and a restart ended it.',
         }}
         eyebrow="Rooms"
         title={`No room is called ${name}`}
