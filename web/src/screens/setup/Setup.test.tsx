@@ -411,11 +411,41 @@ describe('the hub', () => {
     const refused = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
     const hub = hubList()
-    expect(hub.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(hub.getByText('the key was refused · its machine page shows how')).toBeTruthy()
+    expect(hub.queryByText(/join command/)).toBeNull()
     expect(hub.queryByText('Permission denied (publickey)')).toBeNull()
     expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
     fireEvent.click(hub.getByRole('button', { name: /What ssh said/ }))
     expect(await hub.findByText('Permission denied (publickey)')).toBeTruthy()
+  })
+
+  /** Y-622: the box is the hub, so no word on the page sends the owner to the join command. */
+  const named = { name: 'yantra-box', dns_name: 'yantra-box.tail3a1b.ts.net.', hub: true }
+  const otherMachines = () => screen.queryByRole('list', { name: 'Other machines' })
+
+  it.each([
+    ['unjoined', 'the ssh config here names no account for yantra-box, so ssh tried `yantra` · Permission denied (publickey).', 'no account named for it · its machine page shows how'],
+    ['browser', 'Tailscale SSH requires an additional check', 'Tailscale asks for a browser sign-in · its machine page shows how'],
+  ])('lists a %s hub once, under step 1, with no join command', async (_kind, detail, words) => {
+    const one = aMachine({ ...named, os: 'linux', online: true, address: '100.64.0.1' })
+    const report = { machine: one.name, checks: [{ check: 'reachable', state: 'absent', detail }] }
+    await draw({ ...base([one]), ...keyed, 'GET /api/readiness': [200, looked.ok([report as Readiness])] })
+    expect(screen.getAllByText('yantra-box')).toHaveLength(1)
+    const hub = hubList()
+    expect(hub.getByText('yantra-box')).toBeTruthy()
+    expect(hub.getByText(words)).toBeTruthy()
+    expect(otherMachines()).toBeNull()
+    expect(hub.queryByText(/join command/)).toBeNull()
+    expect(hub.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+  })
+
+  it('lists a tagged hub once, under step 1, and not among the devices the account does not own', async () => {
+    const one = aMachine({ ...named, os: 'linux', online: true, ownership: 'tagged', address: '100.64.0.1' })
+    await draw({ ...base([one]), ...keyed })
+    expect(screen.getAllByText('yantra-box')).toHaveLength(1)
+    expect(hubList().getByText(/^tagged, so the tailnet owns it/)).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Devices your account does not own' })).toBeNull()
+    expect(hubList().queryByRole('button')).toBeNull()
   })
 
   it('still draws the hub when the key could not be read', async () => {

@@ -81,11 +81,13 @@ export function useChecklist(now: number) {
     return { machine, report, line: line(machine, report, since) }
   })
   // Y-582: the hub is the daemon's own node, so it is shown and never added.
-  const hub = lines.find((one) => one.machine.hub) ?? null
+  // A hub the account does not own runs no session here, but it is still drawn once, apart.
+  const hubNode = all.find((one) => one.hub)
+  const hub = lines.find((one) => one.machine.hub) ?? (hubNode ? { machine: hubNode, report: null, line: null } : null)
   const guests = lines.filter((one) => !one.machine.hub)
   // A report about an asleep machine is an old one, so only an online machine
   // counts as ssh getting in now.
-  const reaches = ({ machine, report }: (typeof lines)[number]) =>
+  const reaches = ({ machine, report }: Pick<(typeof lines)[number], 'machine' | 'report'>) =>
     machine.online && report?.checks.some((one) => one.check === 'reachable' && one.state === 'present')
   const reached = guests.filter(reaches).map((one) => one.machine.name)
   // A join is its event, or ssh getting in now after a restart forgot it. The
@@ -117,7 +119,7 @@ export function useChecklist(now: number) {
   }
   const key = keyExpiry(
     { data: machines.looked === 'ok' ? machines.data : undefined, error: fromReading(machines), isPending: machines.looked === 'pending' },
-    all.find((one) => one.hub) ?? null,
+    hubNode ?? null,
     now,
   )
   const later = { github: github(connection), push: push(about), key }
