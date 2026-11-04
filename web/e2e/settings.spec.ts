@@ -354,7 +354,7 @@ test.describe('settings · About reads the appliance', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Add a device' })).toBeVisible()
   })
 
-  test('says the daemon facts and where its one file lives', async ({ page, size }) => {
+  test('says the daemon facts and where its env file lives', async ({ page, size }) => {
     await scenario(page, 'busy')
     await page.goto('/settings/about')
     await opened(page, 'About', size)

@@ -251,5 +251,15 @@
       ],
       "rejected": []
     }
+  },
+  "about": {
+    "version": "0.10.0",
+    "target": "aarch64-unknown-linux-musl",
+    "built": "2026-11-04",
+    "uptime_seconds": 3600,
+    "listening_on": ["100.64.0.1:7717"],
+    "tailnet": "yantra.tail3a1b.ts.net",
+    "relay": true,
+    "published": { "looked": "ok", "age_seconds": 60, "data": { "version": "0.10.0", "newer": false } }
   }
 }
