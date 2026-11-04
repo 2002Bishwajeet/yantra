@@ -260,6 +260,8 @@ for (const destination of DESTINATIONS) {
   test.describe(`a fresh install at ${destination.path}`, () => {
     test('draws, passes axe and is captured', async ({ page, size }) => {
       await open(page, 'fresh', destination)
+      // The page draws a random name; a fixed one keeps the capture the same each run.
+      if (destination.id === 'new') await page.getByLabel('Name').fill('quiet-otter')
       await axe(page)
       await screenshot(page, destination.id, 'fresh', size)
     })
