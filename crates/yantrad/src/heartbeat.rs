@@ -91,7 +91,8 @@ pub struct Fleet {
     /// Each thread's open PR the appliance watches (Y-494), in memory only.
     pub pulls: crate::watch::Pulls,
     /// Wakes the agent sweep after `up`, `down` or `resume` (Y-639), so the
-    /// verb's result does not wait out `EVERY`.
+    /// verb's result does not wait out `EVERY`. The sweep looks again after
+    /// `SETTLE`, because `claude` registers after `up` returns.
     pub look_at_agents: Arc<tokio::sync::Notify>,
 }
 

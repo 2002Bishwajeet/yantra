@@ -133,7 +133,9 @@ their own, so readiness rides them at any interval. It is the same constant beca
 to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
 --json` on every machine every 30 s, and this adds the auth gate beside it. **A successful `up`,
 `down` or `resume` wakes the agents sweep at once** (Y-639), so the browser's next poll shows the
-verb's result and not a reading 30 s old.
+verb's result and not a reading 30 s old. **The wake looks twice**: now, and `SETTLE` (5 s) later.
+`up` and `resume` return before `claude` registers, so the first look can read the agent as
+unclear, and the second look corrects it.
 
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
 name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
