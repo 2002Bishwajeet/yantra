@@ -5,7 +5,7 @@ import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
-import { reachWords } from '@/lib/checks'
+import { joinFixes, reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
 import { notYours } from '@/lib/platform'
 import { ago } from '@/lib/time'
@@ -108,8 +108,7 @@ function wordsOf(said: Line, name: string): string {
   }
 }
 
-const bad = (said: Line): said is Extract<Line, { detail: string }> =>
-  said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'browser' || said.kind === 'unreachable'
+const bad = (said: Line): said is Extract<Line, { detail: string }> => 'detail' in said
 
 /** Y-582: the hub's line under step 1. It is never added, so it offers no
  *  Check or Install; one that is not ready links to its machine page. */
@@ -230,7 +229,7 @@ function MachineLine(props: {
             {reachWords(said.kind, name).next}
           </Text>
         ) : null}
-        {bad(said) && said.kind !== 'unreachable' ? join : null}
+        {bad(said) && joinFixes(said.kind) ? join : null}
         {bad(said) ? <SshSaid detail={said.detail} /> : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
