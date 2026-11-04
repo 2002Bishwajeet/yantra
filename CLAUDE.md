@@ -292,10 +292,13 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   The local gate tests only what a row changed, and so does CI: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607). Shipping waits for every check that runs.
   Verification and shipping run one row at a time, because podman runs out of memory and rebases
   must see each other's merges.
-- **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a real
-  Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, a changed
+- **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a Pi,
+  audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, a changed
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the
   report. A later run skips it until its reason no longer holds, then continues from that branch.
+- **It may use the real Mac.** `bishwajeets-macbook-pro` answers ssh as `biswa` over the tailnet
+  (owner, 2026-11-04). A row that needs a check on a Mac runs it there. An ssh login cannot read
+  the login keychain (I-44), so work that needs a GUI login session still parks.
 - **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
   web and docs, runs the gate, simplifies and ships. No subagent runs on Fable. Owner, 2026-10-05:
   use Opus only where it matters, and at high effort only to review and to plan transport work.
