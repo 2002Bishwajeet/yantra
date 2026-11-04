@@ -41,12 +41,12 @@ test.describe('the first run', () => {
     await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(0)
   })
 
-  test('lists phones, tablets and Windows apart, where they block nothing', async ({ page }) => {
-    const apart = page.getByRole('list', { name: 'Devices that open the dashboard' })
+  /** Y-582: phones, tablets and Windows are listed on Machines, not here. */
+  test('lists no devices that only open the dashboard', async ({ page }) => {
+    await expect(page.getByText('Devices that open the dashboard')).toHaveCount(0)
     for (const name of ['iphone', 'pixel-tablet', 'gaming-pc']) {
-      await expect(apart.getByText(name, { exact: true })).toBeVisible()
+      await expect(page.getByText(name, { exact: true })).toHaveCount(0)
     }
-    await expect(apart.getByText(/Windows · coming soon/)).toBeVisible()
   })
 
   test('says the key is made by the first join, and reads the relay', async ({ page }) => {
@@ -91,5 +91,36 @@ test.describe('the first run', () => {
 
   test('looks like the board', async ({ page, size }) => {
     await screenshot(page, 'setup', 'firstrun', size)
+  })
+})
+
+/** Y-582: a fresh install. The hub is the daemon's own node and is ready, so
+ *  step 1 shows it with nothing to press, and step 2 lists only the other
+ *  machines. The key is not made yet, so `/` still draws the checklist. */
+test.describe('a fresh install with a ready hub', () => {
+  test.beforeEach(async ({ page }) => {
+    await scenario(page, 'hub')
+    await page.goto(route('dashboard').path)
+    await expect(page.locator('h1', { hasText: 'Set up Yantra' }).first()).toBeAttached()
+  })
+
+  test('shows the hub ready under step 1, with no action', async ({ page }) => {
+    const hub = page.getByRole('list', { name: 'The hub' })
+    await expect(hub.getByText('yantra-box', { exact: true })).toBeVisible()
+    await expect(hub.getByText(/^ready · /)).toBeVisible()
+    await expect(hub.getByRole('button')).toHaveCount(0)
+    await expect(hub.getByRole('link')).toHaveCount(0)
+    await expect(page.getByText(/yantra-box is the hub and needs no adding · more machines can be added later/)).toBeVisible()
+  })
+
+  test('lists only the other machines under step 2', async ({ page }) => {
+    const others = page.getByRole('list', { name: 'Other machines' })
+    await expect(others.getByText('macbook', { exact: true })).toBeVisible()
+    await expect(others.getByText('yantra-box', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('iphone', { exact: true })).toHaveCount(0)
+  })
+
+  test('passes axe', async ({ page }) => {
+    await axe(page)
   })
 })

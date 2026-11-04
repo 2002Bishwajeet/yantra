@@ -31,6 +31,7 @@ export function aMachine(overrides: Partial<Machine> = {}): Machine {
     last_seen: '2026-07-07T09:00:00Z',
     heartbeat: aBeat(),
     ownership: 'yours',
+    hub: false,
     ...overrides,
   }
 }

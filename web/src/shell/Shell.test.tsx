@@ -276,7 +276,9 @@ describe('the FAB', () => {
     })
 
     it('carries Add a device before any machine has joined', async () => {
-      mount('tablet', '/', { overrides: { '/api/workspaces': empty } })
+      // Y-582: a reached hub needs no adding, so no node is the hub here.
+      const unhubbed = { body: looked.ok(contract.machines.data.map((one) => ({ ...one, hub: false }))) }
+      mount('tablet', '/', { overrides: { '/api/workspaces': empty, '/api/machines': unhubbed } })
       await waitFor(() => expect(named(fab())).toBe('Add a device'))
       expect(fab()!.getAttribute('href')).toBe('/machines/add')
       const add = within(screen.getByRole('main')).getByRole('link', { name: 'Add a device' })

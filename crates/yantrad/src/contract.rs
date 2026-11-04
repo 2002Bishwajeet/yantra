@@ -350,6 +350,18 @@ async fn fleet() -> Fleet {
             },
         ])))),
     });
+    // Y-582: bound to n-1's address, so n-1 is the hub.
+    let fleet = Fleet {
+        facts: Arc::new(crate::heartbeat::Facts {
+            started: std::time::Instant::now(),
+            listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
+            ssh_dir: PathBuf::new(),
+            relay: false,
+            trigger: PathBuf::new(),
+            updater: PathBuf::new(),
+        }),
+        ..fleet
+    };
     // A grant whose login the sweep has learned; the token is in no answer.
     fleet
         .github

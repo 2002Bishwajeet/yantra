@@ -366,3 +366,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-04** — **[Y-587](../tracker.md#3-task-board) is in review.** The Access settings page is gone. The key now lives in Add a device, and About says who can open the dashboard. Old links resolve, and the e2e baselines cover the key.
 
 - **2026-11-04** — **[Y-581](../tracker.md#3-task-board) is in review.** The Fleet page now uses one row pattern from phone to desktop. Rows hold at 390, 768, 1280 and 2000 px with no word breaks, and the e2e baselines cover a long title.
+
+- **2026-11-04** — **[Y-582](../tracker.md#3-task-board) is in review.** The daemon now names its own host. Setup no longer offers that host as a machine to add, and Machines shows it first and apart. It can still run agents. Tests cover a fresh install, and the Finish setup card says what setup configured.

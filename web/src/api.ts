@@ -54,6 +54,8 @@ export type Machine = {
   // Y-404: only `yours` counts or runs a session. `shared` is another Tailscale
   // account's node; `tagged` is the tailnet's, and wins over a matching owner.
   ownership: 'yours' | 'shared' | 'tagged'
+  // Y-582: the node yantrad runs on, named by the daemon from its bound address.
+  hub: boolean
 }
 
 // ADR-0013 §2: two variants, so unknown power cannot be spelled. A string and

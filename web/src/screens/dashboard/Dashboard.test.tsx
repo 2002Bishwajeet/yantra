@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { Machine, Readiness } from '@/api'
-import { aMachine, looked } from '@/api/fixtures'
+import { aListed, aMachine, looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
 import { readPrefs, writePrefs } from '@/shell/prefs'
 import { mount, scenario, unmount, type Scenario } from '@/screens/fleet/harness'
@@ -254,6 +254,24 @@ describe('the Dashboard on the first run', () => {
     fireEvent.click(card.getByRole('button', { name: 'Hide Finish setup' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Finish setup' })).toBeNull())
     expect(readPrefs().general.finishSetup).toBe('hidden')
+  })
+
+  /** R23 change 13: step 4 needs a workspace, and a workspace ends the
+   *  checklist, so the summary is on the card the owner lands on. */
+  it('says what setup configured on the card once all four steps are done', async () => {
+    const state = keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')]))
+    mount('desktop', '/', Object.assign(state, { workspaces: looked.ok([aListed()]) }))
+    const card = within(await screen.findByRole('region', { name: 'Finish setup' }))
+    const configured = within(card.getByRole('list', { name: 'What setup configured' }))
+    expect(configured.getByText(/Add a machine/)).toBeTruthy()
+    expect(configured.getByText(/1 of 1 machines ready/)).toBeTruthy()
+    expect(configured.getByText(/1 workspace made/)).toBeTruthy()
+  })
+
+  it('keeps no summary on the card while the first session is not made', async () => {
+    mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
+    await screen.findByRole('region', { name: 'Finish setup' })
+    expect(screen.queryByRole('list', { name: 'What setup configured' })).toBeNull()
   })
 
   /** Y-388: a phone runs no session, so one online is not a machine answering. */
