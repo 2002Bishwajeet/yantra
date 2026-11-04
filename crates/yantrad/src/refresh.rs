@@ -97,11 +97,12 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
 
     let agents = model.clone();
     let remembered = fleet.events.clone();
+    let woken = fleet.look_at_agents.clone();
     tokio::spawn(async move {
         let mut notifier = Notifier::new(relay);
         loop {
             look_at_agents(&agents, &mut notifier, &viewers, &remembered).await;
-            tokio::time::sleep(EVERY).await;
+            tick_or_verb(&woken).await;
         }
     });
 
@@ -180,6 +181,13 @@ async fn tick_or_change(grant: &Grant) {
     tokio::select! {
         () = tokio::time::sleep(ATTENTION) => {}
         () = grant.changed() => {}
+    }
+}
+
+async fn tick_or_verb(woken: &tokio::sync::Notify) {
+    tokio::select! {
+        () = tokio::time::sleep(EVERY) => {}
+        () = woken.notified() => {}
     }
 }
 
@@ -368,6 +376,20 @@ mod tests {
             key_expires: None,
             addresses: Vec::new(),
         }
+    }
+
+    /// Y-639: a verb wakes the agent sweep, even one that lands while a look is
+    /// running, and with no verb the sweep waits out `EVERY`.
+    #[tokio::test(start_paused = true)]
+    async fn a_verb_wakes_the_agent_sweep_before_every() {
+        let woken = tokio::sync::Notify::new();
+        let start = tokio::time::Instant::now();
+        woken.notify_one();
+        tick_or_verb(&woken).await;
+        assert!(start.elapsed() < EVERY);
+
+        tick_or_verb(&woken).await;
+        assert!(start.elapsed() >= EVERY);
     }
 
     /// I-47's lesson in the read model: a browser that arrives before the first

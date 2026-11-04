@@ -116,9 +116,6 @@ where
     let acts: Router<S> = Router::new()
         .route("/workspaces", post(make::<I>))
         .route("/workspaces/{name}", patch(change::<I>).delete(erase::<I>))
-        .route("/workspaces/{name}/up", post(open::<I>))
-        .route("/workspaces/{name}/down", post(stop::<I>))
-        .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/workspaces/{name}/tokens", post(spent::<I>))
         .route("/workspaces/{name}/logs", post(said::<I>))
         .route("/workspaces/{name}/mentions", post(mentions::<I>))
@@ -145,6 +142,10 @@ where
     // `/relay` is here since Y-343 because its test send is an event (ADR-0025).
     let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
+        // Here to wake the agent sweep once the verb is done (Y-639).
+        .route("/workspaces/{name}/up", post(open::<I>))
+        .route("/workspaces/{name}/down", post(stop::<I>))
+        .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/here", get(here::<I>))
         .route("/viewing", post(viewing::<I>))
         .route("/relay", post(relay::<I>))
@@ -528,13 +529,13 @@ fn from_edit(error: &edit::Error) -> StatusCode {
 }
 
 async fn open<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Option<Json<Start>>,
 ) -> Result<Json<Opened>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let agent = body
         .and_then(|Json(start)| start.agent)
         .map(up::Agent::from);
@@ -546,6 +547,7 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_up(&error),
             said: chain(&error),
         })?;
+    state.fleet.look_at_agents.notify_one();
 
     Ok(Json(Opened {
         machine: report.workspace.machine,
@@ -561,18 +563,19 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Stopped>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("down {name} for {}", caller.node);
 
     let report = down::down(&name).await.map_err(|error| Refused::Verb {
         status: from_down(&error),
         said: chain(&error),
     })?;
+    state.fleet.look_at_agents.notify_one();
 
     Ok(Json(Stopped {
         machine: report.workspace.machine,
@@ -1973,12 +1976,12 @@ async fn erase<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn again<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Resumed>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("resume {name} for {}", caller.node);
 
     let report = resume::resume(&name, term())
@@ -1987,6 +1990,7 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_resume(&error),
             said: chain(&error),
         })?;
+    state.fleet.look_at_agents.notify_one();
 
     Ok(Json(Resumed {
         machine: report.workspace.machine,

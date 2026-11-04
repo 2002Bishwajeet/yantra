@@ -121,6 +121,33 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
     Ok(())
 }
 
+/// Y-639 against the real registry. Read-only: 2.1.318 lists background agents
+/// with no `pid`, and each of the others must still come back.
+#[tokio::test]
+#[ignore = "needs the real MacBook; set YANTRA_MAC=user@host"]
+async fn the_registry_lists_every_agent_with_a_pid_on_real_macos() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest,
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y639"),
+    })?;
+    let claude = Claude::resolve(&ssh).await?;
+
+    let raw = ssh
+        .exec(&format!("'{}' agents --json", claude.path()))
+        .await?;
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&raw.stdout)?;
+    let with_pid = entries.iter().filter(|e| e.get("pid").is_some()).count();
+    println!("{} entries, {with_pid} with a pid", entries.len());
+
+    assert!(with_pid > 0, "no interactive claude runs on that Mac now");
+    assert_eq!(claude.agents(&ssh).await?.len(), with_pid);
+    Ok(())
+}
+
 /// Y-058 where the version skew is real: this machine runs ncurses 6.6 and the
 /// MacBook runs 6.0 from 2015. The container cannot reproduce a ten-year gap.
 ///

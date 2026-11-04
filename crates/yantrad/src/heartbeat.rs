@@ -90,6 +90,9 @@ pub struct Fleet {
     pub rooms: crate::room::Rooms,
     /// Each thread's open PR the appliance watches (Y-494), in memory only.
     pub pulls: crate::watch::Pulls,
+    /// Wakes the agent sweep after `up`, `down` or `resume` (Y-639), so the
+    /// verb's result does not wait out `EVERY`.
+    pub look_at_agents: Arc<tokio::sync::Notify>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -141,6 +144,7 @@ impl Default for Fleet {
             rooms: crate::room::Rooms::new(chats.clone(), None, None),
             chats,
             pulls: crate::watch::Pulls::default(),
+            look_at_agents: Arc::default(),
         }
     }
 }

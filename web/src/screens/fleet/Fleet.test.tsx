@@ -51,7 +51,8 @@ describe('/fleet on the busy fleet', () => {
     fireEvent.click(idle.getByRole('button', { name: 'Show 1 more' }))
     expect(idle.getAllByRole('button', { name: /^(Start|Resume)$/ })).toHaveLength(4)
     expect(idle.getByText('finished')).toBeTruthy()
-    expect(idle.getByText('stopped')).toBeTruthy()
+    // Y-639: a stopped agent and a session that is gone read the same.
+    expect(idle.getAllByText('stopped')).toHaveLength(3)
   })
 
   it('Stop never asks first, and the order holds until Reorder', async () => {

@@ -46,14 +46,14 @@ const sessions = looked([
 /** Answers the reads this screen makes, and `tokens` — the one write the Spend
  *  view sends, since reading spend costs an ssh and only happens on request
  *  (ADR-0019). */
-function daemon(list: unknown = looked(workspaces)) {
+function daemon(list: unknown = looked(workspaces), agent: unknown = status) {
   const asked: string[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
       asked.push(`${init?.method ?? 'GET'} ${path.split('?')[0]}`)
       if (path.endsWith('/tokens')) return Promise.resolve(answer(200, contract.spend))
-      if (path.includes('/status')) return Promise.resolve(answer(200, status))
+      if (path.includes('/status')) return Promise.resolve(answer(200, agent))
       if (path.endsWith('/api/sessions')) return Promise.resolve(answer(200, sessions))
       if (path.endsWith('/api/workspaces')) return Promise.resolve(answer(200, list))
       return Promise.resolve(answer(404, 'no'))
@@ -201,6 +201,29 @@ describe('one workspace, four views the URL carries', () => {
     const chats = sockets.filter((one) => one.url.includes('/chat'))
     expect(chats).toHaveLength(1)
     expect(chats[0]?.closed).toBe(false)
+  })
+
+  /** Y-639: every Stop ends in `no_session`, which is a stopped agent and not
+   *  a terminal that refused to attach. */
+  it('draws a stopped session as a note and opens no terminal socket', async () => {
+    daemon(looked(workspaces), looked({ workspace: 'landing', machine: 'macbook', reached: 'yes', status: { state: 'no_session' } }))
+    const sockets: string[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        constructor(url: string) {
+          sockets.push(url)
+        }
+        send() {}
+        close() {}
+      },
+    )
+    await open('landing', 'terminal')
+
+    await screen.findByText('landing is stopped. Resume starts claude again.')
+    expect(screen.getByRole('button', { name: 'Resume' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByText(/has no terminal to attach to/)).toBeNull()
+    expect(sockets).toEqual([])
   })
 
   it('reattaches the chat when the URL names another thread', async () => {

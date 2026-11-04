@@ -458,11 +458,7 @@ impl Tmux {
     /// creation.
     async fn set_remain_on_exit<E: Exec>(&self, exec: &E, session: &Session) -> Result<(), Error> {
         let out = exec
-            .exec(&format!(
-                "{} set-option -w -t {} remain-on-exit on",
-                sq(&self.path),
-                sq(&session.window_id)
-            ))
+            .exec(&remain_on_exit(&self.path, &session.window_id))
             .await?;
         if out.success() {
             Ok(())
@@ -623,6 +619,16 @@ pub(crate) fn login_server_command(tmux: &str) -> String {
     format!("{LOGIN_SERVER}\nlogin_server {}\n", sq(tmux))
 }
 
+/// The empty format keeps tmux's "Pane is dead" line off an attached terminal
+/// (Y-639); `-q` because tmux before 3.3 has no such option.
+fn remain_on_exit(tmux: &str, window_id: &str) -> String {
+    let (tmux, window) = (sq(tmux), sq(window_id));
+    format!(
+        "{tmux} set-option -w -t {window} remain-on-exit on \\; \
+         set-option -qw -t {window} remain-on-exit-format ''"
+    )
+}
+
 /// POSIX single-quoting. Safe here because the exec payload runs the command
 /// under `/bin/sh` (ADR-0006), so the tcsh caveat in R7 does not apply.
 pub(crate) fn sq(s: &str) -> String {
@@ -698,6 +704,15 @@ mod tests {
         for good in ["demo", "my-repo_2", "A1"] {
             assert!(validate_name(good).is_ok(), "`{good}` is a usable name");
         }
+    }
+
+    #[test]
+    fn remain_on_exit_also_blanks_the_dead_pane_text_in_one_round_trip() {
+        assert_eq!(
+            remain_on_exit("/usr/bin/tmux", "@7"),
+            "'/usr/bin/tmux' set-option -w -t '@7' remain-on-exit on \\; \
+             set-option -qw -t '@7' remain-on-exit-format ''"
+        );
     }
 
     #[test]

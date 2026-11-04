@@ -31,3 +31,28 @@ describe('the sessions rail when its read fails', () => {
     expect(within(rail).queryByRole('alert')).toBeNull()
   })
 })
+
+/** Y-639: `unclear` has one real cause, a live pane, and every Stop ends in
+ *  `no_session`, which the rail calls stopped. */
+describe('the sessions rail groups each state', () => {
+  it('files running and unclear under Live, and stopped and no_session under History', async () => {
+    const workspace = (name: string) => ({ loaded: 'yes', machine: 'cachyos-g14', name, repo: '/srv/repo', startup: null })
+    mount('desktop', '/', {
+      overrides: {
+        '/api/workspaces': {
+          body: { looked: 'ok', age_seconds: 0, data: ['api', 'ghost', 'halted', 'gone'].map(workspace) },
+        },
+      },
+    })
+    const rail = await screen.findByRole('complementary', { name: 'Sessions' })
+    const live = await within(rail).findByRole('region', { name: 'Live' })
+    const history = within(rail).getByRole('region', { name: 'History' })
+
+    await waitFor(() => expect(within(live).getAllByRole('link').map((one) => one.textContent)).toHaveLength(2))
+    expect(within(live).getByRole('link', { name: /^api/ })).toBeTruthy()
+    expect(within(live).getByRole('link', { name: /^ghost.*unclear/ })).toBeTruthy()
+    expect(within(history).getByRole('link', { name: /^halted.*stopped/ })).toBeTruthy()
+    expect(within(history).getByRole('link', { name: /^gone.*stopped/ })).toBeTruthy()
+    expect(within(rail).queryByText(/no session/)).toBeNull()
+  })
+})

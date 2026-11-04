@@ -131,7 +131,9 @@ It runs at the same `EVERY` as the other four, and **not** because a slower loop
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
 their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
 to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
---json` on every machine every 30 s, and this adds the auth gate beside it.
+--json` on every machine every 30 s, and this adds the auth gate beside it. **A successful `up`,
+`down` or `resume` wakes the agents sweep at once** (Y-639), so the browser's next poll shows the
+verb's result and not a reading 30 s old.
 
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
 name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
@@ -1030,7 +1032,7 @@ own quota, which their `gh` and their `git push` draw on too. GitHub asks for th
 `/notifications` answered **`X-Poll-Interval: 60`** on 2026-08-10, so `EVERY` would poll it at twice
 the rate its server requests. `ATTENTION` is five minutes, and the freshness that costs is a field
 rather than a lie — the reading carries its own age like every other. **A change to the grant wakes
-those classes early** (Y-342), which is the one exception to the clock: a sign-in that showed its
+those classes early** (Y-342), which is the one exception to that clock: a sign-in that showed its
 repositories five minutes later would read as a sign-in that failed.
 
 Two measurements from that day worth keeping, because both invert what the obvious worry would be.
