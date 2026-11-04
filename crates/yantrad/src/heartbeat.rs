@@ -104,10 +104,12 @@ pub struct Facts {
     /// Whether this process started with a relay (Y-388). ADR-0021: a relay
     /// saved since reaches the next start, so this is what a push uses now.
     pub relay: bool,
-    /// [`yantra_core::update::TRIGGER`] and [`yantra_core::update::UPDATER`],
-    /// parameters so a test names a scratch directory.
+    /// [`yantra_core::update::TRIGGER`], [`yantra_core::update::UPDATER`]
+    /// and [`yantra_core::update::PROGRESS`], parameters so a test names a
+    /// scratch directory.
     pub trigger: PathBuf,
     pub updater: PathBuf,
+    pub progress: PathBuf,
 }
 
 impl Default for Fleet {
@@ -125,6 +127,7 @@ impl Default for Fleet {
                 relay: false,
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
+                progress: PathBuf::new(),
             }),
             github: crate::github::Grant::default(),
             joins: Arc::default(),

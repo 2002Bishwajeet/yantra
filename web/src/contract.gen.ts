@@ -51,6 +51,7 @@ import type {
   ThreadPrOpened,
   ThreadPushed,
   Transcript,
+  UpdateProgress,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -572,9 +573,22 @@ export const about = {
   "relay": true,
   "tailnet": "<tailnet>.ts.net",
   "target": "aarch64-unknown-linux-musl",
+  "update": null,
   "uptime_seconds": 86412,
   "version": "0.1.0"
 } satisfies About
+
+export const updateDownloading = {
+  "received": 3100000,
+  "step": "downloading",
+  "total": 9800000,
+  "version": "0.4.0"
+} satisfies UpdateProgress
+
+export const updateFailed = {
+  "said": "install: yantra-0.4.0-aarch64-unknown-linux-musl.tar.gz does not match SHA256SUMS — nothing was installed",
+  "step": "failed"
+} satisfies UpdateProgress
 
 export const sshIdentity = {
   "fingerprint": "SHA256:<fingerprint>",

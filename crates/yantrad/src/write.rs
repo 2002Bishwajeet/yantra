@@ -1204,9 +1204,12 @@ async fn renew<I: Inventory + Clone + Send + Sync + 'static>(
 fn from_update(error: &update::Error) -> StatusCode {
     match error {
         update::Error::NotInstalled { .. } => StatusCode::CONFLICT,
-        update::Error::NoPrivilege { .. } | update::Error::Failed { .. } | update::Error::Io(_) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        update::Error::NoPrivilege { .. }
+        | update::Error::Failed { .. }
+        | update::Error::Io(_)
+        | update::Error::Unreadable { .. }
+        | update::Error::UnknownStep { .. }
+        | update::Error::ArchivePath { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -5227,6 +5230,7 @@ mod tests {
                 relay: false,
                 trigger: trigger.clone(),
                 updater,
+                progress: PathBuf::new(),
             }),
             ..Fleet::default()
         };
@@ -5334,6 +5338,7 @@ mod tests {
                 relay: false,
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
+                progress: PathBuf::new(),
             }),
             ..Fleet::default()
         }

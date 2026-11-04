@@ -31,7 +31,7 @@ use std::net::SocketAddr;
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
-use yantra_core::{about, doctor, github, identity};
+use yantra_core::{about, doctor, github, identity, update};
 
 use crate::events::{self, Event};
 use crate::github::Grant;
@@ -64,6 +64,17 @@ pub fn router() -> Router<Fleet> {
 /// name is read off the machines look, for the node holding a bound address.
 async fn about(State(fleet): State<Fleet>) -> Json<About> {
     let snapshot = fleet.model.read().await.clone();
+    let dir = fleet.facts.progress.clone();
+    // A local file, read off the worker (I-13). A file this build cannot read
+    // costs only the progress, and the journal says why.
+    let update = match tokio::task::spawn_blocking(move || update::progress(&dir)).await {
+        Ok(Ok(progress)) => progress,
+        Ok(Err(error)) => {
+            tracing::warn!("the update's progress is unreadable: {}", because(&error));
+            None
+        }
+        Err(_) => None,
+    };
     Json(About {
         version: about::VERSION,
         target: about::TARGET,
@@ -78,6 +89,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
         relay: fleet.facts.relay,
         published: Answer::of(snapshot.release.as_deref(), Published::of),
+        update,
     })
 }
 
@@ -511,6 +523,9 @@ pub(crate) struct About {
     pub(crate) relay: bool,
     /// The newest release GitHub publishes, read hourly (ADR-0027 §2).
     pub(crate) published: Answer<Published>,
+    /// How far `yantra-update.service` has got (Y-612). `None` when nothing
+    /// runs and the last run did not fail.
+    pub(crate) update: Option<update::Progress>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -741,8 +756,9 @@ impl Session {
     }
 }
 
-/// The two answers on this seam that the router cannot render deterministically
-/// — a build date and a key on the daemon's own disk — built for
+/// The answers on this seam that the router cannot render deterministically
+/// — a build date, a key and an update's progress on the daemon's own disk —
+/// built for
 /// [`crate::contract`] the way `write::answers` builds its own.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
@@ -772,6 +788,24 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         newer: true,
                     },
                 },
+                update: None,
+            }),
+        ),
+        // About's `update` while the unit runs, and after it failed (Y-612).
+        (
+            "updateDownloading",
+            "UpdateProgress",
+            of(&update::Progress::Downloading {
+                version: "0.4.0".to_owned(),
+                received: 3_100_000,
+                total: Some(9_800_000),
+            }),
+        ),
+        (
+            "updateFailed",
+            "UpdateProgress",
+            of(&update::Progress::Failed {
+                said: "install: yantra-0.4.0-aarch64-unknown-linux-musl.tar.gz does not match SHA256SUMS — nothing was installed".to_owned(),
             }),
         ),
         (
@@ -1363,6 +1397,7 @@ pub(crate) mod tests {
                 relay: false,
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(machines)
         }
@@ -2195,6 +2230,7 @@ pub(crate) mod tests {
                 relay: true,
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(vec![
                 MachineInfo {
@@ -2275,6 +2311,61 @@ pub(crate) mod tests {
         assert_eq!(failed["published"].get("data"), None, "never current");
     }
 
+    /// Y-612: the unit's progress file, read on each request.
+    #[tokio::test]
+    async fn about_says_how_far_an_update_has_got() {
+        let dir = std::env::temp_dir().join(format!("yantra-api-progress-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        let reading = |dir: &std::path::Path| Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: std::path::PathBuf::new(),
+                relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
+                progress: dir.to_owned(),
+            }),
+            ..Fleet::default()
+        };
+
+        let idle = get_json(reading(&dir.join("gone")), "/about").await;
+        assert_eq!(idle["update"], Value::Null, "{idle}");
+
+        std::fs::write(
+            dir.join("status"),
+            "step=downloading\nversion=0.10.0\narchive=a.tar.gz\ntotal=9800000\n",
+        )
+        .expect("a status");
+        std::fs::write(dir.join("a.tar.gz"), [0u8; 3_100]).expect("some bytes");
+        let downloading = get_json(reading(&dir), "/about").await;
+        assert_eq!(
+            downloading["update"],
+            json!({"step": "downloading", "version": "0.10.0", "received": 3_100, "total": 9_800_000})
+        );
+
+        std::fs::write(dir.join("status"), "step=failed\n").expect("a status");
+        std::fs::write(
+            dir.join("said"),
+            "install: a.tar.gz does not match SHA256SUMS — nothing was installed\n",
+        )
+        .expect("said");
+        let failed = get_json(reading(&dir), "/about").await;
+        assert_eq!(
+            failed["update"],
+            json!({"step": "failed", "said": "install: a.tar.gz does not match SHA256SUMS — nothing was installed"})
+        );
+
+        std::fs::write(dir.join("status"), "step=rebooting\n").expect("a status");
+        let unknown = get_json(reading(&dir), "/about").await;
+        assert_eq!(
+            unknown["update"],
+            Value::Null,
+            "an unknown step is not a guess"
+        );
+    }
+
     fn looking_at_machines(machines: Vec<MachineInfo>) -> Fleet {
         holding(Snapshot {
             machines: Some(Arc::new(Reading::new(Ok(machines)))),
@@ -2298,6 +2389,7 @@ pub(crate) mod tests {
                 relay: false,
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
             }),
             ..Fleet::default()
         };

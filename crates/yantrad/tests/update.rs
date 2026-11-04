@@ -510,6 +510,79 @@ fn a_failed_update_restarts_nothing_and_the_socket_stays_up() -> Result<()> {
     Ok(())
 }
 
+/// Y-612: the daemon runs as `yantra`, which cannot read the root unit's
+/// journal, so the unit writes its own progress to `/run/yantra-update` and
+/// `GET /api/about` reads it. A failure stays there after the oneshot exits,
+/// in the unit's own words. The fixture's host is local, so the steps before
+/// the failure may pass between two reads: they are reported, not asserted.
+#[test]
+fn a_failed_update_is_read_back_on_about_in_the_units_words() -> Result<()> {
+    let Some(appliance) = Appliance::start()? else {
+        return Ok(());
+    };
+    appliance.arrange()?;
+    appliance.publish(NEW, NEW_MARK)?;
+    appliance.sh(&format!(
+        "bash /fixture/release.sh corrupt {} {NEW}",
+        appliance.repo
+    ))?;
+
+    let asked = appliance
+        .sh("curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7717/api/update")?;
+    assert_eq!(asked, "202");
+
+    let read = appliance.systemd.exec(&[
+        "python3",
+        "-c",
+        r#"
+import json, sys, time, urllib.request
+steps = []
+for _ in range(240):
+    update = json.load(urllib.request.urlopen("http://127.0.0.1:7717/api/about"))["update"]
+    if update and steps[-1:] != [update["step"]]:
+        steps.append(update["step"])
+    if update and update["step"] == "failed":
+        print(json.dumps({"steps": steps, "said": update["said"]}))
+        sys.exit(0)
+    time.sleep(0.25)
+sys.exit("About never said the update failed; it saw " + json.dumps(steps))
+"#,
+    ])?;
+    let story = format!(
+        "{}\n--- yantra-update ---\n{}\n--- yantrad ---\n{}",
+        String::from_utf8_lossy(&read.stderr),
+        appliance.systemd.journal("yantra-update.service"),
+        appliance.systemd.journal("yantrad.service"),
+    );
+    assert!(read.status.success(), "{story}");
+    let seen: serde_json::Value = serde_json::from_slice(&read.stdout)?;
+    eprintln!("About saw the steps {}", seen["steps"]);
+    assert!(
+        seen["said"]
+            .as_str()
+            .is_some_and(|said| said.contains("does not match SHA256SUMS")),
+        "{seen}\n{story}"
+    );
+
+    // The unit keeps the failure, so a recovery at a terminal must clear it.
+    appliance.publish(NEW, NEW_MARK)?;
+    appliance.install("/fixture/install.sh", NEW)?;
+    let recovered = appliance.sh("for _ in $(seq 120); do \
+           curl -fsS http://127.0.0.1:7717/api/about && exit 0; sleep 0.25; \
+         done; exit 1")?;
+    let recovered: serde_json::Value = serde_json::from_str(&recovered)?;
+    assert!(
+        appliance.carries("/usr/local/bin/yantrad", NEW_MARK)?,
+        "the terminal run did not install v{NEW}"
+    );
+    assert_eq!(
+        recovered["update"],
+        serde_json::Value::Null,
+        "the failure outlived the recovery: {recovered}"
+    );
+    Ok(())
+}
+
 /// The version `yantra --version` must print: the tag on a tag push, and the
 /// crate's own version on a dispatch, which has no tag.
 fn expected_version() -> String {

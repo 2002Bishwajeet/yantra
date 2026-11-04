@@ -378,6 +378,13 @@ the account it runs as may ask for *the current release* and nothing else. A box
 The paths are `Facts` fields, so a test names a scratch directory. `tests/update.rs` is the proof that
 a restart leaves the far tmux session running and the terminal socket reconnects.
 
+**`GET /api/about` reads how far the unit has got** (Y-612). This account cannot read the root unit's
+journal, so `install.sh` writes its step and its stderr to `/run/yantra-update`, the unit's
+`RuntimeDirectory`, and downloads the archive there. `about` reads that directory with
+`update::progress` on a blocking thread (I-13) and answers `update`: `null`, or the step with the
+bytes received, or `failed` with the unit's last 20 stderr lines. It still fetches nothing and
+applies nothing. A file it cannot read is `null` and a warning in the journal.
+
 **`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
 caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
 under `deny_unknown_fields`, so a `machine` field is a `422`: the name comes from `whois` joined to
