@@ -26,7 +26,7 @@ use yantra_core::logs::{self, Who};
 use yantra_core::ssh::{self, Exec as _, Machine, Os, Ssh};
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
-use yantra_core::{up, workspace};
+use yantra_core::{doctor, up, workspace};
 
 /// Long enough to be nobody's real workspace, and legal under `validate_name`.
 const E2E: &str = "yantra-manual-e2e";
@@ -146,6 +146,38 @@ async fn the_terminal_probe_tells_real_macos_apart() -> anyhow::Result<()> {
         terminfo::choose(&ssh, terminfo::FALLBACK).await?,
         Chosen::Known(terminfo::FALLBACK.to_owned())
     );
+    Ok(())
+}
+
+/// Y-619 on the real Mac: once a login session started the tmux server, both
+/// keychain checks pass. Start it first at the Mac, in Terminal:
+/// `tmux new-session -d`.
+#[tokio::test]
+#[ignore = "needs the real MacBook and a tmux server started from a GUI login; set YANTRA_MAC=user@host"]
+async fn doctor_passes_on_the_mac_once_the_login_server_runs() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest,
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y619"),
+    })?;
+
+    let checks = doctor::of(&ssh, terminfo::FALLBACK).await;
+    for name in ["login-session", "provider-auth"] {
+        let check = checks
+            .iter()
+            .find(|check| check.check == name)
+            .ok_or_else(|| anyhow::anyhow!("doctor reported no {name} check"))?;
+        println!("{name}: {:?} — {}", check.state, check.detail);
+        anyhow::ensure!(
+            check.state == doctor::State::Present,
+            "{name} is {:?}: {}",
+            check.state,
+            check.detail
+        );
+    }
     Ok(())
 }
 
