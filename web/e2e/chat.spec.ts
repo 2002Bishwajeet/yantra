@@ -456,10 +456,14 @@ test('an issue draft fills the card with no label over it', async ({ page, size 
     .click()
   await expect(composer(page)).toHaveValue(/^Work on /)
   await expect(shell(page).locator('label')).toHaveCount(0)
-  // The history and the thread list load after the draft; an overlay capture before them shows the page at the top.
+  // The overlay capture races the history, the thread list and the scroll; wait for all three, then scroll to the end.
   await expect(page.getByText('Is the core crate green?')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Open PR' })).toBeVisible()
-  await screenshot(page, 'composer-issue-draft','busy', size, { overlay: size === 'phone' })
+  await expect(page.getByRole('button', { name: 'Commit', exact: true })).toBeEnabled()
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await expect
+    .poll(() => page.evaluate(() => Math.round(window.innerHeight + window.scrollY - document.documentElement.scrollHeight)))
+    .toBe(0)
+  await screenshot(page, 'composer-issue-draft', 'busy', size, { overlay: size === 'phone' })
 })
 
 test.describe('the composer in the dark', () => {
