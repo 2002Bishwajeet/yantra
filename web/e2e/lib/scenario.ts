@@ -18,6 +18,7 @@ export type Scenario =
   | 'stranger'
   | 'setup'
   | 'difffails'
+  | 'gitfails'
   | 'rooms'
   | 'composer'
   | 'longrepo'

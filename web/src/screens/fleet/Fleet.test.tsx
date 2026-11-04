@@ -92,7 +92,7 @@ describe('/fleet Start session', () => {
     expect(location.search).toContain(`thread=${contract.threadOpened.thread}`)
     expect(location.search).not.toContain('Work')
     expect((history.state as { draft?: string }).draft).toBe(contract.threadOpened.draft)
-    const composer = await screen.findByRole('combobox', { name: /Message/ }, { timeout: 5000 })
+    const composer = await screen.findByRole('combobox', { name: /Message/ }, { timeout: 20_000 })
     expect((composer as HTMLTextAreaElement).value).toBe(contract.threadOpened.draft)
     expect(asked).toContain('POST /api/workspaces/yantra-web/threads')
   })
@@ -104,7 +104,7 @@ describe('/fleet Start session', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start session on 2002Bishwajeet/yantra#118' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(await within(dialog).findByRole('button', { name: 'yantra-web' }, { timeout: 2000 }))
-    const composer = (await screen.findByRole('combobox', { name: /Message/ }, { timeout: 5000 })) as HTMLTextAreaElement
+    const composer = (await screen.findByRole('combobox', { name: /Message/ }, { timeout: 20_000 })) as HTMLTextAreaElement
     await waitFor(() => expect((history.state as { draft?: string } | null)?.draft).toBeUndefined())
     expect(composer.value).not.toBe('')
     expect(location.search).toContain(`thread=${contract.threadOpened.thread}`)

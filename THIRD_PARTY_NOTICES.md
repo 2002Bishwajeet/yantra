@@ -81,6 +81,11 @@ with its logic ([`EditorMenu.tsx`](web/src/screens/session/diff/EditorMenu.tsx),
 [`editors.ts`](web/src/screens/session/diff/editors.ts)), on Yantra's own menu, tokens and daemon frames.
 Its name, wordmark and icon are not used.
 
+[`web/src/screens/session/git.ts`](web/src/screens/session/git.ts) adapts, at commit `1451e7c`, the
+commit, push and PR cases of
+[`GitActionsControl.logic.ts`](https://github.com/pingdotgg/t3code/blob/1451e7c/apps/web/src/components/GitActionsControl.logic.ts)
+into typed failures for Yantra's daemon routes. Its name, wordmark and icon are not used.
+
 The composer in [`web/src/composer/`](web/src/composer/) adapts, at commit `810e8f6`, these files of T3 Code,
 each with its upstream path in the block comment at its top:
 [`ComposerSurface.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerSurface.tsx)
