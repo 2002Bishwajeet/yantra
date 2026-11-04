@@ -4,6 +4,7 @@ import {
   CHECK_IDS,
   fixOf,
   joinFixes,
+  noLoginServer,
   nameOf,
   reachableFailure,
   reachWords,
@@ -12,6 +13,10 @@ import {
   withoutSignIn,
 } from './checks'
 import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
+
+/** doctor.rs `no_login_server`, word for word. */
+const NO_SERVER =
+  'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
 
 describe('the check name table', () => {
   it('names each of doctor’s twelve checks the way a person says it', () => {
@@ -48,20 +53,38 @@ describe('the check name table', () => {
 
   it('keeps an id it does not know, rather than hiding it', () => {
     expect(nameOf('docker')).toBe('docker')
-    expect(fixOf('docker', 'pi')).toBeNull()
+    expect(fixOf({ check: 'docker' }, 'pi')).toBeNull()
   })
 
   it('says who fixes each one', () => {
-    expect(fixOf('reachable', 'pi')).toEqual({ by: 'join' })
-    expect(fixOf('agent-cli', 'pi')).toEqual({ by: 'install' })
-    expect(fixOf('terminfo', 'pi')).toEqual({ by: 'command', command: 'yantra fix-terminfo pi', where: 'appliance' })
-    expect(fixOf('provider-auth', 'pi')).toEqual({ by: 'command', command: 'gh auth login', where: 'machine' })
-    expect(fixOf('mic', 'pi')).toEqual({ by: 'hand', words: 'Run Install with Microphone ticked.' })
-    expect(fixOf('folder-access', 'mbp')).toEqual({
+    expect(fixOf({ check: 'reachable' }, 'pi')).toEqual({ by: 'join' })
+    expect(fixOf({ check: 'agent-cli' }, 'pi')).toEqual({ by: 'install' })
+    expect(fixOf({ check: 'terminfo' }, 'pi')).toEqual({ by: 'command', command: 'yantra fix-terminfo pi', where: 'appliance' })
+    expect(fixOf({ check: 'provider-auth' }, 'pi')).toEqual({ by: 'command', command: 'gh auth login', where: 'machine' })
+    expect(fixOf({ check: 'mic' }, 'pi')).toEqual({ by: 'hand', words: 'Run Install with Microphone ticked.' })
+    expect(fixOf({ check: 'folder-access' }, 'mbp')).toEqual({
       by: 'hand',
       words:
         'To allow it, open System Settings > General > Sharing > Remote Login, and turn on Allow full disk access for remote users. Every ssh login to mbp, agents included, then gets that access.',
     })
+  })
+
+  /** Y-619: on a Mac with no login tmux server, both keychain checks are
+   *  fixed in Terminal there, and neither is a sign-in. */
+  it('gives a Mac with no login tmux server the Terminal command, not a sign-in', () => {
+    const terminal = { by: 'command', command: 'tmux new-session -d', where: 'terminal' }
+    expect(fixOf({ check: 'login-session', detail: NO_SERVER }, 'mbp')).toEqual(terminal)
+    expect(fixOf({ check: 'provider-auth', detail: NO_SERVER }, 'mbp')).toEqual(terminal)
+    expect(fixOf({ check: 'provider-auth', detail: 'gh found no credential there' }, 'mbp')).toEqual({
+      by: 'command',
+      command: 'gh auth login',
+      where: 'machine',
+    })
+  })
+
+  it('knows doctor’s phrase for a missing login tmux server', () => {
+    expect(noLoginServer(NO_SERVER)).toBe(true)
+    expect(noLoginServer('claude finds no credential where the agent will run (method: none)')).toBe(false)
   })
 
   /** Y-390 review: GitHub and `yantra-agent` are optional for a session. */

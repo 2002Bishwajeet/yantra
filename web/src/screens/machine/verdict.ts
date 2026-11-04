@@ -1,6 +1,6 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { answerFailure, INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
+import { answerFailure, INSTALLABLE, nameOf, noLoginServer, reachableFailure } from '@/lib/checks'
 import { missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
@@ -118,7 +118,8 @@ export function noRows(verdict: Verdict, name: string): { title: string; words: 
  *  key). */
 export const startable = (verdict: Verdict) => verdict.kind === 'ready' || verdict.kind === 'manual'
 
-function missingTitle(check: Check): string {
+function missingTitle(check: Check, name: string): string {
+  if (noLoginServer(check.detail)) return `No tmux server from a login on ${name}`
   if (check.check === 'provider-auth') return 'gh is not signed in'
   if (check.check === 'login-session') return 'claude is not signed in'
   if (check.check === 'folder-access') return 'macOS blocks Desktop, Documents and Downloads'
@@ -156,7 +157,10 @@ export function titleOf(verdict: Verdict, name: string): string {
     case 'missing':
       return `${listed(verdict.missing)} ${be(verdict.missing, 'is', 'are')} missing`
     case 'manual':
-      return verdict.absent.length === 1 ? missingTitle(verdict.absent[0]!) : `${verdict.absent.length} checks need you`
+      // Both keychain checks miss one server on a Mac, and one command fixes both.
+      return verdict.absent.length === 1 || verdict.absent.every((one) => noLoginServer(one.detail))
+        ? missingTitle(verdict.absent[0]!, name)
+        : `${verdict.absent.length} checks need you`
     case 'ready':
       return 'Ready for sessions'
   }

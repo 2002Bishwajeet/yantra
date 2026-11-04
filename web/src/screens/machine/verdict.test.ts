@@ -32,6 +32,10 @@ const stopped = (at: number, commands: string[]): Event => ({
   commands,
 })
 
+/** doctor.rs `no_login_server`, word for word. */
+const NO_SERVER =
+  'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
+
 /** yantrad's words for `ssh::Error::Transport` and a tmux error (Y-585). */
 const SSH = 'ssh to pi failed before the command reported a status:'
 const TMUX = 'tmux `list-sessions` failed with status 1: error connecting to /tmp/tmux-1000/default (Permission denied)'
@@ -181,6 +185,26 @@ describe('the machine page’s verdict', () => {
     expect(v.kind).toBe('manual')
     expect(titleOf(v, 'pi')).toBe('gh is not signed in')
     expect(startable(v)).toBe(true)
+  })
+
+  /** Y-619: the account is signed in; the Mac has no login tmux server. */
+  it('names the missing login tmux server, not a sign-out, for one check', () => {
+    const v = verdict(all({ 'login-session': 'absent' }, { 'login-session': NO_SERVER }))
+    expect(titleOf(v, 'mbp')).toBe('No tmux server from a login on mbp')
+  })
+
+  it('gives one title when both keychain checks miss the login tmux server', () => {
+    const v = verdict(
+      all({ 'login-session': 'absent', 'provider-auth': 'absent' }, { 'login-session': NO_SERVER, 'provider-auth': NO_SERVER }),
+    )
+    expect(titleOf(v, 'mbp')).toBe('No tmux server from a login on mbp')
+  })
+
+  it('still says claude is not signed in where claude finds no credential', () => {
+    const v = verdict(all({ 'login-session': 'absent' }, { 'login-session': 'claude finds no credential where the agent will run (method: none)' }))
+    expect(titleOf(v, 'pi')).toBe('claude is not signed in')
+    const two = verdict(all({ 'login-session': 'absent', 'provider-auth': 'absent' }, { 'login-session': NO_SERVER }))
+    expect(titleOf(two, 'pi')).toBe('2 checks need you')
   })
 
   /** Y-591: macOS guarding Desktop, Documents and Downloads is a warning. */

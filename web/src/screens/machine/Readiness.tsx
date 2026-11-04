@@ -33,7 +33,7 @@ const marks: Record<Check['state'], MarkState> = { present: 'done', absent: 'nee
 
 function CheckLine(props: { check: Check; machine: string }) {
   const { check, machine } = props
-  const fix = check.state === 'absent' ? fixOf(check.check, machine) : null
+  const fix = check.state === 'absent' ? fixOf(check, machine) : null
   return (
     <li className="machine__check">
       <State size="small" state={marks[check.state]}>
@@ -49,7 +49,11 @@ function CheckLine(props: { check: Check; machine: string }) {
       {fix?.by === 'command' ? (
         <div className="machine__fix">
           <Text scale="body-small" tone="variant">
-            {fix.where === 'appliance' ? 'Run this on the appliance:' : `Run this on ${machine}:`}
+            {fix.where === 'appliance'
+              ? 'Run this on the appliance:'
+              : fix.where === 'terminal'
+                ? `Open Terminal on ${machine} and run:`
+                : `Run this on ${machine}:`}
           </Text>
           <Copyable text={fix.command} what={`the command that fixes ${nameOf(check.check)}`} />
         </div>

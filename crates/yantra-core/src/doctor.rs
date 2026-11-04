@@ -1,9 +1,9 @@
 //! What a machine can and cannot do, asked without changing it.
 //!
 //! The check list is [D2 §3.1] and the constraint is [D2 §3.2]: `doctor` is a
-//! **read**. Nothing here installs, writes or starts anything — the one place
-//! that could is the macOS branch of [`login_session`], which asks whether a
-//! tmux server exists rather than creating one (ADR-0018 §1).
+//! **read**. Nothing here installs, writes or starts anything — the places that
+//! could are the macOS branches of [`login_session`] and [`provider_auth`],
+//! which ask whether a tmux server exists rather than creating one (ADR-0018 §1).
 //!
 //! **Every branch answers `Unknown` where it could not ask**, which is R-23 and
 //! the reason this module is longer than the commands it runs: *absent* sends a
@@ -69,6 +69,26 @@ const NOT_ASKED: &str = "nothing behind ssh could be asked — see the `reachabl
 /// The provider CLIs D2 §3.1 names. `tea` is deliberately not here: it was
 /// measured absent on this fleet and nothing in Yantra reads it.
 const PROVIDERS: [&str; 2] = ["gh", "glab"];
+
+/// What a provider CLI inside the tmux server prints once it found a credential.
+const FOUND: &str = "yantra-credential-found";
+
+/// The web matches on this phrase to show the Terminal fix, so changing it is a
+/// breaking change. Both login-keychain checks say it.
+const NO_LOGIN_SERVER: &str = "no tmux server from a login session is running on this Mac";
+
+/// What [`NO_LOGIN_SERVER`] costs and how to end it — the command `up` and
+/// `commit` give for the same refusal.
+fn no_login_server(check: &'static str) -> Check {
+    absent(
+        check,
+        format!(
+            "{NO_LOGIN_SERVER}, and Yantra will not start one, because panes in a server started \
+             over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal \
+             there: `tmux new-session -d`"
+        ),
+    )
+}
 
 /// The longest a login may take. `ConnectTimeout` does not cover a server that
 /// holds the auth stage, so wording [`ssh::BROWSER_CHECK`] misses would otherwise
@@ -234,6 +254,7 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
     let (provider_cli, providers) = timed(provider_cli(exec)).await;
     let gated = found_tmux.is_some() && found_claude.is_some();
     let has_provider = !providers.is_empty();
+    let os = ssh::os(exec).await;
 
     vec![
         reachable,
@@ -243,10 +264,14 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         agent_cli,
         timed_one(terminfo(exec, term)).await,
         provider_cli,
-        timed_if(has_provider, provider_auth(exec, providers)).await,
+        timed_if(
+            has_provider,
+            provider_auth(exec, providers, found_tmux.as_ref(), &os),
+        )
+        .await,
         timed_if(
             gated,
-            login_session(exec, found_tmux.as_ref(), found_claude.as_ref()),
+            login_session(exec, found_tmux.as_ref(), found_claude.as_ref(), &os),
         )
         .await,
         timed_one(mic(exec)).await,
@@ -487,7 +512,16 @@ async fn provider_cli<E: Exec>(exec: &E) -> (Check, Vec<(&'static str, String)>)
 ///
 /// What a pass claims is bounded exactly as I-53 bounds the agent's: a
 /// credential was found, and nothing about whether it works.
-async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>) -> Check {
+///
+/// On macOS a token in the login keychain is out of ssh's reach (I-44), so a
+/// miss there is asked again inside the login session's tmux server, as the
+/// agent's gate is (ADR-0018 §5).
+async fn provider_auth<E: Exec>(
+    exec: &E,
+    providers: Vec<(&'static str, String)>,
+    tmux: Option<&Tmux>,
+    os: &Result<Os, ssh::Error>,
+) -> Check {
     if providers.is_empty() {
         return unknown(
             PROVIDER_AUTH,
@@ -501,6 +535,17 @@ async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>
         match exec.exec(&command).await {
             Ok(out) if out.success() => credentialled.push(*name),
             Ok(_) => {}
+            Err(err) => return unknown(PROVIDER_AUTH, format!("could not be asked: {err}")),
+        }
+    }
+
+    if credentialled.is_empty() {
+        match os {
+            Ok(Os::Other) => {}
+            Ok(Os::MacOs) => match asked_inside(exec, &providers, tmux).await {
+                Ok(found) => credentialled = found,
+                Err(check) => return check,
+            },
             Err(err) => return unknown(PROVIDER_AUTH, format!("could not be asked: {err}")),
         }
     }
@@ -521,6 +566,49 @@ async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>
     )
 }
 
+/// [`provider_auth`]'s question again, inside the Mac's login-session tmux
+/// server. `Err` is the check to report, because it could not be asked there.
+async fn asked_inside<E: Exec>(
+    exec: &E,
+    providers: &[(&'static str, String)],
+    tmux: Option<&Tmux>,
+) -> Result<Vec<&'static str>, Check> {
+    let Some(tmux) = tmux else {
+        return Err(unknown(
+            PROVIDER_AUTH,
+            "macOS keeps the credential in the login keychain, which only that machine's tmux \
+             server can reach, and tmux was not found there",
+        ));
+    };
+    let could_not =
+        |err: &dyn std::fmt::Display| unknown(PROVIDER_AUTH, format!("could not be asked: {err}"));
+    if tmux
+        .list(exec)
+        .await
+        .map_err(|err| could_not(&err))?
+        .is_empty()
+    {
+        return Err(no_login_server(PROVIDER_AUTH));
+    }
+
+    let mut found = Vec::new();
+    for (name, path) in providers {
+        // run-shell ends in `exit 0`, so the status crosses as a mark on stdout.
+        let command = format!("{} auth status >/dev/null 2>&1 && echo {FOUND}", sq(path));
+        let out = exec
+            .exec(&tmux::run_shell(tmux.path(), &command))
+            .await
+            .map_err(|err| could_not(&err))?;
+        if !out.success() {
+            return Err(could_not(&String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        if String::from_utf8_lossy(&out.stdout).contains(FOUND) {
+            found.push(*name);
+        }
+    }
+    Ok(found)
+}
+
 /// ADR-0018's gate: can the process that will fork the agent reach the account?
 ///
 /// On macOS both halves are asked, and neither may be skipped. §1 is the
@@ -533,7 +621,12 @@ async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>
 /// Linux has no such split — the credential is a file this ssh session can read
 /// — so the same question is asked directly, and a pass means what I-53 says it
 /// means and no more.
-async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&Claude>) -> Check {
+async fn login_session<E: Exec>(
+    exec: &E,
+    tmux: Option<&Tmux>,
+    claude: Option<&Claude>,
+    os: &Result<Os, ssh::Error>,
+) -> Check {
     let (Some(tmux), Some(claude)) = (tmux, claude) else {
         return unknown(
             LOGIN_SESSION,
@@ -542,21 +635,14 @@ async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&C
         );
     };
 
-    let os = match ssh::os(exec).await {
-        Ok(os) => os,
+    let os = match os {
+        Ok(os) => *os,
         Err(err) => return unknown(LOGIN_SESSION, format!("could not be asked: {err}")),
     };
 
     if os == Os::MacOs {
         match tmux.list(exec).await {
-            Ok(sessions) if sessions.is_empty() => {
-                return absent(
-                    LOGIN_SESSION,
-                    "macOS, and no tmux server is running — Yantra will not start one, because \
-                     panes in a server started over ssh cannot read the login keychain \
-                     (ADR-0018 §1, I-44)",
-                );
-            }
+            Ok(sessions) if sessions.is_empty() => return no_login_server(LOGIN_SESSION),
             Ok(_) => {}
             Err(err) => return unknown(LOGIN_SESSION, format!("could not be asked: {err}")),
         }
@@ -1208,5 +1294,133 @@ mod tests {
                 .detail
                 .contains("octocat")
         );
+    }
+
+    /// Y-619: a Mac answering by command. gh over ssh finds nothing, as it
+    /// does when its token is in the login keychain (I-44).
+    struct Mac {
+        os: &'static str,
+        server: bool,
+        gh_inside: bool,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Mac {
+        fn new(os: &'static str, server: bool, gh_inside: bool) -> Self {
+            Self {
+                os,
+                server,
+                gh_inside,
+                asked: std::sync::Mutex::default(),
+            }
+        }
+
+        fn asked(&self, part: &str) -> bool {
+            let asked = self.asked.lock().expect("not poisoned");
+            asked.iter().any(|command| command.contains(part))
+        }
+    }
+
+    impl Exec for Mac {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            self.asked
+                .lock()
+                .expect("not poisoned")
+                .push(command.to_owned());
+            let no_server = "no server running on /tmp/tmux-501/default\n";
+            let (status, stdout, stderr) = if command == "uname -s" {
+                (0, self.os, "")
+            } else if command.contains("run-shell") {
+                match (self.server, self.gh_inside) {
+                    (false, _) => (1, "", no_server),
+                    (true, true) => (0, "yantra-credential-found\n", ""),
+                    (true, false) => (0, "", ""),
+                }
+            } else if command.contains("list-sessions") {
+                if self.server {
+                    (0, "1|0|Mon Nov  3 09:00:00 2026|1793696400|main\n", "")
+                } else {
+                    (1, "", no_server)
+                }
+            } else if command.contains("auth status") {
+                (1, "", "")
+            } else if command.contains("command -v gh") || command.contains("command -v tmux") {
+                (0, "/opt/homebrew/bin/found\n", "")
+            } else if command.contains("command -v claude") {
+                (0, "/Users/me/.local/bin/claude\n", "")
+            } else {
+                (1, "", "")
+            };
+            Ok(ssh::Output {
+                status,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            })
+        }
+    }
+
+    fn check<'a>(checks: &'a [Check], name: &str) -> &'a Check {
+        checks
+            .iter()
+            .find(|check| check.check == name)
+            .expect("the list holds it")
+    }
+
+    fn gh() -> Vec<(&'static str, String)> {
+        vec![("gh", "/opt/homebrew/bin/gh".to_owned())]
+    }
+
+    /// The card reads this detail, so it names the server and the command,
+    /// and never sends the owner to sign in to an account that is signed in.
+    #[tokio::test]
+    async fn a_mac_with_no_login_server_is_told_to_start_one_not_to_log_in() {
+        let checks = of(&Mac::new("Darwin\n", false, false), "alacritty").await;
+        for name in [LOGIN_SESSION, PROVIDER_AUTH] {
+            let found = check(&checks, name);
+            assert_eq!(found.state, State::Absent, "{name}: {}", found.detail);
+            assert!(found.detail.contains(NO_LOGIN_SERVER), "{}", found.detail);
+            assert!(
+                found.detail.contains("`tmux new-session -d`"),
+                "{}",
+                found.detail
+            );
+            let said = found.detail.to_lowercase();
+            assert!(
+                !said.contains("log in") && !said.contains("sign in"),
+                "{said}"
+            );
+        }
+    }
+
+    /// ADR-0018 §5 for gh: where ssh cannot reach the keychain, the server can.
+    #[tokio::test]
+    async fn gh_on_a_mac_is_asked_again_inside_the_login_server() {
+        let mac = Mac::new("Darwin\n", true, true);
+        let tmux = Tmux::resolve(&mac).await.expect("a tmux");
+        let found = provider_auth(&mac, gh(), Some(&tmux), &Ok(Os::MacOs)).await;
+        assert_eq!(found.state, State::Present, "{}", found.detail);
+
+        let mac = Mac::new("Darwin\n", true, false);
+        let found = provider_auth(&mac, gh(), Some(&tmux), &Ok(Os::MacOs)).await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found.detail.contains("found no credential"),
+            "{}",
+            found.detail
+        );
+
+        let found = provider_auth(&mac, gh(), None, &Ok(Os::MacOs)).await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+    }
+
+    /// Linux keeps one question over ssh, and never asks tmux.
+    #[tokio::test]
+    async fn gh_on_linux_is_asked_over_ssh_alone() {
+        let linux = Mac::new("Linux\n", true, true);
+        let tmux = Tmux::resolve(&linux).await.expect("a tmux");
+        let found = provider_auth(&linux, gh(), Some(&tmux), &Ok(Os::Other)).await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert_eq!(found.detail, "gh found no credential there");
+        assert!(!linux.asked("list-sessions") && !linux.asked("run-shell"));
     }
 }

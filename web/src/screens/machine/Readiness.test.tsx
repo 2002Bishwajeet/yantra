@@ -23,6 +23,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 })
 
 const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'heartbeat']
@@ -33,6 +34,10 @@ const checks = (absent: string[] = [], detail: Record<string, string> = {}): Che
     state: absent.includes(id) ? 'absent' : 'present',
     detail: detail[id] ?? (absent.includes(id) ? `no \`${id}\` there` : 'found'),
   }))
+
+/** doctor.rs `no_login_server`, word for word. */
+const NO_SERVER =
+  'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
 
 const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list, age_seconds: 0 } })
 
@@ -458,6 +463,23 @@ describe('the Readiness card', () => {
     expect(card().getByRole('heading', { name: 'gh is not signed in' })).toBeTruthy()
     expect(card().getByText('gh auth login')).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+  })
+
+  /** Y-619: a Mac with no login tmux server is signed in, so the card gives
+   *  the Terminal command and never sends the owner to log in. */
+  it('gives a Mac with no login tmux server the Terminal command, with Copy', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    daemon()
+    const both = { 'login-session': NO_SERVER, 'provider-auth': NO_SERVER }
+    await draw(report(checks(['login-session', 'provider-auth'], both)), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().getByRole('heading', { name: 'No tmux server from a login on pi' })).toBeTruthy()
+    expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(2)
+    expect(card().getAllByText('tmux new-session -d')).toHaveLength(2)
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/log in|sign in/i)
+    fireEvent.click(card().getByRole('button', { name: 'Copy the command that fixes claude signed in' }))
+    expect(await card().findByRole('button', { name: 'Copied the command that fixes claude signed in' })).toBeTruthy()
+    expect(writeText).toHaveBeenCalledWith('tmux new-session -d')
   })
 
   /** Y-591: a warning with the fix and its cost, and never a block on a session. */

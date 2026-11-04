@@ -1,6 +1,8 @@
 /** D7 §3.5: one name per check on every screen, and what fixes it. `doctor`
  *  keeps the ids; a person reads the names. */
 
+import type { Check } from '@/api'
+
 /** Apple's words for the one switch that lets an ssh login read the folders
  *  macOS guards (support.apple.com/guide/mac-help/mchlp1066, 2026-11-03), and its cost. */
 export const fullDisk = (machine: string) =>
@@ -10,7 +12,7 @@ export const fullDisk = (machine: string) =>
 export type Fix =
   | { by: 'join' }
   | { by: 'install' }
-  | { by: 'command'; command: string; where: 'appliance' | 'machine' }
+  | { by: 'command'; command: string; where: 'appliance' | 'machine' | 'terminal' }
   | { by: 'hand'; words: string }
 
 /** `session`: a session cannot start on the machine without it, which is what
@@ -66,7 +68,15 @@ export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check
 
-export const fixOf = (check: string, machine: string): Fix | null => CHECKS[check]?.fix(machine) ?? null
+/** doctor.rs `NO_LOGIN_SERVER`, which only `login-session` and `provider-auth`
+ *  say: the account is signed in, and the Mac has no login tmux server (I-44). */
+export const noLoginServer = (detail: string) => /no tmux server from a login session is running/.test(detail)
+
+/** A check with no detail gets the fix its id names. */
+export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>, machine: string): Fix | null {
+  if (noLoginServer(check.detail ?? '')) return { by: 'command', command: 'tmux new-session -d', where: 'terminal' }
+  return CHECKS[check.check]?.fix(machine) ?? null
+}
 
 /** An id this table does not know is not one a session needs. */
 export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?? false
@@ -75,7 +85,7 @@ export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?
  *  every check a session needs (`lib/ready`'s `READY`). The one place this
  *  is derived; `lib/ready`'s `missingBasics` and the setup checklist both
  *  read it from here (Y-402 review). */
-export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
+export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf({ check: id }, '')?.by === 'install')
 
 /** `reachable`'s failure reads five ways: the appliance's key was refused,
  *  which the join command fixes by placing a fresh one, or ssh fails for
