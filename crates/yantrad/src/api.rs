@@ -27,7 +27,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, response::IntoResponse};
 use std::collections::BTreeMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
@@ -81,23 +81,27 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
     })
 }
 
-/// The tailnet is `DNSName` past this node's own label. Which node is this one
-/// is answered by the addresses `listen_on` bound — the same join the
-/// heartbeat makes, in the other direction.
+/// The tailnet is `DNSName` past this node's own label.
 fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
     let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
-    let bound: Vec<IpAddr> = listening_on
+    let me = machines
         .iter()
-        .map(|address| address.ip().to_canonical())
-        .collect();
-    let me = machines.iter().find(|machine| {
-        machine
-            .addresses
-            .iter()
-            .any(|held| bound.contains(&held.to_canonical()))
-    })?;
+        .find(|machine| is_this_node(machine, listening_on))?;
     let (_, tailnet) = me.dns_name.trim_end_matches('.').split_once('.')?;
     Some(tailnet.to_owned())
+}
+
+/// Which node is this one is answered by the addresses `listen_on` bound — the
+/// same join the heartbeat makes, in the other direction.
+fn is_this_node(
+    machine: &yantra_core::inventory::MachineInfo,
+    listening_on: &[SocketAddr],
+) -> bool {
+    machine.addresses.iter().any(|held| {
+        listening_on
+            .iter()
+            .any(|bound| bound.ip().to_canonical() == held.to_canonical())
+    })
 }
 
 /// `yantra ssh-identity`'s read half. **A 404 and never a key**: a route a
@@ -159,13 +163,13 @@ async fn no_such_route() -> impl IntoResponse {
 /// The one route that joins two memories: the look Tailscale answered and what
 /// each machine last said about itself. Both are already in memory, so the join
 /// is still a read (ADR-0013 §7).
-async fn machines(State(model): State<Model>, State(beats): State<Beats>) -> impl IntoResponse {
-    let snapshot = model.read().await.clone();
-    let beats = beats.read().await;
+async fn machines(State(fleet): State<Fleet>) -> impl IntoResponse {
+    let snapshot = fleet.model.read().await.clone();
+    let beats = fleet.beats.read().await;
     Json(Answer::of(snapshot.machines.as_deref(), |machines| {
         machines
             .iter()
-            .map(|machine| Machine::of(machine, &beats))
+            .map(|machine| Machine::of(machine, &beats, &fleet.facts.listening_on))
             .collect::<Vec<_>>()
     }))
 }
@@ -567,6 +571,8 @@ struct Machine {
     /// Y-404: `yours`, `shared` or `tagged`. The owner's number and the tag
     /// names stay in the daemon, because the page needs only whose node it is.
     ownership: &'static str,
+    /// Y-582: the node `yantrad` itself runs on, which setup never offers to add.
+    hub: bool,
 }
 
 impl Machine {
@@ -575,6 +581,7 @@ impl Machine {
     fn of(
         machine: &yantra_core::inventory::MachineInfo,
         beats: &BTreeMap<String, Reading<Heartbeat>>,
+        listening_on: &[SocketAddr],
     ) -> Self {
         Self {
             name: machine.name.clone(),
@@ -595,6 +602,7 @@ impl Machine {
                 yantra_core::inventory::Ownership::Shared => "shared",
                 yantra_core::inventory::Ownership::Tagged => "tagged",
             },
+            hub: is_this_node(machine, listening_on),
         }
     }
 }
@@ -1344,6 +1352,71 @@ pub(crate) mod tests {
                 assert!(machine.get(key).is_none(), "{key} leaked: {machine}");
             }
         }
+    }
+
+    fn bound_to(listening_on: &str, machines: Vec<MachineInfo>) -> Fleet {
+        Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: vec![listening_on.parse().expect("an address")],
+                ssh_dir: std::path::PathBuf::new(),
+                relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
+            }),
+            ..looking_at_machines(machines)
+        }
+    }
+
+    fn at(address: &str, machine: MachineInfo) -> MachineInfo {
+        MachineInfo {
+            addresses: vec![address.parse().expect("an address")],
+            ..machine
+        }
+    }
+
+    async fn hubs(fleet: Fleet) -> Vec<Value> {
+        let body = get_json(fleet, "/machines").await;
+        let listed = body["data"].as_array().expect("a list");
+        listed.iter().map(|m| m["hub"].clone()).collect()
+    }
+
+    /// Y-582: the node holding the address the daemon bound is the hub, and no
+    /// other node is.
+    #[tokio::test]
+    async fn the_node_the_daemon_is_bound_to_is_the_hub() {
+        let fleet = bound_to(
+            "100.64.0.1:7717",
+            vec![
+                at("100.64.0.2", machine("n-2", "pi", true)),
+                at("100.64.0.1", machine("n-1", "yantra-box", true)),
+                at("100.64.0.3", machine("n-3", "mac", false)),
+            ],
+        );
+        assert_eq!(hubs(fleet).await, [json!(false), json!(true), json!(false)]);
+    }
+
+    /// A dual-stack bind reports a v4 peer as `::ffff:a.b.c.d`; it is still the hub.
+    #[tokio::test]
+    async fn a_v4_mapped_bind_still_names_the_hub() {
+        let fleet = bound_to(
+            "[::ffff:100.64.0.1]:7717",
+            vec![at("100.64.0.1", machine("n-1", "yantra-box", true))],
+        );
+        assert_eq!(hubs(fleet).await, [json!(true)]);
+    }
+
+    /// A daemon bound to an address no node holds names no hub, and never guesses.
+    #[tokio::test]
+    async fn no_bound_match_names_no_hub() {
+        let fleet = bound_to(
+            "127.0.0.1:7717",
+            vec![
+                at("100.64.0.1", machine("n-1", "yantra-box", true)),
+                at("100.64.0.2", machine("n-2", "pi", true)),
+            ],
+        );
+        assert_eq!(hubs(fleet).await, [json!(false), json!(false)]);
     }
 
     /// I-39 again: the dashboard's most actionable machine is the one that is

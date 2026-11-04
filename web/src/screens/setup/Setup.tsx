@@ -7,7 +7,7 @@ import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
-import { apart, notYours, runsSessions } from '@/lib/platform'
+import { notYours } from '@/lib/platform'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -31,7 +31,7 @@ import { SshSaid } from '@/screens/machine/ReachFailure'
 import { stamp } from '../dashboard/bands'
 import { Join } from './Join'
 import { REQUIRED, useChecklist } from './progress'
-import { marks, statusWord, type Line, type Step } from './steps'
+import { marks, statusWord, TITLES, type Line, type Step } from './steps'
 import './Setup.css'
 
 const tones = { done: 'primary', progress: 'tertiary', todo: 'high', due: 'error', failed: 'error' } as const
@@ -72,6 +72,78 @@ type Presses = { check: (() => void) | null; install: (() => void) | null }
 type Register = (name: string, presses: Presses | null) => void
 type Running = (name: string, running: boolean) => void
 
+type View = Line['kind'] | 'installing' | 'blocked'
+
+const mark: Record<View, MarkState> = {
+  asleep: 'unknown',
+  unchecked: 'idle',
+  unreachable: 'unknown',
+  refused: 'failed',
+  unjoined: 'failed',
+  browser: 'failed',
+  missing: 'needs',
+  installing: 'running',
+  blocked: 'needs',
+  ready: 'done',
+}
+
+function wordsOf(said: Line, name: string): string {
+  switch (said.kind) {
+    case 'asleep':
+      return `asleep${said.since ? ` · last seen ${said.since} ago` : ''}`
+    case 'unchecked':
+      return 'not checked yet · a check costs one ssh round trip'
+    case 'unreachable':
+      return reachWords(said.kind, name).cause
+    case 'refused':
+      return 'the key was refused · run the join command on it'
+    case 'unjoined':
+      return 'no account named for it · run the join command on it'
+    case 'browser':
+      return 'Tailscale asks for a browser sign-in · run the join command on it'
+    case 'ready':
+      return `ready · ${said.present} of ${said.total}`
+    case 'missing':
+      return said.installable ? said.words : `${said.words} · the machine page shows how`
+  }
+}
+
+const bad = (said: Line): said is Extract<Line, { detail: string }> =>
+  said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'browser' || said.kind === 'unreachable'
+
+/** Y-582: the hub's line under step 1. It is never added, so it offers no
+ *  Check or Install; one that is not ready links to its machine page. */
+function HubLine(props: { machine: Machine; line: Line }) {
+  const { machine, line: said } = props
+  const beat = machine.heartbeat
+  return (
+    <li className="setup__line" data-kind={said.kind}>
+      <State size="small" state={mark[said.kind]}>
+        <span className="setup__machine">{machine.name}</span>
+      </State>
+      <div className="setup__said">
+        <Text className={bad(said) ? 'setup__bad' : undefined} scale="body-small" tone={bad(said) ? undefined : 'variant'}>
+          {wordsOf(said, machine.name)}
+        </Text>
+        {said.kind === 'unreachable' ? (
+          <Text scale="body-small" tone="variant">
+            {reachWords(said.kind, machine.name).next}
+          </Text>
+        ) : null}
+        <Text scale="body-small" tone="variant">
+          {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'no beat has arrived'}
+        </Text>
+        {bad(said) ? <SshSaid detail={said.detail} /> : null}
+      </div>
+      {said.kind === 'ready' ? null : (
+        <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
+          Open
+        </Button>
+      )}
+    </li>
+  )
+}
+
 /** D7 §4.1's machine lines: what each state says and the one action it
  *  offers. An asleep machine offers none, since ssh cannot answer it. */
 function MachineLine(props: {
@@ -93,7 +165,7 @@ function MachineLine(props: {
   useAskOnArrival(name, events, read, recheck.mutate)
   const stop = newest(events, name)
   const blocked = said.kind === 'missing' && blockedBy(stop)
-  const view = said.kind === 'missing' && install.running ? 'installing' : blocked ? 'blocked' : said.kind
+  const view: View = said.kind === 'missing' && install.running ? 'installing' : blocked ? 'blocked' : said.kind
 
   useEffect(() => {
     register(name, {
@@ -108,42 +180,7 @@ function MachineLine(props: {
     return () => running(name, false)
   }, [name, install.running, running])
 
-  const mark: Record<typeof view, MarkState> = {
-    asleep: 'unknown',
-    unchecked: 'idle',
-    unreachable: 'unknown',
-    refused: 'failed',
-    unjoined: 'failed',
-    browser: 'failed',
-    missing: 'needs',
-    installing: 'running',
-    blocked: 'needs',
-    ready: 'done',
-  }
-  const words =
-    said.kind === 'asleep'
-      ? `asleep${said.since ? ` · last seen ${said.since} ago` : ''}`
-      : said.kind === 'unchecked'
-        ? 'not checked yet · a check costs one ssh round trip'
-        : said.kind === 'unreachable'
-          ? reachWords(said.kind, name).cause
-          : said.kind === 'refused'
-            ? 'the key was refused · run the join command on it'
-            : said.kind === 'unjoined'
-              ? 'no account named for it · run the join command on it'
-              : said.kind === 'browser'
-                ? 'Tailscale asks for a browser sign-in · run the join command on it'
-                : said.kind === 'ready'
-                  ? `ready · ${said.present} of ${said.total}`
-                  : view === 'installing'
-                    ? `installing on ${name}…`
-                    : view === 'blocked'
-                      ? password(report)
-                      : said.installable
-                        ? said.words
-                        : `${said.words} · the machine page shows how`
-
-  const failed = said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'browser' || said.kind === 'unreachable'
+  const words = view === 'installing' ? `installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said, name)
 
   const check = (label: string) => (
     <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
@@ -185,11 +222,7 @@ function MachineLine(props: {
         data-fab-return={target ? '' : undefined}
         tabIndex={target ? -1 : undefined}
       >
-        <Text
-          className={failed ? 'setup__bad' : undefined}
-          scale="body-small"
-          tone={failed ? undefined : 'variant'}
-        >
+        <Text className={bad(said) ? 'setup__bad' : undefined} scale="body-small" tone={bad(said) ? undefined : 'variant'}>
           {words}
         </Text>
         {said.kind === 'unreachable' ? (
@@ -197,8 +230,8 @@ function MachineLine(props: {
             {reachWords(said.kind, name).next}
           </Text>
         ) : null}
-        {failed && said.kind !== 'unreachable' ? join : null}
-        {failed ? <SshSaid detail={said.detail} /> : null}
+        {bad(said) && said.kind !== 'unreachable' ? join : null}
+        {bad(said) ? <SshSaid detail={said.detail} /> : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
@@ -216,10 +249,9 @@ function MachineLine(props: {
  *  are for later. One button is filled, and it is the next required thing. */
 export function Setup() {
   const now = useTick(true)
-  const devices = useId()
   const strangers = useId()
   const later = useId()
-  const { about, identity, machines, sweep, notifications, events, all, lines, steps, later: optional, done, next, target } =
+  const { about, identity, machines, sweep, notifications, events, all, hub, guests, steps, later: optional, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
   const presses = useRef(new Map<string, Presses>())
@@ -241,14 +273,13 @@ export function Setup() {
   const press = (which: keyof Presses) => {
     for (const one of presses.current.values()) one[which]?.()
   }
-  const unchecked = lines.some((one) => one.line.kind === 'unchecked')
+  const unchecked = guests.some((one) => one.line.kind === 'unchecked')
   const installable =
     installing.size === 0 &&
-    lines.some(
+    guests.some(
       (one) => one.line.kind === 'missing' && one.line.installable && !blockedBy(newest(events, one.machine.name)),
     )
 
-  const others = all.filter((one) => one.ownership === 'yours' && !runsSessions(one))
   // Y-404: listed with the reason, never counted.
   const foreign = all.filter((one) => one.ownership !== 'yours')
   const join = joinUrl(location, about.data)
@@ -307,17 +338,24 @@ export function Setup() {
             <Item
               fallback="1"
               step={steps.tailnet}
-              title="The appliance is on your tailnet"
+              title={TITLES.tailnet}
               trailing={
                 <Button render={<Link params={{ category: 'about' }} to="/settings/$category" />} role="link" variant="text">
                   Open
                 </Button>
               }
             />
+            {hub ? (
+              <li className="setup__sub">
+                <ul aria-label="The hub" className="setup__lines">
+                  <HubLine line={hub.line} machine={hub.machine} />
+                </ul>
+              </li>
+            ) : null}
             <Item
               fallback="2"
               step={steps.machine}
-              title="Add a machine"
+              title={TITLES.machine}
               trailing={
                 <Button
                   icon={<Plus />}
@@ -349,7 +387,7 @@ export function Setup() {
               )}
               {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
-              ) : lines.length > 0 ? (
+              ) : guests.length > 0 ? (
                 <>
                   {unchecked || installable ? (
                     <div className="setup__bulk">
@@ -365,8 +403,8 @@ export function Setup() {
                       ) : null}
                     </div>
                   ) : null}
-                  <ul className="setup__lines">
-                  {lines.map((one) => (
+                  <ul aria-label="Other machines" className="setup__lines">
+                  {guests.map((one) => (
                     <MachineLine
                       events={events}
                       join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
@@ -380,23 +418,6 @@ export function Setup() {
                       target={next === 'install' && one.machine.name === target}
                     />
                   ))}
-                  </ul>
-                </>
-              ) : null}
-              {others.length > 0 ? (
-                <>
-                  <Text id={devices} scale="label-large" tone="variant">
-                    Devices that open the dashboard
-                  </Text>
-                  <ul aria-labelledby={devices} className="setup__lines">
-                    {others.map((one) => (
-                      <li className="setup__line" data-kind="apart" key={one.name}>
-                        <span className="setup__machine">{one.name}</span>
-                        <Text className="setup__said" scale="body-small" tone="variant">
-                          {apart(one)}
-                        </Text>
-                      </li>
-                    ))}
                   </ul>
                 </>
               ) : null}
@@ -418,11 +439,11 @@ export function Setup() {
                 </>
               ) : null}
             </li>
-            <Item fallback="3" step={steps.ready} title="Get it ready" />
+            <Item fallback="3" step={steps.ready} title={TITLES.ready} />
             <Item
               fallback="4"
               step={steps.first}
-              title="Your first session"
+              title={TITLES.first}
               trailing={
                 <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={next === 'session' && !carried ? 'filled' : 'tonal'}>
                   New session

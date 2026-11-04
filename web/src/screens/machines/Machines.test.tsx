@@ -316,6 +316,52 @@ describe('/machines when no machine can run a session', () => {
   })
 })
 
+/** Y-582: the hub is the node yantrad runs on. It is drawn first, in its own
+ *  section, and never in the grid. The busy fleet's hub is cachyos-g14. */
+describe('/machines with a hub', () => {
+  type Row = Record<string, unknown>
+  it('draws the hub first and apart, with the note that its agents share it', async () => {
+    mount('desktop', '/machines')
+    await screen.findByText(/^looked /)
+    const hub = screen.getByRole('region', { name: 'Hub' })
+    expect(within(hub).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
+    expect(within(hub).getByText('Agents on the hub share its CPU and memory with yantrad.')).toBeTruthy()
+    const grid = document.querySelector('.machines__grid')!
+    expect(within(grid as HTMLElement).queryByRole('region', { name: 'cachyos-g14' })).toBeNull()
+    expect(within(grid as HTMLElement).getByRole('region', { name: 'pi-5' })).toBeTruthy()
+    expect(hub.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getAllByRole('link', { name: 'Open' })).toHaveLength(6)
+  })
+
+  it('draws the page as before when no node is the hub', async () => {
+    const state = scenario('busy')
+    state.machines!.data = (state.machines!.data as Row[]).map((one) => ({ ...one, hub: false }))
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(screen.queryByRole('region', { name: 'Hub' })).toBeNull()
+    const grid = document.querySelector('.machines__grid') as HTMLElement
+    expect(within(grid).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
+  })
+
+  it('offers Add a device under a hub that is the only machine', async () => {
+    const state = scenario('busy')
+    state.machines!.data = (state.machines!.data as Row[]).filter((one) => one.hub === true)
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(within(screen.getByRole('region', { name: 'Hub' })).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
+    expect(screen.getByText('No other machine yet')).toBeTruthy()
+    expect(screen.queryByText('No machine can run a session yet')).toBeNull()
+  })
+
+  it('draws no hub and keeps the failure card when the machines could not be read', async () => {
+    const state = scenario('busy')
+    state.machines = { looked: 'failed', age_seconds: 0, error: 'tailscaled is down' } as typeof state.machines
+    mount('desktop', '/machines', state)
+    expect(await screen.findByText('The machines could not be read')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Hub' })).toBeNull()
+  })
+})
+
 describe('/machines when nothing can be reached', () => {
   it('is one page-sized error rather than one per card', async () => {
     mount('desktop', '/machines', scenario('unreachable'))

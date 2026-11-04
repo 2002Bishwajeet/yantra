@@ -40,6 +40,7 @@ use yantra_core::up;
 use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
+mod dash;
 mod mcp;
 mod why;
 
@@ -315,6 +316,16 @@ enum Command {
         /// yantrad's address, such as http://appliance:7717
         #[arg(long)]
         daemon: String,
+    },
+    /// The fleet in the terminal: what needs you, the sessions and the machines.
+    /// Enter attaches to the selected session over ssh; detach to come back
+    Dash {
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+        /// Read only: no key reaches a session
+        #[arg(long)]
+        view_only: bool,
     },
 }
 
@@ -762,6 +773,13 @@ async fn main() -> ExitCode {
             path,
             daemon,
         }) => why(workspace, repo.or(path), daemon).await,
+        Some(Command::Dash { daemon, view_only }) => {
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                eprintln!("yantra: dash needs a terminal on stdin and stdout");
+                return ExitCode::FAILURE;
+            }
+            dash::run(daemon, view_only).await
+        }
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {

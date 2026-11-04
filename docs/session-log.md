@@ -355,4 +355,16 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 
 - **2026-11-03** — **[Y-515](../tracker.md#3-task-board) is in review.** `GET` and `PUT /api/layout` and `yantra layout` now read and write `dashboard.json` in the daemon. A write with a stale `rev` gets 409, and the file is written atomically. A podman test proves both.
 
-- **2026-11-03** — **[Y-585](../tracker.md#3-task-board) is in review.** A refused ssh login now ends fast. The machine check times each step, and Readiness and Sessions show one plain cause and next step with the raw ssh text behind a disclosure. A real sshd test times the refused login.
+- **2026-11-03** — **[Y-592](../tracker.md#3-task-board) is in review.** `yantra dash` is a terminal dashboard. It lists machines, sessions and what needs the owner from the daemon, and marks each agent's state. Enter attaches, and a view-only mode serves an appliance console. Unit tests cover the view logic.
+
+- **2026-11-03** — **[Y-562](../tracker.md#3-task-board) is in review.** A read-only daemon route, `POST /api/workspaces/{name}/mentions`, lists a workspace's files and an agent's skills. The Chat composer opens a menu on `@` and `$`, and the chosen mention reaches the agent as text. Tests cover the route, the trigger parser and the composer.
+
+- **2026-11-03** — **[Y-563](../tracker.md#3-task-board) is in review.** The daemon now names the slash commands each harness takes. The Chat composer lists them when the owner types `/`, and picking one sends it. Tests cover the daemon route, the trigger parser and the composer.
+
+- **2026-11-04:** v0.10.0 cut ([Y-610](../tracker.md#3-task-board)). It ships the 16 merges of the 2026-11-03 build-loop run: the composer's queue, mentions, slash commands and Build/Plan toggle, the watched PRs, the terminal dashboard in the CLI, and the faster CI.
+
+- **2026-11-04** — **[Y-587](../tracker.md#3-task-board) is in review.** The Access settings page is gone. The key now lives in Add a device, and About says who can open the dashboard. Old links resolve, and the e2e baselines cover the key.
+
+- **2026-11-04** — **[Y-581](../tracker.md#3-task-board) is in review.** The Fleet page now uses one row pattern from phone to desktop. Rows hold at 390, 768, 1280 and 2000 px with no word breaks, and the e2e baselines cover a long title.
+
+- **2026-11-04** — **[Y-582](../tracker.md#3-task-board) is in review.** The daemon now names its own host. Setup no longer offers that host as a machine to add, and Machines shows it first and apart. It can still run agents. Tests cover a fresh install, and the Finish setup card says what setup configured.

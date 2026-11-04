@@ -1180,8 +1180,25 @@ enum SessionUpdate {
     SessionInfoUpdate {
         title: Option<String>,
     },
+    AvailableCommandsUpdate {
+        #[serde(rename = "availableCommands")]
+        available_commands: Vec<AvailableCommand>,
+    },
     #[serde(other)]
     Other,
+}
+
+#[derive(Deserialize)]
+struct AvailableCommand {
+    name: String,
+    #[serde(default)]
+    description: String,
+    input: Option<CommandInput>,
+}
+
+#[derive(Deserialize)]
+struct CommandInput {
+    hint: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1390,6 +1407,21 @@ fn event(update: SessionUpdate) -> Option<Event> {
         }
         SessionUpdate::SessionInfoUpdate { title } => {
             title.map(|name| Event::ThreadMetadataUpdated { name })
+        }
+        SessionUpdate::AvailableCommandsUpdate { available_commands } => {
+            Some(Event::CommandsUpdated {
+                commands: available_commands
+                    .into_iter()
+                    .map(|command| chat::Command {
+                        name: command.name,
+                        description: command.description,
+                        hint: command
+                            .input
+                            .and_then(|input| input.hint)
+                            .filter(|hint| !hint.is_empty()),
+                    })
+                    .collect(),
+            })
         }
         SessionUpdate::Other => None,
     }
@@ -2264,9 +2296,40 @@ mod tests {
     }
 
     #[test]
+    fn the_agents_commands_are_kept_with_their_hints() {
+        assert_eq!(
+            parse(
+                json!({"sessionUpdate": "available_commands_update", "availableCommands": [
+                    {"name": "init", "description": "create/update AGENTS.md"},
+                    {"name": "review", "description": "review changes", "input": {"hint": "<branch>"}},
+                    {"name": "undo", "description": "", "input": {"hint": ""}},
+                ]})
+            ),
+            Some(Event::CommandsUpdated {
+                commands: vec![
+                    chat::Command {
+                        name: "init".to_owned(),
+                        description: "create/update AGENTS.md".to_owned(),
+                        hint: None,
+                    },
+                    chat::Command {
+                        name: "review".to_owned(),
+                        description: "review changes".to_owned(),
+                        hint: Some("<branch>".to_owned()),
+                    },
+                    chat::Command {
+                        name: "undo".to_owned(),
+                        description: String::new(),
+                        hint: None,
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
     fn updates_the_chat_does_not_draw_are_dropped() {
         for update in [
-            json!({"sessionUpdate": "available_commands_update", "availableCommands": []}),
             json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"}),
             json!({"sessionUpdate": "state_update", "state": "idle"}),
         ] {

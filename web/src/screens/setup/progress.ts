@@ -11,7 +11,6 @@ import {
 } from '@/api/hooks'
 import { fromReading } from '@/api/client'
 import { machineReadinessQuery } from '@/api/queries'
-import { appliance } from '@/lib/appliance'
 import { runsSessions } from '@/lib/platform'
 import { isReady } from '@/lib/ready'
 import { at } from '@/lib/time'
@@ -81,15 +80,18 @@ export function useChecklist(now: number) {
     const since = machine.last_seen ? (at(machine.last_seen, now)?.text ?? null) : null
     return { machine, report, line: line(machine, report, since) }
   })
+  // Y-582: the hub is the daemon's own node, so it is shown and never added.
+  const hub = lines.find((one) => one.machine.hub) ?? null
+  const guests = lines.filter((one) => !one.machine.hub)
   // A report about an asleep machine is an old one, so only an online machine
   // counts as ssh getting in now.
-  const reached = lines
-    .filter(({ machine, report }) => machine.online && report?.checks.some((one) => one.check === 'reachable' && one.state === 'present'))
-    .map((one) => one.machine.name)
+  const reaches = ({ machine, report }: (typeof lines)[number]) =>
+    machine.online && report?.checks.some((one) => one.check === 'reachable' && one.state === 'present')
+  const reached = guests.filter(reaches).map((one) => one.machine.name)
   // A join is its event, or ssh getting in now after a restart forgot it. The
   // first join makes the key (ADR-0029), so with no key nothing has joined.
   const joined = identity.data
-    ? lines
+    ? guests
         .filter(
           ({ machine }) =>
             events.some((one) => one.kind === 'joined' && one.machine === machine.name) || reached.includes(machine.name),
@@ -100,19 +102,21 @@ export function useChecklist(now: number) {
 
   const steps = {
     tailnet: tailnet(about, location.protocol),
-    machine: identity.error ? failed(identity.error) : added(joined, identity.data === null ? reached : []),
+    machine: identity.error
+      ? failed(identity.error)
+      : added(joined, identity.data === null ? reached : [], hub && reaches(hub) ? hub.machine.name : null),
     ready: readied(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
     first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount),
   }
   const key = keyExpiry(
     { data: machines.looked === 'ok' ? machines.data : undefined, error: fromReading(machines), isPending: machines.looked === 'pending' },
-    appliance(all, about.data),
+    all.find((one) => one.hub) ?? null,
     now,
   )
   const later = { github: github(connection), push: push(about), key }
   const done = Object.values(steps).filter((one) => one.status === 'done').length
   const target =
-    lines.find((one) => one.line.kind === 'missing' && one.line.installable)?.machine.name ?? null
+    guests.find((one) => one.line.kind === 'missing' && one.line.installable)?.machine.name ?? null
   const next: Next =
     steps.machine.status !== 'done'
       ? 'add'
@@ -137,7 +141,8 @@ export function useChecklist(now: number) {
     notifications,
     events,
     all,
-    lines,
+    hub,
+    guests,
     steps,
     later,
     done,

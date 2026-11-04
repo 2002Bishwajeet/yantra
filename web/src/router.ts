@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  redirect,
   type RouterHistory,
 } from '@tanstack/react-router'
 import {
@@ -198,6 +199,10 @@ const settings = createRoute({
 const settingsCategory = createRoute({
   getParentRoute: () => root,
   path: '/settings/$category',
+  // The key was the one task Access held, and Add a device holds it now.
+  beforeLoad: ({ params }) => {
+    if (params.category === 'access') throw redirect({ to: '/machines/add', replace: true })
+  },
   component: lazyRouteComponent(() => import('@/screens/settings/Settings'), 'Settings'),
   head: ({ params }) => titled(params.category.charAt(0).toUpperCase() + params.category.slice(1)),
 })

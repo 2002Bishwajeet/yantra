@@ -38,6 +38,8 @@ API the CLI cannot reach.
 | `POST /api/placement` | `yantra why --repo` / `--path`. Both call `placement::ask`; the CLI has no `folders` override, so it finds each clone folder on the machine (Y-517) |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
+| `POST /api/workspaces/{name}/mentions` | **None**: a terminal cannot mean it. The Chat composer's `@` files and `$` skills, for `{harness, thread?}` (Y-562, a `POST` for ADR-0019's reason) |
+| `POST /api/workspaces/{name}/commands` | **None**: a terminal cannot mean it. Claude's slash commands for the Chat composer's `/`, for `{harness, thread?}`; an ACP harness gets `[]`, since its list comes on the chat socket (Y-563, a `POST` for ADR-0019's reason) |
 | `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
@@ -115,7 +117,9 @@ an address no peer holds is refused with `403`.
 long ago it arrived, and a machine nothing has ever been heard from carries **`null`** rather than a
 row of zeros — the two send a person to different places. The daemon names no display state: it
 serves the age and Tailscale's `online`, and the dashboard turns those into ADR-0013 §7's four. The
-beat is the one thing on this route that `yantra ls machines` cannot yet show.
+beat is the one thing on this route that `yantra ls machines` cannot yet show. Each machine also
+carries `hub`: `true` for the node that holds an address the daemon is bound to, which is the
+appliance itself (Y-582).
 
 ```json
 {"name": "cachyos-g14", "online": true, …,

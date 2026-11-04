@@ -108,6 +108,10 @@ export type TurnCompleted = {
  *  diff cut at 256 KiB. */
 export type TurnDiff = { turn: number; unifiedDiff: string; truncated: boolean }
 
+/** A slash command the agent expands when `/<name>` opens a prompt (Y-563).
+ *  `hint` says what the argument is for; with none, the command takes no argument. */
+export type SlashCommand = { name: string; description: string; hint?: string }
+
 /** `cursor` is `<run>:<line end>:<part>` on an event read from the agent's
  *  keeper, and absent on one the daemon made (ADR-0035). A reconnect sends the
  *  last one back as `after`. On `thread.started` it is the cursor the replay
@@ -121,6 +125,8 @@ export type ThreadEvent = { threadId: string; cursor?: string } & (
   | { type: 'turn.diff.updated'; payload: TurnDiff }
   /** Not T3 Code's: the files are back as checkpoint `turn` kept them. */
   | { type: 'thread.reverted'; payload: { turn: number } }
+  /** Not T3 Code's: an ACP agent's slash commands, sent when its session opens. */
+  | { type: 'thread.commands.updated'; payload: { commands: SlashCommand[] } }
   | {
       type: 'turn.plan.updated'
       payload: { plan: { step: string; status: 'pending' | 'inProgress' | 'completed' }[] }

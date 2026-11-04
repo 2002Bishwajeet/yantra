@@ -72,6 +72,7 @@ export function Fleet() {
   const failed = [listed, agents].find((read) => read.looked === 'failed')
   const live = sessionsOf(sessions)
   const rows = (band: Band) => placed.filter((row) => row.band === band)
+  const allSet = ready && placed.length === 0 && !speaks(attention)
 
   if (nothing) {
     return (
@@ -100,6 +101,10 @@ export function Fleet() {
         stamp={<Looked reads={[machines, listed, sessions, agents]} />}
         title="Fleet"
       />
+      {/* The phone hides the h1, so the line sits in the body where it stays. */}
+      <Text className="fleet__lede" render={<p />} scale="body-medium" tone="variant">
+        Every workspace on every machine, and what needs you first.
+      </Text>
 
       {failed && !ready ? (
         <ErrorSurface.Card
@@ -117,17 +122,17 @@ export function Fleet() {
         />
       ) : null}
 
+      {allSet ? (
+        <Text className="fleet__allset" render={<p />} scale="title-small">
+          All set
+        </Text>
+      ) : null}
+
       <ErrorBoundary eyebrow="Needs you" title="Needs you could not be drawn">
         <Group
           band="needs"
           count={rows('needs').length}
-          empty={
-            speaks(attention) ? null : (
-              <EmptyState title="Nothing needs you">
-                when an agent asks for trust or a review is requested, it appears here first
-              </EmptyState>
-            )
-          }
+          empty={null}
           pending={!ready}
           rows={rows('needs')}
           sessions={live}
@@ -142,7 +147,7 @@ export function Fleet() {
         <Group
           band="running"
           count={rows('running').length}
-          empty={<EmptyState title="Nothing is running">Start a session and its elapsed time shows here</EmptyState>}
+          empty={null}
           pending={!ready}
           rows={rows('running')}
           sessions={live}
@@ -158,9 +163,7 @@ export function Fleet() {
               <EmptyState title="No workspaces yet">
                 <Link to="/new">New</Link> makes one
               </EmptyState>
-            ) : (
-              <EmptyState title="Nothing is idle">every workspace is running or waiting on you</EmptyState>
-            )
+            ) : null
           }
           limit={factor === 'phone' ? 0 : IDLE_SHOWN}
           pending={!ready}
@@ -208,6 +211,8 @@ function Group(props: {
   children?: ReactNode
 }) {
   const { band, title, count, surface, rows, sessions, pending, empty, note, children } = props
+  // A band with nothing to show and nothing to do is not a card.
+  if (!pending && rows.length === 0 && !empty && !children) return null
   return (
     <Card aria-labelledby={`fleet-${band}`} className="fleet__card" surface={surface}>
       <div className="fleet__eyebrow">
@@ -232,6 +237,7 @@ function Group(props: {
 function Idle(props: { rows: WorkRow[]; sessions: Sessions; limit: number; pending: boolean; empty: ReactNode }) {
   const { rows, sessions, limit, pending, empty } = props
   const [open, setOpen] = useState(false)
+  if (!pending && rows.length === 0 && !empty) return null
   const folded = rows.length > limit
   const shown = open || !folded ? rows : rows.slice(0, limit)
   const rest = rows.length - limit

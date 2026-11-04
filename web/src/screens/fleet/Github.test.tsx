@@ -139,3 +139,59 @@ describe('Start session', () => {
     await waitFor(() => expect(asked.some((one) => /^POST \/api\/workspaces\/[^/]+\/threads\/new$/.test(one))).toBe(true))
   })
 })
+
+describe('the GitHub queue', () => {
+  const items = (heading: string) =>
+    within(screen.getByRole('heading', { name: heading }).closest('.github__group') as HTMLElement).getAllByRole('listitem')
+
+  it('lists reviews before issues, each row with the reason it needs you', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} />)
+    const headings = screen.getAllByRole('heading', { level: 4 }).map((one) => one.textContent)
+    expect(headings).toEqual(['Reviews', 'Issues'])
+    for (const row of items('Reviews')) expect(within(row).getByText('review requested')).toBeTruthy()
+    for (const row of items('Issues')) expect(within(row).getByText('assigned issue')).toBeTruthy()
+  })
+
+  it('gives every row one actions slot, the primary action first', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} />)
+    for (const row of [...items('Reviews'), ...items('Issues')]) {
+      expect(row.querySelectorAll('.github__actions')).toHaveLength(1)
+    }
+    const review = within(items('Reviews')[0]!.querySelector('.github__actions') as HTMLElement)
+    expect(review.getByRole('link', { name: 'Review' }).getAttribute('href')).toBe(contract.attention.data.reviews[0]!.url)
+    expect(review.queryByRole('button', { name: /^Start session/ })).toBeNull()
+    const issue = items('Issues')[0]!.querySelector('.github__actions') as HTMLElement
+    const [open, start] = Array.from(issue.querySelectorAll('a, button'))
+    expect(open!.textContent).toBe('Open')
+    expect(start!.textContent).toBe('Start session')
+  })
+
+  it('links the count as plain text, "Open N on GitHub"', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} />)
+    const link = screen.getByRole('link', { name: `Open ${contract.attention.data.notifications} on GitHub` })
+    expect(link.getAttribute('href')).toBe('https://github.com/notifications')
+  })
+
+  it('draws a skeleton while pending', async () => {
+    daemon()
+    await renderInApp(<Github attention={{ looked: 'pending' }} />)
+    expect(document.querySelector('.github__pending[aria-busy="true"]')).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Reviews' })).toBeNull()
+  })
+
+  it('says GitHub was never looked at', async () => {
+    daemon()
+    await renderInApp(<Github attention={{ looked: 'never' } as never} />)
+    expect(screen.getByText('GitHub not looked at yet')).toBeTruthy()
+  })
+
+  it('names the failure and links a missing sign-in to Providers', async () => {
+    daemon()
+    await renderInApp(<Github attention={{ looked: 'failed', age_seconds: 0, error: 'no GitHub grant' }} />)
+    expect(screen.getByText('GitHub cannot be asked')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/settings/providers')
+  })
+})

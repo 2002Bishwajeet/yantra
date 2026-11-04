@@ -130,6 +130,19 @@ describe('every path draws its screen and names it in the title', () => {
   })
 })
 
+describe('the old Access link', () => {
+  it('/settings/access opens Add a device, where the key is', async () => {
+    await open('/settings/access')
+    expect(await h1('Add a device')).toBeTruthy()
+    expect(location.pathname).toBe('/machines/add')
+  })
+
+  it('an unknown settings category still says nothing is there', async () => {
+    await open('/settings/no-such-category')
+    expect(await screen.findByText(/Nothing is at/)).toBeTruthy()
+  })
+})
+
 describe('the search params', () => {
   it('keeps a known view on /w/{name} and drops an unknown one', async () => {
     await open('/w/landing?view=chat')

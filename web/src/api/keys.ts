@@ -16,6 +16,11 @@ export const keys = {
   transcript: (name: string, window: Window) =>
     ['workspaces', name, 'transcript', window] as const,
   repair: (name: string) => ['workspaces', name, 'repair'] as const,
+  /** `null` is the workspace's repository, before a thread opens. */
+  mentions: (name: string, thread: string | null, harness: string) =>
+    ['workspaces', name, 'mentions', thread, harness] as const,
+  commands: (name: string, thread: string | null, harness: string) =>
+    ['workspaces', name, 'commands', thread, harness] as const,
   sessions: () => ['sessions'] as const,
   /** The whole sweep, or one machine's report under it. */
   readiness: (machine?: string) =>

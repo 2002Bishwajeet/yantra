@@ -1,6 +1,8 @@
 // Unions rather than optional properties: a `sessions?: Session[]` compiles
 // and lets an unreachable machine render as "0 sessions".
 
+import type { SlashCommand } from './api/thread'
+
 export type Looked<T> =
   | { looked: 'ok'; age_seconds: number; data: T }
   | { looked: 'failed'; age_seconds: number; error: string }
@@ -52,6 +54,8 @@ export type Machine = {
   // Y-404: only `yours` counts or runs a session. `shared` is another Tailscale
   // account's node; `tagged` is the tailnet's, and wins over a matching owner.
   ownership: 'yours' | 'shared' | 'tagged'
+  // Y-582: the node yantrad runs on, named by the daemon from its bound address.
+  hub: boolean
 }
 
 // ADR-0013 §2: two variants, so unknown power cannot be spelled. A string and
@@ -504,6 +508,27 @@ export type ThreadOpened = {
   draft: string
 }
 
+/** `POST /api/workspaces/{name}/mentions` with `{ harness, thread? }` (Y-562):
+ *  what the composer offers after `@` and `$`. `files` is cut at 5000. */
+export type Mentions = {
+  files: string[]
+  truncated: boolean
+  skills: MentionSkill[]
+}
+
+export type MentionSkill = {
+  name: string
+  description: string
+  scope: 'user' | 'project'
+  /** What the composer inserts: `$<name>`. */
+  mention: string
+}
+
+/** `POST /api/workspaces/{name}/commands` with `{ harness, thread? }` (Y-563):
+ *  Claude's slash commands, for the composer's `/` menu. An ACP harness is
+ *  answered with none, because its list comes on the chat socket. */
+export type Commands = { commands: SlashCommand[] }
+
 /** `POST /api/workspaces/{name}/threads/{thread}/message`: the commit message
  *  `claude -p` wrote on the machine (Y-492). */
 export type ThreadMessage = {
@@ -612,6 +637,7 @@ export type {
   ChatNotAttached,
   ChatQuery,
   ChatQueue,
+  SlashCommand,
   ThreadEvent,
 } from './api/thread'
 

@@ -50,6 +50,9 @@ pub enum Event {
     ThreadReverted { turn: u32 },
     #[serde(rename = "turn.plan.updated")]
     PlanUpdated { plan: Vec<PlanStep> },
+    /// Not T3 Code's event: an ACP agent's slash commands (Y-563).
+    #[serde(rename = "thread.commands.updated")]
+    CommandsUpdated { commands: Vec<Command> },
     #[serde(rename = "content.delta")]
     ContentDelta(ContentDelta),
     #[serde(rename = "item.started")]
@@ -110,6 +113,16 @@ pub enum StopReason {
     MaxTurnRequests,
     Refusal,
     Cancelled,
+}
+
+/// A slash command the agent expands when `/<name>` opens a prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Command {
+    pub name: String,
+    pub description: String,
+    /// What the argument is for. `None` takes no argument.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

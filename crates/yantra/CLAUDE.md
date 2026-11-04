@@ -17,7 +17,8 @@ the same logic: if yes, it is not CLI code.
 [`yantra_core::notify`](../yantra-core/CLAUDE.md) reaches `ureq` and its bundled root store, and the
 aarch64-musl binary went 1,256,496 → 2,451,504 bytes for it (Y-147). `yantra mcp` (Y-435) is the second
 verb that sends, and `yantra why` (Y-452) the third. Both call `yantrad` in plain HTTP over the `ureq` this binary already carried, so their
-cost should be small; nobody has measured it yet. Weigh the next verb that sends on
+cost should be small; nobody has measured it yet. `yantra dash` (Y-592) adds `ratatui` and its
+`crossterm`, which are not free, and nobody has measured that either. Weigh the next verb that sends on
 `just appliance-size` the same way.
 
 ## Exit codes are a contract
@@ -60,6 +61,8 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `history extract`, unless the rows are written and every transcript was read | 1 | `history stage`'s rule, so a partial answer shows. No `gitleaks` on PATH, a failed scan, a folder it cannot read and an output it cannot write each write nothing. A row gitleaks still finds a secret in, or every row of a transcript with a finding in no row, is dropped and named on stderr as a bug against Y-430 |
 | `mic`, after Ctrl-C | **0** | Ctrl-C is how the verb ends ([ADR-0031](../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §7). It closes the writer's stdin and waits for `pw-cat` to drain first |
 | `mic` with no `pw-record` here, a machine it cannot reach, a writer that exits, a recorder that ends on its own, or a second Ctrl-C during the close | 1 | each stops the stream before it was asked to stop. A writer that exits names `yantra install <machine> --mic`, unless `ssh` itself failed with 255 |
+| `dash`, on `q` or Esc | **0** | the owner asked to leave. A daemon it cannot reach is drawn on the screen and polled again, not an exit |
+| `dash` when stdin or stdout is not a terminal | 1 | checked before it draws, because there is no screen to draw on |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.
@@ -69,6 +72,7 @@ process becomes `ssh` and the exit code is `ssh`'s and then tmux's. Everything i
 decides *before* handing over — the workspace exists, a session exists, `TERM` resolves, stdin is a
 terminal — and each of those is a normal exit 1. `exec` rather than spawn-and-wait is deliberate:
 a supervising parent would have to forward `SIGWINCH`, relay signals and reap a child to add nothing.
+**`dash` spawns `ssh` and waits for it instead**, because the dashboard must come back after the detach; the child shares the tty, so `SIGWINCH` reaches it with no forwarding.
 
 ## Saying things
 

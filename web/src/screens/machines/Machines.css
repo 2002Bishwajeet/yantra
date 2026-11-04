@@ -7,6 +7,18 @@
   list-style: none;
 }
 
+.machines__hub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.machines__hub > h2,
+.machines__hub > p {
+  margin: 0;
+  padding: 0 4px;
+}
+
 .machines__grid > li {
   display: flex;
 }

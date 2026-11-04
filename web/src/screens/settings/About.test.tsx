@@ -21,6 +21,12 @@ describe('About', () => {
     expect(screen.getByText(/persists nothing about the fleet/)).toBeTruthy()
   })
 
+  it('says who can open the dashboard, and names the tailnet', async () => {
+    mountSettings('desktop', '/settings/about', { 'GET /api/about': [200, { ...contract.about, tailnet: 'home.ts.net' }] })
+    expect(await screen.findByText('Only devices on your tailnet can open this dashboard. There is no separate login.')).toBeTruthy()
+    expect(await screen.findByText('Tailnet · home.ts.net')).toBeTruthy()
+  })
+
   it('draws the boundary when the daemon answers something else', async () => {
     mountSettings('desktop', '/settings/about', { 'GET /api/about': [500, 'boom'] })
     expect(await screen.findByText('About could not be drawn')).toBeTruthy()

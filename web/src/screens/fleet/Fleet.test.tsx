@@ -67,12 +67,13 @@ describe('/fleet on the busy fleet', () => {
     mount('desktop', '/fleet')
     await screen.findByText(/^looked /, {}, { timeout: 2000 })
     const github = within(await screen.findByRole('region', { name: 'On GitHub' }))
-    const review = github.getByRole('link', { name: /yantra#245/ })
+    const review = github.getAllByRole('link', { name: 'Review' })[0]!
+    expect(within(review.closest('li') as HTMLElement).getByText(/yantra#245/)).toBeTruthy()
     expect(review.getAttribute('href')).toBe('https://github.com/2002Bishwajeet/yantra/pull/245')
     expect(review.getAttribute('target')).toBe('_blank')
     expect(github.getByRole('heading', { name: 'Reviews' })).toBeTruthy()
     expect(github.getByRole('heading', { name: 'Issues' })).toBeTruthy()
-    expect(github.getByRole('link', { name: /7notifications on GitHub/ })).toBeTruthy()
+    expect(github.getByRole('link', { name: 'Open 7 on GitHub' })).toBeTruthy()
   })
 })
 
@@ -91,7 +92,7 @@ describe('/fleet Start session', () => {
     expect(location.search).toContain(`thread=${contract.threadOpened.thread}`)
     expect(location.search).not.toContain('Work')
     expect((history.state as { draft?: string }).draft).toBe(contract.threadOpened.draft)
-    const composer = await screen.findByRole('textbox', { name: /Message/ }, { timeout: 5000 })
+    const composer = await screen.findByRole('combobox', { name: /Message/ }, { timeout: 5000 })
     expect((composer as HTMLTextAreaElement).value).toBe(contract.threadOpened.draft)
     expect(asked).toContain('POST /api/workspaces/yantra-web/threads')
   })
@@ -103,7 +104,7 @@ describe('/fleet Start session', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start session on 2002Bishwajeet/yantra#118' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(await within(dialog).findByRole('button', { name: 'yantra-web' }, { timeout: 2000 }))
-    const composer = (await screen.findByRole('textbox', { name: /Message/ }, { timeout: 5000 })) as HTMLTextAreaElement
+    const composer = (await screen.findByRole('combobox', { name: /Message/ }, { timeout: 5000 })) as HTMLTextAreaElement
     await waitFor(() => expect((history.state as { draft?: string } | null)?.draft).toBeUndefined())
     expect(composer.value).not.toBe('')
     expect(location.search).toContain(`thread=${contract.threadOpened.thread}`)
@@ -155,11 +156,37 @@ describe('/fleet when GitHub has no grant', () => {
 })
 
 describe('/fleet on an empty fleet', () => {
-  it('draws the three empty blocks', async () => {
+  it('draws one All set line and keeps the one block that has an action', async () => {
     mount('desktop', '/fleet', scenario('empty'))
-    await screen.findByText('Nothing needs you', {}, { timeout: 2000 })
-    expect(screen.getByText('Nothing is running')).toBeTruthy()
-    expect(screen.getByText('No workspaces yet')).toBeTruthy()
+    await screen.findByText('No workspaces yet', {}, { timeout: 2000 })
+    expect(screen.getByRole('link', { name: 'New' }).getAttribute('href')).toBe('/new')
+    expect(screen.getByText('All set')).toBeTruthy()
+    // A band with no rows and no action is not a card.
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
+    expect(screen.queryByText('Nothing needs you')).toBeNull()
+    expect(screen.queryByText('Nothing is running')).toBeNull()
+    expect(screen.getByRole('region', { name: 'Idle' })).toBeTruthy()
+  })
+})
+
+describe('/fleet when GitHub has nothing to say', () => {
+  it('leaves the GitHub block out and keeps the bands that hold rows', async () => {
+    const quiet = scenario('busy')
+    quiet.attention = { looked: 'ok', data: { reviews: [], issues: [], notifications: 0 } }
+    mount('desktop', '/fleet', quiet)
+    await screen.findByText(/^looked /, {}, { timeout: 2000 })
+    await screen.findByRole('region', { name: 'Running' }, { timeout: 2000 })
+    expect(screen.queryByText('All set')).toBeNull()
+    expect(screen.queryByText('Nothing is running')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'On GitHub' })).toBeNull()
+  })
+})
+
+describe('/fleet header', () => {
+  it('says what the page is for, on the phone too', async () => {
+    mount('phone', '/fleet')
+    expect(await screen.findByText(/Every workspace on every machine/, {}, { timeout: 2000 })).toBeTruthy()
   })
 })
 

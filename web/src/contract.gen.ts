@@ -17,6 +17,7 @@ import type {
   ChatQuery,
   ChatQueue,
   Cloning,
+  Commands,
   Connection,
   Device,
   Event,
@@ -27,6 +28,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Mentions,
   Opened,
   Placement,
   Readiness,
@@ -72,6 +74,7 @@ export const machines = {
         ],
         "power": "ac"
       },
+      "hub": true,
       "key_expires": "2027-01-18T10:11:44Z",
       "last_seen": null,
       "name": "cachyos-g14",
@@ -99,6 +102,7 @@ export const machines = {
           }
         }
       },
+      "hub": false,
       "key_expires": null,
       "last_seen": "2026-07-07T09:00:00Z",
       "name": "bishwajeets-macbook-pro",
@@ -111,6 +115,7 @@ export const machines = {
       "dns_name": "pi.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": null,
+      "hub": false,
       "key_expires": null,
       "last_seen": null,
       "name": "pi",
@@ -795,6 +800,42 @@ export const threadOpened = {
   "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
 } satisfies ThreadOpened
 
+export const mentions = {
+  "files": [
+    "README.md",
+    "src/main.rs"
+  ],
+  "skills": [
+    {
+      "description": "Reviews a diff for correctness.",
+      "mention": "$code-review",
+      "name": "code-review",
+      "scope": "user"
+    },
+    {
+      "description": "",
+      "mention": "$deploy-staging",
+      "name": "deploy-staging",
+      "scope": "project"
+    }
+  ],
+  "truncated": false
+} satisfies Mentions
+
+export const commands = {
+  "commands": [
+    {
+      "description": "Free up context by summarizing the conversation so far",
+      "name": "compact"
+    },
+    {
+      "description": "Review a pull request",
+      "hint": "<pr>",
+      "name": "review"
+    }
+  ]
+} satisfies Commands
+
 export const threadMessage = {
   "message": "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
 } satisfies ThreadMessage
@@ -990,6 +1031,19 @@ export const chatEvents = [
     },
     "threadId": "1a2b3c4d",
     "type": "item.completed"
+  },
+  {
+    "payload": {
+      "commands": [
+        {
+          "description": "review changes",
+          "hint": "<branch>",
+          "name": "review"
+        }
+      ]
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.commands.updated"
   },
   {
     "payload": {

@@ -107,9 +107,20 @@ and
 [`ExpandedImageDialog.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ExpandedImageDialog.tsx)
 ([`Attachments.tsx`](web/src/composer/Attachments.tsx)),
 [`composerPromptHistory.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/composerPromptHistory.ts)
-and its test ([`history.ts`](web/src/composer/history.ts), [`history.test.ts`](web/src/composer/history.test.ts)), and
+and its test ([`history.ts`](web/src/composer/history.ts), [`history.test.ts`](web/src/composer/history.test.ts)),
 [`composer-logic.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/composer-logic.ts)
-([`keys.ts`](web/src/composer/keys.ts)). Yantra keeps the shapes and writes them on its own tokens and daemon
+([`keys.ts`](web/src/composer/keys.ts), [`trigger.ts`](web/src/composer/trigger.ts)), and
+[`ComposerCommandMenu.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerCommandMenu.tsx)
+([`MentionMenu.tsx`](web/src/composer/MentionMenu.tsx), [`MentionMenu.css`](web/src/composer/MentionMenu.css)). The
+skill roots in [`mention.rs`](crates/yantra-core/src/mention.rs) for Claude match T3 Code's
+[`ClaudeSkills.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/server/src/provider/Drivers/ClaudeSkills.ts).
+The slash command ranking in [`searchCommands.ts`](web/src/composer/searchCommands.ts) adapts
+[`composerSlashCommandSearch.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/composerSlashCommandSearch.ts)
+and
+[`searchRanking.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/packages/shared/src/searchRanking.ts),
+and [`command.rs`](crates/yantra-core/src/command.rs) re-expresses the `initialize` probe and the list's clean-up in
+[`ClaudeProvider.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/server/src/provider/ClaudeProvider.ts).
+Yantra keeps the shapes and writes them on its own tokens and daemon
 frames, and leaves out what the daemon does not back. From `ComposerControl.tsx` it copies `ComposerControl`, `Icon`,
 `Chevron` and `Separator`; it leaves out `SelectControl`, which nothing in Yantra uses. Its name, wordmark and icon
 are not used.

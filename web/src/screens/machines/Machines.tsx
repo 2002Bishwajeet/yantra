@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Plus } from 'lucide-react'
+import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { Button } from '@/m3/button/Button'
 import { loaded, useMachines, useReadiness, useSessions, useWorkspaces } from '@/api/hooks'
@@ -13,7 +14,7 @@ import { List, ListItem } from '@/m3/list/List'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow } from '@/m3/text/Text'
+import { Eyebrow, Text } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
 import { useFab } from '@/shell/primary'
 import { unreachable } from '@/work'
@@ -70,10 +71,21 @@ export function Machines() {
   // D7 §3.4: a phone, a tablet and a Windows PC open the dashboard; they
   // never get a card, a check or a count.
   const runs = list.filter(runsSessions)
+  // Y-582: the hub is drawn apart, first, and never in the grid.
+  const hub = runs.find((one) => one.hub) ?? null
+  const others = runs.filter((one) => !one.hub)
   const devices = list.filter((one) => one.ownership === 'yours' && !runsSessions(one))
   // Y-404: listed with the reason, never counted.
   const foreign = list.filter((one) => one.ownership !== 'yours')
   const checks = readiness.looked === 'ok' ? readiness.data : []
+  const cardOf = (machine: Machine) => (
+    <MachineCard
+      checks={checksOf(checks, machine.name)}
+      condensed={factor === 'phone'}
+      machine={machine}
+      pending={readiness.looked === 'pending'}
+    />
+  )
   const held =
     sessions.looked === 'ok' && workspaces.looked === 'ok'
       ? unclaimed(sessions.data, workspaces.data)
@@ -93,6 +105,20 @@ export function Machines() {
         title="Machines"
       />
 
+      {machines.looked === 'ok' && hub ? (
+        <ErrorBoundary eyebrow="Hub" title="The hub could not be drawn">
+          <section aria-labelledby="machines-hub" className="machines__hub">
+            <Eyebrow id="machines-hub" render={<h2 />}>
+              Hub
+            </Eyebrow>
+            {cardOf(hub)}
+            <Text render={<p />} scale="body-small" tone="variant">
+              Agents on the hub share its CPU and memory with yantrad.
+            </Text>
+          </section>
+        </ErrorBoundary>
+      ) : null}
+
       <ErrorBoundary eyebrow="Machines" title="The machines could not be drawn">
         {machines.looked === 'failed' ? (
           <ErrorSurface.Card
@@ -102,22 +128,15 @@ export function Machines() {
             title="The machines could not be read"
           />
         ) : machines.looked === 'ok' ? (
-          runs.length > 0 ? (
+          others.length > 0 ? (
             <ul className="machines__grid">
-              {runs.map((machine) => (
-                <li key={machine.name}>
-                  <MachineCard
-                    checks={checksOf(checks, machine.name)}
-                    condensed={factor === 'phone'}
-                    machine={machine}
-                    pending={readiness.looked === 'pending'}
-                  />
-                </li>
+              {others.map((machine) => (
+                <li key={machine.name}>{cardOf(machine)}</li>
               ))}
             </ul>
           ) : (
             <Card>
-              <EmptyState title="No machine can run a session yet">
+              <EmptyState title={hub ? 'No other machine yet' : 'No machine can run a session yet'}>
                 <Link to="/machines/add">Add a device</Link>
               </EmptyState>
             </Card>
