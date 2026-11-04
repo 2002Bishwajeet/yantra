@@ -2,8 +2,8 @@
 //! [ADR-0029](../../../docs/adr/0029-a-machine-joins-itself.md)).
 //!
 //! The script is POSIX `sh` in [`join.sh`](join.sh). The daemon fills in three
-//! values and serves it at `GET /join`; `yantra join-script` prints the same
-//! bytes. What the machine reports back is [`crate::identity::join_in`]'s input.
+//! values and `login_server.sh`, and serves it at `GET /join`; `yantra
+//! join-script` prints the same bytes. What the machine reports back is [`crate::identity::join_in`]'s input.
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -47,7 +47,8 @@ pub fn script(daemon: SocketAddr, public_key: &str) -> Result<String, Error> {
     Ok(SCRIPT
         .replace("__YANTRA_DAEMON__", &daemon.to_string())
         .replace("__YANTRA_KEY__", public_key)
-        .replace("__YANTRA_VERSION__", crate::about::VERSION))
+        .replace("__YANTRA_VERSION__", crate::about::VERSION)
+        .replace("__YANTRA_LOGIN_SERVER__", crate::tmux::LOGIN_SERVER))
 }
 
 #[cfg(test)]
@@ -67,6 +68,16 @@ mod tests {
         assert!(script.contains(&format!("KEY='{KEY}'")));
         assert!(script.contains(&format!("VERSION='{}'", crate::about::VERSION)));
         assert!(!script.contains("__YANTRA_"), "a placeholder was left in");
+    }
+
+    /// The Mac branch calls `login_server`, so the function must be in it.
+    #[test]
+    fn the_script_carries_the_login_server_function() {
+        let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
+        let script = script(daemon, KEY).expect("a usable key");
+        assert!(script.contains(crate::tmux::LOGIN_SERVER));
+        assert!(script.contains("login_server() {"));
+        assert!(script.contains("login_server \"$tmux\""));
     }
 
     /// `sh -n` parses without running, so a syntax error fails here rather

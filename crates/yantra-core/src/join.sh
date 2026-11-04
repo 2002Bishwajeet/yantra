@@ -273,6 +273,25 @@ linux_agent() {
     say "yantra-agent is running, and reports to $DAEMON."
 }
 
+# yantrad puts tmux.rs's login_server.sh here when it serves this script.
+__YANTRA_LOGIN_SERVER__
+
+# ADR-0018 §7: the tmux server Yantra's sessions run in, started by the login
+# session so that their panes can read the keychain.
+mac_tmux() {
+    if ! tmux=$(command -v tmux); then
+        say "tmux is not here, so its LaunchAgent waits until a session starts."
+        return 0
+    fi
+    status=0
+    login_server "$tmux" || status=$?
+    case "$status" in
+    (0) say "tmux runs in your login session, from $plist." ;;
+    (3) say "no one is logged in at this Mac's screen, so tmux's LaunchAgent waits until a session starts." ;;
+    (*) say "tmux's LaunchAgent did not start a server. Yantra tries again when a session starts." ;;
+    esac
+}
+
 # A LaunchAgent in this person's own login session (ADR-0018 §7's domain), so
 # it needs no root. Not measured on a Mac yet.
 mac_agent() {
@@ -395,6 +414,7 @@ fi
 place_key
 basics
 if [ "$os" = Darwin ]; then
+    mac_tmux
     mac_agent
 else
     linux_agent

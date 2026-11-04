@@ -17,7 +17,7 @@ import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 
 /** doctor.rs `no_login_server`, word for word. */
 const NO_SERVER =
-  'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
 
 describe('the check name table', () => {
   it('names each of doctor’s twelve checks the way a person says it', () => {

@@ -55,6 +55,9 @@ struct Recorder {
     /// prerequisite, with root and with no linger, so `install::of` runs
     /// every step.
     bare: bool,
+    /// A Mac whose `list-sessions` finds no server, so the login-server
+    /// script is sent.
+    no_server: bool,
     installed: Mutex<bool>,
     label: Mutex<&'static str>,
     seen: Mutex<Vec<(String, String)>>,
@@ -65,6 +68,7 @@ impl Recorder {
         Self {
             darwin,
             bare: false,
+            no_server: false,
             installed: Mutex::new(false),
             label: Mutex::new(""),
             seen: Mutex::new(Vec::new()),
@@ -103,6 +107,13 @@ impl Exec for Recorder {
         } else {
             None
         };
+        if self.no_server && command.ends_with("list-sessions") {
+            return Ok(ssh::Output {
+                status: 1,
+                stdout: Vec::new(),
+                stderr: b"no server running on /private/tmp/tmux-501/default".to_vec(),
+            });
+        }
         Ok(ssh::Output {
             status: 0,
             stdout: stdout
@@ -388,6 +399,13 @@ async fn every_script() -> Vec<(String, String)> {
 
     let mac = Recorder::new(true);
     drive!(mac, "doctor", doctor::of(&mac, "xterm-256color"));
+    let mut serverless = Recorder::new(true);
+    serverless.no_server = true;
+    drive!(
+        serverless,
+        "up",
+        up::open(&serverless, &tmux, &ws, None, Os::MacOs)
+    );
 
     r.keep(
         "claude",
@@ -419,7 +437,14 @@ async fn every_script() -> Vec<(String, String)> {
     );
     r.keep("keep", keep::appending(&keeper, "run1", 10, 5));
     r.keep("keep", keep::reading(&tmux, &keeper, "%1", 10));
-    r.keep("join", join::SCRIPT.to_owned());
+    r.keep(
+        "join",
+        join::script(
+            std::net::SocketAddr::from(([100, 64, 0, 1], join::DAEMON_PORT)),
+            "ssh-ed25519 AAAA yantra",
+        )
+        .expect("a usable key"),
+    );
     r.keep(
         "pty",
         attach::remote_command(tmux.path(), "web", "xterm-256color"),
@@ -430,7 +455,13 @@ async fn every_script() -> Vec<(String, String)> {
     );
 
     let mut all = Vec::new();
-    for (label, script) in r.seen().into_iter().chain(mac.seen()).chain(bare.seen()) {
+    for (label, script) in r
+        .seen()
+        .into_iter()
+        .chain(mac.seen())
+        .chain(bare.seen())
+        .chain(serverless.seen())
+    {
         opened(&label, &script, &mut all);
     }
     all
@@ -480,6 +511,7 @@ const REACHED: &[&str] = &[
     INSTALLER,
     "/usr/bin/claude' --version",
     "--format=%s%x00%b",
+    "\nlogin_server '/usr/bin/tmux'\n",
 ];
 
 /// The checker's failures for `scripts`, or `None` when podman is missing.

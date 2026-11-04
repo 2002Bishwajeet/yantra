@@ -16,7 +16,8 @@
 //! **Two of these need a person at that machine first**: Y-139's transcript
 //! measurement and Y-151's gate both want a tmux server started from a GUI
 //! login, and both refuse without one. Their own doc comments say why and what
-//! to run.
+//! to run. Y-632's needs the owner logged in at the screen, and ends every tmux
+//! session there.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -264,6 +265,68 @@ async fn the_gate_finds_a_credential_in_the_server_where_ssh_finds_none() -> any
              the evidence for it"
         );
     }
+    Ok(())
+}
+
+/// **Y-632's done condition**: with no tmux server at all, `up` starts one
+/// through the LaunchAgent and opens a session in it, and that server's panes
+/// find the credential. Needs the owner logged in at the Mac's screen.
+///
+/// **It runs `tmux kill-server`, so every tmux session on that Mac ends.** It
+/// leaves the LaunchAgent loaded and its server running.
+#[tokio::test]
+#[ignore = "needs the real MacBook with the owner logged in at its screen, and kills its tmux server; set YANTRA_MAC=user@host"]
+async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y632"),
+    })?;
+    anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
+    let tmux = Tmux::resolve(&ssh).await?;
+    let claude = Claude::resolve(&ssh).await?;
+
+    ssh.exec(&format!("'{}' kill-server", tmux.path())).await?;
+    anyhow::ensure!(
+        !tmux.running(&ssh).await?,
+        "the server outlived kill-server"
+    );
+
+    let _leaves = Leaves::session_only(&dest, tmux.path(), E2E);
+    let ws = workspace::Workspace {
+        name: E2E.to_owned(),
+        machine: dest.clone(),
+        repo: PathBuf::from("/tmp"),
+        startup: None,
+    };
+    let opened = up::open(&ssh, &tmux, &ws, None, Os::MacOs).await?;
+    anyhow::ensure!(
+        opened.was_created(),
+        "up attached to a session kill-server ended"
+    );
+
+    let plist = ssh
+        .exec("test -f \"$HOME/Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist\"")
+        .await?;
+    anyhow::ensure!(
+        plist.success(),
+        "up started a server but wrote no LaunchAgent"
+    );
+
+    let auth = claude.auth(&ssh, &tmux, Os::MacOs).await?;
+    println!(
+        "in the LaunchAgent's server: loggedIn {}, authMethod {}",
+        auth.logged_in, auth.method
+    );
+    anyhow::ensure!(
+        auth.logged_in,
+        "the LaunchAgent's server finds no credential (authMethod `{}`), so it is not in the \
+         login session",
+        auth.method
+    );
     Ok(())
 }
 

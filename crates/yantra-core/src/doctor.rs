@@ -83,9 +83,9 @@ fn no_login_server(check: &'static str) -> Check {
     absent(
         check,
         format!(
-            "{NO_LOGIN_SERVER}, and Yantra will not start one, because panes in a server started \
-             over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal \
-             there: `tmux new-session -d`"
+            "{NO_LOGIN_SERVER}. Panes in a server started over ssh cannot read the login \
+             keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a \
+             session starts. Start one in Terminal there: `tmux new-session -d`"
         ),
     )
 }
@@ -583,12 +583,7 @@ async fn asked_inside<E: Exec>(
     };
     let could_not =
         |err: &dyn std::fmt::Display| unknown(PROVIDER_AUTH, format!("could not be asked: {err}"));
-    if tmux
-        .list(exec)
-        .await
-        .map_err(|err| could_not(&err))?
-        .is_empty()
-    {
+    if !tmux.running(exec).await.map_err(|err| could_not(&err))? {
         return Err(no_login_server(PROVIDER_AUTH));
     }
 
@@ -614,10 +609,9 @@ async fn asked_inside<E: Exec>(
 ///
 /// On macOS both halves are asked, and neither may be skipped. §1 is the
 /// precondition — a tmux server the *login session* started — and asking for it
-/// is [`Tmux::list`], which answers an empty vec where there is no server and
-/// starts none. §5 is the gate itself, which on that platform runs inside that
-/// server because ssh lands in launchd's `Background` domain and would answer
-/// `false` there forever (I-44).
+/// is [`Tmux::running`], which starts none. §5 is the gate itself, which on that
+/// platform runs inside that server because ssh lands in launchd's `Background`
+/// domain and would answer `false` there forever (I-44).
 ///
 /// Linux has no such split — the credential is a file this ssh session can read
 /// — so the same question is asked directly, and a pass means what I-53 says it
@@ -642,9 +636,9 @@ async fn login_session<E: Exec>(
     };
 
     if os == Os::MacOs {
-        match tmux.list(exec).await {
-            Ok(sessions) if sessions.is_empty() => return no_login_server(LOGIN_SESSION),
-            Ok(_) => {}
+        match tmux.running(exec).await {
+            Ok(false) => return no_login_server(LOGIN_SESSION),
+            Ok(true) => {}
             Err(err) => return unknown(LOGIN_SESSION, format!("could not be asked: {err}")),
         }
     }
@@ -1302,6 +1296,8 @@ mod tests {
     struct Mac {
         os: &'static str,
         server: bool,
+        /// A `tmux -D` server with no session still answers `list-sessions`.
+        sessions: bool,
         gh_inside: bool,
         asked: std::sync::Mutex<Vec<String>>,
     }
@@ -1311,6 +1307,7 @@ mod tests {
             Self {
                 os,
                 server,
+                sessions: true,
                 gh_inside,
                 asked: std::sync::Mutex::default(),
             }
@@ -1338,7 +1335,9 @@ mod tests {
                     (true, false) => (0, "", ""),
                 }
             } else if command.contains("list-sessions") {
-                if self.server {
+                if self.server && !self.sessions {
+                    (0, "", "")
+                } else if self.server {
                     (0, "1|0|Mon Nov  3 09:00:00 2026|1793696400|main\n", "")
                 } else {
                     (1, "", no_server)
@@ -1391,6 +1390,25 @@ mod tests {
                 "{said}"
             );
         }
+    }
+
+    /// The LaunchAgent's `tmux -D` server holds no session until one starts,
+    /// and it is the login server all the same.
+    #[tokio::test]
+    async fn an_empty_login_server_is_not_reported_absent() {
+        let mut mac = Mac::new("Darwin\n", true, true);
+        mac.sessions = false;
+        let checks = of(&mac, "alacritty").await;
+        for name in [LOGIN_SESSION, PROVIDER_AUTH] {
+            let found = check(&checks, name);
+            assert!(
+                !found.detail.contains(NO_LOGIN_SERVER),
+                "{name}: {}",
+                found.detail
+            );
+        }
+        assert_eq!(check(&checks, PROVIDER_AUTH).state, State::Present);
+        assert!(!mac.asked("launchctl"), "doctor is a read");
     }
 
     /// ADR-0018 §5 for gh: where ssh cannot reach the keychain, the server can.

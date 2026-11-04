@@ -58,11 +58,11 @@ pub enum Error {
     #[error(transparent)]
     Tmux(#[from] tmux::Error),
 
-    /// ADR-0018 §1, the same refusal `up` makes: a tmux server this starts on
-    /// macOS is one every later agent session would inherit.
+    /// The same refusal `up` makes: every later agent session inherits the
+    /// server this one opens in, so it must be the login session's.
     #[error(
-        "`{machine}` runs macOS and has no tmux server, and Yantra will not start one there \
-         (ADR-0018 §1). Start one from a login session on that machine: `tmux new-session -d`"
+        "`{machine}` runs macOS, and no one is logged in at its screen, so there is no login \
+         session for its tmux server (ADR-0018 §1). Log in at that Mac, then try again"
     )]
     NoLoginServer { machine: String },
 
@@ -202,7 +202,7 @@ pub async fn clone_on<E: Exec>(
     machine: &str,
     plan: &Plan,
 ) -> Result<Cloning, Error> {
-    if os == Os::MacOs && tmux.list(exec).await?.is_empty() {
+    if os == Os::MacOs && !tmux.login_server(exec).await? {
         return Err(Error::NoLoginServer {
             machine: machine.to_owned(),
         });
@@ -224,6 +224,44 @@ pub async fn clone_on<E: Exec>(
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::tmux::fake::{Mac, Server};
+
+    async fn cloned(mac: &Mac) -> Result<Cloning, Error> {
+        let tmux = Tmux::resolve(mac).await.expect("a tmux");
+        let plan = plan("https://github.com/o/r.git", "~/src/r").expect("planned");
+        clone_on(mac, &tmux, Os::MacOs, "mac", &plan).await
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_server_clones_once_the_launch_agent_starts_one() {
+        let mac = Mac::new(Server::None, 0);
+        let cloning = cloned(&mac).await.expect("cloning");
+        assert!(cloning.opened.was_created());
+        assert!(mac.asked_for("launchctl bootstrap") && mac.asked_for("new-session"));
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_an_empty_server_clones_without_launchctl() {
+        let mac = Mac::new(Server::Empty, 3);
+        cloned(&mac).await.expect("cloning");
+        assert!(!mac.asked_for("launchctl"));
+    }
+
+    #[tokio::test]
+    async fn no_one_at_a_macs_screen_is_refused_and_nothing_starts() {
+        let mac = Mac::new(Server::None, 3);
+        let err = cloned(&mac).await.expect_err("refused");
+        assert!(matches!(err, Error::NoLoginServer { .. }), "{err:?}");
+        assert!(!mac.asked_for("new-session"));
+
+        let err = cloned(&Mac::new(Server::None, 1))
+            .await
+            .expect_err("refused");
+        assert!(
+            matches!(err, Error::Tmux(tmux::Error::Command { .. })),
+            "{err:?}"
+        );
+    }
 
     #[test]
     fn the_three_git_spellings_are_accepted_and_nothing_else_is() {
