@@ -23,7 +23,6 @@ const GRANTLESS = /grant|logged in|signed in|auth login/i
  *  links open GitHub and nothing else. */
 export function Github(props: { attention: Reading<Attention> }) {
   const { attention } = props
-  const factor = useFormFactor()
 
   return (
     <section aria-labelledby="fleet-github" className="github">
@@ -33,8 +32,7 @@ export function Github(props: { attention: Reading<Attention> }) {
         </Text>
         {attention.looked === 'ok' && attention.data.notifications > 0 ? (
           <a className="github__unread" href="https://github.com/notifications" rel="noreferrer" target="_blank">
-            <Mono>{attention.data.notifications}</Mono>
-            {factor === 'phone' ? 'notifications' : 'notifications on GitHub'}
+            Open {attention.data.notifications} on GitHub
             <ArrowUpRight aria-hidden="true" />
           </a>
         ) : null}
@@ -69,8 +67,8 @@ export function Github(props: { attention: Reading<Attention> }) {
 
       {attention.looked === 'ok' ? (
         <div className="github__groups">
-          <Group items={attention.data.reviews} title="Reviews" verb="Review" />
-          <Group items={attention.data.issues} title="Issues" verb="Open" />
+          <Group items={attention.data.reviews} title="Reviews" verb="Review" why="review requested" />
+          <Group items={attention.data.issues} title="Issues" verb="Open" why="assigned issue" />
         </div>
       ) : null}
     </section>
@@ -78,9 +76,10 @@ export function Github(props: { attention: Reading<Attention> }) {
 }
 
 /** Two lists rather than one with a badge: which list an item is in is its
- *  kind, and a badge would re-encode what the heading already says. */
-function Group(props: { items: Item[]; title: string; verb: string }) {
-  const { items, title, verb } = props
+ *  kind, and a badge would re-encode what the heading already says. Reviews
+ *  come first because a review blocks someone else. */
+function Group(props: { items: Item[]; title: string; verb: string; why: string }) {
+  const { items, title, verb, why } = props
   const factor = useFormFactor()
   if (items.length === 0) return null
   const Icon = verb === 'Review' ? GitPullRequest : CircleDot
@@ -98,21 +97,28 @@ function Group(props: { items: Item[]; title: string; verb: string }) {
           const ref = factor === 'phone' ? item.repo.split('/').pop() : item.repo
           return (
             <li className="github__item" key={item.url}>
-              <Row className="github__row" render={<a href={item.url} rel="noreferrer" target="_blank" />}>
+              <Row className="github__row">
                 <IconTile className="github__tile">
                   <Icon />
                 </IconTile>
-                <span className="github__text">
-                  <Mono className="github__ref m3-wrap">
-                    {ref}#{item.number}
-                  </Mono>
-                  <span className="github__title m3-wrap">{item.title}</span>
-                </span>
-                {/* GitHub's age, which is the item's rather than the answer's. */}
-                <Mono className="github__when">{clock?.text ?? item.updated_at}</Mono>
-                <span className="github__verb">{verb}</span>
+                <div className="github__text">
+                  <span className="github__meta">
+                    <Mono className="github__ref">
+                      {ref}#{item.number}
+                    </Mono>
+                    <span className="github__why">{why}</span>
+                    {/* GitHub's age, which is the item's rather than the answer's. */}
+                    <Mono className="github__when">{clock?.text ?? item.updated_at}</Mono>
+                  </span>
+                  <span className="github__title">{item.title}</span>
+                </div>
+                <div className="github__actions">
+                  <Button render={<a href={item.url} rel="noreferrer" target="_blank" />} role="link" variant="outlined">
+                    {verb}
+                  </Button>
+                  {verb === 'Open' ? <StartSession item={item} /> : null}
+                </div>
               </Row>
-              {verb === 'Open' ? <StartSession item={item} /> : null}
             </li>
           )
         })}

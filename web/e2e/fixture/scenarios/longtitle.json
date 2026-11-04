@@ -1,0 +1,105 @@
+{
+  "extends": "busy",
+  "attention": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": {
+      "reviews": [
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 245,
+          "title": "Y-330: the options round for D7",
+          "url": "https://github.com/2002Bishwajeet/yantra/pull/245",
+          "updated_at": "2026-09-06T09:12:44Z"
+        },
+        {
+          "repo": "utopia-php/messaging",
+          "number": 54,
+          "title": "feat: add the APNs adapter",
+          "url": "https://github.com/utopia-php/messaging/pull/54",
+          "updated_at": "2026-09-04T16:40:02Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 261,
+          "title": "Y-581: rebuild the Fleet page so that a review title long enough to wrap across several lines keeps whole words together at every width",
+          "url": "https://github.com/2002Bishwajeet/yantra/pull/261",
+          "updated_at": "2026-09-06T08:01:12Z"
+        }
+      ],
+      "issues": [
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 118,
+          "title": "the fleet page draws an empty table while nobody has looked",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/118",
+          "updated_at": "2026-09-05T18:09:33Z"
+        },
+        {
+          "repo": "2002Bishwajeet/homelab-k8s",
+          "number": 31,
+          "title": "cert-manager renews a day late on the nas",
+          "url": "https://github.com/2002Bishwajeet/homelab-k8s/issues/31",
+          "updated_at": "2026-09-02T07:55:10Z"
+        },
+        {
+          "repo": "an-organisation-with-a-very-long-name/infrastructure-deployment-configuration-for-the-staging-cluster",
+          "number": 4096,
+          "title": "The staging cluster rolls out every deployment twice when the configuration repository changes while a previous rollout is still waiting on its health checks to settle and report back to the controller",
+          "url": "https://github.com/an-organisation-with-a-very-long-name/infrastructure-deployment-configuration-for-the-staging-cluster/issues/4096",
+          "updated_at": "2026-09-05T11:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 130,
+          "title": "Follow-up 1: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/130",
+          "updated_at": "2026-09-01T10:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 131,
+          "title": "Follow-up 2: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/131",
+          "updated_at": "2026-09-02T10:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 132,
+          "title": "Follow-up 3: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/132",
+          "updated_at": "2026-09-03T10:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 133,
+          "title": "Follow-up 4: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/133",
+          "updated_at": "2026-09-04T10:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 134,
+          "title": "Follow-up 5: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/134",
+          "updated_at": "2026-09-01T10:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 135,
+          "title": "Follow-up 6: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/135",
+          "updated_at": "2026-09-02T10:00:00Z"
+        },
+        {
+          "repo": "2002Bishwajeet/yantra",
+          "number": 136,
+          "title": "Follow-up 7: tidy the labels on the fleet page",
+          "url": "https://github.com/2002Bishwajeet/yantra/issues/136",
+          "updated_at": "2026-09-03T10:00:00Z"
+        }
+      ],
+      "notifications": 12
+    }
+  }
+}
