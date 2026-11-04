@@ -388,3 +388,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 
 - **2026-11-04** — **[Y-622](../tracker.md#3-task-board) is in review.** Setup no longer lists the daemon's own host under Add a machine, and it no longer shows the join command for it. The hub appears once, under step 1. A test uses the hub's real tailnet name.
 - **2026-11-04** — **[Y-625](../tracker.md#3-task-board) is in review.** The opencode ACP test no longer fails CI with -32603. The cause is in opencode 1.18.34: a cancel that arrives before the model's first output hits a missing `tokens` field. The test now cancels after the first text, and it passed 20 runs in a row in the fixture image. A failure names its step and shows opencode's log.
+
+- **2026-11-04** — **[Y-621](../tracker.md#3-task-board) is in review.** The machine card now says that Tailscale SSH waits for a browser sign-in. It shows no login URL and offers the machine's join command. A changed host key after a switch to `sshd` now reads plainly, and the join removes the old key line. A test feeds the real refusal text.
