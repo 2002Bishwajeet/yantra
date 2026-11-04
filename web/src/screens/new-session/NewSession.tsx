@@ -129,7 +129,7 @@ export function NewSession() {
           {...(step === 1
             ? {
                 title: 'New session',
-                description: 'a name, a machine, a repository, and what to start in it',
+                description: 'A name, a machine, a repository, and what to start in it',
               }
             : {
                 leading: <Tile className="ns-dialog__tile" name={values.name} />,
@@ -166,7 +166,7 @@ export function NewSession() {
         <header className="ns__head">
           {step === 1 ? (
             <Text render={<p />} className="ns__lead" scale="body-medium" tone="variant">
-              a name, a machine, a repository, and what to start in it
+              A name, a machine, a repository, and what to start in it
             </Text>
           ) : (
             <p className="ns__recap">

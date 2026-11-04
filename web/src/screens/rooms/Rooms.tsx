@@ -20,8 +20,8 @@ function List({ rooms }: { rooms: RoomSummary[] }) {
     return (
       <Card className="rooms__empty">
         <EmptyState title="No rooms">
-          A room starts when an agent calls room_send or room_read. yantrad holds rooms in memory,
-          so a restart clears them.
+          A room starts when an agent calls room_send or room_read. A restart keeps each room and
+          clears its messages.
         </EmptyState>
       </Card>
     )

@@ -156,17 +156,31 @@ describe('/fleet when GitHub has no grant', () => {
 })
 
 describe('/fleet on an empty fleet', () => {
-  it('draws one All set line and keeps the one block that has an action', async () => {
+  it('draws no All set line and keeps the one block that has an action', async () => {
     mount('desktop', '/fleet', scenario('empty'))
     await screen.findByText('No workspaces yet', {}, { timeout: 2000 })
-    expect(screen.getByRole('link', { name: 'New' }).getAttribute('href')).toBe('/new')
-    expect(screen.getByText('All set')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
+    expect(screen.queryByText('All set')).toBeNull()
     // A band with no rows and no action is not a card.
     expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
     expect(screen.queryByText('Nothing needs you')).toBeNull()
     expect(screen.queryByText('Nothing is running')).toBeNull()
     expect(screen.getByRole('region', { name: 'Idle' })).toBeTruthy()
+  })
+})
+
+describe('/fleet when every workspace is idle', () => {
+  it('draws the All set line', async () => {
+    const calm = scenario('busy')
+    const idle = ['ntfy-relay', 'appliance', 'landing-copy']
+    const listed = calm.workspaces as { data: { name: string }[] }
+    listed.data = listed.data.filter((one) => idle.includes(one.name))
+    calm.attention = { looked: 'ok', data: { reviews: [], issues: [], notifications: 0 } }
+    mount('desktop', '/fleet', calm)
+    await screen.findByText('All set', {}, { timeout: 2000 })
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
   })
 })
 

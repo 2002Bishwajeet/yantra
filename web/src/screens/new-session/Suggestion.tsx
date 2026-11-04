@@ -62,8 +62,8 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
       <Text aria-live="polite" render={<p role="status" />} className="ns__note" scale="body-medium" tone="variant">
         {placement.data
           ? top
-            ? `${top.machine} suggested: ${top.reason}${caveat}`
-            : 'no machine reports a heartbeat, so none is suggested'
+            ? `Suggested: ${top.machine}, because ${top.reason}${caveat}`
+            : 'No machine reports a heartbeat, so none is suggested.'
           : ''}
       </Text>
       <Failed error={placement.error} retry={() => mutate({})} title="No machine could be suggested" />

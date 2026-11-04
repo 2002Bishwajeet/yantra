@@ -28,8 +28,8 @@ test.describe('the four steps', () => {
     await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
     // Y-517: the daemon's top machine is preselected, with the reason.
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.getByRole('status').filter({ hasText: 'suggested' })).toHaveText(
-      'cachyos-g14 suggested: it is idle and it has RAM to spare',
+    await expect(page.getByRole('status').filter({ hasText: 'Suggested' })).toHaveText(
+      'Suggested: cachyos-g14, because it is idle and it has RAM to spare',
     )
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
