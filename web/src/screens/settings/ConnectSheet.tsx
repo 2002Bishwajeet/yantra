@@ -1,10 +1,11 @@
 import { ExternalLink, LogIn } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { keys } from '@/api/keys'
-import { signedIn } from '@/lib/github'
+import { grant, signedIn } from '@/lib/github'
 import { useGithubLogin } from '@/api/mutations'
-import { githubQuery } from '@/api/queries'
+import { useGithubReadiness } from '@/api/hooks'
+import { githubQuery, githubReadinessQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
 import { Copyable, useCopy } from '@/m3/copyable/Copyable'
 import { List, ListItem } from '@/m3/list/List'
@@ -33,18 +34,32 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
     enabled: open && device !== undefined,
     refetchInterval: device === undefined ? false : device.interval * 1000,
   })
-  // A refused grant is still `connected`; the daemon holds `pending` while a new flow runs, and the login write marks it at once.
-  const connected = device !== undefined && connection.data?.connected && !connection.data.pending ? connection.data : null
+  // `pending` is true from the login write until the daemon ends the flow, and a failed flow ends too, keeping the old grant.
+  const ended = device !== undefined && connection.data?.connected === true && !connection.data.pending
   const client = useQueryClient()
-  // The daemon looks at GitHub again when the grant changes; Settings reads that look.
+  // Ended is not signed in: only a fresh look at GitHub says whether this flow landed or was abandoned.
+  const [looked, setLooked] = useState<number | null>(null)
   useEffect(() => {
-    if (connected) void client.invalidateQueries({ queryKey: keys.github() })
-  }, [connected, client])
-  const now = useTick(open && device !== undefined && connected === null)
+    if (!ended) return
+    const flow = login.submittedAt
+    void client
+      .fetchQuery({ ...githubReadinessQuery(), staleTime: 0 })
+      .catch(() => undefined)
+      .then(() => {
+        setLooked(flow)
+        void client.invalidateQueries({ queryKey: keys.github() })
+      })
+  }, [ended, login.submittedAt, client])
+  const readiness = useGithubReadiness()
+  const settled = ended && looked === login.submittedAt
+  const accepted = settled && grant(connection.data, readiness).kind === 'accepted'
+  const connected = accepted ? (connection.data ?? null) : null
+  const failed = settled && !accepted
+  const now = useTick(open && device !== undefined && connected === null && !failed)
   // The tick may predate the write by a few ms; elapsed never counts backwards.
   const elapsed = Math.max(0, Math.floor((now - login.submittedAt) / 1000))
   const left = device === undefined ? 0 : Math.max(0, device.expires_in - elapsed)
-  const expired = device !== undefined && connected === null && left === 0
+  const expired = device !== undefined && connected === null && !failed && left === 0
 
   const close = (next: boolean) => {
     if (!next) login.reset()
@@ -68,8 +83,13 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
           <Text render={<p />} scale="title-medium" emphasized>
             {signedIn(connected.login)}.
           </Text>
-        ) : device === undefined || expired ? (
+        ) : device === undefined || expired || failed ? (
           <>
+            {failed ? (
+              <Text render={<p />} scale="body-medium" tone="error">
+                The sign-in did not finish. GitHub has not accepted a new grant.
+              </Text>
+            ) : null}
             {expired ? (
               <Text render={<p />} scale="body-medium" tone="error">
                 The code expired before it was typed.

@@ -126,6 +126,8 @@ describe('Providers', () => {
           started = true
           return [200, contract.device]
         },
+        // GitHub accepts the grant once the flow lands.
+        'GET /api/readiness/github': () => [200, polls < 2 ? contract.githubRefused : contract.githubReadiness],
         // The old grant stays `connected` until the new one lands; the first poll after the start sees the flow waiting.
         'GET /api/github': () => [
           200,
@@ -140,6 +142,30 @@ describe('Providers', () => {
       expect(await sheet.findByText('Signed in as 2002Bishwajeet.', {}, { timeout: 14000 })).toBeTruthy()
     }, 20000)
   })
+
+  it('reports a flow that ends with the grant still refused as failed, not as signed in', async () => {
+    let started = false
+    let polls = 0
+    mountSettings('desktop', '/settings/providers', {
+      'GET /api/github': () => [
+        200,
+        { ...contract.github, login: null, pending: started && ++polls < 2 },
+      ],
+      'GET /api/readiness/github': [200, contract.githubRefused],
+      'POST /api/github/login': () => {
+        started = true
+        return [200, contract.device]
+      },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in again' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Connect GitHub' }))
+    fireEvent.click(sheet.getByRole('button', { name: 'Sign in with GitHub' }))
+    expect(await sheet.findByText('WDJB-MJHT')).toBeTruthy()
+    expect(await sheet.findByText(/The sign-in did not finish/, {}, { timeout: 14000 })).toBeTruthy()
+    expect(sheet.queryByText(/Signed in/)).toBeNull()
+    expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull()
+    expect(sheet.getByRole('button', { name: 'Sign in with GitHub' })).toBeTruthy()
+  }, 20000)
 
   it('says GitHub was not asked when the login is unread and the check could not be made', async () => {
     mountSettings('desktop', '/settings/providers', {
