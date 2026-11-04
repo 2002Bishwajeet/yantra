@@ -21,8 +21,7 @@ use yantra_core::ssh::{Exec, Machine, Ssh};
 const PATIENCE: Duration = Duration::from_secs(120);
 const CWD: &str = "/home/yantra/acp";
 /// `small_model` too, so a title request never reaches opencode's hosted model.
-/// `DEBUG`, because a -32603 reply carries `data: {}` and only the log names the defect.
-const CONFIG: &str = r#"{"autoupdate":false,"logLevel":"DEBUG","model":"stub/slow","small_model":"stub/slow","provider":{"stub":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:8471/v1","apiKey":"stub"},"models":{"slow":{}}}}}"#;
+const CONFIG: &str = r#"{"autoupdate":false,"model":"stub/slow","small_model":"stub/slow","provider":{"stub":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:8471/v1","apiKey":"stub"},"models":{"slow":{}}}}}"#;
 
 fn ssh_to(fixture: &SshFixture, state_dir: &std::path::Path) -> Result<Ssh> {
     Ok(Ssh::new(Machine {
@@ -163,8 +162,8 @@ async fn initialize_reload_and_cancel(fixture: &SshFixture) -> Result<()> {
 
     let turn = agent.prompt(&session, "Count slowly from 1 to 500, one number per line.");
     let cancel = async {
-        // Y-625: cancel mid-stream. A cancel before the stub's first number
-        // can reach an opencode defect (-32603) instead of its cancel path.
+        // Y-625: cancel mid-stream. opencode 1.18.34 answers an earlier cancel with
+        // -32603: its usage reads `tokens.cache` of a message that has no `tokens`.
         tokio::time::timeout(PATIENCE, async {
             while let Some(update) = events.recv().await {
                 match update.event {
