@@ -379,6 +379,10 @@ const routes = [
     /^\/api\/machines\/([^/]+)\/readiness$/,
     (s, [machine], _, request) => {
       if (s.readiness.looked !== 'ok') return [200, s.readiness]
+      // #514, before Y-579: a re-check of a machine no workspace names was refused.
+      if (request.method === 'POST' && s.defects?.includes('recheck-needs-workspace')) {
+        return [404, `no workspace names a machine called \`${machine}\``]
+      }
       // A machine no workspace names answers a re-check (write.rs `recheck`
       // takes any name), and `asked` is what it answers. The daemon keeps it,
       // so the GETs that follow serve it too.
