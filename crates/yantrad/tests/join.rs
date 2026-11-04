@@ -38,6 +38,8 @@ const TAILSCALE_SSH_ON: &str = "Tailscale SSH is on";
 const NO_BROWSER: &str = "the appliance has no browser";
 /// When present, `listen.py` refuses a login the way a check policy does.
 const CHECK_MODE: &str = "/srv/check-mode";
+/// `listen.py` appends each readiness check and forgotten host key here.
+const ASKED: &str = "/srv/asked";
 
 /// Per process: two runs on one box (`just test` beside `just test-embedded`)
 /// sharing a directory swap the key under each other's container.
@@ -393,8 +395,22 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     );
 
     // "Yes" starts sshd before it gives up Tailscale SSH, and the login then works.
+    sh(&systemd, &format!("rm -f {ASKED}"))?;
     let switched = succeeded(&run_join(&systemd, Some("y"))?, "check mode, accepted")?;
     assert!(switched.contains("Tailscale SSH is off"), "{switched}");
+    // Y-621: sshd's host key is not Tailscale SSH's, so the daemon forgets the
+    // old one after the switch and before the login is tested again.
+    assert_eq!(
+        sh(&systemd, &format!("cat {ASKED}"))?
+            .lines()
+            .collect::<Vec<_>>(),
+        [
+            "readiness ssh-off=False",
+            "forget-host-key ssh-off=True",
+            "readiness ssh-off=True",
+        ],
+        "{switched}"
+    );
     assert_eq!(
         systemd.property("sshd.service", "UnitFileState")?,
         "enabled",

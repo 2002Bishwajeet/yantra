@@ -6,6 +6,7 @@ import { aListed, aMachine, looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
 import { answer } from '@/test/daemon'
 import { renderRouted } from '@/test/inRouter'
+import { CHANGED_KEY } from '@/test/sshSaid'
 import { useSetupGate } from './progress'
 import { Setup } from './Setup'
 
@@ -503,6 +504,17 @@ describe('the machine lines', () => {
     const browser = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Tailscale SSH requires an additional check' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([browser as Readiness])] })
     expect(screen.getByText('Tailscale asks for a browser sign-in · run the join command on it')).toBeTruthy()
+  })
+
+  /** Y-621: a changed key names the forget command, and the join command
+   *  would not help, so it is not offered. */
+  it('gives a machine whose host key changed the forget command, and no join command', async () => {
+    const changed = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: CHANGED_KEY }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([changed as Readiness])] })
+    expect(
+      screen.getByText('its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
   })
 
   /** Y-585, #520: the first-run page speaks plainly, and the join command

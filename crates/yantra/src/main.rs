@@ -263,6 +263,11 @@ enum Command {
         /// ssh destination, spelled the way a workspace's `machine` spells it
         machine: String,
     },
+    /// Forget the host key Yantra recorded for a machine, so the next check records the new one
+    ForgetHostKey {
+        /// ssh destination, spelled the way a workspace's `machine` spells it
+        machine: String,
+    },
     /// Prepare this account's ssh identity, and print the public key to place
     SshIdentity {
         /// Write this one machine's block, logging in as `--user`. The join
@@ -658,6 +663,7 @@ async fn main() -> ExitCode {
         }) => history_extract(&folder, &out),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
+        Some(Command::ForgetHostKey { machine }) => forget_host_key(&machine).await,
         Some(Command::SshIdentity {
             machine: Some(machine),
             user: Some(user),
@@ -1649,6 +1655,31 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
             if !installed.warnings.is_empty() {
                 println!("  tic said: {}", installed.warnings);
             }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Y-621: the fix the dashboard names for a changed host key. Only a person
+/// can tell a reinstall from an attack, so the dashboard never runs it.
+async fn forget_host_key(machine: &str) -> ExitCode {
+    let Some(target) = yantra_core::ssh::machine_at(machine) else {
+        eprintln!("yantra: could not determine a directory for ssh state");
+        return ExitCode::FAILURE;
+    };
+    match target.forget_host_key().await {
+        Ok(true) => {
+            println!(
+                "forgot the host key recorded for {machine}; the next check records the new one"
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            println!("no host key was recorded for {machine}, so nothing changed");
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -3228,6 +3259,17 @@ mod tests {
     #[test]
     fn the_command_tree_is_well_formed() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn forget_host_key_needs_a_machine() {
+        let parsed = Cli::try_parse_from(["yantra", "forget-host-key", "pi"])
+            .expect("`forget-host-key <machine>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::ForgetHostKey { machine }) if machine == "pi"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "forget-host-key"]).is_err());
     }
 
     #[test]

@@ -323,9 +323,22 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
             ),
         );
     }
-    // sshd itself wrote these, so it exists — what failed is this key or this
-    // known-hosts file, which is a different thing to go and fix.
-    if said.contains("permission denied") || said.contains("host key verification failed") {
+    // Y-621: Tailscale SSH has its own host key, so turning it off changes the
+    // key, and so does a reinstall. Only a person can tell those from an attack.
+    if said.contains("host key verification failed")
+        || said.contains("remote host identification has changed")
+    {
+        return (
+            unreachable(format!(
+                "the machine answered with a host key the appliance did not record for it: \
+                 {diagnosis}"
+            )),
+            present(SSHD, "a server sent its host key, so one is running"),
+        );
+    }
+    // sshd itself wrote this, so it exists — what failed is this key, which is
+    // a different thing to go and fix.
+    if said.contains("permission denied") {
         return (
             unreachable(format!("sshd refused this connection: {diagnosis}")),
             present(SSHD, "the refusal came from sshd itself, so one is running"),
@@ -800,6 +813,45 @@ mod tests {
             diagnose("Host key verification failed.").1.state,
             State::Present
         );
+    }
+
+    /// Y-621: OpenSSH's own words for a changed key, as `ssh -E` logged them
+    /// against github.com with a wrong key recorded (2026-11-04).
+    #[test]
+    fn a_changed_host_key_says_so_and_is_a_server_that_answered() {
+        let said = "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\
+                    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n\
+                    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\
+                    IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\n\
+                    Someone could be eavesdropping on you right now (man-in-the-middle attack)!\n\
+                    It is also possible that a host key has just been changed.\n\
+                    The fingerprint for the ED25519 key sent by the remote host is\n\
+                    SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU.\n\
+                    Please contact your system administrator.\n\
+                    Add correct host key in /run/user/1000/yantra/known_hosts to get rid of this message.\n\
+                    Offending ED25519 key in /run/user/1000/yantra/known_hosts:1\n\
+                    Host key for pi has changed and you have requested strict checking.\n\
+                    Host key verification failed.";
+        let (reachable, sshd) = diagnose(said);
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable
+                .detail
+                .starts_with("the machine answered with a host key the appliance did not record"),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            reachable.detail.contains("known_hosts:1"),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            !reachable.detail.contains("sshd refused"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
     }
 
     /// Y-412, as the appliance logged it on 2026-09-28: the banner is the

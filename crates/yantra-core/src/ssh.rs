@@ -56,18 +56,24 @@ pub struct Machine {
 /// Control sockets are runtime state, and the runtime directory is also the
 /// shortest — which matters against I-28's 90-byte path budget.
 pub fn machine_at(host: &str) -> Option<Machine> {
-    use etcetera::BaseStrategy as _;
-    let base = etcetera::choose_base_strategy().ok()?;
     Some(Machine {
         host: host.to_owned(),
         user: None,
         port: None,
         identity: None,
-        state_dir: base
-            .runtime_dir()
+        state_dir: state_dir()?,
+    })
+}
+
+/// The directory [`machine_at`] gives every machine.
+pub fn state_dir() -> Option<PathBuf> {
+    use etcetera::BaseStrategy as _;
+    let base = etcetera::choose_base_strategy().ok()?;
+    Some(
+        base.runtime_dir()
             .unwrap_or_else(|| base.data_dir())
             .join("yantra"),
-    })
+    )
 }
 
 impl Machine {
@@ -123,6 +129,48 @@ impl Machine {
         args
     }
 
+    /// Removes this machine's line from Yantra's known-hosts, so the next
+    /// connection records the key it is offered (`accept-new`). Answers whether
+    /// a line was there. `ssh -G` names the host the way `ssh` recorded it, and
+    /// `ssh-keygen -R` also finds a hashed line (I-20: both are system binaries).
+    pub async fn forget_host_key(&self) -> Result<bool, Error> {
+        let file = self.known_hosts();
+        if !file.exists() {
+            return Ok(false);
+        }
+        let mut resolve = vec!["-G".to_owned()];
+        resolve.extend(self.connection_args());
+        resolve.extend(self.destination_args());
+        let resolved = String::from_utf8_lossy(&forget_step("ssh", &resolve).await?).into_owned();
+        let said = |key: &str| {
+            resolved
+                .lines()
+                .find_map(|line| line.strip_prefix(key)?.strip_prefix(' '))
+                .map(str::trim)
+        };
+        let (Some(host), Some(port)) = (said("hostname"), said("port")) else {
+            return Err(Error::Forget {
+                said: format!("`ssh -G` named no hostname and port for {}", self.host),
+            });
+        };
+        let name = if port == "22" {
+            host.to_owned()
+        } else {
+            format!("[{host}]:{port}")
+        };
+        let removed = forget_step(
+            "ssh-keygen",
+            &[
+                "-R".to_owned(),
+                name,
+                "-f".to_owned(),
+                file.display().to_string(),
+            ],
+        )
+        .await?;
+        Ok(String::from_utf8_lossy(&removed).contains(" found: line "))
+    }
+
     /// The control sockets live here, and `ssh` will not create the directory.
     fn prepare_sockets(&self) -> Result<(), Error> {
         let sockets = self.state_dir.join("cm");
@@ -131,6 +179,28 @@ impl Machine {
             source,
         })
     }
+}
+
+/// One step of [`Machine::forget_host_key`], answering its stdout.
+async fn forget_step(program: &str, args: &[String]) -> Result<Vec<u8>, Error> {
+    let out = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| Error::Forget {
+            said: format!("could not run `{program}`: {e}"),
+        })?;
+    if !out.status.success() {
+        return Err(Error::Forget {
+            said: format!(
+                "`{program}` failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        });
+    }
+    Ok(out.stdout)
 }
 
 /// Which operating system the far side answered with, to the resolution the two
@@ -206,6 +276,9 @@ pub enum Error {
 
     #[error("could not ask that machine which operating system it runs: `uname -s` said `{said}`")]
     Uname { said: String },
+
+    #[error("could not forget the recorded host key: {said}")]
+    Forget { said: String },
 }
 
 /// The seam the layers above are tested against (§B2). Implementations of this
@@ -321,6 +394,13 @@ pub(crate) struct Piped {
 
 impl Exec for Ssh {
     async fn exec(&self, command: &str) -> Result<Output, Error> {
+        self.exec_with("ssh", command).await
+    }
+}
+
+impl Ssh {
+    /// [`Exec::exec`] with the binary named, so a test can stand a script in.
+    async fn exec_with(&self, program: &str, command: &str) -> Result<Output, Error> {
         let m = &self.machine;
 
         m.prepare_sockets()?;
@@ -328,7 +408,7 @@ impl Exec for Ssh {
         let log = LogFile::new(&m.state_dir)?;
         let nonce = nonce()?;
 
-        let mut cmd = tokio::process::Command::new("ssh");
+        let mut cmd = tokio::process::Command::new(program);
         cmd.arg("-E").arg(log.path());
         cmd.args(m.connection_args());
         // Not ERROR: ssh prints a server's banner only from INFO up, and
@@ -608,6 +688,8 @@ mod tests {
         );
     }
 
+    /// Tailscale's two lines, as forum.tailscale.com/t/4539 and flaviocopes.com
+    /// quote them (both read 2026-11-04).
     const CHECK_MODE: &[u8] = b"# Tailscale SSH requires an additional check.\n\
         # To authenticate, visit: https://login.tailscale.com/a/abc\n";
 
@@ -668,6 +750,108 @@ mod tests {
     fn the_browser_diagnosis_keeps_the_phrase_and_holds_no_link() {
         assert!(BROWSER_DIAGNOSIS.contains(BROWSER_CHECK));
         assert!(!BROWSER_DIAGNOSIS.contains("http"), "{BROWSER_DIAGNOSIS}");
+    }
+
+    /// Y-621: `exec` itself, with an `ssh` that prints Tailscale's real two
+    /// lines and then holds, as a server holding the auth stage does.
+    #[tokio::test]
+    async fn the_real_check_text_ends_as_the_diagnosis_with_no_link() {
+        let dir = std::env::temp_dir().join(format!("yantra-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a dir");
+        let fake = dir.join("ssh");
+        let banner = String::from_utf8(CHECK_MODE.to_vec()).expect("utf-8");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\nprintf '{banner}' >&2\nexec sleep 30\n"),
+        )
+        .expect("the fake");
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("executable");
+        let ssh = Ssh::new(test_machine("fixture", None, dir.join("state"))).expect("short");
+
+        let started = std::time::Instant::now();
+        let err = ssh
+            .exec_with(fake.to_str().expect("utf-8"), "true")
+            .await
+            .expect_err("a held login is not a command result");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert!(
+            matches!(&err, Error::Transport { diagnosis, .. } if diagnosis == BROWSER_DIAGNOSIS),
+            "{err:?}"
+        );
+        assert!(!err.to_string().contains("https://"), "{err}");
+    }
+
+    fn test_machine(host: &str, port: Option<u16>, state_dir: PathBuf) -> Machine {
+        Machine {
+            host: host.to_owned(),
+            user: None,
+            port,
+            identity: None,
+            state_dir,
+        }
+    }
+
+    const KEY_A: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK3nWKie+BAYQ/y9zgv6dgW8g5EE71n5muPqQ3gjdbrp";
+
+    fn forget_scratch(label: &str, lines: Option<&str>) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("yantra-forget-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a dir");
+        if let Some(lines) = lines {
+            std::fs::write(dir.join("known_hosts"), lines).expect("known_hosts");
+        }
+        dir
+    }
+
+    /// Y-621: the one line for this host goes, and every other host stays.
+    #[tokio::test]
+    async fn forgetting_removes_only_this_hosts_line() {
+        let lines = format!("forget-me.invalid {KEY_A}\nkeep-me.invalid {KEY_A}\n");
+        let dir = forget_scratch("one", Some(&lines));
+
+        let machine = test_machine("forget-me.invalid", None, dir.clone());
+        let removed = machine.forget_host_key().await.expect("it ran");
+        let left = std::fs::read_to_string(dir.join("known_hosts")).expect("still there");
+        let again = machine.forget_host_key().await.expect("it ran");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(removed);
+        assert_eq!(left, format!("keep-me.invalid {KEY_A}\n"));
+        assert!(!again, "a second forget finds nothing");
+    }
+
+    /// A port other than 22 is recorded as `[host]:port`, which `ssh -G` names.
+    #[tokio::test]
+    async fn forgetting_finds_a_host_on_another_port() {
+        let lines = format!("[forget-me.invalid]:2222 {KEY_A}\nforget-me.invalid {KEY_A}\n");
+        let dir = forget_scratch("port", Some(&lines));
+
+        let machine = test_machine("forget-me.invalid", Some(2222), dir.clone());
+        let removed = machine.forget_host_key().await.expect("it ran");
+        let left = std::fs::read_to_string(dir.join("known_hosts")).expect("still there");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(removed);
+        assert_eq!(left, format!("forget-me.invalid {KEY_A}\n"));
+    }
+
+    /// No known-hosts yet is nothing to forget, not an error.
+    #[tokio::test]
+    async fn forgetting_with_no_file_is_nothing_to_forget() {
+        let dir = forget_scratch("missing", None);
+        let removed = test_machine("forget-me.invalid", None, dir.clone())
+            .forget_host_key()
+            .await
+            .expect("not an error");
+        let created = dir.join("known_hosts").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!removed);
+        assert!(!created);
     }
 
     #[test]

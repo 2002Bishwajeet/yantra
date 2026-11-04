@@ -5,7 +5,7 @@ import { fromReading, type Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { fixOf, nameOf, tookOf } from '@/lib/checks'
+import { fixOf, nameOf, tookOf, withoutSignIn } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -43,7 +43,7 @@ function CheckLine(props: { check: Check; machine: string }) {
         {wordOf(check.state)}
       </Text>
       <Text className="machine__detail" scale="body-small" tone="variant">
-        {check.detail}
+        {withoutSignIn(check.detail)}
         {check.took_ms === undefined ? null : <span> · {tookOf(check.took_ms)}</span>}
       </Text>
       {fix?.by === 'command' ? (
@@ -375,6 +375,7 @@ function Body(props: {
     case 'refused':
     case 'unjoined':
     case 'browser':
+    case 'changed':
     case 'unreachable':
       return (
         <ReachFailure detail={verdict.detail} join={join} kind={verdict.kind} name={name}>

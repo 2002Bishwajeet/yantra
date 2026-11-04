@@ -5,7 +5,7 @@ import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
-import { joinFixes, reachWords } from '@/lib/checks'
+import { forgetHostKey, joinFixes, reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
 import { apart, notYours } from '@/lib/platform'
 import { ago } from '@/lib/time'
@@ -81,6 +81,7 @@ const mark: Record<View, MarkState> = {
   refused: 'failed',
   unjoined: 'failed',
   browser: 'failed',
+  changed: 'failed',
   missing: 'needs',
   installing: 'running',
   blocked: 'needs',
@@ -101,6 +102,8 @@ function wordsOf(said: Line, name: string): string {
       return 'no account named for it · run the join command on it'
     case 'browser':
       return 'Tailscale asks for a browser sign-in · run the join command on it'
+    case 'changed':
+      return `its host key changed · run ${forgetHostKey(name)} once you know why`
     case 'ready':
       return `ready · ${said.present} of ${said.total}`
     case 'missing':

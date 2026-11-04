@@ -12,7 +12,9 @@
 //! **Nothing here writes a `known_hosts`.** [`crate::ssh`] already gives every
 //! connection its own under Yantra's state directory with
 //! `StrictHostKeyChecking=accept-new`, so it fills on first contact with nobody
-//! typing anything — and a *changed* host key stays a hard refusal.
+//! typing anything — and a *changed* host key stays a hard refusal. A person
+//! clears one with [`crate::ssh::Machine::forget_host_key`], where `ssh-keygen -R`
+//! removes the line (Y-621). Yantra still writes none.
 //!
 //! **The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and
 //! the alternative is an agent, which is a login session an appliance that

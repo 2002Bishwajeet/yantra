@@ -77,22 +77,37 @@ export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?
  *  read it from here (Y-402 review). */
 export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
 
-/** `reachable`'s failure reads four ways: the appliance's key was refused,
+/** `reachable`'s failure reads five ways: the appliance's key was refused,
  *  which the join command fixes by placing a fresh one, or ssh fails for
- *  another reason (a changed host key, a firewall), which no command here
+ *  another reason (a firewall, a machine that is off), which no command here
  *  can fix. The machine page and the machines list both classify it this
  *  same way, so they cannot disagree (Y-402 review). `unjoined` is a machine
  *  the appliance's ssh config names no account for (doctor.rs
  *  `name_the_account`, Y-412), which the join command also fixes. `browser`
  *  is a Tailscale SSH `check` rule (ssh.rs `BROWSER_CHECK`, Y-585): the join
- *  command offers normal ssh in its place. */
-export type ReachableFailure = 'refused' | 'unjoined' | 'browser' | 'unreachable'
+ *  command offers normal ssh in its place. `changed` is a host key the
+ *  appliance did not record (doctor.rs `diagnose`, Y-621): only a person can
+ *  tell a reinstall from an attack, so `yantra forget-host-key` waits for one. */
+export type ReachableFailure = 'refused' | 'unjoined' | 'browser' | 'changed' | 'unreachable'
+
+/** The daemon's `known_hosts` belongs to the account yantrad runs as, so the
+ *  verb runs as that account, as docs/appliance.md runs the others. */
+export const forgetHostKey = (machine: string) => `sudo -u yantra -H yantra forget-host-key ${machine}`
 
 export function reachableFailure(detail: string): ReachableFailure {
   if (/names no account/i.test(detail)) return 'unjoined'
   if (/requires an additional check/i.test(detail)) return 'browser'
+  if (/host key verification failed|remote host identification has changed/i.test(detail)) return 'changed'
   return /permission denied/i.test(detail) ? 'refused' : 'unreachable'
 }
+
+/** Tailscale's sign-in link dies with the ssh that asked for it, and a daemon
+ *  before v0.10.1 still sends it, so no page shows a line that holds one. */
+export const withoutSignIn = (said: string): string =>
+  said
+    .split('\n')
+    .filter((line) => !/https:\/\/login\.tailscale\.com\//i.test(line))
+    .join('\n')
 
 /** `ssh::Error::Transport` after yantrad's `because` (sessions.rs pins it). */
 const TRANSPORT = /^ssh to \S+ failed before the command reported a status/
@@ -104,7 +119,7 @@ export type AnswerFailure = ReachableFailure | 'listing'
 export const answerFailure = (error: string): AnswerFailure =>
   TRANSPORT.test(error) ? reachableFailure(error) : 'listing'
 
-export const joinFixes = (kind: AnswerFailure) => kind !== 'unreachable' && kind !== 'listing'
+export const joinFixes = (kind: AnswerFailure) => kind !== 'unreachable' && kind !== 'changed' && kind !== 'listing'
 
 /** The plain cause and the next step, which no title repeats. */
 export function reachWords(kind: AnswerFailure, name: string): { cause: string; next: string } {
@@ -121,12 +136,17 @@ export function reachWords(kind: AnswerFailure, name: string): { cause: string; 
       }
     case 'browser':
       return {
-        cause: `Yantra can’t reach ${name} because Tailscale asks for a browser sign-in on each connection.`,
-        next: `Run the join command on ${name}; it offers normal ssh with the appliance’s key. Or change the tailnet’s SSH rule from check to accept.`,
+        cause: `Tailscale SSH on ${name} waits for a browser sign-in, and the appliance has no browser.`,
+        next: `Run the join command on ${name}; it turns on normal ssh with the appliance’s key. Or change the tailnet’s SSH rule from check to accept.`,
+      }
+    case 'changed':
+      return {
+        cause: `${name} answered with a different host key than the one the appliance recorded. Turning Tailscale SSH off changes it, and so does a reinstall.`,
+        next: `If you know why it changed, run ${forgetHostKey(name)} on the appliance, then Check again. If you do not, find out first.`,
       }
     case 'unreachable':
       return {
-        cause: `Yantra can’t reach ${name} over ssh. A firewall, a changed host key or a machine that is off can do this.`,
+        cause: `Yantra can’t reach ${name} over ssh. A firewall or a machine that is off can do this.`,
         next: 'The join command does not fix this. What ssh said names the reason.',
       }
     case 'listing':
