@@ -58,7 +58,12 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
  *  the first join makes it (ADR-0029). `unkeyed` is a machine ssh reaches
  *  with no key made, so through the account's own keys and not Yantra's.
  *  `hub` is the daemon's own node once ssh reaches it: it needs no adding. */
-export function added(joined: string[], unkeyed: string[] = [], hub: string | null = null): Step {
+export function added(
+  joined: string[],
+  unkeyed: string[] = [],
+  hub: string | null = null,
+  unchecked: string[] = [],
+): Step {
   if (joined.length > 0 || hub) {
     const who = joined.length > 0 ? `${joined.join(', ')} joined` : `${hub} is the hub and needs no adding`
     return { status: 'done', words: `${who} · more machines can be added later` }
@@ -67,6 +72,12 @@ export function added(joined: string[], unkeyed: string[] = [], hub: string | nu
     return {
       status: 'todo',
       words: `${unkeyed.join(', ')} reached without Yantra's key · run the join command on ${unkeyed.length === 1 ? 'it' : 'each'} once`,
+    }
+  }
+  if (unchecked.length > 0) {
+    return {
+      status: 'todo',
+      words: `${unchecked.length} machine${unchecked.length === 1 ? '' : 's'} on the tailnet, none checked yet · a check shows which joined`,
     }
   }
   return { status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' }
@@ -168,7 +179,8 @@ export function machines(lines: { machine: string; line: Line }[]): Step {
 }
 
 /** Done once a workspace exists, which is what a first session starts from. */
-export function firstSession(workspaces: number | null, ready: number): Step {
+export function firstSession(workspaces: number | null, ready: number, unchecked = 0): Step {
   if (workspaces) return { status: 'done', words: `${workspaces} workspace${workspaces === 1 ? '' : 's'} made` }
+  if (ready === 0 && unchecked > 0) return { status: 'todo', words: 'needs one ready machine · none is checked yet' }
   return { status: 'todo', words: `needs one ready machine, you have ${ready === 0 ? 'none yet' : ready}` }
 }

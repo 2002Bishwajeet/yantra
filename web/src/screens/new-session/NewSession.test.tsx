@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { writePrefs } from '@/shell/prefs'
+import { READY } from '@/lib/ready'
 import { type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
 
 afterEach(() => {
@@ -533,8 +534,18 @@ describe('the suggested machine (Y-517)', () => {
     reason,
     ...(path ? { path } : {}),
   })
+  // Every placed machine is checked ready, so the plain Y-517 words hold.
+  const readyReport = (machine: string, ok = true) => ({
+    machine,
+    age_seconds: 0,
+    checks: READY.map((check) => ({ check, state: ok ? 'present' : 'absent', detail: '' })),
+  })
   const ranked = (...machines: ReturnType<typeof placed>[]): Answers => ({
     'POST /api/placement': [200, { ranked: machines, rejected: [] }],
+    'GET /api/readiness': [
+      200,
+      { looked: 'ok', age_seconds: 0, data: machines.map((one) => readyReport(one.machine)) },
+    ],
   })
 
   it('preselects the top machine and says why, and Continue enables with a name', async () => {
@@ -543,6 +554,31 @@ describe('the suggested machine (Y-517)', () => {
     expect(screen.getByRole('status').textContent).toBe('pi suggested: it is idle and it has RAM to spare')
     type('Name', 'quiet-otter')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+  })
+
+  it('says the top machine is not checked yet when the sweep has no report for it', async () => {
+    mountNew('desktop', '/new', {
+      ...ranked(placed('pi', 45, 'it is idle')),
+      'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [] }],
+    })
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pi suggested: it is idle · not checked yet'))
+  })
+
+  it('says the top machine is not ready yet when its report is not ready', async () => {
+    mountNew('desktop', '/new', {
+      ...ranked(placed('pi', 45, 'it is idle')),
+      'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [readyReport('pi', false)] }],
+    })
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pi suggested: it is idle · not ready yet'))
+  })
+
+  it('keeps the plain words while the sweep has not been read', async () => {
+    mountNew('desktop', '/new', {
+      ...ranked(placed('pi', 45, 'it is idle')),
+      'GET /api/readiness': [200, { looked: 'failed', age_seconds: 0, error: 'ssh: nothing' }],
+    })
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pi suggested: it is idle'))
   })
 
   it('takes the first of a tie, which the daemon sorts by name', async () => {
