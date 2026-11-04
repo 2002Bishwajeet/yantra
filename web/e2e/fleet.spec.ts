@@ -142,6 +142,7 @@ for (const { width, height, owner } of WIDTHS) {
               range.setStart(node, i)
               range.setEnd(node, i + 1)
               const rect = range.getClientRects()[0]
+              if (text[i] === ' ') last = ''
               if (!rect || text[i] === ' ') continue
               if (top !== null && Math.abs(rect.top - top) > 4 && /[A-Za-z0-9]/.test(last) && /[A-Za-z0-9]/.test(text[i]!))
                 return `${text.slice(Math.max(0, i - 6), i)}|${text.slice(i, i + 6)}`
