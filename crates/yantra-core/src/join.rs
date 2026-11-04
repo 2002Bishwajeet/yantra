@@ -10,7 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 /// `yantrad`'s port, here so the CLI names the daemon without a second copy.
 pub const DAEMON_PORT: u16 = 7717;
 
-const SCRIPT: &str = include_str!("join.sh");
+pub(crate) const SCRIPT: &str = include_str!("join.sh");
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

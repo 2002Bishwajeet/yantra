@@ -147,8 +147,11 @@ pub async fn run(machine: &str, command: &str, term: &str, size: Size) -> Result
 /// and the command in single quotes, so a login `zsh` or `fish` parses none of
 /// it (I-35).
 pub fn run_on(ssh: &Ssh, command: &str, term: &str, size: Size) -> Result<Terminal, Error> {
-    let remote = format!("TERM={term} /bin/sh -c {}", tmux::sq(command));
-    spawned(ssh, &remote, term, size)
+    spawned(ssh, &run_command(command, term), term, size)
+}
+
+pub(crate) fn run_command(command: &str, term: &str) -> String {
+    format!("TERM={term} /bin/sh -c {}", tmux::sq(command))
 }
 
 fn spawned(ssh: &Ssh, remote: &str, term: &str, size: Size) -> Result<Terminal, Error> {

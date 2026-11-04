@@ -201,10 +201,10 @@ impl Tmux {
     /// `sh -lc` answers `NONE` on the machine that raised I-34.
     pub async fn resolve<E: Exec>(exec: &E) -> Result<Self, Error> {
         // `exit` is safe: ADR-0006 runs this in a child shell, so it cannot
-        // suppress the sentinel.
+        // suppress the sentinel. `(/*)`, as in `agent::probe` (Y-634, Y-635).
         let probe = format!(
             "p=$(command -v tmux 2>/dev/null)\n\
-             case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
+             case \"$p\" in (/*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
              for d in {dirs}; do\n\
              \x20 [ -x \"$d/tmux\" ] && {{ printf '%s\\n' \"$d/tmux\"; exit 0; }}\n\
              done\n\

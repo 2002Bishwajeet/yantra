@@ -217,6 +217,7 @@ pub async fn list_on<E: Exec>(
 /// an empty folder.
 fn command(path: Option<&str>) -> String {
     let base = base(path);
+    // `(*/)`, as in `agent::probe` (Y-634, Y-635).
     format!(
         r#"b={base}
 if ! test -d "$b"; then
@@ -225,7 +226,7 @@ elif ! {{ [ -r "$b" ] && [ -x "$b" ] && ls -A "$b" >/dev/null 2>&1; }}; then
   printf 'shut\0%s\0' "$b"
 else
   printf 'yes\0%s\0' "$b"
-  case "$b" in */) p=$b;; *) p=$b/;; esac
+  case "$b" in (*/) p=$b;; (*) p=$b/;; esac
   n=0
   for f in "$p"* "$p".[!.]* "$p"..?*; do
     [ -e "$f" ] || [ -L "$f" ] || continue

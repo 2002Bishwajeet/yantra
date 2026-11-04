@@ -60,3 +60,6 @@ pub mod tokens;
 pub mod up;
 pub mod update;
 pub mod workspace;
+
+#[cfg(test)]
+mod shells;

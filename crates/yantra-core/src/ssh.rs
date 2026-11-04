@@ -485,7 +485,7 @@ impl Ssh {
 ///
 /// The command runs in a *child* shell — `exit 3` in the wrapper's own shell
 /// would terminate it before the sentinel is printed.
-fn payload(command: &str, nonce: &str) -> String {
+pub(crate) fn payload(command: &str, nonce: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
 
