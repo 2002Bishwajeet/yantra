@@ -233,6 +233,11 @@ opens one from an issue. The session page reads the list on mount and on Refresh
 Start session on an inbox issue passes the issue's draft to Chat in router location state, not in
 the URL, so the issue text stays out of logs (ADR-0034).
 
+The Chat bar commits, pushes and opens a PR for its thread (Y-493), through `useDraftMessage`,
+`useCommit`, `usePush` and `useOpenPr`. The commit dialog fills an editable box with `claude`'s draft.
+Each failure is a `GitFailure` in [`git.ts`](src/screens/session/git.ts) with a title, a next step and
+the daemon's own text.
+
 - **There is no machine argument on a verb, and adding one would be a bug.** The
   target is `workspace.machine`, chosen when the workspace was written. A
   transient override would place a session where `down`, `resume`, `status` and

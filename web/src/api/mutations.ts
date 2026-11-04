@@ -16,7 +16,11 @@ import type {
   RoomPosted,
   Stopped,
   Thread,
+  ThreadCommitted,
+  ThreadMessage,
   ThreadOpened,
+  ThreadPrOpened,
+  ThreadPushed,
   Workspace,
 } from '@/api'
 import { fetchJson, json } from '@/api/client'
@@ -326,6 +330,40 @@ export function useOpenThread(name: string) {
   return useMutation<ThreadOpened, ApiError, string>({
     mutationFn: (issue) =>
       fetchJson<ThreadOpened>(workspace(name, '/threads/new'), { method: 'POST', ...json({ issue }) }),
+  })
+}
+
+// Y-493: the four git verbs on a thread (Y-492, Y-449). Each reaches git or
+// GitHub, so each is a POST a person asks for and none polls (ADR-0019).
+const thread = (name: string, id: string, verb: string) => workspace(name, `/threads/${encodeURIComponent(id)}/${verb}`)
+
+/** `…/message`: `claude -p` drafts a commit message on the machine. 409 is a
+ *  running turn, 502 `claude` failed, 504 it timed out. */
+export function useDraftMessage(name: string) {
+  return useMutation<ThreadMessage, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadMessage>(thread(name, id, 'message'), { method: 'POST' }),
+  })
+}
+
+/** `…/commit`. 400 is an empty message, 409 no git identity or nothing to commit. */
+export function useCommit(name: string) {
+  return useMutation<ThreadCommitted, ApiError, { id: string; message: string }>({
+    mutationFn: ({ id, message }) =>
+      fetchJson<ThreadCommitted>(thread(name, id, 'commit'), { method: 'POST', ...json({ message }) }),
+  })
+}
+
+/** `…/push`. 409 is a refused push or no remote. */
+export function usePush(name: string) {
+  return useMutation<ThreadPushed, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadPushed>(thread(name, id, 'push'), { method: 'POST' }),
+  })
+}
+
+/** `…/pr`. 409 is not pushed, ahead, behind, no grant or not GitHub; 502 is GitHub. */
+export function useOpenPr(name: string) {
+  return useMutation<ThreadPrOpened, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadPrOpened>(thread(name, id, 'pr'), { method: 'POST', ...json({}) }),
   })
 }
 

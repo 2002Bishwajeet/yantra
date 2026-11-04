@@ -494,17 +494,40 @@ const routes = [
   ],
   ['POST', /^\/api\/workspaces\/([^/]+)\/tokens$/, () => [200, contract.spend]],
   ['POST', /^\/api\/workspaces\/([^/]+)\/logs$/, () => [200, contract.logs]],
-  // Y-489: Y-488's two thread routes. The second thread carries THREAD and a worktree, so editor links resolve (Y-491).
+  // Y-489: Y-488's two thread routes. The first thread is the chat's: THREAD, with a worktree so editor links resolve (Y-491).
+  // Its PR is none until the `pr` route opens one (Y-493); the second thread keeps its open PR.
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads$/,
     (s, [name]) =>
       findWorkspace(s, name)
         ? [200, contract.threads.map((one, at) =>
-            at === 1 ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}` } : one,
+            at === 0
+              ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}`, pr: s.opened?.[name] ?? one.pr }
+              : one,
           )]
         : [404, notFound(name)],
   ],
+  // Y-493: Y-492's and Y-449's git routes. The scenario `gitfails` refuses each as the daemon does.
+  ...[
+    ['message', [200, contract.threadMessage], [502, 'claude exited with status 1: could not reach the model']],
+    ['commit', [200, contract.threadCommitted], [409, 'Author identity unknown: set user.name and user.email on the machine']],
+    ['push', [200, contract.threadPushed], [409, '! [rejected] yantra/492 -> yantra/492 (non-fast-forward)']],
+    ['pr', [200, contract.threadPrOpened], [409, 'the branch is not pushed to its upstream']],
+  ].map(([verb, good, refused]) => [
+    'POST',
+    new RegExp(`^/api/workspaces/([^/]+)/threads/([^/]+)/${verb}$`),
+    (s, [name], sent) => {
+      if (!findWorkspace(s, name)) return [404, notFound(name)]
+      if (s.gitFails) return refused
+      if (verb === 'commit' && String(sent.message ?? '').trim() === '') return [400, 'the commit message is empty']
+      if (verb === 'pr') {
+        const { number, url } = contract.threadPrOpened
+        ;(s.opened ??= {})[name] = { state: 'open', number, url }
+      }
+      return good
+    },
+  ]),
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads\/new$/,

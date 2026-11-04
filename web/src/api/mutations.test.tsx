@@ -4,20 +4,25 @@ import { useQueryClient } from '@tanstack/react-query'
 import { daemon } from '../test/daemon'
 import { renderHookQueried } from '../test/inQuery'
 import { ApiError } from './errors'
+import { threadCommitted, threadMessage, threadPrOpened, threadPushed } from '@/contract.gen'
 import { aWorkspace, looked, opened, stopped } from './fixtures'
 import { keys } from './keys'
 import {
   useApplyUpdate,
   useClone,
+  useCommit,
   useCreateWorkspace,
   useDeleteWorkspace,
   useDown,
+  useDraftMessage,
   useEditWorkspace,
   useGithubLogin,
   useGithubLogout,
   useInstall,
   useKillSession,
   useMakeDir,
+  useOpenPr,
+  usePush,
   useRecheckReadiness,
   useRepairWorkspace,
   useResume,
@@ -491,5 +496,58 @@ describe('every write refused', () => {
 
     expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ kind: 'network', retryable: true })
+  })
+})
+
+describe('the git verbs on a thread', () => {
+  const base = '/api/workspaces/yantra/threads/0a1b'
+
+  it.each([
+    ['draft', () => useDraftMessage('yantra'), '0a1b', 'message', undefined, threadMessage],
+    [
+      'commit',
+      () => useCommit('yantra'),
+      { id: '0a1b', message: 'Fix it' },
+      'commit',
+      JSON.stringify({ message: 'Fix it' }),
+      threadCommitted,
+    ],
+    ['push', () => usePush('yantra'), '0a1b', 'push', undefined, threadPushed],
+    ['pr', () => useOpenPr('yantra'), '0a1b', 'pr', '{}', threadPrOpened],
+  ] as const)('%s is a POST to its own route and returns the answer', async (_, hook, input, verb, body, answer) => {
+    const asked = daemon(200, answer)
+    const { result } = renderHookQueried(hook as () => ReturnType<typeof usePush>)
+
+    const got = await act(() => result.current.mutateAsync(input as never))
+
+    expect(sent(asked)).toEqual({ path: `${base}/${verb}`, method: 'POST', body })
+    expect(got).toEqual(answer)
+  })
+
+  it.each([
+    ['draft', () => useDraftMessage('yantra'), '0a1b', 502, 'claude failed'],
+    ['commit', () => useCommit('yantra'), { id: '0a1b', message: 'x' }, 409, 'nothing to commit'],
+    ['push', () => usePush('yantra'), '0a1b', 409, 'push refused'],
+    ['pr', () => useOpenPr('yantra'), '0a1b', 409, 'branch not pushed'],
+  ] as const)('%s rejects with the status and the words', async (_, hook, input, status, said) => {
+    daemon(status, said)
+    const { result } = renderHookQueried(hook as () => ReturnType<typeof usePush>)
+
+    const error = await act(() =>
+      result.current.mutateAsync(input as never).then(
+        () => null,
+        (cause: unknown) => cause,
+      ),
+    )
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ status, said })
+  })
+
+  it('does not poll: one press is one request', async () => {
+    const asked = daemon(200, threadPushed)
+    const { result } = renderHookQueried(() => usePush('yantra'))
+    await act(() => result.current.mutateAsync('0a1b'))
+    expect(asked).toHaveBeenCalledTimes(1)
   })
 })

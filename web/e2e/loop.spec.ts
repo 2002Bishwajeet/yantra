@@ -34,3 +34,56 @@ test('an inbox issue starts a session with its draft and lists the threads', asy
   }
   await expect(threads.getByText('2002Bishwajeet/yantra#488')).toBeVisible()
 })
+
+/** The git actions (Y-493) on the fixture chat. `gitfails` refuses each route as the daemon does. */
+const ATTACHED = '/w/yantra-web?thread=1a2b3c4d'
+
+test('a thread is drafted, edited, committed, pushed and opened as a PR', async ({ page }) => {
+  await scenario(page, 'busy')
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  const bar = page.locator('.chat__bar')
+
+  await bar.getByRole('button', { name: 'Commit' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Commit this thread' })
+  const message = dialog.getByLabel('Commit message')
+  await expect(message).toHaveValue(/^Add the commit and push verbs/)
+  await message.fill('Add the git actions\n\nThe bar commits, pushes and opens a PR.')
+  await axe(page)
+  await dialog.getByRole('button', { name: 'Commit', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(bar.getByText('Committed: Add the commit and push verbs')).toBeVisible()
+
+  await bar.getByRole('button', { name: 'Push' }).click()
+  await expect(bar.getByText('Pushed origin/yantra/492-0a1b2c3d4e5f6a7b')).toBeVisible()
+
+  await bar.getByRole('button', { name: 'Open PR' }).click()
+  await expect(bar.getByRole('link', { name: 'PR #497' })).toBeVisible()
+  await expect(bar.getByRole('button', { name: 'Open PR' })).toHaveCount(0)
+  await axe(page)
+})
+
+test('each failed git action is drawn with the daemon text', async ({ page }) => {
+  await scenario(page, 'gitfails')
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  const bar = page.locator('.chat__bar')
+  const failure = (title: string, said: string) =>
+    page.getByRole('alert').filter({ has: page.getByRole('heading', { name: title }), hasText: said })
+
+  await bar.getByRole('button', { name: 'Commit' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Commit this thread' })
+  await expect(failure('The draft failed', 'claude exited with status 1')).toBeVisible()
+  await dialog.getByLabel('Commit message').fill('Write it myself')
+  await dialog.getByRole('button', { name: 'Commit', exact: true }).click()
+  await expect(failure('The commit was refused', 'Author identity unknown')).toBeVisible()
+  await axe(page)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+
+  await bar.getByRole('button', { name: 'Push' }).click()
+  await expect(failure('The push was refused', 'non-fast-forward')).toBeVisible()
+  await bar.getByRole('button', { name: 'Open PR' }).click()
+  await expect(failure('The pull request was refused', 'not pushed to its upstream')).toBeVisible()
+  await axe(page)
+})
