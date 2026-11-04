@@ -135,7 +135,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     Copy: text('Copied'),
     'Show key': dialog,
     'Show QR code': expanded,
-    ...Object.fromEntries(['yantra-box', 'pi-5', 'nas'].map((n) => [n, url(`/machines/add?platform=linux&machine=${n}`)])),
+    ...Object.fromEntries(['pi-5', 'nas'].map((n) => [n, url(`/machines/add?platform=linux&machine=${n}`)])),
   },
 }
 
@@ -257,6 +257,7 @@ for (const destination of DESTINATIONS) {
       await open(page, 'fresh', destination)
       // The page draws a random name; a fixed one keeps the capture the same each run.
       if (destination.id === 'new') await page.getByLabel('Name').fill('quiet-otter')
+      if (destination.id === 'add-device') await expect(page.locator('main').getByRole('link', { name: 'yantra-box' })).toHaveCount(0)
       await axe(page)
       await screenshot(page, destination.id, 'fresh', size)
     })
