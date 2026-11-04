@@ -33,9 +33,8 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
     enabled: open && device !== undefined,
     refetchInterval: device === undefined ? false : device.interval * 1000,
   })
-  // A refused grant is still `connected`: only a poll made after the flow began, with none waiting, is a new sign-in.
-  const fresh = connection.dataUpdatedAt > login.submittedAt
-  const connected = device !== undefined && fresh && connection.data?.connected && !connection.data.pending ? connection.data : null
+  // A refused grant is still `connected`; the daemon holds `pending` while a new flow runs, and the login write marks it at once.
+  const connected = device !== undefined && connection.data?.connected && !connection.data.pending ? connection.data : null
   const client = useQueryClient()
   // The daemon looks at GitHub again when the grant changes; Settings reads that look.
   useEffect(() => {
