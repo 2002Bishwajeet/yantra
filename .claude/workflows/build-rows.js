@@ -100,6 +100,7 @@ const VERIFY_SCHEMA = {
   properties: {
     pass: { type: 'boolean' },
     failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
+    flaky: { type: 'array', items: { type: 'string' }, description: 'tests that failed in the gate, are in files that `git diff --name-only origin/main...HEAD` does not list, and passed when rerun alone' },
     fixedChecks: { type: 'array', items: { type: 'string' }, description: 'only when a Then command is itself wrong (an unknown target, a filter that matches no test): every Then command, corrected' },
   },
   required: ['pass', 'failures'],
@@ -154,7 +155,11 @@ const clash = (a, b) => a.paths.some((p) => b.paths.some((q) => p.startsWith(q) 
 const CLEANUP = `Afterwards remove only the test containers: those with label yantra-fixture (podman ps -aq --filter label=yantra-fixture) and those named yantra-e2e-*. Never stop or remove any other container.`
 
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
-const GATE_HOW = `The gate can take longer than a 10-minute Bash call: run it in the background with its output in a log file, and read only the tail of that log. ${CLEANUP}`
+// Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
+const GATE_HOW = `The gate can take longer than a 10-minute Bash call. Put the gate commands and the Then commands in one background shell: \`( <commands> ) > "$LOG" 2>&1; echo "GATE_EXIT=$?" >> "$LOG"\`. Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' "$LOG"\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Re-arm until the GATE_EXIT line exists. Report nothing until that line exists. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. ${CLEANUP}`
+
+// A slow-network test outside the diff parked Y-585; CI runs the full suites again, so a real regression still blocks the merge.
+const FLAKY = `When the gate fails, rerun each failing test alone. For nextest that is \`NEXTEST_TEST_THREADS=1 cargo nextest run -p <crate> -E 'test(=<name>)'\`, with YANTRA_REQUIRE_PODMAN=1 if the gate used it. For e2e that is one spec. A failure is a retry, not a failure, when its test file is outside \`git diff --name-only origin/main...HEAD\` and it passes alone. If every failure is like that, report pass=true and list those tests in flaky. Any other failure keeps pass=false.`
 
 // A web or docs row is built by Sonnet, so one Sonnet agent can run the gate and fix what it finds.
 async function verifyAndFix(row, wt, plan, label, attempts) {
@@ -165,6 +170,7 @@ Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 ${GATE_HOW}
 If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the gate once. Stop after ${attempts} gate runs.
+${FLAKY} Do not change code for a flaky test.
 A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
 If a Then command fails before any test runs because the command is wrong, not the code, correct it and return the corrected list as fixedChecks.${RULES(wt)}`,
       { label: `gate:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'medium' },
@@ -179,7 +185,8 @@ async function verify(row, wt, plan, label) {
 Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
-${GATE_HOW}`,
+${GATE_HOW}
+${FLAKY}`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
   )
@@ -200,12 +207,14 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
   if (selfFix) {
     const v = await verifyAndFix(row, wt, plan, 'g', rounds)
     if (v?.fixedChecks?.length) plan.extraChecks = v.fixedChecks
+    if (v?.flaky?.length) log(`${row.id}: retried outside its diff, passed alone: ${v.flaky.join(', ')}`)
     return !!(v && v.pass)
   }
   for (let i = 1; i <= rounds; i++) {
     const v = await verify(row, wt, plan, String(i))
     // A wrong check is the plan's bug, and no code fix can make it pass.
     if (v?.fixedChecks?.length) plan.extraChecks = v.fixedChecks
+    if (v?.flaky?.length) log(`${row.id}: retried outside its diff, passed alone: ${v.flaky.join(', ')}`)
     if (v && v.pass) return true
     if (i === rounds) return false
     if (v) await fix(row, wt, `The gate failed:\n${v.failures}`)
