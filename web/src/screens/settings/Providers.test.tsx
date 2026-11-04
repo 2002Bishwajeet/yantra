@@ -25,6 +25,15 @@ describe('Providers', () => {
     expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
   })
 
+  it('says no machine is checked yet when the sweep reported none', async () => {
+    mountSettings('desktop', '/settings/providers', { 'GET /api/readiness': [200, { ...contract.readiness, data: [] }] })
+    expect(await screen.findByText(/Claude subscription · no machine is checked yet/)).toBeTruthy()
+    cleanup()
+    unmountSettings()
+    mountSettings('phone', '/settings/providers', { 'GET /api/readiness': [200, { ...contract.readiness, data: [] }] })
+    expect(await screen.findByText('No machine is checked yet')).toBeTruthy()
+  })
+
   /** Row 114: `.m3-clip` cuts rather than wraps, so the 390 px row takes the
    *  boards' shorter strings (PhoneSettingsProviders). */
   it('takes the phone strings on a phone', async () => {

@@ -317,6 +317,13 @@ describe('step 3, what opens in the session', () => {
     await waitFor(() => expect(screen.getByText(/^run just dev in it/)).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', false)
   })
+
+  it('offers two options and no placeholder for another agent', async () => {
+    await toStepThree()
+    const group = screen.getByRole('group', { name: 'What opens in the session' })
+    expect(within(group).getAllByRole('button')).toHaveLength(2)
+    expect(screen.queryByText('Another agent')).toBeNull()
+  })
 })
 
 describe('step 4, starting', () => {
