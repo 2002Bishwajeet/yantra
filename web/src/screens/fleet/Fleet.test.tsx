@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as contract from '@/contract.gen'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { renderInApp } from '@/test/inApp'
+import { WorkRowView } from './Fleet'
 import { mount, scenario, unmount } from './harness'
 
 // The route is lazy, so the first mount pays for its chunk; warming it here
@@ -28,6 +30,9 @@ describe('/fleet on the busy fleet', () => {
     expect(needs.getByText('waiting for trust')).toBeTruthy()
     // An unreachable machine is one row and its workspaces are not listed.
     expect(needs.getByText('unreachable')).toBeTruthy()
+    // Y-585: the plain cause here, and the raw words on the machine page.
+    expect(needs.getByText(/Yantra can’t reach thinkpad over ssh/)).toBeTruthy()
+    expect(needs.queryByText(/No route to host/)).toBeNull()
     expect(needs.getByText('1 workspace')).toBeTruthy()
     expect(needs.getByRole('link', { name: 'Fix' }).getAttribute('href')).toBe('/m/thinkpad')
     expect(needs.queryByText('cargo-zig')).toBeNull()
@@ -182,6 +187,24 @@ describe('/fleet header', () => {
   it('says what the page is for, on the phone too', async () => {
     mount('phone', '/fleet')
     expect(await screen.findByText(/Every workspace on every machine/, {}, { timeout: 2000 })).toBeTruthy()
+  })
+})
+
+/** Y-585 review: `status.rs` sends a tmux error as `reached: 'no'` too. */
+describe('a machine row whose answer was a tmux error', () => {
+  it('does not call the machine unreachable or give an ssh cause', async () => {
+    const error = 'tmux `has-session` failed with status 1: error connecting to /tmp/tmux-1000/default (Permission denied)'
+    await renderInApp(
+      <WorkRowView
+        row={{ id: 'm:pi', band: 'needs', kind: 'machine', machine: 'pi', workspaces: 1, error }}
+        sessions={new Map()}
+      />,
+    )
+    expect(await screen.findByText('not listed')).toBeTruthy()
+    expect(screen.getByText('Yantra could not list the sessions on pi.')).toBeTruthy()
+    for (const words of [/unreachable/, /can’t reach/, /appliance’s key/, /Permission denied/]) {
+      expect(screen.queryByText(words)).toBeNull()
+    }
   })
 })
 

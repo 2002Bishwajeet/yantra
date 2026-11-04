@@ -509,6 +509,7 @@ mod tests {
                 check: "reachable",
                 state: doctor::State::Present,
                 detail: detail.to_string(),
+                took_ms: None,
             }],
         }
     }

@@ -25,6 +25,7 @@ import { useFormFactor } from '@/shell/formFactor'
 import { asEvents } from '@/shell/notifications'
 import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
+import { SshSaid } from '@/screens/machine/ReachFailure'
 import { Sheet } from '@/screens/settings/Sheet'
 import { Join } from '@/screens/setup/Join'
 import { joined, LATE_MS, newDevice, newStranger, onTailnet, reachable, ready, installable, type Beat, type BeatState } from './beats'
@@ -63,6 +64,8 @@ function Words(props: { beat: Beat; reset?: () => void; children?: ReactNode }) 
         </State>
       </div>
       {beat.error ? <ErrorSurface.Inline error={asApiError(beat.error)} reset={reset} title={beat.words} /> : null}
+      {beat.ssh ? <Note>{beat.ssh.next}</Note> : null}
+      {beat.ssh ? <SshSaid detail={beat.ssh.detail} /> : null}
       {children}
     </>
   )
@@ -325,7 +328,13 @@ function Following(props: { first: StepItem; machine: Machine; platform: Session
         item(
           'Reachable over ssh',
           third,
-          third.state === 'ahead' ? undefined : <div className="add-device__actions">{again('Check again')}</div>,
+          third.state === 'ahead' ? undefined : (
+            <>
+              {/* A done beat folds, so beat 2's command is gone by now. */}
+              {third.ssh?.join ? <JoinHere name={name} platform={platform} /> : null}
+              <div className="add-device__actions">{again('Check again')}</div>
+            </>
+          ),
         ),
         item(
           'Ready',

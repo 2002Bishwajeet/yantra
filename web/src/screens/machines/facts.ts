@@ -81,6 +81,7 @@ export type CardVerdict =
   | { kind: 'unchecked' }
   | { kind: 'refused' }
   | { kind: 'unjoined' }
+  | { kind: 'browser' }
   | { kind: 'unreachable' }
   | { kind: 'needs'; missing: number }
   | { kind: 'ready' }
@@ -113,6 +114,8 @@ export function cardChip(verdict: CardVerdict, seen: string | null): { state: Ma
       return { state: 'failed', word: 'key refused', error: true }
     case 'unjoined':
       return { state: 'failed', word: 'not joined', error: true }
+    case 'browser':
+      return { state: 'failed', word: 'browser sign-in', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'needs':

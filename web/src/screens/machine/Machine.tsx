@@ -143,7 +143,8 @@ export function Machine() {
       : listed
   const agents = useAgents(here)
   const one = machines.looked === 'ok' ? machines.data.find((m) => m.name === name) : undefined
-  const verdicted = useVerdict(name, one, readiness)
+  const answer = sessions.looked === 'ok' ? sessions.data.find((m) => m.machine === name) : undefined
+  const verdicted = useVerdict(name, one, readiness, answer?.reached === 'no' ? answer.error : null)
 
   const nothing = unreachable([machines, readiness, sessions, listed])
   if (nothing) {
@@ -226,7 +227,7 @@ export function Machine() {
         </ErrorBoundary>
 
         <ErrorBoundary eyebrow={name} title="The sessions could not be drawn">
-          <Sessions machine={name} sessions={sessions} workspaces={here} />
+          <Sessions machine={name} sessions={sessions} verdict={verdicted.verdict} workspaces={here} />
         </ErrorBoundary>
 
         <ErrorBoundary eyebrow={name} title="About could not be drawn">

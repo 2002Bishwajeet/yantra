@@ -1,6 +1,6 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
+import { answerFailure, INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
 import { missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
@@ -15,6 +15,7 @@ export type Verdict =
   | { kind: 'installing'; missing: string[] }
   | { kind: 'refused'; detail: string }
   | { kind: 'unjoined'; detail: string }
+  | { kind: 'browser'; detail: string }
   | { kind: 'unreachable'; detail: string }
   | { kind: 'sudo'; missing: string[]; result: Event }
   | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
@@ -29,14 +30,22 @@ export function verdictOf(input: {
   readiness: Reading<Readiness>
   events: Event[]
   watch: Watch | null
+  /** This machine's answer in the sessions reading, if it did not answer. */
+  sessionsError?: string | null
 }): Verdict {
-  const { name, machine, readiness, events, watch } = input
+  const { name, machine, readiness, events, watch, sessionsError } = input
   // D7 §3.3: the tailnet says it is off, so nothing behind ssh can be asked.
   if (machine?.expired) return { kind: 'expired' }
   if (machine && !machine.online) return { kind: 'asleep' }
   if (readiness.looked === 'pending') return { kind: 'pending' }
   if (readiness.looked === 'failed') return { kind: 'unread', error: readiness.error }
-  if (readiness.looked === 'never' || readiness.data.checks.length === 0) return { kind: 'unasked' }
+  if (readiness.looked === 'never' || readiness.data.checks.length === 0) {
+    // The sweep skips a machine no workspace names, and Sessions asks it anyway.
+    // A tmux error says nothing about ssh, so it leaves the machine unasked.
+    if (!sessionsError) return { kind: 'unasked' }
+    const kind = answerFailure(sessionsError)
+    return kind === 'listing' ? { kind: 'unasked' } : { kind, detail: sessionsError }
+  }
 
   const { checks } = readiness.data
   const missing = missingBasics(readiness.data).map((one) => nameOf(one.check))
@@ -72,6 +81,36 @@ export function verdictOf(input: {
   return absent.length > 0 ? { kind: 'manual', absent } : { kind: 'ready' }
 }
 
+const NOT_REACHED: ReadonlySet<Verdict['kind']> = new Set([
+  'asleep',
+  'expired',
+  'refused',
+  'unjoined',
+  'browser',
+  'unreachable',
+])
+
+/** Sessions' answer when ssh got in and the listing failed (Y-585). */
+export type SessionsFailure = Verdict | { kind: 'listing'; detail: string }
+
+/** What Sessions says for a machine that did not answer: Readiness's verdict
+ *  where that failed too, so the two cards agree, or else its own error. */
+export const sessionsFailure = (verdict: Verdict, error: string): SessionsFailure =>
+  NOT_REACHED.has(verdict.kind) ? verdict : { kind: answerFailure(error), detail: error }
+
+/** Sessions with no row. `sessions.rs` answers an empty list for a machine with
+ *  no tmux, so only a verdict that read the tmux check can speak for tmux. */
+export function noRows(verdict: Verdict, name: string): { title: string; words: string } {
+  const missing = 'missing' in verdict ? verdict.missing : null
+  if (missing?.includes(nameOf('tmux'))) {
+    return { title: 'No session can start here', words: `tmux is missing on ${name}. Readiness shows the fix.` }
+  }
+  if (missing || verdict.kind === 'ready' || verdict.kind === 'manual') {
+    return { title: 'No session is open here', words: `tmux lists nothing on ${name}` }
+  }
+  return { title: 'No session is listed', words: `Readiness has not read tmux on ${name}` }
+}
+
 /** A session can start: tmux and claude are there and ssh gets in. A missing
  *  `gh` does not stop one, so `manual` counts (B3 names only the basics and the
  *  key). */
@@ -104,6 +143,8 @@ export function titleOf(verdict: Verdict, name: string): string {
       return 'The key was refused'
     case 'unjoined':
       return `${name} has not joined`
+    case 'browser':
+      return `${name} needs a browser sign-in`
     case 'unreachable':
       return `ssh to ${name} fails`
     case 'sudo':
@@ -128,6 +169,8 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
       return { state: 'failed', word: 'key refused', error: true }
     case 'unjoined':
       return { state: 'failed', word: 'not joined', error: true }
+    case 'browser':
+      return { state: 'failed', word: 'browser sign-in', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'installing':

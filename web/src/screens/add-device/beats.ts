@@ -1,6 +1,6 @@
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/hooks'
-import { INSTALLABLE, nameOf } from '@/lib/checks'
+import { INSTALLABLE, joinFixes, nameOf, reachableFailure, reachWords } from '@/lib/checks'
 import { notYours, platformOf, type Platform } from '@/lib/platform'
 import { blocking, isReady, missingBasics } from '@/lib/ready'
 import { listed } from '@/screens/machine/install'
@@ -17,6 +17,9 @@ export type Beat = {
   error?: Error
   /** The commands an install left for a person, each run verbatim (Y-386). */
   commands?: string[]
+  /** Why ssh failed: `words` holds the plain cause, and this what comes after
+   *  it (Y-585). `join`: the join command fixes it. */
+  ssh?: { next: string; detail: string; join: boolean }
 }
 
 /** A person's ask or install, as the page holds it. */
@@ -127,6 +130,12 @@ export function joined(
   return { state: 'waiting', words: `run this in a terminal on ${name}` }
 }
 
+function notReached(name: string, detail: string, hint: string): Beat {
+  const kind = reachableFailure(detail)
+  const { cause, next } = reachWords(kind, name)
+  return { state: 'stuck', words: cause, ssh: { next: `${next}${hint}`, detail, join: joinFixes(kind) } }
+}
+
 /** Beat 3: readiness answers `reachable`, which only a running `sshd` can. */
 export function reachable(
   before: Beat,
@@ -142,10 +151,10 @@ export function reachable(
   if (ask.pending) return { state: 'waiting', words: `Yantra is checking ${name} over ssh` }
   if (ask.error) return { state: 'stuck', words: `${name} was not asked`, error: ask.error }
   const hint = platform === 'macos' ? ' · check that Remote Login is on' : ''
-  if (reach) return { state: 'stuck', words: `${reach.detail}${hint}` }
+  if (reach) return notReached(name, reach.detail, hint)
   const since = newest(events, name, ['joined'])?.at ?? 0
   const lost = events.find((one) => one.machine === name && one.kind === 'unreachable' && one.at >= since)
-  if (lost) return { state: 'stuck', words: `${lost.said}${hint}` }
+  if (lost) return notReached(name, lost.said, hint)
   return { state: 'waiting', words: `Yantra checks ${name} over ssh once it joins · Check asks now` }
 }
 

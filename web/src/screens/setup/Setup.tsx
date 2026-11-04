@@ -5,6 +5,7 @@ import type { Event, Machine, Readiness } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
+import { joinFixes, reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
 import { notYours } from '@/lib/platform'
 import { ago } from '@/lib/time'
@@ -26,6 +27,7 @@ import { PushSetup } from '@/screens/settings/PushSetup'
 import { useTick } from '@/useTick'
 import { password } from '@/screens/add-device/beats'
 import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
+import { SshSaid } from '@/screens/machine/ReachFailure'
 import { stamp } from '../dashboard/bands'
 import { Join } from './Join'
 import { REQUIRED, useChecklist } from './progress'
@@ -78,24 +80,27 @@ const mark: Record<View, MarkState> = {
   unreachable: 'unknown',
   refused: 'failed',
   unjoined: 'failed',
+  browser: 'failed',
   missing: 'needs',
   installing: 'running',
   blocked: 'needs',
   ready: 'done',
 }
 
-function wordsOf(said: Line): string {
+function wordsOf(said: Line, name: string): string {
   switch (said.kind) {
     case 'asleep':
       return `asleep${said.since ? ` · last seen ${said.since} ago` : ''}`
     case 'unchecked':
       return 'not checked yet · a check costs one ssh round trip'
     case 'unreachable':
-      return said.words
+      return reachWords(said.kind, name).cause
     case 'refused':
       return 'the key was refused · run the join command on it'
     case 'unjoined':
       return 'no account named for it · run the join command on it'
+    case 'browser':
+      return 'Tailscale asks for a browser sign-in · run the join command on it'
     case 'ready':
       return `ready · ${said.present} of ${said.total}`
     case 'missing':
@@ -103,7 +108,7 @@ function wordsOf(said: Line): string {
   }
 }
 
-const bad = (said: Line) => said.kind === 'refused' || said.kind === 'unjoined' || said.kind === 'unreachable'
+const bad = (said: Line): said is Extract<Line, { detail: string }> => 'detail' in said
 
 /** Y-582: the hub's line under step 1. It is never added, so it offers no
  *  Check or Install; one that is not ready links to its machine page. */
@@ -117,11 +122,17 @@ function HubLine(props: { machine: Machine; line: Line }) {
       </State>
       <div className="setup__said">
         <Text className={bad(said) ? 'setup__bad' : undefined} scale="body-small" tone={bad(said) ? undefined : 'variant'}>
-          {wordsOf(said)}
+          {wordsOf(said, machine.name)}
         </Text>
+        {said.kind === 'unreachable' ? (
+          <Text scale="body-small" tone="variant">
+            {reachWords(said.kind, machine.name).next}
+          </Text>
+        ) : null}
         <Text scale="body-small" tone="variant">
           {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'no beat has arrived'}
         </Text>
+        {bad(said) ? <SshSaid detail={said.detail} /> : null}
       </div>
       {said.kind === 'ready' ? null : (
         <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
@@ -168,7 +179,7 @@ function MachineLine(props: {
     return () => running(name, false)
   }, [name, install.running, running])
 
-  const words = view === 'installing' ? `installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said)
+  const words = view === 'installing' ? `installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said, name)
 
   const check = (label: string) => (
     <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
@@ -213,7 +224,13 @@ function MachineLine(props: {
         <Text className={bad(said) ? 'setup__bad' : undefined} scale="body-small" tone={bad(said) ? undefined : 'variant'}>
           {words}
         </Text>
-        {said.kind === 'refused' || said.kind === 'unjoined' ? join : null}
+        {said.kind === 'unreachable' ? (
+          <Text scale="body-small" tone="variant">
+            {reachWords(said.kind, name).next}
+          </Text>
+        ) : null}
+        {bad(said) && joinFixes(said.kind) ? join : null}
+        {bad(said) ? <SshSaid detail={said.detail} /> : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)

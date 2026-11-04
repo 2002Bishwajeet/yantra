@@ -158,6 +158,7 @@ mod tests {
                 check: "reachable",
                 state: doctor::State::Unknown,
                 detail: detail.into(),
+                took_ms: None,
             }],
         };
         let mut snapshot = Snapshot::default();

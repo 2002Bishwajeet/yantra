@@ -369,9 +369,57 @@ describe('the Readiness card', () => {
       '(Add a device, or `yantra join-script`) · Connection closed by 100.64.0.2 port 22'
     await draw(report(checks(['reachable'], { reachable: said })))
     expect(card().getByRole('heading', { name: 'pi has not joined' })).toBeTruthy()
-    expect(card().getByText(said)).toBeTruthy()
+    expect(card().getByText(/does not know which account/)).toBeTruthy()
+    expect(card().queryByText(said)).toBeNull()
+    fireEvent.click(card().getByRole('button', { name: /What ssh said/ }))
+    expect(card().getAllByText(said).length).toBeGreaterThan(0)
     expect(card().getByRole('link', { name: 'Add a device' }).getAttribute('href')).toBe('/machines/add')
     expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+  })
+
+  /** Y-585: the plain words first, one next step, and the raw text one press
+   *  away with no link in it. */
+  it('tells a browser check in plain words and keeps ssh’s own behind a press', async () => {
+    daemon()
+    const said = 'Tailscale SSH requires an additional check, which needs a browser sign-in that Yantra cannot finish, so ssh was stopped'
+    await draw(report(checks(['reachable'], { reachable: said })))
+    expect(card().getByRole('heading', { name: 'pi needs a browser sign-in' })).toBeTruthy()
+    expect(card().getByText(/Tailscale asks for a browser sign-in on each connection/)).toBeTruthy()
+    expect(card().getByText(/from check to accept/)).toBeTruthy()
+    expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+
+    const press = card().getByRole('button', { name: /What ssh said/ })
+    expect(press.getAttribute('aria-expanded')).toBe('false')
+    expect(card().queryByText(said)).toBeNull()
+    expect(card().queryByRole('link', { name: /login.tailscale/ })).toBeNull()
+
+    fireEvent.click(press)
+    expect(card().getAllByText(said).length).toBeGreaterThan(0)
+    expect(card().getByText('tmux')).toBeTruthy()
+  })
+
+  /** R-23 on the page: every failure has words of its own, and none shows
+   *  raw ssh until it is asked for. */
+  it.each([
+    ['yantra@pi: Permission denied (publickey).', 'The key was refused', /did not take the appliance’s key/, true],
+    ['No route to host', 'ssh to pi fails', /can’t reach pi over ssh/, false],
+  ])('keeps the raw text closed for %s', async (said, title, cause, join) => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: said })))
+    expect(card().getByRole('heading', { name: title })).toBeTruthy()
+    expect(card().getByText(cause)).toBeTruthy()
+    expect(card().queryByText(said)).toBeNull()
+    if (join) expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+    else expect(card().queryByText(/curl -fsSL/)).toBeNull()
+  })
+
+  it('says how long a step took, and nothing where no step ran', async () => {
+    daemon()
+    const timed = checks().map((one) => (one.check === 'tmux' ? { ...one, took_ms: 84 } : one))
+    await draw(report(timed))
+    fireEvent.click(card().getByRole('button', { name: /^Show/ }))
+    expect(card().getByText('· 84 ms')).toBeTruthy()
+    expect(card().getAllByText(/^· /)).toHaveLength(1)
   })
 
   it('puts a manual fix beside its check, and still offers a session', async () => {

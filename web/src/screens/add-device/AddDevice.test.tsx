@@ -262,10 +262,24 @@ describe('beat 3, reachable', () => {
     expect(await screen.findByText(/done · reachable over ssh/)).toBeTruthy()
   })
 
-  it("is stuck with the check's own detail", async () => {
+  /** Y-585, #520: beat 2 has folded, so beat 3 carries the command itself. */
+  it('is stuck on the plain cause and the join command, with ssh behind a press', async () => {
     const refused = { machine: 'laptop', checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] } as Readiness
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [refused]))
-    expect(await screen.findByText(/stuck · Permission denied \(publickey\)/)).toBeTruthy()
+    expect(await screen.findByText(/stuck · laptop did not take the appliance’s key\./)).toBeTruthy()
+    const third = beat('Reachable over ssh')
+    expect(third.getByText('Run the join command on laptop; it places the key.')).toBeTruthy()
+    expect(await third.findByRole('button', { name: 'Copy the join command' })).toBeTruthy()
+    expect(third.queryByText('Permission denied (publickey)')).toBeNull()
+    fireEvent.click(third.getByRole('button', { name: /What ssh said/ }))
+    expect(await third.findByText('Permission denied (publickey)')).toBeTruthy()
+  })
+
+  it('offers no join command to a machine it would not help', async () => {
+    const silent = { machine: 'laptop', checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] } as Readiness
+    mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [silent]))
+    expect(await screen.findByText(/stuck · Yantra can’t reach laptop over ssh\./)).toBeTruthy()
+    expect(beat('Reachable over ssh').queryByRole('button', { name: 'Copy the join command' })).toBeNull()
   })
 
   it('draws the refusal when the ask failed', async () => {

@@ -208,6 +208,8 @@ export type Check = {
   state: CheckState
   // What was found, or why nothing could be. Carries no credential.
   detail: string
+  // Absent where no step ran, which zero would misreport (R-23).
+  took_ms?: number
 }
 
 /** `age_seconds` is this report's own: the daemon keeps a machine's last check,

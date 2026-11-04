@@ -550,11 +550,13 @@ fn swept(machine: &str) -> doctor::Report {
                 check: "reachable",
                 state: doctor::State::Present,
                 detail: "a command ran there and reported its own status".into(),
+                took_ms: Some(120),
             },
             doctor::Check {
                 check: "provider-auth",
                 state: doctor::State::Absent,
                 detail: "`gh` is installed there and no account is logged in".into(),
+                took_ms: None,
             },
             // The daemon fills this one in from the beats it holds, so the
             // fixture's value is the substitution's rather than the library's.
@@ -562,6 +564,7 @@ fn swept(machine: &str) -> doctor::Report {
                 check: doctor::HEARTBEAT,
                 state: doctor::State::Unknown,
                 detail: "only the running daemon holds the beats".into(),
+                took_ms: None,
             },
         ],
     }

@@ -23,6 +23,7 @@ import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
+import { answerFailure, reachWords } from '@/lib/checks'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
@@ -288,10 +289,12 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
   const { row, sessions } = props
 
   if (row.kind === 'machine') {
+    const failure = answerFailure(row.error)
+    const listing = failure === 'listing'
     return (
       <Row className="fleet__row">
-        <State className="fleet__state" state="failed">
-          unreachable
+        <State className="fleet__state" state={listing ? 'unknown' : 'failed'}>
+          {listing ? 'not listed' : 'unreachable'}
         </State>
         <span className="fleet__meta">
           <Link className="fleet__name" params={{ machine: row.machine }} to="/m/$machine">
@@ -301,7 +304,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
             {row.workspaces} workspace{row.workspaces === 1 ? '' : 's'}
           </span>
         </span>
-        <Mono className="fleet__detail m3-wrap">{row.error}</Mono>
+        <span className="fleet__detail m3-wrap">{reachWords(failure, row.machine).cause}</span>
         <span className="fleet__actions">
           <Button render={<Link params={{ machine: row.machine }} to="/m/$machine" />} role="link" variant="outlined">
             Fix

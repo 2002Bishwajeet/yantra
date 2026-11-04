@@ -106,6 +106,98 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(ready.getByRole('button', { name: 'Check again' })).toBeTruthy()
     expect(screen.queryByText(/yantrad was not reached/)).toBeNull()
   })
+
+  /** Y-585: the sweep skips a machine no workspace names, and Sessions asks it
+   *  anyway. Both cards then say the one thing that is known. */
+  it('gives one title in both cards when only the sessions failed', async () => {
+    const busy = scenario('busy')
+    const error = 'ssh to cachyos-g14 failed before the command reported a status: No route to host'
+    const state = {
+      ...busy,
+      readiness: { looked: 'never' },
+      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'no', error }] },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    const title = 'ssh to cachyos-g14 fails'
+    expect(await ready.findByRole('heading', { name: title })).toBeTruthy()
+    expect(ready.queryByText('Not checked yet')).toBeNull()
+
+    const sessions = card('Sessions')
+    expect(await sessions.findByText(title)).toBeTruthy()
+    expect(sessions.queryByText(/No route to host/)).toBeNull()
+    fireEvent.click(sessions.getByRole('button', { name: /What ssh said/ }))
+    expect(sessions.getByText(error)).toBeTruthy()
+  })
+
+  it('classifies the sessions error itself when Readiness has not failed', async () => {
+    const busy = scenario('busy')
+    const error = 'ssh to cachyos-g14 failed before the command reported a status: Tailscale SSH requires an additional check'
+    const state = {
+      ...busy,
+      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'no', error }] },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
+    expect(await card('Sessions').findByText('cachyos-g14 needs a browser sign-in')).toBeTruthy()
+  })
+
+  /** Y-585 review: tmux's own `Permission denied` is not the appliance's key. */
+  it('never calls a tmux error an ssh failure, and keeps its text behind a disclosure', async () => {
+    const busy = scenario('busy')
+    const error = 'tmux `list-sessions` failed with status 1: error connecting to /tmp/tmux-1000/default (Permission denied)'
+    const state = {
+      ...busy,
+      readiness: { looked: 'never' },
+      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'no', error }] },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: 'Not checked yet' })).toBeTruthy()
+
+    const sessions = card('Sessions')
+    expect(await sessions.findByText('The sessions could not be listed')).toBeTruthy()
+    expect(sessions.getByText(/not an ssh failure/)).toBeTruthy()
+    for (const words of [/ssh to/, /key was refused/, /What ssh said/, /Permission denied/]) {
+      expect(screen.queryByText(words)).toBeNull()
+    }
+    fireEvent.click(sessions.getByRole('button', { name: /The full error/ }))
+    expect(sessions.getByText(error)).toBeTruthy()
+  })
+})
+
+describe('the Sessions card with no row', () => {
+  /** Y-585: `sessions.rs` answers an empty list here, and tmux did not run. */
+  it('agrees with Readiness on a machine with no tmux', async () => {
+    mount('desktop', '/m/nas')
+    const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
+    expect(await ready.findByRole('heading', { name: /tmux.* missing/ })).toBeTruthy()
+    const sessions = card('Sessions')
+    expect(await sessions.findByText('No session can start here')).toBeTruthy()
+    expect(sessions.getByText('tmux is missing on nas. Readiness shows the fix.')).toBeTruthy()
+    expect(sessions.queryByText(/tmux lists nothing/)).toBeNull()
+  })
+
+  it('claims a tmux listing where Readiness found tmux', async () => {
+    mount('desktop', '/m/pi-5')
+    expect(await screen.findByText('tmux lists nothing on pi-5')).toBeTruthy()
+    expect(card('Sessions').getByText('No session is open here')).toBeTruthy()
+  })
+
+  /** A fresh machine no workspace names: the sweep skipped it, so nothing has
+   *  read tmux, and it may not be there. */
+  it('claims nothing about tmux where no check has read it', async () => {
+    const busy = scenario('busy')
+    const state = {
+      ...busy,
+      readiness: { looked: 'never' },
+      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }] },
+    }
+    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
+    expect(await screen.findByText('Readiness has not read tmux on cachyos-g14')).toBeTruthy()
+    expect(card('Sessions').queryByText(/tmux lists nothing/)).toBeNull()
+  })
 })
 
 describe('/m/pi-5, which is missing git and claude', () => {
@@ -135,7 +227,9 @@ describe('/m/thinkpad, which is off', () => {
     expect(ready.queryByRole('button', { name: 'Check again' })).toBeNull()
     expect(screen.getByText(/^asleep/)).toBeTruthy()
     const sessions = card('Sessions')
-    expect(await sessions.findByText('the machine did not answer')).toBeTruthy()
+    expect(await sessions.findByText('thinkpad is asleep')).toBeTruthy()
+    expect(sessions.queryByText(/No route to host/)).toBeNull()
+    fireEvent.click(sessions.getByRole('button', { name: /What ssh said/ }))
     expect(sessions.getByText(/No route to host/)).toBeTruthy()
     // N2: no Kill here, so nothing says how Kill behaves.
     expect(sessions.queryByText(/Kill asks first/)).toBeNull()

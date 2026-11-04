@@ -264,10 +264,28 @@ describe('/machines with devices that open the dashboard', () => {
 })
 
 describe('/machines when ssh fails for a reason the join command cannot fix', () => {
+  /** Y-585: the card says why in plain words, offers the join command, and
+   *  keeps ssh's own words behind a press. */
+  it('reads a browser check as Copy join command, with the raw text closed', async () => {
+    const state = scenario('busy')
+    const said = 'Tailscale SSH requires an additional check, which needs a browser sign-in'
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const one = data.find((report) => report.machine === 'cachyos-g14')!
+    one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: said } : check))
+    mount('desktop', '/machines', state)
+    const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
+    expect(await box.findByText('browser sign-in')).toBeTruthy()
+    expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
+    expect(box.getByText(/Tailscale asks for a browser sign-in on each connection/)).toBeTruthy()
+    expect(box.queryByText(said)).toBeNull()
+    fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
+    expect(box.getByText(said)).toBeTruthy()
+  })
+
   /** A changed host key reads as `unreachable`, never `refused` — the join
    *  command places a key and cannot fix that (`reachableFailure`, Y-402
    *  review). Only a refused key offers Copy join command. */
-  it('reads ssh failing on a neutral-tone chip, and offers nothing to press', async () => {
+  it('reads ssh failing on a neutral-tone chip, and offers only the raw text', async () => {
     const state = scenario('busy')
     const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
     const cachy = data.find((one) => one.machine === 'cachyos-g14')!
@@ -280,7 +298,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     const failing = card('cachyos-g14')
     expect(failing.getByText('ssh failing')).toBeTruthy()
     expect(failing.queryByRole('button', { name: 'Copy join command' })).toBeNull()
-    expect(failing.queryAllByRole('button')).toHaveLength(0)
+    expect(failing.getAllByRole('button').map((one) => one.textContent)).toEqual(['Show'])
   })
 })
 

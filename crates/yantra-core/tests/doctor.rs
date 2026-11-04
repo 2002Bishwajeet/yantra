@@ -15,6 +15,8 @@
 
 mod common;
 
+use std::time::{Duration, Instant};
+
 use anyhow::Result;
 use common::{SshFixture, USER};
 use yantra_core::doctor::{self, Check, State};
@@ -157,6 +159,21 @@ fn assert_state(checks: &[Check], name: &str, wanted: State) {
 }
 
 /// A port nothing is listening on, closed again before the test uses it.
+/// Y-585: a failed login has to end fast, so the tests that fail one time it.
+async fn timed_of(ssh: &Ssh) -> (Vec<Check>, Duration) {
+    let started = Instant::now();
+    let checks = doctor::of(ssh, KNOWN_REMOTELY).await;
+    (checks, started.elapsed())
+}
+
+/// Y-585: a refused login ends inside `FAILED_TARGET` and says how long it took.
+fn assert_ended_fast(checks: &[Check], took: Duration) {
+    eprintln!("Y-585 failed login ended in {took:?}");
+    assert!(took < FAILED_TARGET, "the check took {took:?}");
+    let reachable = look(checks, "reachable");
+    assert!(reachable.took_ms.is_some(), "{reachable:?}");
+}
+
 fn closed_port() -> Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
@@ -184,9 +201,10 @@ async fn a_machine_that_refuses_the_connection_is_never_reported_as_missing_anyt
         state_dir: dir.clone(),
     })?;
 
-    let checks = doctor::of(&ssh, KNOWN_REMOTELY).await;
+    let (checks, took) = timed_of(&ssh).await;
     let _ = std::fs::remove_dir_all(&dir);
 
+    assert_ended_fast(&checks, took);
     let reachable = look(&checks, "reachable");
     assert_eq!(reachable.state, State::Absent, "{}", reachable.detail);
     assert!(
@@ -352,7 +370,7 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
     // sshd re-executes on SIGHUP, so ask until the banner is in the answer.
     let unjoined = machine("unjoined", &account)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let mut checks = doctor::of(&unjoined, KNOWN_REMOTELY).await;
+    let (mut checks, mut took) = timed_of(&unjoined).await;
     while !look(&checks, "reachable").detail.contains(BANNER) {
         anyhow::ensure!(
             std::time::Instant::now() < deadline,
@@ -360,8 +378,9 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
             look(&checks, "reachable").detail
         );
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        checks = doctor::of(&unjoined, KNOWN_REMOTELY).await;
+        (checks, took) = timed_of(&unjoined).await;
     }
+    assert_ended_fast(&checks, took);
     assert_state(&checks, "reachable", State::Absent);
     assert_state(&checks, "sshd", State::Present);
 
@@ -381,6 +400,142 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
     assert_eq!(String::from_utf8_lossy(&out.stderr), "own\n");
 
     let _ = std::fs::remove_dir_all(&config);
+    Ok(())
+}
+
+/// What Tailscale's check mode prints, with a link that must not reach a report.
+const CHECK_MODE: &str = "# Tailscale SSH requires an additional check.\n\
+                          # To authenticate, visit: https://login.tailscale.com/a/fixture";
+
+/// A healthy machine answers every step inside this (#520). yantra-box took 2.4 s
+/// on 2026-11-02, and 1.4 s of it was a real `gh auth status`. This test prints
+/// the fixture's times.
+const HEALTHY_TARGET: Duration = Duration::from_secs(5);
+
+/// A refused login, or a browser check that stops at the banner, ends in the
+/// time a handshake takes.
+const FAILED_TARGET: Duration = Duration::from_secs(5);
+
+fn scratch_ssh(fixture: &SshFixture, label: &str, user: &str) -> Result<(Ssh, std::path::PathBuf)> {
+    let dir = std::path::PathBuf::from("/tmp").join(format!("yd-{label}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(user.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.clone(),
+    })?;
+    Ok((ssh, dir))
+}
+
+/// Holds the auth stage after the banner, as check mode does: the key is only
+/// looked up by a command that sleeps, and `ConnectTimeout` has already stopped
+/// counting. This proves that ssh prints a banner during a held auth stage and
+/// that Yantra stops there. It does not prove when Tailscale sends its banner.
+fn hold_the_auth_stage(fixture: &SshFixture) -> Result<()> {
+    fixture.arrange_as_root(&format!(
+        "printf '%s\\n' '{CHECK_MODE}' > /etc/yantra-banner \
+         && printf '#!/bin/sh\\nexec sleep 300\\n' > /usr/local/bin/yantra-hold \
+         && chmod 755 /usr/local/bin/yantra-hold \
+         && sed -i '/^AuthorizedKeysFile/d' /etc/ssh/sshd_config \
+         && {{ echo 'Banner /etc/yantra-banner'; echo 'AuthorizedKeysFile none'; \
+         echo 'AuthorizedKeysCommand /usr/local/bin/yantra-hold'; \
+         echo 'AuthorizedKeysCommandUser nobody'; }} >> /etc/ssh/sshd_config \
+         && /usr/sbin/sshd -t && kill -HUP 1"
+    ))
+}
+
+/// Y-585: the 45 s the owner paid. A login held for a browser ends at the
+/// banner, the server counts as running, and the sign-in link stays out.
+#[tokio::test]
+async fn a_login_that_wants_a_browser_ends_fast_and_keeps_the_link_out() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    hold_the_auth_stage(&fixture)?;
+
+    // sshd re-executes on SIGHUP. An account with no key cannot leave a
+    // multiplexed master behind, so asking as one cannot skip the new login.
+    let (probe, probe_dir) = scratch_ssh(&fixture, "held-probe", "nobody-here")?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !look(&doctor::of(&probe, KNOWN_REMOTELY).await, "reachable")
+        .detail
+        .contains("requires an additional check")
+    {
+        anyhow::ensure!(Instant::now() < deadline, "the banner never arrived");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let (held, held_dir) = scratch_ssh(&fixture, "held", USER)?;
+    let (checks, took) = timed_of(&held).await;
+    let _ = std::fs::remove_dir_all(&probe_dir);
+    let _ = std::fs::remove_dir_all(&held_dir);
+
+    assert_ended_fast(&checks, took);
+    let reachable = look(&checks, "reachable");
+    assert_eq!(reachable.state, State::Absent, "{}", reachable.detail);
+    assert!(
+        reachable.detail.contains("requires an additional check"),
+        "join.sh reads this phrase: {}",
+        reachable.detail
+    );
+    assert!(
+        !reachable.detail.contains("http"),
+        "the link is dead once ssh stops: {}",
+        reachable.detail
+    );
+    assert_state(&checks, "sshd", State::Present);
+    Ok(())
+}
+
+/// Y-585: only what `ssh` printed before the start marker counts, so a command
+/// that says the phrase on its own stderr runs to the end.
+#[tokio::test]
+async fn a_command_that_prints_the_phrase_runs_to_completion() -> Result<()> {
+    let Some(lab) = Lab::start("phrase")? else {
+        return Ok(());
+    };
+    let out = lab
+        .ssh
+        .exec("echo 'Tailscale SSH requires an additional check' >&2; sleep 1; echo done; exit 3")
+        .await?;
+    assert_eq!(out.status, 3);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "done\n");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("requires an additional check"),
+        "the command keeps its own stderr"
+    );
+    Ok(())
+}
+
+/// #520's numbers: each step on a healthy machine says how long it took, and
+/// the whole check stays under its target. `--nocapture` prints them.
+#[tokio::test]
+async fn a_healthy_machine_times_every_step_and_stays_under_the_target() -> Result<()> {
+    let Some(lab) = Lab::start("timed")? else {
+        return Ok(());
+    };
+    lab.install_claude(true).await?;
+    lab.install_provider("gh", true).await?;
+
+    let started = Instant::now();
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    let took = started.elapsed();
+
+    eprintln!("Y-585 whole check took {took:?}");
+    for check in &checks {
+        eprintln!("Y-585 {}: {:?} ms", check.check, check.took_ms);
+        assert_eq!(
+            check.took_ms.is_some(),
+            check.check != "heartbeat",
+            "{}: {:?}",
+            check.check,
+            check.took_ms
+        );
+    }
+    assert!(took < HEALTHY_TARGET, "the check took {took:?}");
     Ok(())
 }
 

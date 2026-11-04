@@ -330,6 +330,34 @@ describe('the hub', () => {
     expect(screen.queryByRole('button', { name: /Install/ })).toBeNull()
   })
 
+  /** Y-585: the hub speaks as plainly as a machine line, and it is never
+   *  added, so it never offers the join command. */
+  it('gives a hub ssh cannot reach a cause and a next step, with ssh behind a press and no join command', async () => {
+    const silent = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] }
+    await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([silent as Readiness])] })
+    const hub = hubList()
+    expect(hub.getByText(/^Yantra can’t reach yantra-box over ssh\./)).toBeTruthy()
+    expect(hub.getByText(/^The join command does not fix this\./)).toBeTruthy()
+    expect(hub.queryByText('No route to host')).toBeNull()
+    const press = hub.getByRole('button', { name: /What ssh said/ })
+    expect(press.getAttribute('aria-expanded')).toBe('false')
+    expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
+    expect(screen.queryByText(COMMAND)).toBeNull()
+    fireEvent.click(press)
+    expect(await hub.findByText('No route to host')).toBeTruthy()
+  })
+
+  it('says the key was refused on a refused hub, with ssh behind a press and no join command', async () => {
+    const refused = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
+    await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
+    const hub = hubList()
+    expect(hub.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(hub.queryByText('Permission denied (publickey)')).toBeNull()
+    expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
+    fireEvent.click(hub.getByRole('button', { name: /What ssh said/ }))
+    expect(await hub.findByText('Permission denied (publickey)')).toBeTruthy()
+  })
+
   it('still draws the hub when the key could not be read', async () => {
     await draw({
       ...base([box]),
@@ -381,10 +409,32 @@ describe('the machine lines', () => {
     expect(screen.getByRole('link', { name: 'Add a device' })).toBeTruthy()
   })
 
+  it('gives a machine that wants a browser the join command too', async () => {
+    const browser = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Tailscale SSH requires an additional check' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([browser as Readiness])] })
+    expect(screen.getByText('Tailscale asks for a browser sign-in · run the join command on it')).toBeTruthy()
+  })
+
+  /** Y-585, #520: the first-run page speaks plainly, and the join command
+   *  would not help this machine, so it is not offered. */
+  it('gives a machine ssh cannot reach a cause and a next step, with ssh behind a press', async () => {
+    const silent = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([silent as Readiness])] })
+    expect(screen.getByText(/^Yantra can’t reach cachyos-g14 over ssh\./)).toBeTruthy()
+    expect(screen.getByText(/^The join command does not fix this\./)).toBeTruthy()
+    expect(screen.queryByText('No route to host')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
+    expect(await screen.findByText('No route to host')).toBeTruthy()
+  })
+
   it('gives a refused machine the join command to run on it', async () => {
     const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
     expect(screen.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(screen.queryByText('Permission denied (publickey)')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
+    expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
     expect(screen.getAllByText(COMMAND)).toHaveLength(1)
   })
