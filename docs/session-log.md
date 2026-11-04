@@ -384,6 +384,7 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 
 - **2026-11-04** — **[Y-617](../tracker.md#3-task-board) is in review.** Agents and Providers now say that no machine is checked yet, not "0 of 0 machines". The placeholder "Another agent" cards are gone from Agents and New session. The fresh-install captures show the result.
 - **2026-11-04:** v0.10.1 cut ([Y-624](../tracker.md#3-task-board)). It ships what merged after v0.10.0: the Fleet rebuild (#513), the hub out of Setup (#517), the Access page removed (#522), the plain machine check (#520), the git actions in the Chat, update progress in About, and the fresh-install fixes Y-614 to Y-618.
+- **2026-11-04:** v0.10.2 cut ([Y-636](../tracker.md#3-task-board)). It ships the Chat fix for macOS's bash 3.2 (Y-634, #617), the hub out of Setup (Y-622, #606) and the opencode test fix (Y-625, #607).
 
 - **2026-11-04** — **[Y-622](../tracker.md#3-task-board) is in review.** Setup no longer lists the daemon's own host under Add a machine, and it no longer shows the join command for it. The hub appears once, under step 1. A test uses the hub's real tailnet name.
 - **2026-11-04** — **[Y-625](../tracker.md#3-task-board) is in review.** The opencode ACP test no longer fails CI with -32603. The cause is in opencode 1.18.34: a cancel that arrives before the model's first output hits a missing `tokens` field. The test now cancels after the first text, and it passed 20 runs in a row in the fixture image. A failure names its step and shows opencode's log.
