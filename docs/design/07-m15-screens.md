@@ -171,8 +171,8 @@ machine page ignores it.
 | `agent-cli` | claude | Install |
 | `terminfo` | terminfo | `yantra fix-terminfo`, shown with Copy |
 | `provider-cli` | gh | the package manager's command, shown with Copy |
-| `provider-auth` | gh signed in | `gh auth login` on that machine, shown with Copy |
-| `login-session` | claude signed in | `claude` on that machine, then log in |
+| `provider-auth` | gh signed in | `gh auth login` on that machine, shown with Copy; on a Mac with no tmux server from a login, `tmux new-session -d` in Terminal there, shown with Copy (Y-619) |
+| `login-session` | claude signed in | `claude` on that machine, then log in; on a Mac with no tmux server from a login, `tmux new-session -d` in Terminal there, shown with Copy (Y-619) |
 | `heartbeat` | heartbeat | the join command's `yantra-agent` offer |
 
 *Doctor* on a button becomes **Check again**, the checklist's word. `yantra doctor` keeps its name
