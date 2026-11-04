@@ -29,15 +29,8 @@ import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
 import { stamp } from '../dashboard/bands'
 import { Join } from './Join'
 import { REQUIRED, useChecklist } from './progress'
-import { marks, statusWord, type Line, type Step } from './steps'
+import { marks, statusWord, TITLES, type Line, type Step } from './steps'
 import './Setup.css'
-
-const TITLES = {
-  tailnet: 'The appliance is on your tailnet',
-  machine: 'Add a machine',
-  ready: 'Get it ready',
-  first: 'Your first session',
-} as const
 
 const tones = { done: 'primary', progress: 'tertiary', todo: 'high', due: 'error', failed: 'error' } as const
 
@@ -240,7 +233,6 @@ export function Setup() {
   const now = useTick(true)
   const strangers = useId()
   const later = useId()
-  const configured = useId()
   const { about, identity, machines, sweep, notifications, events, all, hub, guests, steps, later: optional, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
@@ -441,21 +433,6 @@ export function Setup() {
               }
             />
           </List>
-
-          {done === REQUIRED ? (
-            <div className="setup__later">
-              <Text id={configured} render={<h2 />} scale="title-small" tone="variant">
-                What setup configured
-              </Text>
-              <ul aria-labelledby={configured} className="setup__configured">
-                {(Object.keys(TITLES) as (keyof typeof TITLES)[]).map((step) => (
-                  <Text key={step} render={<li />} scale="body-medium">
-                    {TITLES[step]} · {steps[step].words}
-                  </Text>
-                ))}
-              </ul>
-            </div>
-          ) : null}
 
           <div className="setup__later">
             <Text id={later} render={<h2 />} scale="title-small" tone="variant">

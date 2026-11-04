@@ -330,25 +330,6 @@ describe('the hub', () => {
     expect(screen.queryByRole('button', { name: /Install/ })).toBeNull()
   })
 
-  it('says what setup configured once all four steps are done', async () => {
-    await draw({
-      ...base([box]),
-      ...keyed,
-      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
-      'GET /api/workspaces': [200, looked.ok([aListed()])],
-    })
-    const configured = within(screen.getByRole('list', { name: 'What setup configured' }))
-    expect(configured.getByText(/The appliance is on your tailnet/)).toBeTruthy()
-    expect(configured.getByText(/yantra-box is the hub and needs no adding/)).toBeTruthy()
-    expect(configured.getByText(/1 of 1 machines ready/)).toBeTruthy()
-    expect(configured.getByText(/1 workspace made/)).toBeTruthy()
-  })
-
-  it('keeps no summary while a step is not done', async () => {
-    await draw({ ...base([box]), ...keyed })
-    expect(screen.queryByRole('list', { name: 'What setup configured' })).toBeNull()
-  })
-
   it('still draws the hub when the key could not be read', async () => {
     await draw({
       ...base([box]),

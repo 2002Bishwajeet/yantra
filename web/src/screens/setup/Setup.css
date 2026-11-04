@@ -136,14 +136,6 @@
   padding: 0 4px;
 }
 
-.setup__configured {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0 4px 0 24px;
-}
-
 /* A line's words carry the commands and the install bar beneath them. */
 .setup__line[data-kind="blocked"],
 .setup__line[data-kind="installing"] {

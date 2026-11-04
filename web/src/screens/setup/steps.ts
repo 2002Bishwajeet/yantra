@@ -12,6 +12,14 @@ export type Status = 'done' | 'progress' | 'todo' | 'due' | 'failed'
 
 export type Step = { status: Status; words: string }
 
+/** The four required steps' titles, as the checklist and the Finish setup card both name them. */
+export const TITLES = {
+  tailnet: 'The appliance is on your tailnet',
+  machine: 'Add a machine',
+  ready: 'Get it ready',
+  first: 'Your first session',
+} as const
+
 export const marks: Record<Status, MarkState> = {
   done: 'done',
   progress: 'running',
