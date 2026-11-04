@@ -384,3 +384,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 
 - **2026-11-04** — **[Y-617](../tracker.md#3-task-board) is in review.** Agents and Providers now say that no machine is checked yet, not "0 of 0 machines". The placeholder "Another agent" cards are gone from Agents and New session. The fresh-install captures show the result.
 - **2026-11-04:** v0.10.1 cut ([Y-624](../tracker.md#3-task-board)). It ships what merged after v0.10.0: the Fleet rebuild (#513), the hub out of Setup (#517), the Access page removed (#522), the plain machine check (#520), the git actions in the Chat, update progress in About, and the fresh-install fixes Y-614 to Y-618.
+
+- **2026-11-04** — **[Y-622](../tracker.md#3-task-board) is in review.** Setup no longer lists the daemon's own host under Add a machine, and it no longer shows the join command for it. The hub appears once, under step 1. A test uses the hub's real tailnet name.
