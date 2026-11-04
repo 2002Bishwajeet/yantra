@@ -370,3 +370,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-04** — **[Y-582](../tracker.md#3-task-board) is in review.** The daemon now names its own host. Setup no longer offers that host as a machine to add, and Machines shows it first and apart. It can still run agents. Tests cover a fresh install, and the Finish setup card says what setup configured.
 
 - **2026-11-03** — **[Y-493](../tracker.md#3-task-board) is in review.** The Chat bar now has commit, push and open-PR controls. The commit message is generated and the owner can edit it. The PR link shows once the PR exists. Each failure is drawn, and the 409 causes read in the daemon's own words. Unit and Playwright tests cover the flow.
+
+- **2026-11-04** — **[Y-612](../tracker.md#3-task-board) is in review.** Settings → About and `yantra update` now show the update's download progress and install step. If the update fails, both show the error from the update service's journal. Daemon tests cover the status route.

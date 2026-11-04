@@ -381,7 +381,19 @@ export type About = {
   relay: boolean
   // Y-367: the newest release, read hourly. `failed` is never *current*.
   published: Looked<Published>
+  // Y-612: how far `yantra-update.service` has got. Null when nothing runs
+  // and the last run did not fail.
+  update: UpdateProgress | null
 }
+
+/** Y-612: what the update unit wrote to `/run/yantra-update`. `total` is null
+ *  when the release host sent no length. `said` is the unit's last stderr. */
+export type UpdateProgress =
+  | { step: 'resolving' }
+  | { step: 'downloading'; version: string; received: number; total: number | null }
+  | { step: 'verifying' }
+  | { step: 'installing' }
+  | { step: 'failed'; said: string }
 
 /** ADR-0027 §2: the published version, and whether it is newer than this
  *  build. The daemon decides `newer`, so the page and the CLI agree. */
