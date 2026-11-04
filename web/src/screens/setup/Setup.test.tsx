@@ -57,6 +57,7 @@ const base = (machines: Machine[] = [linux, mac, phone, tablet, windows]): Route
   'GET /api/about': [200, { ...contract.about, relay: false }],
   'GET /api/ssh-identity': [404, 'no ssh identity yet — the first join makes one'],
   'GET /api/github': [200, contract.disconnected],
+  'GET /api/readiness/github': [200, contract.githubReadiness],
 })
 
 async function draw(routes: Routes) {
@@ -113,6 +114,18 @@ describe('the steps', () => {
     expect(later.getByText('GitHub')).toBeTruthy()
     expect(later.getByText('Push to your phone')).toBeTruthy()
     expect(later.getByRole('link', { name: 'Connect' }).dataset.variant).toBe('tonal')
+  })
+
+  it('says GitHub refused the grant and links Sign in again to Providers', async () => {
+    await draw({
+      ...base(),
+      'GET /api/github': [200, contract.github],
+      'GET /api/readiness/github': [200, contract.githubRefused],
+    })
+    const later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
+    expect(await later.findByText(/GitHub refused the grant · sign in again/)).toBeTruthy()
+    expect(later.getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('/settings/providers')
+    expect(document.body.textContent).not.toContain('someone')
   })
 
   /** Y-477: the appliance is the node the daemon is bound to. */

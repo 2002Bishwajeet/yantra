@@ -29,6 +29,8 @@ export const keys = {
       : (['readiness', machine] as const),
   attention: () => ['attention'] as const,
   github: () => ['github'] as const,
+  /** Under `github`, so a sign-in or sign-out that drops one drops both. */
+  githubReadiness: () => ['github', 'readiness'] as const,
   repos: () => ['repos'] as const,
   notifications: () => ['notifications'] as const,
   about: () => ['about'] as const,

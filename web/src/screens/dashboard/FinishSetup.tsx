@@ -13,11 +13,11 @@ import { hideSetupCard, setupCardHidden } from './setupCard'
 function Unfinished(props: { now: number }) {
   const heading = useId()
   const configured = useId()
-  const { steps, later, done, settled } = useChecklist(props.now)
+  const { steps, later, githubGrant, done, settled } = useChecklist(props.now)
   // Unsettled, a step says *not yet* for what is only unread.
   if (!settled) return null
   const open = [
-    { key: 'github', title: 'GitHub', step: later.github, action: 'Connect', category: 'providers' },
+    { key: 'github', title: 'GitHub', step: later.github, action: githubGrant.kind === 'refused' ? 'Sign in again' : 'Connect', category: 'providers' },
     { key: 'push', title: 'Push to your phone', step: later.push, action: 'Set up', category: 'notifications' },
   ].filter((one) => one.step.status !== 'done')
   if (open.length === 0) return null

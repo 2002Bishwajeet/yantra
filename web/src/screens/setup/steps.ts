@@ -1,6 +1,8 @@
-import type { About, Check, Machine, Readiness } from '@/api'
+import type { About, Check, Connection, Machine, Readiness } from '@/api'
+import type { Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure } from '@/lib/checks'
+import { grant, REFUSED } from '@/lib/github'
 import { blocking } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 
@@ -106,17 +108,15 @@ export function keyExpiry(machines: Asked<Machine[]>, appliance: Machine | null,
   return { status: 'todo', words: `the key expires on ${date} · turn key expiry off in the admin console` }
 }
 
-/** The grant, read as narrowly as this step needs it: the api layer still
- *  types `/api/github` without `pending`, and the daemon sends it. */
-type Grant = { connected: boolean; login: string | null; pending?: boolean }
-
-export function github(connection: Asked<Grant>): Step {
+export function github(connection: Asked<Connection>, readiness: Reading<Check>): Step {
   if (connection.error) return failed(connection.error)
   if (connection.isPending || !connection.data) return reading()
-  if (connection.data.connected) {
-    return { status: 'done', words: `signed in as ${connection.data.login ?? 'an account not yet read'} on the appliance` }
+  const state = grant(connection.data, readiness)
+  if (state.kind === 'refused') return { status: 'due', words: `${REFUSED} · sign in again` }
+  if (state.kind === 'accepted' || state.kind === 'unasked') {
+    return { status: 'done', words: `signed in${state.login ? ` as ${state.login}` : ''} on the appliance` }
   }
-  if (connection.data.pending) return { status: 'progress', words: 'a sign-in is waiting at github.com' }
+  if (state.kind === 'pending') return { status: 'progress', words: 'a sign-in is waiting at github.com' }
   return { status: 'todo', words: 'not connected · reviews, issues and repositories come through it' }
 }
 

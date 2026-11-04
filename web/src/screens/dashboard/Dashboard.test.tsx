@@ -256,6 +256,15 @@ describe('the Dashboard on the first run', () => {
     expect(readPrefs().general.finishSetup).toBe('hidden')
   })
 
+  it('says on Finish setup that GitHub refused the grant, and offers Sign in again', async () => {
+    const state = keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')]))
+    Object.assign(state, { github: contract.github, 'readiness/github': contract.githubRefused })
+    mount('desktop', '/', state)
+    const card = within(await screen.findByRole('region', { name: 'Finish setup' }))
+    expect(await card.findByText(/GitHub refused the grant · sign in again/)).toBeTruthy()
+    expect(card.getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('/settings/providers')
+  })
+
   /** R23 change 13: step 4 needs a workspace, and a workspace ends the
    *  checklist, so the summary is on the card the owner lands on. */
   it('says what setup configured on the card once all four steps are done', async () => {

@@ -1,5 +1,8 @@
 import { ExternalLink, LogIn } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keys } from '@/api/keys'
+import { signedIn } from '@/lib/github'
 import { useGithubLogin } from '@/api/mutations'
 import { githubQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
@@ -30,7 +33,14 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
     enabled: open && device !== undefined,
     refetchInterval: device === undefined ? false : device.interval * 1000,
   })
-  const connected = device !== undefined && connection.data?.connected ? connection.data : null
+  // A refused grant is still `connected`: only a poll made after the flow began, with none waiting, is a new sign-in.
+  const fresh = connection.dataUpdatedAt > login.submittedAt
+  const connected = device !== undefined && fresh && connection.data?.connected && !connection.data.pending ? connection.data : null
+  const client = useQueryClient()
+  // The daemon looks at GitHub again when the grant changes; Settings reads that look.
+  useEffect(() => {
+    if (connected) void client.invalidateQueries({ queryKey: keys.github() })
+  }, [connected, client])
   const now = useTick(open && device !== undefined && connected === null)
   // The tick may predate the write by a few ms; elapsed never counts backwards.
   const elapsed = Math.max(0, Math.floor((now - login.submittedAt) / 1000))
@@ -57,7 +67,7 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
       <div className="settings__connect">
         {connected ? (
           <Text render={<p />} scale="title-medium" emphasized>
-            Signed in as {connected.login ?? 'someone'}.
+            {signedIn(connected.login)}.
           </Text>
         ) : device === undefined || expired ? (
           <>

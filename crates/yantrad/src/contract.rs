@@ -65,6 +65,7 @@ import type {
   ChatNotAttached,
   ChatQuery,
   ChatQueue,
+  Check,
   Cloning,
   Commands,
   Connection,
@@ -167,6 +168,16 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
         ),
         ("repos", "Looked<Repo[]>", read(&fleet, "/repos").await),
         ("github", "Connection", read(&fleet, "/github").await),
+        (
+            "githubReadiness",
+            "Looked<Check>",
+            read(&fleet, "/readiness/github").await,
+        ),
+        (
+            "githubRefused",
+            "Looked<Check>",
+            read(&refused(), "/readiness/github").await,
+        ),
         (
             "disconnected",
             "Connection",
@@ -325,9 +336,9 @@ async fn fleet() -> Fleet {
             .map(|report| (report.machine.clone(), Arc::new(Reading::new(report))))
             .collect(),
         attention: Some(Arc::new(Reading::new(Ok(attention())))),
-        // `/readiness/github` has no entry below: the type it would satisfy is
-        // the card's, and the dashboard is parked (Y-174).
-        github: None,
+        github: Some(Arc::new(Reading::new(doctor::github(Some(&Ok(
+            "2002Bishwajeet".into(),
+        )))))),
         // `/about` is built by hand in `api::answers` for its build date, and
         // its `published` fact is spelled there.
         release: None,
@@ -502,6 +513,15 @@ fn broken() -> Fleet {
                 stderr: "failed to connect to local tailscaled".into(),
             },
         )))),
+        ..Snapshot::default()
+    })
+}
+
+fn refused() -> Fleet {
+    holding(Snapshot {
+        github: Some(Arc::new(Reading::new(doctor::github(Some(&Err(
+            yantra_core::github::Error::Refused,
+        )))))),
         ..Snapshot::default()
     })
 }

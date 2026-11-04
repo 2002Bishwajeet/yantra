@@ -2,6 +2,7 @@ import { type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
+  Check,
   Commands,
   Connection,
   Listed,
@@ -286,6 +287,10 @@ export const githubQuery = () =>
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
+
+/** Y-623: what GitHub said about the grant, on the daemon's own sweep. */
+export const githubReadinessQuery = () =>
+  swept<Check>(keys.githubReadiness(), '/api/readiness/github')
 
 /** Y-342. Swept on `attention`'s clock — it leaves the tailnet. */
 export const reposQuery = () =>

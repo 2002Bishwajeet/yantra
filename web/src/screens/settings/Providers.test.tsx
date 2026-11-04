@@ -101,6 +101,59 @@ describe('Providers', () => {
     expect(document.body.textContent).not.toMatch(/gho_|ghp_/)
   })
 
+  describe('a refused grant', () => {
+    const refused = {
+      'GET /api/github': [200, { ...contract.github, login: null }],
+      'GET /api/readiness/github': [200, contract.githubRefused],
+      'POST /api/github/login': [200, contract.device],
+    } as Answers
+
+    it('says GitHub refused it, offers Sign in again, and never says someone', async () => {
+      mountSettings('desktop', '/settings/providers', refused)
+      expect(await screen.findByText('GitHub refused the grant')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Manage' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+      expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
+      expect(document.body.textContent).not.toContain('someone')
+    })
+
+    it('waits for the new flow to finish before it says signed in', async () => {
+      let started = false
+      let polls = 0
+      mountSettings('desktop', '/settings/providers', {
+        ...refused,
+        'POST /api/github/login': () => {
+          started = true
+          return [200, contract.device]
+        },
+        // The old grant stays `connected` until the new one lands; the first poll after the start sees the flow waiting.
+        'GET /api/github': () => [
+          200,
+          !started ? contract.github : ++polls < 2 ? { ...contract.github, pending: true } : contract.github,
+        ],
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in again' }))
+      const sheet = within(await screen.findByRole('dialog', { name: 'Connect GitHub' }))
+      fireEvent.click(sheet.getByRole('button', { name: 'Sign in with GitHub' }))
+      expect(await sheet.findByText('WDJB-MJHT')).toBeTruthy()
+      expect(sheet.queryByText('Signed in as 2002Bishwajeet.')).toBeNull()
+      expect(await sheet.findByText('Signed in as 2002Bishwajeet.', {}, { timeout: 14000 })).toBeTruthy()
+    }, 20000)
+  })
+
+  it('says GitHub was not asked when the login is unread and the check could not be made', async () => {
+    mountSettings('desktop', '/settings/providers', {
+      'GET /api/github': [200, { ...contract.github, login: null }],
+      'GET /api/readiness/github': [500, 'boom'],
+    })
+    expect(await screen.findByText('Signed in · GitHub not asked yet')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Manage' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'GitHub' }))
+    expect(sheet.queryByText(/Signed in as/)).toBeNull()
+    expect(document.body.textContent).not.toContain('someone')
+  })
+
   describe('the device code', () => {
     const clipboard = (writeText: ((text: string) => Promise<void>) | undefined) =>
       Object.defineProperty(navigator, 'clipboard', {
