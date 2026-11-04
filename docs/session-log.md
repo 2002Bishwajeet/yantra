@@ -380,3 +380,5 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-04** — **[Y-615](../tracker.md#3-task-board) is in review.** Setup steps 2 and 4 now count the machines they list, and step 3 has its own action. Setup and New session agree on which machine is ready. One Add a device button remains. The fresh-install captures show the result.
 
 - **2026-11-04** — **[Y-616](../tracker.md#3-task-board) is in review.** A machine never checked now shows Check and one status, not Check again. Worth a look waits for the sessions answer and says no machine is checked yet. The fresh-install baselines are regenerated.
+
+- **2026-11-04** — **[Y-617](../tracker.md#3-task-board) is in review.** Agents and Providers now say that no machine is checked yet, not "0 of 0 machines". The placeholder "Another agent" cards are gone from Agents and New session. The fresh-install captures show the result.
