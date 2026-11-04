@@ -1,0 +1,6 @@
+{
+  "extends": "fresh",
+  "defects": [
+    "recheck-needs-workspace"
+  ]
+}

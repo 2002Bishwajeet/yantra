@@ -35,8 +35,8 @@ export function ListItem(props: ListItemProps) {
         <>
           {leading ? <span className="m3-list-item__leading">{leading}</span> : null}
           <span className="m3-list-item__text">
-            <span className="m3-list-item__headline m3-clip">{headline}</span>
-            {supporting ? <span className="m3-list-item__supporting m3-clip">{supporting}</span> : null}
+            <span className="m3-list-item__headline m3-wrap">{headline}</span>
+            {supporting ? <span className="m3-list-item__supporting m3-wrap">{supporting}</span> : null}
           </span>
         </>
       ),

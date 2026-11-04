@@ -791,8 +791,8 @@ measures, and the reading belongs to no frame a reader sees (Y-363).
 **The fixture daemon is Node, not `yantrad`.**
 [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the
 dashboard calls from `src/contract.gen.ts`, plus both terminal sockets, under one
-of fourteen scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
-`contract`, `broken`, `repair`, `firstrun`, `notifications`, `install`, `adding`, `stranger`, `setup`. A test picks one with a cookie
+of twenty-seven scenarios, among them `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
+`contract`, `broken`, `repair`, `firstrun`, `notifications`, `install`, `adding`, `stranger`, `setup`, `fresh` (the first join: machines, no check, no workspace) and `freshdefect` (`fresh` with #514's refused re-check). A test picks one with a cookie
 carrying its own key, so a write in one worker is not a row in another, and
 `page.clock` pins the instant so an age reads the same on every run.
 
@@ -891,7 +891,7 @@ src/
                      `inApp`, and the vitest setup
 e2e/
   lib/               sizes, scenario, axe, screenshot, keyboard, routes
-  fixture/           the Node daemon and its eighteen scenarios
+  fixture/           the Node daemon and its twenty-six scenarios
   __screenshots__/   one baseline per screen, scenario and size
 design/              Y-330's options round. A second Vite root; ships nothing
 ```

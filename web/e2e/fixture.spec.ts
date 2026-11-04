@@ -138,3 +138,21 @@ test('a read can be held for the pending state', async ({ request }) => {
   await request.get(`${api}/machines?slow=300`, under('busy'))
   expect(Date.now() - started).toBeGreaterThanOrEqual(300)
 })
+
+test('fresh has machines, no workspace and no check, and a re-check gets a report', async ({ request }) => {
+  const workspaces = await (await request.get(`${api}/workspaces`, under('fresh'))).json()
+  expect(workspaces.data).toEqual([])
+  const machines = await (await request.get(`${api}/machines`, under('fresh'))).json()
+  expect(machines.data.length).toBeGreaterThanOrEqual(3)
+  const name = machines.data[1].name
+  expect((await request.get(`${api}/machines/${name}/readiness`, under('fresh'))).status()).toBe(404)
+  const asked = await request.post(`${api}/machines/${name}/readiness`, under('fresh'))
+  expect(asked.status()).toBe(200)
+  expect((await asked.json()).data.machine).toBe(name)
+})
+
+test('freshdefect refuses a re-check of a machine no workspace names', async ({ request }) => {
+  const refused = await request.post(`${api}/machines/macbook/readiness`, under('freshdefect'))
+  expect(refused.status()).toBe(404)
+  expect(await refused.text()).toBe('no workspace names a machine called `macbook`')
+})
