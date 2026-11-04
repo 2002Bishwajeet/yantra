@@ -285,6 +285,21 @@ costs more to discover the same thing.
 > is answered, and nothing else in that list moves. Whether the ADR is accepted is the owner's and is
 > deliberately not part of the change that recorded this.
 
+> **2026-11-04, Y-632: §7's launchd job can be loaded over ssh, without root.** §8 says a process
+> can reach `gui/<uid>` from ssh only through `launchctl asuser`, which needs root. That is true of
+> `asuser` and not of a LaunchAgent. On `bishwajeets-macbook-pro`, macOS 26, while the owner was
+> logged in at the screen, a plain ssh session as `biswa` ran
+> `launchctl bootstrap gui/$(id -u) <plist>` and it exited **0**. The plist ran
+> `/opt/homebrew/bin/tmux -L yprobe new-session -d` with `claude auth status` in its pane, and that
+> answered `loggedIn: true` / `authMethod: "claude.ai"`. The same ssh session, outside the job,
+> answered `loggedIn: false` / `"none"`, and `tmux -L yprobe ls` from it found the job's server.
+> The probe read only those two fields, then ran `launchctl bootout` and removed its plist and server.
+>
+> So the owner no longer starts the server by hand. Join installs §7's job, and where §1 found no
+> server, Yantra loads or kickstarts that job over ssh and proceeds. §1 holds in its intent: the
+> server still belongs to the login session, and ssh still never forks it. One limit remains: with
+> no user logged in at the screen there is no `gui/<uid>` domain, and Yantra then refuses as before.
+
 ## Alternatives considered
 
 ### A. Do nothing — Yantra says *this machine cannot start an agent*, and why
