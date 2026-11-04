@@ -31,13 +31,6 @@
   overflow-wrap: anywhere;
 }
 
-.readiness__detail {
-  display: block;
-  padding: 0 4px;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
 .readiness__running,
 .readiness__result,
 .readiness__left {
