@@ -190,6 +190,18 @@ describe('the steps', () => {
     expect(within(row).queryByRole('button', { name: 'Check all' })).toBeNull()
   })
 
+  it('keeps Install on all beside Check all while one machine is unchecked', async () => {
+    await draw({
+      ...base([up, upToo]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' })])],
+    })
+    const row = screen.getByText('Get it ready').closest('.m3-list__row') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Check all' })).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Install on all' })).toBeTruthy()
+    expect(screen.queryByText(/none is checked/)).toBeNull()
+  })
+
   /** Y-615: the FAB is the one Add a device on a phone and a tablet. */
   it('draws no Add a device in the page while the FAB carries it', async () => {
     fab.carries = true

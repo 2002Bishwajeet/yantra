@@ -52,16 +52,20 @@ describe('the step each read makes', () => {
       status: 'todo',
       words: '3 machines on the tailnet, none checked yet · a check shows which joined',
     })
+    expect(added([], [], null, ['pi-5', 'nas'], 3).words).toBe(
+      '1 of 3 machines checked, none joined yet · a check shows which joined',
+    )
     expect(added([], [], null, ['pi-5']).words).toBe('1 machine on the tailnet, none checked yet · a check shows which joined')
     expect(added(['pi-5'], [], null, ['nas']).status).toBe('done')
     expect(added([], [], null, []).words).toBe('no machine has joined yet · Add a device shows the steps')
   })
 
   it('says no machine is checked ready when none is checked, and keeps the old words otherwise', () => {
-    expect(firstSession(null, 0, 3).words).toBe('needs one ready machine · none is checked yet')
-    expect(firstSession(null, 0, 0).words).toBe('needs one ready machine, you have none yet')
-    expect(firstSession(null, 1, 2).words).toBe('needs one ready machine, you have 1')
-    expect(firstSession(2, 0, 3).status).toBe('done')
+    expect(firstSession(null, 0, true).words).toBe('needs one ready machine · none is checked yet')
+    expect(firstSession(null, 0, false).words).toBe('needs one ready machine, you have none yet')
+    expect(firstSession(null, 0, false).words).not.toContain('none is checked')
+    expect(firstSession(null, 1, false).words).toBe('needs one ready machine, you have 1')
+    expect(firstSession(2, 0, true).status).toBe('done')
   })
 
   /** Y-582: the hub is the daemon's own node, so a fresh install has nothing to add. */

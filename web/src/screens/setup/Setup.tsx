@@ -413,14 +413,19 @@ export function Setup() {
               step={steps.ready}
               title={TITLES.ready}
               trailing={
-                unchecked ? (
-                  <Button onClick={() => press('check')} variant="tonal">
-                    Check all
-                  </Button>
-                ) : installable ? (
-                  <Button onClick={() => press('install')} variant="tonal">
-                    Install on all
-                  </Button>
+                unchecked || installable ? (
+                  <>
+                    {unchecked ? (
+                      <Button onClick={() => press('check')} variant="tonal">
+                        Check all
+                      </Button>
+                    ) : null}
+                    {installable ? (
+                      <Button onClick={() => press('install')} variant="tonal">
+                        Install on all
+                      </Button>
+                    ) : null}
+                  </>
                 ) : undefined
               }
             />

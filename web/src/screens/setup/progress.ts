@@ -110,9 +110,10 @@ export function useChecklist(now: number) {
           identity.data === null ? reached : [],
           hub && reaches(hub) ? hub.machine.name : null,
           unchecked.filter((one) => !one.machine.hub).map((one) => one.machine.name),
+          guests.length,
         ),
     ready: readied(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
-    first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount, unchecked.length),
+    first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount, lines.length > 0 && unchecked.length === lines.length),
   }
   const key = keyExpiry(
     { data: machines.looked === 'ok' ? machines.data : undefined, error: fromReading(machines), isPending: machines.looked === 'pending' },
