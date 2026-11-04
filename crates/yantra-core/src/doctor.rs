@@ -1,9 +1,9 @@
 //! What a machine can and cannot do, asked without changing it.
 //!
 //! The check list is [D2 §3.1] and the constraint is [D2 §3.2]: `doctor` is a
-//! **read**. Nothing here installs, writes or starts anything — the one place
-//! that could is the macOS branch of [`login_session`] and [`provider_auth`],
-//! which asks whether a tmux server exists rather than creating one (ADR-0018 §1).
+//! **read**. Nothing here installs, writes or starts anything — the places that
+//! could are the macOS branches of [`login_session`] and [`provider_auth`],
+//! which ask whether a tmux server exists rather than creating one (ADR-0018 §1).
 //!
 //! **Every branch answers `Unknown` where it could not ask**, which is R-23 and
 //! the reason this module is longer than the commands it runs: *absent* sends a
