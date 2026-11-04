@@ -162,9 +162,11 @@ pub async fn locate<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<St
 pub(crate) fn probe(binary: &'static str) -> String {
     // `$HOME` is left unquoted in the loop so the remote shell expands it;
     // every path here is a constant, so there is nothing to inject.
+    // `(/*)`, not `/*)`: callers embed this in `c=$(…)`, and macOS's bash 3.2
+    // ends the substitution at a pattern's unpaired `)` (Y-634).
     format!(
         "p=$(command -v {binary} 2>/dev/null)\n\
-         case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
+         case \"$p\" in (/*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
          for d in {dirs}; do\n\
          \x20 [ -x \"$d/{binary}\" ] && {{ printf '%s\\n' \"$d/{binary}\"; exit 0; }}\n\
          done\n\
@@ -385,6 +387,14 @@ fn new_session_id() -> Result<String, Error> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    // macOS's bash 3.2 closes a `$(…)` at the first unpaired `)`, and three
+    // callers embed the probe in `c=$(…)` (Y-634).
+    #[test]
+    fn the_probe_pairs_every_paren_so_it_survives_bash_3_2() {
+        let probe = probe("claude");
+        assert_eq!(probe.matches('(').count(), probe.matches(')').count());
+    }
 
     #[test]
     fn a_session_id_is_a_v4_uuid() {
