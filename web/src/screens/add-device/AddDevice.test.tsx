@@ -162,6 +162,20 @@ describe('beat 1, on the tailnet', () => {
     expect(beat('Joined').getByText(/not yet · waits for the device to be on the tailnet/)).toBeTruthy()
   })
 
+  it('never offers the hub as a device to add', async () => {
+    const box = aMachine({ name: 'box', os: 'linux', hub: true })
+    mountSettings('desktop', at('platform=linux'), fleet([box, laptop], []))
+    expect(await screen.findByRole('link', { name: 'laptop' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'box' })).toBeNull()
+  })
+
+  it('draws no pick note when the hub is the only node', async () => {
+    const box = aMachine({ name: 'box', os: 'linux', hub: true })
+    mountSettings('desktop', at('platform=linux'), fleet([box], []))
+    expect(await screen.findByText(/waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
+    expect(screen.queryByText(/Already on the tailnet\? Pick it/)).toBeNull()
+  })
+
   it('draws the failure inline when the tailnet list could not be read', async () => {
     mountSettings('desktop', at('platform=linux'), { 'GET /api/machines': [200, looked.failed('tailscaled is down')] })
     expect(await screen.findByText(/stuck · the tailnet list could not be read/)).toBeTruthy()

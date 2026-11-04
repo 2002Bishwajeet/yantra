@@ -412,7 +412,8 @@ function Flow(props: { platform: Exclude<Platform, 'windows'>; named: string | u
 
   const first = onTailnet(machines, named, platform, late, named ? undefined : newStranger(list, seen, platform))
   // Y-404: a node another owner holds is never offered as the device.
-  const candidates = named ? [] : list.filter((one) => platformOf(one) === platform && one.ownership === 'yours')
+  // Y-614: the hub is the daemon's own host, never a device to add.
+  const candidates = named ? [] : list.filter((one) => platformOf(one) === platform && one.ownership === 'yours' && !one.hub)
   const one = item(
     'On the tailnet',
     first,
