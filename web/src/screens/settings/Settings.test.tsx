@@ -17,7 +17,6 @@ describe('the settings screen', () => {
       'Providers',
       'Agents',
       'Appearance',
-      'Access',
       'About',
     ])
     expect(within(nav).getByRole('link', { name: 'General' }).getAttribute('aria-current')).toBe('page')

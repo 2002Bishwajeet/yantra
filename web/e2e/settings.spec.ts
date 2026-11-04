@@ -11,7 +11,6 @@ const CATEGORIES = [
   { id: 'providers', label: 'Providers', shows: 'GitLab' },
   { id: 'agents', label: 'Agents', shows: 'Claude Code' },
   { id: 'appearance', label: 'Appearance', shows: 'Colour' },
-  { id: 'access', label: 'Access', shows: 'Who may open the dashboard' },
   { id: 'about', label: 'About', shows: 'Listens on' },
 ] as const
 
@@ -337,16 +336,22 @@ test.describe('settings · Notifications', () => {
   })
 })
 
-test.describe('settings · Access and About read the appliance', () => {
-  test('names the key and shows the public half only in the sheet', async ({ page, size }) => {
+test.describe('settings · About reads the appliance', () => {
+  test('says who can open the dashboard', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/settings/about')
+    await opened(page, 'About', size)
+    await expect(
+      page.getByText('Only devices on your tailnet can open this dashboard. There is no separate login.'),
+    ).toBeVisible()
+  })
+
+  // The key moved to Add a device, so the old link opens its new home.
+  test('sends the old Access link to Add a device', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto('/settings/access')
-    await opened(page, 'Access', size)
-    await expect(page.getByText('/home/<user>/.ssh/id_yantra')).toBeVisible()
-    await expect(page.getByText(/^ssh-ed25519 AAAA/)).toBeHidden()
-    await page.getByRole('button', { name: 'Show key' }).click()
-    const sheet = page.getByRole('dialog', { name: 'Public key' })
-    await expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeVisible()
+    await expect(page).toHaveURL(/\/machines\/add/)
+    await expect(page.getByRole('heading', { level: 1, name: 'Add a device' })).toBeVisible()
   })
 
   test('says the daemon facts and where its one file lives', async ({ page, size }) => {

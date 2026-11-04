@@ -187,6 +187,39 @@ describe('beat 2, joined', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(COMMAND))
   })
 
+  it('names the key the command adds, and keeps its path in collapsed diagnostics', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], []))
+    expect(await screen.findByText(/The command adds this key: ed25519 · SHA256:<fingerprint>/)).toBeTruthy()
+    const diagnostics = screen.getByText('Diagnostics').closest('details')!
+    expect(diagnostics.open).toBe(false)
+    expect(within(diagnostics).getByText('/home/<user>/.ssh/id_yantra')).toBeTruthy()
+    expect(screen.queryByText(/ssh-ed25519 AAAA/)).toBeNull()
+  })
+
+  it('shows the public key with Copy in a sheet', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText } })
+    mountSettings('desktop', joinAt, fleet([laptop], []))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
+    expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeTruthy()
+    expect(sheet.getByText(/add it to ~\/\.ssh\/authorized_keys/)).toBeTruthy()
+    fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
+    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh-ed25519 /))
+  })
+
+  it('says the appliance makes its key at the first join when there is none', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], [], [], { 'GET /api/ssh-identity': [404, { error: 'no identity' }] }))
+    expect(await screen.findByText('The appliance makes its key when the first machine joins.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show key' })).toBeNull()
+  })
+
+  it('draws a key read error inline and keeps the command', async () => {
+    mountSettings('phone', joinAt, fleet([laptop], [], [], { 'GET /api/ssh-identity': [500, 'boom'] }))
+    expect(await screen.findByText("The appliance's key could not be read")).toBeTruthy()
+    expect(screen.getByText(COMMAND)).toBeTruthy()
+  })
+
   it('is done on the join event, and folds its body away', async () => {
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean]))
     expect(await screen.findByText(/done · joined as biswa/)).toBeTruthy()

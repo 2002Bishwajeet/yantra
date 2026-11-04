@@ -29,6 +29,20 @@ test.describe('Add a device', () => {
     await screenshot(page, 'add-device', 'adding', size)
   })
 
+  test('beat 2 names the key, and Show key opens the public half', async ({ page }) => {
+    await scenario(page, 'adding')
+    await page.goto(flow('new-box'))
+    const joined = beat(page, 'Joined')
+    await expect(joined.getByText(/The command adds this key: ed25519 · SHA256:/)).toBeVisible()
+    await expect(joined.getByText('/home/<user>/.ssh/id_yantra')).toBeHidden()
+    await joined.getByText('Diagnostics').click()
+    await expect(joined.getByText('/home/<user>/.ssh/id_yantra')).toBeVisible()
+    await axe(page)
+    await joined.getByRole('button', { name: 'Show key' }).click()
+    const sheet = page.getByRole('dialog', { name: 'Public key' })
+    await expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeVisible()
+  })
+
   test('a joined device goes ready when Check again asks it', async ({ page }) => {
     await scenario(page, 'adding')
     await page.goto(flow('joined-box'))
