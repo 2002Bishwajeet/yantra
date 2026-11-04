@@ -460,6 +460,7 @@ deleted everywhere else.
 | Y-609 | Make the build loop's merge guard a command | ✅ done | claude | — | **Found 2026-11-03.** #568 merged with `web` red: the ship agent ran its check with `;` before `gh pr merge`. **Done** when ship merges only through `merge-guard.sh N && gh pr merge`, and the guard refuses #568's checks. |
 | Y-610 | v0.10.0 | 🟡 wip | owner, claude | — | **Owner, 2026-11-04:** cut the release. **Done** when v0.10.0 is published and the owner walks the [smoke pass](docs/plans/smoke-pass.md). |
 | Y-611 | Stop the build loop parking green work | ⬜ todo | claude | — | **Found 2026-11-04:** Y-493 parked while its gate still ran, and Y-585 parked on slow-network tests outside its diff ([report](.claude/build-loop/2026-11-04.md)). **Done** when a gate agent waits for the gate to end, and a failure outside the row's diff that passes alone is retried, not parked. |
+| Y-612 | Show the update progress on the box | ⬜ todo | claude | — | **Found 2026-11-04:** the v0.10.0 update took about 6 minutes at 20 KB/s, and neither Settings → About nor `yantra update` showed that it ran. **Done** when both show the download progress and the install step, and show the error from `journalctl -u yantra-update` if the update fails. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
