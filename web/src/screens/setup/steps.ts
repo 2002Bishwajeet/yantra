@@ -48,9 +48,13 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
 
 /** D7 §4.1 step 2: a machine has joined. The key is a line under it, since
  *  the first join makes it (ADR-0029). `unkeyed` is a machine ssh reaches
- *  with no key made, so through the account's own keys and not Yantra's. */
-export function added(joined: string[], unkeyed: string[] = []): Step {
-  if (joined.length > 0) return { status: 'done', words: `${joined.join(', ')} joined` }
+ *  with no key made, so through the account's own keys and not Yantra's.
+ *  `hub` is the daemon's own node once ssh reaches it: it needs no adding. */
+export function added(joined: string[], unkeyed: string[] = [], hub: string | null = null): Step {
+  if (joined.length > 0 || hub) {
+    const who = joined.length > 0 ? `${joined.join(', ')} joined` : `${hub} is the hub and needs no adding`
+    return { status: 'done', words: `${who} · more machines can be added later` }
+  }
   if (unkeyed.length > 0) {
     return {
       status: 'todo',

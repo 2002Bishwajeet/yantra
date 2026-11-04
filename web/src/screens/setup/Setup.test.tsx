@@ -109,7 +109,7 @@ describe('the steps', () => {
 
   /** Y-477: the appliance is the node the daemon is bound to. */
   it('shows the appliance key expiry with a link to the admin console, and no link when expiry is off', async () => {
-    const node = aMachine({ name: 'pi', address: '100.64.0.1', key_expires: '2026-09-12T12:00:00Z' })
+    const node = aMachine({ name: 'pi', address: '100.64.0.1', hub: true, key_expires: '2026-09-12T12:00:00Z' })
     await draw(base([node]))
     let later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
     expect(later.getByText("The appliance's Tailscale key")).toBeTruthy()
@@ -261,6 +261,11 @@ describe('the setup gate', () => {
     expect(await gate(up)).toBe('passed')
   })
 
+  /** Y-582: the hub runs agents, so a ready hub alone passes the gate. */
+  it('passes on a ready hub with no other machine', async () => {
+    expect(await gate({ ...up, hub: true })).toBe('passed')
+  })
+
   it('holds on a ready machine another account shares, or the tailnet owns', async () => {
     expect(await gate({ ...up, ownership: 'shared' })).toBe('held')
     cleanup()
@@ -268,15 +273,107 @@ describe('the setup gate', () => {
   })
 })
 
+/** Y-582: the hub is the daemon's own node. Setup shows it under step 1 and
+ *  never offers to add it. */
+describe('the hub', () => {
+  const box = aMachine({ name: 'yantra-box', os: 'linux', online: true, hub: true, address: '100.64.0.1' })
+  const keyed = { 'GET /api/ssh-identity': [200, contract.sshIdentity] } as Routes
+  const hubList = () => within(screen.getByRole('list', { name: 'The hub' }))
+
+  it('is ready with no action on a fresh install, and step 2 has nothing to add', async () => {
+    await draw({
+      ...base([box, phone]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
+    })
+    const hub = hubList()
+    expect(hub.getByText('yantra-box')).toBeTruthy()
+    expect(hub.getByText('ready · 7 of 7')).toBeTruthy()
+    expect(hub.getByText('19,942 MB free · 15% busy')).toBeTruthy()
+    expect(hub.queryByRole('button')).toBeNull()
+    expect(hub.queryByRole('link')).toBeNull()
+    expect([...document.querySelectorAll('.m3-lead')][0]!.querySelector('svg')).toBeTruthy()
+    expect(
+      screen.getByText('done · yantra-box is the hub and needs no adding · more machines can be added later'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Other machines' })).toBeNull()
+    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(screen.queryByText('Devices that open the dashboard')).toBeNull()
+    expect(screen.queryByText('iphone')).toBeNull()
+    expect(filled()).toEqual(['New session'])
+  })
+
+  it('lists only the other machines under step 2', async () => {
+    await draw({
+      ...base([box, up]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name), checks(tools)])],
+    })
+    const added = within(screen.getByRole('list', { name: 'Other machines' }))
+    expect(added.getByText('cachyos-g14')).toBeTruthy()
+    expect(added.queryByText('yantra-box')).toBeNull()
+    expect(hubList().queryByText('cachyos-g14')).toBeNull()
+    expect(screen.getByText('done · cachyos-g14 joined · more machines can be added later')).toBeTruthy()
+    expect(screen.getByText(/done · 2 of 2 machines ready/)).toBeTruthy()
+  })
+
+  it('links a hub that is not ready to its machine page, and offers no Check or Install', async () => {
+    await draw({
+      ...base([box]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' }, '', box.name)])],
+    })
+    const hub = hubList()
+    expect(hub.getByText('missing tmux')).toBeTruthy()
+    expect(hub.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+    expect(hub.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Install/ })).toBeNull()
+  })
+
+  it('says what setup configured once all four steps are done', async () => {
+    await draw({
+      ...base([box]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
+      'GET /api/workspaces': [200, looked.ok([aListed()])],
+    })
+    const configured = within(screen.getByRole('list', { name: 'What setup configured' }))
+    expect(configured.getByText(/The appliance is on your tailnet/)).toBeTruthy()
+    expect(configured.getByText(/yantra-box is the hub and needs no adding/)).toBeTruthy()
+    expect(configured.getByText(/1 of 1 machines ready/)).toBeTruthy()
+    expect(configured.getByText(/1 workspace made/)).toBeTruthy()
+  })
+
+  it('keeps no summary while a step is not done', async () => {
+    await draw({ ...base([box]), ...keyed })
+    expect(screen.queryByRole('list', { name: 'What setup configured' })).toBeNull()
+  })
+
+  it('still draws the hub when the key could not be read', async () => {
+    await draw({
+      ...base([box]),
+      'GET /api/ssh-identity': [500, 'the key file could not be read'],
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
+    })
+    expect(await screen.findByText("The appliance's key could not be read")).toBeTruthy()
+    expect(hubList().getByText('ready · 7 of 7')).toBeTruthy()
+  })
+
+  it('draws no hub and keeps the failure when the machines could not be read', async () => {
+    await draw({ ...base(), 'GET /api/machines': [200, { looked: 'failed', age_seconds: 0, error: 'tailscaled is down' }] })
+    expect(screen.getByText('Machines could not be read')).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'The hub' })).toBeNull()
+  })
+})
+
 describe('the machine lines', () => {
-  it('lists only the machines that run a session, and shows the rest apart', async () => {
+  /** Y-582: the devices block lives on Machines, so Setup lists only what runs a session. */
+  it('lists only the machines that run a session, and no devices block', async () => {
     await draw(base())
     expect(screen.getByText(/0 of 2 machines ready/)).toBeTruthy()
-    const apart = within(screen.getByRole('list', { name: 'Devices that open the dashboard' }))
-    expect(apart.getByText('iphone')).toBeTruthy()
-    expect(apart.getAllByText('opens the dashboard · runs no session')).toHaveLength(2)
-    expect(apart.getByText(/Windows · coming soon/)).toBeTruthy()
-    expect(apart.queryByText('cachyos-g14')).toBeNull()
+    expect(screen.queryByText('Devices that open the dashboard')).toBeNull()
+    expect(screen.queryByText('iphone')).toBeNull()
+    expect(within(screen.getByRole('list', { name: 'Other machines' })).getByText('cachyos-g14')).toBeTruthy()
   })
 
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */

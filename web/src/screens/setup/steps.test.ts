@@ -43,7 +43,16 @@ describe('the step each read makes', () => {
     const none = added([])
     expect(none).toEqual({ status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' })
     expect(none.words).not.toMatch(/yantra|`/)
-    expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined' })
+    expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined · more machines can be added later' })
+  })
+
+  /** Y-582: the hub is the daemon's own node, so a fresh install has nothing to add. */
+  it('is done once ssh reaches the hub, which needs no adding', () => {
+    expect(added([], [], 'yantra-box')).toEqual({
+      status: 'done',
+      words: 'yantra-box is the hub and needs no adding · more machines can be added later',
+    })
+    expect(added(['pi-5'], [], 'yantra-box').words).toBe('pi-5 joined · more machines can be added later')
   })
 
   /** With no key made, ssh that gets in used the account's own keys. */

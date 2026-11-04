@@ -6,7 +6,9 @@
       {
         "name": "cachyos-g14",
         "ownership": "yours",
+        "hub": true,
         "dns_name": "cachyos-g14.yantra.tail3a1b.ts.net.",
+        "address": "100.64.0.1",
         "os": "linux",
         "online": true,
         "expired": false,

@@ -91,6 +91,22 @@ test.describe('the machines on a busy fleet', () => {
   })
 })
 
+/** Y-582: the busy fleet's hub is cachyos-g14, drawn first and apart. */
+test.describe('the hub on a busy fleet', () => {
+  test('is first, in its own section, with the note about shared CPU and memory', async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto('/machines')
+    await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
+    const hub = page.getByRole('region', { name: 'Hub' })
+    await expect(hub.getByRole('region', { name: 'cachyos-g14' })).toBeVisible()
+    await expect(hub.getByText('Agents on the hub share its CPU and memory with yantrad.')).toBeVisible()
+    const grid = page.locator('.machines__grid')
+    await expect(grid.getByRole('region', { name: 'cachyos-g14' })).toHaveCount(0)
+    const [above, below] = await Promise.all([hub.boundingBox(), grid.boundingBox()])
+    expect(above!.y).toBeLessThan(below!.y)
+  })
+})
+
 test.describe('the machines on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
